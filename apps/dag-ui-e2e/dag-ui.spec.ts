@@ -20,17 +20,16 @@ import {
 } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import {
   API_V2_PATHS,
-  adoptedSchema,
   parseRunList,
   parseRunTimeline,
 } from "@onepipeline-ui/dag-model";
 import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
-import { fixture, fixtureIn, runs } from "./fixture-facts";
+import { fixture, runs } from "./fixture-facts";
 import {
   graphNodeList,
   graphNodes,
@@ -2750,7 +2749,7 @@ test("lands on the run as a whole, with every deep link still opening", async ({
   // An address that names the flat list and no view is an operator arriving at
   // the runs, and what they came to read is the newest one as a whole — not the
   // shape of its graph. A bare address opens on the projects instead, which
-  // `dag-ui-supervise.spec.ts` holds.
+  // `dag-ui-controls.spec.ts` holds.
   await page.goto("/?list=runs");
   await expect(page.getByText("DAG Observatory")).toBeVisible();
   await expect(page.getByRole("tab", { name: "Overall" })).toHaveAttribute(
@@ -3374,11 +3373,15 @@ test("drills from a graph row into that node's own view", async ({ page }) => {
 });
 
 test("connects to the server's event stream on load", async ({ page }) => {
+  const connected = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === API_V2_PATHS.events &&
+      response.status() === 200,
+  );
   await openObservatory(page);
-  // The server opens every connection with a snapshot, so the header gains a
-  // last-updated reading only once the browser's EventSource really connected. The
-  // journeys below then change the served run and assert what the stream carries.
-  await expect(page.getByText(/Last updated/)).toBeVisible();
+  expect((await connected).headers()["content-type"]).toContain(
+    "text/event-stream",
+  );
 });
 
 test("recovers the selection when a bookmarked run is not being served", async ({
@@ -3843,7 +3846,9 @@ test("streams real progress the server observes on disk", async ({ page }) => {
     graphNodes(page, "done").filter({ hasText: "dashboard" }),
   ).toBeVisible();
   await expect(graphNodes(page, "running")).toHaveCount(0);
-  await expect(page.getByText(/Last updated/)).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Run header" }).getByLabel(/^Liveness /),
+  ).toBeVisible();
 });
 
 test("shows a turn the dispatch relays while its transcript is open", async ({
@@ -4089,15 +4094,18 @@ test("refuses to serve when the read API has not been built", () => {
 });
 
 /**
- * The binary `dag-ui:build-api-server` built, which this run is already being served
- * through. Named from this file rather than from the working directory, for the
- * reason `FIXTURE_COMMAND` is: the tier is launched from the workspace root, and a
- * path that counted directories up from there named one outside the checkout.
+ * The main fixture's retained server, independent of Cargo's mutable output.
+ * Later subprocess journeys must still start after a concurrent install moves
+ * the build's binary out of target/debug.
  */
-const API_BINARY = resolve(
-  import.meta.dirname,
-  "../../target/debug/onepipeline-api",
-);
+function retainedApiBinary(): string {
+  const binary = ["onepipeline-api", "onepipeline-api.exe"]
+    .map((name) => join(FIXTURE_WORKSPACE, "debug", name))
+    .find(existsSync);
+  if (binary === undefined)
+    throw new Error("the main fixture retained no read API binary");
+  return binary;
+}
 
 /** Hold `port` on loopback for the duration of a case, so the fixture cannot take it. */
 function holdPort(port: number): Promise<() => void> {
@@ -4236,8 +4244,9 @@ function freePort(): Promise<number> {
  * the thing under test, so it costs a copy rather than the journey.
  */
 function stageBinary(path: string): void {
+  const binary = retainedApiBinary();
   try {
-    linkSync(API_BINARY, path);
+    linkSync(binary, path);
   } catch (caught) {
     // Narrowed rather than asserted: `catch` binds `unknown`, and the one thing
     // that distinguishes the cross-device refusal from a real failure to stage
@@ -4251,7 +4260,7 @@ function stageBinary(path: string): void {
     ) {
       throw caught;
     }
-    copyFileSync(API_BINARY, path);
+    copyFileSync(binary, path);
   }
 }
 
@@ -4308,80 +4317,6 @@ for (const name of ["onepipeline-api", "onepipeline-api.exe"]) {
     }
   });
 }
-
-/**
- * And what an adoption retains once cargo has relinked the binary the fixture found.
- *
- * The adopt route spawns *this executable* by the path it was started from, and
- * `just check` runs cargo test builds beside this tier that unlink that name in
- * `target/debug` and link it to an artifact of their own. A server spawned from
- * that name then reads its own path as deleted and refuses every adoption with
- * `No such file or directory` — which is how both adopt journeys failed the
- * v0.22.0 release. So the fixture serves through a name of its own, and this
- * replaces the found one under a live server, as cargo does, and adopts.
- */
-// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] measured rather than assumed: 9.4 s on this host (6.3 s when the fixture linked its binary rather than copying it), beside adopt journeys of 1.1 to 1.2 min in the same project. What it holds is this project's own fixture server, `fixtures/serve-fixture.mjs`, which nothing outside `dag-ui-e2e` runs, and it needs exactly what `dag-ui-e2e:test` already depends on, so no narrower edge contains it.
-test("adopts a run after the binary it was served from is relinked under it", async () => {
-  test.slow();
-  const target = mkdtempSync(join(tmpdir(), "dag-ui-e2e-target-"));
-  const workspace = mkdtempSync(join(tmpdir(), "dag-ui-e2e-target-space-"));
-  const built = join(target, "debug", "onepipeline-api");
-  mkdirSync(join(target, "debug"), { recursive: true });
-  stageBinary(built);
-  const port = await freePort();
-  const api = `http://127.0.0.1:${port}`;
-  const served = spawn(
-    process.execPath,
-    [FIXTURE_COMMAND, "--workspace", workspace, "--port", String(port)],
-    {
-      stdio: ["ignore", "inherit", "inherit"],
-      env: { ...process.env, CARGO_TARGET_DIR: target },
-    },
-  );
-  let adopted: string | undefined;
-  try {
-    await expect
-      .poll(
-        async () => {
-          try {
-            return (await fetch(`${api}/healthz`)).status;
-          } catch {
-            return 0;
-          }
-        },
-        { timeout: 30_000 },
-      )
-      .toBe(200);
-    // What a cargo build beside this tier does to that name: unlinks it and
-    // links it again, leaving the running server's own path deleted.
-    rmSync(built);
-    stageBinary(built);
-
-    const { runs: written } = fixtureIn(workspace);
-    const answered = await fetch(
-      `${api}${API_V2_PATHS.adopt(written.adoptable)}`,
-      { method: "POST" },
-    );
-    const body: unknown = await answered.json();
-    expect(answered.status, JSON.stringify(body)).toBe(200);
-    adopted = written.adoptable;
-    const receipt = adoptedSchema.parse(body);
-    expect(receipt.run_id).toBe(written.adoptable);
-    expect(receipt.pid).toBeGreaterThan(0);
-  } finally {
-    // The driver it retained runs in a process group of its own, so it is
-    // stopped through the run rather than left behind the workspace it drives.
-    if (adopted !== undefined) {
-      const stopped = await fetch(`${api}${API_V2_PATHS.stop(adopted)}`, {
-        method: "POST",
-      });
-      expect(stopped.status, await stopped.text()).toBe(200);
-    }
-    served.kill("SIGTERM");
-    rmSync(target, { recursive: true, force: true });
-    rmSync(workspace, { recursive: true, force: true });
-  }
-});
 
 async function detailScroll(
   page: Page,

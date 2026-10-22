@@ -60,13 +60,8 @@ export const API_V2_PATHS = {
     `/api/v2/runs/${encodeURIComponent(runId)}/channel/surface`,
   attest: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/attest`,
   stop: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/stop`,
-  adopt: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/adopt`,
-  /** The engine's host shutdown over one run, as the acting session. */
-  runShutdown: (runId: string) =>
-    `/api/v2/runs/${encodeURIComponent(runId)}/shutdown`,
-  /** The engine's host shutdown over every run the session owns, or the host. */
+  /** Shut down every run on the host. */
   shutdown: "/api/v2/shutdown",
-  watch: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/watch`,
   unwatched: "/api/v2/unwatched",
   host: "/api/v2/host",
   status: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/status`,
@@ -248,7 +243,7 @@ export const API_V2_FILTER_PROFILES = {
  * client that has never seen the field shows a run a dozen agents ran under as
  * one nothing was launched for.
  */
-export const TELEMETRY_SCHEMA_VERSION = 21;
+export const TELEMETRY_SCHEMA_VERSION = 22;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -1594,6 +1589,7 @@ export const sseEventNameSchema = z.enum([
 export const sseEventDataSchema = arbitraryRecord;
 
 export interface LiveActivity {
+  event_id: string;
   node: string;
   step?: string;
   at: number;
@@ -1603,6 +1599,7 @@ export interface LiveActivity {
   events: number;
 }
 export const liveActivitySchema: z.ZodType<LiveActivity> = z.object({
+  event_id: z.string().min(1),
   node: z.string().min(1),
   step: z.string().min(1).optional(),
   at: z.number().finite(),
@@ -2060,13 +2057,6 @@ export const stoppedSchema = openObject({
   teardown: z.string().min(1),
 });
 
-/** `POST /api/v2/runs/{run}/adopt`: the retained driver's pid. */
-export const adoptedSchema = openObject({
-  ...verbEnvelope,
-  run_id: z.string().min(1),
-  pid: counter.positive(),
-});
-
 /**
  * The grace the engine gives a dispatch to end itself when a shutdown names
  * none, in seconds: the default its own binary takes without `--grace`. A client
@@ -2075,11 +2065,11 @@ export const adoptedSchema = openObject({
  */
 export const SHUTDOWN_DEFAULT_GRACE_SECONDS = 600;
 
-/** Which runs a shutdown acts on: one run, the session's own, or the host's. */
-export const shutdownScopeSchema = z.enum(["run", "mine", "host"]);
+/** The API shuts down the entire host. */
+export const shutdownScopeSchema = z.enum(["host"]);
 
-/** The two scopes `POST /api/v2/shutdown` takes; one run is the run route's. */
-export const hostShutdownScopeSchema = z.enum(["mine", "host"]);
+/** The sole scope `POST /api/v2/shutdown` accepts. */
+export const hostShutdownScopeSchema = z.enum(["host"]);
 
 /**
  * What a dispatch's interrupt was answered with. None is a failure of the
@@ -2109,7 +2099,7 @@ export const branchPreservedSchema = z.enum([
 ]);
 
 /**
- * `POST /api/v2/runs/{run}/shutdown` and `POST /api/v2/shutdown`: the engine's
+ * `POST /api/v2/shutdown`: the engine's
  * report of a shutdown it performed, whatever it found.
  *
  * `complete` is false when a dispatch was killed at the deadline, a teardown was
@@ -2157,47 +2147,6 @@ export const shutdownReportSchema = openObject({
   not_pushed_unread: z.string().nullable(),
   rendered: z.string(),
 });
-
-/**
- * The three frames `GET /api/v2/runs/{run}/watch` streams, by their SSE `event`
- * name: one meaningful event, a heartbeat, and the ending that closes the stream.
- */
-export const watchEventNameSchema = z.enum(["event", "tick", "returned"]);
-
-/**
- * A run's unread accounting as a watch frame carries it: how many surfaces nobody
- * has read, the age of the oldest in seconds — `null` rather than zero where
- * there is none — and the count per kind.
- */
-export const watchUnreadSchema = openObject({
-  count: counter,
-  oldest_seconds: nonnegative.nullable(),
-  kinds: z.array(openObject({ kind: z.string().min(1), count: counter })),
-});
-
-/**
- * The data of each frame, discriminated on the engine's own `watch` tag — the
- * record `onepipeline watch` prints on standard output for that frame, rendered
- * by the SDK, so a client of this stream and a script reading that verb read one
- * shape. The event under an `event` frame is the engine's machine record, open.
- */
-export const watchFrameDataSchema = z.discriminatedUnion("watch", [
-  openObject({ watch: z.literal("event"), event: arbitraryRecord }),
-  openObject({
-    watch: z.literal("heartbeat"),
-    run_id: z.string().min(1),
-    unread: watchUnreadSchema,
-  }),
-  openObject({
-    watch: z.literal("return"),
-    run_id: z.string().min(1),
-    condition: z.string().min(1),
-    exit: z.number().int(),
-    node: z.string().min(1).optional(),
-    cursor: z.string().min(1),
-    unread: watchUnreadSchema,
-  }),
-]);
 
 /**
  * `GET /api/v2/unwatched`: one entry per run the acting session owns that the
@@ -2460,13 +2409,9 @@ export type ChannelNext = z.infer<typeof channelNextSchema>;
 export type ReplyReceipt = z.infer<typeof replyReceiptSchema>;
 export type Surfaced = z.infer<typeof surfacedSchema>;
 export type Stopped = z.infer<typeof stoppedSchema>;
-export type Adopted = z.infer<typeof adoptedSchema>;
 export type ShutdownScope = z.infer<typeof shutdownScopeSchema>;
 export type HostShutdownScope = z.infer<typeof hostShutdownScopeSchema>;
 export type ShutdownReport = z.infer<typeof shutdownReportSchema>;
-export type WatchEventName = z.infer<typeof watchEventNameSchema>;
-export type WatchFrameData = z.infer<typeof watchFrameDataSchema>;
-export type WatchUnread = z.infer<typeof watchUnreadSchema>;
 export type Unwatched = z.infer<typeof unwatchedSchema>;
 export type RenderedRoot = z.infer<typeof renderedRootSchema>;
 export type RenderedRun = z.infer<typeof renderedRunSchema>;

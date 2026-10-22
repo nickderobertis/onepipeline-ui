@@ -258,16 +258,11 @@ fn the_comparison_asks_for_every_route_the_contract_defines() {
         .map(|(route, _)| route)
         .collect();
     for route in routes::TABLE {
-        // The two streams have no single response to compare: each stays open
-        // rather than answering once, and what the event stream opens with is
-        // the run list this already asks for. `tests/e2e/server.rs` drives
-        // both. A route that writes to the run is not a comparison either: what
-        // it serves is what the engine did, and asking two servers to do it is
-        // two stops or two adoptions of one run.
-        if route.path == routes::EVENTS
-            || route.path == routes::RUN_WATCH
-            || route.method == routes::Method::Post
-        {
+        // The event stream stays open rather than answering once, and opens
+        // with the run list this already asks for. Server journeys cover it.
+        // A write route answers what the engine did; asking two servers to do
+        // it would perform the operation twice.
+        if route.path == routes::EVENTS || route.method == routes::Method::Post {
             continue;
         }
         let route = route.path;
@@ -512,6 +507,64 @@ fn as_served_at(mut timeline: Value, base_schema: u64) -> Value {
     timeline
 }
 
+/// Validate the envelope independently of the timeline's additive schema.
+fn telemetry_schemas_are_compatible(before: &Value, after: &Value) -> Result<(), String> {
+    let version = |body: &Value, side: &str| {
+        body["telemetry_schema_version"]
+            .as_u64()
+            .filter(|value| *value > 0 && u32::try_from(*value).is_ok())
+            .ok_or_else(|| format!("{side} declares an invalid telemetry schema: {body}"))
+    };
+    let base = version(before, "base commit")?;
+    let current = version(after, "this build")?;
+    if current < base {
+        return Err(format!(
+            "this build serves telemetry schema {current}, older than the base commit's {base}"
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn invalid_or_regressed_telemetry_schemas_fail_the_timeline_comparison() {
+    let serving = Serving::start(compared_store);
+    let path = timeline_paths(fixture_run::RUN_ID, &[])[0].clone();
+    let response = http::get(serving.address, &path);
+    assert_eq!(response.status, 200);
+    let mut before = response.json();
+    let mut after = before.clone();
+    before["telemetry_schema_version"] = 21.into();
+    after["telemetry_schema_version"] = 22.into();
+    assert_eq!(telemetry_schemas_are_compatible(&before, &after), Ok(()));
+    assert!(telemetry_schemas_are_compatible(&after, &before).is_err());
+    let mut missing = after.clone();
+    missing
+        .as_object_mut()
+        .expect("a timeline")
+        .remove("telemetry_schema_version");
+    assert!(telemetry_schemas_are_compatible(&before, &missing).is_err());
+    assert!(telemetry_schemas_are_compatible(&missing, &after).is_err());
+    for invalid in [
+        Value::Null,
+        serde_json::json!("22"),
+        serde_json::json!(-1),
+        serde_json::json!(0),
+        serde_json::json!(22.5),
+        serde_json::json!(u64::from(u32::MAX) + 1),
+    ] {
+        let mut broken = after.clone();
+        broken["telemetry_schema_version"] = invalid.clone();
+        assert!(
+            telemetry_schemas_are_compatible(&before, &broken).is_err(),
+            "current schema {invalid}"
+        );
+        assert!(
+            telemetry_schemas_are_compatible(&broken, &after).is_err(),
+            "base schema {invalid}"
+        );
+    }
+}
+
 /// One timeline as two servers answered it, with what is a property of the
 /// response rather than of the run — when it was read, and the schema it
 /// declares — set aside.
@@ -525,6 +578,8 @@ fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value,
     );
     assert_eq!(after.status, 200, "{path} now: {}", after.body);
     let (mut before, mut after) = (before.json(), after.json());
+    telemetry_schemas_are_compatible(&before, &after)
+        .unwrap_or_else(|error| panic!("{path}: {error}"));
     let base_schema = before["timeline_schema_version"]
         .as_u64()
         .unwrap_or_else(|| panic!("{path} at the base commit declares no schema: {before}"));
@@ -545,6 +600,9 @@ fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value,
         let body = body.as_object_mut().expect("a timeline");
         body.remove("observed_at");
         body.remove("timeline_schema_version");
+        // The envelope's telemetry schema is validated above independently:
+        // live-activity additions can advance it without changing the timeline.
+        body.remove("telemetry_schema_version");
     }
     (before, as_served_at(after, base_schema), base_schema)
 }

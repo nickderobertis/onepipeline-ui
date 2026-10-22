@@ -6,7 +6,6 @@ import {
   DEFAULT_GRACE,
   graceSeconds,
   graceWords,
-  ownedBy,
   progressOf,
   type SentShutdown,
   settleFailure,
@@ -21,8 +20,6 @@ const sent: SentShutdown = {
   runs: rows.map((row) => ({
     runId: row.run_id,
     owner: "x",
-    mine: false,
-    unowned: false,
   })),
   grace: 600,
   force: false,
@@ -45,15 +42,6 @@ describe("shutdown model", () => {
     expect(graceWords(60)).toBe("1 minute");
     expect(graceWords(600)).toBe("10 minutes");
     expect(graceWords(90)).toBe("1 minute 30 seconds");
-  });
-
-  test("owns a run only by the one session its launch recorded", () => {
-    const key = live?.launch?.session_key ?? "";
-    expect(ownedBy(live?.launch, key)).toBe(true);
-    expect(ownedBy(history?.launch, key)).toBe(false);
-    // An unattributed server owns nothing, and a run with no session is nobody's.
-    expect(ownedBy(live?.launch, null)).toBe(false);
-    expect(ownedBy(undefined, key)).toBe(false);
   });
 
   test("reads progress only off rows that moved to the shutdown's own records since it was sent", () => {

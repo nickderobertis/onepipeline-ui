@@ -498,8 +498,7 @@ test("a package consumer sends an envelope as the bytes it typed and reads the e
           forced: true,
           teardown: "nothing-to-stop",
         });
-      case "/api/v2/runs/run-1/adopt":
-        return Response.json({ ...enveloped, run_id: "run-1", pid: 4242 });
+
       default:
         return Response.json(
           { error: { code: "not_found", message: "Not found" } },
@@ -539,7 +538,6 @@ test("a package consumer sends an envelope as the bytes it typed and reads the e
       message: "run run-1 belongs to [codex:160c290a], not to this session",
     });
     expect((await client.stop("run-1", true)).forced).toBe(true);
-    expect((await client.adopt("run-1")).pid).toBe(4242);
 
     expect(received.map(({ method, path }) => `${method} ${path}`)).toEqual([
       "GET /api/v2/runs/run-1/channel",
@@ -550,7 +548,6 @@ test("a package consumer sends an envelope as the bytes it typed and reads the e
       "POST /api/v2/runs/run-1/attest",
       "POST /api/v2/runs/run-1/stop",
       "POST /api/v2/runs/run-1/stop",
-      "POST /api/v2/runs/run-1/adopt",
     ]);
     expect(received[2]?.body).toBe(typed);
     expect(received[4]?.body).toBe('{"kind":"finding","message":"red"}');

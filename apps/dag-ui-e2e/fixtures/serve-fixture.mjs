@@ -166,13 +166,8 @@ function serverBinary() {
 /**
  * The server binary under a name in `workspace` that nothing but this tier writes.
  *
- * The adopt route retains *this executable* as the run's driver, and finds it by the
- * path it was started from. `target/debug/onepipeline-api` is cargo's to rewrite, and
- * every cargo task `just check` runs beside this tier does: a test build of the crate
- * links that name to an artifact of its own, and a dev build links it back. The
- * server keeps running the image it started from, but its path now names
- * `onepipeline-api (deleted)`, so every adoption from then on is refused with
- * `cannot retain a driver: No such file or directory`.
+ * Keep the fixture server's executable independent of cargo's output path,
+ * which concurrent build and test targets can replace while the server runs.
  *
  * A copy rather than a hard link, though a link would be free: a link cannot cross
  * filesystems, and a checkout whose temporary directory is on another one — this
@@ -180,7 +175,9 @@ function serverBinary() {
  * the filesystem can share the blocks gets one rather than a copy.
  */
 function privateBinary(binary, workspace) {
-  const directory = join(workspace, "bin");
+  // Keep Cargo's debug layout so later fixture servers can use this retained
+  // copy as their target root instead of revisiting Cargo's mutable output.
+  const directory = join(workspace, "debug");
   mkdirSync(directory, { recursive: true });
   const staged = join(directory, basename(binary));
   copyFileSync(binary, staged, constants.COPYFILE_FICLONE);
@@ -304,8 +301,8 @@ async function serve(workspace, port, ui, corpus) {
   );
 
   const binary = privateBinary(serverBinary(), workspace);
-  // These journeys ask for unbudgeted watches under the explicit --session
-  // below; a dispatch host's wake promise and session belong to its own runs.
+  // The fixture server uses the explicit session below; a dispatch host's wake
+  // promise and session belong to its own runs.
   const fixtureEnvironment = { ...process.env };
   // Match tests/support/serving.rs: omit every PATH directory containing a
   // registered harness. tests/contract.rs holds this corpus to the linked SDK.
@@ -322,7 +319,7 @@ async function serve(workspace, port, ui, corpus) {
       ),
   ].join(delimiter);
   // User configuration can name a provider by absolute path too. Give this
-  // server its own empty user config; explicit adopted-dispatch configs remain
+  // server its own empty user config; explicit engine-dispatch configs remain
   // the fixture's real subprocess doubles.
   const providerConfig = join(workspace, "provider-config.toml");
   writeFileSync(providerConfig, "");
@@ -367,16 +364,14 @@ async function serve(workspace, port, ui, corpus) {
         ONEAGENTGRAPH_STATE_DIR: graphRecordsFor(runsRoot),
         HOSTNAME: thisHost(),
         ONEVCS_HOME: onevcsHome,
-        // Where a dispatch the adopted driver starts runs, and where its harness
+        // Where a fixture engine dispatch runs, and where its harness
         // turn records itself: named inside the workspace, because the defaults
         // are this server's working directory — the app's checkout — and the
         // operator's own oneharness history, behind a lock every turn on the
         // host shares.
         ONEPIPELINE_PROJECT_DIR: overridesDir(workspace),
         XDG_STATE_HOME: join(workspace, "state"),
-        // Where the server keeps the name it retains each adopted driver from —
-        // its running image, linked or copied — rather than the operator's own
-        // cache, which nothing would ever clear of a copy this tier made.
+        // Confine any library cache writes to this fixture's workspace.
         XDG_CACHE_HOME: join(workspace, "cache"),
       },
     },

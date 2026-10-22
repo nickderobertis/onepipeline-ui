@@ -6366,7 +6366,7 @@ fn judge_span(
 pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
     let mut order: Vec<String> = Vec::new();
     let mut latest: BTreeMap<String, (i128, Value)> = BTreeMap::new();
-    for event in &view.events {
+    for (index, event) in view.events.iter().enumerate() {
         if event.source != Source::Agentgraph
             || event.kind.0 != graph::TURN_ACTIVITY
             || !filter.allows(event)
@@ -6397,6 +6397,7 @@ pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
         let stamp = at as f64;
         let mut entry = Map::new();
         entry.insert("node".into(), json!(node));
+        entry.insert("event_id".into(), json!(format!("e{index}")));
         // The step within a lifecycle node, when the record names one: the node
         // runs several in sequence on one branch, and which of them is talking is
         // what a reader watching it needs.

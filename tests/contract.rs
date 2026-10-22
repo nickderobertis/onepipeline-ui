@@ -24,10 +24,9 @@ use onepipeline_ui::cli::{Cli, Command, ServeArgs, SessionId, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, DispatchId, Envelope, ErrorEnvelope,
     EventFrame, EventsQuery, Health, HealthStatus, NextQuery, NodeId, PageLimit, ProjectId,
-    ReferenceKind, Release, RunId, RunQuery, RunShutdownRequest, RunsPage, RunsQuery,
-    ShutdownRequest, ShutdownScope, SseEvent, StopRequest, SurfaceRequest, TimelineQuery,
-    TimelineScope, TranscriptQuery, WatchQuery, API_VERSION, RUNS_PAGE_LIMIT,
-    TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
+    ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery, ShutdownRequest, ShutdownScope,
+    SseEvent, StopRequest, SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery,
+    API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -55,10 +54,7 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUN_CHANNEL_SURFACE, "run-channel-surface.json"),
     (routes::RUN_ATTEST, "run-attest.json"),
     (routes::RUN_STOP, "run-stop.json"),
-    (routes::RUN_ADOPT, "run-adopt.json"),
-    (routes::RUN_SHUTDOWN, "run-shutdown.json"),
     (routes::SHUTDOWN, "shutdown.json"),
-    (routes::RUN_WATCH, "run-watch.json"),
     (routes::UNWATCHED, "unwatched.json"),
     (routes::HOST, "host.json"),
     (routes::RUN_STATUS, "run-status.json"),
@@ -71,15 +67,6 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUN_NODE_AGENTS, "run-node-agents.json"),
     (routes::PROJECT_AGENTS, "project-agents.json"),
 ];
-
-/// The binary that carries the hidden driver verb an adoption retains.
-///
-/// An in-process store would retain the *test* executable, which does not
-/// answer `drive-run`; the served process retains itself, and this is what it
-/// would retain.
-fn api_binary() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_onepipeline-api"))
-}
 
 /// The store the served process would build over a workspace's runs root: the
 /// root itself, and the graph records the fixtures keep beside it — where the
@@ -642,11 +629,8 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
     let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
     let node = NodeId::try_from(fixture_run::NODE_ID).expect("valid");
     let project = ProjectId::try_from(fixture_run::PLAN_PROJECT).expect("the fixture's project");
-    let journal_end = fs::metadata(RunPaths::under(&root, fixture_run::RUN_ID).journal())
-        .expect("the fixture run's journal")
-        .len();
 
-    let served: [(&str, Value); 15] = [
+    let served: [(&str, Value); 14] = [
         ("projects.json", enveloped(store.projects())),
         ("project.json", enveloped(store.project(&project))),
         ("run-agents.json", enveloped(store.agents(&run))),
@@ -659,27 +643,6 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
             enveloped(store.project_agents(&project)),
         ),
         ("run-channel.json", enveloped(store.channel(&run))),
-        (
-            "run-watch.json",
-            at_journal_end(
-                serde_json::to_value(
-                    store
-                        .watch(
-                            &run,
-                            &WatchQuery {
-                                timeout: onepipeline::cli::WatchTimeout::Bounded(0),
-                                ..WatchQuery::default()
-                            },
-                        )
-                        .expect("a watch of no seconds reads the run once")
-                        .collect::<Vec<_>>(),
-                )
-                .expect("serialize the frames"),
-                journal_end,
-            ),
-        ),
-        // As the session the fixture runs were launched by, so the golden pins
-        // the acting session's key the report names beside what it reports.
         (
             "unwatched.json",
             enveloped(
@@ -801,12 +764,6 @@ fn every_write_verb_serves_the_payload_its_golden_pins() {
     // for the adoption below.
     let onevcs_home = tempfile::tempdir().expect("an empty onevcs state root");
     std::env::set_var("ONEVCS_HOME", onevcs_home.path());
-    let (_shutting, shutdown_root) = fixture_run::workspace();
-    fixture_run::write(&shutdown_root, fixture_run::RUN_ID);
-    let shutting = store_over(&shutdown_root).acting_as(Some(
-        &SessionId::try_from(fixture_run::SESSION.to_owned()).expect("the fixture's session"),
-    ));
-    let one = enveloped(shutting.run_shutdown(&run, &RunShutdownRequest::default()));
     let (_host, host_root) = fixture_run::workspace();
     fixture_run::write(&host_root, fixture_run::RUN_ID);
     fixture_run::write(&host_root, fixture_run::OTHER_RUN_ID);
@@ -829,51 +786,7 @@ fn every_write_verb_serves_the_payload_its_golden_pins() {
             }),
     );
     std::env::remove_var("ONEVCS_HOME");
-    pin_under("run-shutdown.json", one, Some(&shutdown_root));
     pin_under("shutdown.json", host, Some(&host_root));
-
-    // An adoption, retaining the compiled binary as the driver of the complete
-    // run — which settles it and lets go, so nothing is left running behind
-    // this test. The engine judges an adoption's ownership by the session its
-    // *environment* names rather than by one handed in — the served process
-    // exports its acting session for exactly that reason — so this process
-    // acts as the fixture's session for the length of the call. Nothing else
-    // in this binary reads the variable: every other verb is handed the
-    // session explicitly.
-    // Over a fresh copy: the reply above wrote to the first copy's journal a
-    // moment ago, which is a run being driven as far as the engine's liveness
-    // reading is concerned, and an adoption refuses one of those. The driver
-    // the engine retains resolves the run under the root *its* environment
-    // names — the served process exports its root for exactly that reason —
-    // so this process names the copy's root for the length of the call, as it
-    // names the session.
-    let (adopting_workspace, adopt_root) = fixture_run::workspace();
-    fixture_run::write(&adopt_root, fixture_run::RUN_ID);
-    fixture_run::adoptable_from(&adopt_root, fixture_run::RUN_ID, adopting_workspace.path());
-    // A driver recorded on another host cannot be probed, so it reads as live
-    // and quiet — `PARKED`, which is driven — and an adoption refuses it. The
-    // run is adopted from a driver proved gone on this host instead.
-    driven_by(&adopt_root, fixture_run::RUN_ID, 0x7FFF_FFF0);
-    let adopting = store_over(&adopt_root).driving_with(&api_binary());
-    std::env::set_var(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION);
-    std::env::set_var(onepipeline_ui::store::RUNS_DIR_ENV, &adopt_root);
-    let adopted = enveloped(adopting.adopt(&run));
-    std::env::remove_var(onepipeline_ui::cli::SESSION_ENV);
-    std::env::remove_var(onepipeline_ui::store::RUNS_DIR_ENV);
-    let pid = adopted["pid"]
-        .as_u64()
-        .unwrap_or_else(|| panic!("a detached adoption answers the driver's pid: {adopted}"));
-    assert!(pid > 0);
-    pin("run-adopt.json", adopted);
-    let lock = adopt_root.join(fixture_run::RUN_ID).join("owner.lock");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    while lock.exists() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    assert!(
-        !lock.exists(),
-        "the retained driver never let go of the run"
-    );
 }
 
 /// The envelope a route served, as JSON, or the failure that stops the golden
@@ -1079,49 +992,6 @@ fn a_scratch_path_reads_as_the_golden_whichever_separator_recorded_it() {
 /// suite happened to run on.
 const READING_HOST: &str = "a-reading-host";
 
-/// Where a golden says a watch's cursor stood: at the end of the journal.
-///
-/// A cursor is a byte offset into the run's journal, and the fixture journal's
-/// length is a property of the host that wrote it — a settled member records
-/// the path its producer's scratch had, and a temporary directory is spelled
-/// differently on every platform. So the offset is replaced by this where it
-/// equals the journal's length, and kept where it does not: what the golden pins
-/// is that a watch of no seconds read the whole journal and says so, not how
-/// many bytes that was.
-const JOURNAL_END: &str = "end-of-journal";
-
-/// `frames` with every `cursor` standing at `journal_end` replaced by
-/// [`JOURNAL_END`].
-fn at_journal_end(frames: Value, journal_end: u64) -> Value {
-    let whole = format!(":{journal_end}");
-    match frames {
-        Value::Object(fields) => Value::Object(
-            fields
-                .into_iter()
-                .map(|(key, value)| {
-                    if key != "cursor" {
-                        return (key, at_journal_end(value, journal_end));
-                    }
-                    if let Some(run) = value
-                        .as_str()
-                        .and_then(|cursor| cursor.strip_suffix(&whole))
-                    {
-                        return (key, Value::String(format!("{run}:{JOURNAL_END}")));
-                    }
-                    (key, value)
-                })
-                .collect(),
-        ),
-        Value::Array(items) => Value::Array(
-            items
-                .into_iter()
-                .map(|item| at_journal_end(item, journal_end))
-                .collect(),
-        ),
-        other => other,
-    }
-}
-
 /// The same document with the read's own instant — and a retained driver's
 /// pid, a surface's queued instant, every scratch directory, and the
 /// workspace's `root` where one is named — replaced, wherever they appear.
@@ -1239,7 +1109,7 @@ fn the_health_body_round_trips_and_names_the_release_this_crate_links() {
 #[test]
 fn every_enveloped_fixture_round_trips_byte_for_byte() {
     for (route, fixture) in ROUTE_FIXTURES {
-        if route == routes::HEALTHZ || route == routes::EVENTS || route == routes::RUN_WATCH {
+        if route == routes::HEALTHZ || route == routes::EVENTS {
             continue; // Not enveloped, and enveloped one level down, and a list of frames.
         }
         let raw = read_fixture(fixture);
@@ -1295,7 +1165,7 @@ fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent()
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 21);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 22);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
@@ -2033,9 +1903,7 @@ fn the_serve_surface_parses_and_defaults_to_loopback() {
     let root = runs.path().to_str().expect("utf-8 path");
     let cli =
         Cli::try_parse_from(["onepipeline-api", "serve", "--runs-root", root]).expect("parse");
-    let Command::Serve(args) = &cli.command else {
-        panic!("`serve` parsed as {:?}", cli.command);
-    };
+    let Command::Serve(args) = &cli.command;
     assert_eq!(args.runs_root.as_path(), runs.path());
     assert_eq!(args.bind.to_string(), "127.0.0.1:8765");
     assert_eq!(args.session, None, "a session nobody named");
@@ -2050,9 +1918,7 @@ fn the_serve_surface_parses_and_defaults_to_loopback() {
         "0.0.0.0:9000",
     ])
     .expect("parse");
-    let Command::Serve(args) = &bound.command else {
-        panic!("`serve` parsed as {:?}", bound.command);
-    };
+    let Command::Serve(args) = &bound.command;
     assert_eq!(args.bind.to_string(), "0.0.0.0:9000");
 
     // The acting session, as the flag names it — and refused where the flag
@@ -2066,9 +1932,7 @@ fn the_serve_surface_parses_and_defaults_to_loopback() {
         "c276121e-6630-5213-be31-ca182068739e",
     ])
     .expect("parse");
-    let Command::Serve(args) = &acting.command else {
-        panic!("`serve` parsed as {:?}", acting.command);
-    };
+    let Command::Serve(args) = &acting.command;
     assert_eq!(
         args.session.as_ref().map(SessionId::as_str),
         Some("c276121e-6630-5213-be31-ca182068739e")
@@ -2248,8 +2112,6 @@ impl RunApi for Unimplemented {
         Ok(Vec::new().into_iter())
     }
 
-    type Watch = std::vec::IntoIter<onepipeline_ui::contract::WatchFrame>;
-
     fn projects(&self) -> Result<Envelope<Value>, ApiError> {
         Err(ApiError::Read("not implemented".to_owned()))
     }
@@ -2296,24 +2158,8 @@ impl RunApi for Unimplemented {
         })
     }
 
-    fn adopt(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::RunNotFound(run.clone()))
-    }
-
-    fn run_shutdown(
-        &self,
-        run: &RunId,
-        _request: &RunShutdownRequest,
-    ) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::RunNotFound(run.clone()))
-    }
-
     fn shutdown(&self, _request: &ShutdownRequest) -> Result<Envelope<Value>, ApiError> {
         Err(ApiError::Read("not implemented".to_owned()))
-    }
-
-    fn watch(&self, _run: &RunId, _query: &WatchQuery) -> Result<Self::Watch, ApiError> {
-        Ok(Vec::new().into_iter())
     }
 
     fn unwatched(&self) -> Result<Envelope<Value>, ApiError> {

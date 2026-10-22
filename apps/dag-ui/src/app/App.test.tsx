@@ -1086,6 +1086,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         run_id: LIVE_RUN,
         activity: [
           {
+            event_id: "e14",
             node: "dashboard",
             at: Date.now() / 1000,
             kind: "tool",
