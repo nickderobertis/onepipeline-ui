@@ -102,8 +102,8 @@ export function App({
     selection.runId,
     timelineScope,
     filter,
-    // An address naming no run opens the first one served; the Host page names
-    // no run and opens none.
+    // An address naming no run opens the first one served, except on the Host
+    // page, which picks none itself; a run the address already names stays read.
     !selection.host,
   );
   // The order is the server's — most recent activity first — and is never
