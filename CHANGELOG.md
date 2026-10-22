@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.45.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.45.0...v0.45.1) - 2026-10-22
+
+### Fixed
+
+- place every timeline event and span where its own records put it ([#426](https://github.com/nickderobertis/onepipeline-ui/pull/426))
+
 ## [0.45.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.44.0...v0.45.0) - 2026-10-22
 
 ### Added
