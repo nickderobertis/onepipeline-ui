@@ -112,6 +112,27 @@ async function open(page: Page, size: Viewport, path: string): Promise<void> {
   await expect(navigation(page).locator(".run-link").first()).toBeVisible();
 }
 
+test("offers no kind filter when no served run carries a kind", async ({
+  page,
+}) => {
+  await open(page, DESKTOP, `/?run=${runs().live}&view=graph`);
+  // The corpus this file shares records no `kind` label on any run, so a filter
+  // here would be a legend with nothing under it.
+  const served = projectListSchema.parse(
+    await (await page.request.get("/api/v2/projects")).json(),
+  );
+  expect(
+    served.projects.flatMap((group) =>
+      group.runs.flatMap((run) => (run.labels?.kind ? [run.labels.kind] : [])),
+    ),
+  ).toEqual([]);
+  await expect(navigation(page).getByRole("button").first()).toBeVisible();
+  await expect(
+    navigation(page).getByRole("group", { name: "Run kinds" }),
+  ).toHaveCount(0);
+  await expect(navigation(page).getByRole("checkbox")).toHaveCount(0);
+});
+
 for (const size of [DESKTOP, PHONE]) {
   test(`scrolls every project run independently of the workspace at ${size.name}`, async ({
     page,

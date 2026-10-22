@@ -58,6 +58,9 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
     await expect(
       nav.getByRole("button", { name: "Open project-centric", exact: true }),
     ).toBeVisible();
+    await expect(
+      nav.getByRole("group", { name: "Run kinds", exact: true }),
+    ).toBeVisible();
     for (const kind of [
       "main",
       "planning",

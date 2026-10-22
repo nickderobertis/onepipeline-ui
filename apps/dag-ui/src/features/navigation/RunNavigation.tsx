@@ -52,25 +52,27 @@ export function RunNavigation({
           <Button onClick={onHost} variant="ghost">
             Host
           </Button>
-          <fieldset className="kind-filter">
-            <legend>Run kinds</legend>
-            {kinds.map((kind) => (
-              <label key={kind}>
-                <input
-                  type="checkbox"
-                  checked={!hiddenKinds.includes(kind)}
-                  onChange={(event) =>
-                    onKindsChange(
-                      event.target.checked
-                        ? hiddenKinds.filter((value) => value !== kind)
-                        : [...hiddenKinds, kind],
-                    )
-                  }
-                />{" "}
-                {kind}
-              </label>
-            ))}
-          </fieldset>
+          {kinds.length > 0 && (
+            <fieldset className="kind-filter">
+              <legend>Run kinds</legend>
+              {kinds.map((kind) => (
+                <label key={kind}>
+                  <input
+                    type="checkbox"
+                    checked={!hiddenKinds.includes(kind)}
+                    onChange={(event) =>
+                      onKindsChange(
+                        event.target.checked
+                          ? hiddenKinds.filter((value) => value !== kind)
+                          : [...hiddenKinds, kind],
+                      )
+                    }
+                  />{" "}
+                  {kind}
+                </label>
+              ))}
+            </fieldset>
+          )}
           {projects === undefined ? (
             <p role="status">Loading projects…</p>
           ) : (
