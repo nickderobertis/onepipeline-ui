@@ -13,7 +13,7 @@
 //! Everything here is a pure function of a [`RunView`], the run directory, and
 //! that document, so a payload can be built and asserted without a server.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -2713,6 +2713,9 @@ fn detail_document(
     if let Some(count) = agents {
         run["agent_count"] = json!(count);
     }
+    // What each node was last seen doing, over the whole journal whatever the
+    // filter said: it is a fact about the run, which a filter never shapes.
+    run["live_activity"] = json!(live_activity_over(view, &EventFilter::default()));
     payload.insert("run".into(), run);
     payload.insert("telemetry".into(), sdk_telemetry);
     payload.insert("graph".into(), graph_state(view).unwrap_or(Value::Null));
@@ -7453,19 +7456,35 @@ fn judge_span(
 /// summary is a record like any other, and this is the listing of them.
 #[must_use]
 pub(crate) fn live_activity_over(view: &Run<'_>, filter: &EventFilter) -> Vec<Value> {
-    let mut order: Vec<String> = Vec::new();
-    let mut latest: BTreeMap<String, (i128, Value)> = BTreeMap::new();
-    let mut identities = BTreeSet::new();
-    for event in view
-        .events
-        .iter()
-        .filter(|event| identities.insert((&event.stream, event.seq)))
-    {
+    let mut fold = ActivityFold::default();
+    for event in view.events {
+        fold.absorb(event, filter);
+    }
+    fold.entries()
+}
+
+/// The fold behind [`live_activity_over`], one record at a time, so a live
+/// reading keeps it current from the records a refresh appended alone.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct ActivityFold {
+    order: Vec<String>,
+    latest: BTreeMap<String, (i128, Value)>,
+    identities: HashSet<(String, u64)>,
+}
+
+impl ActivityFold {
+    /// Take one record into the fold: a repeated producer identity is counted
+    /// once, and anything but a node's `turn-activity` the filter admits is
+    /// passed over.
+    pub(crate) fn absorb(&mut self, event: &Envelope, filter: &EventFilter) {
+        if !self.identities.insert((event.stream.clone(), event.seq)) {
+            return;
+        }
         if event.source != Source::Agentgraph
             || event.kind.0 != graph::TURN_ACTIVITY
             || !filter.allows(event)
         {
-            continue;
+            return;
         }
         // One entry per node, keyed by the node alone: a node is dispatched once
         // per readiness and re-asked in place, so what it is doing now is one
@@ -7478,10 +7497,11 @@ pub(crate) fn live_activity_over(view: &Run<'_>, filter: &EventFilter) -> Vec<Va
                 .and_then(|node| NodeId::try_from(node).ok()),
             millis_of(&event.ts),
         ) else {
-            continue;
+            return;
         };
         let node = node.as_str().to_owned();
-        let counted = latest
+        let counted = self
+            .latest
             .get(&node)
             .and_then(|(_, seen)| seen["events"].as_u64())
             .unwrap_or(0);
@@ -7513,19 +7533,28 @@ pub(crate) fn live_activity_over(view: &Run<'_>, filter: &EventFilter) -> Vec<Va
             );
         }
         entry.insert("events".into(), json!(counted + 1));
-        if latest
+        if self
+            .latest
             .insert(node.clone(), (at, Value::Object(entry)))
             .is_none()
         {
-            order.push(node);
+            self.order.push(node);
         }
     }
-    let mut activity: Vec<(i128, Value)> = order
-        .into_iter()
-        .filter_map(|key| latest.remove(&key))
-        .collect();
-    activity.sort_by_key(|(at, _)| *at);
-    activity.into_iter().map(|(_, entry)| entry).collect()
+
+    /// One entry per node, oldest first.
+    pub(crate) fn entries(&self) -> Vec<Value> {
+        let mut activity: Vec<&(i128, Value)> = self
+            .order
+            .iter()
+            .filter_map(|key| self.latest.get(key))
+            .collect();
+        activity.sort_by_key(|(at, _)| *at);
+        activity
+            .into_iter()
+            .map(|(_, entry)| entry.clone())
+            .collect()
+    }
 }
 
 /// `live_activity`, over everything `view` read: the whole merged store.

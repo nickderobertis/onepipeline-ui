@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 24,
+  "telemetry_schema_version": 25,
   "observed_at": "2026-08-07T12:00:00Z",
   "run": {
     "run_id": "run-20260807-a1b2c3",
@@ -136,7 +136,18 @@
     },
     "turns": 4,
     "lint": 0,
-    "agent_count": 2
+    "agent_count": 2,
+    "live_activity": [
+      {
+        "node": "contract-interface",
+        "event_id": "a-recording-host-4242.14",
+        "at": 1786104004500.0,
+        "kind": "tool_call",
+        "name": "Bash",
+        "detail": "just gate",
+        "events": 2
+      }
+    ]
   },
   "telemetry": {
     "schema_version": 2,

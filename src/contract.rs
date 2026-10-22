@@ -148,7 +148,16 @@ pub const API_VERSION: u32 = 2;
 /// Schema 22 adds the exact timeline `event_id` to each live-activity entry.
 /// Schema 23 separates observed checks’ conclusions and remote URLs and retains
 /// the producer’s optional start and finish timestamps.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 24;
+///
+/// **Schema 25 is pushed changes.** A tab subscribes to the sidebar and at most
+/// one visible run view (`POST /api/v2/subscriptions`) and its stream carries
+/// trimmed sidebar rows and patches of the payloads it already holds, never a
+/// whole one; and the run detail's `run` gains `live_activity`, what each node
+/// was last seen doing, so the header's activity line is patched with the rest.
+/// Every field 24 served is served with the same meaning and the same value; the
+/// version moves because a client written against 24 re-reads whole payloads on
+/// every change and has never seen `live_activity`.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 25;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///

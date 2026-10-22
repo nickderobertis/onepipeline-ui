@@ -32,8 +32,8 @@ use serde_json::{json, Map, Value};
 
 use super::{
     detail_document, is_end_boundary, is_settlement, measured, moment_of, share_spans,
-    timeline_harnesses_over, turns_of, DeclaredMembers, Ends, Rendered, Run, Scope, Share,
-    Transcripts,
+    timeline_harnesses_over, turns_of, ActivityFold, DeclaredMembers, Ends, Rendered, Run, Scope,
+    Share, Transcripts,
 };
 use crate::contract::NodeId;
 use crate::filter::EventFilter;
@@ -701,6 +701,8 @@ enum Source {
 pub(crate) struct LiveDetail {
     filter: EventFilter,
     payload: Value,
+    /// What each node was last seen doing, folded one appended record at a time.
+    activity: ActivityFold,
     /// Each owner's transcript turns, which the run's own count sums.
     turns: BTreeMap<Owner, usize>,
 }
@@ -728,6 +730,7 @@ impl LiveDetail {
         let mut detail = Self {
             filter,
             payload: Value::Null,
+            activity: ActivityFold::default(),
             turns: BTreeMap::new(),
         };
         detail.payload = detail.whole(view, indexed, declared, inputs);
@@ -747,6 +750,10 @@ impl LiveDetail {
         inputs: &DetailInputs<'_>,
     ) -> Value {
         self.turns.clear();
+        self.activity = ActivityFold::default();
+        for event in &view.events {
+            self.activity.absorb(event, &EventFilter::default());
+        }
         for owner in std::iter::once(Owner::Run).chain(
             indexed
                 .node_order()
@@ -839,6 +846,10 @@ impl LiveDetail {
                 .insert(owner, owner_turns(&whole.over(&events), declared));
         }
         let mut detail = partial;
+        // Only the appended records reach the activity fold.
+        for event in &view.events[view.events.len().saturating_sub(touched.records)..] {
+            self.activity.absorb(event, &EventFilter::default());
+        }
         let held = &self.payload;
         let keep = |node: &str| !dirty.contains(node);
         // The run: its own fields read over the whole store, its nodes merged.
@@ -848,6 +859,7 @@ impl LiveDetail {
             run.insert("timing_quality".into(), quality.clone());
             run.insert("turns".into(), json!(self.turns.values().sum::<usize>()));
             run.insert("lint".into(), json!(indexed.lint));
+            run.insert("live_activity".into(), json!(self.activity.entries()));
             if let Some(Value::Array(nodes)) = run.get_mut("nodes") {
                 for entry in nodes.iter_mut() {
                     let node = entry["node"].as_str().unwrap_or_default().to_owned();

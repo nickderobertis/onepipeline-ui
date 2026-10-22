@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This verifies the package export as a consumer uses it.
 import {
+  applyPatch,
   channelNextSchema,
   channelQueueSchema,
   conversationSchema,
@@ -30,7 +31,11 @@ import {
   runSummarySchema,
   runTelemetryDocumentSchema,
   runTranscriptSchema,
+  SIDEBAR_ROW_FIELDS,
+  SUBSCRIPTION_FRAME_TYPES,
   sessionLinkSchema,
+  subscribedSchema,
+  subscriptionFrameSchema,
   sseEventNameSchema,
   stoppedSchema,
   surfacedSchema,
@@ -1185,4 +1190,49 @@ test("the graph serves a node's overrides and the run-wide list, and absent read
     graphStateSchema.safeParse({ ...golden.graph, run_node_sets: "a=1" })
       .success,
   ).toBe(false);
+});
+
+test("the subscription and every frame type the server served parse through the public export", async () => {
+  const subscribed = subscribedSchema.parse(await served("subscriptions.json"));
+  expect(subscribed.initial.type).toBe("snapshot");
+  if (subscribed.initial.type !== "snapshot") return;
+  const { snapshot } = subscribed.initial;
+  // Every sidebar row carries exactly the fields the contract lists for one.
+  for (const row of snapshot.sidebar)
+    expect(
+      Object.keys(row).filter((key) => key !== "started_at"),
+    ).toStrictEqual(SIDEBAR_ROW_FIELDS.filter((key) => key !== "started_at"));
+  expect(snapshot.visible.type).toBe("detail");
+  const frames = z
+    .array(subscriptionFrameSchema)
+    .parse(await served("subscription-frames.json"));
+  expect(new Set(frames.map((frame) => frame.type))).toStrictEqual(
+    new Set(SUBSCRIPTION_FRAME_TYPES),
+  );
+  // The detail patch the served stream carried applies to the detail the
+  // served snapshot holds, and the result is still a detail.
+  const patch = frames.find((frame) => frame.type === "detail.patch");
+  if (patch?.type !== "detail.patch" || snapshot.visible.type !== "detail")
+    throw new Error("no detail patch was served");
+  expect(() =>
+    runDetailSchema.parse(applyPatch(snapshot.visible.detail, patch.ops)),
+  ).not.toThrow();
+  for (const frame of frames)
+    if (frame.type !== "reset") expect(frame.base < frame.id).toBe(true);
+});
+
+test("a patch the contract does not allow is refused rather than guessed at", () => {
+  const held = { spans: [{ id: "a", events: [] }], run_id: "r" };
+  expect(applyPatch(held, [{ p: ["spans", 0, "events"], a: [{ id: "e" }] }]))
+    .toStrictEqual({ spans: [{ id: "a", events: [{ id: "e" }] }], run_id: "r" });
+  expect(held.spans[0]?.events).toStrictEqual([]);
+  for (const refused of [
+    { p: [], v: {} },
+    { p: [], d: true as const },
+    { p: ["missing", "x"], v: 1 },
+    { p: ["spans", 3], v: {} },
+    { p: ["run_id"], a: [1] },
+    { p: ["spans", 0], d: true as const },
+  ])
+    expect(() => applyPatch(held, [refused])).toThrow();
 });

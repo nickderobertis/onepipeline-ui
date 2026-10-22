@@ -66,6 +66,12 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUN_AGENTS, "run-agents.json"),
     (routes::RUN_NODE_AGENTS, "run-node-agents.json"),
     (routes::PROJECT_AGENTS, "project-agents.json"),
+    // Neither subscription route is enveloped: the first answers the
+    // subscription and its snapshot, and the second answers nothing — what it
+    // pins is every frame the subscription it retires carried, as the real
+    // server served them (`tests/e2e/live.rs`).
+    (routes::SUBSCRIPTIONS, "subscriptions.json"),
+    (routes::SUBSCRIPTION, "subscription-frames.json"),
 ];
 
 /// The store the served process would build over a workspace's runs root: the
@@ -134,7 +140,7 @@ fn the_route_table_documents_no_route_the_contract_does_not() {
         .lines()
         .filter_map(|line| {
             let (method, rest) = line.split_once(' ')?;
-            matches!(method, "GET" | "POST")
+            matches!(method, "GET" | "POST" | "DELETE")
                 .then(|| (method, rest.split_whitespace().next().unwrap_or_default()))
         })
         .collect();
@@ -163,7 +169,7 @@ fn the_readme_indexes_every_route_and_names_the_served_schema() {
         .lines()
         .filter_map(|line| {
             let (method, rest) = line.split_once(' ')?;
-            matches!(method, "GET" | "POST")
+            matches!(method, "GET" | "POST" | "DELETE")
                 .then(|| (method, rest.split_whitespace().next().unwrap_or_default()))
         })
         .collect();
@@ -1120,7 +1126,14 @@ fn the_health_body_round_trips_and_names_the_release_this_crate_links() {
 #[test]
 fn every_enveloped_fixture_round_trips_byte_for_byte() {
     for (route, fixture) in ROUTE_FIXTURES {
-        if route == routes::HEALTHZ || route == routes::EVENTS {
+        if [
+            routes::HEALTHZ,
+            routes::EVENTS,
+            routes::SUBSCRIPTIONS,
+            routes::SUBSCRIPTION,
+        ]
+        .contains(&route)
+        {
             continue; // Not enveloped, and enveloped one level down, and a list of frames.
         }
         let raw = read_fixture(fixture);
@@ -1176,7 +1189,7 @@ fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent()
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 24);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 25);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told

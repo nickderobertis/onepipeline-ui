@@ -436,7 +436,7 @@ impl LiveRun {
             self.details.insert(detail_key.clone(), held(built));
         }
         let detail = enveloped(
-            &self.details[&detail_key].payload.payload(),
+            self.details[&detail_key].payload.payload(),
             &self.details[&detail_key].observed_at,
         );
         let run = self.run.as_str();

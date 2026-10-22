@@ -1010,3 +1010,256 @@ fn kinds(frames: &[Value]) -> BTreeMap<String, usize> {
     }
     counted
 }
+
+/// The UUID every served epoch and subscription id is written as in a golden.
+const PINNED_EPOCH: &str = "00000000-0000-4000-8000-0000000e9c00";
+const PINNED_SUBSCRIPTION: &str = "00000000-0000-4000-8000-00000005ab00";
+
+/// A served document with what no two runs share replaced by what the golden
+/// claims: the process's epoch, the subscription ids, the instant of each read,
+/// and any wall-clock stamp written today (the channel's own records of the
+/// surface this journey raised, as text or as epoch milliseconds). Everything
+/// else is compared byte for byte.
+fn pinned(value: &Value, subscriptions: &[String], epoch: &str, today: &str) -> Value {
+    match value {
+        Value::String(text) => {
+            let mut text = text.replace(epoch, PINNED_EPOCH);
+            for subscription in subscriptions {
+                text = text.replace(subscription.as_str(), PINNED_SUBSCRIPTION);
+            }
+            if text.starts_with(today) {
+                text = "2026-08-07T12:00:00Z".to_owned();
+            }
+            Value::String(text)
+        }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| pinned(item, subscriptions, epoch, today))
+                .collect(),
+        ),
+        Value::Object(members) => Value::Object(
+            members
+                .iter()
+                .map(|(key, member)| {
+                    let member = if key == "observed_at" {
+                        json!("2026-08-07T12:00:00Z")
+                    } else {
+                        pinned(member, subscriptions, epoch, today)
+                    };
+                    (key.clone(), member)
+                })
+                .collect(),
+        ),
+        Value::Number(number) => match number.as_u64() {
+            // An epoch-millisecond stamp taken today, as the channel's own
+            // records carry one.
+            Some(millis) if millis.abs_diff(now_epoch_millis()) < 86_400_000 => {
+                json!(1_786_104_000_000_u64)
+            }
+            _ => value.clone(),
+        },
+        other => other.clone(),
+    }
+}
+
+fn now_epoch_millis() -> u64 {
+    u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX)
+}
+
+/// The sequence numbers of the event ids one document names, renumbered by
+/// rank: other subscriptions take numbers in between, so where a frame's ids
+/// fall depends on timing, and what a golden can pin is their order.
+fn ranked(document: &Value) -> Value {
+    let prefix = format!("{PINNED_EPOCH}:");
+    let mut seqs = std::collections::BTreeSet::new();
+    collect_seqs(document, &prefix, &mut seqs);
+    let rank: BTreeMap<u64, usize> = seqs
+        .into_iter()
+        .enumerate()
+        .map(|(at, seq)| (seq, at + 1))
+        .collect();
+    renumber(document, &prefix, &rank)
+}
+
+fn collect_seqs(value: &Value, prefix: &str, seqs: &mut std::collections::BTreeSet<u64>) {
+    match value {
+        Value::String(text) => {
+            if let Some(seq) = text.strip_prefix(prefix).and_then(|seq| seq.parse().ok()) {
+                seqs.insert(seq);
+            }
+        }
+        Value::Array(items) => items
+            .iter()
+            .for_each(|item| collect_seqs(item, prefix, seqs)),
+        Value::Object(members) => members
+            .values()
+            .for_each(|member| collect_seqs(member, prefix, seqs)),
+        _ => {}
+    }
+}
+
+fn renumber(value: &Value, prefix: &str, rank: &BTreeMap<u64, usize>) -> Value {
+    match value {
+        Value::String(text) => match text
+            .strip_prefix(prefix)
+            .and_then(|seq| seq.parse::<u64>().ok())
+        {
+            Some(seq) => Value::String(format!("{prefix}{}", rank[&seq])),
+            None => value.clone(),
+        },
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| renumber(item, prefix, rank))
+                .collect(),
+        ),
+        Value::Object(members) => Value::Object(
+            members
+                .iter()
+                .map(|(key, member)| (key.clone(), renumber(member, prefix, rank)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Hold a served document to its golden under `tests/fixtures/`, or rewrite it
+/// with `UPDATE_CONTRACT_FIXTURES` set — the variable `tests/contract.rs`
+/// rewrites every other golden under.
+fn pin_golden(name: &str, document: &Value) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
+    let rendered = format!(
+        "{}\n",
+        serde_json::to_string_pretty(document).expect("serialize")
+    );
+    if std::env::var_os("UPDATE_CONTRACT_FIXTURES").is_some() {
+        fs::write(&path, &rendered).expect("rewrite the golden");
+        return;
+    }
+    let pinned = fs::read_to_string(&path).unwrap_or_default();
+    assert!(
+        pinned == rendered,
+        "tests/fixtures/{name} is not what the server serves — re-run with \
+         UPDATE_CONTRACT_FIXTURES=1 to accept the change deliberately:\n{rendered}"
+    );
+}
+
+/// Read `tab` until a frame of `kind` arrives, failing by name after the
+/// journey's patience rather than waiting without limit.
+fn frame_of(tab: &mut Tab, kind: &str) -> Value {
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        if let Some(found) = tab.frames.iter().find(|frame| frame["type"] == kind) {
+            return found.clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no {kind} frame arrived within {PATIENCE:?}: {:#?}",
+            tab.frames
+        );
+        tab.drain();
+    }
+}
+
+#[test]
+fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pins() {
+    let run = fixture_run::RUN_ID;
+    let mut held_back = Vec::new();
+    let live = Live::start(|root| {
+        fixture_run::write(root, run);
+        fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+        let journal = root.join(run).join("events.jsonl");
+        let total = fs::read_to_string(&journal)
+            .expect("a journal")
+            .lines()
+            .count();
+        held_back = live_journal::hold_back(&journal, total / 2);
+    });
+    let subscribed = live.subscribe(&json!({ "view": { "type": "detail", "run_id": run } }));
+    let mut detail = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
+    let mut overall = Tab::open(
+        &live,
+        &json!({ "type": "timeline", "run_id": run, "scope": "run" }),
+    );
+    let mut node = Tab::open(
+        &live,
+        &json!({ "type": "timeline", "run_id": run, "scope": "node", "node": fixture_run::NODE_ID }),
+    );
+    let mut channel = Tab::open(&live, &json!({ "type": "channel", "run_id": run }));
+    let mut sidebar = Tab::open(&live, &json!({ "type": "sidebar" }));
+
+    // One record of the node's own, appended the engine's way.
+    let line = held_back
+        .iter()
+        .find(|line| line.contains(&format!("\"node\":\"{}\"", fixture_run::NODE_ID)))
+        .expect("a held-back record of the node")
+        .clone();
+    live_journal::append_lines(&live.journal(run), &[line]);
+    let detail_patch = frame_of(&mut detail, "detail.patch");
+    let run_patch = frame_of(&mut overall, "timeline.patch");
+    let node_patch = frame_of(&mut node, "timeline.patch");
+    let changed = frame_of(&mut sidebar, "run.changed");
+    // A surface raised through the engine's own verb reaches the channel view.
+    let raised = http::post(
+        live.address(),
+        &format!("/api/v2/runs/{run}/channel/surface"),
+        &json!({ "kind": "question", "message": "pinned" }).to_string(),
+    );
+    assert_eq!(raised.status, 200, "{}", raised.body);
+    let channel_patch = frame_of(&mut channel, "channel.patch");
+    // A run taken out of the root is removed from every sidebar.
+    fs::remove_dir_all(live.serving.run_dir(fixture_run::OTHER_RUN_ID))
+        .expect("remove the other run");
+    let removed = frame_of(&mut sidebar, "run.removed");
+    // A cursor the subscription never issued is answered with one reset.
+    let (epoch, _) = sidebar.applied.split_once(':').expect("epoch:seq");
+    let epoch = epoch.to_owned();
+    let mut reset_stream = http::stream(
+        live.address(),
+        &format!(
+            "/api/v2/events?subscription={}&after={epoch}:999999",
+            sidebar.subscription
+        ),
+        None,
+    );
+    let reset = reset_stream
+        .frame_within(PATIENCE)
+        .expect("a reset frame")
+        .json();
+    assert_eq!(reset["type"], "reset");
+
+    let subscriptions: Vec<String> = [&detail, &overall, &node, &channel, &sidebar]
+        .iter()
+        .map(|tab| tab.subscription.clone())
+        .chain(std::iter::once(
+            subscribed["subscription"]
+                .as_str()
+                .expect("an id")
+                .to_owned(),
+        ))
+        .collect();
+    let today = time::OffsetDateTime::now_utc().date().to_string();
+    let pin = |value: &Value| ranked(&pinned(value, &subscriptions, &epoch, &today));
+    pin_golden("subscriptions.json", &pin(&subscribed));
+    pin_golden(
+        "subscription-frames.json",
+        &json!([
+            pin(&changed),
+            pin(&removed),
+            pin(&detail_patch),
+            pin(&run_patch),
+            pin(&node_patch),
+            pin(&channel_patch),
+            pin(&reset),
+        ]),
+    );
+}
