@@ -23,6 +23,7 @@ import { formatDurationSeconds, isoOfMillis } from "../../lib/time";
 import { useRead } from "../../lib/useRead";
 import { type CurrentOverrides, ReplyComposer } from "./ReplyComposer";
 import { opOf } from "./reply-shortcuts";
+import { useChannelConversation } from "./useChannelConversation";
 import { useVerb, type Verb } from "./useVerb";
 
 /**
@@ -146,13 +147,9 @@ function useChannelQueue(
 }
 
 /**
- * The queue's four readings of a surface — pending, held and abandoned, waiting
- * and answered — and the replies, commands and outcomes beside them.
- *
- * Derived from the six logs exactly as the engine's own `ChannelQueue` reads
- * them: the pending surface is the held one nobody has given up on, an
- * abandoned one is the held one they have, `waiting` is the engine's own list of
- * the unread, and an answered surface is one raised that is neither.
+ * Questions and answers joined by the correlation the producer recorded.
+ * Consumption is separate from answering: a claimed surface with no correlated
+ * reply still waits for an answer. Uncorrelated replies remain readable below.
  */
 function Queue({
   queue,
@@ -161,69 +158,34 @@ function Queue({
   readonly queue: ChannelQueue;
   readonly observedAt: string;
 }) {
-  const waitingIds = new Set(queue.waiting.map((surface) => surface.id));
-  const held = queue.held;
-  const pending = held !== null && held.abandoned !== true ? held : undefined;
-  const abandoned = held !== null && held.abandoned === true ? held : undefined;
-  const answered = queue.surfaces.filter(
-    (surface) => !waitingIds.has(surface.id) && surface.id !== held?.id,
-  );
+  const { exchanges, otherReplies } = useChannelConversation(queue);
   return (
     <div className="channel-queue">
-      <SurfaceList
-        emptyText="Nothing is waiting on an answer."
-        observedAt={observedAt}
-        surfaces={pending ? [pending] : []}
-        title="Pending"
-      />
-      <SurfaceList
-        emptyText="No unread surfaces."
-        observedAt={observedAt}
-        surfaces={queue.waiting}
-        title="Waiting"
-      />
-      {abandoned && (
-        <SurfaceList
-          emptyText=""
-          observedAt={observedAt}
-          surfaces={[abandoned]}
-          title="Abandoned"
-        />
-      )}
-      <SurfaceList
-        emptyText="No surface has been answered yet."
-        observedAt={observedAt}
-        surfaces={answered}
-        title="Answered"
-      />
-      <section aria-label="Replies" className="channel-list">
-        <h4>Replies</h4>
-        {queue.replies.length === 0 ? (
-          <p className="channel-empty">No reply written yet.</p>
-        ) : (
-          <ul>
-            {queue.replies.map((reply) => (
-              <li key={reply.id}>
-                <Card className="channel-card">
-                  <CardContent>
-                    <div className="channel-card-head">
-                      <Badge variant="outline">reply {reply.id}</Badge>
-                      {reply.correlation !== undefined && (
-                        <Badge variant="secondary">
-                          answers {reply.correlation}
-                        </Badge>
-                      )}
-                      <Timestamp at={isoOfMillis(reply.at)} relative />
-                    </div>
-                    <pre className="verb-text">
-                      {JSON.stringify(reply.reply, null, 2)}
-                    </pre>
-                  </CardContent>
-                </Card>
-              </li>
-            ))}
-          </ul>
+      <section aria-label="Surfaces" className="channel-list">
+        <h4>Conversation</h4>
+        {queue.surfaces.length === 0 && (
+          <p className="channel-empty">No surfaces yet.</p>
         )}
+        <ul>
+          {exchanges.map(({ surface, replies }) => (
+            <li key={surface.id} aria-label={`Surface ${surface.id}`}>
+              <SurfaceCard observedAt={observedAt} surface={surface} />
+              {replies.length === 0 ? (
+                <p className="channel-empty">Waiting for reply</p>
+              ) : (
+                replies.map((reply) => (
+                  <ReplyCard key={reply.id} reply={reply} />
+                ))
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section aria-label="Replies" className="channel-list">
+        <h4>Other replies</h4>
+        {otherReplies.map((reply) => (
+          <ReplyCard key={reply.id} reply={reply} />
+        ))}
       </section>
       <section aria-label="Queued commands" className="channel-list">
         <h4>Queued commands</h4>
@@ -289,34 +251,61 @@ function Queue({
   );
 }
 
-function SurfaceList({
-  title,
-  surfaces,
-  emptyText,
-  observedAt,
+function Message({
+  text,
+  children,
+  meta,
+  label,
 }: {
-  readonly title: string;
-  readonly surfaces: readonly ChannelSurface[];
-  readonly emptyText: string;
-  readonly observedAt: string;
+  readonly text: string;
+  readonly meta: React.ReactNode;
+  readonly label: string;
+  readonly children?: React.ReactNode;
 }) {
+  const firstLine = text.split(/\r?\n/, 1)[0];
   return (
-    <section aria-label={`${title} surfaces`} className="channel-list">
-      <h4>
-        {title} <Badge variant="outline">{surfaces.length}</Badge>
-      </h4>
-      {surfaces.length === 0 ? (
-        <p className="channel-empty">{emptyText}</p>
-      ) : (
-        <ul>
-          {surfaces.map((surface) => (
-            <li key={surface.id}>
-              <SurfaceCard observedAt={observedAt} surface={surface} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+    <details aria-label={label} className="channel-message-details">
+      <summary aria-label={`${label}: ${firstLine}`}>
+        <span className="channel-message-meta">{meta}</span>
+        <span className="channel-message-preview">{firstLine}…</span>
+      </summary>
+      <pre className="verb-text">{text}</pre>
+      {children}
+    </details>
+  );
+}
+
+function ReplyCard({
+  reply,
+}: {
+  readonly reply: ChannelQueue["replies"][number];
+}) {
+  const text =
+    typeof reply.reply.message === "string"
+      ? reply.reply.message
+      : "Reply without message";
+  return (
+    <Card className="channel-card py-2">
+      <CardContent>
+        <Message
+          label={`Reply ${reply.id} message`}
+          text={text}
+          meta={
+            <>
+              <Badge variant="outline">reply {reply.id}</Badge>
+              <Timestamp at={isoOfMillis(reply.at)} relative />
+            </>
+          }
+        >
+          <details aria-label={`Raw envelope for reply ${reply.id}`}>
+            <summary>Raw envelope</summary>
+            <pre className="verb-text">
+              {JSON.stringify(reply.reply, null, 2)}
+            </pre>
+          </details>
+        </Message>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -333,24 +322,29 @@ function SurfaceCard({
     (Date.parse(observedAt) - surface.queued_at) / 1000,
   );
   return (
-    <Card className="channel-card">
+    <Card className="channel-card py-2">
       <CardContent>
-        <div className="channel-card-head">
-          <Badge>{surface.kind}</Badge>
-          <Badge variant="secondary">from {surface.source}</Badge>
-          {surface.blocking ? (
-            <Badge variant="destructive">blocking</Badge>
-          ) : (
-            <Badge variant="outline">non-blocking</Badge>
-          )}
-          {surface.workstream !== undefined && (
-            <Badge variant="outline">node {surface.workstream}</Badge>
-          )}
-          <span className="channel-age">
-            surface {surface.id} · {formatDurationSeconds(ageSeconds)} old
-          </span>
-        </div>
-        <p className="channel-message">{surface.message}</p>
+        <Message
+          label={`Surface ${surface.id} message`}
+          text={surface.message}
+          meta={
+            <>
+              <Badge>{surface.kind}</Badge>
+              <Badge variant="secondary">from {surface.source}</Badge>
+              {surface.blocking ? (
+                <Badge variant="destructive">blocking</Badge>
+              ) : (
+                <Badge variant="outline">non-blocking</Badge>
+              )}
+              {surface.workstream !== undefined && (
+                <Badge variant="outline">node {surface.workstream}</Badge>
+              )}
+              <span className="channel-age">
+                surface {surface.id} · {formatDurationSeconds(ageSeconds)} old
+              </span>
+            </>
+          }
+        />
       </CardContent>
     </Card>
   );

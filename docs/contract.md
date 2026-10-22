@@ -114,7 +114,7 @@ The envelope carries `{scope, root, grace_seconds, forced, complete, runs, not_p
 
 `/healthz` is the one response that is not enveloped — liveness must answer without reading run storage, so it has no schema version to read one from — and it carries two fields: `status`, whose only value is `ok`, and `onepipeline_version`, the `onepipeline` release this binary links, read from that crate's own `VERSION` rather than restated here and served as a validated `MAJOR.MINOR.PATCH` — a body naming a release nobody could have published is refused at the parse rather than compared against. A host that pins the engine writing a run store and separately pins this reader of it has nothing else to prove the two are the same release, so the reader says which one it is rather than leaving it assumed.
 
-Payloads keep the telemetry schema-version discipline and serve schema 22 including `dispatch_id` — schema 10 was where `dispatch_id` landed, and 11 is that discipline exercised: an unmeasured timing is served `null` rather than `0`, so a lane nothing measured can no longer read as a measured zero. Anything the API computes that is presentation-worthy lands in the onepipeline SDK/CLI first: the agent reading the CLI must have the same or better visibility than the human in the UI.
+Payloads keep the telemetry schema-version discipline and serve schema 23 including `dispatch_id` — schema 10 was where `dispatch_id` landed, and 11 is that discipline exercised: an unmeasured timing is served `null` rather than `0`, so a lane nothing measured can no longer read as a measured zero. Anything the API computes that is presentation-worthy lands in the onepipeline SDK/CLI first: the agent reading the CLI must have the same or better visibility than the human in the UI.
 
 Schema 12 answers, per node in flight, whether the run has a turn it can address for it — the precondition a planner needs before choosing between correcting a node and cancelling it. `node_control` carries one entry for every node recorded as `running` and for no other, and each entry is `{addressable, member?, reason?}`, with `reason` present exactly when `addressable` is false. A node whose turn this run cannot address reads as `addressable: false` carrying the reason — never as an error and never as an absent value — and where an interrupt has already been attempted the reason is the producing library's own words for what it found.
 
@@ -206,3 +206,11 @@ The inline form is the stack's shared grammar, duplicated here per repository ex
 **Filtering shapes responses and never run state.** A filter is a read, and it narrows only the events a payload carries: every node status, settlement, decision, count and timing is folded from the whole journal whatever the filter said, so a reader narrowing their attention is shown the same graph in the same states as one who asked for everything. On the event stream — which invalidates rather than restating state — a filter decides which movements are worth announcing, so a run whose only new records the filter excludes does not wake that subscriber.
 
 The browser view carries this as one affordance: a **Decisions / Detailed activity** switch in the toolbar, held in the query string as `?detail=` alongside every other selection, so a narrowed reading is bookmarkable and survives a back button. It maps to the `planner` and `detailed` profiles, which is the same distinction those two get on the CLI.
+
+**Telemetry schema 23 preserves each observed check's remote evidence separately.**
+`node_details[NODE].verification.checks` keeps its existing `state` and optional
+`status`, and gains optional `conclusion`, `url`, `started_at` and `completed_at`,
+copied from the latest `change-check` record for that name. Null, non-string,
+empty or absent values are omitted, as are malformed URLs or RFC3339 timestamps.
+Times are the producer's timestamps, never the journal observation
+time. Every field schema 22 served retains its meaning and value.

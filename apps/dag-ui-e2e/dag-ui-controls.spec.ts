@@ -156,9 +156,9 @@ test("raises a surface, claims it, and answers it with a reply composed by short
 }) => {
   await page.goto(`/?run=${runs().supervised}&view=channel`);
   const queue = page.getByRole("region", { name: "Channel queue" });
-  await expect(
-    queue.getByRole("region", { name: "Waiting surfaces" }),
-  ).toContainText("No unread surfaces.");
+  await expect(queue.getByRole("region", { name: "Surfaces" })).toContainText(
+    "No surfaces yet.",
+  );
 
   // Surface: a kind under the engine's grammar and a message.
   const surface = page.getByRole("region", { name: "Surface" });
@@ -168,25 +168,26 @@ test("raises a surface, claims it, and answers it with a reply composed by short
     .fill("the gate went red on the same hunk");
   await surface.getByRole("button", { name: "Raise surface" }).click();
   await expect(receipt(page, "Surface")).toContainText('"state": "queued"');
-  const waiting = queue.getByRole("region", { name: "Waiting surfaces" });
-  await expect(waiting).toContainText("finding");
-  await expect(waiting).toContainText("from proposal");
-  await expect(waiting).toContainText("non-blocking");
-  await expect(waiting).toContainText(/\d+(ms|s) old/);
-  await expect(waiting).toContainText("the gate went red on the same hunk");
+  const conversation = queue.getByRole("region", { name: "Surfaces" });
+  await expect(conversation).toContainText("finding");
+  await expect(conversation).toContainText("from proposal");
+  await expect(conversation).toContainText("non-blocking");
+  await expect(conversation).toContainText(/\d+(ms|s) old/);
+  await expect(conversation).toContainText(
+    "the gate went red on the same hunk",
+  );
 
   // Next: the channel's one consumer. A non-blocking surface is read and done —
-  // it leaves the unread list for the answered ones, and holds nothing.
+  // the receipt confirms consumption; the question remains in the conversation.
   await queue.getByRole("button", { name: "Next" }).click();
   const next = receipt(page, "Next");
   await expect(next).toContainText('"status": "surface"');
   await expect(next).toContainText(
     '"message": "the gate went red on the same hunk"',
   );
-  await expect(
-    queue.getByRole("region", { name: "Answered surfaces" }),
-  ).toContainText("the gate went red on the same hunk");
-  await expect(waiting).toContainText("No unread surfaces.");
+  await expect(queue.getByRole("region", { name: "Surfaces" })).toContainText(
+    "the gate went red on the same hunk",
+  );
 
   // An edit by shortcut: a blocking finding, which the engine raises as a
   // surface holding the node it names — and claims into the pending slot.
@@ -220,13 +221,11 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   const applied = receipt(page, "Reply");
   await expect(applied).toContainText('"state": "applied"');
   await expect(applied).toContainText('"commands": "applied"');
-  await expect(waiting).toContainText("stop and read this first");
-  await expect(waiting).toContainText("blocking");
-  await expect(waiting).toContainText("node build");
+  await expect(conversation).toContainText("stop and read this first");
+  await expect(conversation).toContainText("blocking");
+  await expect(conversation).toContainText("node build");
   await queue.getByRole("button", { name: "Next" }).click();
-  const pending = queue.getByRole("region", { name: "Pending surfaces" });
-  await expect(pending).toContainText("stop and read this first");
-  await expect(waiting).toContainText("No unread surfaces.");
+  await expect(conversation).toContainText("stop and read this first");
 
   // The composer: a verdict by shortcut, rendered into the editor and sent as
   // the bytes there — with a space typed after the shortcut composed it, so the
@@ -251,7 +250,7 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   await expect(replied).toContainText('"state": "delivered"');
   await expect(replied).toContainText('"verdict": "delivered"');
   await expect(queue.getByRole("region", { name: "Replies" })).toContainText(
-    '"message": "carry on; the hunk is fine"',
+    "carry on; the hunk is fine",
   );
 
   // A refusal is the engine's own words: what the API answers for these bytes

@@ -207,12 +207,26 @@ export function NodeTimelineView({
             </div>
           </dl>
         </TabsContent>
-        <TabsContent className="node-tab-panel" value="pr">
+        <TabsContent className="node-tab-panel" value="remote">
           <dl className="facts">
             <div>
               <dt>Publication</dt>
               <dd>
                 <Publication node={node} />
+              </dd>
+            </div>
+            <div>
+              <dt>Branch</dt>
+              <dd>{node.detail?.publication?.branch ?? "Not recorded"}</dd>
+            </div>
+            <div>
+              <dt>Merge</dt>
+              <dd>
+                {node.detail?.publication
+                  ? node.detail.publication.merged
+                    ? "Merged"
+                    : "Not merged"
+                  : "Not recorded"}
               </dd>
             </div>
             {/* Beside the change request rather than under a tab of its own: the
@@ -226,11 +240,7 @@ export function NodeTimelineView({
                 <NodeRelease node={node} />
               </dd>
             </div>
-          </dl>
-        </TabsContent>
-        <TabsContent className="node-tab-panel" value="checks">
-          <dl className="facts">
-            <div>
+            <div className="remote-check-facts">
               <dt>Verification coverage</dt>
               <dd>
                 Hook:{" "}
@@ -242,23 +252,45 @@ export function NodeTimelineView({
                   "none configured"}
               </dd>
             </div>
-            <div>
+            <div className="remote-check-facts">
               <dt>Observed checks</dt>
               <dd>
-                {(node.detail?.verification.checks ?? []).length === 0
-                  ? "No checks observed"
-                  : node.detail?.verification.checks?.map((check, index) => (
-                      <span key={check.name}>
-                        {index > 0 && " · "}
-                        {check.url ? (
-                          <a href={check.url} rel="noreferrer" target="_blank">
-                            {check.name}: {check.state}
-                          </a>
-                        ) : (
-                          `${check.name}: ${check.state}`
-                        )}
-                      </span>
-                    ))}
+                {(node.detail?.verification.checks ?? []).length === 0 ? (
+                  "No checks observed"
+                ) : (
+                  <table aria-label="Remote checks" className="remote-checks">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Conclusion</th>
+                        <th>Required</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {node.detail?.verification.checks?.map((check) => (
+                        <tr key={check.name}>
+                          <th scope="row">
+                            {check.url ? (
+                              <a
+                                href={check.url}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                {check.name}
+                              </a>
+                            ) : (
+                              check.name
+                            )}
+                          </th>
+                          <td>{check.status ?? "Not recorded"}</td>
+                          <td>{check.conclusion ?? "—"}</td>
+                          <td>{check.required ? "Required" : "Optional"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </dd>
             </div>
           </dl>

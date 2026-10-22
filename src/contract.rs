@@ -146,7 +146,9 @@ pub const API_VERSION: u32 = 2;
 /// lists shows a node about to dispatch under another model or harness config
 /// as one dispatching under the graph as written.
 /// Schema 22 adds the exact timeline `event_id` to each live-activity entry.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 22;
+/// Schema 23 separates observed checks’ conclusions and remote URLs and retains
+/// the producer’s optional start and finish timestamps.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 23;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///

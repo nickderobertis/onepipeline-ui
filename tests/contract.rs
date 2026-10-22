@@ -1165,7 +1165,7 @@ fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent()
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 22);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 23);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
@@ -3181,6 +3181,66 @@ fn the_failure_kinds_and_fall_through_reasons_the_fixtures_carry_are_oneharnesss
         "no fixture report carries a classified failure or a fall-through, so this gate \
          holds nothing to the contract"
     );
+}
+
+/// Compare the exact browser records with files the linked producer writes, so
+/// renamed optional fields cannot disappear through permissive deserialization.
+#[test]
+fn the_browser_channel_records_match_the_sdks_writer() {
+    use onepipeline::channel::layout::{Channel, QueuedReply, Surface, REPLIES, SURFACES};
+    use std::sync::Arc;
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let output = std::process::Command::new("node")
+        .args([
+            "--input-type=module",
+            "--eval",
+            "import {channelFixtureRecords} from './apps/dag-ui-e2e/fixtures/runs.mjs'; process.stdout.write(JSON.stringify(channelFixtureRecords()));",
+        ])
+        .current_dir(root)
+        .output()
+        .expect("Node runs the same channel record builder as the browser fixture");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let records: Value = serde_json::from_slice(&output.stdout).expect("fixture records are JSON");
+    let scratch = tempfile::tempdir().expect("a channel for the SDK writer");
+    let transport: Arc<dyn onemessagebus::Transport> = Arc::new(
+        onemessagebus::LocalTransport::open(scratch.path()).expect("local channel transport"),
+    );
+    let channel = Channel::open(&transport).expect("the producer's channel layout");
+    for record in records[format!("{SURFACES}.jsonl")]
+        .as_array()
+        .expect("surface records")
+    {
+        let surface: Surface = serde_json::from_value(record.clone()).expect("SDK surface record");
+        channel.push(&surface).expect("the SDK writes the surface");
+    }
+    for record in records[format!("{REPLIES}.jsonl")]
+        .as_array()
+        .expect("reply records")
+    {
+        let reply: QueuedReply = serde_json::from_value(record.clone()).expect("SDK reply record");
+        channel
+            .replies()
+            .push(&reply)
+            .expect("the SDK writes the reply");
+    }
+    for (file, expected) in records.as_object().expect("named channel files") {
+        let written = fs::read_to_string(scratch.path().join(file))
+            .unwrap_or_else(|error| panic!("the SDK did not write fixture file {file}: {error}"));
+        let actual: Vec<Value> = written
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("SDK JSONL"))
+            .collect();
+        assert_eq!(
+            json!(actual),
+            *expected,
+            "browser {file} must match the producer's exact records"
+        );
+    }
 }
 
 /// The browser fixture writes tool summaries a real member could have written,

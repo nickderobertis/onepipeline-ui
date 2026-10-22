@@ -47,7 +47,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(22), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(23), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -5677,6 +5677,71 @@ fn a_watched_stream_reports_only_that_run_and_notices_its_transcripts() {
 }
 
 #[test]
+fn invalid_remote_check_metadata_is_omitted() {
+    for (invalid, invalid_conclusion) in [
+        (Value::Null, true),
+        (json!(""), true),
+        (json!(17), true),
+        (json!([]), true),
+        (json!({}), true),
+        (json!("not a URL or timestamp"), false),
+        (json!("2026-02-30T12:00:00Z"), false),
+    ] {
+        let serving = two_runs();
+        let journal = serving.run_dir(fixture_run::RUN_ID).join("events.jsonl");
+        let existing = std::fs::read_to_string(&journal).expect("the recorded journal");
+        let mut changed = false;
+        let rewritten: Vec<String> = existing
+            .lines()
+            .map(|line| {
+                let mut record: Value = serde_json::from_str(line).expect("a recorded envelope");
+                if record["kind"] == "change-check"
+                    && record["payload"]["name"] == "published-smoke"
+                {
+                    for key in ["conclusion", "url", "started_at", "completed_at"] {
+                        if key != "conclusion" || invalid_conclusion {
+                            record["payload"][key] = invalid.clone();
+                        }
+                    }
+                    changed = true;
+                }
+                serde_json::to_string(&record).expect("a recorded envelope serializes")
+            })
+            .collect();
+        assert!(
+            changed,
+            "the fixture must contain the check being exercised"
+        );
+        std::fs::write(&journal, format!("{}\n", rewritten.join("\n")))
+            .expect("record malformed optional metadata before the first read");
+        let response = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+        );
+        assert_eq!(response.status, 200, "{}", response.body);
+        let body = response.json();
+        let checks = body["node_details"][fixture_run::NODE_ID]["verification"]["checks"]
+            .as_array()
+            .expect("the recorded checks remain readable");
+        let check = checks
+            .iter()
+            .find(|check| check["name"] == "published-smoke")
+            .expect("the check remains visible even without optional metadata");
+        assert_eq!(check["status"], json!("completed"));
+        for key in ["conclusion", "url", "started_at", "completed_at"] {
+            if key == "conclusion" && !invalid_conclusion {
+                assert_eq!(check[key], json!("failure"));
+            } else {
+                assert!(
+                    check.get(key).is_none(),
+                    "{key} must omit {invalid}: {check}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn the_checks_a_host_observed_on_a_publication_are_served_with_their_logs() {
     let serving = two_runs();
     let body = http::get(
@@ -5700,6 +5765,16 @@ fn the_checks_a_host_observed_on_a_publication_are_served_with_their_logs() {
     assert_eq!(checks[1]["name"], json!("published-smoke"));
     assert_eq!(checks[1]["required"], json!(false));
     assert_eq!(checks[1]["state"], json!("failure"));
+    assert_eq!(checks[1]["status"], json!("completed"));
+    assert_eq!(checks[1]["conclusion"], json!("failure"));
+    assert_eq!(
+        checks[1]["url"],
+        json!("https://example.test/checks/published-smoke")
+    );
+    assert_eq!(checks[1]["started_at"], json!("2026-08-07T12:00:10Z"));
+    assert_eq!(checks[1]["completed_at"], json!("2026-08-07T12:00:12Z"));
+    assert!(checks[0].get("url").is_none());
+    assert!(checks[0].get("started_at").is_none());
     let log = checks[1]["artifact_id"].as_str().expect("the check's log");
     let failed = verification["records"]
         .as_array()

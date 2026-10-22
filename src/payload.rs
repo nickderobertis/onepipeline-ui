@@ -2599,10 +2599,10 @@ fn evidence<'a>(view: &'a RunView, node: &str) -> Vec<Evidence<'a>> {
 /// `onevcs` reports every transition of every check it waits on — a check that
 /// queued, started and finished is three records of the same name — so what is
 /// served is the last account of each, in the order the run first saw them.
-/// `state` is the check's conclusion once it reached one and its host status
-/// while it has not, which is the one word a reader is asking for; the word it
-/// moved from is beside it, and the log the settled check stored is named so a
-/// failed one can be read rather than only counted.
+/// `state` keeps the combined conclusion-or-status reading for existing clients.
+/// Remote progress is served separately as `status` and `conclusion`, with the
+/// check's own URL and producer timestamps where recorded. Its retained log is
+/// still named so a failed check can be read rather than only counted.
 fn observed_checks(events: &[&Envelope]) -> Vec<Value> {
     let mut order: Vec<&str> = Vec::new();
     let mut latest: BTreeMap<&str, Value> = BTreeMap::new();
@@ -2634,6 +2634,25 @@ fn observed_checks(events: &[&Envelope]) -> Vec<Value> {
         }
         if let Some(status) = status {
             check.insert("status".into(), json!(status));
+        }
+        // The conclusion/time keys follow onevcs's change-check-times golden. The
+        // existing optional check-address slot reads url only when a record has it;
+        // absent/null/empty metadata stays absent. Host Check is not an event writer.
+        // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 (Cargo.lock) declares no change-check payload schema, so there is no producer declaration for a drift gate; the producer-schema contract test explicitly skips VCS for that reason.
+        for key in ["conclusion", "url", "started_at", "completed_at"] {
+            if let Some(value) = event
+                .payload
+                .get(key)
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .filter(|value| match key {
+                    "url" => url::Url::parse(value).is_ok(),
+                    "started_at" | "completed_at" => OffsetDateTime::parse(value, &Rfc3339).is_ok(),
+                    _ => true,
+                })
+            {
+                check.insert(key.into(), json!(value));
+            }
         }
         if let Some(artifact) = event.artifacts.first() {
             check.insert("artifact_id".into(), json!(artifact.id));

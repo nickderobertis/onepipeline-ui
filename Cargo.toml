@@ -183,6 +183,7 @@ thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
 tokio-stream = "0.1"
+url = "2"
 
 # Unix process probes used by the server and its real-process journeys.
 [target.'cfg(unix)'.dependencies]

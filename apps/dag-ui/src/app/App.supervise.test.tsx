@@ -163,23 +163,28 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
       return defaultResponder(url);
     });
     render(<App client={client} />);
-    // The held surface is pending, the unread one waiting, the read one answered
-    // — each with its kind, source, blocking flag and age.
-    const pending = await screen.findByRole("region", {
-      name: "Pending surfaces",
+    const conversation = await screen.findByRole("region", {
+      name: "Surfaces",
     });
-    expect(pending).toHaveTextContent("ask-manager");
-    expect(pending).toHaveTextContent("from sentinel");
-    expect(pending).toHaveTextContent("blocking");
-    expect(pending).toHaveTextContent("node dashboard");
-    expect(pending).toHaveTextContent(/old/);
-    const waiting = screen.getByRole("region", { name: "Waiting surfaces" });
-    expect(waiting).toHaveTextContent("check-in");
-    expect(waiting).toHaveTextContent("non-blocking");
-    const answered = screen.getByRole("region", { name: "Answered surfaces" });
-    expect(answered).toHaveTextContent("the gate went red 0");
+    const managerQuestion = within(conversation).getByRole("group", {
+      name: /^Surface 1 message$/,
+    });
+    expect(managerQuestion).toHaveTextContent("ask-manager");
+    expect(managerQuestion).toHaveTextContent("from sentinel");
+    expect(managerQuestion).toHaveTextContent("blocking");
+    expect(managerQuestion).toHaveTextContent("node dashboard");
+    expect(managerQuestion).toHaveTextContent(/old/);
+    const checkIn = within(conversation).getByRole("group", {
+      name: /^Surface 2 message$/,
+    });
+    expect(checkIn).toHaveTextContent("check-in");
+    expect(checkIn).toHaveTextContent("non-blocking");
+    const gateQuestion = within(conversation).getByRole("group", {
+      name: /^Surface 0 message$/,
+    });
+    expect(gateQuestion).toHaveTextContent("the gate went red 0");
     expect(screen.getByRole("region", { name: "Replies" })).toHaveTextContent(
-      '"message": "carry on"',
+      "carry on",
     );
     expect(
       screen.getByRole("region", { name: "Command outcomes" }),
@@ -510,7 +515,7 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
       return defaultResponder(url);
     });
     render(<App client={client} />);
-    await screen.findByRole("region", { name: "Pending surfaces" });
+    await screen.findByRole("region", { name: "Surfaces" });
     await userEvent.click(screen.getByRole("button", { name: "Stop" }));
     const confirm = await screen.findByRole("dialog");
     expect(confirm).toHaveTextContent(`Stop ${LIVE_RUN}?`);
@@ -652,8 +657,8 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
     const composer = await screen.findByRole("region", { name: "Reply" });
     expect(within(composer).getByLabelText("Shortcut")).toBeInTheDocument();
     expect(
-      await screen.findByRole("region", { name: "Pending surfaces" }),
-    ).toHaveTextContent("Nothing is waiting on an answer.");
+      await screen.findByRole("region", { name: "Surfaces" }),
+    ).toHaveTextContent("No surfaces yet.");
   });
 });
 

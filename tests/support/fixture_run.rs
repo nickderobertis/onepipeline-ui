@@ -1585,6 +1585,11 @@ fn journal(run: &str) -> String {
                 "status": "completed",
                 "from_status": "in_progress",
                 "conclusion": "failure",
+                // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 (Cargo.lock) declares no change-check payload schema, as the producer-schema contract test records. The time/conclusion names follow its change-check-times golden; url exercises this reader's optional address slot only when supplied. Missing/null metadata stays absent, and the host Check type is not an event writer to gate against.
+                "url": "https://example.test/checks/published-smoke",
+                "started_at": "2026-08-07T12:00:10Z",
+                "completed_at": "2026-08-07T12:00:12Z",
+                // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
             }),
             json!([{ "id": CHECK_LOG_ARTIFACT, "kind": "log", "bytes": 39 }]),
         )

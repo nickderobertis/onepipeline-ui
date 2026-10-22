@@ -1558,7 +1558,7 @@ test("shows the release that carried a node's work and the waits before it", asy
       })
       .locator("dd");
   await openObservatory(page, `/?run=${runs().live}&node=foundation`);
-  await page.getByRole("tab", { name: "PR" }).click();
+  await page.getByRole("tab", { name: "Remote" }).click();
   await expect(fact("Release")).toContainText(facts.release.version);
   await expect(fact("Release")).toContainText(facts.release.target);
 
@@ -1567,7 +1567,7 @@ test("shows the release that carried a node's work and the waits before it", asy
   // recorded and only the row beside it is not. A panel-wide reading would pass
   // on a node that recorded neither and prove nothing about this row.
   await openObservatory(page, `/?run=${runs().live}&node=remote-open`);
-  await page.getByRole("tab", { name: "PR" }).click();
+  await page.getByRole("tab", { name: "Remote" }).click();
   await expect(fact("Release")).toHaveText("Not recorded");
   await expect(
     fact("Publication").getByRole("link", { name: "Pull request" }),
@@ -1955,7 +1955,7 @@ test("states a reference whose id no route can be asked for", async ({
 
 test("states when a verification artifact is unavailable", async ({ page }) => {
   await openObservatory(page, `/?run=${runs().live}&node=missing-artifact`);
-  await page.getByRole("tab", { name: "Checks" }).click();
+  await page.getByRole("tab", { name: "Remote" }).click();
   await expect(
     page.locator(".facts").filter({ hasText: "Verification coverage" }),
   ).toContainText("Hook: not recorded");
@@ -2014,7 +2014,7 @@ for (const scenario of [
     page,
   }) => {
     await openObservatory(page, `/?run=${runs().live}&node=${scenario.node}`);
-    await page.getByRole("tab", { name: "PR" }).click();
+    await page.getByRole("tab", { name: "Remote" }).click();
     const facts = page.locator(".facts");
     const change = scenario.change ?? fixture().foundation_pr;
     if (scenario.change === undefined && scenario.node === "local-direct") {
@@ -2040,7 +2040,7 @@ for (const scenario of [
  */
 test("reads the checks a host observed on a publication", async ({ page }) => {
   await openObservatory(page, `/?run=${runs().live}&node=remote-open`);
-  await page.getByRole("tab", { name: "Checks" }).click();
+  await page.getByRole("tab", { name: "Remote" }).click();
   const facts = page.locator(".facts");
   // The repository's own pre-push hook left a verdict, which is the only record
   // that it ran at all.
@@ -2049,13 +2049,13 @@ test("reads the checks a host observed on a publication", async ({ page }) => {
   // Each check's own state: the conclusion once it reached one, and the host's
   // status while it has not — so a required check still running cannot read as
   // one that passed, and one that never ran cannot hide.
-  await expect(facts).toContainText("gate: success");
-  await expect(facts).toContainText("published-smoke: failure");
-  await expect(facts).toContainText("e2e: in_progress");
+  await expect(facts).toContainText("gatecompletedsuccessRequired");
+  await expect(facts).toContainText("published-smokecompletedfailureOptional");
+  await expect(facts).toContainText("e2ein_progress—Required");
 
   // And the same checks are read beside the change they ran on, from the
   // publication the plot draws.
-  await page.getByRole("tab", { name: "PR" }).click();
+  await page.getByRole("tab", { name: "Remote" }).click();
   await expect(
     page.locator(".facts").getByRole("link", { name: "Pull request" }),
   ).toHaveAttribute("href", fixture().remote_open_pr);
@@ -2152,12 +2152,12 @@ test("keeps a node's task, criteria, dependencies and verification reachable", a
 
   await page.getByRole("tab", { name: "Dependencies" }).click();
   await expect(page.locator(".facts")).toContainText("foundation");
-  await page.getByRole("tab", { name: "PR" }).click();
+  await page.getByRole("tab", { name: "Remote" }).click();
   await expect(page.locator(".facts")).toContainText("Not recorded");
   await expect(page.locator(".facts").getByRole("link")).toHaveCount(0);
 
   await openObservatory(page, `/?run=${runs().live}&node=foundation`);
-  await page.getByRole("tab", { name: "PR" }).click();
+  await page.getByRole("tab", { name: "Remote" }).click();
   const pr = page.locator(".facts").getByRole("link", { name: "Pull request" });
   await expect(pr).toHaveAttribute("href", fixture().foundation_pr);
   await expect(pr).toHaveAttribute("target", "_blank");
@@ -2876,9 +2876,16 @@ test("restores node tabs and moves between them from the keyboard", async ({
   // Nothing observed a check on *this* node's publication, so the tab states that
   // rather than leaving an empty panel; the node that did observe some is read in
   // its own journey above.
-  await page.getByRole("tab", { name: "Checks" }).click();
+  await page.getByRole("tab", { name: "Remote" }).click();
   await expect(page.locator(".facts")).toContainText("No checks observed");
-  await expect(page.locator(".facts").getByRole("link")).toHaveCount(0);
+  await expect(page.getByRole("table", { name: "Remote checks" })).toHaveCount(
+    0,
+  );
+  await expect(
+    page
+      .locator(".facts")
+      .getByRole("link", { name: "Pull request", exact: true }),
+  ).toHaveAttribute("href", fixture().foundation_pr);
   await page.getByRole("tab", { name: "Task" }).click();
   await expect(page.locator(".facts")).toContainText(
     "Gate completed successfully",
@@ -3544,7 +3551,7 @@ test("reflows navigation, detail, and metrics at a narrow viewport", async ({
   const stripBox = await tabStrip.boundingBox();
   if (stripBox === null) throw new Error("the node tab strip has no bounds");
   const labels = await tabStrip.getByRole("tab").all();
-  expect(labels).toHaveLength(6);
+  expect(labels).toHaveLength(5);
   for (const label of labels) {
     // Both axes: the row they spill past horizontally is only reachable one way, and
     // the row they spill past vertically is drawn under the reading below and reaches

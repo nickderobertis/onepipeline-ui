@@ -140,8 +140,7 @@ export const NODE_TAB_LABELS = {
   task: "Task",
   criteria: "Acceptance criteria",
   dependencies: "Dependencies",
-  pr: "PR",
-  checks: "Checks",
+  remote: "Remote",
 };
 export type NodeTab = keyof typeof NODE_TAB_LABELS;
 
@@ -197,7 +196,12 @@ export function useUrlSelection(): UrlSelection {
   const detail: DetailLevel = isDetailLevel(namedDetail)
     ? namedDetail
     : "activity";
-  const nodeTab = isNodeTab(namedTab) ? namedTab : "timeline";
+  const nodeTab =
+    namedTab === "pr" || namedTab === "checks"
+      ? "remote"
+      : isNodeTab(namedTab)
+        ? namedTab
+        : "timeline";
   const view: RunView = isRunView(named)
     ? named
     : nodeId === undefined

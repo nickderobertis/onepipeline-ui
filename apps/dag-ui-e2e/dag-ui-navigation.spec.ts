@@ -298,7 +298,7 @@ test("restores a deep-linked moment at a narrow viewport", async ({ page }) => {
   // Every tab of the node is reachable too: the strip scrolls rather than setting a
   // width the region around it cannot afford.
   await expect(page.getByRole("tab", { name: "Timeline" })).toBeInViewport();
-  await page.getByRole("tab", { name: "Checks" }).click();
+  await page.getByRole("tab", { name: "Remote" }).click();
   await expect(page.locator(".facts")).toContainText("Verification coverage");
   await expectThePageItselfDoesNotScroll(page);
 });

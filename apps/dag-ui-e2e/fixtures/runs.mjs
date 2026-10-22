@@ -1022,7 +1022,7 @@ function relayTurn(
   });
 }
 
-function writeLiveRun(root) {
+function writeLiveRun(root, checkOrigin) {
   const dir = runDir(root, LIVE_RUN);
   mkdirSync(join(dir, "artifacts"), { recursive: true });
   // The oneharness store this run's worker wrote its conversation into. Outside
@@ -1607,16 +1607,31 @@ function writeLiveRun(root) {
       CHECK_ARTIFACT,
     ],
     ["e2e", true, "queued", "in_progress", null, undefined],
+    ["queued-check", false, null, "queued", null, undefined],
+    ["skipped-check", true, "queued", "completed", "skipped", undefined],
   ]) {
-    journal
-      .advance(1)
-      .emit(
-        "vcs",
-        "change-check",
-        { ...run, node: "remote-open" },
-        { name, required, status, from_status: from, conclusion },
-        log === undefined ? [] : [{ id: log, kind: "log", bytes: 33 }],
-      );
+    journal.advance(1).emit(
+      "vcs",
+      "change-check",
+      { ...run, node: "remote-open" },
+      {
+        name,
+        required,
+        status,
+        from_status: from,
+        conclusion,
+        // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 (Cargo.lock) declares no change-check payload schema to validate this fixture against. Its change-check-times golden fixes the time/conclusion names; url exercises the consumer's existing optional check-address slot, not a claim that every producer records it. Older absent/null metadata remains optional; host Check does not write the event and cannot supply a false gate.
+        url: `${checkOrigin}/healthz?check=${name}`,
+        ...(status === "completed"
+          ? {
+              started_at: stamp(journal.at - 4000),
+              completed_at: stamp(journal.at),
+            }
+          : {}),
+        // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+      },
+      log === undefined ? [] : [{ id: log, kind: "log", bytes: 33 }],
+    );
   }
   // The contention the merge queue met, timed by `onevcs` itself: thousands of
   // these is the normal shape, which is why the reading is a summary.
@@ -1833,7 +1848,7 @@ function writeLiveRun(root) {
         cost_usd: 0.42,
       },
       started_at: startedAt,
-      finished_at: stamp(journal.at),
+      completed_at: stamp(journal.at),
     });
     journal.advance(8);
   }
@@ -3080,8 +3095,62 @@ function writeNamedRun(root) {
   Journal.writeMerged(join(dir, "events.jsonl"), [driver, observers, nodes]);
 }
 
+/**
+ * Answers arrive out of question order. tests/contract.rs compares these records
+ * and filenames with the SDK's actual channel writer so its storage cannot drift.
+ */
+export function channelFixtureRecords() {
+  const surfaces = [0, 1, 2].map((id) => ({
+    event: "queued",
+    id,
+    kind: "finding",
+    source: "proposal",
+    blocking: false,
+    queued_at: now() - (3 - id) * 1000,
+    correlation: `c-${String(id).padStart(32, "0")}`,
+    message: `Question ${id} ${"long preview ".repeat(30)}\nQuestion final sentinel ${id}`,
+  }));
+  return {
+    "surfaces.jsonl": surfaces,
+    "replies.jsonl": [1, 0, 2, 3].map((id, index) => ({
+      id: index,
+      at: now(),
+      ...(id === 2
+        ? {}
+        : { correlation: surfaces[id === 3 ? 0 : id].correlation }),
+      reply: {
+        completion: false,
+        ...(id === 2
+          ? {}
+          : {
+              message:
+                id === 3
+                  ? `Follow-up answer ${"long preview ".repeat(30)}\nFollow-up final sentinel`
+                  : `Answer ${id} ${"long preview ".repeat(30)}\nAnswer final sentinel ${id}`,
+            }),
+      },
+    })),
+  };
+}
+
+function writeChannelRun(root) {
+  const channel = join(root, HISTORY_RUN, "channel");
+  mkdirSync(channel, { recursive: true });
+  for (const [name, records] of Object.entries(channelFixtureRecords())) {
+    writeFileSync(
+      join(channel, name),
+      `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    );
+  }
+}
+
 /** Write every run this fixture serves, oldest first. */
-export function buildRuns(root, workspace, review = false) {
+export function buildRuns(
+  root,
+  workspace,
+  review = false,
+  checkOrigin = "http://127.0.0.1",
+) {
   buildRecordedTimelines(root);
   mkdirSync(root, { recursive: true });
   writeSupervisedRun(root, review);
@@ -3099,11 +3168,12 @@ export function buildRuns(root, workspace, review = false) {
   writeBusyRun(root);
   writeUnattributedRun(root);
   writeHistoryRun(root);
+  writeChannelRun(root);
   writeOutcomesRun(root);
   writeLegacyRun(root);
   writeSiblingRun(root);
   writeNamedRun(root);
-  writeLiveRun(root);
+  writeLiveRun(root, checkOrigin);
 }
 
 /** Everything the fixture wrote, published beside the runs it serves. */
