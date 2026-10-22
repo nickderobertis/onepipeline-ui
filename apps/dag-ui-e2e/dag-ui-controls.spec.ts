@@ -710,14 +710,14 @@ test("says in run details when the status read fails, and shows the readings aga
 
     // The API goes away under an open page: the next status poll is refused,
     // and the last readings stay beside the alert that says so.
-    await server.pause();
+    await server.stopServing();
     await expect(header.getByRole("alert")).toContainText(
       "Status unavailable",
       { timeout: 30_000 },
     );
     await expect(header).toContainText(before.summary);
 
-    await server.resume();
+    await server.serveRebuilt();
     const after = await read();
     await expect(header.getByRole("alert")).toHaveCount(0, {
       timeout: 30_000,

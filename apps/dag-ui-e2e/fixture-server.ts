@@ -25,10 +25,14 @@ export interface FixtureServer {
   /** What the corpus published about itself, unparsed: each caller holds its own shape. */
   readonly facts: unknown;
   readonly stop: () => Promise<void>;
-  /** Stop the server and keep its workspace, so `resume` serves it again. */
-  readonly pause: () => Promise<void>;
-  /** Start the server again on the same port, and wait until it answers. */
-  readonly resume: () => Promise<void>;
+  /** Stop the server and leave its origin unanswered until `serveRebuilt`. */
+  readonly stopServing: () => Promise<void>;
+  /**
+   * Start the server again on the same origin and wait until it answers. The
+   * corpus is written afresh, as on any start: `serve-fixture.mjs` removes and
+   * rebuilds the workspace, so nothing written into it since is kept.
+   */
+  readonly serveRebuilt: () => Promise<void>;
 }
 
 /** A port the kernel says is free now. */
@@ -120,8 +124,8 @@ export async function startFixtureServer(
       await halt();
       rmSync(workspace, { recursive: true, force: true });
     },
-    pause: halt,
-    resume: async () => {
+    stopServing: halt,
+    serveRebuilt: async () => {
       if (child === undefined) child = await serve();
     },
   };
