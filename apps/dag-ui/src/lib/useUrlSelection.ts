@@ -70,8 +70,7 @@ export interface UrlSelection {
  * The readings of one run. `graph` and `overall` are the two readings of its
  * recorded execution; `channel`, `watch` and `reads` are the supervising
  * surface — what the CLI does to a run once its plan has started, each wired to
- * the route the contract names for it — and `agents` is every oneharness
- * session the run's launches wrote, each opening to its transcript.
+ * the route the contract names for it.
  */
 export const RUN_VIEWS = {
   graph: "graph",

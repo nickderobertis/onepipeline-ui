@@ -309,7 +309,7 @@ const SURFACES: readonly Surface[] = [
       await expect(
         page
           .getByRole("region", { name: "Node timeline" })
-          .getByRole("button", { name: /engineer-dashboard/ }),
+          .getByRole("button", { name: /^worker \(engineer-dashboard\)/ }),
       ).toBeVisible();
       await expect(
         page
