@@ -343,6 +343,40 @@ impl Traced {
         name.to_owned()
     }
 
+    /// Whether every task followed by strace has an exit record. `-ff` follows
+    /// children even when they daemonize or scrub their environment, so an
+    /// orphan cannot disappear from this check by losing its parent.
+    pub fn all_tasks_exited(&self) -> bool {
+        let traces: Vec<_> = std::fs::read_dir(self.traces.path())
+            .expect("the trace directory")
+            .map(|entry| entry.expect("a trace entry").path())
+            .collect();
+        !traces.is_empty()
+            && traces.iter().all(|path| {
+                let trace = std::fs::read_to_string(path).expect("a trace file");
+                trace.lines().last().is_some_and(|line| {
+                    line.contains("+++ exited with ") || line.contains("+++ killed by ")
+                })
+            })
+    }
+
+    /// Stop the child and require all of its traced descendants to exit within
+    /// ten seconds after it does. Only the child PID we spawned is signalled.
+    pub fn stop_without_survivors(mut self, stop: Stop) {
+        ask_to_stop(&mut self.child, stop);
+        let status = wait_within(&mut self.child, STOP_DEADLINE);
+        assert_eq!(status.code(), Some(0), "the server did not stop cleanly");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !self.all_tasks_exited() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "a task started by the server has no exit record ten seconds after shutdown: {:?}",
+                self.traces.path()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     /// Stop the server and read what it did.
     ///
     /// The trace is only whole once the process has exited, so this is the only

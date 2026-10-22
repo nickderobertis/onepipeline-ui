@@ -3271,8 +3271,18 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
 
   // And resetting from any of them puts every one of them back.
   await runLevel.getByRole("button", { name: "Reset timeline zoom" }).click();
-  await expect.poll(() => axisTicks(graphLine(page))).toBe(before);
-  expect(await axisTicks(dashboard)).toBe(before);
+  await expect(
+    runLevel.getByRole("button", { name: "Reset timeline zoom" }),
+  ).toBeDisabled();
+  // The live range ends at the server's latest observation, which may have
+  // advanced since `before`. Its launch tick stays fixed; every row must still
+  // show the same full range after reset.
+  await expect
+    .poll(async () => (await axisTicks(graphLine(page))).split("\n")[0])
+    .toBe(before.split("\n")[0]);
+  const reset = await axisTicks(graphLine(page));
+  expect(await axisTicks(dashboard)).toBe(reset);
+  expect(await axisTicks(runLevel)).toBe(reset);
 });
 
 test("draws the stretches the run recorded nothing in", async ({ page }) => {
@@ -4639,7 +4649,31 @@ test("drops a run the server stops serving", async ({ page }) => {
 });
 
 test("falls back to the empty state once no run is left", async ({ page }) => {
+  const captured = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  let held = false;
+  // Hold the real opening answer while the stream reports newer removals.
+  // Every byte released below is the server's own response, captured before
+  // any run was removed; no response is fabricated.
+  // llmlint: ignore-block[e2e_not_mocked] only delivery timing is controlled: fetch reads the real API over the real fixture root, and fulfill releases that unchanged response after the real stream reports removals. No fixture can deterministically make an HTTP answer arrive after those stream events; this reproduces a slow network without replacing the server or its payload.
+  await page.route(RUN_LIST_READ, async (intercepted) => {
+    const url = new URL(intercepted.request().url());
+    if (held || url.searchParams.has("select")) {
+      await intercepted.continue();
+      return;
+    }
+    held = true;
+    const response = await intercepted.fetch();
+    captured.resolve();
+    await released.promise;
+    await intercepted.fulfill({ response });
+  });
+  // llmlint: ignore-end[e2e_not_mocked]
   await openObservatory(page);
+  await captured.promise;
+  await expect(
+    page.getByRole("button", { name: RegExp(runs().live) }),
+  ).toBeVisible();
   changeServedRuns(["--remove-page-runs"]);
 
   // Every remaining run except one — the journey before this removed the historical
@@ -4653,6 +4687,12 @@ test("falls back to the empty state once no run is left", async ({ page }) => {
     await expect(page.getByText("No DAG runs found")).toHaveCount(0);
   }
   changeServedRuns(["--remove-run", last]);
+
+  await expect(page.getByRole("button", { name: RegExp(last) })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: RegExp(runs().live) }),
+  ).toHaveCount(0);
+  released.resolve();
 
   await expect(page.getByText("No DAG runs found")).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);

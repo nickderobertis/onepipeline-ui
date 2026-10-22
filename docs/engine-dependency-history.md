@@ -456,3 +456,9 @@ of. No route or MSRV changes, and the dev-only `onevcs` and `onetaskgraph-*`
 requirements already name the releases its lock resolves. This changes the
 engine types carried by ApiError::from_engine and the other engine-typed
 public items.
+0.84.1 links oneharness-core 0.28.8 and oneagentgraph 0.7.1, carrying the
+shared Codex app-server cleanup fix (oneharness#1520). The lock follows the
+engine release's own resolution. Browser adoption remains removed under the
+current contract; this binary reads runs driven by the engine CLI. This
+changes the engine types carried by ApiError::from_engine and the other
+engine-typed public items.

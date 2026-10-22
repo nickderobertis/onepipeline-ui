@@ -14184,9 +14184,9 @@ fn notes_awaiting_an_answer(state: &Path) -> usize {
     found
 }
 
-/// A note posted through the reply route into a run adopted through the adopt
-/// route waits on the held turn it was offered to **without stopping the run**:
-/// the adopted driver is this binary's copy of the engine, which delivers a live
+/// A note posted through the reply route into a run driven by the pinned CLI
+/// waits on the held turn it was offered to **without stopping the run**. The
+/// envelope is acknowledged with the note queued, and the engine delivers the
 /// note off the run's single writer, so while the turn has not taken it the run
 /// goes on journalling that turn's work and its member's heartbeat, and every
 /// read goes on serving the run as live. Once the turn ends and the conversation
@@ -14297,9 +14297,9 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     );
     assert_eq!(notes_awaiting_an_answer(&dir), 0);
 
-    // The note, into the held turn. Its answer is owed once the conversation has
-    // taken it, which is not until the turn ends — so it is posted beside the
-    // journey rather than in front of it.
+    // The envelope is acknowledged with its note queued while delivery waits
+    // on the held turn. Post beside the journey so a writer blocking on delivery
+    // is caught by the journal and receipt checks below.
     let envelope = json!({
         "version": 2,
         "commands": [{ "op": "note", "id": node, "addressee": "worker", "text": HELD_TURN_NOTE }],
@@ -14336,9 +14336,18 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         "the conversation took the note before its turn ended, so nothing above was recorded \
          while one was waiting"
     );
-    assert!(
-        !reply.is_finished(),
-        "the reply was answered before the turn took the note"
+    eventually(
+        "the envelope to be acknowledged while its note waits",
+        || reply.is_finished(),
+    );
+    let answered = reply.join().expect("the reply thread");
+    assert_eq!(answered.status, 200, "{}", answered.body);
+    let receipt = answered.json();
+    assert_eq!(receipt["receipt"]["state"], json!("applied"), "{receipt}");
+    assert_eq!(
+        receipt["receipt"]["notes"][node],
+        json!("queued"),
+        "{receipt}"
     );
     let live = detail();
     assert_eq!(live["run"]["state"], json!("active"), "{live}");
@@ -14356,10 +14365,6 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     // The turn ends, the conversation takes the note, and the run records the
     // delivery and settles.
     fs::write(fakes.join("turn.settle"), "go").expect("release the turn's end");
-    let answered = reply.join().expect("the reply thread");
-    assert_eq!(answered.status, 200, "{}", answered.body);
-    let receipt = answered.json();
-    assert_eq!(receipt["receipt"]["state"], json!("applied"), "{receipt}");
     // The driver records a presentation when it next reads the turn's stream
     // after the delivery, not before the receipt is answered.
     eventually("the note's presentation to be recorded", || {
@@ -14393,8 +14398,8 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     );
     // And the envelope the driver claimed is answered rather than left claimed:
     // the channel holds no unclaimed command and one outcome, for that reply —
-    // naming, as the engine's `verbs::channel` does, that the held turn took
-    // the note as it ended.
+    // naming the note as queued when the envelope was acknowledged. Delivery
+    // is recorded in the journal above; it does not rewrite the receipt.
     let channel = http::get(address, &format!("/api/v2/runs/{run}/channel")).json();
     assert_eq!(channel["commands"], json!([]), "{channel}");
     assert_eq!(
@@ -14402,7 +14407,7 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         json!([{
             "id": receipt["receipt"]["reply"],
             "applied": true,
-            "results": [{ "index": 0, "op": "note", "outcome": "applied", "turn": "turn-end" }],
+            "results": [{ "index": 0, "op": "note", "outcome": "queued" }],
         }]),
         "{channel}"
     );
