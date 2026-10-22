@@ -6087,8 +6087,8 @@ fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
         // its records; an undeclared member still rules out a persona fallback.
         let member = relayed.iter().find_map(|(_, event)| member_label(event));
         let persona = relayed
-            .iter()
-            .find_map(|(_, event)| event.labels.persona.as_deref());
+            .first()
+            .and_then(|(_, event)| event.labels.persona.as_deref());
         if let Some(role) = lens.transcripts.declared.agent_role(member, persona) {
             span.insert("agent_role".into(), json!(role));
         }
