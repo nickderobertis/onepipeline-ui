@@ -699,3 +699,43 @@ test("filtering every dispatch boundary and graph record preserves served groups
   ).toHaveCount(2);
   await expect(headings()).toHaveText(groups);
 });
+
+for (const scope of ["node", "run"] as const) {
+  test(`restores a legacy ${scope} event bookmark when producer identity is present`, async ({
+    page,
+    request,
+  }) => {
+    const query =
+      scope === "node" ? `scope=node&node=${corpus.node}` : "scope=run";
+    const response = await request.get(
+      `${SERVED_UI_URL}/api/v2/runs/${corpus.run_id}/timeline?${query}`,
+    );
+    expect(response.ok()).toBe(true);
+    const timeline = parseRunTimeline(await response.json());
+    const kind = scope === "node" ? "turn-activity" : "completion-requested";
+    const event = timeline.spans
+      .filter((span) => scope === "node" || span.node_id === undefined)
+      .flatMap((span) => span.events)
+      .find((event) => event.kind === kind && event.record_id !== event.id);
+    if (event?.record_id === undefined)
+      throw new Error("producer-addressed event");
+    const bookmark = new URLSearchParams({
+      run: corpus.run_id,
+      event: event.id,
+    });
+    if (scope === "node") bookmark.set("node", corpus.node);
+    else bookmark.set("view", "overall");
+    await page.goto(`/?${bookmark}`);
+    const detail = page.getByRole("region", { name: "Timeline item detail" });
+    await expect(
+      detail.getByRole("heading", { name: kind, exact: true }),
+    ).toBeVisible();
+    await expect(detail.getByRole("time").first()).toHaveAttribute(
+      "datetime",
+      event.at,
+    );
+    await page.keyboard.press("Escape");
+    await expect(detail).toHaveCount(0);
+    expect(new URL(page.url()).searchParams.has("event")).toBe(false);
+  });
+}
