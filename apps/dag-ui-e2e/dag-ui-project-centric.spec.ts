@@ -76,6 +76,14 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
       exact: true,
     });
     await expect(group.getByRole("button")).toHaveCount(7);
+    await expect(group.getByRole("note")).toHaveText([
+      "follow-ups",
+      "design",
+      "finalize",
+      "main",
+      "spikes",
+      "planning",
+    ]);
     await group.getByText("project-centric", { exact: true }).click();
     await expect(
       group.getByRole("button", { name: "Open project-centric", exact: true }),
@@ -138,7 +146,9 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
         nav.getByRole("checkbox", { name: kind, exact: true }),
       ).not.toBeChecked();
       await expect(
-        nav.getByRole("button", { name: new RegExp(`^project-${kind}`) }),
+        nav.getByRole("button", {
+          name: new RegExp(`project-${kind} ${kind}`),
+        }),
       ).toHaveCount(0);
     }
     const other = nav.getByRole("group", {
@@ -152,7 +162,7 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
     await expect(
       other
         .getByRole("button", { name: /project-ungrouped/ })
-        .getByText("main", { exact: true }),
+        .getByRole("note"),
     ).toHaveCount(0);
     await expect(
       nav.getByRole("button", { name: /project-before-labels spike-brief/ }),
@@ -165,6 +175,12 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
     await expect(group.getByRole("status")).toHaveText(
       "No runs of the shown kinds.",
     );
+    await expect(page).toHaveURL(/run=project-design/);
+    await expect(
+      page
+        .getByRole("heading", { name: "project-design", exact: true })
+        .first(),
+    ).toBeVisible();
     await nav.getByRole("checkbox", { name: "design", exact: true }).check();
     await expect(
       group.getByRole("button", { name: "Open project-centric", exact: true }),

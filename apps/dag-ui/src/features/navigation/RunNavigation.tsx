@@ -123,7 +123,13 @@ export function RunNavigation({
                           </Tooltip>
                           <span>{run.run_id}</span>
                           {run.labels?.kind && (
-                            <Badge variant="outline">{run.labels.kind}</Badge>
+                            <Badge
+                              aria-label={run.labels.kind}
+                              role="note"
+                              variant="outline"
+                            >
+                              {run.labels.kind}
+                            </Badge>
                           )}
                         </span>
                         <span className="run-link-counts">

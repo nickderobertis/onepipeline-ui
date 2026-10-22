@@ -4191,8 +4191,7 @@ export function buildProjectCentricRuns(root) {
   ]) {
     writeEventlessRun(root, id);
     const recordPath = join(root, id, "launch.json");
-    const record = JSON.parse(readFileSync(recordPath, "utf8"));
-    delete record.started_at;
+    const record = launch(id, "a-plain-shell", "", undefined, 4248);
     Object.assign(record, {
       group: "local-md:ordering",
       ...(started === undefined ? {} : { started_at: stamp(started) }),
@@ -4206,7 +4205,7 @@ export function buildProjectCentricRuns(root) {
   writeEventlessRun(root, "project-unfamiliar");
   const unfamiliar = join(root, "project-unfamiliar", "launch.json");
   writeJson(unfamiliar, {
-    ...JSON.parse(readFileSync(unfamiliar, "utf8")),
+    ...launch("project-unfamiliar", "a-plain-shell", "", stamp(HISTORIC), 4248),
     labels: { kind: "field-research" },
     group: "local-md:another-project",
   });

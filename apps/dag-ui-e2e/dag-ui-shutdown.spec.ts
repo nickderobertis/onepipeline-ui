@@ -441,7 +441,7 @@ test("a live dispatch that outlasts the grace is killed, and the report says so 
   for (const gone of host.reading.gone)
     await expect(
       page.getByRole("region", { name: "Gone dispatches", exact: true }),
-    ).toContainText(gone.reason);
+    ).toContainText(`${gone.run} · ${gone.node} · ${gone.reason}`);
 });
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
@@ -463,14 +463,43 @@ test("reads structured host data and refreshes fixture-owned unwatched runs only
     if (new URL(request.url()).pathname === "/api/v2/unwatched") calls += 1;
   });
   await page.clock.install();
+  let releaseHost: () => void = () => undefined;
+  const releasedHost = new Promise<void>((resolve) => {
+    releaseHost = resolve;
+  });
+  let hostHeld: () => void = () => undefined;
+  const heldHost = new Promise<void>((resolve) => {
+    hostHeld = resolve;
+  });
+  // llmlint: ignore[e2e_not_mocked] The real Host response is forwarded unchanged and only its arrival is held, so the browser's pending read can be asserted without a timing race or a fabricated payload.
+  await page.route(
+    (url) => url.pathname === "/api/v2/host",
+    async (route) => {
+      const response = await route.fetch();
+      hostHeld();
+      await releasedHost;
+      await route.fulfill({ response });
+    },
+  );
   const displayedResponse = page.waitForResponse(
     (response) => new URL(response.url()).pathname === "/api/v2/host",
   );
   await page.goto(`${current.origin}/?page=host`);
+  await heldHost;
+  const pendingHost = page
+    .getByRole("region", { name: "Host", exact: true })
+    .getByRole("status")
+    .filter({ hasText: "Reading host…" });
+  try {
+    await expect(pendingHost).toBeVisible();
+  } finally {
+    releaseHost();
+  }
   const displayed = hostEnvelopeSchema.parse(
     await (await displayedResponse).json(),
   );
   const view = page.getByRole("region", { name: "Host", exact: true });
+  await expect(pendingHost).toHaveCount(0);
   await expect(
     view.getByRole("heading", {
       name: `Unwatched runs: ${initial.reported.length}`,
@@ -483,6 +512,25 @@ test("reads structured host data and refreshes fixture-owned unwatched runs only
   await expect(view.getByRole("region", { name: "Free space" })).toContainText(
     String(host.reading.free_space[0]?.total_bytes),
   );
+  const roots = displayed.reading.free_space.flatMap((space) => space.roots);
+  for (const [index, root] of roots.entries()) {
+    await expect(
+      view
+        .getByRole("status", { name: "Filesystem root path", exact: true })
+        .nth(index),
+    ).toHaveText(root.path ?? "unresolved");
+    await expect(
+      view.getByRole("region", { name: "Free space", exact: true }),
+    ).toContainText(`${root.role}:`);
+  }
+  for (const [index, root] of roots
+    .filter((root) => root.measured_at !== null)
+    .entries())
+    await expect(
+      view
+        .getByRole("status", { name: "Measured root ancestor", exact: true })
+        .nth(index),
+    ).toHaveText(root.measured_at ?? "missing ancestor");
   for (const [index, space] of displayed.reading.free_space.entries()) {
     await expect(
       view
@@ -538,7 +586,7 @@ test("reads structured host data and refreshes fixture-owned unwatched runs only
   rmSync(join(current.workspace, "runs", current.facts.runs.mine), {
     recursive: true,
   });
-  await page.clock.fastForward(60_000);
+  await page.clock.runFor(60_000);
   expect(calls).toBe(1);
   await expect(
     view.getByRole("heading", {
@@ -584,7 +632,10 @@ test("reads structured host data and refreshes fixture-owned unwatched runs only
   expect(
     refusedRoot.reading.skipped.some((row) => row.path === unreadable),
   ).toBe(true);
-  await expect(view.getByText(/unreadable-host-run/)).toBeVisible();
+  for (const skipped of refusedRoot.reading.skipped)
+    await expect(
+      view.getByText(`${skipped.path}: ${skipped.reason}`, { exact: true }),
+    ).toBeVisible();
   await page.context().setOffline(true);
   await view.getByRole("button", { name: "Refresh host", exact: true }).click();
   await expect(view.getByRole("alert")).toBeVisible();

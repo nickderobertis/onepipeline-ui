@@ -28,7 +28,6 @@ import {
 } from "@onepipeline-ui/dag-model";
 import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
-import { z } from "zod";
 import { fixture, runs } from "./fixture-facts";
 import {
   graphNodeList,
