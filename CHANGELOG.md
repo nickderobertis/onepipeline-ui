@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.45.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.45.1...v0.45.2) - 2026-10-22
+
+### Added
+
+- one Remote tab with a per-check table, and a paired one-line channel ([#428](https://github.com/nickderobertis/onepipeline-ui/pull/428))
+
 ## [0.45.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.45.0...v0.45.1) - 2026-10-22
 
 ### Fixed
