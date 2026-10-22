@@ -112,6 +112,45 @@ async function open(page: Page, size: Viewport, path: string): Promise<void> {
   await expect(navigation(page).locator(".run-link").first()).toBeVisible();
 }
 
+for (const size of VIEWPORTS) {
+  test(`keeps every Host reading inside its column at ${size.name}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await page.goto("/?page=host");
+    const host = page.getByRole("region", { name: "Host", exact: true });
+    // The corpus's dispatch proofs and root paths are long unbroken strings, and its
+    // providers table has five columns: what widened this page past a phone.
+    await expect(host.getByRole("table").getByRole("row").nth(1)).toBeVisible();
+    await expect(
+      host.getByRole("button", { name: "Refresh host", exact: true }),
+    ).toBeVisible();
+    const viewport = page
+      .locator("[data-radix-scroll-area-viewport]")
+      .filter({ has: host });
+    const escaped = await viewport.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const region = element.querySelector('[aria-label="Host"]');
+      const outside = [...(region?.querySelectorAll("*") ?? [])].filter(
+        (child) => {
+          const box = child.getBoundingClientRect();
+          return box.width > 0 && box.right > bounds.right + 1;
+        },
+      );
+      return {
+        overflow: element.scrollWidth - element.clientWidth,
+        outside: outside.map(
+          (child) =>
+            `${child.tagName.toLowerCase()} ${child.textContent?.slice(0, 40)}`,
+        ),
+      };
+    });
+    expect(escaped.outside).toEqual([]);
+    expect(escaped.overflow).toBeLessThanOrEqual(1);
+    await expectThePageItselfDoesNotScroll(page);
+  });
+}
+
 test("offers no kind filter when no served run carries a kind", async ({
   page,
 }) => {

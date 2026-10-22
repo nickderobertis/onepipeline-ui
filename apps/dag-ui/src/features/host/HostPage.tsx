@@ -21,7 +21,7 @@ export function HostPage({
   const reading = host.value?.reading;
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <section aria-label="Host" className="channel-view">
+      <section aria-label="Host" className="channel-view host-page">
         <h2>This host{reading && ` · ${reading.host}`}</h2>
         <Button onClick={refresh}>Refresh host</Button>
         {(host.error || unwatched.error) && (

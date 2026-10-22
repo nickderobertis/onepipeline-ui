@@ -1416,6 +1416,36 @@ button.graph-row-name {
   padding: 20px 28px 32px;
 }
 
+/*
+ * The Host page holds absolute paths, dispatch proofs and a five-column table, none
+ * of which has a natural break. A grid track's default minimum is its content's, so
+ * without these the column grew past a phone's width and clipped the page.
+ */
+.host-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.host-page :where(h2, dd, p, th, td) {
+  overflow-wrap: anywhere;
+}
+
+.host-page table {
+  width: 100%;
+}
+
+.host-page .host-shutdown {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.host-page .host-shutdown-actions > button {
+  flex-shrink: 1;
+  max-width: 100%;
+  height: auto;
+  min-height: 2rem;
+  white-space: normal;
+  text-align: start;
+}
+
 .channel-section h3 {
   display: flex;
   align-items: center;
