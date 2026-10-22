@@ -789,8 +789,6 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
         await expect(identity).toContainText(repo);
     }
 
-    // Results, one node line and the lines under it at a time.
-    // The node the indented lines below a node line belong to.
     let current: string | undefined;
     for (const line of nodeLines) {
       const nodeLine = line.match(/^ {2}(\S+)\s+(\S+)(?: \(([^)]+)\))?(.*)$/);
@@ -804,7 +802,7 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
         const url = rest?.match(/ — (https?:\/\/\S+)$/)?.[1];
         if (url !== undefined)
           await expect(
-            view.locator("header").getByRole("link", { name: "Pull request" }),
+            view.getByRole("link", { name: "Pull request" }),
           ).toHaveAttribute("href", url);
         const beside = (rest ?? "").replace(/ — https?:\/\/\S+$/, "");
         // Dropped: a landing read taken when the read was asked, not a record.
@@ -851,7 +849,6 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
       }
     }
 
-    // Transcript, per node, as the read's node selector asked for it.
     const perNode: string[] = [];
     for (const { id } of tasks) {
       const response = await page.request.get(
@@ -864,8 +861,8 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
           `has recorded nothing for node '${id}'`,
         );
         await expect(
-          (await openNode(page, runId, id)).locator("header"),
-        ).toContainText("· 0 turns ·");
+          (await openNode(page, runId, id)).getByText(/ node · 0 turns · /),
+        ).toBeVisible();
         continue;
       }
       const rendered = runTranscriptSchema.parse(
@@ -907,7 +904,6 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
   expect(unmapped).toEqual([]);
 });
 
-/** Open one node of a run, and return its view. */
 async function openNode(
   page: Page,
   runId: string,
@@ -919,7 +915,6 @@ async function openNode(
   return view;
 }
 
-/** Select one of a node's detail tabs, and return its panel. */
 async function nodeTab(view: Locator, tab: string): Promise<Locator> {
   await view.getByRole("tab", { name: tab, exact: true }).click();
   return view.getByRole("tabpanel", { name: tab, exact: true });
@@ -952,7 +947,6 @@ async function expectTranscriptShown(
     runTimelineSchema,
   );
   const dispatches = timeline.spans.filter((span) => span.kind === "dispatch");
-  // What each dispatch's conversation shows, turn by turn, read off the view.
   const shown: string[][] = [];
   for (const { conversation } of conversations) {
     const span = dispatches.find(
