@@ -6082,10 +6082,15 @@ fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
             "transport_role".into(),
             json!(relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()),
         );
-        if let Some(role) = relayed
-            .first()
-            .and_then(|(_, event)| lens.transcripts.declared.role_of(event))
-        {
+        // A graph-started record can precede this session's member records
+        // without stamping any member itself. Read the session's stamp across
+        // its records; an undeclared member still rules out a persona fallback.
+        if let Some(role) = lens.transcripts.declared.agent_role(
+            relayed.iter().find_map(|(_, event)| member_label(event)),
+            relayed
+                .iter()
+                .find_map(|(_, event)| event.labels.persona.as_deref()),
+        ) {
             span.insert("agent_role".into(), json!(role));
         }
         span.insert(
