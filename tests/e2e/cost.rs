@@ -1007,3 +1007,31 @@ fn a_session_is_recorded_and_served_without_reading_an_index_or_walking_the_stor
         );
     }
 }
+
+/// Follow the real child and every task it starts through shutdown, including
+/// descendants that detach. Both supervisor and terminal stops must leave no
+/// survivor within ten seconds of the server's successful exit.
+#[test]
+fn stopping_the_server_leaves_no_process_it_started_alive() {
+    for stop in [
+        crate::serving::Stop::Terminate,
+        crate::serving::Stop::Interrupt,
+    ] {
+        let serving = Traced::start(|root| {
+            fixture_run::write(root, fixture_run::RUN_ID);
+        });
+        assert_eq!(http::get(serving.address, "/healthz").status, 200);
+        assert_eq!(http::get(serving.address, "/api/v2/runs").status, 200);
+        assert_eq!(
+            http::get(serving.address, "/api/v2/no-such-route").status,
+            404
+        );
+        // A live server must be rejected by the same check used after stop.
+        let live_server_reported_exited = serving.all_tasks_exited();
+        serving.stop_without_survivors(stop);
+        assert!(
+            !live_server_reported_exited,
+            "the liveness check missed the server"
+        );
+    }
+}

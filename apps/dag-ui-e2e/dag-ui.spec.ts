@@ -185,6 +185,7 @@ const scrollOffset = (locator: Locator): Promise<number> =>
  * one declaration of it in this file and none of it in this repository.
  */
 const RUN_DETAIL_READ = new RegExp(`${RUN_LIST_PATH}/[^/?]+(\\?|$)`);
+const RUN_LIST_READ = new RegExp(`${RUN_LIST_PATH}(\\?|$)`);
 
 // llmlint: ignore-block[e2e_not_mocked] the three helpers below are one construct with one reason: nothing is doubled and no response is fabricated. Every request is forwarded to the same `onepipeline-api serve` every other journey drives, and every byte the browser reads back — including both refusals — is that server's own. What each changes is a condition on the way there, exactly as `context.setOffline` changes whether a request arrives at all, which this tier already relies on to reach its pagination-failure journey: `delayReads` changes how long the answer takes, `sweepDuringRead` takes the run off the served root before forwarding, and `readUnderProfile` asks for a reading the app has no control for. None of the three is reachable from a fixture — the defects behind them are races between a server's poll interval and the time a fold of a journal takes (the operator reported a twenty-second read against a stream invalidating twice a second), no run this tier can write reads slowly enough, and the browser's own toolbar offers only the two profiles every run answers to.
 // llmlint: ignore-block[tests_mirror_real_usage] same three sites, same reason: each reproduces a reader who really is in that position — a read slower than the run is moving, a run swept while it was being opened, a reading the run has no profile for — and what the journeys then assert about each is entirely what that reader sees on screen.
@@ -3137,8 +3138,18 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
 
   // And resetting from any of them puts every one of them back.
   await runLevel.getByRole("button", { name: "Reset timeline zoom" }).click();
-  await expect.poll(() => axisTicks(graphLine(page))).toBe(before);
-  expect(await axisTicks(dashboard)).toBe(before);
+  await expect(
+    runLevel.getByRole("button", { name: "Reset timeline zoom" }),
+  ).toBeDisabled();
+  // The live range ends at the server's latest observation, which may have
+  // advanced since `before`. Its launch tick stays fixed; every row must still
+  // show the same full range after reset.
+  await expect
+    .poll(async () => (await axisTicks(graphLine(page))).split("\n")[0])
+    .toBe(before.split("\n")[0]);
+  const reset = await axisTicks(graphLine(page));
+  expect(await axisTicks(dashboard)).toBe(reset);
+  expect(await axisTicks(runLevel)).toBe(reset);
 });
 
 test("draws the stretches the run recorded nothing in", async ({ page }) => {
@@ -4485,7 +4496,31 @@ test("drops a run the server stops serving", async ({ page }) => {
 });
 
 test("falls back to the empty state once no run is left", async ({ page }) => {
+  const captured = Promise.withResolvers<void>();
+  const listReleased = Promise.withResolvers<void>();
+  let listHeld = false;
+  // Hold the real opening answer while the stream reports newer removals.
+  // Every byte released below is the server's own response, captured before
+  // any run was removed; no response is fabricated.
+  // llmlint: ignore-block[e2e_not_mocked] only delivery timing is controlled: fetch reads the real API over the real fixture root, and fulfill releases that unchanged response after the real stream reports removals. No fixture can deterministically make an HTTP answer arrive after those stream events; this reproduces a slow network without replacing the server or its payload.
+  await page.route(RUN_LIST_READ, async (intercepted) => {
+    const url = new URL(intercepted.request().url());
+    if (listHeld || url.searchParams.has("select")) {
+      await intercepted.continue();
+      return;
+    }
+    listHeld = true;
+    const response = await intercepted.fetch();
+    captured.resolve();
+    await listReleased.promise;
+    await intercepted.fulfill({ response });
+  });
+  // llmlint: ignore-end[e2e_not_mocked]
   await openObservatory(page);
+  await captured.promise;
+  await expect(
+    page.getByRole("button", { name: RegExp(runs().live) }),
+  ).toBeVisible();
   const selected = new URL(page.url()).searchParams.get("run");
   if (!selected) throw new Error("the page selected no run");
   let releaseDetail: () => void = () => undefined;
@@ -4527,6 +4562,16 @@ test("falls back to the empty state once no run is left", async ({ page }) => {
     }
     changeServedRuns(["--remove-run", last]);
 
+    await expect(page.getByRole("button", { name: RegExp(last) })).toHaveCount(
+      0,
+    );
+    await expect(
+      page.getByRole("button", { name: RegExp(runs().live) }),
+    ).toHaveCount(0);
+    // The opening list read lands only now, older than every removal above; the
+    // runs it names stay gone.
+    listReleased.resolve();
+
     await expect(page.getByText("No DAG runs found")).toBeVisible();
     await expect(page.getByRole("alert")).toHaveCount(0);
     await expect(
@@ -4539,6 +4584,7 @@ test("falls back to the empty state once no run is left", async ({ page }) => {
       }),
     ).toHaveCount(0);
   } finally {
+    listReleased.resolve();
     releaseDetail();
   }
   await (await lateResponse).finished();

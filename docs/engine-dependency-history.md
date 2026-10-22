@@ -468,3 +468,9 @@ than once it is delivered (onepipeline #1094). It links the same onetaskgraph
 0.9.2, onevcs 0.56.3 and oneagentgraph 0.7.0 as 0.82.0. This changes the
 engine types carried by ApiError::from_engine and the other engine-typed
 public items.
+0.84.1 links oneharness-core 0.28.8 and oneagentgraph 0.7.1, carrying the
+shared Codex app-server cleanup fix (oneharness#1520). The lock follows the
+engine release's own resolution. Browser adoption remains removed under the
+current contract; this binary reads runs driven by the engine CLI. This
+changes the engine types carried by ApiError::from_engine and the other
+engine-typed public items.

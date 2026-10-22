@@ -166,6 +166,8 @@ export function useDagTelemetry(
   const reads = useRef<{ key: string; again: boolean } | undefined>(undefined);
   //: Whether the global stream has already handed this view a snapshot.
   const opened = useRef(false);
+  // The stream's newer list state must survive a page read already in flight.
+  const listRevision = useRef(0);
 
   /** What a read that the server answered says: this reading is served, and it is
    *  reachable. */
@@ -200,7 +202,9 @@ export function useDagTelemetry(
     );
   }, []);
   const loadList = useCallback(async () => {
-    setList(retainKnown(await client.listRuns(true)));
+    const revision = listRevision.current;
+    const answer = await client.listRuns(true);
+    if (revision === listRevision.current) setList(retainKnown(answer));
   }, [client, retainKnown]);
   /**
    * The cursor a page read is out for, so the scroll that asked for it can fire as
@@ -460,6 +464,7 @@ export function useDagTelemetry(
     void open();
     const subscription = client.subscribe({
       onEvent: (event) => {
+        listRevision.current += 1;
         setLastUpdated(new Date().toISOString());
         // Every connection — including one the browser reopened after a drop —
         // opens with a snapshot, so an arriving event means the stream recovered.

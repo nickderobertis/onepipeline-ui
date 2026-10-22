@@ -14184,9 +14184,9 @@ fn notes_awaiting_an_answer(state: &Path) -> usize {
     found
 }
 
-/// A note posted through the reply route into a run adopted through the adopt
-/// route waits on the held turn it was offered to **without stopping the run**:
-/// the adopted driver is this binary's copy of the engine, which delivers a live
+/// A note posted through the reply route into a run driven by the pinned CLI
+/// waits on the held turn it was offered to **without stopping the run**. The
+/// envelope is acknowledged with the note queued, and the engine delivers the
 /// note off the run's single writer, so while the turn has not taken it the run
 /// goes on journalling that turn's work and its member's heartbeat, and every
 /// read goes on serving the run as live. Once the turn ends and the conversation
@@ -14297,9 +14297,9 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     );
     assert_eq!(notes_awaiting_an_answer(&dir), 0);
 
-    // The note, into the held turn. Its answer is owed once the conversation has
-    // taken it, which is not until the turn ends — so it is posted beside the
-    // journey rather than in front of it.
+    // The envelope is acknowledged with its note queued while delivery waits
+    // on the held turn. Post beside the journey so a writer blocking on delivery
+    // is caught by the journal and receipt checks below.
     let envelope = json!({
         "version": 3,
         "commands": [{ "op": "note", "id": node, "addressee": "worker", "deliver": "turn-end", "text": HELD_TURN_NOTE }],
