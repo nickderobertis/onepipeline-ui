@@ -4655,6 +4655,7 @@ test("falls back to the empty state once no run is left", async ({ page }) => {
   // Hold the real opening answer while the stream reports newer removals.
   // Every byte released below is the server's own response, captured before
   // any run was removed; no response is fabricated.
+  // llmlint: ignore-block[e2e_not_mocked] only delivery timing is controlled: fetch reads the real API over the real fixture root, and fulfill releases that unchanged response after the real stream reports removals. No fixture can deterministically make an HTTP answer arrive after those stream events; this reproduces a slow network without replacing the server or its payload.
   await page.route(RUN_LIST_READ, async (intercepted) => {
     const url = new URL(intercepted.request().url());
     if (held || url.searchParams.has("select")) {
@@ -4667,6 +4668,7 @@ test("falls back to the empty state once no run is left", async ({ page }) => {
     await released.promise;
     await intercepted.fulfill({ response });
   });
+  // llmlint: ignore-end[e2e_not_mocked]
   await openObservatory(page);
   await captured.promise;
   await expect(
