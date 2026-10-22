@@ -88,18 +88,16 @@ test("renders a reworked, continued and readjusted stack and every node in it wi
     ).toBeVisible();
   }
 
-  // The agents: the reply drafter a review pass launched for a node's comments
-  // is grouped under a scope of its own, after the node's dispatch.
-  await page.goto(`${origin}/?run=${run}&view=agents`);
-  const panel = page.getByRole("region", { name: "Agents" });
-  await expect(panel).toContainText("2 agents");
-  const drafting = panel.getByRole("list", {
-    name: "Review reply author · attempt 1",
+  // Harness sessions are read with the node whose dispatch or drafting they served.
+  await page.goto(`${origin}/?run=${run}&node=${replied}`);
+  const drafting = page.getByRole("region", {
+    name: "Review reply drafter",
+    exact: true,
   });
-  await expect(drafting).toContainText(`node ${replied}`);
-  expect(
-    await panel.getByRole("heading", { level: 4 }).allTextContents(),
-  ).toEqual(["Node dispatch · attempt 1", "Review reply author · attempt 1"]);
+  await expect(drafting).toContainText(`review-reply-${replied}`);
+  await expect(
+    page.getByRole("tab", { name: "Agents", exact: true }),
+  ).toHaveCount(0);
 
   expect(thrown).toEqual([]);
   expect(unanswered).toEqual([]);

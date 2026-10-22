@@ -842,6 +842,9 @@ test("this repository's own served goldens parse through the public parsers", as
     "verification",
     "publication",
     "rollup",
+    // Harness sessions recorded only in the pointer file also open transcripts.
+    "dispatch",
+    "dispatch",
   ]);
   // The aggregate lane carries what it stands for rather than the window the
   // waits fell in, which is what a client plots it at.

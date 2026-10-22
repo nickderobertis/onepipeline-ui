@@ -80,6 +80,21 @@ async function openObservatory(
   await expect(page.getByText("DAG Observatory")).toBeVisible();
 }
 
+/** All pages the real server currently serves, including settled recordings. */
+async function allRunIds(page: Page): Promise<string[]> {
+  const ids: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const query = new URLSearchParams({ include_settled: "true" });
+    if (cursor) query.set("cursor", cursor);
+    const response = await page.request.get(`/api/v2/runs?${query}`);
+    const listed = parseRunList(await response.json());
+    ids.push(...listed.runs.map((run) => run.run_id));
+    cursor = listed.next_cursor;
+  } while (cursor);
+  return ids;
+}
+
 /**
  * Whether repeated Tab presses ever land on `target`, i.e. it is in the tab order.
  *
@@ -575,7 +590,7 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   // The upstream plot distinguishes duration bars from instant icons and moves the
   // old row metadata into a compact hover tooltip.
   const worker = timeline(page).getByRole("button", {
-    name: /engineer-dashboard/,
+    name: /^worker \(engineer-dashboard\)/,
   });
   await worker.hover();
   await expect(page.getByRole("tooltip")).toContainText("Duration:");
@@ -616,6 +631,8 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
       "worker",
       "check-in",
       "llmlint",
+      "node",
+      "review-reply",
       "Verification",
       "Publication",
       "Lock waits",
@@ -725,7 +742,7 @@ test("restores a bookmarked moment inside a session from the address alone", asy
 }) => {
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
   await timeline(page)
-    .getByRole("button", { name: /engineer-dashboard/ })
+    .getByRole("button", { name: /^worker \(engineer-dashboard\)/ })
     .click();
   const turn = timeline(page)
     .getByRole("button", { name: /turn-started/ })
@@ -805,9 +822,11 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
   await expect(judgeItem).toHaveAttribute("data-selected", "true");
   await expect(judgeItem).toHaveAttribute("data-dispatch-group", "Dispatch 1");
   await expect(judgeItem).toContainText("worker · judge");
-  const workerItem = transcript
-    .getByRole("article")
-    .filter({ hasText: "engineer-dashboard" });
+  const workerItem = transcript.getByRole("article").filter({
+    has: page.getByRole("button", {
+      name: /^Open worker \(engineer-dashboard\)/,
+    }),
+  });
   await expect(workerItem).toHaveAttribute("data-dispatch-group", "Dispatch 1");
 
   // Opened, the conversation heads itself with the same call the segment that
@@ -1343,10 +1362,10 @@ test("scrolls the transcript to the journal record a marker names", async ({
   await expect(
     dispatch.getByRole("article", { name: /^worker · judge \(/ }),
   ).toBeVisible();
-  // A separately dispatched role is its own group rather than a member of the first.
+  // Check-in is another member of this same graph dispatch, not another attempt.
   await expect(
     transcript
-      .getByRole("region", { name: "Dispatch 2" })
+      .getByRole("region", { name: "Dispatch 1" })
       .getByRole("article", { name: /^check-in \(/ }),
   ).toBeVisible();
 });
@@ -2491,9 +2510,9 @@ test("tells the reasons a node was not running apart from one another", async ({
   await expect(itemDetail(page)).toContainText(
     `held by decision ${queue.decision_reference}`,
   );
-  // Nothing said this hold cleared, so it is still open rather than closed at an
-  // instant the app invented.
-  await expect(itemDetail(page)).toContainText("Still running");
+  // The hold is unclosed, but this recording has no living driver. An open
+  // record alone is insufficient evidence that work is still running.
+  await expect(itemDetail(page)).not.toContainText(/still running/i);
 
   // And a node the run said nothing at all about is given no span at all: the gap
   // it shows is the gap it always showed, because a span drawn from a guess cannot
@@ -2634,7 +2653,9 @@ test("loads another run-list page when navigation reaches the end", async ({
   await expect(navigation.locator(".run-link")).toHaveCount(50);
   await navigation.locator("[data-radix-scroll-area-viewport]").hover();
   await page.mouse.wheel(0, 10_000);
-  await expect(navigation.locator(".run-link")).toHaveCount(52);
+  await expect(navigation.locator(".run-link")).toHaveCount(
+    (await allRunIds(page)).length,
+  );
 });
 
 test("says the next run-list page is loading while it is", async ({ page }) => {
@@ -2649,7 +2670,9 @@ test("says the next run-list page is loading while it is", async ({ page }) => {
   await navigation.locator("[data-radix-scroll-area-viewport]").hover();
   await page.mouse.wheel(0, 10_000);
   await expect(navigation.getByText("Loading more runs…")).toBeVisible();
-  await expect(navigation.locator(".run-link")).toHaveCount(52);
+  await expect(navigation.locator(".run-link")).toHaveCount(
+    (await allRunIds(page)).length,
+  );
   // And it stops saying so once the page has arrived, rather than announcing a
   // read that is over.
   await expect(navigation.getByText("Loading more runs…")).toHaveCount(0);
@@ -2685,7 +2708,9 @@ test("loads another run-list page from the keyboard", async ({ page }) => {
   // account for the next one is the keypress below.
   await expect(navigation.locator(".run-link")).toHaveCount(50);
   await page.keyboard.press("Enter");
-  await expect(navigation.locator(".run-link")).toHaveCount(52);
+  await expect(navigation.locator(".run-link")).toHaveCount(
+    (await allRunIds(page)).length,
+  );
 });
 
 test("recovers when loading another run-list page fails", async ({
@@ -2707,7 +2732,9 @@ test("recovers when loading another run-list page fails", async ({
   await context.setOffline(false);
   await page.mouse.wheel(0, -200);
   await page.mouse.wheel(0, 10_000);
-  await expect(navigation.locator(".run-link")).toHaveCount(52);
+  await expect(navigation.locator(".run-link")).toHaveCount(
+    (await allRunIds(page)).length,
+  );
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
@@ -2828,7 +2855,7 @@ test("restores node tabs and moves between them from the keyboard", async ({
 
   await page.getByRole("tab", { name: "Timeline" }).click();
   await timeline(page)
-    .getByRole("button", { name: /engineer-dashboard/ })
+    .getByRole("button", { name: /^worker \(engineer-dashboard\)/ })
     .click();
   await expect(page).toHaveURL(/event=/);
   await page.getByRole("tab", { name: "Task" }).click();
@@ -2885,7 +2912,7 @@ test("reads every recorded moment as words rather than as its stamp", async ({
     .getByRole("button", { name: /approval/ })
     .click();
   await expect(itemDetail(page)).toContainText("Recorded at");
-  await expect(itemDetail(page)).toContainText("Still running");
+  await expect(itemDetail(page)).not.toContainText(/still running/i);
   // The detail reading stays human-formatted; the exact stamp belongs to the
   // timeline's accessible tooltip, where it can be copied when needed.
   await expect(itemDetail(page)).not.toContainText(/\d{4}-\d\d-\d\dT/);
@@ -2902,7 +2929,7 @@ test("reads every recorded moment as words rather than as its stamp", async ({
   // Across a populated node, metadata stays in the visualization's hover detail.
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
   const dashboardWorker = timeline(page).getByRole("button", {
-    name: /engineer-dashboard/,
+    name: /^worker \(engineer-dashboard\)/,
   });
   await dashboardWorker.hover();
   // The dispatch ran for as long as the run recorded it running, not the instant a
@@ -3279,14 +3306,53 @@ test("draws the stretches the run recorded nothing in", async ({ page }) => {
     followup.getByRole("button", { name: /^followup · / }),
   ).toHaveCount(0);
 
-  // A gap too narrow to see is not drawn at all. This run's journal is written in
-  // one pass, so `foundation` verified and published milliseconds apart inside a
-  // window of minutes — a hairline nobody could read or click. Only the two gaps at
-  // the ends survive, and they always do: they are what makes every row span the
-  // same interval, which is what one shared zoom rests on.
-  await expect(
-    graphRow(page, "foundation").getByRole("button", { name: /^Idle · / }),
-  ).toHaveCount(2);
+  // The live clock moves, so the narrow-gap presentation can change. Each
+  // interval still has to be real silence inside the execution window.
+  const response = await page.request.get(
+    `/api/v2/runs/${runs().live}/timeline?scope=run`,
+  );
+  const servedTimeline = parseRunTimeline(await response.json());
+  const root = servedTimeline.spans.find((span) => span.kind === "run");
+  if (root === undefined) throw new Error("run interval");
+  const bounds = [
+    Date.parse(root.started_at),
+    Date.parse(root.ended_at ?? servedTimeline.observed_at),
+  ];
+  const work = servedTimeline.spans
+    .filter(
+      (span) =>
+        span.node_id === "foundation" &&
+        span.harness_scope === undefined &&
+        !["node", "step"].includes(span.kind),
+    )
+    .map((span) => {
+      const start = Date.parse(span.started_at);
+      const end = Math.min(
+        span.total_duration_ms === undefined
+          ? Date.parse(span.ended_at ?? servedTimeline.observed_at)
+          : start + span.total_duration_ms,
+        bounds[1] ?? 0,
+      );
+      return [start, end];
+    });
+  const foundationIdle = graphRow(page, "foundation").getByRole("button", {
+    name: /^Idle · /,
+  });
+  expect(await foundationIdle.count()).toBeGreaterThan(0);
+  for (const idleSpan of await foundationIdle.all()) {
+    await idleSpan.focus();
+    const description = await graphRow(page, "foundation")
+      .getByRole("tooltip")
+      .textContent();
+    const from = Date.parse(description?.match(/Start: (\S+)/)?.[1] ?? "");
+    const to = Date.parse(description?.match(/End: (\S+)/)?.[1] ?? "");
+    expect(from).toBeGreaterThanOrEqual(bounds[0] ?? 0);
+    expect(to).toBeLessThanOrEqual(bounds[1] ?? 0);
+    expect(to).toBeGreaterThan(from);
+    for (const [workFrom = 0, workTo = 0] of work)
+      if (workTo > workFrom)
+        expect(to <= workFrom || from >= workTo).toBe(true);
+  }
 
   // How much of its life each row spent working, and how much it did not, is on the
   // row rather than left to be measured off the plot.
@@ -3444,7 +3510,7 @@ test("reflows navigation, detail, and metrics at a narrow viewport", async ({
     overflowsY: false,
   });
   await timeline(page)
-    .getByRole("button", { name: /engineer-dashboard/ })
+    .getByRole("button", { name: /^worker \(engineer-dashboard\)/ })
     .click();
   await expect(navigation).toBeVisible();
   expect(await width(navigation)).toBe(280);
@@ -3478,7 +3544,7 @@ test("reflows navigation, detail, and metrics at a narrow viewport", async ({
   const stripBox = await tabStrip.boundingBox();
   if (stripBox === null) throw new Error("the node tab strip has no bounds");
   const labels = await tabStrip.getByRole("tab").all();
-  expect(labels).toHaveLength(7);
+  expect(labels).toHaveLength(6);
   for (const label of labels) {
     // Both axes: the row they spill past horizontally is only reachable one way, and
     // the row they spill past vertically is drawn under the reading below and reaches
@@ -3494,7 +3560,7 @@ test("reflows navigation, detail, and metrics at a narrow viewport", async ({
     await expect(label).toBeInViewport();
   }
   await timeline(page)
-    .getByRole("button", { name: /engineer-dashboard/ })
+    .getByRole("button", { name: /^worker \(engineer-dashboard\)/ })
     .click();
   // Everything stays on screen: the navigation and the rail each give up width,
   // and the metrics wrap onto a second row instead of being squeezed.
@@ -3609,7 +3675,7 @@ test("paints the design system's components in the application's dark palette", 
   // things at once: that the utilities its components are written in are generated
   // for this app at all, and that they resolve to the dark token rather than white.
   await timeline(page)
-    .getByRole("button", { name: /engineer-dashboard/ })
+    .getByRole("button", { name: /^worker \(engineer-dashboard\)/ })
     .click();
   const card = await backgroundColor(
     itemDetail(page).locator('[data-slot="card"]').first(),
@@ -4408,7 +4474,9 @@ test("keeps the pages a reader scrolled to when a run moves", async ({
   await expect(navigation.locator(".run-link")).toHaveCount(50);
   await viewport.hover();
   await page.mouse.wheel(0, 10_000);
-  await expect(navigation.locator(".run-link")).toHaveCount(52);
+  await expect(navigation.locator(".run-link")).toHaveCount(
+    (await allRunIds(page)).length,
+  );
   const scrolled = await scrollOffset(viewport);
   expect(scrolled).toBeGreaterThan(0);
 
@@ -4431,7 +4499,9 @@ test("keeps the pages a reader scrolled to when a run moves", async ({
   // every page the reader had scrolled to, twice a second, on any moving host.
   expect(listReads.filter((search) => !search.includes("select="))).toEqual([]);
   // llmlint: ignore-end[tests_mirror_real_usage]
-  await expect(navigation.locator(".run-link")).toHaveCount(52);
+  await expect(navigation.locator(".run-link")).toHaveCount(
+    (await allRunIds(page)).length,
+  );
   // The reader keeps the position they scrolled to, not just the rows.
   expect(await scrollOffset(viewport)).toBe(scrolled);
 });
@@ -4568,22 +4638,14 @@ test("falls back to the empty state once no run is left", async ({ page }) => {
   // Every remaining run except one — the journey before this removed the historical
   // one. The empty state means the server serves none, so it must not appear while
   // any run is still there to show, whatever shape that run is.
-  for (const runId of [
-    runs().live,
-    runs().outcomes,
-    runs().legacy,
-    runs().unattributed,
-    runs().eventless,
-    runs().busy,
-    runs().named,
-    runs().supervised,
-    runs().elsewhere,
-    runs().adoptable,
-  ]) {
+  const remaining = await allRunIds(page);
+  const last = remaining.pop();
+  if (last === undefined) throw new Error("fixture has no remaining runs");
+  for (const runId of remaining) {
     changeServedRuns(["--remove-run", runId]);
     await expect(page.getByText("No DAG runs found")).toHaveCount(0);
   }
-  changeServedRuns(["--remove-run", runs().sibling]);
+  changeServedRuns(["--remove-run", last]);
 
   await expect(page.getByText("No DAG runs found")).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);

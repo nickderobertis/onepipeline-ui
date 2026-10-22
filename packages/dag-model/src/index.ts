@@ -317,7 +317,7 @@ export const TELEMETRY_SCHEMA_VERSION = 22;
  * other journal record — and the turn after it reads as a worker inexplicably
  * switching tasks.
  */
-export const TIMELINE_SCHEMA_VERSION = 12;
+export const TIMELINE_SCHEMA_VERSION = 13;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -1407,6 +1407,14 @@ export const timelineReleaseSchema = openObject({
     });
   }
 });
+/** Unfiltered dispatch ownership, shared by a record and the session lane. */
+export const timelineDispatchGroupSchema = openObject({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  order: counter,
+  started_at: timestamp,
+});
+
 /**
  * `kind` is an open string on purpose: it is the journal event kind that produced
  * the item, or `conversation-turn` for a turn, and the journal owns that vocabulary.
@@ -1418,6 +1426,14 @@ export const timelineReleaseSchema = openObject({
 // llmlint: ignore[boundary_inputs_validated] the pairing of `redirection` with a `kind` is not a constraint this parser may enforce: `kind` is the journal event kind and the journal owns that vocabulary, so a conforming server relaying another producer's interrupt record under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `redirection` itself carries is fully validated above, which is the part this contract does own.
 export const timelineEventSchema = openObject({
   id: z.string().min(1),
+  stream: z.string().min(1).optional(),
+  seq: counter.optional(),
+  journal_order: counter.optional(),
+  record_id: z.string().min(1).optional(),
+  persona: z.string().min(1).optional(),
+  dispatch_id: z.string().min(1).optional(),
+  dispatch_group: timelineDispatchGroupSchema.optional(),
+  fields: z.record(z.string().min(1), z.json()).optional(),
   kind: z.string().min(1),
   at: timestamp,
   node_id: z.string().min(1).optional(),
@@ -1507,9 +1523,12 @@ export const timelineSpanSchema = openObject({
   count: counter.optional(),
   total_duration_ms: counter.optional(),
   intervals: z.array(timelineIntervalSchema).optional(),
+  harness_scope: z.string().min(1).optional(),
+  dispatch_attempt: z.string().min(1).optional(),
   agent_role: agentRoleSchema.optional(),
   transport_role: transportRoleSchema.optional(),
   dispatch_id: z.string().min(1).optional(),
+  dispatch_group: timelineDispatchGroupSchema.optional(),
   reference: timelineReferenceSchema.optional(),
   detail: openObject({
     ok: z.boolean().optional(),

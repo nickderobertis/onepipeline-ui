@@ -8,6 +8,7 @@
 // over whole and its implementation is the spec (see apps/dag-ui/AGENTS.md), and these
 // are the journeys that would have to catch the regression.
 
+import { runListSchema } from "@onepipeline-ui/dag-model";
 import {
   EVENT_CATEGORIES,
   eventCategoryLabel,
@@ -138,7 +139,17 @@ for (const size of [DESKTOP, PHONE]) {
     await expect
       .poll(() => scrollTop(navigationViewport(page)))
       .toBeGreaterThan(0);
-    await expect(links).toHaveCount(52);
+    let expectedCount = 0;
+    let cursor: string | undefined;
+    do {
+      const query = new URLSearchParams({ include_settled: "true" });
+      if (cursor) query.set("cursor", cursor);
+      const complete = await page.request.get(`/api/v2/runs?${query}`);
+      const listed = runListSchema.parse(await complete.json());
+      expectedCount += listed.runs.length;
+      cursor = listed.next_cursor;
+    } while (cursor);
+    await expect(links).toHaveCount(expectedCount);
     // The rows that just arrived are reachable by the same scroll that asked for them.
     await page.mouse.wheel(0, 10_000);
     await expect(links.last()).toBeInViewport();
@@ -222,7 +233,7 @@ test("walks graph to node to timeline item and back, restoring each selection", 
     page.getByRole("region", { name: "Timeline for dashboard" }),
   ).toBeVisible();
   await timeline(page)
-    .getByRole("button", { name: /engineer-dashboard/ })
+    .getByRole("button", { name: /^worker \(engineer-dashboard\)/ })
     .click();
   await expect(itemDetail(page)).toContainText(
     "Implementing the dashboard now",
@@ -826,7 +837,7 @@ for (const size of [DESKTOP, PHONE]) {
   }) => {
     await open(page, size, `/?run=${runs().live}&node=dashboard`);
     await timeline(page)
-      .getByRole("button", { name: /engineer-dashboard/ })
+      .getByRole("button", { name: /^worker \(engineer-dashboard\)/ })
       .click();
     await expect(itemDetail(page)).toContainText(
       "Implementing the dashboard now",

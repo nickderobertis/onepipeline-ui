@@ -59,9 +59,12 @@ anything new here is a proposal to make upstream first.
   inventing the record the CLI does not print.
 - **A dispatch id.** The journal stamps a dispatch with its run and node but
   mints no id for it; schema 10 serves one, so `payload::dispatch_key` derives it
-  from the pair. Execution is continuous, so the pair is the whole of what
-  identifies a dispatch — the round that used to be its third part is not a thing
-  any run has.
+  from the pair. That pair addresses the node's dispatch endpoint across retries;
+  the round that used to be its third part is not a thing any run has.
+  Schema 13's `dispatch_group` additionally distinguishes the graph stream and
+  opening producer identity. `stamp_dispatch_groups` folds ownership, labels and
+  ordering over the unfiltered journal so a reading cannot renumber dispatches
+  or lose their drafter groups.
 - **An opaque session key.** The raw launching session id may be sensitive and is
   never served, so runs are grouped by a digest of it.
 - **The run list's order.** `RunStore::page` serves the SDK's own `Listing`
@@ -79,17 +82,11 @@ anything new here is a proposal to make upstream first.
   a reading rather than a download: a node that dispatched two hundred of them is
   two hundred spans at `scope=node` and one per category at `scope=run`. The SDK
   counts neither.
-- **The interval one dispatched session ran over.** The journal brackets a
-  *node*, not a session: `payload::session_interval` reads one from the attempt
-  that ran it — the `node-dispatched` it appeared after, closed by the next
-  dispatch, the settlement, the `session-closed` or the session's own
-  `member-settled`, joined by the `{stream}.{member}` rule schema 14 already
-  resolves a report by. Every session of one attempt opens at that attempt's
-  dispatch, including one the attempt reached only later: the run records no
-  boundary between the members inside an attempt, and a session opened from its
-  own first word is not bracketed by anything the run said. A node re-asked in
-  place otherwise reads as having run its attempts over one window, which cannot
-  say what was running at a given moment.
+- **The interval one dispatched session ran over.** `payload::session_interval`
+  uses the session's own first and last records, joining member records by
+  `{stream}.{member}` and graph records through their stream. A settlement or
+  external closure proves the session ended without extending its work into
+  another session's time. Both timeline scopes use this reading.
 - **The party a record's session ran under.** `transportRoleSchema` is a pair
   with `agentRoleSchema`, and nothing stamps the transport half as such;
   `payload::transport_role` reads it off the record — the `role` `oneagentgraph`

@@ -11,4 +11,15 @@
 /// `tests/contract.rs` fails when an entry names a field the paragraph for its
 /// schema does not. A field added inside an object an event already carried is
 /// named by its dotted path, as `redirection.turn` is.
-pub const TIMELINE_EVENT_ADDITIONS: &[(u64, &str)] = &[(11, "review"), (12, "redirection.turn")];
+pub const TIMELINE_EVENT_ADDITIONS: &[(u64, &str)] = &[
+    (11, "review"),
+    (12, "redirection.turn"),
+    (13, "stream"),
+    (13, "seq"),
+    (13, "journal_order"),
+    (13, "record_id"),
+    (13, "dispatch_id"),
+    (13, "dispatch_group"),
+    (13, "persona"),
+    (13, "fields"),
+];

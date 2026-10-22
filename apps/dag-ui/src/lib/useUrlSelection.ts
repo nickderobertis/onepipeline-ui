@@ -70,15 +70,13 @@ export interface UrlSelection {
  * The readings of one run. `graph` and `overall` are the two readings of its
  * recorded execution; `channel` and `reads` are the supervising
  * surface — what the CLI does to a run once its plan has started, each wired to
- * the route the contract names for it — and `agents` is every oneharness
- * session the run's launches wrote, each opening to its transcript.
+ * the route the contract names for it.
  */
 export const RUN_VIEWS = {
   graph: "graph",
   overall: "overall",
   channel: "channel",
   reads: "reads",
-  agents: "agents",
 } as const;
 export type RunView = keyof typeof RUN_VIEWS;
 
@@ -144,7 +142,6 @@ export const NODE_TAB_LABELS = {
   dependencies: "Dependencies",
   pr: "PR",
   checks: "Checks",
-  agents: "Agents",
 };
 export type NodeTab = keyof typeof NODE_TAB_LABELS;
 

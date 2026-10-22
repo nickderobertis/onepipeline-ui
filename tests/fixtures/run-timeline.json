@@ -2,7 +2,7 @@
   "api_version": 2,
   "telemetry_schema_version": 22,
   "observed_at": "2026-08-07T12:00:00Z",
-  "timeline_schema_version": 12,
+  "timeline_schema_version": 13,
   "run_id": "run-20260807-a1b2c3",
   "spans": [
     {
@@ -16,12 +16,22 @@
       "events": [
         {
           "id": "e1",
+          "record_id": "a-recording-host-4242.1",
+          "stream": "a-recording-host-4242",
+          "seq": 1,
+          "journal_order": 1,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "node-ready",
           "at": "2026-08-07T12:00:01.000Z",
           "node_id": "contract-interface"
         },
         {
           "id": "e2",
+          "record_id": "a-recording-host-4242.2",
+          "stream": "a-recording-host-4242",
+          "seq": 2,
+          "journal_order": 2,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "release-wait",
           "at": "2026-08-07T12:00:01.200Z",
           "node_id": "contract-interface",
@@ -51,6 +61,11 @@
         },
         {
           "id": "e5",
+          "record_id": "a-recording-host-4242.5",
+          "stream": "a-recording-host-4242",
+          "seq": 5,
+          "journal_order": 5,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "release-arrived",
           "at": "2026-08-07T12:00:01.400Z",
           "node_id": "contract-interface",
@@ -64,6 +79,11 @@
         },
         {
           "id": "e8",
+          "record_id": "a-recording-host-4242.8",
+          "stream": "a-recording-host-4242",
+          "seq": 8,
+          "journal_order": 8,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "release-arrived",
           "at": "2026-08-07T12:00:01.600Z",
           "node_id": "contract-interface",
@@ -77,6 +97,11 @@
         },
         {
           "id": "e9",
+          "record_id": "a-recording-host-4242.9",
+          "stream": "a-recording-host-4242",
+          "seq": 9,
+          "journal_order": 9,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "release-adopted",
           "at": "2026-08-07T12:00:01.800Z",
           "node_id": "contract-interface",
@@ -98,88 +123,252 @@
         },
         {
           "id": "e10",
+          "record_id": "a-recording-host-4242.10",
+          "stream": "a-recording-host-4242",
+          "seq": 10,
+          "journal_order": 10,
+          "persona": "worker",
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Attempt": 1,
+            "Persona": "worker"
+          },
           "kind": "node-dispatched",
           "at": "2026-08-07T12:00:02.000Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "node-scope-1786925518098-3163646.worker.0",
+          "record_id": "a-recording-host-4242.11",
+          "stream": "a-recording-host-4242",
+          "seq": 11,
+          "journal_order": 11,
+          "persona": "worker",
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Turn": 1
+          },
           "kind": "turn-started",
           "at": "2026-08-07T12:00:03.000Z",
           "node_id": "contract-interface",
           "reference": {
             "kind": "conversation",
             "value": "node-scope-1786925518098-3163646.worker"
+          },
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
           }
         },
         {
           "id": "e12",
+          "record_id": "a-recording-host-4242.12",
+          "stream": "a-recording-host-4242",
+          "seq": 12,
+          "journal_order": 12,
+          "persona": "worker",
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Tool": "Read",
+            "Detail": "src/api.rs"
+          },
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:03.500Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "node-scope-1786925518098-3163646.worker.1",
+          "record_id": "a-recording-host-4242.13",
+          "stream": "a-recording-host-4242",
+          "seq": 13,
+          "journal_order": 13,
+          "persona": "worker",
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Turn": 2
+          },
           "kind": "turn-started",
           "at": "2026-08-07T12:00:04.000Z",
           "node_id": "contract-interface",
           "reference": {
             "kind": "conversation",
             "value": "node-scope-1786925518098-3163646.worker"
+          },
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
           }
         },
         {
           "id": "e14",
+          "record_id": "a-recording-host-4242.14",
+          "stream": "a-recording-host-4242",
+          "seq": 14,
+          "journal_order": 14,
+          "persona": "worker",
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Tool": "Bash",
+            "Detail": "just gate"
+          },
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:04.500Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "e15",
+          "record_id": "a-recording-host-4242.15",
+          "stream": "a-recording-host-4242",
+          "seq": 15,
+          "journal_order": 15,
+          "persona": "worker",
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Usage": {
+              "input_tokens": 159810,
+              "output_tokens": 1728,
+              "cache_read_tokens": 231481,
+              "cache_write_tokens": 1068,
+              "cost_usd": 53.79
+            }
+          },
           "kind": "turn-completed",
           "at": "2026-08-07T12:00:05.000Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "e16",
+          "record_id": "node-scope-1786925518098-3163646.0",
+          "stream": "node-scope-1786925518098-3163646",
+          "seq": 0,
+          "journal_order": 16,
+          "persona": "worker",
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "member-settled",
           "at": "2026-08-07T12:00:05.500Z",
           "node_id": "contract-interface",
           "reference": {
             "kind": "worker_report",
             "value": "report-node-scope-1786925518098-3163646"
+          },
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
           }
         },
         {
           "id": "e17",
+          "record_id": "a-recording-host-4242.16",
+          "stream": "a-recording-host-4242",
+          "seq": 16,
+          "journal_order": 17,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Branch": "feature/contract-interface",
+            "Base": "main"
+          },
           "kind": "session-opened",
           "at": "2026-08-07T12:00:06.000Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "e18",
+          "record_id": "a-recording-host-4242.17",
+          "stream": "a-recording-host-4242",
+          "seq": 17,
+          "journal_order": 18,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "gate-started",
           "at": "2026-08-07T12:00:07.000Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "e19",
+          "record_id": "a-recording-host-4242.18",
+          "stream": "a-recording-host-4242",
+          "seq": 18,
+          "journal_order": 19,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "gate-verdict",
           "at": "2026-08-07T12:00:09.000Z",
           "node_id": "contract-interface",
           "reference": {
             "kind": "gate_log",
             "value": "artifact-5c8f0a1b"
+          },
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
           }
         },
         {
           "id": "e20",
+          "record_id": "a-recording-host-4242.19",
+          "stream": "a-recording-host-4242",
+          "seq": 19,
+          "journal_order": 20,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "push",
           "at": "2026-08-07T12:00:10.000Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "e21",
+          "record_id": "a-recording-host-4242.20",
+          "stream": "a-recording-host-4242",
+          "seq": 20,
+          "journal_order": 21,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "change-opened",
           "at": "2026-08-07T12:00:11.000Z",
           "node_id": "contract-interface",
@@ -187,10 +376,21 @@
           "reference": {
             "kind": "pr",
             "value": "https://example.invalid/changes/1"
+          },
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
           }
         },
         {
           "id": "e22",
+          "record_id": "a-recording-host-4242.21",
+          "stream": "a-recording-host-4242",
+          "seq": 21,
+          "journal_order": 22,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "change-check",
           "at": "2026-08-07T12:00:12.000Z",
           "node_id": "contract-interface",
@@ -199,10 +399,21 @@
             "name": "gate",
             "required": true,
             "state": "pending"
+          },
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
           }
         },
         {
           "id": "e23",
+          "record_id": "a-recording-host-4242.22",
+          "stream": "a-recording-host-4242",
+          "seq": 22,
+          "journal_order": 23,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "change-check",
           "at": "2026-08-07T12:00:13.000Z",
           "node_id": "contract-interface",
@@ -215,10 +426,21 @@
           "reference": {
             "kind": "gate_log",
             "value": "artifact-published-smoke"
+          },
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
           }
         },
         {
           "id": "e24",
+          "record_id": "a-recording-host-4242.23",
+          "stream": "a-recording-host-4242",
+          "seq": 23,
+          "journal_order": 24,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "change-check",
           "at": "2026-08-07T12:00:14.000Z",
           "node_id": "contract-interface",
@@ -231,58 +453,145 @@
           "reference": {
             "kind": "gate_log",
             "value": "artifact-gate-check"
+          },
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
           }
         },
         {
           "id": "e25",
+          "record_id": "a-recording-host-4242.24",
+          "stream": "a-recording-host-4242",
+          "seq": 24,
+          "journal_order": 25,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "lock-wait",
           "at": "2026-08-07T12:00:15.000Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "e26",
+          "record_id": "a-recording-host-4242.25",
+          "stream": "a-recording-host-4242",
+          "seq": 25,
+          "journal_order": 26,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "lock-acquired",
           "at": "2026-08-07T12:00:15.100Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "e27",
+          "record_id": "a-recording-host-4242.26",
+          "stream": "a-recording-host-4242",
+          "seq": 26,
+          "journal_order": 27,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "merge-queued",
           "at": "2026-08-07T12:00:16.000Z",
           "node_id": "contract-interface",
           "reference": {
             "kind": "pr",
             "value": "https://example.invalid/changes/1"
+          },
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
           }
         },
         {
           "id": "e28",
+          "record_id": "a-recording-host-4242.27",
+          "stream": "a-recording-host-4242",
+          "seq": 27,
+          "journal_order": 28,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "lock-wait",
           "at": "2026-08-07T12:00:17.000Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "e29",
+          "record_id": "a-recording-host-4242.28",
+          "stream": "a-recording-host-4242",
+          "seq": 28,
+          "journal_order": 29,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "change-merged",
           "at": "2026-08-07T12:00:18.000Z",
           "node_id": "contract-interface",
           "reference": {
             "kind": "pr",
             "value": "https://example.invalid/changes/1"
+          },
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
           }
         },
         {
           "id": "e30",
+          "record_id": "a-recording-host-4242.29",
+          "stream": "a-recording-host-4242",
+          "seq": 29,
+          "journal_order": 30,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "kind": "merge-completed",
           "at": "2026-08-07T12:00:19.000Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "e32",
+          "record_id": "a-recording-host-4242.31",
+          "stream": "a-recording-host-4242",
+          "seq": 31,
+          "journal_order": 32,
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Status": "done",
+            "Outcome": "shipped"
+          },
           "kind": "node-settled",
           "at": "2026-08-07T12:00:20.000Z",
           "node_id": "contract-interface",
-          "status": "done"
+          "status": "done",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         }
       ]
     },
@@ -290,7 +599,7 @@
       "id": "dispatch.node-scope-1786925518098-3163646.worker",
       "kind": "dispatch",
       "label": "node-scope-1786925518098-3163646.worker",
-      "started_at": "2026-08-07T12:00:02.000Z",
+      "started_at": "2026-08-07T12:00:03.000Z",
       "ended_at": "2026-08-07T12:00:05.500Z",
       "parent_id": "node.contract-interface",
       "node_id": "contract-interface",
@@ -305,43 +614,132 @@
       "events": [
         {
           "id": "node-scope-1786925518098-3163646.worker.0",
+          "record_id": "a-recording-host-4242.11",
+          "stream": "a-recording-host-4242",
+          "seq": 11,
+          "journal_order": 11,
+          "persona": "worker",
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Turn": 1
+          },
           "kind": "turn-started",
           "at": "2026-08-07T12:00:03.000Z",
           "node_id": "contract-interface",
           "reference": {
             "kind": "conversation",
             "value": "node-scope-1786925518098-3163646.worker"
+          },
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
           }
         },
         {
           "id": "e12",
+          "record_id": "a-recording-host-4242.12",
+          "stream": "a-recording-host-4242",
+          "seq": 12,
+          "journal_order": 12,
+          "persona": "worker",
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Tool": "Read",
+            "Detail": "src/api.rs"
+          },
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:03.500Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "node-scope-1786925518098-3163646.worker.1",
+          "record_id": "a-recording-host-4242.13",
+          "stream": "a-recording-host-4242",
+          "seq": 13,
+          "journal_order": 13,
+          "persona": "worker",
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Turn": 2
+          },
           "kind": "turn-started",
           "at": "2026-08-07T12:00:04.000Z",
           "node_id": "contract-interface",
           "reference": {
             "kind": "conversation",
             "value": "node-scope-1786925518098-3163646.worker"
+          },
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
           }
         },
         {
           "id": "e14",
+          "record_id": "a-recording-host-4242.14",
+          "stream": "a-recording-host-4242",
+          "seq": 14,
+          "journal_order": 14,
+          "persona": "worker",
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Tool": "Bash",
+            "Detail": "just gate"
+          },
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:04.500Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         },
         {
           "id": "e15",
+          "record_id": "a-recording-host-4242.15",
+          "stream": "a-recording-host-4242",
+          "seq": 15,
+          "journal_order": 15,
+          "persona": "worker",
+          "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "Usage": {
+              "input_tokens": 159810,
+              "output_tokens": 1728,
+              "cache_read_tokens": 231481,
+              "cache_write_tokens": 1068,
+              "cost_usd": 53.79
+            }
+          },
           "kind": "turn-completed",
           "at": "2026-08-07T12:00:05.000Z",
-          "node_id": "contract-interface"
+          "node_id": "contract-interface",
+          "dispatch_group": {
+            "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+            "label": "Dispatch 1",
+            "order": 30,
+            "started_at": "2026-08-07T12:00:02.000Z"
+          }
         }
-      ]
+      ],
+      "dispatch_group": {
+        "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+        "label": "Dispatch 1",
+        "order": 30,
+        "started_at": "2026-08-07T12:00:02.000Z"
+      }
     },
     {
       "id": "verification.contract-interface.report-node-scope-1786925518098-3163646",
@@ -357,7 +755,13 @@
         "output_tail": "",
         "artifact_id": "report-node-scope-1786925518098-3163646"
       },
-      "events": []
+      "events": [],
+      "dispatch_group": {
+        "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+        "label": "Dispatch 1",
+        "order": 30,
+        "started_at": "2026-08-07T12:00:02.000Z"
+      }
     },
     {
       "id": "verification.contract-interface.artifact-5c8f0a1b",
@@ -373,7 +777,13 @@
         "output_tail": "the gate ran and passed",
         "artifact_id": "artifact-5c8f0a1b"
       },
-      "events": []
+      "events": [],
+      "dispatch_group": {
+        "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+        "label": "Dispatch 1",
+        "order": 30,
+        "started_at": "2026-08-07T12:00:02.000Z"
+      }
     },
     {
       "id": "verification.contract-interface.artifact-published-smoke",
@@ -389,7 +799,13 @@
         "output_tail": "",
         "artifact_id": "artifact-published-smoke"
       },
-      "events": []
+      "events": [],
+      "dispatch_group": {
+        "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+        "label": "Dispatch 1",
+        "order": 30,
+        "started_at": "2026-08-07T12:00:02.000Z"
+      }
     },
     {
       "id": "verification.contract-interface.artifact-gate-check",
@@ -405,7 +821,13 @@
         "output_tail": "",
         "artifact_id": "artifact-gate-check"
       },
-      "events": []
+      "events": [],
+      "dispatch_group": {
+        "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+        "label": "Dispatch 1",
+        "order": 30,
+        "started_at": "2026-08-07T12:00:02.000Z"
+      }
     },
     {
       "id": "publication.contract-interface",
@@ -420,7 +842,13 @@
         "kind": "pr",
         "value": "https://example.invalid/changes/1"
       },
-      "events": []
+      "events": [],
+      "dispatch_group": {
+        "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+        "label": "Dispatch 1",
+        "order": 30,
+        "started_at": "2026-08-07T12:00:02.000Z"
+      }
     },
     {
       "id": "rollup.contract-interface.lock-wait",
@@ -432,7 +860,61 @@
       "node_id": "contract-interface",
       "count": 2,
       "total_duration_ms": 3000,
-      "events": []
+      "events": [],
+      "dispatch_group": {
+        "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+        "label": "Dispatch 1",
+        "order": 30,
+        "started_at": "2026-08-07T12:00:02.000Z"
+      }
+    },
+    {
+      "id": "harness.0198a5b3-2c4d-7e60-8f01-000000000001",
+      "kind": "dispatch",
+      "label": "contract-interface-worker · no recorded end",
+      "started_at": "2026-08-07T12:00:03Z",
+      "ended_at": "2026-08-07T12:00:03Z",
+      "status": "no-recorded-end",
+      "parent_id": "dispatch.node-scope-1786925518098-3163646.worker",
+      "harness_scope": "node",
+      "reference": {
+        "kind": "oneharness_session",
+        "value": "0198a5b3-2c4d-7e60-8f01-000000000001"
+      },
+      "events": [],
+      "dispatch_attempt": "1",
+      "node_id": "contract-interface",
+      "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+      "dispatch_group": {
+        "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+        "label": "Dispatch 1",
+        "order": 30,
+        "started_at": "2026-08-07T12:00:02.000Z"
+      }
+    },
+    {
+      "id": "harness.0198a5b3-2c4d-7e60-8f01-000000000002",
+      "kind": "dispatch",
+      "label": "contract-interface-worker · no recorded end",
+      "started_at": "2026-08-07T12:00:10Z",
+      "ended_at": "2026-08-07T12:00:10Z",
+      "status": "no-recorded-end",
+      "parent_id": "dispatch.node-scope-1786925518098-3163646.worker",
+      "harness_scope": "node",
+      "reference": {
+        "kind": "oneharness_session",
+        "value": "0198a5b3-2c4d-7e60-8f01-000000000002"
+      },
+      "events": [],
+      "dispatch_attempt": "1",
+      "node_id": "contract-interface",
+      "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+      "dispatch_group": {
+        "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+        "label": "Dispatch 1",
+        "order": 30,
+        "started_at": "2026-08-07T12:00:02.000Z"
+      }
     }
   ]
 }

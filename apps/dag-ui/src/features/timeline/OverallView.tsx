@@ -20,6 +20,7 @@ import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { Activity, Clock3, Cpu, Layers3, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { NodeView } from "../../lib/run-model";
+import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration, formatDurationSeconds } from "../../lib/time";
 import {
   type GraphRow,
@@ -79,9 +80,13 @@ export function OverallView({
     (span) => span.node_id === undefined,
   );
   const openedSpan = runLevel.find((span) => span.id === selectedItemId);
-  const openedEvent = runLevel
-    .flatMap((span) => span.events)
-    .find((event) => event.id === selectedItemId);
+  const openedEvent =
+    runLevel
+      .flatMap((span) => span.events)
+      .find((event) => (event.record_id ?? event.id) === selectedItemId) ??
+    runLevel
+      .flatMap((span) => span.events)
+      .find((event) => event.id === selectedItemId);
   const opened =
     openedSpan === undefined
       ? openedEvent === undefined
@@ -254,7 +259,7 @@ function GraphExecution({
     if (segment.kind === "record" && segment.nodeId === undefined)
       onOpenItem(segment.id);
     else if (segment.nodeId !== undefined) onOpenNode(segment.nodeId);
-    else if (segment.conversationId !== undefined) onOpenItem(segment.id);
+    else onOpenItem(segment.id);
   };
   const lineLanes = graph.line.lanes.filter(({ id }) =>
     graph.line.items.some((item) => item.laneId === id),
@@ -275,6 +280,24 @@ function GraphExecution({
         range={range}
         selectedId={selectedItemId}
       />
+      {graph.line.markers.some((marker) => marker.at > graph.range[1]) && (
+        <section aria-label="Records after execution" className="p-3 border-t">
+          <h3 className="eyebrow">After execution ended</h3>
+          {graph.line.markers
+            .filter((marker) => marker.at > graph.range[1])
+            .map((marker) => (
+              <Button
+                key={marker.id}
+                onClick={() => open(marker.payload)}
+                variant="outline"
+                size="sm"
+              >
+                {marker.payload.label} ·{" "}
+                <Timestamp at={marker.payload.startedAt} />
+              </Button>
+            ))}
+        </section>
+      )}
       {rowsOpen && (
         <ol className="graph-rows">
           {graph.rows.map((row) => (

@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { AgentsView, NodeAgents } from "../features/agents/AgentsView";
 import {
   channelQueue,
   DASHBOARD_HISTORY_ID,
@@ -663,7 +664,14 @@ describe("the agents a run launched", JOURNEY_TIMEOUT, () => {
   test("lists a run's sessions by scope and attempt, and opens one to its transcript", async () => {
     window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=agents`);
     const { client, fetch } = telemetryHarness();
-    render(<App client={client} />);
+    render(
+      <AgentsView
+        client={client}
+        runId={LIVE_RUN}
+        count={3}
+        invalidations={0}
+      />,
+    );
     const panel = await screen.findByRole("region", { name: "Agents" });
     // The count the run detail carries, beside the listing it counts.
     await waitFor(() => expect(panel).toHaveTextContent("3 agents"));
@@ -752,7 +760,14 @@ describe("the agents a run launched", JOURNEY_TIMEOUT, () => {
           })
         : defaultResponder(url),
     );
-    render(<App client={client} />);
+    render(
+      <AgentsView
+        client={client}
+        runId={LIVE_RUN}
+        count={3}
+        invalidations={0}
+      />,
+    );
     const panel = await screen.findByRole("region", { name: "Agents" });
     const reply = await within(panel).findByRole("list", {
       name: "Review reply author · attempt 1",
@@ -777,7 +792,14 @@ describe("the agents a run launched", JOURNEY_TIMEOUT, () => {
       `/?run=${LIVE_RUN}&node=dashboard&tab=agents`,
     );
     const { client } = telemetryHarness();
-    render(<App client={client} />);
+    const view = render(
+      <NodeAgents
+        client={client}
+        runId={LIVE_RUN}
+        nodeId="dashboard"
+        invalidations={0}
+      />,
+    );
     const panel = await screen.findByRole("region", {
       name: "Agents of dashboard",
     });
@@ -787,21 +809,13 @@ describe("the agents a run launched", JOURNEY_TIMEOUT, () => {
       ).toHaveLength(3),
     );
     expect(within(panel).queryByText("Observer")).toBeNull();
-    // Another node of the same run, whose dispatches wrote no session, opened
-    // from the graph's own keyboard list.
-    await userEvent.click(screen.getByRole("button", { name: /Graph/ }));
-    await userEvent.click(
-      within(await screen.findByRole("list", { name: "DAG nodes" })).getByRole(
-        "button",
-        { name: /^foundation:/ },
-      ),
-    );
-    // The node's own tab strip — the run's views carry an Agents tab too.
-    await userEvent.click(
-      within(screen.getByRole("tablist", { name: "Node details" })).getByRole(
-        "tab",
-        { name: "Agents" },
-      ),
+    view.rerender(
+      <NodeAgents
+        client={client}
+        runId={LIVE_RUN}
+        nodeId="foundation"
+        invalidations={0}
+      />,
     );
     expect(
       await screen.findByRole("region", { name: "Agents of foundation" }),
@@ -862,7 +876,9 @@ describe("the agents a run launched", JOURNEY_TIMEOUT, () => {
       }
       return defaultResponder(url);
     });
-    render(<App client={refused.client} />);
+    render(
+      <AgentsView client={refused.client} runId={LIVE_RUN} invalidations={0} />,
+    );
     const panel = await screen.findByRole("region", { name: "Agents" });
     expect(
       await within(panel).findByRole("alert", { name: "Agents refused" }),

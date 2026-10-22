@@ -885,6 +885,36 @@ describe("run timeline", () => {
     ],
   };
 
+  test("round-trips optional dispatch ownership and refuses invalid groups", () => {
+    const dispatch_group = {
+      id: "run.node:graph:producer:1",
+      label: "Dispatch 1",
+      order: 3,
+      started_at: "2026-07-26T12:00:00Z",
+    };
+    const event = { id: "e1", kind: "gate-run", at: "2026-07-26T12:00:01Z" };
+    expect(
+      timelineEventSchema.parse({ ...event, dispatch_group }).dispatch_group,
+    ).toEqual(dispatch_group);
+    expect(
+      timelineSpanSchema.parse({ ...span, dispatch_group }).dispatch_group,
+    ).toEqual(dispatch_group);
+    expect(
+      JSON.parse(JSON.stringify(timelineEventSchema.parse(event))),
+    ).not.toHaveProperty("dispatch_group");
+    expect(
+      JSON.parse(JSON.stringify(timelineSpanSchema.parse(span))),
+    ).not.toHaveProperty("dispatch_group");
+    for (const group of [
+      {},
+      { ...dispatch_group, order: -1 },
+      { ...dispatch_group, started_at: "invalid" },
+    ])
+      expect(() =>
+        timelineEventSchema.parse({ ...event, dispatch_group: group }),
+      ).toThrow();
+  });
+
   test("accepts an open span, a rollup, and reference-only heavy content", () => {
     const timeline = parseRunTimeline({
       api_version: 2,

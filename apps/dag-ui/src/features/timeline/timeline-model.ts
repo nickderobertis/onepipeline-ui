@@ -188,7 +188,7 @@ export function laneVocabulary(
   const spans = timeline?.spans ?? [];
   const roles: AgentRole[] = [];
   for (const span of spans) {
-    const role = span.agent_role;
+    const role = span.agent_role ?? span.harness_scope;
     if (role !== undefined && !roles.includes(role)) roles.push(role);
   }
   // The unroled lane exists only where the payload has a session for it: every
@@ -374,7 +374,17 @@ export function compactTimelineItems<Payload>(
       result.push(item);
     }
   }
-  return result;
+  // Boundary spans must survive compaction to keep one clock, but a later,
+  // lower-priority boundary must not cover the worker's clickable bar. Paint
+  // the dominant lane last, with its enclosing session above nested judge
+  // sessions in that same role lane. The expanded lanes retain every session.
+  return result.sort(
+    (left, right) =>
+      compactPriority(right, lanes) - compactPriority(left, lanes) ||
+      (left.end ?? left.start) -
+        left.start -
+        ((right.end ?? right.start) - right.start),
+  );
 }
 
 /** Whether two plotted items occupy the same pixels, to within one visual moment. */
@@ -649,7 +659,14 @@ export function nodeTimeline(
   // siblings, which is a run of one kind by every rule here — collapsing first hid
   // an ordinary single dispatch behind a control, and left `groupDispatches` a
   // group row it could nest nothing inside.
-  const rows = group(groupDispatches(labelWorkerRetries(top)));
+  const servedGroups = scoped.some(
+    (span) =>
+      span.dispatch_group !== undefined ||
+      span.events.some((event) => event.dispatch_group !== undefined),
+  );
+  const rows = servedGroups
+    ? servedDispatchGroups(top)
+    : group(groupDispatches(labelWorkerRetries(top)));
   return { span: own, rows, total: count(rows) };
 }
 
@@ -692,12 +709,22 @@ export function pathTo(
   rows: readonly TimelineRow[],
   id: string,
 ): readonly TimelineRow[] {
-  for (const row of rows) {
-    if (row.id === id) return [row];
-    const nested = pathTo(row.children, id);
-    if (nested.length > 0) return [row, ...nested];
-  }
-  return [];
+  const search = (
+    held: readonly TimelineRow[],
+    legacy: boolean,
+  ): readonly TimelineRow[] => {
+    for (const row of held) {
+      if (
+        legacy ? row.rowKind === "event" && row.event.id === id : row.id === id
+      )
+        return [row];
+      const nested = search(row.children, legacy);
+      if (nested.length > 0) return [row, ...nested];
+    }
+    return [];
+  };
+  const exact = search(rows, false);
+  return exact.length > 0 ? exact : search(rows, true);
 }
 
 function spanRows(
@@ -742,7 +769,9 @@ function spanRow(
 
 /** A dispatch's served member word, and nothing for any other kind of span. */
 function dispatchRole(span: TimelineSpan): AgentRole | undefined {
-  return span.kind === "dispatch" ? span.agent_role : undefined;
+  return span.kind === "dispatch"
+    ? (span.agent_role ?? span.harness_scope)
+    : undefined;
 }
 
 /**
@@ -759,6 +788,7 @@ function dispatchRole(span: TimelineSpan): AgentRole | undefined {
  */
 export function spanLane(span: TimelineSpan): LaneId | null {
   if (span.agent_role !== undefined) return roleLaneId(span.agent_role);
+  if (span.harness_scope !== undefined) return roleLaneId(span.harness_scope);
   // Widened for the lookup, not narrowed for it: a rollup's label is a plain string,
   // and a word the table has no entry for is an answer rather than an assertion.
   const table: Readonly<Record<string, LaneId | null>> = LANE_BY_SPAN_KIND;
@@ -864,7 +894,7 @@ function eventRow(event: TimelineEvent): TimelineRow {
   return {
     rowKind: "event",
     event,
-    id: event.id,
+    id: event.record_id ?? event.id,
     kind: event.kind,
     label: event.step_id ?? "",
     startedAt: event.at,
@@ -921,6 +951,14 @@ function group(rows: readonly TimelineRow[]): TimelineRow[] {
         children: run,
         displayLabel: `${run.length} grouped ${first.displayKind.toLowerCase()} activities`,
         displayKind: first.displayKind,
+        ...(first.role === undefined ? {} : { role: first.role }),
+        ...(first.transport === undefined
+          ? {}
+          : { transport: first.transport }),
+        ...(first.dispatch !== undefined &&
+        run.every((row) => row.dispatch?.id === first.dispatch?.id)
+          ? { dispatch: first.dispatch }
+          : {}),
       });
     }
     index = end;
@@ -1077,6 +1115,66 @@ function groupDispatches(rows: readonly TimelineRow[]): TimelineRow[] {
   return grouped;
 }
 
+/** The server owns grouping even when a filter hides all boundary records. */
+function servedDispatchGroups(rows: readonly TimelineRow[]): TimelineRow[] {
+  const buckets = new Map<
+    string,
+    {
+      metadata: NonNullable<TimelineEvent["dispatch_group"]>;
+      members: TimelineRow[];
+    }
+  >();
+  const outside: TimelineRow[] = [];
+  for (const row of flattenRows(rows).filter(
+    (row) => row.rowKind !== "group",
+  )) {
+    const metadata =
+      row.rowKind === "event"
+        ? row.event.dispatch_group
+        : row.span.dispatch_group;
+    const member = { ...row, children: [] };
+    if (metadata === undefined) {
+      outside.push(member);
+      continue;
+    }
+    const bucket = buckets.get(metadata.id) ?? { metadata, members: [] };
+    bucket.members.push({
+      ...member,
+      dispatch: { id: metadata.id, label: metadata.label },
+    });
+    buckets.set(metadata.id, bucket);
+  }
+  const groupedMembers = (members: readonly TimelineRow[]) => [
+    ...group(
+      members
+        .filter((row) => row.rowKind === "span" && row.kind === "dispatch")
+        .sort(byStart),
+    ),
+    ...group(
+      members
+        .filter((row) => row.rowKind !== "span" || row.kind !== "dispatch")
+        .sort(byStart),
+    ),
+  ];
+  return [
+    ...outside.map((row) => ({
+      at: row.startedAt,
+      order: row.rowKind === "event" ? (row.event.journal_order ?? 0) * 3 : 0,
+      rows: [row],
+    })),
+    ...[...buckets.values()].map(({ metadata, members }) => ({
+      at: metadata.started_at,
+      order: metadata.order,
+      rows: groupedMembers(members),
+    })),
+  ]
+    .sort(
+      (left, right) =>
+        Date.parse(left.at) - Date.parse(right.at) || left.order - right.order,
+    )
+    .flatMap(({ rows }) => rows);
+}
+
 /** The parties that run over an agent's work rather than being dispatched alone. */
 function supervises(transport: TransportRole | undefined): boolean {
   return transport === "judge" || transport === LLMLINT_TRANSPORT;
@@ -1095,7 +1193,9 @@ function sameKind(first: TimelineRow, next: TimelineRow | undefined): boolean {
     next !== undefined &&
     first.rowKind !== "group" &&
     next.rowKind === first.rowKind &&
-    first.kind === next.kind
+    first.kind === next.kind &&
+    first.role === next.role &&
+    first.transport === next.transport
   );
 }
 
@@ -1134,7 +1234,11 @@ function count(rows: readonly TimelineRow[]): number {
  * be called.
  */
 function byStart(first: TimelineRow, next: TimelineRow): number {
-  return first.startedAt.localeCompare(next.startedAt);
+  const delta = Date.parse(first.startedAt) - Date.parse(next.startedAt);
+  if (delta !== 0) return delta;
+  return first.rowKind === "event" && next.rowKind === "event"
+    ? (first.event.journal_order ?? 0) - (next.event.journal_order ?? 0)
+    : 0;
 }
 
 function elapsed(startedAt: string, endedAt: string | null): number | null {

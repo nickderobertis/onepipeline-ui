@@ -153,7 +153,14 @@ function Body({
   if (surface !== undefined)
     return <SurfaceRecord row={row} surface={surface} />;
   if (reference?.kind === "conversation")
-    return <Session row={row} transcript={transcript} />;
+    return (
+      <>
+        {row.rowKind === "event" && (
+          <Recorded row={row} reference={reference} />
+        )}
+        <Session row={row} transcript={transcript} />
+      </>
+    );
   if (isVerification(row))
     return (
       <Verification
@@ -667,6 +674,31 @@ function Recorded({
   readonly row: TimelineRow;
   readonly reference?: TimelineReference;
 }) {
+  if (row.rowKind === "event") {
+    return (
+      <>
+        <dl className="facts">
+          <div>
+            <dt>Recorded at</dt>
+            <dd>
+              <Timestamp at={row.startedAt} relative />
+            </dd>
+          </div>
+          {Object.entries(row.event.fields ?? {}).map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>
+                {typeof value === "string" ? value : JSON.stringify(value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        {reference !== undefined && (
+          <Reference reference={reference} fallback="No recorded artifact." />
+        )}
+      </>
+    );
+  }
   const located = row.rowKind === "group" ? undefined : row;
   const rollup =
     row.rowKind === "span" && row.span.count !== undefined
@@ -685,16 +717,19 @@ function Recorded({
             <Timestamp at={row.startedAt} relative />
           </dd>
         </div>
-        <div>
-          <dt>Ended</dt>
-          <dd>
-            {row.endedAt === null ? (
-              "Still running"
-            ) : (
-              <Timestamp at={row.endedAt} relative />
-            )}
-          </dd>
-        </div>
+        {row.rowKind === "span" &&
+          (row.endedAt !== null || row.status === "running") && (
+            <div>
+              <dt>Ended</dt>
+              <dd>
+                {row.endedAt === null ? (
+                  "Still running"
+                ) : (
+                  <Timestamp at={row.endedAt} relative />
+                )}
+              </dd>
+            </div>
+          )}
         <div>
           <dt>Status</dt>
           <dd>{row.status ?? "Not recorded"}</dd>

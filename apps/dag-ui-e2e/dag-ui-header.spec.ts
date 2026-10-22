@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -52,6 +53,18 @@ for (const viewport of VIEWPORTS) {
   }) => {
     const server = await startFixtureServer("header", []);
     try {
+      // A continued session re-relays producer identities before new activity.
+      const journal = join(
+        server.workspace,
+        "runs",
+        runs().live,
+        "events.jsonl",
+      );
+      const records = readFileSync(journal, "utf8").trim().split("\n");
+      writeFileSync(
+        journal,
+        `${[...records, ...records, ...records].join("\n")}\n`,
+      );
       const command =
         "just check && cargo test --locked --all-targets --features bundled-ui -- --test-threads=1 && printf '%s' 'checking a long shell command in the run header'";
       execFileSync(process.execPath, [
@@ -152,8 +165,13 @@ for (const viewport of VIEWPORTS) {
       const timeline = runTimelineSchema.parse(await response.json());
       const namedEvent = timeline.spans
         .flatMap((span) => span.events ?? [])
-        .find((event) => event.id === namedActivity.event_id);
+        .find((event) => event.record_id === namedActivity.event_id);
       expect(namedEvent?.kind).toBe("turn-activity");
+      expect(namedActivity.events).toBe(
+        timeline.spans
+          .find((span) => span.kind === "node")
+          ?.events.filter((event) => event.kind === "turn-activity").length,
+      );
       const detail = page.getByRole("region", { name: "Timeline item detail" });
       await expect(
         detail.getByRole("heading", { name: "turn-activity", exact: true }),

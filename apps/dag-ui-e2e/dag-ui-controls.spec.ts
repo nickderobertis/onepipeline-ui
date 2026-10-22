@@ -7,8 +7,8 @@ import {
   renderedRootSchema,
   renderedRunSchema,
   runAgentsSchema,
-  runDetailSchema,
   runStatusSchema,
+  runTimelineSchema,
   runTranscriptSchema,
 } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -627,7 +627,7 @@ test("stops a run the acting session owns on one confirm", async ({ page }) => {
  * the sessions the listing serves are the ones the fixture's pointer file names,
  * and the count beside the run is the number of them.
  */
-test("lists every agent the run launched, grouped by scope and attempt, and opens one to its transcript", async ({
+test("observer and worker harness sessions open from their timelines", async ({
   page,
 }) => {
   const listing = await served(
@@ -636,119 +636,89 @@ test("lists every agent the run launched, grouped by scope and attempt, and open
     runAgentsSchema,
   );
   expect(listing.sessions).toHaveLength(fixture().agents.live);
-  expect(listing.skipped).toBe(0);
-  const detail = await served(
-    page,
-    `/api/v2/runs/${runs().live}`,
-    runDetailSchema,
+  const observer = listing.sessions.find(
+    (session) => session.labels["onepipeline.scope"] === "observer",
   );
-  expect(detail.run.agent_count).toBe(fixture().agents.live);
-
-  await page.goto(`/?run=${runs().live}&view=agents`);
-  const panel = page.getByRole("region", { name: "Agents" });
-  await expect(panel).toContainText(`${fixture().agents.live} agents`);
-  // The worker's dispatch of its node at its first attempt, then the run's
-  // observer: the engine's own scope order, with the labels a reader wants —
-  // the node, and the repository's own `role` — and the harness run by its
-  // configured id.
-  const dispatch = panel.getByRole("list", {
-    name: "Node dispatch · attempt 1",
+  expect(observer).toBeDefined();
+  const timeline = await served(
+    page,
+    `/api/v2/runs/${runs().live}/timeline?scope=run`,
+    runTimelineSchema,
+  );
+  const observed = timeline.spans.find(
+    (span) => span.harness_scope === "observer",
+  );
+  if (observed?.ended_at == null)
+    throw new Error("observer with its own recorded end");
+  expect(Date.parse(observed.ended_at) - Date.parse(observed.started_at)).toBe(
+    42_000,
+  );
+  const worked = timeline.spans.find((span) => span.harness_scope === "node");
+  expect(worked).toBeDefined();
+  expect(worked?.ended_at).toBe(worked?.started_at);
+  expect(worked?.label).toContain("no recorded end");
+  await page.goto(`/?run=${runs().live}&view=overall`);
+  const graph = page.getByRole("region", {
+    name: "Graph timeline",
+    exact: true,
   });
-  await expect(dispatch).toContainText("engineer-dashboard");
-  await expect(dispatch).toContainText(`node ${fixture().agents.worker.node}`);
-  await expect(dispatch).toContainText("role engineer");
-  await expect(dispatch).toContainText("claude-code:alternate");
-  await expect(dispatch).toContainText("started");
-  const observer = panel.getByRole("list", { name: "Observer" });
-  await expect(observer).toContainText("monitor");
-  // The drafting of a reply to a review comment on that node's draft, read
-  // under its own scope after the observer, in the engine's scope order.
-  const replier = panel.getByRole("list", {
-    name: "Review reply author · attempt 1",
+  await graph.getByRole("button", { name: "Expand timeline" }).click();
+  const runLevel = page.getByRole("region", {
+    name: "Run-level timeline",
+    exact: true,
   });
-  await expect(replier).toContainText("replier-dashboard");
-  await expect(replier).toContainText(`node ${fixture().agents.worker.node}`);
-  const headings = await panel
-    .getByRole("heading", { level: 4 })
-    .allTextContents();
-  expect(headings).toEqual([
-    "Node dispatch · attempt 1",
-    "Observer",
-    "Review reply author · attempt 1",
-  ]);
-
-  // Opening the worker's harness run: the conversation view the app has for a
-  // oneharness session, over the record its pointer line names — which is the
-  // record the artifact route serves under that history id.
-  await dispatch.getByRole("button", { name: "Open transcript" }).click();
-  await expect(dispatch).toContainText(fixture().agents.worker.text);
+  await runLevel.getByRole("button", { name: "Expand timeline" }).click();
+  await runLevel
+    .getByRole("button", { name: /^Run-level · observer/ })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Timeline item detail" }),
+  ).toContainText("Oneharness conversation");
+  await expect(
+    page.getByRole("tab", { name: "Agents", exact: true }),
+  ).toHaveCount(0);
+  const node = fixture().agents.worker.node;
+  await page.goto(`/?run=${runs().live}&node=${node}`);
+  const worker = listing.sessions.find(
+    (session) => session.labels["onepipeline.scope"] === "node",
+  );
+  if (worker === undefined) throw new Error("worker session");
+  await page
+    .getByRole("button", {
+      name: `Open node (${worker.name} · no recorded end)`,
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Timeline item detail" }),
+  ).toContainText(fixture().agents.worker.text);
   const transcript = await served(
     page,
     `/api/v2/runs/${runs().live}/artifacts/${fixture().agents.worker.history_id}`,
     artifactContentSchema,
   );
-  expect(transcript.kind).toBe("oneharness_session");
   expect(transcript.content).toContain(fixture().agents.worker.text);
-  // No location on the host reaches the reader: the store's path is the
-  // record's own business, and the panel asks by the history id alone.
-  await expect(panel).not.toContainText("oneharness-history");
-  await dispatch.getByRole("button", { name: "Close transcript" }).click();
-  await expect(dispatch).not.toContainText(fixture().agents.worker.text);
-
-  // A run whose launches wrote nothing — one an earlier engine launched, or
-  // one that has dispatched nothing yet — is a count of zero and an empty
-  // listing, never an error.
-  const none = await served(
-    page,
-    `/api/v2/runs/${runs().history}`,
-    runDetailSchema,
-  );
-  expect(none.run.agent_count).toBe(fixture().agents.history);
-  await page.goto(`/?run=${runs().history}&view=agents`);
-  await expect(panel).toContainText("0 agents");
-  await expect(panel).toContainText("No agents launched.");
-});
-
-test("shows a node's own agents on its Agents tab, and a node that dispatched nothing as none", async ({
-  page,
-}) => {
-  const node = fixture().agents.worker.node;
-  const mine = await served(
-    page,
-    `/api/v2/runs/${runs().live}/nodes/${node}/agents`,
-    runAgentsSchema,
-  );
-  expect(mine.node).toBe(node);
-  // The node's worker and the drafting of a reply on its draft, both stamped
-  // with the node; the run's observer is no node's.
-  expect(
-    mine.sessions.map((session) => session.labels["onepipeline.scope"]),
-  ).toEqual(["node", "review-reply"]);
-  expect(mine.sessions[0]?.runs[0]?.history_id).toBe(
-    fixture().agents.worker.history_id,
-  );
-  await page.goto(`/?run=${runs().live}&node=${node}&tab=agents`);
-  const panel = page.getByRole("region", { name: `Agents of ${node}` });
   await expect(
-    panel.getByRole("button", { name: "Open transcript" }),
-  ).toHaveCount(2);
-  await expect(panel).not.toContainText("Observer");
-  await panel
-    .getByRole("list", { name: "Node dispatch · attempt 1" })
-    .getByRole("button", { name: "Open transcript" })
+    page.getByRole("region", { name: "Review reply drafter", exact: true }),
+  ).toContainText("replier-dashboard");
+  await page.keyboard.press("Escape");
+  await page
+    .getByRole("button", {
+      name: "Open review-reply (replier-dashboard · no recorded end)",
+      exact: true,
+    })
     .click();
-  await expect(panel).toContainText(fixture().agents.worker.text);
-
-  const quiet = await served(
-    page,
-    `/api/v2/runs/${runs().live}/nodes/foundation/agents`,
-    runAgentsSchema,
-  );
-  expect(quiet.sessions).toEqual([]);
-  await page.goto(`/?run=${runs().live}&node=foundation&tab=agents`);
   await expect(
-    page.getByRole("region", { name: "Agents of foundation" }),
-  ).toContainText("No agents launched.");
+    page.getByRole("region", { name: "Timeline item detail" }),
+  ).toContainText("the review reply is drafted");
+  await page.goto(`/?run=${runs().live}&node=foundation`);
+  await expect(page.getByRole("button", { name: /^Open node \(/ })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByRole("tab", { name: "Agents", exact: true }),
+  ).toHaveCount(0);
 });
 
 test("shows the union of a project's agents across its runs, with the count on its row", async ({

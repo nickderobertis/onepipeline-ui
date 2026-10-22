@@ -641,6 +641,12 @@ being photographed.
 | `12-project-page` | a project's page: its runs, newest activity first |
 | `13-channel` | the channel: the queue, the composer and the surface form |
 | `14-channel-graph-overrides` | the composer editing a node's graph overrides as an ordered list, composed into the editor |
+| `15-recorded-node-collapsed` | the recorded worker and change request drafter in their own groups, collapsed |
+| `16-recorded-node-expanded` | the same recorded sessions with their lanes expanded |
+| `17-recorded-gate-run` | the gate's own result and measured duration |
+| `18-recorded-session-closed` | the closed session's recorded fields |
+| `19-recorded-node-dispatched` | the dispatch's attempt and persona |
+| `20-recorded-overall` | execution ending at settlement and the completion marker 41 hours later |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the
