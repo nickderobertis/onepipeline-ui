@@ -34,10 +34,10 @@ import {
   SIDEBAR_ROW_FIELDS,
   SUBSCRIPTION_FRAME_TYPES,
   sessionLinkSchema,
-  subscribedSchema,
-  subscriptionFrameSchema,
   sseEventNameSchema,
   stoppedSchema,
+  subscribedSchema,
+  subscriptionFrameSchema,
   surfacedSchema,
   TELEMETRY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
@@ -1223,8 +1223,9 @@ test("the subscription and every frame type the server served parse through the 
 
 test("a patch the contract does not allow is refused rather than guessed at", () => {
   const held = { spans: [{ id: "a", events: [] }], run_id: "r" };
-  expect(applyPatch(held, [{ p: ["spans", 0, "events"], a: [{ id: "e" }] }]))
-    .toStrictEqual({ spans: [{ id: "a", events: [{ id: "e" }] }], run_id: "r" });
+  expect(
+    applyPatch(held, [{ p: ["spans", 0, "events"], a: [{ id: "e" }] }]),
+  ).toStrictEqual({ spans: [{ id: "a", events: [{ id: "e" }] }], run_id: "r" });
   expect(held.spans[0]?.events).toStrictEqual([]);
   for (const refused of [
     { p: [], v: {} },

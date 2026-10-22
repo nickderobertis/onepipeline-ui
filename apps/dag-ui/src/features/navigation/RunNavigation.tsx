@@ -8,33 +8,30 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@oneharness/ui";
-import type { ProjectGroup } from "@onepipeline-ui/dag-model";
+import type { SidebarRow } from "@onepipeline-ui/dag-model";
 import { Activity } from "lucide-react";
-import { nodeCountSummary } from "../../lib/run-model";
 import { stateDotClass } from "../../lib/StateBadge";
+import { rowCountSummary } from "../../lib/sidebar-model";
 import { useProjectNavigation } from "./useProjectNavigation";
 
 /** One project list, with kinds discovered from the engine's effective labels. */
 export function RunNavigation({
-  projects,
+  rows,
   selectedRunId,
   onSelect,
   onHost,
   hiddenKinds,
   onKindsChange,
 }: {
-  readonly projects?: readonly ProjectGroup[];
+  /** The sidebar's trimmed rows, as the subscription holds them. */
+  readonly rows?: readonly SidebarRow[];
   readonly selectedRunId?: string;
   readonly onSelect: (runId: string) => void;
   readonly onHost: () => void;
   readonly hiddenKinds: readonly string[];
   readonly onKindsChange: (kinds: readonly string[]) => void;
 }) {
-  const { kinds, groups } = useProjectNavigation(
-    projects,
-    hiddenKinds,
-    onSelect,
-  );
+  const { kinds, groups } = useProjectNavigation(rows, hiddenKinds, onSelect);
   return (
     <nav aria-label="Projects" className="run-nav">
       <ScrollArea className="h-full">
@@ -73,7 +70,7 @@ export function RunNavigation({
               ))}
             </fieldset>
           )}
-          {projects === undefined ? (
+          {rows === undefined ? (
             <p role="status">Loading projects…</p>
           ) : (
             groups.map((group) => {
@@ -101,12 +98,12 @@ export function RunNavigation({
                     {visible.map((run) => (
                       <button
                         aria-current={
-                          selectedRunId === run.run_id ? "page" : undefined
+                          selectedRunId === run.id ? "page" : undefined
                         }
                         className="run-link"
-                        data-active={selectedRunId === run.run_id}
-                        key={run.run_id}
-                        onClick={() => onSelect(run.run_id)}
+                        data-active={selectedRunId === run.id}
+                        key={run.id}
+                        onClick={() => onSelect(run.id)}
                         type="button"
                       >
                         <span className="run-link-main">
@@ -114,28 +111,28 @@ export function RunNavigation({
                             <TooltipTrigger asChild>
                               <span
                                 role="img"
-                                aria-label={run.activityLabel}
+                                aria-label={run.state}
                                 className={cn(
                                   "run-dot",
                                   stateDotClass(run.state),
                                 )}
                               />
                             </TooltipTrigger>
-                            <TooltipContent>{run.activityLabel}</TooltipContent>
+                            <TooltipContent>{run.state}</TooltipContent>
                           </Tooltip>
-                          <span>{run.run_id}</span>
-                          {run.labels?.kind && (
+                          <span>{run.name}</span>
+                          {run.kind && (
                             <Badge
-                              aria-label={run.labels.kind}
+                              aria-label={run.kind}
                               role="note"
                               variant="outline"
                             >
-                              {run.labels.kind}
+                              {run.kind}
                             </Badge>
                           )}
                         </span>
                         <span className="run-link-counts">
-                          {[run.state, nodeCountSummary(run.node_counts)]
+                          {[run.state, rowCountSummary(run)]
                             .filter(Boolean)
                             .join(" · ")}
                         </span>

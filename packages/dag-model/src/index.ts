@@ -1665,7 +1665,6 @@ export const sseEventNameSchema = z.enum([
 ]);
 export const sseEventDataSchema = arbitraryRecord;
 
-
 /**
  * Whether a string is a qualified project id: `<source>:<native>`, the source
  * under onetaskgraph's grammar and the native id a bare identifier — ASCII
@@ -2680,7 +2679,8 @@ function applyOne(root: Json, op: PatchOp): Json {
     if (isObject(parent) && typeof last === "string") {
       if (!Object.hasOwn(parent, last))
         throw new PatchError("a deletion names an existing member");
-      const { [last]: _removed, ...rest } = parent;
+      const rest = { ...parent };
+      delete rest[last];
       return rest;
     }
     throw new PatchError("a deletion names an object member");

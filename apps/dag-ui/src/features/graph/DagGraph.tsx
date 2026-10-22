@@ -19,8 +19,11 @@ export function DagGraph({
   nodes: nodeViews,
   selectedNodeId,
   onSelectNode,
+  journalSeq,
 }: {
   readonly nodes: readonly NodeView[];
+  /** The journal sequence number of the last record this view has rendered. */
+  readonly journalSeq?: number;
   readonly selectedNodeId?: string;
   readonly onSelectNode: (nodeId: string) => void;
 }) {
@@ -97,7 +100,7 @@ export function DagGraph({
   }, [nodeViews, reasons, selectedNodeId]);
 
   return (
-    <div className="graph-wrap">
+    <div className="graph-wrap" data-journal-seq={journalSeq}>
       <ReactFlow
         nodes={nodes}
         edges={edges}

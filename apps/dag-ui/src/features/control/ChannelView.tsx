@@ -20,7 +20,6 @@ import { useCallback, useId, useState } from "react";
 import { Outcome } from "../../lib/Outcome";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDurationSeconds, isoOfMillis } from "../../lib/time";
-import { useRead } from "../../lib/useRead";
 import { type CurrentOverrides, ReplyComposer } from "./ReplyComposer";
 import { opOf } from "./reply-shortcuts";
 import { useChannelConversation } from "./useChannelConversation";
@@ -30,7 +29,9 @@ import { useVerb, type Verb } from "./useVerb";
  * The run's channel: the queue as the engine keeps it, the one consumer of it,
  * and the two ways of writing to it.
  *
- * The queue is `GET .../channel`, a reading that consumes nothing. **Next** is
+ * The queue is the subscription's channel payload — `GET .../channel`'s, kept
+ * current by the `channel.patch` frames the server pushes, so nothing here reads
+ * it again — a reading that consumes nothing. **Next** is
  * the channel's only consumer and shows what it claimed. The composer sends an
  * envelope as typed; **Surface** raises one under a kind; and a ready human
  * action the graph shows can be attested from here. Every receipt and every
@@ -45,7 +46,8 @@ export function ChannelView({
   filter,
   decisions,
   observedAt,
-  invalidations,
+  channel,
+  journalSeq,
   overrides,
 }: {
   readonly client: TelemetryClient;
@@ -55,11 +57,15 @@ export function ChannelView({
   readonly decisions: readonly Decision[];
   /** When the graph was read, so a surface's age is against the payload's clock. */
   readonly observedAt: string;
-  readonly invalidations: number;
+  /** The queue as the subscription holds it; absent until it arrives. */
+  readonly channel?: ChannelQueue;
+  /** The journal sequence number of the last record this view has rendered. */
+  readonly journalSeq?: number;
   /** The graph overrides the run holds now, which the composer offers to load. */
   readonly overrides?: CurrentOverrides;
 }) {
-  const { queue, wrote } = useChannelQueue(client, runId, invalidations);
+  // A write made here reaches the queue as a pushed patch, like any other.
+  const wrote = useCallback(() => undefined, []);
   const next = useVerb(
     "Next",
     useCallback(() => client.claimNext(runId, filter), [client, runId, filter]),
@@ -68,7 +74,7 @@ export function ChannelView({
 
   return (
     <ScrollArea className="h-full">
-      <div className="channel-view">
+      <div className="channel-view" data-journal-seq={journalSeq}>
         <section
           aria-labelledby="channel-queue-heading"
           className="channel-section"
@@ -86,24 +92,14 @@ export function ChannelView({
               Next
             </Button>
           </div>
-          {queue.error && (
-            <Outcome
-              label="Channel"
-              outcome={{
-                kind: "refused",
-                title: "Channel",
-                error: queue.error,
-              }}
-            />
-          )}
-          {queue.value === undefined && queue.loading ? (
+          {channel === undefined ? (
             <div aria-live="polite" className="loading-state">
               <Skeleton className="h-2 w-48" />
               Loading channel…
             </div>
-          ) : queue.value ? (
-            <Queue observedAt={observedAt} queue={queue.value} />
-          ) : null}
+          ) : (
+            <Queue observedAt={observedAt} queue={channel} />
+          )}
           <Outcome label="Next" outcome={next.outcome} />
         </section>
         <Attestations
@@ -122,28 +118,6 @@ export function ChannelView({
       </div>
     </ScrollArea>
   );
-}
-
-/**
- * The queue as `GET .../channel` serves it, read again on the stream and after
- * every write made from this view — a surface raised, a claim, a reply, an
- * attest — so what the reader wrote is on screen without waiting for the stream
- * to say so.
- */
-function useChannelQueue(
-  client: TelemetryClient,
-  runId: string,
-  invalidations: number,
-) {
-  //: Bumped after every write here, so the queue re-reads without waiting on the stream.
-  const [writes, setWrites] = useState(0);
-  const queue = useRead(
-    runId,
-    () => client.getChannel(runId),
-    invalidations + writes,
-  );
-  const wrote = useCallback(() => setWrites((current) => current + 1), []);
-  return { queue, wrote };
 }
 
 /**
