@@ -8,7 +8,7 @@
 // over whole and its implementation is the spec (see apps/dag-ui/AGENTS.md), and these
 // are the journeys that would have to catch the regression.
 
-import { runListSchema } from "@onepipeline-ui/dag-model";
+import { projectListSchema, runListSchema } from "@onepipeline-ui/dag-model";
 import {
   EVENT_CATEGORIES,
   eventCategoryLabel,
@@ -38,7 +38,7 @@ import { DESKTOP, PHONE, VIEWPORTS, type Viewport } from "./viewports";
 
 /** The left navigation's own scroll container. */
 const navigation = (page: Page): Locator =>
-  page.getByRole("navigation", { name: "DAG runs" });
+  page.getByRole("navigation", { name: "Projects" });
 const navigationViewport = (page: Page): Locator =>
   navigation(page).locator("[data-radix-scroll-area-viewport]");
 
@@ -113,12 +113,16 @@ async function open(page: Page, size: Viewport, path: string): Promise<void> {
 }
 
 for (const size of [DESKTOP, PHONE]) {
-  test(`scrolls the run list and pages the next runs in at ${size.name}`, async ({
+  test(`scrolls every project run independently of the workspace at ${size.name}`, async ({
     page,
   }) => {
     await open(page, size, `/?run=${runs().live}&view=graph`);
     const links = navigation(page).locator(".run-link");
-    await expect(links).toHaveCount(50);
+    await expect(links).toHaveCount(
+      projectListSchema
+        .parse(await (await page.request.get("/api/v2/projects")).json())
+        .projects.reduce((count, group) => count + group.runs.length, 0),
+    );
     // The run this reader is on is legible rather than ellipsized away: a list no run
     // can be identified from is not a navigation, at any width. At 160px the id shares
     // its row with a state pill and a chevron, which left `dag-ui-live` reading `d..`.

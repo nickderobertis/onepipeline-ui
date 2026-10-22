@@ -182,7 +182,7 @@ const enveloped = {
   observed_at: "2026-08-07T12:00:00Z",
 } as const;
 
-test("a package consumer reads the grouped projects and every rendered verb over a real HTTP boundary", async () => {
+test("a package consumer reads grouped projects, host, unwatched runs and status over a real HTTP boundary", async () => {
   const row = {
     run_id: "run-1",
     state: "settled",
@@ -262,26 +262,6 @@ test("a package consumer reads the grouped projects and every rendered verb over
           summary: "1/1 done",
           rendered: "run-1  SETTLED  1/1 done\n",
         });
-      case "/api/v2/runs/run-1/results":
-      case "/api/v2/runs/run-1/goals":
-        return Response.json({
-          ...enveloped,
-          run_id: "run-1",
-          rendered: "text\n",
-        });
-      case "/api/v2/runs/run-1/transcript":
-        return Response.json({
-          ...enveloped,
-          run_id: "run-1",
-          node: url.searchParams.get("node"),
-          rendered: "run-1  a\n",
-        });
-      case "/api/v2/runs/run-1/telemetry":
-        return Response.json({
-          ...enveloped,
-          run_id: "run-1",
-          telemetry: { schema_version: 2, run_id: "run-1", wall_ms: 1000 },
-        });
       default:
         return Response.json(
           { error: { code: "not_found", message: "Not found" } },
@@ -298,18 +278,10 @@ test("a package consumer reads the grouped projects and every rendered verb over
       "observatory",
     );
     expect((await client.host()).rendered).toBe("host a-host\n");
-    expect((await client.getGoals()).rendered).toBe("== a project\n");
     expect((await client.unwatched()).reported[0]?.run).toBe("run-1");
     const status = await client.getStatus("run-1");
     expect(status.liveness).toBe("DRIVER DEAD");
     expect(status.unread_surfaces.oldest_seconds).toBe(40);
-    expect((await client.getResults("run-1")).rendered).toBe("text\n");
-    expect((await client.getRunGoals("run-1")).rendered).toBe("text\n");
-    expect((await client.getTranscript("run-1", "a")).node).toBe("a");
-    expect(
-      (await client.getTelemetryDocument("run-1")).telemetry.schema_version,
-    ).toBe(2);
-    expect(requested).toContain("GET /api/v2/runs/run-1/transcript?node=a");
   } finally {
     await server.stop();
   }

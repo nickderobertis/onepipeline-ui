@@ -2045,3 +2045,64 @@ button.graph-row-name {
     display: none;
   }
 }
+
+.kind-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 16px 0;
+  font-size: 12px;
+}
+.kind-filter legend {
+  margin-bottom: 8px;
+  color: var(--muted-foreground);
+}
+.kind-filter label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.project-group {
+  margin-top: 14px;
+}
+.project-group summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+}
+.project-group .project-link {
+  max-width: 100%;
+  white-space: normal;
+  height: auto;
+  text-align: left;
+}
+.run-header-details {
+  padding: 8px 24px;
+  font-size: 12px;
+}
+.run-header-details summary {
+  cursor: pointer;
+}
+.structured-fields fieldset {
+  min-width: 0;
+  margin: 8px 0;
+  padding: 4px 0 4px 12px;
+  border-left: 1px solid var(--border);
+}
+.structured-fields legend {
+  font-weight: 600;
+  font-size: 12px;
+}
+.structured-fields ol {
+  margin-left: 16px;
+}
+.run-header-details {
+  flex-shrink: 0;
+  max-height: min(40vh, 320px);
+  overflow: auto;
+}
+.shutdown-status {
+  flex-shrink: 0;
+  max-height: 40vh;
+  overflow: auto;
+}

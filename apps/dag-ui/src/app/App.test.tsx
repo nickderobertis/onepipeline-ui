@@ -23,6 +23,7 @@ import {
   LONG_SESSION,
   longConversation,
   PR_URL,
+  projectList,
   RUN_CHECK_IN_SESSION,
   runDetail,
   runList,
@@ -313,9 +314,20 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
           : run,
       ),
     };
-    const { client } = telemetryHarness((url) =>
-      isRunList(url) ? Response.json(degraded) : defaultResponder(url),
-    );
+    const { client } = telemetryHarness((url) => {
+      if (url.pathname === "/api/v2/projects")
+        return Response.json({
+          ...projectList,
+          projects: projectList.projects.map((group) => ({
+            ...group,
+            runs: group.runs.map(
+              (run) =>
+                degraded.runs.find((row) => row.run_id === run.run_id) ?? run,
+            ),
+          })),
+        });
+      return isRunList(url) ? Response.json(degraded) : defaultResponder(url);
+    });
     render(<App client={client} />);
 
     const row = await screen.findByRole("button", {
@@ -1029,14 +1041,16 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     );
   });
 
-  test("tags each row with its launching session and refreshes it on SSE invalidation", async () => {
+  test("shows launching sessions in header details and refreshes on SSE invalidation", async () => {
     const { client, sources, fetch } = telemetryHarness();
     render(<App client={client} />);
-    // One flat list: the session is a tag on the row rather than a heading the
-    // list is broken into, so it never outranks the order the server serves.
-    expect(await screen.findByText(/Codex session/)).toBeInTheDocument();
-    expect(screen.getByText(/Claude session/)).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: /session/ })).toBeNull();
+    await userEvent.click(await screen.findByText("Run details"));
+    expect(
+      await screen.findByText(/Launching session: Codex session/),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("navigation")).queryByText(/session/),
+    ).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: RegExp(HISTORY_RUN) }));
     await waitFor(() =>
@@ -1237,77 +1251,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       await within(detail()).findByText("Implementing the dashboard now"),
     ).toBeVisible();
     expect(screen.queryByText("Loading transcript…")).toBeNull();
-  });
-
-  test("loads the next run-list page when the sidebar reaches its end", async () => {
-    const { client, fetch } = telemetryHarness((url) => {
-      if (isRunList(url)) {
-        return Response.json(
-          url.searchParams.has("cursor")
-            ? { ...runList, runs: [runList.runs[1]] }
-            : { ...runList, runs: [runList.runs[0]], next_cursor: "page-2" },
-        );
-      }
-      return defaultResponder(url);
-    });
-    render(<App client={client} />);
-    expect(
-      await screen.findByRole("button", { name: RegExp(LIVE_RUN) }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: RegExp(HISTORY_RUN) }),
-    ).toBeNull();
-
-    await userEvent.click(
-      screen.getByRole("button", { name: "Load more runs" }),
-    );
-
-    expect(
-      await screen.findByRole("button", { name: RegExp(HISTORY_RUN) }),
-    ).toBeInTheDocument();
-    expect(
-      fetch.mock.calls.some((call: unknown[]) =>
-        String(call[0]).includes("cursor=page-2"),
-      ),
-    ).toBe(true);
-  });
-
-  test("reports a failed next page and can load it on a later scroll", async () => {
-    let continuationAttempts = 0;
-    const { client } = telemetryHarness((url) => {
-      if (!isRunList(url)) return defaultResponder(url);
-      if (!url.searchParams.has("cursor"))
-        return Response.json({
-          ...runList,
-          runs: [runList.runs[0]],
-          next_cursor: "page-2",
-        });
-      continuationAttempts += 1;
-      if (continuationAttempts === 1) throw new Error("next page unavailable");
-      return Response.json({ ...runList, runs: [runList.runs[1]] });
-    });
-    render(<App client={client} />);
-    await screen.findByRole("button", { name: RegExp(LIVE_RUN) });
-
-    const viewport = document.querySelector<HTMLElement>(
-      "[data-radix-scroll-area-viewport]",
-    );
-    if (viewport === null) throw new Error("scroll viewport was not rendered");
-    Object.defineProperties(viewport, {
-      clientHeight: { configurable: true, value: 100 },
-      scrollHeight: { configurable: true, value: 200 },
-      scrollTop: { configurable: true, value: 100 },
-    });
-    fireEvent.scroll(viewport);
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Telemetry request failed",
-    );
-
-    fireEvent.scroll(viewport);
-    expect(
-      await screen.findByRole("button", { name: RegExp(HISTORY_RUN) }),
-    ).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
   test("opens on the run as a whole when the address names no view", async () => {
@@ -1563,6 +1506,8 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   test("shows the loading state, then an empty history", async () => {
     let release: (response: Response) => void = () => {};
     const { client } = telemetryHarness((url) => {
+      if (url.pathname === "/api/v2/projects")
+        return Response.json({ ...runList, projects: [] });
       if (isRunList(url))
         return new Promise<Response>((resolve) => {
           release = resolve;
@@ -1731,6 +1676,18 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   test("drops a removed run and falls back to the remaining one", async () => {
     let removed = false;
     const { client, sources } = telemetryHarness((url) => {
+      if (url.pathname === "/api/v2/projects")
+        return Response.json({
+          ...projectList,
+          projects: projectList.projects
+            .map((group) => ({
+              ...group,
+              runs: group.runs.filter(
+                (run) => !removed || run.run_id !== LIVE_RUN,
+              ),
+            }))
+            .filter((group) => group.runs.length > 0),
+        });
       if (isRunList(url)) {
         const served = removed
           ? { ...runList, runs: runList.runs.slice(1) }

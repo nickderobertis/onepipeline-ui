@@ -19,25 +19,19 @@ import {
   projectDetailSchema,
   projectListSchema,
   type RenderedRoot,
-  type RenderedRun,
   type ReplyReceipt,
   type RunAgents,
   type RunDetail,
   type RunList,
   type RunStatus,
-  type RunTelemetryDocument,
   type RunTimeline,
-  type RunTranscript,
   renderedRootSchema,
-  renderedRunSchema,
   replyReceiptSchema,
   runAgentsSchema,
   runDetailSchema,
   runListSchema,
   runStatusSchema,
-  runTelemetryDocumentSchema,
   runTimelineSchema,
-  runTranscriptSchema,
   type ShutdownReport,
   type SseEventName,
   type Stopped,
@@ -434,46 +428,6 @@ export class TelemetryClient {
     return this.#request(
       this.#url(API_V2_PATHS.status(runId)),
       runStatusSchema.parse,
-    );
-  }
-
-  async getResults(runId: string): Promise<RenderedRun> {
-    requireOpaqueId(runId, "run ID");
-    return this.#request(
-      this.#url(API_V2_PATHS.results(runId)),
-      renderedRunSchema.parse,
-    );
-  }
-
-  async getGoals(): Promise<RenderedRoot> {
-    return this.#request(
-      this.#url(API_V2_PATHS.goals),
-      renderedRootSchema.parse,
-    );
-  }
-
-  async getRunGoals(runId: string): Promise<RenderedRun> {
-    requireOpaqueId(runId, "run ID");
-    return this.#request(
-      this.#url(API_V2_PATHS.runGoals(runId)),
-      renderedRunSchema.parse,
-    );
-  }
-
-  /** The CLI's rendering of a node's transcript, or the whole run's when `node` is omitted. */
-  async getTranscript(runId: string, node?: string): Promise<RunTranscript> {
-    requireOpaqueId(runId, "run ID");
-    const url = this.#url(API_V2_PATHS.transcript(runId));
-    if (node !== undefined) url.searchParams.set(API_V2_QUERY.node, node);
-    return this.#request(url, runTranscriptSchema.parse);
-  }
-
-  /** The SDK's own telemetry document for the run. */
-  async getTelemetryDocument(runId: string): Promise<RunTelemetryDocument> {
-    requireOpaqueId(runId, "run ID");
-    return this.#request(
-      this.#url(API_V2_PATHS.telemetry(runId)),
-      runTelemetryDocumentSchema.parse,
     );
   }
 

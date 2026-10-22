@@ -1,15 +1,11 @@
 import {
   apiErrorSchema,
   artifactContentSchema,
-  type ProjectGroup,
-  projectAgentsSchema,
-  projectListSchema,
-  renderedRootSchema,
-  renderedRunSchema,
   runAgentsSchema,
+  runDetailSchema,
   runStatusSchema,
+  runTelemetryDocumentSchema,
   runTimelineSchema,
-  runTranscriptSchema,
 } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
@@ -54,102 +50,10 @@ async function refusedBy(
   return apiErrorSchema.parse(await response.json()).error;
 }
 
-async function servedProjects(page: Page): Promise<readonly ProjectGroup[]> {
-  return (await served(page, "/api/v2/projects", projectListSchema)).projects;
-}
-
 const receipt = (page: Page, label: string): Locator =>
   page.getByRole("alert", { name: `${label} receipt` });
 const refusal = (page: Page, label: string): Locator =>
   page.getByRole("alert", { name: `${label} refused` });
-
-test("opens on the projects in the order the API serves them, and a project opens to its runs", async ({
-  page,
-}) => {
-  const groups = await servedProjects(page);
-  expect(groups.length).toBeGreaterThan(2);
-  const none = groups.findIndex((group) => group.project === null);
-  expect(none).toBeGreaterThanOrEqual(0);
-
-  await page.goto("/");
-  const cards = page.getByRole("list", { name: "Projects" });
-  await expect(cards.getByRole("listitem")).toHaveCount(groups.length);
-  // Card by card, the same order — the server's, newest activity first — and
-  // the `(no project)` group where its own recency puts it.
-  for (const [index, group] of groups.entries()) {
-    const card = cards.getByRole("listitem").nth(index);
-    await expect(card).toContainText(group.name ?? "(no project)");
-    if (group.project !== null) await expect(card).toContainText(group.project);
-    await expect(card).toContainText(
-      `${group.runs.length} ${group.runs.length === 1 ? "run" : "runs"}`,
-    );
-  }
-  // The navigation lists the same groups in the same order.
-  const rows = page
-    .getByRole("navigation", { name: "Projects" })
-    .getByRole("list", { name: "Project rows" })
-    .getByRole("listitem");
-  await expect(rows).toHaveCount(groups.length);
-  await expect(rows.nth(none)).toContainText("(no project)");
-
-  // The supervision project's page: its runs newest first, exactly as served,
-  // each with its settlement, liveness, node counts and last write.
-  const supervision = groups.find(
-    (group) => group.project === fixture().projects.supervision,
-  );
-  expect(supervision).toBeDefined();
-  if (supervision === undefined) return;
-  await cards
-    .getByRole("button", { name: supervision.name ?? "" })
-    .first()
-    .click();
-  await expect(page).toHaveURL(
-    new RegExp(
-      `project=${encodeURIComponent(fixture().projects.supervision).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
-    ),
-  );
-  const list = page.getByRole("list", { name: `Runs of ${supervision.name}` });
-  await expect(list.getByRole("listitem")).toHaveCount(supervision.runs.length);
-  for (const [index, run] of supervision.runs.entries()) {
-    const row = list.getByRole("listitem").nth(index);
-    await expect(row).toContainText(run.run_id);
-    await expect(row).toContainText(run.state);
-    if (run.liveness !== undefined)
-      await expect(row).toContainText(run.liveness);
-    await expect(row).toContainText(/\d+ (done|running|pending|waiting)/);
-    await expect(row).toContainText("Last write");
-  }
-
-  // A run opens to the run view that exists today, with the page one step back.
-  await list.getByRole("button", { name: `Open ${runs().supervised}` }).click();
-  await expect(
-    page.getByRole("region", { name: "Graph timeline" }),
-  ).toBeVisible();
-  await expect(page).toHaveURL(new RegExp(`run=${runs().supervised}`));
-  await page
-    .getByRole("button", { name: `Back to ${supervision.name}` })
-    .click();
-  await expect(list).toBeVisible();
-
-  // And a project page is linkable: the address alone opens it, and the flat
-  // run list is one toggle away.
-  await page.goto(
-    `/?project=${encodeURIComponent(fixture().projects.archive)}`,
-  );
-  await expect(
-    page.getByRole("list", { name: /^Runs of / }).getByRole("button", {
-      name: `Open ${runs().history}`,
-    }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Runs", exact: true }).click();
-  // The flat list, with the live run on it — every run row is a button named
-  // by its mark, live or historical, and then its id.
-  await expect(
-    page.getByRole("navigation", { name: "DAG runs" }).getByRole("button", {
-      name: RegExp(`^(Live|Historical) ${runs().live}`),
-    }),
-  ).toBeVisible();
-});
 
 test("raises a surface, claims it, and answers it with a reply composed by shortcut and sent as typed", async ({
   page,
@@ -518,81 +422,6 @@ test("refuses to stop a run another session owns, naming the owner, and forces i
   );
 });
 
-test("reads status, results, goals, the transcript, telemetry and the host as the API renders them", async ({
-  page,
-}) => {
-  await page.goto(`/?run=${runs().supervised}&view=reads`);
-  const status = await served(
-    page,
-    `/api/v2/runs/${runs().supervised}/status`,
-    runStatusSchema,
-  );
-  const panel = page.getByRole("region", { name: "Status" });
-  await expect(panel).toContainText(status.liveness);
-  // The rendering carries a clock — how long a node has been running — that
-  // moves between the API's read and the browser's, so it is held to its
-  // first line, which is the run's own standing.
-  await expect(panel).toContainText(status.rendered.split("\n")[0] ?? "");
-
-  const results = await served(
-    page,
-    `/api/v2/runs/${runs().supervised}/results`,
-    renderedRunSchema,
-  );
-  await page.getByRole("tab", { name: "Results" }).click();
-  await expect(
-    page
-      .getByRole("region", { name: "Results" })
-      .getByText(results.rendered, { exact: true }),
-  ).toBeVisible();
-
-  const goals = await served(
-    page,
-    `/api/v2/runs/${runs().supervised}/goals`,
-    renderedRunSchema,
-  );
-  await page.getByRole("tab", { name: "Goals" }).click();
-  await expect(
-    page
-      .getByRole("region", { name: "Goals" })
-      .getByText(goals.rendered, { exact: true }),
-  ).toBeVisible();
-
-  const transcript = await served(
-    page,
-    `/api/v2/runs/${runs().supervised}/transcript`,
-    runTranscriptSchema,
-  );
-  await page.getByRole("tab", { name: "Transcript" }).click();
-  const transcriptPanel = page.getByRole("region", { name: "Transcript" });
-  await expect(
-    transcriptPanel.getByText(transcript.rendered, { exact: true }),
-  ).toBeVisible();
-  // A node this run dispatched nothing for is the engine's refusal rather than
-  // an empty transcript, and it is shown as the API worded it.
-  const { message } = await refusedBy(
-    await page.request.get(
-      `/api/v2/runs/${runs().supervised}/transcript?node=prepare`,
-    ),
-    422,
-  );
-  await transcriptPanel.getByLabel("Node").selectOption("prepare");
-  await expect(refusal(page, "Transcript")).toContainText(message);
-
-  await page.getByRole("tab", { name: "Telemetry" }).click();
-  await expect(page.getByRole("region", { name: "Telemetry" })).toContainText(
-    `"run_id": "${runs().supervised}"`,
-  );
-
-  const host = await served(page, "/api/v2/host", renderedRootSchema);
-  await page.getByRole("tab", { name: "Host" }).click();
-  // The host view carries a clock per dispatch too, so it is held to its head:
-  // the host and the root it is reading.
-  const hostPanel = page.getByRole("region", { name: "Host" });
-  for (const line of host.rendered.split("\n").slice(0, 2))
-    await expect(hostPanel).toContainText(line.trim());
-});
-
 test("stops a run the acting session owns on one confirm", async ({ page }) => {
   await page.goto(`/?run=${runs().supervised}&view=overall`);
   await expect(
@@ -720,57 +549,135 @@ test("observer and worker harness sessions open from their timelines", async ({
   ).toHaveCount(0);
 });
 
-test("shows the union of a project's agents across its runs, with the count on its row", async ({
+/** Each SDK field is visible in labelled fieldsets and lists, including exact numeric readings. */
+async function expectStructuredFields(
+  fields: Locator,
+  value: unknown,
+  label = "Record",
+): Promise<void> {
+  if (value === null || value === undefined)
+    await expect(
+      fields.getByText("Not recorded", { exact: true }),
+    ).toBeVisible();
+  else if (Array.isArray(value)) {
+    if (value.length === 0)
+      await expect(fields.getByText("None", { exact: true })).toBeVisible();
+    for (const [index, item] of value.entries())
+      await expectStructuredFields(
+        fields.getByRole("listitem", {
+          name: `${label}.${index}`,
+          exact: true,
+        }),
+        item,
+        `${label}.${index}`,
+      );
+  } else if (typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      const field = fields.getByRole("group", {
+        name: `${label}.${key}`,
+        exact: true,
+      });
+      await expect(
+        field.getByText(key.replaceAll("_", " "), { exact: true }).first(),
+      ).toBeVisible();
+      await expectStructuredFields(field, item, `${label}.${key}`);
+    }
+  } else
+    await expect(
+      fields.getByText(
+        typeof value === "boolean" ? (value ? "Yes" : "No") : String(value),
+        { exact: true },
+      ),
+    ).toBeVisible();
+}
+
+test("preserves Reads facts as structured fields in Overall and run details", async ({
   page,
 }) => {
-  const observatory = fixture().projects.observatory;
-  const union = await served(
-    page,
-    `/api/v2/projects/${encodeURIComponent(observatory)}/agents`,
-    projectAgentsSchema,
-  );
-  expect(union.sessions).toHaveLength(fixture().agents.observatory);
-  const group = (await servedProjects(page)).find(
-    (served) => served.project === observatory,
-  );
-  expect(group?.agent_count).toBe(fixture().agents.observatory);
-  // Each entry names the run it is under, which is the run its transcript is
-  // opened through: the live run's sessions and the sibling's, across two runs.
-  expect(
-    union.sessions.filter((session) => session.run_id === runs().live),
-  ).toHaveLength(fixture().agents.live);
-  expect(
-    union.sessions.filter((session) => session.run_id === runs().sibling),
-  ).toHaveLength(fixture().agents.sibling);
-
-  await page.goto(`/?project=${encodeURIComponent(observatory)}`);
-  const label = group?.name ?? observatory;
-  await expect(
-    page.getByRole("list", { name: `Runs of ${label}` }),
-  ).toBeVisible();
-  const row = page
-    .getByRole("navigation", { name: "Projects" })
-    .getByRole("button", { name: new RegExp(label) });
-  await expect(row).toContainText(`${fixture().agents.observatory} agents`);
-  const panel = page.getByRole("region", { name: `Agents of ${label}` });
-  await expect(panel).toContainText(`${fixture().agents.observatory} agents`);
-  await expect(
-    panel.getByRole("button", { name: "Open transcript" }),
-  ).toHaveCount(fixture().agents.observatory);
-  // The sibling run's worker, opened from the project page under the run its
-  // entry names.
-  // The session's own item is the outermost one naming its node: the harness
-  // runs are items inside it.
-  const sibling = panel
-    .getByRole("listitem")
-    .filter({ hasText: `node ${fixture().agents.sibling_worker.node}` })
-    .first();
-  await sibling.getByRole("button", { name: "Open transcript" }).click();
-  await expect(sibling).toContainText(fixture().agents.sibling_worker.text);
-  const transcript = await served(
-    page,
-    `/api/v2/runs/${runs().sibling}/artifacts/${fixture().agents.sibling_worker.history_id}`,
-    artifactContentSchema,
-  );
-  expect(transcript.content).toContain(fixture().agents.sibling_worker.text);
+  for (const runId of [
+    runs().live,
+    runs().history,
+    runs().outcomes,
+    runs().legacy,
+  ]) {
+    const detail = await served(
+      page,
+      `/api/v2/runs/${runId}?include_conversations=false`,
+      runDetailSchema,
+    );
+    const telemetry = await served(
+      page,
+      `/api/v2/runs/${runId}/telemetry`,
+      runTelemetryDocumentSchema,
+    );
+    const statusResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === `/api/v2/runs/${runId}/status`,
+    );
+    await page.goto(`/?run=${runId}&view=overall`);
+    const status = runStatusSchema.parse(await (await statusResponse).json());
+    await expect(
+      page.getByRole("region", { name: "Node statuses", exact: true }),
+    ).toHaveCount(0);
+    await page.getByText("Run details", { exact: true }).click();
+    const header = page.getByRole("group", {
+      name: "Run details",
+      exact: true,
+    });
+    await expect(header).toContainText(status.summary);
+    await expect(header).toContainText(
+      `Unread surfaces${status.unread_surfaces.count}`,
+    );
+    await expect(header).toContainText(
+      `Oldest unread (seconds)${status.unread_surfaces.oldest_seconds ?? "None"}`,
+    );
+    await expectStructuredFields(
+      page.getByRole("region", { name: "Node statuses", exact: true }),
+      status.node_status,
+    );
+    await page.getByText("Run details", { exact: true }).click();
+    await expect(
+      page.getByRole("region", { name: "Node statuses", exact: true }),
+    ).toHaveCount(0);
+    await page.getByText("Run details", { exact: true }).click();
+    await expect(header).toContainText(status.summary);
+    await page.getByText("Run details", { exact: true }).click();
+    await expect(
+      page.getByRole("tab", { name: "Reads", exact: true }),
+    ).toHaveCount(0);
+    await page.getByText("Timing and usage", { exact: true }).click();
+    await expectStructuredFields(
+      page.getByRole("group", { name: "Timing and usage", exact: true }),
+      telemetry.telemetry,
+    );
+    await page.getByText("Recorded results", { exact: true }).click();
+    await expectStructuredFields(
+      page.getByRole("group", { name: "Recorded results", exact: true }),
+      detail.graph?.result,
+    );
+    await page
+      .getByText("Goal and repository identities", { exact: true })
+      .click();
+    await expectStructuredFields(
+      page.getByRole("group", {
+        name: "Goal and repository identities",
+        exact: true,
+      }),
+      {
+        goal: detail.graph?.plan.goal,
+        repositories: [
+          ...new Set(
+            detail.graph?.plan.tasks.flatMap((task: { repo?: string }) =>
+              task.repo ? [task.repo] : [],
+            ) ?? [],
+          ),
+        ],
+      },
+    );
+    await page.getByText("Provider health", { exact: true }).click();
+    await expectStructuredFields(
+      page.getByRole("group", { name: "Provider health", exact: true }),
+      detail.provider_health,
+    );
+  }
 });

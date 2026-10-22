@@ -186,7 +186,6 @@ const scrollOffset = (locator: Locator): Promise<number> =>
  * one declaration of it in this file and none of it in this repository.
  */
 const RUN_DETAIL_READ = new RegExp(`${RUN_LIST_PATH}/[^/?]+(\\?|$)`);
-const RUN_LIST_READ = new RegExp(`${RUN_LIST_PATH}(\\?|$)`);
 
 // llmlint: ignore-block[e2e_not_mocked] the three helpers below are one construct with one reason: nothing is doubled and no response is fabricated. Every request is forwarded to the same `onepipeline-api serve` every other journey drives, and every byte the browser reads back — including both refusals — is that server's own. What each changes is a condition on the way there, exactly as `context.setOffline` changes whether a request arrives at all, which this tier already relies on to reach its pagination-failure journey: `delayReads` changes how long the answer takes, `sweepDuringRead` takes the run off the served root before forwarding, and `readUnderProfile` asks for a reading the app has no control for. None of the three is reachable from a fixture — the defects behind them are races between a server's poll interval and the time a fold of a journal takes (the operator reported a twenty-second read against a stream invalidating twice a second), no run this tier can write reads slowly enough, and the browser's own toolbar offers only the two profiles every run answers to.
 // llmlint: ignore-block[tests_mirror_real_usage] same three sites, same reason: each reproduces a reader who really is in that position — a read slower than the run is moving, a run swept while it was being opened, a reading the run has no profile for — and what the journeys then assert about each is entirely what that reader sees on screen.
@@ -1380,8 +1379,8 @@ test("opens a node from the keyboard-accessible node list and walks back", async
   // nothing until it has arrived: setting off first reached the node list only because
   // the fifty run links were still missing from it.
   await expect(
-    page.getByRole("navigation", { name: "DAG runs" }).locator(".run-link"),
-  ).toHaveCount(50);
+    page.getByRole("navigation", { name: "Projects" }).locator(".run-link"),
+  ).toHaveCount((await allRunIds(page)).length);
   // The canvas is a pointer surface, so the list beside it is the keyboard path to
   // every node; it has to reach the same node view a click does.
   const node = page
@@ -2600,12 +2599,11 @@ test("renders a graph whose node depends on another run", async ({ page }) => {
   );
 });
 
-test("navigates historical DAGs from one list tagged by launching session", async ({
-  page,
-}) => {
+test("navigates historical DAGs from the project sidebar", async ({ page }) => {
   await openObservatory(page);
-  await expect(page.getByText(/Codex session/).first()).toBeVisible();
-  await expect(page.getByText(/Claude session/).first()).toBeVisible();
+  await expect(page.getByRole("navigation").getByText(/session ·/)).toHaveCount(
+    0,
+  );
 
   // Every row states the run's own state and whether it is still moving, so the list
   // is readable without opening a run.
@@ -2627,10 +2625,10 @@ test("navigates historical DAGs from one list tagged by launching session", asyn
 
   // The live marker is a bare dot, so it carries a name of its own and repeats it on
   // hover rather than leaving colour to say the only thing that distinguishes it.
-  const liveMarker = liveRow.getByRole("img", { name: "Live" });
+  const liveMarker = liveRow.getByRole("img", { name: "ACTIVE" });
   await expect(liveMarker).toBeVisible();
   await liveMarker.hover();
-  await expect(page.getByRole("tooltip")).toContainText("Live");
+  await expect(page.getByRole("tooltip")).toContainText("ACTIVE");
 
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
   await expect(graphNodes(page, "done")).toContainText("archive");
@@ -2643,99 +2641,6 @@ test("navigates historical DAGs from one list tagged by launching session", asyn
   await expect(graphNodes(page, "running")).toContainText("dashboard");
   await page.goBack();
   await expect(graphNodes(page, "done")).toContainText("archive");
-});
-
-test("loads another run-list page when navigation reaches the end", async ({
-  page,
-}) => {
-  await page.goto("/?list=runs&view=graph");
-  const navigation = page.getByRole("navigation", { name: "DAG runs" });
-  await expect(navigation.locator(".run-link")).toHaveCount(50);
-  await navigation.locator("[data-radix-scroll-area-viewport]").hover();
-  await page.mouse.wheel(0, 10_000);
-  await expect(navigation.locator(".run-link")).toHaveCount(
-    (await allRunIds(page)).length,
-  );
-});
-
-test("says the next run-list page is loading while it is", async ({ page }) => {
-  // Held open long enough for a reader to see it: a list that reaches its end and
-  // shows nothing is a list that looks like it has simply stopped, which is what
-  // an operator who could not scroll past the first page was looking at.
-  await delayReads(page, RUN_LIST_READ, 1_500);
-  await page.goto("/?list=runs&view=graph");
-  const navigation = page.getByRole("navigation", { name: "DAG runs" });
-  await expect(navigation.locator(".run-link")).toHaveCount(50);
-
-  await navigation.locator("[data-radix-scroll-area-viewport]").hover();
-  await page.mouse.wheel(0, 10_000);
-  await expect(navigation.getByText("Loading more runs…")).toBeVisible();
-  await expect(navigation.locator(".run-link")).toHaveCount(
-    (await allRunIds(page)).length,
-  );
-  // And it stops saying so once the page has arrived, rather than announcing a
-  // read that is over.
-  await expect(navigation.getByText("Loading more runs…")).toHaveCount(0);
-});
-
-/**
- * A window tall enough to hold the whole first page of runs: those fifty rows measure
- * 4350px, so this leaves room for ten more before the list would scroll again.
- */
-const RUN_LIST_FITS_HEIGHT = 5200;
-
-test("loads another run-list page from the keyboard", async ({ page }) => {
-  // Fifty-odd Tab presses, each a browser round trip: the journey is latency-bound
-  // rather than slow, so it needs the budget rather than the speed.
-  test.slow();
-  // The keyboard path and the scroll path are otherwise the same path: walking the run
-  // list scrolls it, the navigation pages itself from that scroll, and `hasMore` going
-  // false unmounts the control being tabbed towards. A list that fits cannot scroll.
-  await page.setViewportSize({ width: 1280, height: RUN_LIST_FITS_HEIGHT });
-  await page.goto("/?list=runs&view=graph");
-  const navigation = page.getByRole("navigation", { name: "DAG runs" });
-  const loadMore = page.getByRole("button", { name: "Load more runs" });
-  await expect(navigation.locator(".run-link")).toHaveCount(50);
-  // Asserted rather than assumed: a first page that outgrew the window would scroll.
-  expect(
-    await navigation
-      .locator("[data-radix-scroll-area-viewport]")
-      .evaluate((element) => element.scrollHeight - element.clientHeight),
-  ).toBe(0);
-
-  expect(await tabTo(page, loadMore, 70)).toBe(true);
-  // Still on the first page once the walk has arrived, so the only thing that can
-  // account for the next one is the keypress below.
-  await expect(navigation.locator(".run-link")).toHaveCount(50);
-  await page.keyboard.press("Enter");
-  await expect(navigation.locator(".run-link")).toHaveCount(
-    (await allRunIds(page)).length,
-  );
-});
-
-test("recovers when loading another run-list page fails", async ({
-  context,
-  page,
-}) => {
-  await page.goto("/?list=runs&view=graph");
-  const navigation = page.getByRole("navigation", { name: "DAG runs" });
-  const viewport = navigation.locator("[data-radix-scroll-area-viewport]");
-  await expect(navigation.locator(".run-link")).toHaveCount(50);
-
-  await context.setOffline(true);
-  await viewport.hover();
-  await page.mouse.wheel(0, 10_000);
-  await expect(page.getByRole("alert")).toContainText(
-    "Telemetry request failed",
-  );
-
-  await context.setOffline(false);
-  await page.mouse.wheel(0, -200);
-  await page.mouse.wheel(0, 10_000);
-  await expect(navigation.locator(".run-link")).toHaveCount(
-    (await allRunIds(page)).length,
-  );
-  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("restores a bookmarked view and refreshes through the read API", async ({
@@ -2755,7 +2660,10 @@ test("restores a bookmarked view and refreshes through the read API", async ({
   await expect(metric("Turns")).toContainText(/\d+/);
   await expect(graphLine(page)).toBeVisible();
   await expect(page.getByText("Observe the live DAG safely")).toBeVisible();
-  await expect(page.getByText(/^Codex session · /).first()).toBeVisible();
+  await page.getByText("Run details", { exact: true }).click();
+  await expect(
+    page.getByText(/Launching session: Codex session/),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(graphLine(page)).toBeVisible();
@@ -2947,62 +2855,28 @@ test("reads every recorded moment as words rather than as its stamp", async ({
   );
 });
 
-test("tags every run of one launching session with it, in one flat list", async ({
+test("keeps launching sessions in run header details and out of the project sidebar", async ({
   page,
 }) => {
   await openObservatory(page);
-  const navigation = page.getByRole("navigation", { name: "DAG runs" });
-  // One list, ordered by what moved last. Nothing gathers the rows into sections,
-  // because a grouping outranks that order: the run an operator came to look at
-  // stops being at the top, and on a host with fifty of them stops being on the
-  // first page at all.
-  await expect(navigation.locator(".run-link").first()).toBeVisible();
-  await expect(navigation.getByRole("heading", { level: 2 })).toHaveCount(0);
-  await expect(navigation.locator("section")).toHaveCount(0);
-
-  // Three of the served runs record the same launching *session*, as one planner
-  // session driving several graphs does — each of them minting a launch id of its
-  // own, which is why the tag is read off the session rather than off the launch.
-  // Each of the three carries that session as a tag on its own row rather than
-  // sharing a heading with the others.
-  for (const runId of [runs().live, runs().sibling, runs().busy]) {
-    await expect(
-      navigation.getByRole("button", { name: RegExp(runId) }),
-    ).toContainText(/Codex session · /);
-  }
-  // The claude launch has no protected provenance record at all — the state every
-  // launch reaches once that short-lived record expires — and its run is still
-  // named by the session that launched it, from what the run directory recorded.
-  await expect(page.getByText(/Claude session/).first()).toBeVisible();
-
-  await navigation
-    .getByRole("button", { name: RegExp(runs().sibling) })
-    .click();
-  await expect(graphNodes(page, "running")).toContainText("sibling");
-});
-
-test("tags a run with no recorded launch as unattributed", async ({ page }) => {
-  await openObservatory(page);
-  const navigation = page.getByRole("navigation", { name: "DAG runs" });
-  await expect(page.getByText(/Codex session/).first()).toBeVisible();
-  // The server serves this run with no launch join and no transcripts at all; it
-  // still has to be reachable rather than dropped from the navigation, and it reads
-  // as honestly unattributed rather than as an unknown session.
+  const navigation = page.getByRole("navigation", { name: "Projects" });
+  await expect(navigation.getByText(/session ·/)).toHaveCount(0);
+  await page.getByText("Run details", { exact: true }).click();
   await expect(
-    navigation.getByRole("button", { name: RegExp(runs().unattributed) }),
-  ).toContainText("Unattributed");
-  // A run recorded before attribution reached the run directory, whose protected
-  // record is gone too: nothing can name its session, so it is named by the launch
-  // it did record rather than pooled with the runs that recorded nothing at all.
-  await expect(
-    navigation.getByRole("button", { name: RegExp(runs().eventless) }),
-  ).toContainText(`Unattributed launch · ${runs().eventless.slice(0, 8)}…`);
-
+    page.getByText(/Launching session: Codex session/),
+  ).toBeVisible();
   await navigation
     .getByRole("button", { name: RegExp(runs().unattributed) })
     .click();
-  await expect(graphNodes(page, "running")).toContainText("orphan");
-  await expect(page.getByText("Continue unattributed work")).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("heading", { name: runs().unattributed, exact: true })
+      .first(),
+  ).toBeVisible();
+  await page.getByText("Run details", { exact: true }).click();
+  await expect(
+    page.getByText(/^Launching session: Unattributed launch ·/),
+  ).toBeVisible();
 });
 
 test("lists a run that has recorded no event beside the runs that have", async ({
@@ -3014,7 +2888,7 @@ test("lists a run that has recorded no event beside the runs that have", async (
   // `last_event` it rejected would take every other run down with it and leave the
   // operator looking at "No DAG runs found" — the state this fixture would have
   // reproduced before `last_event` became nullable.
-  const navigation = page.getByRole("navigation", { name: "DAG runs" });
+  const navigation = page.getByRole("navigation", { name: "Projects" });
   for (const runId of Object.values(runs())) {
     await expect(
       navigation.getByRole("button", { name: RegExp(runId) }),
@@ -3490,7 +3364,7 @@ test("reflows navigation, detail, and metrics at a narrow viewport", async ({
 }) => {
   const width = async (locator: Locator): Promise<number | undefined> =>
     (await locator.boundingBox())?.width;
-  const navigation = page.getByRole("navigation", { name: "DAG runs" });
+  const navigation = page.getByRole("navigation", { name: "Projects" });
   const metrics = metricTiles(page);
   /**
    * Which way, if either, the whole reading spills out of the viewport it was given.
@@ -3859,16 +3733,12 @@ test("surfaces a telemetry read it cannot complete", async ({ page }) => {
   // EventSource both fail for real, and the operator must be told rather than shown
   // an empty graph that looks like "no runs yet".
   await page.goto(OFFLINE_UI_URL);
-  // The header's banner is about the run list and the stream; the projects the
-  // landing opens on report their own failed read beside it, so the banner is
-  // asked for by what it says.
+  // Both failed reads are named in the shared banner.
   const banner = page
     .getByRole("alert")
     .filter({ hasText: "Live telemetry issue" });
   await expect(banner).toContainText("Live telemetry issue");
-  await expect(
-    page.getByRole("alert").filter({ hasText: "could not be read" }),
-  ).toBeVisible();
+  await expect(banner).toContainText("Projects unavailable");
   // The banner names the failure as well as announcing one: an operator who cannot
   // see what broke cannot tell a wedged server from a mistyped API address.
   await expect(
@@ -4476,9 +4346,11 @@ test("keeps the pages a reader scrolled to when a run moves", async ({
     if (url.pathname === RUN_LIST_PATH) listReads.push(url.search);
   });
   await page.goto("/?list=runs&view=graph");
-  const navigation = page.getByRole("navigation", { name: "DAG runs" });
+  const navigation = page.getByRole("navigation", { name: "Projects" });
   const viewport = navigation.locator("[data-radix-scroll-area-viewport]");
-  await expect(navigation.locator(".run-link")).toHaveCount(50);
+  await expect(navigation.locator(".run-link")).toHaveCount(
+    (await allRunIds(page)).length,
+  );
   await viewport.hover();
   await page.mouse.wheel(0, 10_000);
   await expect(navigation.locator(".run-link")).toHaveCount(
@@ -4583,7 +4455,7 @@ test("stays quiet when the run it is opening is swept out from under it", async 
   // The row goes, which is the whole of what the reader is told about it.
   await expect(
     page
-      .getByRole("navigation", { name: "DAG runs" })
+      .getByRole("navigation", { name: "Projects" })
       .getByRole("button", { name: RegExp(swept) }),
   ).toHaveCount(0);
   // And the reader lands on a run the server still serves rather than on the one
@@ -4599,29 +4471,6 @@ test("stays quiet when the run it is opening is swept out from under it", async 
 });
 
 test("drops a run the server stops serving", async ({ page }) => {
-  // What the server said about the run that went away, read off the answer the
-  // browser actually got: `missing` is the companion list a selection names an id
-  // it could not find in, and it is the whole of why the row goes.
-  //
-  // llmlint: ignore-block[tests_mirror_real_usage] a row that disappears is what a reader sees, and it is asserted below — but it looks the same whichever answer removed it: a `missing` entry, an empty selection, or a refetched first page. This repository's contract makes those three different facts to a caller, so which one the browser acted on is read from the answer the browser was given rather than guessed from the row that went.
-  const missing: string[] = [];
-  page.on("response", (response) => {
-    const url = new URL(response.url());
-    if (url.pathname !== RUN_LIST_PATH || !url.searchParams.has("select"))
-      return;
-    void response
-      .json()
-      .then((body: unknown) => {
-        const answer = z
-          .object({ missing: z.array(z.string()).optional() })
-          .safeParse(body);
-        if (answer.success) missing.push(...(answer.data.missing ?? []));
-      })
-      .catch(() => {
-        // A body the browser never read is nothing to assert on.
-      });
-  });
-  // llmlint: ignore-end[tests_mirror_real_usage]
   await openObservatory(page);
   await expect(
     page.getByRole("button", { name: RegExp(runs().history) }),
@@ -4632,7 +4481,12 @@ test("drops a run the server stops serving", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: RegExp(runs().history) }),
   ).toHaveCount(0);
-  await expect.poll(() => missing).toContain(runs().history);
+  const absent = parseRunList(
+    await (
+      await page.request.get(`/api/v2/runs?select=${runs().history}`)
+    ).json(),
+  );
+  expect(absent.missing).toContain(runs().history);
   await expect(
     page.getByRole("button", { name: RegExp(runs().live) }),
   ).toBeVisible();
@@ -4640,20 +4494,64 @@ test("drops a run the server stops serving", async ({ page }) => {
 
 test("falls back to the empty state once no run is left", async ({ page }) => {
   await openObservatory(page);
-  changeServedRuns(["--remove-page-runs"]);
+  const selected = new URL(page.url()).searchParams.get("run");
+  if (!selected) throw new Error("the page selected no run");
+  let releaseDetail: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => {
+    releaseDetail = resolve;
+  });
+  let detailHeld: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    detailHeld = resolve;
+  });
+  // llmlint: ignore[e2e_not_mocked] The route forwards the real server's response unchanged and holds only its delivery. This stages a response already in flight when its run is removed, which the filesystem corpus cannot synchronize by itself.
+  await page.route(
+    (url) => url.pathname === `/api/v2/runs/${selected}`,
+    async (route) => {
+      const response = await route.fetch();
+      detailHeld();
+      await released;
+      await route.fulfill({ response });
+    },
+  );
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await held;
+  const lateResponse = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === `/api/v2/runs/${selected}`,
+  );
+  try {
+    changeServedRuns(["--remove-page-runs"]);
 
-  // Every remaining run except one — the journey before this removed the historical
-  // one. The empty state means the server serves none, so it must not appear while
-  // any run is still there to show, whatever shape that run is.
-  const remaining = await allRunIds(page);
-  const last = remaining.pop();
-  if (last === undefined) throw new Error("fixture has no remaining runs");
-  for (const runId of remaining) {
-    changeServedRuns(["--remove-run", runId]);
-    await expect(page.getByText("No DAG runs found")).toHaveCount(0);
+    // Every remaining run except one — the journey before this removed the historical
+    // one. The empty state means the server serves none, so it must not appear while
+    // any run is still there to show, whatever shape that run is.
+    const remaining = await allRunIds(page);
+    const last = remaining.pop();
+    if (last === undefined) throw new Error("fixture has no remaining runs");
+    for (const runId of remaining) {
+      changeServedRuns(["--remove-run", runId]);
+      await expect(page.getByText("No DAG runs found")).toHaveCount(0);
+    }
+    changeServedRuns(["--remove-run", last]);
+
+    await expect(page.getByText("No DAG runs found")).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(
+      page.getByRole("group", { name: "Run details", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("application", {
+        name: "DAG execution graph",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+  } finally {
+    releaseDetail();
   }
-  changeServedRuns(["--remove-run", last]);
-
+  await (await lateResponse).finished();
   await expect(page.getByText("No DAG runs found")).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(
+    page.getByRole("group", { name: "Run details", exact: true }),
+  ).toHaveCount(0);
 });

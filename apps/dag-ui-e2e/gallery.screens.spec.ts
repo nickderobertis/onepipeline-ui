@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CAPTURE_INSTANT_MS } from "./capture-clock";
 import { fixture, runs } from "./fixture-facts";
 import recorded from "./fixtures/timeline-recorded.json" with { type: "json" };
@@ -225,6 +225,7 @@ async function settleReads(page: Page): Promise<void> {
 interface Surface {
   readonly name: string;
   readonly title: string;
+  readonly mask?: (page: Page) => readonly Locator[];
   readonly open: (page: Page) => Promise<void>;
 }
 
@@ -406,28 +407,79 @@ const SURFACES: readonly Surface[] = [
   },
   {
     name: "11-project-list",
-    title: "The projects the app opens on",
+    title: "Projects and their runs in one sidebar",
     open: async (page) => {
-      await page.goto("/");
+      await page.goto(`/?run=${runs().live}`);
       await settleReads(page);
-      const cards = page.getByRole("list", { name: "Projects" });
-      await expect(cards.getByRole("listitem").first()).toBeVisible();
-      // Photographed with every group's card drawn, the `(no project)` one
-      // among them.
-      await expect(cards).toContainText("(no project)");
+      await expect(
+        page
+          .getByRole("navigation", { name: "Projects" })
+          .getByText("Other runs", { exact: true })
+          .first(),
+      ).toBeVisible();
     },
   },
   {
-    name: "12-project-page",
-    title: "A project's page: its runs, newest activity first",
+    name: "12-host",
+    // Only machine-specific paths and capacity bytes are masked; labels stay visible.
+    mask: (page) => [
+      page.getByRole("img", { name: "Diagnostic absolute path", exact: true }),
+      page
+        .getByRole("region", { name: "Host", exact: true })
+        .getByRole("status", {
+          name: /^(Runs root path|Filesystem root path|Measured root ancestor|Free capacity bytes|Total capacity bytes)$/,
+        }),
+    ],
+    title: "Host resources, unwatched runs and host shutdown",
     open: async (page) => {
-      await page.goto(
-        `/?project=${encodeURIComponent(fixture().projects.observatory)}`,
-      );
+      await page.goto("/?page=host");
+      await settleReads(page);
+      // llmlint: ignore[tests_mirror_real_usage] The manager authorizes capture-only path spans for screenshot masks. Each span covers one rendered line fragment of an absolute path, avoiding a multiline bounding box that would hide surrounding prose. Text is checked byte-identical and layout is untouched; the real Host journey asserts full unmasked diagnostics. Product code and served values are unchanged.
+      await page
+        .getByRole("region", { name: "Host", exact: true })
+        .evaluate((host) => {
+          const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+          const nodes: Text[] = [];
+          while (walker.nextNode()) {
+            const node = walker.currentNode;
+            if (
+              node instanceof Text &&
+              !node.parentElement?.hasAttribute("aria-label")
+            )
+              nodes.push(node);
+          }
+          for (const node of nodes) {
+            const original = node.data;
+            for (const match of original.matchAll(
+              /(?:[A-Za-z]:[\\/]|\/)[^\s:;)]+/g,
+            )) {
+              const range = document.createRange();
+              range.setStart(node, match.index);
+              range.setEnd(node, match.index + match[0].length);
+              for (const rect of range.getClientRects()) {
+                const span = document.createElement("span");
+                span.setAttribute("role", "img");
+                span.setAttribute("aria-label", "Diagnostic absolute path");
+                Object.assign(span.style, {
+                  position: "fixed",
+                  left: `${rect.left}px`,
+                  top: `${rect.top}px`,
+                  width: `${rect.width}px`,
+                  height: `${rect.height}px`,
+                  pointerEvents: "none",
+                });
+                host.append(span);
+              }
+            }
+            if (node.data !== original)
+              throw new Error("path masking changed diagnostic text");
+          }
+        });
       await expect(
-        page
-          .getByRole("list", { name: /^Runs of / })
-          .getByRole("button", { name: `Open ${runs().live}` }),
+        page.getByRole("region", { name: "Free space" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: /^Unwatched runs: [0-9]+$/ }),
       ).toBeVisible();
     },
   },
@@ -665,6 +717,7 @@ for (const size of VIEWPORTS) {
         await page.screenshot({
           path: join(gallery, image),
           animations: "disabled",
+          mask: [...(surface.mask?.(page) ?? [])],
         });
         captured.push({
           name: surface.name,

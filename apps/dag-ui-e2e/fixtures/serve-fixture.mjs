@@ -33,7 +33,7 @@
  *   serve-fixture.mjs --stall --port N [--refuse-port N]
  */
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   constants,
   copyFileSync,
@@ -58,6 +58,7 @@ import { FIXTURE_FACTS_NAME } from "./facts-file.ts";
 import harnessBinaries from "./harness-binaries.json" with { type: "json" };
 import {
   buildPreservedRuns,
+  buildProjectCentricRuns,
   buildReviewLoopRuns,
   buildRuns,
   buildShutdownRuns,
@@ -67,6 +68,7 @@ import {
   growTranscript,
   overridesDir,
   preservedFacts,
+  projectCentricFacts,
   recordActivity,
   recordWords,
   removePageRuns,
@@ -363,7 +365,7 @@ async function serve(workspace, port, ui, corpus) {
         ...fixtureEnvironment,
         ONEAGENTGRAPH_STATE_DIR: graphRecordsFor(runsRoot),
         HOSTNAME: thisHost(),
-        ONEVCS_HOME: onevcsHome,
+        ONEVCS_HOME: corpus.unresolvedWorkspaces ? "" : onevcsHome,
         // Where a fixture engine dispatch runs, and where its harness
         // turn records itself: named inside the workspace, because the defaults
         // are this server's working directory — the app's checkout — and the
@@ -391,7 +393,9 @@ function parseArgs(argv) {
     "--stall",
     "--ui",
     "--shutdown-corpus",
+    "--unresolved-workspaces",
     "--preserved-corpus",
+    "--project-centric-corpus",
     "--review-corpus",
     "--review-loop-corpus",
   ]);
@@ -654,7 +658,35 @@ if (args.stall) {
           ),
         facts: () => facts(workspace),
       };
-      if (args["preserved-corpus"]) {
+      if (args["project-centric-corpus"]) {
+        corpus = {
+          build: (root) => {
+            buildProjectCentricRuns(root);
+            const engine = join(
+              REPO_ROOT,
+              ".tools",
+              "bin",
+              process.platform === "win32" ? "onepipeline.exe" : "onepipeline",
+            );
+            execFileSync(
+              engine,
+              [
+                "label",
+                "project-before-labels",
+                "--label",
+                "kind=spike-brief",
+                "--group",
+                "local-md:overlay-project",
+              ],
+              {
+                env: { ...process.env, ONEPIPELINE_RUNS_DIR: root },
+                stdio: "pipe",
+              },
+            );
+          },
+          facts: projectCentricFacts,
+        };
+      } else if (args["preserved-corpus"]) {
         corpus = { build: buildPreservedRuns, facts: preservedFacts };
       } else if (args["review-loop-corpus"]) {
         corpus = { build: buildReviewLoopRuns, facts: reviewLoopFacts };
@@ -675,6 +707,7 @@ if (args.stall) {
           facts: shutdownFacts,
         };
       }
+      corpus.unresolvedWorkspaces = args["unresolved-workspaces"] === true;
       process.exit(await serve(workspace, port, args.ui === true, corpus));
     }
   } catch (refused) {
