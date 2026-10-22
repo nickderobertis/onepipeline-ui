@@ -1452,6 +1452,16 @@ button.graph-row-name {
   text-align: start;
 }
 
+/* A host name is an identifier, and a fixed-width face also gives one of a given
+   length the same width wherever it is read. */
+.host-page .host-name {
+  font-family: var(--font-mono);
+}
+
+.host-page .host-age {
+  font-variant-numeric: tabular-nums;
+}
+
 .channel-section h3 {
   display: flex;
   align-items: center;

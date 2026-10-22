@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
 import { defineConfig } from "@playwright/test";
@@ -112,6 +112,31 @@ for (const server of held) {
 }
 `;
 
+/**
+ * A fixed name for the fixture directory, which the screenshot tier asks for and no
+ * other run does.
+ *
+ * Every path the read API serves — the runs root, a dispatch registry it could not
+ * read — begins with this directory, and the Host page prints them. `mkdtempSync`'s
+ * random suffix is six characters of a proportional face, so two captures of one
+ * build masked those paths with boxes of different widths and moved the text after
+ * them. The capture always runs in a container of its own, whose temporary directory
+ * nothing else shares, so a fixed name there costs no isolation; anywhere else a
+ * second run asking for it is refused by `mkdirSync` rather than handed the first
+ * run's directory.
+ */
+const fixtureName = z
+  .string()
+  .regex(/^[a-z0-9-]+$/, "a fixture name is lowercase letters, digits and -");
+
+function makeWorkspace(): string {
+  const named = process.env.DAG_UI_E2E_FIXTURE_NAME;
+  if (named === undefined) return mkdtempSync(FIXTURE_PREFIX);
+  const workspace = `${FIXTURE_PREFIX}${fixtureName.parse(named)}`;
+  mkdirSync(workspace);
+  return workspace;
+}
+
 function chooseSession(): Session {
   const [api, ui, offlineApi, offlineUi, stalledApi, stalledUi] = z
     .tuple([port, port, port, port, port, port])
@@ -129,7 +154,7 @@ function chooseSession(): Session {
     offlineUi,
     stalledApi,
     stalledUi,
-    workspace: mkdtempSync(FIXTURE_PREFIX),
+    workspace: makeWorkspace(),
   };
 }
 

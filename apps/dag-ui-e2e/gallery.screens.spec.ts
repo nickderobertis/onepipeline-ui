@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { runDetailSchema } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CAPTURE_INSTANT_MS } from "./capture-clock";
 import { fixture, runs } from "./fixture-facts";
@@ -296,6 +297,27 @@ const SURFACES: readonly Surface[] = [
         "dashboard: running",
       );
       await expect(graphNodes(page, "failed").first()).toBeVisible();
+      // React Flow draws an edge only once it has measured both ends' handles, and
+      // a page whose cards are drawn but whose edges are not yet is quiet enough to
+      // pass `settleReads` — one capture in a few came out with no edges at all. So
+      // every dependency the served plan draws is waited for by its own name.
+      const response = await page.request.get(
+        `/api/v2/runs/${runs().live}?include_conversations=false`,
+      );
+      expect(response.ok()).toBe(true);
+      const tasks =
+        runDetailSchema.parse(await response.json()).graph?.plan.tasks ?? [];
+      const drawn = new Set(tasks.map(({ id }) => id));
+      const edges = tasks.flatMap((task) =>
+        (task.deps ?? [])
+          .filter((dependency) => drawn.has(dependency))
+          .map((dependency) => `Edge from ${dependency} to ${task.id}`),
+      );
+      expect(edges.length).toBeGreaterThan(0);
+      for (const name of edges)
+        await expect(
+          page.getByRole("group", { name, exact: true }),
+        ).toBeAttached();
     },
   },
   {
@@ -421,13 +443,15 @@ const SURFACES: readonly Surface[] = [
   },
   {
     name: "12-host",
-    // Only machine-specific paths and capacity bytes are masked; labels stay visible.
+    // Only machine-specific values are masked — paths, capacity bytes, the host's
+    // name (the capture container's id) and dispatch ages read off the server's
+    // own clock; labels stay visible.
     mask: (page) => [
       page.getByRole("img", { name: "Diagnostic absolute path", exact: true }),
       page
         .getByRole("region", { name: "Host", exact: true })
         .getByRole("status", {
-          name: /^(Runs root path|Filesystem root path|Measured root ancestor|Free capacity bytes|Total capacity bytes)$/,
+          name: /^(Host name|Runs root path|Filesystem root path|Measured root ancestor|Free capacity bytes|Total capacity bytes|Dispatch age milliseconds)$/,
         }),
     ],
     title: "Host resources, unwatched runs and host shutdown",

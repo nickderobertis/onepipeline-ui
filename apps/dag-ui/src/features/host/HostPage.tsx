@@ -22,7 +22,17 @@ export function HostPage({
   return (
     <ScrollArea className="min-h-0 flex-1">
       <section aria-label="Host" className="channel-view host-page">
-        <h2>This host{reading && ` · ${reading.host}`}</h2>
+        <h2>
+          This host
+          {reading && (
+            <>
+              {" · "}
+              <output aria-label="Host name" className="host-name">
+                {reading.host}
+              </output>
+            </>
+          )}
+        </h2>
         <Button onClick={refresh}>Refresh host</Button>
         {(host.error || unwatched.error) && (
           <p role="alert">{host.error?.message ?? unwatched.error?.message}</p>
@@ -111,7 +121,14 @@ export function HostPage({
                           <td>{row.run}</td>
                           <td>{row.node}</td>
                           <td>{row.launcher}</td>
-                          <td>{row.age_ms ?? "Unknown"}</td>
+                          <td>
+                            <output
+                              aria-label="Dispatch age milliseconds"
+                              className="host-age"
+                            >
+                              {row.age_ms ?? "Unknown"}
+                            </output>
+                          </td>
                           <td>
                             {row.proof}
                             {row.unproven && `: ${row.unproven}`}
