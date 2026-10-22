@@ -1425,8 +1425,14 @@ button.graph-row-name {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.host-page :where(h2, dd, p, th, td) {
+.host-page :where(h2, dd, p, td) {
   overflow-wrap: anywhere;
+}
+
+/* Headers break only between words; when a phone's column cannot hold them the
+   table scrolls sideways inside its own focusable box rather than widening the page. */
+.host-table {
+  overflow-x: auto;
 }
 
 .host-page table {

@@ -133,6 +133,8 @@ for (const size of VIEWPORTS) {
       const region = element.querySelector('[aria-label="Host"]');
       const outside = [...(region?.querySelectorAll("*") ?? [])].filter(
         (child) => {
+          // The table's own sideways scroll keeps what it holds reachable.
+          if (child.parentElement?.closest(".host-table")) return false;
           const box = child.getBoundingClientRect();
           return box.width > 0 && box.right > bounds.right + 1;
         },
@@ -148,6 +150,24 @@ for (const size of VIEWPORTS) {
     expect(escaped.outside).toEqual([]);
     expect(escaped.overflow).toBeLessThanOrEqual(1);
     await expectThePageItselfDoesNotScroll(page);
+    // Where the column cannot hold the table, its box scrolls, and a keyboard can
+    // reach the box and scroll it to the proofs at its far edge.
+    const table = host.getByRole("region", {
+      name: "Providers and dispatches table",
+    });
+    const hidden = await table.evaluate(
+      (element) => element.scrollWidth - element.clientWidth,
+    );
+    // The corpus's table outgrows a phone's column, so there the scroll is exercised.
+    if (size === PHONE) expect(hidden).toBeGreaterThan(1);
+    if (hidden > 1) {
+      await tabTo(page, table);
+      await page.keyboard.press("End");
+      await page.keyboard.press("ArrowRight");
+      await expect
+        .poll(() => table.evaluate((element) => element.scrollLeft))
+        .toBeGreaterThan(0);
+    }
   });
 }
 

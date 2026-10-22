@@ -89,31 +89,38 @@ export function HostPage({
               {reading.dispatches.length === 0 ? (
                 <p>No live dispatches</p>
               ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      {["Run", "Node", "Provider", "Age (ms)", "Proof"].map(
-                        (title) => (
-                          <th key={title}>{title}</th>
-                        ),
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reading.dispatches.map((row) => (
-                      <tr key={`${row.run}/${row.node}`}>
-                        <td>{row.run}</td>
-                        <td>{row.node}</td>
-                        <td>{row.launcher}</td>
-                        <td>{row.age_ms ?? "Unknown"}</td>
-                        <td>
-                          {row.proof}
-                          {row.unproven && `: ${row.unproven}`}
-                        </td>
+                <section
+                  aria-label="Providers and dispatches table"
+                  className="host-table"
+                  // biome-ignore lint/a11y/noNoninteractiveTabindex: this box scrolls sideways when a phone's column cannot hold the table, and a keyboard can scroll only what it can focus.
+                  tabIndex={0}
+                >
+                  <table>
+                    <thead>
+                      <tr>
+                        {["Run", "Node", "Provider", "Age (ms)", "Proof"].map(
+                          (title) => (
+                            <th key={title}>{title}</th>
+                          ),
+                        )}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {reading.dispatches.map((row) => (
+                        <tr key={`${row.run}/${row.node}`}>
+                          <td>{row.run}</td>
+                          <td>{row.node}</td>
+                          <td>{row.launcher}</td>
+                          <td>{row.age_ms ?? "Unknown"}</td>
+                          <td>
+                            {row.proof}
+                            {row.unproven && `: ${row.unproven}`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
               )}
             </section>
             <section aria-label="Gone dispatches">
