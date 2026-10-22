@@ -693,12 +693,12 @@ test("preserves Reads facts as structured fields in Overall and run details", as
  * names fails the journey rather than passing unread, which is what makes this
  * an inventory of everything those reads showed rather than a sample of it.
  *
- * Three kinds of line are deliberately not shown, by the manager's ruling, and
+ * Two kinds of line are deliberately not shown, by the manager's ruling, and
  * each is named where it is consumed: a merged node's landing phrase (a live
- * `onevcs` read at request time, not a recorded fact), a transcript's
- * `report ROLE PATH` line with the note under it (the producer's scratch path),
- * and nothing else. A dispatch whose report carries no transcript still says so,
- * in the dispatch's own detail.
+ * `onevcs` read at request time, not a recorded fact), and a transcript's
+ * `report ROLE PATH` line with the note under it (the producer's scratch path).
+ * A dispatch whose run recorded no transcript still says so, in the dispatch's
+ * own detail.
  */
 test("shows every fact the removed Results, Goals and Transcript reads printed", async ({
   page,
