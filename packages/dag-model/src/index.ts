@@ -243,7 +243,7 @@ export const API_V2_FILTER_PROFILES = {
  * client that has never seen the field shows a run a dozen agents ran under as
  * one nothing was launched for.
  */
-export const TELEMETRY_SCHEMA_VERSION = 23;
+export const TELEMETRY_SCHEMA_VERSION = 24;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -609,6 +609,10 @@ export const RUN_LIVENESS_NOTHING_DRIVING: readonly string[] = [
 ];
 
 export const runSummarySchema = openObject({
+  /** Effective engine labels, including label overlays. Absent when empty. */
+  labels: z.record(z.string(), z.string()).optional(),
+  /** Resolved group: explicit group, copy origin, then launched project. */
+  group: z.string().min(1).optional(),
   run_id: z.string().min(1),
   state: z.string().min(1),
   phase: z.string().min(1),
@@ -2202,8 +2206,45 @@ export const unwatchedSchema = openObject({
  * SDK's own text, byte for byte what the binary prints, with the roots it refused
  * beside it on the terms the run list names one.
  */
+/** The engine's versioned host reading, projected without renaming its fields. */
+export const hostReadingSchema = openObject({
+  schema_version: z.literal(1),
+  host: z.string(),
+  root: z.string(),
+  root_error: z.string().nullable(),
+  free_space: z.array(
+    openObject({
+      roots: z.array(
+        openObject({
+          role: z.string(),
+          path: z.string().nullable(),
+          measured_at: z.string().nullable(),
+        }),
+      ),
+      free_bytes: counter.nullable(),
+      total_bytes: counter.nullable(),
+      error: z.string().nullable(),
+    }),
+  ),
+  dispatches: z.array(
+    openObject({
+      run: z.string(),
+      node: z.string(),
+      launcher: z.string(),
+      age_ms: nonnegative.nullable(),
+      proof: z.enum(["held", "unproven"]),
+      unproven: z.string().nullable(),
+    }),
+  ),
+  gone: z.array(
+    openObject({ run: z.string(), node: z.string(), reason: z.string() }),
+  ),
+  skipped: z.array(openObject({ path: z.string(), reason: z.string() })),
+});
+
 export const renderedRootSchema = openObject({
   ...verbEnvelope,
+  reading: hostReadingSchema.optional(),
   rendered: z.string(),
   unreadable: z.array(unreadableRunRootSchema).optional(),
 });

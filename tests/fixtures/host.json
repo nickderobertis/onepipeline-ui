@@ -1,6 +1,34 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 23,
+  "telemetry_schema_version": 24,
   "observed_at": "2026-08-07T12:00:00Z",
-  "rendered": "host a-reading-host\n  reading /a-workspace/runs\n  free space: <this host's own reading>\n  no live dispatches\n"
+  "rendered": "host a-reading-host\n  reading /a-workspace/runs\n  free space: <this host's own reading>\n  no live dispatches\n",
+  "reading": {
+    "schema_version": 1,
+    "host": "a-reading-host",
+    "root": "/a-workspace/runs",
+    "root_error": null,
+    "free_space": [
+      {
+        "roots": [
+          {
+            "role": "runs-root",
+            "path": "/a-workspace/runs",
+            "measured_at": null
+          },
+          {
+            "role": "workspaces",
+            "path": "/a-scratch/onevcs-home/workspaces",
+            "measured_at": "/a-scratch/onevcs-home"
+          }
+        ],
+        "free_bytes": 1,
+        "total_bytes": 1,
+        "error": null
+      }
+    ],
+    "dispatches": [],
+    "gone": [],
+    "skipped": []
+  }
 }

@@ -947,10 +947,11 @@ impl RunApi for RunStore {
 
     fn host(&self) -> Result<Envelope<Value>, ApiError> {
         let host = verbs::host(&self.root);
-        Ok(Self::envelope(payload::rendered_root(
-            verbs::render_host(&host),
-            &host.survey.skipped,
-        )))
+        let mut payload = payload::rendered_root(verbs::render_host(&host), &host.survey.skipped);
+        payload["reading"] = serde_json::to_value(&host.reading).map_err(|error| {
+            ApiError::ProjectionFailed(format!("the host reading does not serialize: {error}"))
+        })?;
+        Ok(Self::envelope(payload))
     }
 
     fn status(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {

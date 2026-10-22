@@ -1,6 +1,6 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 23,
+  "telemetry_schema_version": 24,
   "observed_at": "2026-08-07T12:00:00Z",
   "runs": [
     {
@@ -47,6 +47,7 @@
         "launcher": "claude-code",
         "session_key": "f4a5b11c4e92"
       },
+      "group": "authoring:contract-interface",
       "project": "authoring:contract-interface",
       "project_name": "contract",
       "liveness": "PARKED",
@@ -96,6 +97,7 @@
         "launcher": "claude-code",
         "session_key": "f4a5b11c4e92"
       },
+      "group": "authoring:contract-interface",
       "project": "authoring:contract-interface",
       "project_name": "contract",
       "liveness": "PARKED",

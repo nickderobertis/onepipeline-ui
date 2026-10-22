@@ -1024,6 +1024,12 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     summary.insert("timing".into(), timing(telemetry, &measured(&view.events)));
     summary.insert("node_counts".into(), json!(counts));
     summary.insert("launch".into(), launch(view));
+    if !view.launch.labels.is_empty() {
+        summary.insert("labels".into(), json!(view.launch.labels));
+    }
+    if let Some(group) = &view.launch.group {
+        summary.insert("group".into(), json!(group));
+    }
     // Schema 18: where the run belongs and whether anything waits on it, read
     // off the fold exactly as `run_row` reads them off the summary — the launch
     // record's project, the launched plan's name through the SDK's own loader
@@ -1102,6 +1108,12 @@ pub fn run_row(
         json!(summary_node_counts(summary, paths)),
     );
     row.insert("launch".into(), summary_launch(run, summary));
+    if !summary.labels.is_empty() {
+        row.insert("labels".into(), json!(summary.labels));
+    }
+    if let Some(group) = &summary.group {
+        row.insert("group".into(), json!(group));
+    }
     // Schema 18, off the document and the two bounded reads beside it: the
     // project and name the summary records, the SDK's listing liveness over the
     // document, and the channel's unread count — `verbs::channel` over the

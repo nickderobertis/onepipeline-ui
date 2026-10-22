@@ -1003,6 +1003,17 @@ fn normalized_under(document: Value, root: Option<&Path>) -> Value {
                 .map(|(key, value)| {
                     if key == "observed_at" {
                         (key, Value::String(OBSERVED_AT.to_owned()))
+                    } else if key == "free_bytes" || key == "total_bytes" {
+                        // Host capacity changes while the suite runs. The real HTTP
+                        // journey checks the SDK's measured values; this golden pins shape.
+                        (
+                            key,
+                            if value.is_null() {
+                                Value::Null
+                            } else {
+                                json!(1)
+                            },
+                        )
                     } else if key == "pid" {
                         (key, json!(DRIVER_PID))
                     } else if key == "queued_at" {
@@ -1165,7 +1176,7 @@ fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent()
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 23);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 24);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
