@@ -47,7 +47,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(23), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(24), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -14301,8 +14301,8 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     // taken it, which is not until the turn ends — so it is posted beside the
     // journey rather than in front of it.
     let envelope = json!({
-        "version": 2,
-        "commands": [{ "op": "note", "id": node, "addressee": "worker", "text": HELD_TURN_NOTE }],
+        "version": 3,
+        "commands": [{ "op": "note", "id": node, "addressee": "worker", "deliver": "turn-end", "text": HELD_TURN_NOTE }],
     })
     .to_string();
     let reply = std::thread::spawn(move || {
@@ -14336,9 +14336,21 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         "the conversation took the note before its turn ended, so nothing above was recorded \
          while one was waiting"
     );
-    assert!(
-        !reply.is_finished(),
-        "the reply was answered before the turn took the note"
+    // onepipeline #1094 answers an envelope at receiver hand-off, not at delivery.
+    // A v2 envelope has no deliver field and reads as live; v3 turn-end keeps
+    // this turn held while proving that the queued reply has already finished.
+    eventually(
+        "the queued note's reply to finish before the turn ends",
+        || reply.is_finished(),
+    );
+    let answered = reply.join().expect("the reply thread");
+    assert_eq!(answered.status, 200, "{}", answered.body);
+    let receipt = answered.json();
+    assert_eq!(receipt["receipt"]["state"], json!("applied"), "{receipt}");
+    assert_eq!(
+        receipt["receipt"]["notes"][node],
+        json!("queued"),
+        "{receipt}"
     );
     let live = detail();
     assert_eq!(live["run"]["state"], json!("active"), "{live}");
@@ -14356,10 +14368,6 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     // The turn ends, the conversation takes the note, and the run records the
     // delivery and settles.
     fs::write(fakes.join("turn.settle"), "go").expect("release the turn's end");
-    let answered = reply.join().expect("the reply thread");
-    assert_eq!(answered.status, 200, "{}", answered.body);
-    let receipt = answered.json();
-    assert_eq!(receipt["receipt"]["state"], json!("applied"), "{receipt}");
     // The driver records a presentation when it next reads the turn's stream
     // after the delivery, not before the receipt is answered.
     eventually("the note's presentation to be recorded", || {
@@ -14367,6 +14375,42 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
             .iter()
             .any(|event| event["kind"] == json!("note-shown"))
     });
+    let raw: Vec<Value> = fs::read_to_string(root.join(run).join("events.jsonl"))
+        .expect("the adopted run's journal")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a journal envelope"))
+        .collect();
+    let operations: Vec<&Value> = raw
+        .iter()
+        .filter(|event| event["kind"] == json!("edit-committed"))
+        .flat_map(|event| {
+            event["payload"]["operations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+        .filter(|operation| {
+            operation["kind"] == json!("note-delivered")
+                && operation["text"] == json!(HELD_TURN_NOTE)
+        })
+        .collect();
+    assert_eq!(
+        operations.len(),
+        1,
+        "the note is delivered exactly once: {raw:?}"
+    );
+    assert_eq!(
+        operations[0]["envelope"], receipt["receipt"]["reply"],
+        "{}",
+        operations[0]
+    );
+    assert_eq!(operations[0]["index"], json!(0), "{}", operations[0]);
+    assert_eq!(
+        operations[0]["turn"],
+        json!("turn-end"),
+        "{}",
+        operations[0]
+    );
     let recorded = journal();
     let delivered = recorded
         .iter()
@@ -14393,8 +14437,7 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     );
     // And the envelope the driver claimed is answered rather than left claimed:
     // the channel holds no unclaimed command and one outcome, for that reply —
-    // naming, as the engine's `verbs::channel` does, that the held turn took
-    // the note as it ended.
+    // retaining its queued result after delivery, as #1094 requires.
     let channel = http::get(address, &format!("/api/v2/runs/{run}/channel")).json();
     assert_eq!(channel["commands"], json!([]), "{channel}");
     assert_eq!(
@@ -14402,7 +14445,7 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         json!([{
             "id": receipt["receipt"]["reply"],
             "applied": true,
-            "results": [{ "index": 0, "op": "note", "outcome": "applied", "turn": "turn-end" }],
+            "results": [{ "index": 0, "op": "note", "outcome": "queued" }],
         }]),
         "{channel}"
     );
