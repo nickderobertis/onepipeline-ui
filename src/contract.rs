@@ -300,7 +300,9 @@ pub mod routes {
     pub const RUN_CONVERSATION: &str = "/api/v2/runs/{run}/conversations/{id}";
     /// One recorded artifact of one run.
     pub const RUN_ARTIFACT: &str = "/api/v2/runs/{run}/artifacts/{id}";
-    /// The server-sent event stream; every connection opens with a fresh snapshot.
+    /// The server-sent event stream: a subscription's changes under
+    /// `?subscription=`, and otherwise the invalidation stream, which opens with
+    /// a fresh snapshot.
     pub const EVENTS: &str = "/api/v2/events";
     /// The runs grouped by project, as `verbs::runs` groups them.
     pub const PROJECTS: &str = "/api/v2/projects";
@@ -343,19 +345,27 @@ pub mod routes {
     pub const RUN_NODE_AGENTS: &str = "/api/v2/runs/{run}/nodes/{node}/agents";
     /// The union over a project's runs: `verbs::project_agents`.
     pub const PROJECT_AGENTS: &str = "/api/v2/projects/{project}/agents";
+    /// Create a subscription to the sidebar and at most one visible run view,
+    /// answered with its initial snapshot.
+    pub const SUBSCRIPTIONS: &str = "/api/v2/subscriptions";
+    /// Retire a subscription: its reads and its stream end.
+    pub const SUBSCRIPTION: &str = "/api/v2/subscriptions/{subscription}";
 
     /// The HTTP method a route answers.
     ///
-    /// Two, and only two: a read is a `GET`, and a verb that writes to the run —
-    /// claims a surface, submits an envelope, stops or shuts down — is a
-    /// `POST`, so
-    /// nothing a browser prefetches or a proxy retries can act on a run.
+    /// A read is a `GET`, and a verb that writes to the run — claims a surface,
+    /// submits an envelope, stops or shuts down — is a `POST`, so nothing a
+    /// browser prefetches or a proxy retries can act on a run. Creating a
+    /// subscription is a `POST` too, and retiring one a `DELETE`: both change
+    /// what this process reads for a tab, and neither touches a run.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Method {
         /// A read.
         Get,
-        /// A write to the run.
+        /// A write to the run, or the creation of a subscription.
         Post,
+        /// The retirement of a subscription.
+        Delete,
     }
 
     impl Method {
@@ -365,6 +375,7 @@ pub mod routes {
             match self {
                 Self::Get => "GET",
                 Self::Post => "POST",
+                Self::Delete => "DELETE",
             }
         }
     }
@@ -392,8 +403,15 @@ pub mod routes {
         }
     }
 
+    const fn delete(path: &'static str) -> Route {
+        Route {
+            method: Method::Delete,
+            path,
+        }
+    }
+
     /// How many routes the contract defines.
-    pub const COUNT: usize = 27;
+    pub const COUNT: usize = 29;
 
     /// Every route above with its method, in the order `docs/contract.md`
     /// lists them.
@@ -425,6 +443,8 @@ pub mod routes {
         get(RUN_AGENTS),
         get(RUN_NODE_AGENTS),
         get(PROJECT_AGENTS),
+        post(SUBSCRIPTIONS),
+        delete(SUBSCRIPTION),
     ];
 
     /// Every route's path, in the same order — read off [`TABLE`] rather than
@@ -1542,4 +1562,331 @@ fn check_segment(value: &str, max_len: usize) -> Result<(), String> {
         return Err("must not start with '.'".to_owned());
     }
     Ok(())
+}
+
+/// How many emitted frames a subscription keeps for a reconnect to replay.
+///
+/// `docs/contract.md`'s bound: the latest frames, plus the cursor before the
+/// oldest of them. A cursor older than that boundary is answered with a reset.
+pub const RETAINED_FRAMES: usize = 4096;
+
+/// How long a disconnected subscription keeps recording its changes before it
+/// expires. A connected stream never expires, however quiet it is.
+pub const DISCONNECTED_GRACE: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// A subscription's id: an opaque UUID this process minted.
+///
+/// Parsed rather than carried as text, so a path segment or a body field that
+/// is not one is refused before any subscription is looked up by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SubscriptionId(uuid::Uuid);
+
+impl SubscriptionId {
+    /// A fresh id.
+    #[must_use]
+    pub fn mint() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
+
+impl TryFrom<&str> for SubscriptionId {
+    type Error = ApiError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        canonical_uuid(value)
+            .map(Self)
+            .ok_or_else(|| ApiError::InvalidSubscription(format!("{value:?} is not a subscription id")))
+    }
+}
+
+impl fmt::Display for SubscriptionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.hyphenated().fmt(f)
+    }
+}
+
+impl Serialize for SubscriptionId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+/// A UUID written the one way this process writes one: lowercase and hyphenated.
+///
+/// One spelling only, so two strings naming the same subscription or epoch are
+/// the same string — a cursor compared as text and a cursor compared as a UUID
+/// cannot disagree.
+fn canonical_uuid(value: &str) -> Option<uuid::Uuid> {
+    let parsed = uuid::Uuid::try_parse(value).ok()?;
+    (parsed.hyphenated().to_string() == value).then_some(parsed)
+}
+
+/// One position in a server's frame sequence: `<epoch UUID>:<sequence>`.
+///
+/// The epoch is chosen when the server starts, so a cursor names the process
+/// that issued it, and the sequence increases across every frame and snapshot
+/// boundary that process issues — with gaps, because other subscriptions take
+/// numbers too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EventId {
+    /// The issuing process's epoch.
+    pub epoch: uuid::Uuid,
+    /// The position in its sequence.
+    pub seq: u64,
+}
+
+impl EventId {
+    /// A fresh epoch, for a starting server.
+    #[must_use]
+    pub fn fresh_epoch() -> uuid::Uuid {
+        uuid::Uuid::new_v4()
+    }
+}
+
+impl TryFrom<&str> for EventId {
+    type Error = ApiError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let refused = || ApiError::InvalidSubscription(format!("{value:?} is not an event id"));
+        let (epoch, seq) = value.split_once(':').ok_or_else(refused)?;
+        let epoch = canonical_uuid(epoch).ok_or_else(refused)?;
+        // An unsigned decimal, written the one way: no sign, no leading zero.
+        if seq.is_empty() || !seq.bytes().all(|byte| byte.is_ascii_digit()) || (seq.len() > 1 && seq.starts_with('0')) {
+            return Err(refused());
+        }
+        let seq = seq.parse::<u64>().map_err(|_| refused())?;
+        Ok(Self { epoch, seq })
+    }
+}
+
+impl fmt::Display for EventId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.epoch.hyphenated(), self.seq)
+    }
+}
+
+impl Serialize for EventId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+/// Which timeline a subscription's view reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewScope {
+    /// The whole run (the Overall view).
+    Run,
+    /// One node's work (a node's timeline tab).
+    Node(NodeId),
+}
+
+/// What one subscription shows besides the sidebar: nothing, or one visible
+/// run view.
+///
+/// The Graph view selects `detail`, Overall `timeline` at run scope, a node's
+/// timeline `timeline` at node scope, and Channel `channel`. The Host page and a
+/// page with no run open select `sidebar` alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubscriptionView {
+    /// The sidebar alone.
+    Sidebar,
+    /// The run's detail.
+    Detail {
+        /// The run.
+        run_id: RunId,
+        /// Which events the detail carries, under the detail route's grammar
+        /// and default.
+        filter: Option<FilterSpec>,
+    },
+    /// The run's timeline, with the detail beside it for the header and graph
+    /// state already on screen.
+    Timeline {
+        /// The run.
+        run_id: RunId,
+        /// The run or one node.
+        scope: ViewScope,
+        /// Which events both carry.
+        filter: Option<FilterSpec>,
+    },
+    /// The run's channel queue, with the detail beside it.
+    Channel {
+        /// The run.
+        run_id: RunId,
+    },
+}
+
+impl SubscriptionView {
+    /// Read a view off a request body, refusing any member the contract does
+    /// not name and any combination it does not allow.
+    ///
+    /// # Errors
+    ///
+    /// `400 invalid_subscription` for a malformed view: an unknown `type`, a
+    /// missing or extra member, a `scope` other than `run` or `node`, a node scope
+    /// naming no node or a run scope naming one, or a filter or id that does not
+    /// parse.
+    pub fn parse(value: &Value) -> Result<Self, ApiError> {
+        let refused = |why: &str| ApiError::InvalidSubscription(format!("the view {why}"));
+        let object = value
+            .as_object()
+            .ok_or_else(|| refused("is not an object"))?;
+        let allow = |members: &[&str]| -> Result<(), ApiError> {
+            match object.keys().find(|key| !members.contains(&key.as_str())) {
+                Some(extra) => Err(refused(&format!("takes no member {extra:?}"))),
+                None => Ok(()),
+            }
+        };
+        let text = |name: &str| -> Result<Option<&str>, ApiError> {
+            match object.get(name) {
+                None => Ok(None),
+                Some(Value::String(text)) => Ok(Some(text.as_str())),
+                Some(_) => Err(refused(&format!("names {name} as something other than a string"))),
+            }
+        };
+        let run_id = || -> Result<RunId, ApiError> {
+            let run = text("run_id")?.ok_or_else(|| refused("names no run_id"))?;
+            RunId::try_from(run).map_err(|error| refused(&error.to_string()))
+        };
+        let filter = || -> Result<Option<FilterSpec>, ApiError> {
+            text("filter")?
+                .map(|spec| FilterSpec::parse(spec).map_err(|error| refused(&error.to_string())))
+                .transpose()
+        };
+        match text("type")? {
+            Some("sidebar") => {
+                allow(&["type"])?;
+                Ok(Self::Sidebar)
+            }
+            Some("detail") => {
+                allow(&["type", "run_id", "filter"])?;
+                Ok(Self::Detail {
+                    run_id: run_id()?,
+                    filter: filter()?,
+                })
+            }
+            Some("timeline") => {
+                allow(&["type", "run_id", "scope", "node", "filter"])?;
+                let scope = match (text("scope")?, text("node")?) {
+                    (Some("run"), None) => ViewScope::Run,
+                    (Some("node"), Some(node)) => ViewScope::Node(
+                        NodeId::try_from(node).map_err(|error| refused(&error.to_string()))?,
+                    ),
+                    (Some("node"), None) => return Err(refused("scopes to a node and names none")),
+                    (Some("run"), Some(_)) => return Err(refused("covers the whole run and names a node")),
+                    _ => return Err(refused("names a scope other than run or node")),
+                };
+                Ok(Self::Timeline {
+                    run_id: run_id()?,
+                    scope,
+                    filter: filter()?,
+                })
+            }
+            Some("channel") => {
+                allow(&["type", "run_id"])?;
+                Ok(Self::Channel { run_id: run_id()? })
+            }
+            Some(other) => Err(refused(&format!("names an unknown type {other:?}"))),
+            None => Err(refused("names no type")),
+        }
+    }
+
+    /// The run this view reads, or `None` for the sidebar alone.
+    #[must_use]
+    pub fn run_id(&self) -> Option<&RunId> {
+        match self {
+            Self::Sidebar => None,
+            Self::Detail { run_id, .. } | Self::Timeline { run_id, .. } | Self::Channel { run_id } => {
+                Some(run_id)
+            }
+        }
+    }
+
+    /// The view as it is served back: the same members, with the filter in its
+    /// normalized spelling and omitted where none was asked for.
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        let filtered = |mut value: Value, filter: &Option<FilterSpec>| {
+            if let Some(filter) = filter {
+                value["filter"] = Value::String(filter.as_query_value());
+            }
+            value
+        };
+        match self {
+            Self::Sidebar => serde_json::json!({ "type": "sidebar" }),
+            Self::Detail { run_id, filter } => {
+                filtered(serde_json::json!({ "type": "detail", "run_id": run_id }), filter)
+            }
+            Self::Timeline { run_id, scope: ViewScope::Run, filter } => filtered(
+                serde_json::json!({ "type": "timeline", "run_id": run_id, "scope": "run" }),
+                filter,
+            ),
+            Self::Timeline { run_id, scope: ViewScope::Node(node), filter } => filtered(
+                serde_json::json!({ "type": "timeline", "run_id": run_id, "scope": "node", "node": node }),
+                filter,
+            ),
+            Self::Channel { run_id } => serde_json::json!({ "type": "channel", "run_id": run_id }),
+        }
+    }
+}
+
+/// The body of `POST /api/v2/subscriptions`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubscribeRequest {
+    /// What the tab shows.
+    pub view: SubscriptionView,
+    /// The subscription this one replaces, retired once this one is made.
+    pub replaces: Option<SubscriptionId>,
+    /// The last frame applied, when recreating a subscription the server no
+    /// longer has; answered with a reset rather than a snapshot.
+    pub resume: Option<EventId>,
+}
+
+impl SubscribeRequest {
+    /// Read the body, refusing what the contract does not name.
+    ///
+    /// # Errors
+    ///
+    /// `400 invalid_subscription` for a body that is not JSON, names a member
+    /// beside `view`, `replaces` and `resume`, carries both `replaces` and
+    /// `resume`, or carries an id or a view that does not parse.
+    pub fn parse(body: &str) -> Result<Self, ApiError> {
+        let value: Value = serde_json::from_str(body).map_err(|error| {
+            ApiError::InvalidSubscription(format!("the body is not JSON: {error}"))
+        })?;
+        let object = value.as_object().ok_or_else(|| {
+            ApiError::InvalidSubscription("the body is not an object".to_owned())
+        })?;
+        if let Some(extra) = object
+            .keys()
+            .find(|key| !["view", "replaces", "resume"].contains(&key.as_str()))
+        {
+            return Err(ApiError::InvalidSubscription(format!(
+                "the body takes no member {extra:?}"
+            )));
+        }
+        let text = |name: &str| -> Result<Option<&str>, ApiError> {
+            match object.get(name) {
+                None => Ok(None),
+                Some(Value::String(text)) => Ok(Some(text.as_str())),
+                Some(_) => Err(ApiError::InvalidSubscription(format!(
+                    "{name} is not a string"
+                ))),
+            }
+        };
+        let replaces = text("replaces")?.map(SubscriptionId::try_from).transpose()?;
+        let resume = text("resume")?.map(EventId::try_from).transpose()?;
+        if replaces.is_some() && resume.is_some() {
+            return Err(ApiError::InvalidSubscription(
+                "replaces and resume are mutually exclusive".to_owned(),
+            ));
+        }
+        let view = SubscriptionView::parse(object.get("view").ok_or_else(|| {
+            ApiError::InvalidSubscription("the body names no view".to_owned())
+        })?)?;
+        Ok(Self {
+            view,
+            replaces,
+            resume,
+        })
+    }
 }

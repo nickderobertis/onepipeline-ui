@@ -196,6 +196,24 @@ pub fn post_within(address: SocketAddr, path: &str, body: &str, patience: Durati
     }
 }
 
+/// `DELETE path`, read to completion.
+pub fn delete(address: SocketAddr, path: &str) -> Response {
+    let mut stream = connect(address);
+    stream.set_read_timeout(Some(TIMEOUT)).expect("read timeout");
+    let request = format!("DELETE {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).expect("write the request");
+    stream.flush().expect("flush the request");
+    let mut reader = BufReader::new(stream);
+    let (status, chunked) = head(&mut reader);
+    let mut raw = Vec::new();
+    reader.read_to_end(&mut raw).expect("read the body");
+    let body = String::from_utf8_lossy(&raw).into_owned();
+    Response {
+        status,
+        body: if chunked { dechunk(&body) } else { body },
+    }
+}
+
 /// `GET path`, read to completion.
 ///
 /// The request asks the server to close when it is done, so "the whole body" is

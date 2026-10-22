@@ -184,6 +184,10 @@ time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
 tokio-stream = "0.1"
 url = "2"
+# A subscription's id and the epoch a server's event ids are minted under: both
+# random UUIDs, so an id one process issued cannot be guessed or reused by
+# another, and a cursor names the process that issued it.
+uuid = { version = "1", features = ["v4"] }
 
 # Unix process probes used by the server and its real-process journeys.
 [target.'cfg(unix)'.dependencies]

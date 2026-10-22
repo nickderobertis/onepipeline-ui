@@ -52,14 +52,18 @@ use crate::telemetry::{BucketName, Party as Spender, RunTelemetry};
 ///
 /// Usually the whole merged store, exactly as [`RunView`] holds it. A timeline
 /// over a run that relayed one producer record twice reads its canonical store
-/// instead, which `RunView` cannot hold for it: the engine's view is built only by
-/// reading a run, never from records a reader chose.
+/// instead, and a live subscription rebuilding one owner's share of a payload
+/// reads that owner's records — neither of which `RunView` can hold: the engine's
+/// view is built only by reading a run, never from records a reader chose.
 #[derive(Clone, Copy)]
 pub struct Run<'a> {
     /// Where the run's state lives.
     pub paths: &'a RunPaths,
     /// The records this reading is built over, in merge order.
     pub events: &'a [Envelope],
+    /// Each of `events`' position in the merged store, where `events` is one
+    /// owner's share of it rather than the store itself.
+    positions: Option<&'a [usize]>,
     /// The view itself: its launch record and its fold of the whole journal,
     /// whatever `events` holds, and what only the engine can answer about the
     /// whole run.
@@ -73,6 +77,7 @@ impl<'a> Run<'a> {
         Self {
             paths: &view.paths,
             events: &view.events,
+            positions: None,
             whole: view,
         }
     }
@@ -80,7 +85,24 @@ impl<'a> Run<'a> {
     /// The same run, read over `events` instead.
     #[must_use]
     pub fn over(self, events: &'a [Envelope]) -> Self {
-        Self { events, ..self }
+        Self {
+            events,
+            positions: None,
+            ..self
+        }
+    }
+
+    /// The same run, read over one owner's share of its merged store: `events`,
+    /// each at the merged-store position `positions` names, so every address a
+    /// payload serves for one of them — its `journal_order`, its `e{index}` id —
+    /// is the one a reading of the whole store serves.
+    #[must_use]
+    pub(crate) fn share(self, events: &'a [Envelope], positions: &'a [usize]) -> Self {
+        Self {
+            events,
+            positions: Some(positions),
+            ..self
+        }
     }
 
     /// How the run is being driven: the engine's answer about the whole run.
@@ -93,6 +115,8 @@ impl<'a> Run<'a> {
         self.whole.unread_surfaces()
     }
 }
+
+pub(crate) mod live;
 
 /// The bound on an artifact body served in one response.
 ///
@@ -1179,6 +1203,63 @@ pub fn run_row(
         json!(crate::liveness::driver(summary).as_str()),
     );
     row.insert("unread_surfaces".into(), json!(unread_surfaces(paths)));
+    Value::Object(row)
+}
+
+/// One run as the sidebar shows it, and nothing it does not: the run's
+/// displayed name, the project group it sits under, its kind, its state, its
+/// node counts, when it last recorded activity and when it was launched.
+///
+/// The trimmed row a subscription pushes for every run that moves, read off the
+/// same bounded summary [`run_row`] is — never a fold of the journal — so a
+/// change anywhere on the host costs one small document and one small frame.
+/// `name` is the run's id, which is what the sidebar names a run by; the group's
+/// `name` is the plan name the run recorded, and its id where it recorded none.
+/// `started_at` is omitted for a launch that recorded no time, and `kind` is
+/// `null` for a run with no `kind` label.
+#[must_use]
+pub fn sidebar_row(run: &RunId, summary: &RunSummary, paths: &RunPaths) -> Value {
+    let counts = summary_node_counts(summary, paths);
+    let count = |word: &str| counts.get(word).copied().unwrap_or(0);
+    let mut row = Map::new();
+    row.insert("id".into(), json!(run));
+    row.insert("name".into(), json!(run));
+    row.insert(
+        "group".into(),
+        summary.group.as_ref().map_or(Value::Null, |group| {
+            json!({
+                "project": group,
+                "name": summary.name.as_deref().filter(|name| !name.is_empty()).unwrap_or(group),
+            })
+        }),
+    );
+    row.insert(
+        "kind".into(),
+        summary.labels.get("kind").map_or(Value::Null, |kind| json!(kind)),
+    );
+    row.insert("state".into(), json!(summary_state_word(summary)));
+    row.insert(
+        "nodes".into(),
+        json!({
+            "total": counts.values().sum::<u64>(),
+            "done": count("done"),
+            "failed": count("failed"),
+            "running": count("running"),
+        }),
+    );
+    let started = summary
+        .started_at
+        .as_deref()
+        .filter(|at| OffsetDateTime::parse(at, &Rfc3339).is_ok());
+    let updated = summary
+        .last_write_at
+        .and_then(|at| rfc3339_of(i128::from(at)))
+        .or_else(|| started.map(str::to_owned))
+        .unwrap_or_else(|| rfc3339_of(0).unwrap_or_default());
+    row.insert("updated_at".into(), json!(updated));
+    if let Some(started) = started {
+        row.insert("started_at".into(), json!(started));
+    }
     Value::Object(row)
 }
 
@@ -2586,6 +2667,29 @@ pub(crate) fn run_detail_over(
     agents: Option<usize>,
     filter: &EventFilter,
 ) -> Value {
+    detail_document(
+        view,
+        declared,
+        include_conversations,
+        telemetry,
+        json!(onepipeline::telemetry::of_run(view.paths, view.events)),
+        agents,
+        filter,
+    )
+}
+
+/// The detail, with the SDK's telemetry document already folded: the one part
+/// of it that reads the whole journal however few records moved, which a live
+/// reading folds on its own clock rather than on every change.
+fn detail_document(
+    view: &Run<'_>,
+    declared: &DeclaredMembers,
+    include_conversations: bool,
+    telemetry: Option<&RunTelemetry>,
+    sdk_telemetry: Value,
+    agents: Option<usize>,
+    filter: &EventFilter,
+) -> Value {
     let mut payload = Map::new();
     // One fold of the run's transcripts, read before anything that counts,
     // numbers or lists a turn: the count beside a node and the transcript a
@@ -2607,10 +2711,7 @@ pub(crate) fn run_detail_over(
         run["agent_count"] = json!(count);
     }
     payload.insert("run".into(), run);
-    payload.insert(
-        "telemetry".into(),
-        json!(onepipeline::telemetry::of_run(view.paths, view.events)),
-    );
+    payload.insert("telemetry".into(), sdk_telemetry);
     payload.insert("graph".into(), graph_state(view).unwrap_or(Value::Null));
     payload.insert(
         "conversations".into(),
@@ -4970,6 +5071,22 @@ struct Lens<'a> {
     /// The run's transcripts, folded once: the judge lane is drawn over the same
     /// stored report the turns beside it were read from.
     transcripts: &'a Transcripts<'a>,
+    /// Where each record of the reading sits in the merged store, when the
+    /// reading is one owner's share of it.
+    positions: Option<&'a [usize]>,
+    /// The entries a live reading has already rendered, by merged-store
+    /// position: a record is rendered into an entry once, when it arrives, and
+    /// again only when the turn it belongs to is renumbered.
+    rendered: Option<&'a std::cell::RefCell<Rendered>>,
+}
+
+/// Timeline entries a live reading has rendered, by merged-store position,
+/// with the turn each was rendered under.
+#[derive(Debug, Default)]
+pub(crate) struct Rendered {
+    pub(crate) entries: std::collections::HashMap<usize, (Option<String>, Value)>,
+    /// How many entries were rendered rather than reused, since this was made.
+    pub(crate) fresh: usize,
 }
 
 impl Lens<'_> {
@@ -4980,7 +5097,30 @@ impl Lens<'_> {
         ordered
             .iter()
             .filter(|(_, event)| self.filter.allows(event))
-            .map(|(index, event)| timeline_event(*index, event, self.turns))
+            .map(|(index, event)| {
+                let position = self
+                    .positions
+                    .and_then(|positions| positions.get(*index).copied())
+                    .unwrap_or(*index);
+                let Some(rendered) = self.rendered else {
+                    return timeline_event(*index, position, event, self.turns);
+                };
+                let turn = self
+                    .turns
+                    .get(*index)
+                    .and_then(Option::as_ref)
+                    .map(|turn| turn.id.clone());
+                let mut rendered = rendered.borrow_mut();
+                if let Some((held, entry)) = rendered.entries.get(&position) {
+                    if *held == turn {
+                        return entry.clone();
+                    }
+                }
+                let entry = timeline_event(*index, position, event, self.turns);
+                rendered.fresh += 1;
+                rendered.entries.insert(position, (turn, entry.clone()));
+                entry
+            })
             .collect()
     }
 }
@@ -5011,42 +5151,189 @@ pub(crate) fn timeline_over(
     });
     let canonical_run = canonical.as_deref().map(|events| view.over(events));
     let view = canonical_run.as_ref().unwrap_or(view);
-    let transcripts = Transcripts::of(view, declared);
-    let turns = turn_ids(view, &transcripts);
-    let lens = Lens {
-        turns: &turns,
-        filter,
-        transcripts: &transcripts,
-    };
-    let mut spans = match scope {
-        Scope::Run => run_spans(view, &lens),
-        Scope::Node(node) => node_spans(view, node.as_str(), &lens),
-    };
-    if let Some(end) = timeline_end(view) {
-        for span in &mut spans {
-            if span["ended_at"].is_null() {
-                span["ended_at"] = json!(end.ts);
-                if span["status"] == "running" {
-                    span["status"] = json!("stopped");
-                }
-            }
-        }
-    }
-    if !matches!(
-        view.liveness(),
-        onepipeline::views::DriverLiveness::Driving | onepipeline::views::DriverLiveness::Parked
-    ) {
-        for span in &mut spans {
-            if span["ended_at"].is_null() && span["status"] == "running" {
-                span["status"] = json!("undriven");
-            }
-        }
+    let ends = Ends::of(view);
+    let mut spans = timeline_spans(view, declared, scope, filter, &ends);
+    for span in &mut spans {
+        ends.close(span);
     }
     json!({
         "timeline_schema_version": TIMELINE_SCHEMA_VERSION,
         "run_id": view.paths.run,
         "spans": spans,
     })
+}
+
+/// The spans one timeline scope draws over `view`, before the run's end closes
+/// any of them.
+///
+/// `view` is the whole canonical store, or one owner's share of it: the run's
+/// unattached records for the run-level spans, or one node's records for its
+/// spans at either scope. The transcripts every turn is numbered by are folded
+/// over the same records, which hold every record of the sessions they number.
+fn timeline_spans(
+    view: &Run<'_>,
+    declared: &DeclaredMembers,
+    scope: &Scope<'_>,
+    filter: &EventFilter,
+    ends: &Ends,
+) -> Vec<Value> {
+    let transcripts = Transcripts::of(view, declared);
+    let turns = turn_ids(view, &transcripts);
+    let lens = Lens {
+        turns: &turns,
+        filter,
+        transcripts: &transcripts,
+        positions: view.positions,
+        rendered: None,
+    };
+    match scope {
+        Scope::Run => run_spans(view, &lens, ends),
+        Scope::Node(node) => node_spans(view, node.as_str(), &lens),
+    }
+}
+
+/// Which share of a run a live timeline rebuilds, and the spans it draws.
+pub(crate) enum Share<'a> {
+    /// The run's own span and its unattached sessions, over the records that
+    /// name no node; `first` is the first record of the whole store.
+    RunLevel {
+        /// Where the run started.
+        first: &'a Envelope,
+    },
+    /// One node's spans on the run timeline.
+    NodeLevel(&'a str),
+    /// One node's own timeline.
+    NodeScope(&'a NodeId),
+}
+
+/// The spans one share of a run draws, before the run's end closes any of them:
+/// the same spans [`timeline_over`] draws for those records.
+pub(crate) fn share_spans(
+    view: &Run<'_>,
+    declared: &DeclaredMembers,
+    share: &Share<'_>,
+    filter: &EventFilter,
+    ends: &Ends,
+    rendered: &std::cell::RefCell<Rendered>,
+) -> Vec<Value> {
+    let transcripts = Transcripts::of(view, declared);
+    let turns = turn_ids(view, &transcripts);
+    let lens = Lens {
+        turns: &turns,
+        filter,
+        transcripts: &transcripts,
+        positions: view.positions,
+        rendered: Some(rendered),
+    };
+    match share {
+        Share::RunLevel { first } => run_level_spans(view, &lens, first, ends),
+        Share::NodeLevel(node) => {
+            node_level_spans(view, node, &format!("run.{}", view.paths.run), &lens)
+        }
+        Share::NodeScope(node) => node_spans(view, node.as_str(), &lens),
+    }
+}
+
+/// How the run's end reaches a timeline: where it stopped, if it has, and
+/// whether anything still drives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Ends {
+    /// The execution boundary's stamp, once there is one.
+    pub(crate) end: Option<String>,
+    /// Whether a driver is driving the run, or parked on it.
+    pub(crate) driven: bool,
+}
+
+impl Ends {
+    /// The run's end over its whole store.
+    fn of(view: &Run<'_>) -> Self {
+        Self {
+            end: timeline_end(view).map(|end| end.ts),
+            driven: matches!(
+                view.liveness(),
+                onepipeline::views::DriverLiveness::Driving
+                    | onepipeline::views::DriverLiveness::Parked
+            ),
+        }
+    }
+
+    /// The run's end, from the facts a live reading keeps without re-reading
+    /// the store: the latest settlement, and the last record of the kinds that
+    /// decide whether a historical exit still holds.
+    pub(crate) fn from_parts(
+        view: &Run<'_>,
+        latest_settlement: Option<(i128, &str)>,
+        last_boundary: Option<&Envelope>,
+    ) -> Self {
+        let statuses = view.whole.state.statuses();
+        let settled = !statuses.is_empty()
+            && statuses
+                .values()
+                .all(|status| matches!(status.as_str(), "done" | "failed" | "cancelled" | "skipped"));
+        let end = if settled {
+            latest_settlement.map(|(_, ts)| ts.to_owned())
+        } else {
+            last_boundary
+                .filter(|event| {
+                    matches!(
+                        event.kind.0.as_str(),
+                        "run-stopped" | "host-shutdown" | "driver-exited"
+                    )
+                })
+                .and_then(Moment::of)
+                .map(|end| end.ts)
+        };
+        Self {
+            end,
+            driven: matches!(
+                view.liveness(),
+                onepipeline::views::DriverLiveness::Driving
+                    | onepipeline::views::DriverLiveness::Parked
+            ),
+        }
+    }
+
+    /// Close one span the way the run's end closes it: an open span ends where
+    /// the run did, a running one that the end cut off was stopped, and a
+    /// running one nothing drives any more is undriven.
+    pub(crate) fn close(&self, span: &mut Value) {
+        if let Some(end) = &self.end {
+            if span["ended_at"].is_null() {
+                span["ended_at"] = json!(end);
+                if span["status"] == "running" {
+                    span["status"] = json!("stopped");
+                }
+            }
+        }
+        if !self.driven && span["ended_at"].is_null() && span["status"] == "running" {
+            span["status"] = json!("undriven");
+        }
+    }
+}
+
+/// Whether a record is one [`timeline_end`] reads as the last word on whether a
+/// historical exit still holds.
+pub(crate) fn is_end_boundary(event: &Envelope) -> bool {
+    event.source == Source::Pipeline
+        && matches!(
+            event.kind.0.as_str(),
+            "run-stopped"
+                | "host-shutdown"
+                | "driver-exited"
+                | "driver-adopted"
+                | "driver-taken-over"
+                | "node-dispatched"
+        )
+}
+
+/// Whether a record is a node's settlement, which bounds a settled run's end.
+pub(crate) fn is_settlement(event: &Envelope) -> bool {
+    event.source == Source::Pipeline && event.kind.0 == "node-settled"
+}
+
+/// The epoch milliseconds a record orders by, where it can be ordered.
+pub(crate) fn moment_of(event: &Envelope) -> Option<i128> {
+    Moment::of(event).map(|moment| moment.at)
 }
 
 /// `timeline`, over everything `view` read: the whole merged store.
@@ -5987,12 +6274,12 @@ fn record_fields(event: &Envelope) -> Map<String, Value> {
 }
 
 /// One journal envelope as a timeline event.
-fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Value {
+fn timeline_event(index: usize, position: usize, event: &Envelope, turns: &[Option<Turn>]) -> Value {
     let turn = turns.get(index).and_then(Option::as_ref);
     let mut item = Map::new();
     item.insert(
         "id".into(),
-        json!(turn.map_or_else(|| format!("e{index}"), |turn| turn.id.clone())),
+        json!(turn.map_or_else(|| format!("e{position}"), |turn| turn.id.clone())),
     );
     item.insert(
         "record_id".into(),
@@ -6000,7 +6287,7 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
     );
     item.insert("stream".into(), json!(event.stream));
     item.insert("seq".into(), json!(event.seq));
-    item.insert("journal_order".into(), json!(index));
+    item.insert("journal_order".into(), json!(position));
     if let Some(persona) = &event.labels.persona {
         item.insert("persona".into(), json!(persona));
     }
@@ -6133,19 +6420,40 @@ fn timeline_end(view: &Run<'_>) -> Option<Moment> {
 /// settle and independent branches proceed beside a decision that is holding
 /// another subtree back. Under rounds the top of this list was a stack of
 /// batches, which is a shape nothing in the engine has any more.
-fn run_spans(view: &Run<'_>, lens: &Lens<'_>) -> Vec<Value> {
+fn run_spans(view: &Run<'_>, lens: &Lens<'_>, ends: &Ends) -> Vec<Value> {
+    let Some(first) = view.events.first() else {
+        return Vec::new();
+    };
+    let run_id = format!("run.{}", view.paths.run);
+    let mut spans = run_level_spans(view, lens, first, ends);
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for node in view
+        .events
+        .iter()
+        .filter_map(|event| event.labels.node.as_deref())
+    {
+        if seen.insert(node) {
+            spans.extend(node_level_spans(view, node, &run_id, lens));
+        }
+    }
+    spans
+}
+
+/// The run's own span and the sessions it relayed at no node: everything a run
+/// timeline draws above the nodes.
+///
+/// Read over the records that name no node — the whole store, or that share of
+/// it — and `first`, the first record of the whole store, which is where the run
+/// started whichever share this is read over.
+fn run_level_spans(view: &Run<'_>, lens: &Lens<'_>, first: &Envelope, ends: &Ends) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
     let events: Vec<(usize, &Envelope)> = view.events.iter().enumerate().collect();
-    let Some((_, first)) = events.first() else {
-        return spans;
-    };
     let run_id = format!("run.{}", view.paths.run);
     // A run ends when it stops being driven, and only then. A graph that has
     // completed and a run that recorded a stop are both over; anything else is
     // still open, however quiet it has gone.
-    let end = timeline_end(view);
-    let closed = end.is_some();
-    let ended = end.map_or(Value::Null, |end| json!(end.ts));
+    let closed = ends.end.is_some();
+    let ended = ends.end.as_ref().map_or(Value::Null, |end| json!(end));
     spans.push(json!({
         "id": run_id,
         "kind": "run",
@@ -6218,38 +6526,36 @@ fn run_spans(view: &Run<'_>, lens: &Lens<'_>) -> Vec<Value> {
         span.insert("events".into(), json!(lens.items(&relayed)));
         spans.push(Value::Object(span));
     }
+    spans
+}
 
-    let mut seen: BTreeSet<&str> = BTreeSet::new();
-    for node in events
+/// One node's spans on the run timeline: the node itself, then what it did as
+/// categories rather than as records — the graph draws one lane per category and
+/// opens the node for the rest.
+///
+/// Read over the node's own records alone, whichever reading holds them.
+fn node_level_spans(view: &Run<'_>, node: &str, run_id: &str, lens: &Lens<'_>) -> Vec<Value> {
+    let mut spans = vec![node_span(view, node, Some(run_id), lens)];
+    let node_id = format!("node.{node}");
+    let mine: Vec<(usize, &Envelope)> = view
+        .events
         .iter()
-        .filter_map(|(_, event)| event.labels.node.as_deref())
-    {
-        if !seen.insert(node) {
-            continue;
-        }
-        spans.push(node_span(view, node, Some(&run_id), lens));
-        // What that node did, as categories rather than as records: the graph
-        // draws one lane per category and opens the node for the rest.
-        let node_id = format!("node.{node}");
-        let mine: Vec<(usize, &Envelope)> = events
-            .iter()
-            .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
-            .copied()
-            .collect();
-        let settled = mine.iter().find(|(_, event)| {
-            event.source == Source::Pipeline
-                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
-        });
-        spans.extend(waiting_span(view, settled, &node_id, node));
-        spans.extend(queued_spans(&mine, &node_id, node));
-        spans.extend(role_rollups(
-            &mine,
-            &node_id,
-            node,
-            lens.transcripts.declared,
-        ));
-        spans.extend(kept_spans(view, &mine, &node_id, node));
-    }
+        .enumerate()
+        .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
+        .collect();
+    let settled = mine.iter().find(|(_, event)| {
+        event.source == Source::Pipeline
+            && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
+    });
+    spans.extend(waiting_span(view, settled, &node_id, node));
+    spans.extend(queued_spans(&mine, &node_id, node));
+    spans.extend(role_rollups(
+        &mine,
+        &node_id,
+        node,
+        lens.transcripts.declared,
+    ));
+    spans.extend(kept_spans(view, &mine, &node_id, node));
     spans
 }
 

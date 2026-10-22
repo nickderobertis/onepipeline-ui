@@ -28,7 +28,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Uri};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde_json::Value;
 use tokio::net::TcpListener;
@@ -37,10 +37,12 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::api::RunApi;
 use crate::contract::{
-    routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventsQuery,
-    NextQuery, NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunsPage, RunsQuery,
-    ShutdownRequest, StopRequest, SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery,
+    routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId,
+    EventsQuery, NextQuery, NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunsPage,
+    RunsQuery, ShutdownRequest, StopRequest, SubscribeRequest, SubscriptionId, SurfaceRequest,
+    TimelineQuery, TimelineScope, TranscriptQuery,
 };
+use crate::live::Hub;
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
 use crate::store::{RunStore, HEARTBEAT_INTERVAL};
@@ -64,6 +66,8 @@ struct Serving {
     /// What answers every path the API does not own: the view under `--ui`,
     /// and the error contract's 404 without it.
     view: Option<Arc<View>>,
+    /// Every subscription this process holds.
+    hub: Hub,
 }
 
 /// The router serving one runs root, ending its streams when `stopping` is set,
@@ -110,8 +114,11 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::RUN_AGENTS, get(agents))
         .route(routes::RUN_NODE_AGENTS, get(node_agents))
         .route(routes::PROJECT_AGENTS, get(project_agents))
+        .route(routes::SUBSCRIPTIONS, post(subscribe))
+        .route(routes::SUBSCRIPTION, delete(unsubscribe))
         .fallback(fallback)
         .with_state(Serving {
+            hub: Hub::new(store.clone(), Arc::clone(&stopping)),
             store: Arc::new(store),
             stopping,
             view: view.map(Arc::new),
@@ -376,6 +383,9 @@ async fn events(
     headers: HeaderMap,
     Query(raw): Query<HashMap<String, String>>,
 ) -> Response {
+    if raw.contains_key("subscription") {
+        return subscription_events(&serving, &raw, &headers);
+    }
     let query = match events_query(&raw, &headers) {
         Ok(query) => query,
         Err(error) => return error.into_response(),
@@ -409,6 +419,97 @@ async fn events(
     Sse::new(ReceiverStream::new(rx))
         .keep_alive(KeepAlive::new().interval(HEARTBEAT_INTERVAL))
         .into_response()
+}
+
+/// `GET /api/v2/events?subscription=ID&after=EVENT-ID`: one subscription's
+/// frames after the cursor, then each as it is emitted.
+///
+/// A non-empty `Last-Event-ID` — what a browser's `EventSource` sends on its own
+/// reconnect — takes precedence over `after`. A malformed id or cursor is `400`,
+/// never guessed at; a subscription this process no longer holds is `410` with
+/// `{code: "subscription-unavailable", reason}`, which a client answers by
+/// recreating the same view.
+fn subscription_events(
+    serving: &Serving,
+    raw: &HashMap<String, String>,
+    headers: &HeaderMap,
+) -> Response {
+    let read = || -> Result<(SubscriptionId, Option<EventId>), ApiError> {
+        if let Some(extra) = raw
+            .keys()
+            .find(|key| !["subscription", "after"].contains(&key.as_str()))
+        {
+            return Err(ApiError::InvalidSubscription(format!(
+                "a subscription's stream takes no {extra}: its view says what it shows"
+            )));
+        }
+        let subscription = SubscriptionId::try_from(
+            raw.get("subscription").map(String::as_str).unwrap_or_default(),
+        )?;
+        let header = headers
+            .get("last-event-id")
+            .map(|value| {
+                value.to_str().map_err(|_| {
+                    ApiError::InvalidSubscription("Last-Event-ID is not text".to_owned())
+                })
+            })
+            .transpose()?
+            .filter(|value| !value.is_empty());
+        let after = header
+            .or_else(|| raw.get("after").map(String::as_str))
+            .map(EventId::try_from)
+            .transpose()?;
+        Ok((subscription, after))
+    };
+    let (subscription, after) = match read() {
+        Ok(read) => read,
+        Err(error) => return error.into_response(),
+    };
+    match serving.hub.connect(subscription, after) {
+        Err(unavailable) => (
+            axum::http::StatusCode::GONE,
+            Json(serde_json::json!({
+                "code": "subscription-unavailable",
+                "reason": unavailable.as_str(),
+            })),
+        )
+            .into_response(),
+        Ok(stream) => {
+            use tokio_stream::StreamExt;
+            let frames = tokio_stream::iter(stream.replay)
+                .chain(ReceiverStream::new(stream.frames))
+                .map(Ok::<_, Infallible>);
+            Sse::new(frames)
+                .keep_alive(KeepAlive::new().interval(HEARTBEAT_INTERVAL))
+                .into_response()
+        }
+    }
+}
+
+/// `POST /api/v2/subscriptions`: the subscription and its initial state, `201`.
+async fn subscribe(State(serving): Store, raw: String) -> Response {
+    let request = match SubscribeRequest::parse(&raw) {
+        Ok(request) => request,
+        Err(error) => return error.into_response(),
+    };
+    let hub = serving.hub.clone();
+    match tokio::task::spawn_blocking(move || hub.subscribe(&request)).await {
+        Ok(Ok(subscribed)) => (axum::http::StatusCode::CREATED, Json(subscribed)).into_response(),
+        Ok(Err(error)) => error.into_response(),
+        Err(_) => ApiError::Read("unexpected read failure".to_owned()).into_response(),
+    }
+}
+
+/// `DELETE /api/v2/subscriptions/{subscription}`: `204`, whether or not it was
+/// still held.
+async fn unsubscribe(State(serving): Store, Path(subscription): Path<String>) -> Response {
+    match SubscriptionId::try_from(subscription.as_str()) {
+        Ok(subscription) => {
+            serving.hub.retire(subscription);
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => error.into_response(),
+    }
 }
 
 /// A boolean query parameter, or the contract's refusal of what was sent.

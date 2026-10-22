@@ -1,0 +1,674 @@
+//! Subscriptions, over a real server: what a tab subscribes to is pushed to it as
+//! it changes, and nothing else is.
+//!
+//! Every journey here starts the compiled binary over a runs root, creates a
+//! subscription with `POST /api/v2/subscriptions`, reads its stream off a real
+//! socket and grows the run's journal the way the engine's writer does
+//! (`tests/support/live_journal.rs`), or through the engine's own verbs. The
+//! server's passive trace (`ONEPIPELINE_UI_LIVE_TRACE`) says what each refresh
+//! read and rebuilt, which is how a journey holds the server to building its
+//! patches from the appended records rather than re-reading the run — and every
+//! patched payload is held to what a fresh read of the same route serves.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+use onepipeline_ui::patch::{self, Op};
+use serde_json::{json, Value};
+
+use crate::fixture_run;
+use crate::http;
+use crate::live_journal;
+use crate::serving::Serving;
+
+/// How long a journey waits for the server to act on an append before calling
+/// it stuck: the poll is 50 ms, so this is the loaded-runner margin.
+const PATIENCE: Duration = Duration::from_secs(20);
+
+/// How long a stream must stay quiet before a journey reads it as done
+/// delivering what one refresh sent.
+const QUIET: Duration = Duration::from_millis(300);
+
+/// A server whose subscriptions trace every refresh and refold the SDK's
+/// telemetry on every change, so a patched detail can be held to a fresh read.
+struct Live {
+    serving: Serving,
+    trace: PathBuf,
+    _trace_dir: tempfile::TempDir,
+}
+
+impl Live {
+    fn start(build: impl FnOnce(&Path)) -> Self {
+        Self::start_with(build, &[])
+    }
+
+    fn start_with(build: impl FnOnce(&Path), extra: &[(&str, &str)]) -> Self {
+        let trace_dir = tempfile::tempdir().expect("a trace directory");
+        let trace = trace_dir.path().join("live.jsonl");
+        let trace_text = trace.to_str().expect("utf-8").to_owned();
+        let mut environment = vec![
+            (onepipeline_ui::live::TRACE_ENV, trace_text.as_str()),
+            (onepipeline_ui::live::TELEMETRY_REFOLD_ENV, "0"),
+        ];
+        environment.extend_from_slice(extra);
+        let serving = Serving::start_with_env(build, &environment);
+        Self {
+            serving,
+            trace,
+            _trace_dir: trace_dir,
+        }
+    }
+
+    fn address(&self) -> std::net::SocketAddr {
+        self.serving.address
+    }
+
+    fn journal(&self, run: &str) -> PathBuf {
+        self.serving.run_dir(run).join("events.jsonl")
+    }
+
+    /// Every refresh the server traced, in order.
+    fn refreshes(&self) -> Vec<Value> {
+        fs::read_to_string(&self.trace)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    }
+
+    /// Wait until the server traced a refresh of `run` after the `seen`th
+    /// line, and hand it back.
+    fn next_refresh(&self, run: &str, seen: &mut usize) -> Value {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let lines = self.refreshes();
+            if let Some(found) = lines[*seen..]
+                .iter()
+                .position(|line| line["run"] == run && line["refresh"] != "unchanged")
+            {
+                let line = lines[*seen + found].clone();
+                *seen += found + 1;
+                return line;
+            }
+            assert!(Instant::now() < deadline, "no refresh of {run} after line {seen}: {lines:#?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn subscribe(&self, body: &Value) -> Value {
+        let response = http::post(self.address(), "/api/v2/subscriptions", &body.to_string());
+        assert_eq!(response.status, 201, "{body} was not subscribed: {}", response.body);
+        response.json()
+    }
+}
+
+/// One open subscription: the state it holds, kept by applying what arrives.
+struct Tab {
+    subscription: String,
+    stream: http::Stream,
+    applied: String,
+    state: Value,
+    frames: Vec<Value>,
+}
+
+impl Tab {
+    fn open(live: &Live, view: &Value) -> Self {
+        let subscribed = live.subscribe(&json!({ "view": view }));
+        assert_eq!(subscribed["initial"]["type"], "snapshot");
+        let snapshot = subscribed["initial"]["snapshot"].clone();
+        let subscription = subscribed["subscription"].as_str().expect("an id").to_owned();
+        let applied = snapshot["id"].as_str().expect("a snapshot id").to_owned();
+        let stream = http::stream(
+            live.address(),
+            &format!("/api/v2/events?subscription={subscription}&after={applied}"),
+            None,
+        );
+        assert_eq!(stream.status, 200);
+        Self {
+            subscription,
+            stream,
+            applied,
+            state: snapshot,
+            frames: Vec::new(),
+        }
+    }
+
+    /// Read until the stream goes quiet, applying each frame in order.
+    fn drain(&mut self) -> Vec<Value> {
+        let mut read = Vec::new();
+        while let Some(frame) = self.stream.frame_within(QUIET) {
+            let data = frame.json();
+            assert_eq!(frame.id, data["id"], "the SSE id is the frame's id");
+            assert_eq!(frame.event, data["type"], "the SSE event is the frame's type");
+            assert_eq!(data["subscription"], self.subscription.as_str());
+            self.apply(&data);
+            read.push(data);
+        }
+        self.frames.extend(read.iter().cloned());
+        read
+    }
+
+    fn apply(&mut self, frame: &Value) {
+        if frame["type"] == "reset" {
+            self.state = frame["snapshot"].clone();
+            self.applied = frame["id"].as_str().expect("an id").to_owned();
+            return;
+        }
+        assert_eq!(frame["base"], self.applied.as_str(), "each frame names the one before it");
+        let ops = |frame: &Value| -> Vec<Op> {
+            frame["ops"]
+                .as_array()
+                .expect("ops")
+                .iter()
+                .map(|op| Op::from_json(op).expect("an op the contract allows"))
+                .collect()
+        };
+        let visible = &mut self.state["visible"];
+        match frame["type"].as_str() {
+            Some("run.changed") => {
+                let rows = self.state["sidebar"].as_array_mut().expect("rows");
+                let row = frame["row"].clone();
+                match rows.iter_mut().find(|held| held["id"] == row["id"]) {
+                    Some(held) => *held = row,
+                    None => rows.push(row),
+                }
+            }
+            Some("run.removed") => {
+                let rows = self.state["sidebar"].as_array_mut().expect("rows");
+                rows.retain(|held| held["id"] != frame["run_id"]);
+            }
+            Some("detail.patch") => patch::apply(&mut visible["detail"], &ops(frame)).expect("the detail patch applies"),
+            Some("timeline.patch") => patch::apply(&mut visible["timeline"], &ops(frame)).expect("the timeline patch applies"),
+            Some("channel.patch") => patch::apply(&mut visible["channel"], &ops(frame)).expect("the channel patch applies"),
+            other => panic!("an unknown frame type {other:?}"),
+        }
+        self.applied = frame["id"].as_str().expect("an id").to_owned();
+    }
+}
+
+/// A payload without the instant it was read, which no two reads share.
+fn unstamped(mut payload: Value) -> Value {
+    if let Some(object) = payload.as_object_mut() {
+        object.remove("observed_at");
+    }
+    payload
+}
+
+fn fresh(address: std::net::SocketAddr, path: &str) -> Value {
+    let response = http::get(address, path);
+    assert_eq!(response.status, 200, "{path}: {}", response.body);
+    unstamped(response.json())
+}
+
+/// Every node the fixture run's plan carries.
+fn plan_nodes(root: &Path, run: &str) -> Vec<String> {
+    let plan: Value = serde_json::from_slice(&fs::read(root.join(run).join("plan.json")).expect("a plan"))
+        .expect("the plan parses");
+    plan["tasks"]
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .filter_map(|task| task["id"].as_str().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn every_appended_record_patches_each_view_into_what_a_fresh_read_serves() {
+    let run = fixture_run::RUN_ID;
+    let mut held_back = Vec::new();
+    let mut nodes = Vec::new();
+    let live = Live::start(|root| {
+        fixture_run::write(root, run);
+        nodes = plan_nodes(root, run);
+        let journal = root.join(run).join("events.jsonl");
+        let total = fs::read_to_string(&journal).expect("a journal").lines().count();
+        // The run's first records on disk, and the rest appended one at a time
+        // with every view open: each kind of record the fixture holds arrives
+        // live at least once.
+        held_back = live_journal::hold_back(&journal, total / 3);
+    });
+    assert!(held_back.len() > 10, "enough records to grow the run by: {}", held_back.len());
+
+    let mut views: Vec<(String, Value)> = vec![
+        ("graph".into(), json!({ "type": "detail", "run_id": run })),
+        ("graph, planner".into(), json!({ "type": "detail", "run_id": run, "filter": "planner" })),
+        ("overall".into(), json!({ "type": "timeline", "run_id": run, "scope": "run" })),
+        ("overall, planner".into(), json!({ "type": "timeline", "run_id": run, "scope": "run", "filter": "planner" })),
+        ("channel".into(), json!({ "type": "channel", "run_id": run })),
+    ];
+    for node in &nodes {
+        views.push((
+            format!("node {node}"),
+            json!({ "type": "timeline", "run_id": run, "scope": "node", "node": node }),
+        ));
+    }
+    // Subscribed in turn, before anything grows: a node the held-back records
+    // first name is subscribed to as a node of the plan.
+    let mut tabs: Vec<(String, Value, Tab)> = Vec::new();
+    for (name, view) in views {
+        let subscribed = http::post(
+            live.address(),
+            "/api/v2/subscriptions",
+            &json!({ "view": view }).to_string(),
+        );
+        if subscribed.status == 404 {
+            // A plan node no record names yet is not a node this run has a
+            // timeline for; it is subscribed to once it has one.
+            continue;
+        }
+        let tab = Tab::open(&live, &view);
+        tabs.push((name, view, tab));
+    }
+    assert!(tabs.len() >= 5);
+
+    let mut seen = live.refreshes().len();
+    let journal = live.journal(run);
+    let address = live.address();
+    let mut appended_refreshes = 0;
+    for (index, line) in held_back.iter().enumerate() {
+        live_journal::append_lines(&journal, std::slice::from_ref(line));
+        let refresh = live.next_refresh(run, &mut seen);
+        match refresh["refresh"].as_str() {
+            Some("appended") => {
+                appended_refreshes += 1;
+                assert_eq!(refresh["records"], 1, "only the appended record was read: {refresh}");
+                assert_eq!(refresh["whole"], json!([]), "nothing was rebuilt whole: {refresh}");
+                let timelines = tabs.iter().filter(|(_, view, _)| view["type"] == "timeline").count();
+                assert!(
+                    refresh["rendered"].as_u64().is_some_and(|rendered| rendered <= timelines as u64),
+                    "only the appended record was rendered, at most once per timeline: {refresh}"
+                );
+            }
+            Some("reread") => {
+                // The engine re-reads a record that sorts before the ones it
+                // holds; the rebuild is still sent as what changed.
+                assert!(!refresh["whole"].as_array().expect("whole").is_empty(), "{refresh}");
+            }
+            other => panic!("an unexpected refresh {other:?}"),
+        }
+        for (name, view, tab) in &mut tabs {
+            for frame in tab.drain() {
+                for kind in ["snapshot", "reset"] {
+                    assert_ne!(frame["type"], kind, "{name} was re-sent its state after record {index}");
+                }
+                if let Some(ops) = frame["ops"].as_array() {
+                    let root = ops.iter().any(|op| op["p"] == json!([]));
+                    assert!(!root, "{name} was patched at its root: {frame}");
+                }
+            }
+            let detail = unstamped(tab.state["visible"]["detail"].clone());
+            let filter = view["filter"].as_str().map(|filter| format!("&filter={filter}")).unwrap_or_default();
+            assert_eq!(
+                detail,
+                fresh(address, &format!("/api/v2/runs/{run}?include_conversations=false{filter}")),
+                "{name}'s detail after record {index}"
+            );
+            match view["type"].as_str() {
+                Some("timeline") => {
+                    let scope = match view["node"].as_str() {
+                        Some(node) => format!("scope=node&node={node}"),
+                        None => "scope=run".to_owned(),
+                    };
+                    assert_eq!(
+                        unstamped(tab.state["visible"]["timeline"].clone()),
+                        fresh(address, &format!("/api/v2/runs/{run}/timeline?{scope}{filter}")),
+                        "{name}'s timeline after record {index}"
+                    );
+                }
+                Some("channel") => assert_eq!(
+                    unstamped(tab.state["visible"]["channel"].clone()),
+                    fresh(address, &format!("/api/v2/runs/{run}/channel")),
+                    "{name}'s channel after record {index}"
+                ),
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        appended_refreshes * 2 > held_back.len(),
+        "most appends were read as appends, not re-reads: {appended_refreshes} of {}",
+        held_back.len()
+    );
+}
+
+/// A run of the load corpus's shape, small: one live node appending activity.
+fn growing_run(root: &Path, run: &str) {
+    fixture_run::write(root, run);
+    live_journal::receipt_for(&root.join(run).join("events.jsonl"));
+}
+
+fn activity(run: &str, node: &str, seq: u64, marker: &str) -> String {
+    json!({
+        "v": 1,
+        "ts": onepipeline_ui::payload::now_rfc3339(),
+        "stream": format!("journey-{run}"),
+        "seq": seq,
+        "source": "agentgraph",
+        "kind": "turn-activity",
+        "labels": {
+            "run_id": run, "node": node, "member": "worker", "persona": "worker",
+            "session": format!("journey-{run}-{node}.worker"),
+        },
+        "payload": { "kind": "tool_call", "name": "Bash", "detail": marker, "truncated": false, "index": seq },
+        "artifacts": [],
+    })
+    .to_string()
+}
+
+#[test]
+fn a_tab_is_sent_trimmed_rows_for_other_runs_and_nothing_restated() {
+    let live = Live::start(|root| {
+        growing_run(root, fixture_run::RUN_ID);
+        growing_run(root, fixture_run::OTHER_RUN_ID);
+    });
+    let subscribed = live.subscribe(&json!({ "view": { "type": "sidebar" } }));
+    let rows = subscribed["initial"]["snapshot"]["sidebar"].as_array().expect("rows").clone();
+    assert_eq!(rows.len(), 2);
+    let fields = |row: &Value| -> Vec<String> { row.as_object().expect("a row").keys().cloned().collect() };
+    for row in &rows {
+        let mut keys = fields(row);
+        keys.retain(|key| key != "started_at");
+        assert_eq!(keys, ["id", "name", "group", "kind", "state", "nodes", "updated_at"], "{row}");
+    }
+    let mut tab = Tab::open(&live, &json!({ "type": "sidebar" }));
+    let mut seen = live.refreshes().len();
+    let _ = &mut seen;
+    live_journal::append_lines(
+        &live.journal(fixture_run::OTHER_RUN_ID),
+        &[activity(fixture_run::OTHER_RUN_ID, fixture_run::NODE_ID, 9_000, "elsewhere")],
+    );
+    let deadline = Instant::now() + PATIENCE;
+    let mut frames = Vec::new();
+    while frames.is_empty() && Instant::now() < deadline {
+        frames = tab.drain();
+    }
+    assert_eq!(frames.len(), 1, "one frame for one run that moved: {frames:#?}");
+    assert_eq!(frames[0]["type"], "run.changed");
+    assert_eq!(frames[0]["row"]["id"], fixture_run::OTHER_RUN_ID);
+    let mut keys = fields(&frames[0]["row"]);
+    keys.retain(|key| key != "started_at");
+    assert_eq!(keys, ["id", "name", "group", "kind", "state", "nodes", "updated_at"]);
+    // Nothing else: the sidebar subscription reads no run's detail, so the
+    // server opened none.
+    assert!(live.refreshes().is_empty(), "a sidebar-only tab opened a run: {:#?}", live.refreshes());
+}
+
+#[test]
+fn a_reconnect_replays_every_frame_it_missed_exactly_once() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let mut tab = Tab::open(&live, &json!({ "type": "timeline", "run_id": run, "scope": "node", "node": fixture_run::NODE_ID }));
+    let journal = live.journal(run);
+    let mut seen = live.refreshes().len();
+    live_journal::append_lines(&journal, &[activity(run, fixture_run::NODE_ID, 10_000, "before the drop")]);
+    live.next_refresh(run, &mut seen);
+    tab.drain();
+    let last_applied = tab.applied.clone();
+    // The stream drops; records keep arriving while nothing is connected.
+    let subscription = tab.subscription.clone();
+    drop(std::mem::replace(
+        &mut tab.stream,
+        http::stream(live.address(), "/healthz", None),
+    ));
+    let markers = ["while away 1", "while away 2", "while away 3"];
+    for (offset, marker) in markers.iter().enumerate() {
+        live_journal::append_lines(&journal, &[activity(run, fixture_run::NODE_ID, 10_001 + offset as u64, marker)]);
+        live.next_refresh(run, &mut seen);
+    }
+    // Reconnecting the way a browser's EventSource does: Last-Event-ID, which
+    // takes precedence over a stale `after`.
+    tab.stream = http::stream(
+        live.address(),
+        &format!("/api/v2/events?subscription={subscription}&after={}", tab.frames[0]["id"].as_str().unwrap_or_default()),
+        Some(&last_applied),
+    );
+    assert_eq!(tab.stream.status, 200);
+    let replayed = tab.drain();
+    assert!(!replayed.is_empty());
+    assert!(replayed.iter().all(|frame| frame["type"] == "timeline.patch" || frame["type"] == "detail.patch" || frame["type"] == "run.changed"), "{replayed:#?}");
+    let events: Vec<String> = tab.state["visible"]["timeline"]["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter_map(|event| event["fields"]["detail"].as_str().map(str::to_owned))
+        .collect();
+    for marker in markers {
+        assert_eq!(
+            events.iter().filter(|detail| detail.as_str() == marker).count(),
+            1,
+            "{marker} is on the timeline exactly once: {events:?}"
+        );
+    }
+    assert_eq!(
+        unstamped(tab.state["visible"]["timeline"].clone()),
+        fresh(live.address(), &format!("/api/v2/runs/{run}/timeline?scope=node&node={}", fixture_run::NODE_ID))
+    );
+}
+
+#[test]
+fn a_cursor_the_subscription_cannot_resume_from_is_answered_with_one_named_reset() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let subscribed = live.subscribe(&json!({ "view": { "type": "detail", "run_id": run } }));
+    let subscription = subscribed["subscription"].as_str().expect("an id");
+    let snapshot_id = subscribed["initial"]["snapshot"]["id"].as_str().expect("an id");
+    let (epoch, seq) = snapshot_id.split_once(':').expect("epoch:seq");
+    let seq: u64 = seq.parse().expect("a sequence");
+
+    let cases = [
+        (format!("{epoch}:{}", seq + 1000), "unknown-cursor"),
+        (format!("00000000-0000-4000-8000-000000000000:{seq}"), "server-restarted"),
+    ];
+    for (cursor, reason) in cases {
+        let mut stream = http::stream(
+            live.address(),
+            &format!("/api/v2/events?subscription={subscription}&after={cursor}"),
+            None,
+        );
+        assert_eq!(stream.status, 200);
+        let frame = stream.frame_within(PATIENCE).expect("a reset").json();
+        assert_eq!(frame["type"], "reset");
+        assert_eq!(frame["reason"], reason);
+        assert_eq!(frame["base"], cursor.as_str(), "the reset echoes the cursor it refused");
+        assert_eq!(frame["snapshot"]["id"], frame["id"]);
+        assert_eq!(
+            unstamped(frame["snapshot"]["visible"]["detail"].clone()),
+            fresh(live.address(), &format!("/api/v2/runs/{run}?include_conversations=false"))
+        );
+        assert!(stream.frame_within(QUIET).is_none(), "one reset, nothing restated after it");
+    }
+    for malformed in ["not-a-cursor", &format!("{epoch}:-1"), &format!("{epoch}:01")] {
+        let refused = http::get(
+            live.address(),
+            &format!("/api/v2/events?subscription={subscription}&after={malformed}"),
+        );
+        assert_eq!(refused.status, 400, "{malformed}: {}", refused.body);
+        assert_eq!(refused.json()["error"]["code"], "invalid_subscription");
+    }
+}
+
+#[test]
+fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
+    // Many runs, each grown once per poll while the stream is away, so the
+    // subscription records more frames than it retains.
+    let runs: Vec<String> = (0..60).map(|index| format!("retained-{index:02}")).collect();
+    let live = Live::start(|root| {
+        for run in &runs {
+            growing_run(root, run);
+        }
+    });
+    let subscribed = live.subscribe(&json!({ "view": { "type": "sidebar" } }));
+    let subscription = subscribed["subscription"].as_str().expect("an id").to_owned();
+    let snapshot_id = subscribed["initial"]["snapshot"]["id"].as_str().expect("an id").to_owned();
+    let mut seq = 20_000;
+    let deadline = Instant::now() + Duration::from_secs(120);
+    // Every round moves every run's row; 4,096 frames is about seventy rounds.
+    for _ in 0..90 {
+        for run in &runs {
+            seq += 1;
+            live_journal::append_lines(
+                &live.serving.run_dir(run).join("events.jsonl"),
+                &[activity(run, fixture_run::NODE_ID, seq, "churn")],
+            );
+        }
+        std::thread::sleep(Duration::from_millis(120));
+        assert!(Instant::now() < deadline);
+    }
+    let mut stream = http::stream(
+        live.address(),
+        &format!("/api/v2/events?subscription={subscription}&after={snapshot_id}"),
+        None,
+    );
+    let frame = stream.frame_within(PATIENCE).expect("a reset").json();
+    assert_eq!(frame["type"], "reset");
+    assert_eq!(frame["reason"], "stale-cursor");
+    assert_eq!(frame["snapshot"]["sidebar"].as_array().map(Vec::len), Some(runs.len()));
+}
+
+#[test]
+fn a_retired_or_replaced_subscription_is_gone_and_its_stream_says_so() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let first = live.subscribe(&json!({ "view": { "type": "detail", "run_id": run } }));
+    let first_id = first["subscription"].as_str().expect("an id").to_owned();
+    // Moving to the Channel view replaces the subscription: the detail view
+    // left behind is no longer subscribed or read.
+    let second = live.subscribe(&json!({ "view": { "type": "channel", "run_id": run }, "replaces": first_id }));
+    let second_id = second["subscription"].as_str().expect("an id").to_owned();
+    for (id, status) in [(&first_id, 410), (&second_id, 200)] {
+        let stream = http::stream(live.address(), &format!("/api/v2/events?subscription={id}"), None);
+        assert_eq!(stream.status, status, "{id}");
+    }
+    let gone = http::get(live.address(), &format!("/api/v2/events?subscription={first_id}"));
+    assert_eq!(gone.json(), json!({ "code": "subscription-unavailable", "reason": "unknown" }));
+    let deleted = http::delete(live.address(), &format!("/api/v2/subscriptions/{second_id}"));
+    assert_eq!(deleted.status, 204);
+    assert_eq!(http::delete(live.address(), &format!("/api/v2/subscriptions/{second_id}")).status, 204, "idempotent");
+    assert_eq!(http::get(live.address(), &format!("/api/v2/events?subscription={second_id}")).status, 410);
+    // A cursor from another process's epoch names a restart.
+    let restarted = http::get(
+        live.address(),
+        "/api/v2/events?subscription=00000000-0000-4000-8000-000000000001&after=00000000-0000-4000-8000-000000000000:3",
+    );
+    assert_eq!(restarted.json(), json!({ "code": "subscription-unavailable", "reason": "server-restarted" }));
+    // Recreating with `resume` is answered with an explicit reset, never an
+    // ordinary snapshot.
+    let resumed = live.subscribe(&json!({
+        "view": { "type": "detail", "run_id": run },
+        "resume": "00000000-0000-4000-8000-000000000000:3",
+    }));
+    assert_eq!(resumed["initial"]["type"], "reset");
+    assert_eq!(resumed["initial"]["reason"], "server-restarted");
+    assert_eq!(resumed["initial"]["base"], "00000000-0000-4000-8000-000000000000:3");
+    assert_eq!(resumed["initial"]["snapshot"]["id"], resumed["initial"]["id"]);
+}
+
+#[test]
+fn a_subscription_the_contract_cannot_read_is_refused_before_anything_is_opened() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    for (body, status, code) in [
+        (json!({ "view": { "type": "timeline", "run_id": run, "scope": "node" } }), 400, "invalid_subscription"),
+        (json!({ "view": { "type": "timeline", "run_id": run, "scope": "run", "node": "x" } }), 400, "invalid_subscription"),
+        (json!({ "view": { "type": "detail", "run_id": run, "extra": 1 } }), 400, "invalid_subscription"),
+        (json!({ "view": { "type": "sidebar" }, "replaces": "nope" }), 400, "invalid_subscription"),
+        (json!({ "view": { "type": "sidebar" }, "replaces": "00000000-0000-4000-8000-000000000000", "resume": "00000000-0000-4000-8000-000000000000:1" }), 400, "invalid_subscription"),
+        (json!({ "view": { "type": "detail", "run_id": "no-such-run" } }), 404, "run_not_found"),
+        (json!({ "view": { "type": "timeline", "run_id": run, "scope": "node", "node": "no-such-node" } }), 404, "node_not_found"),
+        (json!({ "view": { "type": "detail", "run_id": run, "filter": "no-such-profile" } }), 404, "unknown_filter_profile"),
+    ] {
+        let response = http::post(live.address(), "/api/v2/subscriptions", &body.to_string());
+        assert_eq!(response.status, status, "{body}: {}", response.body);
+        assert_eq!(response.json()["error"]["code"], code, "{body}");
+    }
+    let unknown_replaced = live.subscribe(&json!({
+        "view": { "type": "sidebar" },
+        "replaces": "00000000-0000-4000-8000-000000000000",
+    }));
+    assert_eq!(unknown_replaced["initial"]["type"], "snapshot", "a missing replaces is harmless");
+}
+
+#[test]
+fn a_label_change_without_growth_is_reread_and_served_as_what_changed() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let mut tab = Tab::open(&live, &json!({ "type": "timeline", "run_id": run, "scope": "run" }));
+    let mut seen = live.refreshes().len();
+    let journal_before = fs::metadata(live.journal(run)).expect("a journal").len();
+    // The overlay `onepipeline label` writes: the journal does not grow.
+    fs::write(
+        live.serving.run_dir(run).join("labels.json"),
+        json!({
+            "schema_version": 1,
+            "labels": { "kind": "follow-ups" },
+            "unlabel": [],
+            "set_at": "2026-10-22T00:00:00Z",
+            "set_by": { "launcher": "journey", "session": "journey" },
+        })
+        .to_string(),
+    )
+    .expect("write the overlay");
+    let refresh = live.next_refresh(run, &mut seen);
+    assert_eq!(refresh["refresh"], "reread", "{refresh}");
+    assert_eq!(fs::metadata(live.journal(run)).expect("a journal").len(), journal_before);
+    let frames = tab.drain();
+    assert!(frames.iter().all(|frame| frame["type"] != "reset" && frame["type"] != "snapshot"));
+    assert!(
+        frames.iter().any(|frame| frame["type"] == "run.changed" && frame["row"]["kind"] == "follow-ups"),
+        "the sidebar row carries the new kind: {frames:#?}"
+    );
+    assert_eq!(
+        unstamped(tab.state["visible"]["detail"].clone()),
+        fresh(live.address(), &format!("/api/v2/runs/{run}?include_conversations=false"))
+    );
+    assert_eq!(
+        unstamped(tab.state["visible"]["timeline"].clone()),
+        fresh(live.address(), &format!("/api/v2/runs/{run}/timeline?scope=run"))
+    );
+}
+
+#[test]
+fn a_surface_raised_through_the_engine_reaches_the_channel_view_as_a_patch() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let mut tab = Tab::open(&live, &json!({ "type": "channel", "run_id": run }));
+    let mut seen = live.refreshes().len();
+    // The engine's own writer journals the surface, receipt and all.
+    let raised = http::post(
+        live.address(),
+        &format!("/api/v2/runs/{run}/channel/surface"),
+        &json!({ "kind": "question", "message": "is the journey live?" }).to_string(),
+    );
+    assert_eq!(raised.status, 200, "{}", raised.body);
+    let refresh = live.next_refresh(run, &mut seen);
+    assert_eq!(refresh["refresh"], "appended", "the engine's own append is read as one: {refresh}");
+    let deadline = Instant::now() + PATIENCE;
+    let mut frames = Vec::new();
+    while !frames.iter().any(|frame: &Value| frame["type"] == "channel.patch") && Instant::now() < deadline {
+        frames.extend(tab.drain());
+    }
+    assert!(frames.iter().any(|frame| frame["type"] == "channel.patch"), "{frames:#?}");
+    let channel = unstamped(tab.state["visible"]["channel"].clone());
+    assert_eq!(channel, fresh(live.address(), &format!("/api/v2/runs/{run}/channel")));
+    let messages: Vec<&str> = channel["surfaces"]
+        .as_array()
+        .expect("surfaces")
+        .iter()
+        .filter_map(|surface| surface["message"].as_str())
+        .collect();
+    assert!(messages.contains(&"is the journey live?"), "{messages:?}");
+}
+
+/// Count each kind of frame a tab received, for the journeys that say what a
+/// view was and was not sent.
+#[allow(dead_code)]
+fn kinds(frames: &[Value]) -> BTreeMap<String, usize> {
+    let mut counted = BTreeMap::new();
+    for frame in frames {
+        *counted.entry(frame["type"].as_str().unwrap_or_default().to_owned()).or_insert(0) += 1;
+    }
+    counted
+}
