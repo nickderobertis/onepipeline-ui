@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.46.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.45.2...v0.46.0) - 2026-10-22
+
+### Added
+
+- [**breaking**] link onepipeline with pooled server cleanup ([#431](https://github.com/nickderobertis/onepipeline-ui/pull/431))
+
+### Fixed
+
+- make the shutdown dialog test and recorded-run screenshots deterministic ([#434](https://github.com/nickderobertis/onepipeline-ui/pull/434))
+
 ## [0.45.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.45.1...v0.45.2) - 2026-10-22
 
 ### Added
