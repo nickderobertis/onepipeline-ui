@@ -739,3 +739,44 @@ for (const scope of ["node", "run"] as const) {
     expect(new URL(page.url()).searchParams.has("event")).toBe(false);
   });
 }
+
+test("keeps the reading cursor when an open event's timeline is expanded", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(nodeUrl);
+  const worker = page.getByRole("region", { name: "Dispatch 1", exact: true });
+  const timeline = page.getByRole("region", {
+    name: "Node timeline",
+    exact: true,
+  });
+  const cursor = timeline.getByLabel("Timeline cursor", { exact: true });
+  await expect(cursor).toBeVisible();
+  const initialReading = await cursor.getAttribute("style");
+  await worker
+    .getByRole("button", { name: "Open gate-run", exact: true })
+    .first()
+    .click();
+  const detail = page.getByRole("region", { name: "Timeline item detail" });
+  await expect(
+    detail.getByRole("heading", { name: "gate-run", exact: true }),
+  ).toBeVisible();
+  const transcript = page.getByRole("region", { name: "Node transcript" });
+  const bounds = await transcript.boundingBox();
+  if (bounds === null) throw new Error("node transcript has no bounds");
+  // Wheel over the reading's exposed left edge beside the drawer.
+  await page.mouse.move(bounds.x + 10, bounds.y + bounds.height / 2);
+  await page.mouse.wheel(0, -20_000);
+  await expect(
+    worker.getByRole("heading", { name: "Dispatch 1", exact: true }),
+  ).toBeInViewport();
+  await expect(cursor).toHaveAttribute("style", initialReading ?? "");
+  // Keyboard activation reaches the control even where the detail overlaps it.
+  await timeline.getByRole("button", { name: "Expand timeline" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    timeline.getByRole("button", { name: "Collapse timeline" }),
+  ).toBeVisible();
+  await expect(cursor).toHaveAttribute("style", initialReading ?? "");
+  await expect(detail).toBeVisible();
+});
