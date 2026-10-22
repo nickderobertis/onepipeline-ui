@@ -74,6 +74,7 @@ export function NodeTimelineView({
   client,
   runId,
   node,
+  nodes,
   timeline,
   timelineError,
   selectedItemId,
@@ -85,6 +86,8 @@ export function NodeTimelineView({
   readonly client: TelemetryClient;
   readonly runId: string;
   readonly node: NodeView;
+  /** Every node of the run, so a blocker can be named with the status it holds. */
+  readonly nodes: readonly NodeView[];
   readonly timeline?: RunTimeline;
   readonly timelineError?: Error;
   readonly selectedItemId?: string;
@@ -152,7 +155,7 @@ export function NodeTimelineView({
         </div>
       </header>
 
-      <NodeProblemBanner node={node} />
+      <NodeProblemBanner node={node} nodes={nodes} />
 
       <Tabs
         className="node-tabs"
@@ -171,6 +174,13 @@ export function NodeTimelineView({
         <TabsContent className="node-tab-panel" value="task">
           <pre>{taskProse(node.task)}</pre>
           <dl className="facts">
+            {/* The settlement's own word — `merged`, `published`, `shipped` —
+                which the status badge does not carry: `done` is the same for a
+                change that merged and one still open. */}
+            <div>
+              <dt>Settled as</dt>
+              <dd>{formatValue(node.result?.outcome)}</dd>
+            </div>
             <div>
               <dt>Outcome</dt>
               <dd>{formatValue(node.result?.detail)}</dd>
@@ -203,7 +213,20 @@ export function NodeTimelineView({
           <dl className="facts">
             <div>
               <dt>Dependencies</dt>
-              <dd>{node.task.deps?.join(", ") || "None"}</dd>
+              <dd>
+                {(node.task.deps ?? [])
+                  .map((dep) => {
+                    const status = nodes.find(
+                      (other) => other.id === dep,
+                    )?.status;
+                    return status === undefined ? dep : `${dep} (${status})`;
+                  })
+                  .join(", ") || "None"}
+              </dd>
+            </div>
+            <div>
+              <dt>Unblocks</dt>
+              <dd>{node.dependents.join(", ") || "None"}</dd>
             </div>
           </dl>
         </TabsContent>
@@ -737,7 +760,13 @@ function Publication({ node }: { readonly node: NodeView }) {
 }
 
 /** Leads an unhealthy node's detail view with its server-recorded reason. */
-function NodeProblemBanner({ node }: { readonly node: NodeView }) {
+function NodeProblemBanner({
+  node,
+  nodes,
+}: {
+  readonly node: NodeView;
+  readonly nodes: readonly NodeView[];
+}) {
   if (!isUnhealthy(node.status)) return null;
   // Not one condition: `blocked` moves when a person acts and `skipped` never will.
   // They share a banner because neither is this node's own failure — the heading
@@ -778,9 +807,24 @@ function NodeProblemBanner({ node }: { readonly node: NodeView }) {
               <dt>{node.status === "skipped" ? "Unmet" : "Blocked by"}</dt>
               <dd>
                 {node.blockers.length > 0
-                  ? node.blockers.join(", ")
+                  ? node.blockers
+                      .map((blocker) => {
+                        const status = nodes.find(
+                          (other) => other.id === blocker,
+                        )?.status;
+                        return status === undefined
+                          ? blocker
+                          : `${blocker} (${status})`;
+                      })
+                      .join(", ")
                   : "Nothing recorded; the run has not written what holds it."}
               </dd>
+            </div>
+          )}
+          {node.status === "skipped" && (
+            <div>
+              <dt>Attempts</dt>
+              <dd>Never attempted</dd>
             </div>
           )}
           {!dependencyDecided && (

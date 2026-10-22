@@ -827,7 +827,11 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       await screen.findByText("Users can inspect transcripts"),
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Dependencies" }));
-    expect(await screen.findByText("foundation")).toBeInTheDocument();
+    // Each dependency with the status it holds, and what this node releases.
+    expect(await screen.findByText("foundation (done)")).toBeInTheDocument();
+    expect(
+      screen.getByText("publish, followup", { exact: true }),
+    ).toBeInTheDocument();
   });
 
   test("reads a steps-shaped node's task from the steps that carry it", async () => {

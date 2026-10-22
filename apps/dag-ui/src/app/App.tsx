@@ -48,6 +48,7 @@ import { RecordDisclosure } from "../lib/RecordDisclosure";
 import {
   currentOverrides,
   graphOf,
+  graphStateWord,
   launchLabel,
   nodeViews,
 } from "../lib/run-model";
@@ -274,6 +275,8 @@ export function App({
                 <dl>
                   <dt>Summary</dt>
                   <dd>{control.status.value.summary}</dd>
+                  <dt>Graph state</dt>
+                  <dd>{graphStateWord(control.status.value.node_status)}</dd>
                   <dt>Unread surfaces</dt>
                   <dd>{control.status.value.unread_surfaces.count}</dd>
                   <dt>Oldest unread (seconds)</dt>
@@ -420,6 +423,7 @@ export function App({
                     <NodeTimelineView
                       client={client}
                       node={selectedNode}
+                      nodes={nodes}
                       onBack={() => selection.selectNode(undefined)}
                       onSelectItem={selection.selectItem}
                       runId={selectedRunId}

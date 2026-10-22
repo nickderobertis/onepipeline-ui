@@ -1,11 +1,13 @@
 import {
   apiErrorSchema,
   artifactContentSchema,
+  renderedRunSchema,
   runAgentsSchema,
   runDetailSchema,
   runStatusSchema,
   runTelemetryDocumentSchema,
   runTimelineSchema,
+  runTranscriptSchema,
 } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
@@ -681,3 +683,354 @@ test("preserves Reads facts as structured fields in Overall and run details", as
     );
   }
 });
+
+/**
+ * The removed Results, Goals and per-node Transcript reads, line by line.
+ *
+ * Each read is still served — the routes are the CLI's, and only the tab that
+ * printed them went — so this reads what each printed over the corpus and holds
+ * every line to the place the remaining views show it. A line no rule below
+ * names fails the journey rather than passing unread, which is what makes this
+ * an inventory of everything those reads showed rather than a sample of it.
+ *
+ * Three kinds of line are deliberately not shown, by the manager's ruling, and
+ * each is named where it is consumed: a merged node's landing phrase (a live
+ * `onevcs` read at request time, not a recorded fact), a transcript's
+ * `report ROLE PATH` line with the note under it (the producer's scratch path),
+ * and nothing else. A dispatch whose report carries no transcript still says so,
+ * in the dispatch's own detail.
+ */
+test("shows every fact the removed Results, Goals and Transcript reads printed", async ({
+  page,
+}) => {
+  const unmapped: string[] = [];
+  for (const runId of [
+    runs().live,
+    runs().history,
+    runs().outcomes,
+    runs().legacy,
+  ]) {
+    const detail = await served(
+      page,
+      `/api/v2/runs/${runId}?include_conversations=true`,
+      runDetailSchema,
+    );
+    const tasks = detail.graph?.plan.tasks ?? [];
+    const conversations = Array.isArray(detail.conversations)
+      ? detail.conversations
+      : [];
+    const results = (
+      await served(page, `/api/v2/runs/${runId}/results`, renderedRunSchema)
+    ).rendered.split("\n");
+    const goals = (
+      await served(page, `/api/v2/runs/${runId}/goals`, renderedRunSchema)
+    ).rendered.split("\n");
+
+    // Goals and the Results header: the run's whole-graph readings.
+    await page.goto(`/?run=${runId}&view=overall`);
+    await page.getByText("Run details", { exact: true }).click();
+    const header = page.getByRole("group", {
+      name: "Run details",
+      exact: true,
+    });
+    const [resultsHead, ...nodeLines] = results.filter((line) => line !== "");
+    const graphState = resultsHead?.match(/^(\S+) {2}(\S+)$/);
+    expect(graphState?.[1]).toBe(runId);
+    await expect(header).toContainText(`Graph state${graphState?.[2]}`);
+    const [goalsHead, goalLine, tally, ...goalRest] = goals.filter(
+      (line) => line !== "",
+    );
+    const liveness = goalsHead?.match(/^(\S+) {2}(\S+)$/);
+    expect(liveness?.[1]).toBe(runId);
+    await expect(
+      page.getByRole("group", { name: "Status", exact: true }),
+    ).toContainText(String(liveness?.[2]).toLowerCase());
+    await expect(header).toContainText(`Summary${tally?.trim()}`);
+    // Every node's status word, as the engine folds it, beside the run's own: the
+    // graph the node view draws is the run's recorded one, which on a run whose
+    // result was recorded over its fold can read a different word.
+    const nodeStatuses = page.getByRole("region", {
+      name: "Node statuses",
+      exact: true,
+    });
+    for (const line of nodeLines) {
+      const word = line.match(/^ {2}(\S+)\s+(\S+)/);
+      if (word !== null)
+        await expect(
+          nodeStatuses.getByRole("group", {
+            name: `Record.${word[1]}`,
+            exact: true,
+          }),
+        ).toContainText(String(word[2]));
+    }
+    await page.getByText("Run details", { exact: true }).click();
+    await page
+      .getByText("Goal and repository identities", { exact: true })
+      .click();
+    const identity = page.getByRole("group", {
+      name: "Goal and repository identities",
+      exact: true,
+    });
+    const goal = goalLine?.trim();
+    // A run whose journal the engine folds to no plan states no goal; the plan
+    // the API serves for it can still name one, and that is what is shown.
+    await expect(identity).toContainText(
+      goal === "(no goal stated)"
+        ? (detail.graph?.plan.goal?.text ?? "Not recorded")
+        : String(goal),
+    );
+    for (const line of goalRest) {
+      const repos = line.match(/^ {2}identities: (.+)$/);
+      if (repos === null) {
+        unmapped.push(`${runId} goals: ${line}`);
+        continue;
+      }
+      for (const repo of repos[1]?.split(", ") ?? [])
+        await expect(identity).toContainText(repo);
+    }
+
+    // Results, one node line and the lines under it at a time.
+    // The node the indented lines below a node line belong to.
+    let current: string | undefined;
+    for (const line of nodeLines) {
+      const nodeLine = line.match(/^ {2}(\S+)\s+(\S+)(?: \(([^)]+)\))?(.*)$/);
+      if (nodeLine !== null) {
+        const [, id, , outcome, rest] = nodeLine;
+        current = String(id);
+        const view = await openNode(page, runId, String(id));
+        const task = await nodeTab(view, "Task");
+        if (outcome !== undefined)
+          await expect(task).toContainText(`Settled as${outcome}`);
+        const url = rest?.match(/ — (https?:\/\/\S+)$/)?.[1];
+        if (url !== undefined)
+          await expect(
+            view.locator("header").getByRole("link", { name: "Pull request" }),
+          ).toHaveAttribute("href", url);
+        const beside = (rest ?? "").replace(/ — https?:\/\/\S+$/, "");
+        // Dropped: a landing read taken when the read was asked, not a record.
+        if (
+          beside !== "" &&
+          !/^ — (landing UNDECIDED|NOT landed|landed on its base)/.test(beside)
+        )
+          unmapped.push(`${runId} results: ${line}`);
+        continue;
+      }
+      const under = line.match(
+        /^ {6}(detail|action|unblocks|never attempted; skipped by): (.+)$/,
+      );
+      const id = current;
+      if (under === null || id === undefined) {
+        unmapped.push(`${runId} results: ${line}`);
+        continue;
+      }
+      const [, term, value] = under;
+      const view = await openNode(page, runId, id);
+      if (term === "detail")
+        await expect(await nodeTab(view, "Task")).toContainText(
+          `Outcome${value}`,
+        );
+      else if (term === "action")
+        await expect(await nodeTab(view, "Task")).toContainText(String(value));
+      else if (term === "unblocks")
+        await expect(await nodeTab(view, "Dependencies")).toContainText(
+          `Unblocks${value}`,
+        );
+      else {
+        // Skipped — never attempted — is the node's word under Node statuses
+        // above; what skipped it is each dependency with the status it holds,
+        // and where the recorded graph reads the node skipped too, its banner
+        // names both.
+        const dependencies = await nodeTab(view, "Dependencies");
+        for (const cause of String(value).split(", "))
+          await expect(dependencies).toContainText(cause);
+        if (detail.graph?.node_status[id] === "skipped") {
+          const banner = view.getByRole("alert");
+          await expect(banner).toContainText(`Unmet${value}`);
+          await expect(banner).toContainText("AttemptsNever attempted");
+        }
+      }
+    }
+
+    // Transcript, per node, as the read's node selector asked for it.
+    const perNode: string[] = [];
+    for (const { id } of tasks) {
+      const response = await page.request.get(
+        `/api/v2/runs/${runId}/transcript?node=${encodeURIComponent(id)}`,
+      );
+      if (!response.ok()) {
+        // The engine refuses a node it recorded nothing for, and so does the
+        // view: that node's header counts no turns.
+        expect((await refusedBy(response, 422)).message).toContain(
+          `has recorded nothing for node '${id}'`,
+        );
+        await expect(
+          (await openNode(page, runId, id)).locator("header"),
+        ).toContainText("· 0 turns ·");
+        continue;
+      }
+      const rendered = runTranscriptSchema.parse(
+        await response.json(),
+      ).rendered;
+      perNode.push(rendered);
+      unmapped.push(
+        ...(await expectTranscriptShown(
+          page,
+          runId,
+          id,
+          rendered,
+          conversations.filter((entry) => entry.attribution?.nodeId === id),
+        )),
+      );
+    }
+    // The whole-run reading is the per-node ones together, or says there are none.
+    const whole = (
+      await served(
+        page,
+        `/api/v2/runs/${runId}/transcript`,
+        runTranscriptSchema,
+      )
+    ).rendered;
+    if (perNode.length === 0) {
+      expect(whole).toBe("no dispatch has recorded a transcript\n");
+      await page.goto(`/?run=${runId}&view=overall`);
+      await expect(
+        page.getByRole("group", { name: "Turns", exact: true }),
+      ).toContainText("0");
+    } else
+      expect(
+        whole
+          .split(new RegExp(`(?=^${runId} {2})`, "m"))
+          .filter(Boolean)
+          .sort(),
+      ).toEqual([...perNode].sort());
+  }
+  expect(unmapped).toEqual([]);
+});
+
+/** Open one node of a run, and return its view. */
+async function openNode(
+  page: Page,
+  runId: string,
+  node: string,
+): Promise<Locator> {
+  await page.goto(`/?run=${runId}&node=${encodeURIComponent(node)}`);
+  const view = page.getByRole("region", { name: /^Timeline for / });
+  await expect(view).toBeVisible();
+  return view;
+}
+
+/** Select one of a node's detail tabs, and return its panel. */
+async function nodeTab(view: Locator, tab: string): Promise<Locator> {
+  await view.getByRole("tab", { name: tab, exact: true }).click();
+  return view.getByRole("tabpanel", { name: tab, exact: true });
+}
+
+/**
+ * Hold one node's transcript reading to the conversations its dispatches open:
+ * every `turn N` to a dispatch showing at least N turns, every tool line and
+ * message to a turn showing it, and every dispatch that recorded no transcript
+ * to a detail saying so. Returns the lines no rule maps.
+ */
+async function expectTranscriptShown(
+  page: Page,
+  runId: string,
+  node: string,
+  rendered: string,
+  conversations: readonly {
+    readonly conversation: {
+      readonly id: string;
+      readonly turns: readonly unknown[];
+    };
+  }[],
+): Promise<string[]> {
+  const unmapped: string[] = [];
+  const [head, ...lines] = rendered.split("\n").filter((line) => line !== "");
+  expect(head).toBe(`${runId}  ${node}`);
+  const timeline = await served(
+    page,
+    `/api/v2/runs/${runId}/timeline?scope=node&node=${encodeURIComponent(node)}`,
+    runTimelineSchema,
+  );
+  const dispatches = timeline.spans.filter((span) => span.kind === "dispatch");
+  // What each dispatch's conversation shows, turn by turn, read off the view.
+  const shown: string[][] = [];
+  for (const { conversation } of conversations) {
+    const span = dispatches.find(
+      (candidate) => candidate.reference?.value === conversation.id,
+    );
+    expect(span, `a dispatch opens ${conversation.id}`).toBeDefined();
+    await page.goto(
+      `/?run=${runId}&node=${encodeURIComponent(node)}&event=${encodeURIComponent(String(span?.id))}`,
+    );
+    const turns = page
+      .getByRole("region", { name: "Timeline item detail" })
+      .getByRole("article", {
+        name: new RegExp(
+          `^Turn ${conversation.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.\\d+ from `,
+        ),
+      });
+    await expect(turns).toHaveCount(conversation.turns.length);
+    shown.push(await turns.allTextContents());
+  }
+  for (const span of dispatches.filter(
+    (each) => each.reference === undefined,
+  )) {
+    await page.goto(
+      `/?run=${runId}&node=${encodeURIComponent(node)}&event=${encodeURIComponent(span.id)}`,
+    );
+    await expect(
+      page.getByRole("region", { name: "Timeline item detail" }),
+    ).toContainText("No transcript was recorded for this dispatch.");
+  }
+  const needed = new Map<number, number>();
+  let inReport = false;
+  for (const line of lines) {
+    const turn = line.match(/^ {2}turn (\d+)$/);
+    if (turn !== null) {
+      inReport = false;
+      const n = Number(turn[1]);
+      needed.set(n, (needed.get(n) ?? 0) + 1);
+      continue;
+    }
+    // Dropped: the producer's report path, and the note on whether this run
+    // kept a copy of it — the dispatch's own detail says when it has no transcript.
+    if (/^ {2}report \S+ \S+$/.test(line)) {
+      inReport = true;
+      continue;
+    }
+    if (
+      inReport &&
+      /^ {4}(it carries no transcript|not retained by this run, )/.test(line)
+    )
+      continue;
+    if (/^ {4}(user|assistant)$/.test(line)) continue;
+    const tool = line.match(/^ {4,6}tool_(?:use|call|result) (\S*) {2}(.*)$/);
+    const said = line.match(/^ {6}(.+)$/);
+    const text = tool === null ? said?.[1] : undefined;
+    if (tool !== null) {
+      const [, name, input] = tool;
+      expect(
+        shown
+          .flat()
+          .some(
+            (each) =>
+              each.includes(String(name)) && each.includes(String(input)),
+          ),
+        `${node}: a turn shows ${line.trim()}`,
+      ).toBe(true);
+    } else if (text !== undefined)
+      expect(
+        shown.flat().some((each) => each.includes(text)),
+        `${node}: a turn shows ${text}`,
+      ).toBe(true);
+    else unmapped.push(`${runId} transcript ${node}: ${line}`);
+  }
+  // Each `turn N` is a turn of one dispatch: N of them need N dispatches that
+  // reached that turn.
+  for (const [n, count] of needed)
+    expect(
+      shown.filter((turns) => turns.length >= n).length,
+      `${node}: dispatches reaching turn ${n}`,
+    ).toBeGreaterThanOrEqual(count);
+  return unmapped;
+}

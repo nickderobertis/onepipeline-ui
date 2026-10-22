@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { LIVE_RUN, runDetail, runList } from "../test/fixtures";
 import {
   graphOf,
+  graphStateWord,
   isUnhealthy,
   launchLabel,
   nodeReason,
@@ -149,5 +150,33 @@ describe("how a row names its launch", () => {
     // And a run with no launch record at all is honestly unattributed, which is
     // what an e2e fixture and a bare `run-plan` genuinely are.
     expect(launchLabel(undefined)).toBe("Unattributed");
+  });
+});
+
+describe("graphStateWord", () => {
+  test("fails a graph with any failed or skipped node, before anything held", () => {
+    expect(graphStateWord({ a: "done", b: "waiting", c: "skipped" })).toBe(
+      "failed",
+    );
+    expect(graphStateWord({ a: "failed", b: "done" })).toBe("failed");
+  });
+
+  test("is complete only when every node is done, and for an empty graph", () => {
+    expect(graphStateWord({ a: "done", b: "done" })).toBe("complete");
+    expect(graphStateWord({})).toBe("complete");
+  });
+
+  test("leaves a graph with work outstanding waiting", () => {
+    expect(graphStateWord({ a: "done", b: "running" })).toBe("waiting");
+    expect(graphStateWord({ a: "blocked", b: "done" })).toBe("waiting");
+  });
+});
+
+describe("dependents", () => {
+  test("names the plan nodes that depend on a node, in plan order, and none for a leaf", () => {
+    const views = new Map(nodeViews(live).map((view) => [view.id, view]));
+    expect(views.get("publish")?.dependents).toEqual(["approval", "abandoned"]);
+    expect(views.get("approval")?.dependents).toEqual(["queued"]);
+    expect(views.get("queued")?.dependents).toEqual([]);
   });
 });
