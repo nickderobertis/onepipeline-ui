@@ -5,6 +5,12 @@ import type { ReactNode } from "react";
 import { StructuredFields } from "../../lib/StructuredFields";
 import { useHostReads } from "./useHostReads";
 
+/**
+ * The dispatch table's columns. Each cell also carries its column's name, which
+ * a column too narrow for the table shows beside the value once it stacks.
+ */
+const DISPATCH_COLUMNS = ["Run", "Node", "Provider", "Age (ms)", "Proof"];
+
 /** Host reads are taken on entry and explicit refresh, never stream invalidation. */
 export function HostPage({
   client,
@@ -102,26 +108,22 @@ export function HostPage({
                 <section
                   aria-label="Providers and dispatches table"
                   className="host-table"
-                  // biome-ignore lint/a11y/noNoninteractiveTabindex: this box scrolls sideways when a phone's column cannot hold the table, and a keyboard can scroll only what it can focus.
-                  tabIndex={0}
                 >
                   <table>
                     <thead>
                       <tr>
-                        {["Run", "Node", "Provider", "Age (ms)", "Proof"].map(
-                          (title) => (
-                            <th key={title}>{title}</th>
-                          ),
-                        )}
+                        {DISPATCH_COLUMNS.map((title) => (
+                          <th key={title}>{title}</th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
                       {reading.dispatches.map((row) => (
                         <tr key={`${row.run}/${row.node}`}>
-                          <td>{row.run}</td>
-                          <td>{row.node}</td>
-                          <td>{row.launcher}</td>
-                          <td>
+                          <td data-label="Run">{row.run}</td>
+                          <td data-label="Node">{row.node}</td>
+                          <td data-label="Provider">{row.launcher}</td>
+                          <td data-label="Age (ms)">
                             <output
                               aria-label="Dispatch age milliseconds"
                               className="host-age"
@@ -129,7 +131,7 @@ export function HostPage({
                               {row.age_ms ?? "Unknown"}
                             </output>
                           </td>
-                          <td>
+                          <td data-label="Proof">
                             {row.proof}
                             {row.unproven && `: ${row.unproven}`}
                           </td>

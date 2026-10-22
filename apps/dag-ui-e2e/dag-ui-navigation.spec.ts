@@ -133,8 +133,6 @@ for (const size of VIEWPORTS) {
       const region = element.querySelector('[aria-label="Host"]');
       const outside = [...(region?.querySelectorAll("*") ?? [])].filter(
         (child) => {
-          // The table's own sideways scroll keeps what it holds reachable.
-          if (child.parentElement?.closest(".host-table")) return false;
           const box = child.getBoundingClientRect();
           return box.width > 0 && box.right > bounds.right + 1;
         },
@@ -150,23 +148,51 @@ for (const size of VIEWPORTS) {
     expect(escaped.outside).toEqual([]);
     expect(escaped.overflow).toBeLessThanOrEqual(1);
     await expectThePageItselfDoesNotScroll(page);
-    // Where the column cannot hold the table, its box scrolls, and a keyboard can
-    // reach the box and scroll it to the proofs at its far edge.
+    // The table never scrolls on its own: wide enough, its headers stand apart;
+    // on a phone each dispatch stacks, one field to a line, led by its column.
     const table = host.getByRole("region", {
       name: "Providers and dispatches table",
     });
-    const hidden = await table.evaluate(
-      (element) => element.scrollWidth - element.clientWidth,
-    );
-    // The corpus's table outgrows a phone's column, so there the scroll is exercised.
-    if (size === PHONE) expect(hidden).toBeGreaterThan(1);
-    if (hidden > 1) {
-      await tabTo(page, table);
-      await page.keyboard.press("End");
-      await page.keyboard.press("ArrowRight");
-      await expect
-        .poll(() => table.evaluate((element) => element.scrollLeft))
-        .toBeGreaterThan(0);
+    const layout = await table.evaluate((element) => {
+      const visible = (node: Element) => node.getBoundingClientRect().width > 0;
+      const headers = [...element.querySelectorAll("th")].filter(visible);
+      const row = element.querySelector("tbody tr");
+      const cells = [...(row?.querySelectorAll("td") ?? [])];
+      return {
+        hidden: element.scrollWidth - element.clientWidth,
+        headers: headers.map((header) => {
+          const box = header.getBoundingClientRect();
+          return { text: header.textContent, left: box.left, right: box.right };
+        }),
+        cells: cells.map((cell) => {
+          const box = cell.getBoundingClientRect();
+          return {
+            label: getComputedStyle(cell, "::before").content,
+            top: box.top,
+            bottom: box.bottom,
+          };
+        }),
+      };
+    });
+    expect(layout.hidden).toBeLessThanOrEqual(1);
+    const columns = ["Run", "Node", "Provider", "Age (ms)", "Proof"];
+    if (size === PHONE) {
+      expect(layout.headers).toEqual([]);
+      expect(layout.cells.map(({ label }) => label)).toEqual(
+        columns.map((column) => `"${column}: "`),
+      );
+      for (const [index, cell] of layout.cells.entries())
+        if (index > 0)
+          expect(cell.top).toBeGreaterThanOrEqual(
+            (layout.cells[index - 1]?.bottom ?? 0) - 1,
+          );
+    } else {
+      expect(layout.headers.map(({ text }) => text)).toEqual(columns);
+      for (const [index, header] of layout.headers.entries())
+        if (index > 0)
+          expect(header.left).toBeGreaterThanOrEqual(
+            layout.headers[index - 1]?.right ?? 0,
+          );
     }
   });
 }

@@ -1429,14 +1429,49 @@ button.graph-row-name {
   overflow-wrap: anywhere;
 }
 
-/* Headers break only between words; when a phone's column cannot hold them the
-   table scrolls sideways inside its own focusable box rather than widening the page. */
+/* Five columns need about 40rem before their headers run together. A narrower
+   column, a phone's, stacks each dispatch instead: one line per field, each led by
+   its column's name, so nothing is clipped and the page never scrolls sideways. */
 .host-table {
-  overflow-x: auto;
+  container-type: inline-size;
 }
 
 .host-page table {
   width: 100%;
+}
+
+.host-page :where(th, td) {
+  padding: 4px 16px 4px 0;
+  text-align: start;
+  vertical-align: top;
+}
+
+.host-page th {
+  white-space: nowrap;
+}
+
+@container (max-width: 40rem) {
+  .host-table thead {
+    display: none;
+  }
+
+  .host-table :where(table, tbody, tr, td) {
+    display: block;
+  }
+
+  .host-table tr {
+    padding-block: 8px;
+    border-top: 1px solid var(--border);
+  }
+
+  .host-table td {
+    padding: 2px 0;
+  }
+
+  .host-table td::before {
+    content: attr(data-label) ": ";
+    color: var(--muted-foreground);
+  }
 }
 
 .host-page .host-shutdown {
