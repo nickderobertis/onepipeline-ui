@@ -27,6 +27,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
 /** `SystemTime` as serde writes it. */
@@ -76,12 +77,18 @@ export function stampOf(journal: string): Stamp {
     ...(about.birthtimeNs > 0n
       ? { created: systemTime(about.birthtimeNs) }
       : {}),
-    identity: [
-      Number(about.dev),
-      Number(about.ino),
-      Number(about.ctimeNs / 1_000_000_000n),
-      Number(about.ctimeNs % 1_000_000_000n),
-    ],
+    // The engine stamps a file's identity on unix alone, so a receipt that
+    // carried one on Windows would never match the journal it describes.
+    ...(process.platform === "win32"
+      ? {}
+      : {
+          identity: [
+            Number(about.dev),
+            Number(about.ino),
+            Number(about.ctimeNs / 1_000_000_000n),
+            Number(about.ctimeNs % 1_000_000_000n),
+          ] as [number, number, number, number],
+        }),
   };
 }
 
@@ -174,9 +181,14 @@ const appendsSchema = z.record(
  *
  * `append` takes one JSON object on standard input naming each journal and the
  * lines to append to it, in order, each journal in one write; `receipt` leaves
- * a fresh receipt for journals written whole.
+ * a fresh receipt for journals written whole. The script is recognised as run
+ * by comparing URLs, because a Windows path prefixed with `file://` is not how
+ * `import.meta.url` spells it, and a command that never ran exits `0`.
  */
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   const [verb, ...journals] = process.argv.slice(2);
   const usage = (why: string): never => {
     console.error(
