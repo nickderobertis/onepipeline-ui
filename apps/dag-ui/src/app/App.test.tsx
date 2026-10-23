@@ -1700,7 +1700,11 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     act(() =>
       push("detail.patch", {
         run_id: LIVE_RUN,
-        ops: [{ p: ["graph", "node_status", "dashboard"], v: "done" }],
+        ops: [
+          { p: ["graph", "node_states", "dashboard"], v: "done" },
+          { p: ["graph", "node_status", "dashboard"], v: "done" },
+          { p: ["graph", "node_control"], v: {} },
+        ],
       }),
     );
     expect(
@@ -1753,6 +1757,27 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     ).toBeInTheDocument();
     expect(screen.getByText("DAG contains a cycle")).toBeInTheDocument();
     consoleError.mockRestore();
+  });
+
+  test("reports the Host page's listing it could not read, beside the reports it could", async () => {
+    window.history.replaceState(null, "", "/?page=host");
+    const { client } = telemetryHarness((url) =>
+      isRunList(url)
+        ? Response.json(
+            { error: { code: "unreadable", message: "Runs root is gone" } },
+            { status: 503 },
+          )
+        : defaultResponder(url),
+    );
+    render(<App client={client} />);
+    const runs = await screen.findByRole("region", {
+      name: "Runs on the host",
+    });
+    expect(await within(runs).findByRole("alert")).toHaveTextContent(
+      "Listing unavailable: Runs root is gone",
+    );
+    // The host's own reports are still read and shown.
+    expect(await screen.findByText(/^Unwatched runs: \d+/)).toBeInTheDocument();
   });
 
   test("drops a removed run and falls back to the remaining one", async () => {

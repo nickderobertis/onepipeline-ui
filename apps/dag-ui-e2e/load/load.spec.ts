@@ -175,6 +175,9 @@ const corpusSchema = z.object({
   liveNode: z.string().min(1),
 });
 
+/** What the corpora measured over said of themselves: one workload for all. */
+let workload: z.infer<typeof corpusSchema> | undefined;
+
 /** The executables a server here must never find on its PATH. */
 const HARNESSES = z.array(z.string().min(1)).parse(harnessBinaries);
 
@@ -200,6 +203,7 @@ async function serveFresh(name: string): Promise<Served> {
       }),
     ),
   );
+  workload = facts;
   const bin = join(workspace, "bin");
   mkdirSync(bin);
   const staged = join(bin, "onepipeline-api");
@@ -733,13 +737,15 @@ test("request load, frames, lag and server CPU in every page state", async ({
     commit,
     dirty,
     window_s: WINDOW_MS / 1000,
+    // What the generated corpus said it holds, so the recorded workload is
+    // the one measured over rather than a second statement of it.
     workload: {
-      runs: 150,
-      projects: 30,
-      other_live_runs: 10,
+      runs: workload?.runs,
+      projects: workload?.projects,
+      other_live_runs: workload?.otherLiveRuns.length,
       records_per_minute_per_live_run: RATE,
       burst_records: BURST,
-      open_live_run_records_at_start: 116_000,
+      open_live_run_records_at_start: workload?.openLiveRecords,
       fresh_server_and_corpus_per_variant: true,
     },
     variants: results,

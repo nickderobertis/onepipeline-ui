@@ -133,7 +133,7 @@ export function App({
   const [hostRefresh, setHostRefresh] = useState(0);
   const shuttingDown = hostShutdowns.host.state.phase === "sending";
   const rowChanges = useChangeCount(rows);
-  const hostList = useHostListing(
+  const { list: hostList, error: hostListError } = useHostListing(
     client,
     selection.host || shuttingDown,
     hostRefresh + (shuttingDown ? rowChanges : 0),
@@ -339,6 +339,7 @@ export function App({
           {selection.host ? (
             <HostPage
               client={client}
+              listError={hostListError}
               onRefresh={() => setHostRefresh((value) => value + 1)}
               list={hostList}
             >

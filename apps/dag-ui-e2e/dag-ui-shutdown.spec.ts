@@ -638,7 +638,10 @@ test("reads structured host data and refreshes fixture-owned unwatched runs only
     ).toBeVisible();
   await page.context().setOffline(true);
   await view.getByRole("button", { name: "Refresh host", exact: true }).click();
-  await expect(view.getByRole("alert")).toBeVisible();
+  // The host's reports and its listing are each refused, and each says so.
+  await expect(
+    view.getByRole("alert").filter({ hasText: "Telemetry request failed" }),
+  ).toHaveCount(2);
   await page.context().setOffline(false);
   await view.getByRole("button", { name: "Refresh host", exact: true }).click();
   await expect(view.getByRole("alert")).toHaveCount(0);

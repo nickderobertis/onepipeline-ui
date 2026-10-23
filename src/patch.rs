@@ -6,8 +6,8 @@
 //! member (`{p, d: true}`). A path is the object keys and array indices from the
 //! envelope's root. The root itself is never replaced or deleted — a patch that
 //! did would be a whole snapshot in disguise — and a deletion never shifts array
-//! indices, so an array that lost or reordered elements is replaced at the
-//! nearest path that holds it.
+//! indices, so an array that lost elements is replaced whole at its own path,
+//! and one that kept its length has each element that moved replaced in place.
 //!
 //! [`diff`] is how the server writes a patch: the structural difference between
 //! the payload a subscriber holds and the one it should hold, element by element
@@ -355,13 +355,20 @@ mod tests {
     }
 
     #[test]
-    fn an_array_that_shrank_or_reordered_is_replaced_at_its_own_path() {
+    fn a_shrunk_array_is_replaced_whole_and_a_reordered_one_element_by_element() {
         let old = json!({"list": [{"id": "a"}, {"id": "b"}], "order": [{"id": "a"}, {"id": "b"}]});
         let new = json!({"list": [{"id": "a"}], "order": [{"id": "b"}, {"id": "a"}]});
         let (applied, ops) = patched(&old, &new);
         assert_eq!(applied, new);
         assert!(ops.iter().all(|op| !matches!(op, Op::Delete { .. })));
         assert_eq!(ops[0].to_json(), json!({"p": ["list"], "v": [{"id": "a"}]}));
+        assert_eq!(
+            ops[1..].iter().map(Op::to_json).collect::<Vec<_>>(),
+            [
+                json!({"p": ["order", 0], "v": {"id": "b"}}),
+                json!({"p": ["order", 1], "v": {"id": "a"}}),
+            ]
+        );
     }
 
     #[test]

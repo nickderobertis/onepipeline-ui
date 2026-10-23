@@ -2,7 +2,10 @@ import {
   API_V2_PATHS,
   API_V2_QUERY,
   applyPatch,
+  channelQueueSchema,
   type ResetFrame,
+  runDetailSchema,
+  runTimelineSchema,
   type SidebarRow,
   SUBSCRIPTION_FRAME_TYPES,
   type Subscribed,
@@ -307,6 +310,26 @@ function applyFrame(
 }
 
 /**
+ * `held` with `ops` applied, read back through the payload's own schema: a
+ * patch that applies but leaves no valid payload is refused, never published.
+ */
+function patchedAs<T>(
+  schema: {
+    safeParse: (
+      value: unknown,
+    ) => { success: true; data: T } | { success: false };
+  },
+  held: T,
+  ops: Parameters<typeof applyPatch>[1],
+  what: string,
+): T {
+  const parsed = schema.safeParse(applyPatch(held, ops));
+  if (!parsed.success)
+    throw new Error(`the patched ${what} failed contract validation`);
+  return parsed.data;
+}
+
+/**
  * The visible state with one patch applied — to the payload of exactly the
  * view the frame names, its run, its scope and its node, or not at all.
  */
@@ -323,7 +346,10 @@ function patched(
     throw refused("a run");
   switch (frame.type) {
     case "detail.patch":
-      return { ...visible, detail: applyPatch(visible.detail, frame.ops) };
+      return {
+        ...visible,
+        detail: patchedAs(runDetailSchema, visible.detail, frame.ops, "detail"),
+      };
     case "timeline.patch": {
       if (visible.type !== "timeline" || visible.scope !== frame.scope)
         throw refused("a timeline");
@@ -332,11 +358,27 @@ function patched(
         (visible.scope !== "node" || visible.node !== frame.node)
       )
         throw refused("a node's timeline");
-      return { ...visible, timeline: applyPatch(visible.timeline, frame.ops) };
+      return {
+        ...visible,
+        timeline: patchedAs(
+          runTimelineSchema,
+          visible.timeline,
+          frame.ops,
+          "timeline",
+        ),
+      };
     }
     case "channel.patch":
       if (visible.type !== "channel") throw refused("a channel");
-      return { ...visible, channel: applyPatch(visible.channel, frame.ops) };
+      return {
+        ...visible,
+        channel: patchedAs(
+          channelQueueSchema,
+          visible.channel,
+          frame.ops,
+          "channel",
+        ),
+      };
   }
 }
 

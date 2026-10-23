@@ -12,8 +12,8 @@ export function useHostListing(
   client: TelemetryClient,
   open: boolean,
   revision: number,
-): RunList | undefined {
-  const { value } = useRead(
+): { readonly list?: RunList; readonly error?: Error } {
+  const { value, error } = useRead(
     open ? "host-listing" : undefined,
     async () => {
       const [list, projects] = await Promise.all([
@@ -28,5 +28,5 @@ export function useHostListing(
     },
     revision,
   );
-  return open ? value : undefined;
+  return open ? { list: value, error } : {};
 }

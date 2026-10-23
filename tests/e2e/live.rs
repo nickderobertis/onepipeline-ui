@@ -732,6 +732,10 @@ fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
     // one records while away, so counting its frames says when the first has
     // recorded more than it keeps.
     let mut counter = Tab::open(&live, &json!({ "type": "sidebar" }));
+    // And a third, connected but never read: its stream falls more than the
+    // retained frames behind, is dropped, and on reconnecting is answered with
+    // the one explicit re-send rather than a replay that lost frames.
+    let stalled = Tab::open(&live, &json!({ "type": "sidebar" }));
     let deadline = Instant::now() + Duration::from_secs(240);
     let mut counted = 0;
     while counted <= onepipeline_ui::contract::RETAINED_FRAMES {
@@ -766,6 +770,28 @@ fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
         frame["snapshot"]["sidebar"].as_array().map(Vec::len),
         Some(runs.len())
     );
+    let Tab {
+        subscription,
+        applied,
+        stream: dropped,
+        ..
+    } = stalled;
+    drop(dropped);
+    let mut resumed = http::stream(
+        live.address(),
+        &format!("/api/v2/events?subscription={subscription}&after={applied}"),
+        None,
+    );
+    assert_eq!(
+        resumed.status, 200,
+        "the stalled subscription is still held"
+    );
+    let reset = resumed
+        .frame_within(PATIENCE)
+        .expect("a reset for the stalled tab")
+        .json();
+    assert_eq!(reset["type"], "reset");
+    assert_eq!(reset["reason"], "stale-cursor");
 }
 
 #[test]
@@ -1458,5 +1484,95 @@ fn a_stale_telemetry_fold_catches_up_once_the_run_goes_quiet_without_holding_bac
             &format!("/api/v2/runs/{run}?include_conversations=false"),
         )),
         "the detail once the fold caught up",
+    );
+}
+
+#[test]
+fn a_channel_that_could_not_be_read_for_a_moment_reaches_the_view_once_it_can() {
+    use std::os::unix::fs::PermissionsExt;
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let raise = |message: &str| {
+        let raised = http::post(
+            live.address(),
+            &format!("/api/v2/runs/{run}/channel/surface"),
+            &json!({ "kind": "question", "message": message }).to_string(),
+        );
+        assert_eq!(raised.status, 200, "{}", raised.body);
+    };
+    // The channel exists before the view opens, so it can be made unreadable.
+    raise("before the view");
+    let mut tab = Tab::open(&live, &json!({ "type": "channel", "run_id": run }));
+    let channel = live.serving.run_dir(run).join("channel");
+    let readable = fs::metadata(&channel).expect("a channel").permissions();
+    // A surface lands, and the queue is then unreadable while the poller looks.
+    raise("while unreadable");
+    fs::set_permissions(&channel, fs::Permissions::from_mode(0o000)).expect("lock the channel");
+    std::thread::sleep(Duration::from_millis(600));
+    fs::set_permissions(&channel, readable).expect("unlock the channel");
+    // Once it can be read, the surface reaches the view, and the view is the
+    // queue a fresh read serves.
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        tab.drain();
+        let shown = tab.state["visible"]["channel"]["surfaces"]
+            .as_array()
+            .is_some_and(|surfaces| {
+                surfaces
+                    .iter()
+                    .any(|surface| surface["message"] == "while unreadable")
+            });
+        if shown {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the surface never reached the view: {:#?}",
+            tab.frames
+        );
+    }
+    same(
+        &unstamped(tab.state["visible"]["channel"].clone()),
+        &fresh(live.address(), &format!("/api/v2/runs/{run}/channel")),
+        "the channel once it could be read",
+    );
+}
+
+#[test]
+fn a_run_that_never_goes_quiet_still_has_its_telemetry_folded_again() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start_with(
+        |root| growing_run(root, run),
+        &[(onepipeline_ui::live::TELEMETRY_REFOLD_ENV, "600")],
+    );
+    let _tab = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
+    // The load workload's own writer, a record every 25 ms — faster than the
+    // 50 ms poll — for longer than two intervals, so no tick is quiet.
+    let root = live
+        .serving
+        .run_dir(run)
+        .parent()
+        .expect("a runs root")
+        .to_path_buf();
+    let log = live._trace_dir.path().join("appended.jsonl");
+    let options = json!({
+        "root": root, "log": log, "durationMs": 2_500, "rate": 2_400,
+        "runs": [{ "run": run, "node": fixture_run::NODE_ID }],
+        "burst": 0, "burstRun": run, "burstAt": 0, "openRun": run,
+    });
+    let writer = std::process::Command::new("node")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui-e2e/load/writer.mjs"))
+        .arg(options.to_string())
+        .status()
+        .expect("node runs the load writer");
+    assert!(writer.success(), "the load writer failed");
+    let folded_while_growing = live
+        .refreshes()
+        .iter()
+        .any(|line| line["refresh"] == "appended" && !line["telemetry_fold_ms"].is_null());
+    assert!(
+        folded_while_growing,
+        "the fold never caught up while the run kept moving: {:#?}",
+        live.refreshes()
     );
 }

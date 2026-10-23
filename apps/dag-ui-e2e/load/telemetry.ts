@@ -119,8 +119,17 @@ export const telemetrySchema = z.object({
   variants: z
     .record(z.string(), variantSchema)
     .refine(
-      (variants) => VARIANTS.every(({ name }) => name in variants),
-      `every variant is recorded: ${VARIANTS.map(({ name }) => name).join(", ")}`,
+      (variants) =>
+        VARIANTS.every(({ name, kind, view, tabs }) => {
+          const recorded = variants[name];
+          return (
+            recorded !== undefined &&
+            recorded.kind === kind &&
+            recorded.view === view &&
+            recorded.tabs === tabs
+          );
+        }),
+      `every variant is recorded, as itself: ${VARIANTS.map(({ name }) => name).join(", ")}`,
     )
     .refine(
       (variants) =>

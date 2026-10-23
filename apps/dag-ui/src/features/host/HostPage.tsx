@@ -16,11 +16,14 @@ export function HostPage({
   client,
   onRefresh,
   list,
+  listError,
   children,
 }: {
   readonly client: TelemetryClient;
   readonly onRefresh?: () => void;
   readonly list?: RunList;
+  /** The listing read that failed, reported where the listing would be. */
+  readonly listError?: Error;
   readonly children?: ReactNode;
 }) {
   const { host, unwatched, refresh } = useHostReads(client, onRefresh);
@@ -173,6 +176,9 @@ export function HostPage({
         </section>
         <section aria-label="Runs on the host">
           <h3>Runs on the host</h3>
+          {listError && (
+            <p role="alert">Listing unavailable: {listError.message}</p>
+          )}
           {list?.runs.map((run) => (
             <p key={run.run_id}>
               {run.run_id} · {run.state}

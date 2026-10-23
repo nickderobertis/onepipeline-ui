@@ -1181,11 +1181,13 @@ impl Hub {
             }
         }
         if channel_moved {
-            run.channel_stamp = channel_stamp;
-            if let (Ok(now_channel), Some(held)) = (
-                channel_payload(&shared.store, &run.run),
-                run.channel.as_mut(),
-            ) {
+            // The stamp is taken as read only once the queue was: a read the
+            // engine refused is tried again on the next tick, not forgotten.
+            let read = channel_payload(&shared.store, &run.run);
+            if read.is_ok() {
+                run.channel_stamp = channel_stamp;
+            }
+            if let (Ok(now_channel), Some(held)) = (read, run.channel.as_mut()) {
                 let mut ops = Vec::new();
                 crate::patch::diff(&held.payload, &now_channel, &mut ops);
                 held.payload = now_channel;
