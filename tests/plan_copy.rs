@@ -1,5 +1,5 @@
 //! The linked plan store's copy boundary, over real Markdown records on disk.
-use onetaskgraph_core::{CopyItems, CopyRequest, CopyScope, GlobalId};
+use onetaskgraph_core::{CopyItems, CopyRequest, CopyScope, GlobalId, StatusPolicy};
 use std::fs;
 
 #[tokio::test]
@@ -55,8 +55,10 @@ async fn a_copied_project_document_keeps_its_budget_fragment_at_the_destination(
         items: CopyItems::new(vec![id.parse::<GlobalId>().expect("a qualified id")])
             .expect("one item"),
         scope,
+        status_policy: StatusPolicy::Source,
         destination: onetaskgraph_plugin_api::SourceName::new("board").expect("a source name"),
         match_by: None,
+        target_task: None,
         recreate: false,
         create: false,
         dry_run: false,
