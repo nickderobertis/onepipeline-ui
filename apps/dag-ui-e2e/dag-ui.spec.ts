@@ -4542,8 +4542,18 @@ test("keeps the list a reader scrolled to when a run moves", async ({
   );
   await viewport.hover();
   await page.mouse.wheel(0, 10_000);
+  // The wheel lands asynchronously: the position is read once the list is at its
+  // end, never while the scroll is still on its way there.
+  await expect
+    .poll(() =>
+      viewport.evaluate(
+        (element) =>
+          element.scrollTop > 0 &&
+          element.scrollHeight - element.clientHeight - element.scrollTop < 1,
+      ),
+    )
+    .toBe(true);
   const scrolled = await scrollOffset(viewport);
-  expect(scrolled).toBeGreaterThan(0);
 
   // A run moves for real: one appended record the server's own poll notices,
   // which reaches the sidebar as that run's one trimmed row.
