@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { runDetailSchema } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CAPTURE_INSTANT_MS } from "./capture-clock";
+import { delayGraphMeasurements } from "./delayed-graph-measurements";
 import { fixture, runs } from "./fixture-facts";
 import recorded from "./fixtures/timeline-recorded.json" with { type: "json" };
 import { graphNodes, metrics, timelineLane } from "./observatory-locators";
@@ -291,6 +292,7 @@ const SURFACES: readonly Surface[] = [
     name: "04-graph",
     title: "Graph view",
     open: async (page) => {
+      await delayGraphMeasurements(page);
       await page.goto(`/?run=${runs().live}&view=graph`);
       await settleReads(page);
       await expect(graphNodes(page, "running")).toHaveAccessibleName(
