@@ -500,3 +500,13 @@ it serves changes. It links the same onevcs 0.56.3 and oneagentgraph 0.7.1 as
 0.84.1, and no route or MSRV changes. This changes the engine types carried by
 ApiError::from_engine and the other engine-typed public items, and
 `payload::timeline` now takes the view mutably.
+0.87.0 is the released engine this branch's live updates were built against
+(engine-incremental-read): its `RunView::refresh` and `Refreshed` are 0.86.0's,
+and its writeback copies a run's members into an existing destination project
+with a members-only copy, falling back to a full copy only for a routed
+destination that has no member project yet. It links the same onetaskgraph
+0.11.0, onevcs 0.56.3 and oneagentgraph 0.7.1, and no route or MSRV changes.
+The timeline reads its canonical events through the crate's `payload::Run`, so
+`payload::timeline` takes the view by shared reference again. This changes the
+engine types carried by ApiError::from_engine and the other engine-typed public
+items.
