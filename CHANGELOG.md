@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.48.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.47.0...v0.48.0) - 2026-10-23
+
+### Performance
+
+- *(deps)* [**breaking**] link the engine whose plan store approves in fewer calls ([#441](https://github.com/nickderobertis/onepipeline-ui/pull/441))
+
 ## [0.47.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.46.0...v0.47.0) - 2026-10-23
 
 ### Added
