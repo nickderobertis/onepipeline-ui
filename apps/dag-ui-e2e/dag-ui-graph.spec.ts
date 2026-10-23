@@ -1,7 +1,7 @@
 import { expect, type Locator, test } from "@playwright/test";
 import { delayGraphMeasurements } from "./delayed-graph-measurements";
 import { runs } from "./fixture-facts";
-import { graphNodes } from "./observatory-locators";
+import { graphNodeList, graphNodes } from "./observatory-locators";
 
 test.beforeEach(async ({ page }) => {
   await delayGraphMeasurements(page);
@@ -50,12 +50,9 @@ test("fits the whole graph to its canvas before node measurements arrive", async
   // rather than re-read, so nothing hands the canvas its nodes again: a fit
   // that waited for every card's resize observation never happens.
   const canvas = page.getByRole("application", { name: "DAG execution graph" });
-  const cards = page.locator(".react-flow__node");
+  const cards = graphNodes(page);
   await expect(cards).toHaveCount(
-    await page
-      .getByRole("list", { name: "DAG nodes" })
-      .getByRole("listitem")
-      .count(),
+    await graphNodeList(page).getByRole("listitem").count(),
   );
   await expect
     .poll(async () => {
@@ -71,7 +68,7 @@ test("fits the whole graph to its canvas before node measurements arrive", async
           box.x + box.width > bounds.x + bounds.width ||
           box.y + box.height > bounds.y + bounds.height
         )
-          outside.push((await card.textContent()) ?? "a card");
+          outside.push((await card.getAttribute("aria-label")) ?? "a card");
       }
       return outside;
     })
