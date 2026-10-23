@@ -53,19 +53,35 @@ export const VARIANTS: readonly Variant[] = [
 /** A measured figure: finite and never negative. */
 const figure = z.number().finite().nonnegative();
 const seconds = figure.nullable();
-const lagStats = z.object({
-  records: z.number().int().nonnegative(),
-  shown: z.number().int().nonnegative(),
-  never_shown: z.number().int().nonnegative(),
-  p50_s: seconds,
-  p95_s: seconds,
-  max_s: seconds,
-});
-export const lagSchema = lagStats.extend({
-  measured_as: z.string().min(1),
-  during_burst: lagStats,
-  frame_arrival: z.object({ p50_s: seconds, p95_s: seconds, max_s: seconds }),
-});
+/**
+ * Percentiles over the records a view showed: present exactly when it showed
+ * any, and the counts adding up — never a missing figure read as no lag.
+ */
+const lagStats = z
+  .object({
+    records: z.number().int().nonnegative(),
+    shown: z.number().int().nonnegative(),
+    never_shown: z.number().int().nonnegative(),
+    p50_s: seconds,
+    p95_s: seconds,
+    max_s: seconds,
+  })
+  .refine(
+    (lag) =>
+      lag.shown + lag.never_shown === lag.records &&
+      [lag.p50_s, lag.p95_s, lag.max_s].every(
+        (figure) => (figure === null) === (lag.shown === 0),
+      ),
+    "a lag's percentiles are present exactly when it showed records",
+  );
+export const lagSchema = z.intersection(
+  lagStats,
+  z.object({
+    measured_as: z.string().min(1),
+    during_burst: lagStats,
+    frame_arrival: z.object({ p50_s: seconds, p95_s: seconds, max_s: seconds }),
+  }),
+);
 const resent = z.object({
   frames: z.number().int().nonnegative(),
   bytes: z.number().int().nonnegative(),

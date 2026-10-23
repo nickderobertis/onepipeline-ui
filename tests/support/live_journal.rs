@@ -1,20 +1,10 @@
-//! Appending to a run's journal the way the engine's own writer does, through
-//! the one fixture writer every test and the load workload append with.
+//! Appending to a run's journal through the one fixture writer every test and
+//! the load workload append with.
 //!
-//! The engine's writer publishes an append receipt beside the journal after each
-//! record it appends (`events.append.json`: the journal's metadata after the
-//! write, under an epoch that survives only a write whose starting metadata
-//! matches the previous receipt). A long-lived `RunView::refresh` reads only the
-//! appended records when the receipt continues the one it last saw, and re-reads
-//! the whole journal otherwise — so a fixture that appended bare lines would make
-//! every live update a whole re-read, which is not what a run the engine drives
-//! costs. The engine exports no appender, so this hands every append to
-//! `apps/dag-ui-e2e/load/journal.ts` — the single fixture writer the browser
-//! fixtures and the load workload use too — and `tests/e2e/live.rs` holds the
-//! receipts it writes field for field to ones the linked engine wrote. The
-//! journeys count the refresh outcomes the server reports, so a receipt the
-//! engine stopped accepting fails them as a re-read rather than passing
-//! unnoticed.
+//! The engine exports no appender, so the crate's journeys hand every append
+//! to `apps/dag-ui-e2e/load/journal.ts` — which says what a receipt is and why
+//! a long-lived reader needs one — rather than keeping a second writer here;
+//! `tests/e2e/live.rs` holds what it writes to receipts the linked engine wrote.
 
 #![allow(dead_code)] // Each test binary uses the part of the harness it needs.
 
