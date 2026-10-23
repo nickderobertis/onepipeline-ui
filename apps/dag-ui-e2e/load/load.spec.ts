@@ -257,6 +257,11 @@ interface Recorder {
   routes: Map<string, string>;
   /** The `Content-Encoding` each event stream the page opened was served under. */
   streamEncodings: string[];
+  /**
+   * The route of each response this session has seen end. One session's events
+   * arrive in order, so every chunk of a finished response is in `bytes`.
+   */
+  finished: string[];
 }
 
 async function record(page: Page): Promise<Recorder> {
@@ -266,6 +271,7 @@ async function record(page: Page): Promise<Recorder> {
     frames: [],
     routes: new Map(),
     streamEncodings: [],
+    finished: [],
   };
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -286,7 +292,14 @@ async function record(page: Page): Promise<Recorder> {
         : "the bundle",
     );
   });
+  // Per request: the bytes its headers took and the body bytes counted so far.
+  const headers = new Map<string, number>();
+  const counted = new Map<string, number>();
   cdp.on("Network.dataReceived", (event) => {
+    counted.set(
+      event.requestId,
+      (counted.get(event.requestId) ?? 0) + event.encodedDataLength,
+    );
     recorder.bytes.push({
       at: Date.now(),
       // The bytes that came over the network: a chunk Chromium hands the page
@@ -296,7 +309,22 @@ async function record(page: Page): Promise<Recorder> {
       route: recorder.routes.get(event.requestId) ?? "other",
     });
   });
+  cdp.on("Network.loadingFinished", (event) => {
+    const route = recorder.routes.get(event.requestId) ?? "other";
+    // Chromium can report a response's last bytes only in its total, never in
+    // a chunk: what the total holds beyond the headers and every counted chunk
+    // came over the network as well.
+    const rest =
+      event.encodedDataLength -
+      (headers.get(event.requestId) ?? 0) -
+      (counted.get(event.requestId) ?? 0);
+    if (rest > 0) recorder.bytes.push({ at: Date.now(), bytes: rest, route });
+    headers.delete(event.requestId);
+    counted.delete(event.requestId);
+    recorder.finished.push(route);
+  });
   cdp.on("Network.responseReceived", (event) => {
+    headers.set(event.requestId, event.response.encodedDataLength);
     if (!recorder.routes.get(event.requestId)?.startsWith("GET /api/v2/events"))
       return;
     const encoding = Object.entries(event.response.headers).find(
@@ -491,6 +519,11 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
       // the browser itself sized it, give or take its chunk framing.
       const body = (await (await subscribed).request().sizes())
         .responseBodySize;
+      // Playwright sizes it off its own session, which can hear the response
+      // end before this recorder's has delivered its last chunk.
+      await expect
+        .poll(() => recorder.finished.includes("POST /api/v2/subscriptions"))
+        .toBe(true);
       const counted = recorder.bytes
         .filter(({ route }) => route === "POST /api/v2/subscriptions")
         .reduce((sum, { bytes: count }) => sum + count, 0);
