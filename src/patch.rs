@@ -36,13 +36,20 @@ impl Step {
 }
 
 /// One patch operation.
+///
+/// Each variant holds only what the contract allows it to name: a set names a
+/// member or an element under a parent, so the root — which has no parent —
+/// cannot be replaced; a deletion names an object member under a parent, so
+/// neither the root nor an array element can be deleted.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
-    /// Set the object member at `path`, or replace the existing array element
-    /// there.
+    /// Set the object member, or replace the existing array element, `last`
+    /// names under the value at `parent`.
     Set {
-        /// The member or element replaced: never the root.
-        path: Vec<Step>,
+        /// The steps to the value that holds it.
+        parent: Vec<Step>,
+        /// The member's key or the element's index.
+        last: Step,
         /// The value it now holds.
         value: Value,
     },
@@ -54,32 +61,58 @@ pub enum Op {
         /// What it gains, in order.
         values: Vec<Value>,
     },
-    /// Delete the object member at `path`.
+    /// Delete the object member `key` of the object at `parent`.
     Delete {
-        /// An object member — never an array element, so no index shifts.
-        path: Vec<Step>,
+        /// The steps to the object that holds it.
+        parent: Vec<Step>,
+        /// The member's key.
+        key: String,
     },
 }
 
 impl Op {
+    /// A set of the value at `path`, or `None` for the root, which a patch
+    /// never replaces.
+    #[must_use]
+    pub fn set(path: &[Step], value: Value) -> Option<Self> {
+        let (last, parent) = path.split_last()?;
+        Some(Self::Set {
+            parent: parent.to_vec(),
+            last: last.clone(),
+            value,
+        })
+    }
+
     /// The operation as the wire writes it: `{p, v}`, `{p, a}` or `{p, d: true}`.
     #[must_use]
     pub fn to_json(&self) -> Value {
         let path = |path: &[Step]| Value::Array(path.iter().map(Step::to_json).collect());
+        let under = |parent: &[Step], last: Step| {
+            let mut whole = parent.to_vec();
+            whole.push(last);
+            path(&whole)
+        };
         match self {
-            Self::Set { path: p, value } => json!({ "p": path(p), "v": value }),
+            Self::Set {
+                parent,
+                last,
+                value,
+            } => json!({ "p": under(parent, last.clone()), "v": value }),
             Self::Append { path: p, values } => json!({ "p": path(p), "a": values }),
-            Self::Delete { path: p } => json!({ "p": path(p), "d": true }),
+            Self::Delete { parent, key } => {
+                json!({ "p": under(parent, Step::Key(key.clone())), "d": true })
+            }
         }
     }
 
     /// Read one operation off the wire, refusing anything that is not exactly
-    /// one of the three.
+    /// one of the three, or names what that one may not.
     ///
     /// # Errors
     ///
     /// A value that is not `{p, v}`, `{p, a: [...]}` or `{p, d: true}` with a
-    /// path of keys and non-negative integer indices.
+    /// path of keys and non-negative integer indices; a set or a deletion of
+    /// the root; a deletion of an array element.
     pub fn from_json(value: &Value) -> Result<Self, PatchError> {
         let object = value
             .as_object()
@@ -109,10 +142,8 @@ impl Op {
             ));
         }
         if let Some(value) = object.get("v") {
-            return Ok(Self::Set {
-                path,
-                value: value.clone(),
-            });
+            return Self::set(&path, value.clone())
+                .ok_or_else(|| PatchError::new("the root is never replaced"));
         }
         if let Some(values) = object.get("a") {
             let values = values
@@ -124,7 +155,16 @@ impl Op {
             });
         }
         if object.get("d") == Some(&Value::Bool(true)) {
-            return Ok(Self::Delete { path });
+            return match path.split_last() {
+                Some((Step::Key(key), parent)) => Ok(Self::Delete {
+                    parent: parent.to_vec(),
+                    key: key.clone(),
+                }),
+                Some((Step::Index(_), _)) => {
+                    Err(PatchError::new("a deletion names an object member"))
+                }
+                None => Err(PatchError::new("the root is never deleted")),
+            };
         }
         Err(PatchError::new("a deletion is written d: true"))
     }
@@ -151,35 +191,42 @@ impl std::error::Error for PatchError {}
 /// The operations that turn `old` into `new`, appended to `ops`.
 ///
 /// Objects are compared member by member and arrays element by element. An array
-/// whose shared prefix kept its length gains an append for what follows; one
-/// that shrank is replaced whole at its own path, because a deletion must never
-/// shift indices. Two elements that are objects naming different `id`s are not
-/// the same element moved, so the element is replaced rather than diffed into the
-/// other's shape. Every payload this is asked about has an object at its root,
-/// which is never replaced: the members inside it are.
-pub fn diff(old: &Value, new: &Value, ops: &mut Vec<Op>) {
-    let mut path = Vec::new();
-    diff_at(&mut path, old, new, ops);
+/// that kept every element in place gains an append for what follows; one that
+/// shrank, or whose elements were removed, inserted or reordered — an element
+/// naming another `id` where one stood — is replaced whole at its own path, as
+/// `docs/contract.md` states, because a deletion must never shift indices. Both
+/// roots are payload envelopes, which are objects; the root itself is never
+/// replaced, only the members inside it.
+///
+/// # Errors
+///
+/// Roots that are not both objects, which no patch can turn one into the other.
+pub fn diff(old: &Value, new: &Value, ops: &mut Vec<Op>) -> Result<(), PatchError> {
+    match (old, new) {
+        (Value::Object(old), Value::Object(new)) => {
+            diff_objects(&mut Vec::new(), old, new, ops);
+            Ok(())
+        }
+        _ => Err(PatchError::new(
+            "a patched payload is an object at its root",
+        )),
+    }
 }
 
-/// [`diff`], at `path`.
+/// [`diff`], at `path` — which is never the root.
 pub fn diff_at(path: &mut Vec<Step>, old: &Value, new: &Value, ops: &mut Vec<Op>) {
     if old == new {
         return;
     }
     match (old, new) {
         (Value::Object(old), Value::Object(new)) => diff_objects(path, old, new, ops),
-        (Value::Array(old), Value::Array(new)) if new.len() >= old.len() => {
+        (Value::Array(old), Value::Array(new))
+            if new.len() >= old.len()
+                && old.iter().zip(new).all(|(was, now)| same_element(was, now)) =>
+        {
             for (index, (was, now)) in old.iter().zip(new).enumerate() {
                 path.push(Step::Index(index));
-                if same_element(was, now) {
-                    diff_at(path, was, now, ops);
-                } else {
-                    ops.push(Op::Set {
-                        path: path.clone(),
-                        value: now.clone(),
-                    });
-                }
+                diff_at(path, was, now, ops);
                 path.pop();
             }
             if new.len() > old.len() {
@@ -189,10 +236,7 @@ pub fn diff_at(path: &mut Vec<Step>, old: &Value, new: &Value, ops: &mut Vec<Op>
                 });
             }
         }
-        _ => ops.push(Op::Set {
-            path: path.clone(),
-            value: new.clone(),
-        }),
+        _ => ops.extend(Op::set(path, new.clone())),
     }
 }
 
@@ -204,19 +248,17 @@ fn diff_objects(
 ) {
     for key in old.keys() {
         if !new.contains_key(key) {
-            path.push(Step::Key(key.clone()));
-            ops.push(Op::Delete { path: path.clone() });
-            path.pop();
+            ops.push(Op::Delete {
+                parent: path.clone(),
+                key: key.clone(),
+            });
         }
     }
     for (key, now) in new {
         path.push(Step::Key(key.clone()));
         match old.get(key) {
             Some(was) => diff_at(path, was, now, ops),
-            None => ops.push(Op::Set {
-                path: path.clone(),
-                value: now.clone(),
-            }),
+            None => ops.extend(Op::set(path, now.clone())),
         }
         path.pop();
     }
@@ -268,45 +310,36 @@ pub fn apply_trusted(target: &mut Value, ops: &[Op]) -> Result<(), PatchError> {
 
 fn apply_one(target: &mut Value, op: &Op) -> Result<(), PatchError> {
     match op {
-        Op::Set { path, value } => {
-            let (last, parent) = split(path)?;
-            let parent = walk(target, parent)?;
-            match (parent, last) {
-                (Value::Object(object), Step::Key(key)) => {
-                    object.insert(key.clone(), value.clone());
-                }
-                (Value::Array(array), Step::Index(index)) => {
-                    let element = array
-                        .get_mut(*index)
-                        .ok_or_else(|| PatchError::new("a set replaces an existing element"))?;
-                    *element = value.clone();
-                }
-                _ => return Err(PatchError::new("a set's path does not match its parent")),
+        Op::Set {
+            parent,
+            last,
+            value,
+        } => match (walk(target, parent)?, last) {
+            (Value::Object(object), Step::Key(key)) => {
+                object.insert(key.clone(), value.clone());
             }
-        }
+            (Value::Array(array), Step::Index(index)) => {
+                let element = array
+                    .get_mut(*index)
+                    .ok_or_else(|| PatchError::new("a set replaces an existing element"))?;
+                *element = value.clone();
+            }
+            _ => return Err(PatchError::new("a set's path does not match its parent")),
+        },
         Op::Append { path, values } => match walk(target, path)? {
             Value::Array(array) => array.extend(values.iter().cloned()),
             _ => return Err(PatchError::new("an append's path names an array")),
         },
-        Op::Delete { path } => {
-            let (last, parent) = split(path)?;
-            match (walk(target, parent)?, last) {
-                (Value::Object(object), Step::Key(key)) => {
-                    object
-                        .shift_remove(key)
-                        .ok_or_else(|| PatchError::new("a deletion names an existing member"))?;
-                }
-                _ => return Err(PatchError::new("a deletion names an object member")),
+        Op::Delete { parent, key } => match walk(target, parent)? {
+            Value::Object(object) => {
+                object
+                    .shift_remove(key)
+                    .ok_or_else(|| PatchError::new("a deletion names an existing member"))?;
             }
-        }
+            _ => return Err(PatchError::new("a deletion names an object member")),
+        },
     }
     Ok(())
-}
-
-/// The last step of a non-root path, and the steps to its parent.
-fn split(path: &[Step]) -> Result<(&Step, &[Step]), PatchError> {
-    path.split_last()
-        .ok_or_else(|| PatchError::new("the root is never replaced or deleted"))
 }
 
 fn walk<'a>(mut value: &'a mut Value, path: &[Step]) -> Result<&'a mut Value, PatchError> {
@@ -330,7 +363,7 @@ mod tests {
 
     fn patched(old: &Value, new: &Value) -> (Value, Vec<Op>) {
         let mut ops = Vec::new();
-        diff(old, new, &mut ops);
+        diff(old, new, &mut ops).expect("both roots are objects");
         let mut applied = old.clone();
         apply(&mut applied, &ops).expect("a diff applies");
         (applied, ops)
@@ -355,20 +388,21 @@ mod tests {
     }
 
     #[test]
-    fn a_shrunk_array_is_replaced_whole_and_a_reordered_one_element_by_element() {
+    fn a_shrunk_or_reordered_array_is_replaced_whole_at_its_own_path() {
         let old = json!({"list": [{"id": "a"}, {"id": "b"}], "order": [{"id": "a"}, {"id": "b"}]});
         let new = json!({"list": [{"id": "a"}], "order": [{"id": "b"}, {"id": "a"}]});
         let (applied, ops) = patched(&old, &new);
         assert_eq!(applied, new);
         assert!(ops.iter().all(|op| !matches!(op, Op::Delete { .. })));
-        assert_eq!(ops[0].to_json(), json!({"p": ["list"], "v": [{"id": "a"}]}));
         assert_eq!(
-            ops[1..].iter().map(Op::to_json).collect::<Vec<_>>(),
+            ops.iter().map(Op::to_json).collect::<Vec<_>>(),
             [
-                json!({"p": ["order", 0], "v": {"id": "b"}}),
-                json!({"p": ["order", 1], "v": {"id": "a"}}),
+                json!({"p": ["list"], "v": [{"id": "a"}]}),
+                json!({"p": ["order"], "v": [{"id": "b"}, {"id": "a"}]}),
             ]
         );
+        // Roots that are not both objects are no patch at all.
+        assert!(diff(&json!([1]), &json!({}), &mut Vec::new()).is_err());
     }
 
     #[test]
@@ -390,30 +424,39 @@ mod tests {
         ] {
             assert!(Op::from_json(&refused).is_err(), "{refused}");
         }
+        // The root and an array element are not even writable as a set or a
+        // deletion: the wire refuses them, and no `Op` can hold them.
+        for refused in [
+            json!({"p": [], "v": {}}),
+            json!({"p": [], "d": true}),
+            json!({"p": ["a", 0], "d": true}),
+        ] {
+            assert!(Op::from_json(&refused).is_err(), "{refused}");
+        }
+        assert!(Op::set(&[], json!({})).is_none());
         let mut root = json!({"a": [1], "o": {}});
         for refused in [
             Op::Set {
-                path: vec![],
-                value: json!({}),
-            },
-            Op::Delete { path: vec![] },
-            Op::Set {
-                path: vec![Step::Key("missing".into()), Step::Key("x".into())],
+                parent: vec![Step::Key("missing".into())],
+                last: Step::Key("x".into()),
                 value: json!(1),
             },
             Op::Set {
-                path: vec![Step::Key("a".into()), Step::Index(5)],
+                parent: vec![Step::Key("a".into())],
+                last: Step::Index(5),
                 value: json!(1),
             },
             Op::Delete {
-                path: vec![Step::Key("a".into()), Step::Index(0)],
+                parent: vec![Step::Key("a".into())],
+                key: "0".into(),
             },
             Op::Append {
                 path: vec![Step::Key("o".into())],
                 values: vec![json!(1)],
             },
             Op::Delete {
-                path: vec![Step::Key("o".into()), Step::Key("none".into())],
+                parent: vec![Step::Key("o".into())],
+                key: "none".into(),
             },
         ] {
             let before = root.clone();

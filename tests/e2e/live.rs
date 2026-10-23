@@ -222,7 +222,7 @@ fn unstamped(mut payload: Value) -> Value {
 fn same(patched: &Value, fresh: &Value, what: &str) {
     if patched != fresh {
         let mut ops = Vec::new();
-        patch::diff(patched, fresh, &mut ops);
+        patch::diff(patched, fresh, &mut ops).expect("both payloads are objects");
         let ops: Vec<Value> = ops.iter().map(Op::to_json).collect();
         panic!("{what} differs from a fresh read by {ops:#?}");
     }
@@ -1574,5 +1574,44 @@ fn a_run_that_never_goes_quiet_still_has_its_telemetry_folded_again() {
         folded_while_growing,
         "the fold never caught up while the run kept moving: {:#?}",
         live.refreshes()
+    );
+}
+
+#[test]
+fn a_view_a_switch_left_behind_is_no_longer_kept_current() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let overall =
+        live.subscribe(&json!({ "view": { "type": "timeline", "run_id": run, "scope": "run" } }));
+    let overall = overall["subscription"].as_str().expect("an id").to_owned();
+    let journal = live.journal(run);
+    let mut seen = live.refreshes().len();
+    live_journal::append_lines(
+        &journal,
+        &[activity(&journal, run, fixture_run::NODE_ID, "on overall")],
+    );
+    let before = live.next_refresh(run, &mut seen);
+    assert!(
+        before["kept"]
+            .as_array()
+            .is_some_and(|kept| kept.iter().any(|payload| payload == "timeline:run:")),
+        "the Overall view's timeline is kept: {before}"
+    );
+    // The tab moves to the Graph: its subscription replaces the Overall one.
+    let _graph = live
+        .subscribe(&json!({ "view": { "type": "detail", "run_id": run }, "replaces": overall }));
+    live_journal::append_lines(
+        &journal,
+        &[activity(&journal, run, fixture_run::NODE_ID, "on graph")],
+    );
+    let after = live.next_refresh(run, &mut seen);
+    assert_eq!(
+        after["kept"],
+        json!(["detail:"]),
+        "only the Graph's detail is kept: {after}"
+    );
+    assert_eq!(
+        after["rendered"], 0,
+        "no timeline entry was rendered for a view nobody shows: {after}"
     );
 }

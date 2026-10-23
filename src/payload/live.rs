@@ -456,8 +456,7 @@ impl LiveTimeline {
             self.seeded.clear();
             let old = std::mem::take(&mut self.payload);
             let new = self.whole(view, indexed, declared, agents);
-            let mut ops = Vec::new();
-            patch::diff(&old, &new, &mut ops);
+            let ops = diffed(&old, &new);
             self.payload = new;
             return ops;
         };
@@ -472,8 +471,7 @@ impl LiveTimeline {
                 self.seed(&Owner::Node(node.as_str().to_owned()));
                 let old = std::mem::take(&mut self.payload);
                 let new = self.whole(view, indexed, declared, agents);
-                let mut ops = Vec::new();
-                patch::diff(&old, &new, &mut ops);
+                let ops = diffed(&old, &new);
                 self.payload = new;
                 ops
             }
@@ -626,7 +624,19 @@ impl LiveTimeline {
 
         let mut ops = Vec::new();
         let mut path = vec![Step::Key("spans".to_owned())];
-        if assembled.len() < spans.len() {
+        // A span standing where another stood is a reordering, which is the
+        // array replaced whole, as one that shrank is.
+        fn id_at<'a>(spans: &'a [Value], source: &'a Source) -> Option<&'a Value> {
+            match source {
+                Source::Held(from) => spans[*from].get("id"),
+                Source::Rebuilt(span) => span.get("id"),
+            }
+        }
+        let reordered = assembled
+            .iter()
+            .zip(spans.iter())
+            .any(|(source, old)| id_at(spans, source) != old.get("id"));
+        if assembled.len() < spans.len() || reordered {
             // A run whose spans shrank: replaced at the array, which a deletion
             // could not do without shifting what follows.
             let whole: Vec<Value> = assembled
@@ -636,10 +646,7 @@ impl LiveTimeline {
                     Source::Rebuilt(span) => span,
                 })
                 .collect();
-            ops.push(Op::Set {
-                path,
-                value: Value::Array(whole),
-            });
+            ops.extend(Op::set(&path, Value::Array(whole)));
         } else {
             let mut appended = Vec::new();
             for (index, source) in assembled.into_iter().enumerate() {
@@ -652,14 +659,7 @@ impl LiveTimeline {
                     }
                     (Source::Rebuilt(span), Some(old)) => {
                         path.push(Step::Index(index));
-                        if old.get("id") == span.get("id") {
-                            patch::diff_at(&mut path, old, &span, &mut ops);
-                        } else {
-                            ops.push(Op::Set {
-                                path: path.clone(),
-                                value: span,
-                            });
-                        }
+                        patch::diff_at(&mut path, old, &span, &mut ops);
                         path.pop();
                     }
                     (Source::Held(from), None) => appended.push(spans[from].clone()),
@@ -684,6 +684,16 @@ impl LiveTimeline {
         self.harness = harness_len;
         ops
     }
+}
+
+/// The operations from `old` to `new`, both payload envelopes and so objects:
+/// were either not one, nothing could patch it, and the poller says so.
+fn diffed(old: &Value, new: &Value) -> Vec<Op> {
+    let mut ops = Vec::new();
+    if let Err(refused) = patch::diff(old, new, &mut ops) {
+        eprintln!("onepipeline-api: a live payload could not be patched: {refused}");
+    }
+    ops
 }
 
 /// How many spans a skeleton holds.
@@ -791,8 +801,7 @@ impl LiveDetail {
             None => self.whole(view, indexed, declared, inputs),
             Some(touched) => self.merged(view, indexed, declared, touched, inputs),
         };
-        let mut ops = Vec::new();
-        patch::diff(&self.payload, &new, &mut ops);
+        let ops = diffed(&self.payload, &new);
         self.payload = new;
         ops
     }

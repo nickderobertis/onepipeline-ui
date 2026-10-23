@@ -258,3 +258,35 @@ test("recreates a subscription the server no longer serves from what it applied"
   expect(new URL(sourceAt(h, 1).url).searchParams.get("after")).toBe(id(8));
   await settle();
 });
+
+test("refuses a reset whose snapshot is not its own, and orders ids past the safe integers", async () => {
+  const h = harness();
+  const { states, errors } = open(h);
+  await vi.waitFor(() => expect(h.sources).toHaveLength(1));
+  const source = sourceAt(h, 0);
+  // Two sequences one apart beyond 2^53: read as numbers they are one id.
+  const huge = 2n ** 60n;
+  source.frame("reset", {
+    id: `${EPOCH}:${huge}`,
+    base: id(1),
+    reason: "stale-cursor",
+    snapshot: { ...snapshot(1), id: `${EPOCH}:${huge}` },
+  });
+  source.frame("run.changed", {
+    id: `${EPOCH}:${huge + 1n}`,
+    base: `${EPOCH}:${huge}`,
+    row: row("settled"),
+  });
+  expect(states.at(-1)?.[0].applied).toBe(`${EPOCH}:${huge + 1n}`);
+  // A reset naming a snapshot other than itself is no base to resume from.
+  source.frame("reset", {
+    id: `${EPOCH}:${huge + 2n}`,
+    base: `${EPOCH}:${huge + 1n}`,
+    reason: "stale-cursor",
+    snapshot: snapshot(3),
+  });
+  expect(errors.map(({ message }) => message)).toStrictEqual([
+    "A reset frame names a snapshot other than itself",
+  ]);
+  expect(states.at(-1)?.[0].applied).toBe(`${EPOCH}:${huge + 1n}`);
+});

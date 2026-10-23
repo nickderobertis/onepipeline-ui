@@ -64,9 +64,10 @@ export interface LiveTransport {
 /** How long a stream that dropped waits before it is opened again. */
 const RECONNECT_MS = 1_000;
 
-function seqOf(id: string): { epoch: string; seq: number } {
+/** An event id's epoch and sequence, the sequence read without losing digits. */
+function seqOf(id: string): { epoch: string; seq: bigint } {
   const at = id.lastIndexOf(":");
-  return { epoch: id.slice(0, at), seq: Number(id.slice(at + 1)) };
+  return { epoch: id.slice(0, at), seq: BigInt(id.slice(at + 1)) };
 }
 
 /**
@@ -260,6 +261,14 @@ export class LiveView {
     const incoming = seqOf(frame.id);
     if (incoming.epoch === applied.epoch && incoming.seq <= applied.seq) return;
     if (frame.type === "reset") {
+      // A reset is its own snapshot's boundary; one naming another is no base
+      // to resume from.
+      if (frame.snapshot.id !== frame.id) {
+        this.#fail(
+          new Error("A reset frame names a snapshot other than itself"),
+        );
+        return;
+      }
       this.#take(frame.snapshot, { kind: "reset", reason: frame.reason });
       return;
     }

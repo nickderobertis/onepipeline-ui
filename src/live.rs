@@ -180,16 +180,16 @@ enum Change {
     Removed(RunId),
     Detail {
         run: RunId,
-        ops: Value,
+        ops: Vec<Op>,
     },
     Timeline {
         run: RunId,
         scope: TimelineScope,
-        ops: Value,
+        ops: Vec<Op>,
     },
     Channel {
         run: RunId,
-        ops: Value,
+        ops: Vec<Op>,
     },
 }
 
@@ -206,22 +206,23 @@ impl Change {
 
     /// `"run_id": …, "ops": […]` — the frame's own members, without braces.
     fn members(&self) -> String {
+        let wire = |ops: &[Op]| Value::Array(ops.iter().map(Op::to_json).collect());
         let object = match self {
             Self::Row(row) => return format!("\"row\":{row}"),
             Self::Removed(run) => json!({ "run_id": run }),
             Self::Detail { run, ops } | Self::Channel { run, ops } => {
-                json!({ "run_id": run, "ops": ops })
+                json!({ "run_id": run, "ops": wire(ops) })
             }
             Self::Timeline {
                 run,
                 scope: TimelineScope::Run,
                 ops,
-            } => json!({ "run_id": run, "scope": "run", "ops": ops }),
+            } => json!({ "run_id": run, "scope": "run", "ops": wire(ops) }),
             Self::Timeline {
                 run,
                 scope: TimelineScope::Node(node),
                 ops,
-            } => json!({ "run_id": run, "scope": "node", "node": node, "ops": ops }),
+            } => json!({ "run_id": run, "scope": "node", "node": node, "ops": wire(ops) }),
         };
         let text = object.to_string();
         text[1..text.len() - 1].to_owned()
@@ -1049,6 +1050,32 @@ impl Hub {
         let mut run = lock(live);
         let run = &mut *run;
         let started = Instant::now();
+        // Only what a subscription shows is kept current: a payload a view
+        // switch left behind is let go rather than rebuilt on every change.
+        // Read under the run's lock, which a subscription is registered under,
+        // so a view being made is never let go.
+        let wanted: Vec<Visible> = lock(&shared.state)
+            .subscriptions
+            .values()
+            .map(|held| Visible::of(&held.view))
+            .filter(|visible| visible.run() == Some(run.run.as_str()))
+            .collect();
+        run.details.retain(|key, _| {
+            wanted.iter().any(|visible| {
+                !matches!(visible, Visible::Sidebar) && visible.detail_filter() == *key
+            })
+        });
+        run.timelines.retain(|(scope, key, _)| {
+            wanted.iter().any(|visible| {
+                matches!(visible, Visible::Timeline { scope: shown, filter, .. } if shown == scope && filter == key)
+            })
+        });
+        if !wanted
+            .iter()
+            .any(|visible| matches!(visible, Visible::Channel { .. }))
+        {
+            run.channel = None;
+        }
         let outcome = run.view.refresh();
         let paths = run.view.paths.clone();
         let touched = match outcome {
@@ -1189,7 +1216,9 @@ impl Hub {
             }
             if let (Ok(now_channel), Some(held)) = (read, run.channel.as_mut()) {
                 let mut ops = Vec::new();
-                crate::patch::diff(&held.payload, &now_channel, &mut ops);
+                if let Err(refused) = crate::patch::diff(&held.payload, &now_channel, &mut ops) {
+                    eprintln!("onepipeline-api: a channel could not be patched: {refused}");
+                }
                 held.payload = now_channel;
                 if let Some(ops) = patch_ops(&mut held.observed_at, &now, ops) {
                     changes.push((
@@ -1219,6 +1248,17 @@ impl Hub {
                 }
             }
         }
+        // Which payloads this refresh kept current, for the trace.
+        let kept: Vec<String> = run
+            .details
+            .keys()
+            .map(|key| format!("detail:{key}"))
+            .chain(run.timelines.iter().map(|(scope, key, _)| match scope {
+                TimelineScope::Run => format!("timeline:run:{key}"),
+                TimelineScope::Node(node) => format!("timeline:node {node}:{key}"),
+            }))
+            .chain(run.channel.as_ref().map(|_| "channel".to_owned()))
+            .collect();
         self.trace(&json!({
             "run": run.run,
             "refresh": match outcome {
@@ -1231,6 +1271,7 @@ impl Hub {
             "whole": rebuilt_whole,
             "telemetry_fold_ms": folded_ms,
             "patches": ops_count,
+            "kept": kept,
             "ms": started.elapsed().as_secs_f64() * 1000.0,
         }));
     }
@@ -1307,16 +1348,17 @@ fn spec_of(view: &SubscriptionView) -> Option<&crate::filter::FilterSpec> {
 
 /// A patch frame's operations, with `observed_at` moved to the instant it was
 /// read — or nothing, where nothing moved.
-fn patch_ops(observed_at: &mut String, now: &str, mut ops: Vec<Op>) -> Option<Value> {
+fn patch_ops(observed_at: &mut String, now: &str, mut ops: Vec<Op>) -> Option<Vec<Op>> {
     if ops.is_empty() {
         return None;
     }
     *observed_at = now.to_owned();
     ops.push(Op::Set {
-        path: vec![crate::patch::Step::Key("observed_at".to_owned())],
+        parent: Vec::new(),
+        last: crate::patch::Step::Key("observed_at".to_owned()),
         value: json!(now),
     });
-    Some(Value::Array(ops.iter().map(Op::to_json).collect()))
+    Some(ops)
 }
 
 fn frame_event(id: &str, kind: FrameKind, data: &str) -> Event {
