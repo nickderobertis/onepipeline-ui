@@ -1804,3 +1804,45 @@ fn a_sidebar_keeps_its_rows_through_a_root_or_a_run_it_could_not_read_and_moves_
     assert_eq!(moved["row"]["id"], other);
     assert_eq!(tab.state["sidebar"].as_array().map(Vec::len), Some(2));
 }
+
+#[test]
+fn a_subscribed_run_that_could_not_be_read_for_a_moment_is_patched_again_once_it_can() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let mut tab = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
+    let launch = live.serving.run_dir(run).join("launch.json");
+    let recorded = fs::read(&launch).expect("a launch record");
+    // The engine cannot read the run's launch record while it grows.
+    fs::write(&launch, b"{ not a launch record").expect("break the launch record");
+    let journal = live.journal(run);
+    live_journal::append_lines(
+        &journal,
+        &[activity(
+            &journal,
+            run,
+            fixture_run::NODE_ID,
+            "while unreadable",
+        )],
+    );
+    std::thread::sleep(Duration::from_millis(400));
+    tab.drain();
+    assert!(
+        tab.frames
+            .iter()
+            .all(|frame| frame["type"] != "detail.patch"),
+        "a run the engine could not read was patched: {:#?}",
+        tab.frames
+    );
+    // Once it can be read, what it recorded meanwhile reaches the view.
+    fs::write(&launch, recorded).expect("restore the launch record");
+    let _ = frame_of(&mut tab, "detail.patch");
+    tab.drain();
+    same(
+        &unstamped(tab.state["visible"]["detail"].clone()),
+        &fresh(
+            live.address(),
+            &format!("/api/v2/runs/{run}?include_conversations=false"),
+        ),
+        "the detail once the run could be read again",
+    );
+}

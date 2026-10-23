@@ -19,9 +19,10 @@
 //! one view share one reading of it.
 //!
 //! The SDK's telemetry document is the one part of a detail that folds the whole
-//! journal however little moved. It is folded when a view first needs it and
-//! then at most once every [`TELEMETRY_REFOLD`], to the run as it stands, so a
-//! change reaches the page without waiting on it.
+//! journal however little moved. It is folded when a view first needs it, and
+//! again once something moved: on the first tick at least [`TELEMETRY_REFOLD`]
+//! after the last fold that carries no change, or once it is twice that behind
+//! on a run that never goes quiet — so no change waits on it.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -470,6 +471,9 @@ struct LiveRun {
     agents: Option<Agents>,
     agents_stamp: Option<(u64, SystemTime)>,
     liveness: onepipeline::views::DriverLiveness,
+    /// Whether the last refresh failed, so a failure is reported once per
+    /// spell rather than every tick it lasts.
+    failing: bool,
 }
 
 /// A payload, and the instant it was last read at — the envelope's
@@ -521,6 +525,7 @@ impl LiveRun {
             run: run.clone(),
             telemetry: Folded::of(&view),
             liveness: view.liveness(),
+            failing: false,
             indexed,
             declared,
             details: HashMap::new(),
@@ -1101,16 +1106,20 @@ impl Hub {
                 None
             }
             Err(error) => {
-                eprintln!(
-                    "onepipeline-api: {} could not be refreshed, and is let go: {error}",
-                    run.run.as_str()
-                );
-                // The run went away: its row's removal reaches every sidebar,
-                // and the view showing it is left as it was.
-                lock(&shared.runs).remove(&run.run);
+                // Kept, and read again next tick: a run the engine could not
+                // read for a moment is patched again once it can be, and one
+                // that went away for good is the sidebar's removal to report.
+                if !run.failing {
+                    eprintln!(
+                        "onepipeline-api: {} could not be refreshed, and is read again each tick: {error}",
+                        run.run.as_str()
+                    );
+                }
+                run.failing = true;
                 return;
             }
         };
+        run.failing = false;
         if touched.as_ref().is_some_and(Touched::any) || touched.is_none() {
             run.telemetry.stale = true;
         }
