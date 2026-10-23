@@ -89,6 +89,7 @@ export function DagGraph({
           // React Flow also gates edges on handle bounds. These point anchors
           // are already known by the routed layout; waiting for ResizeObserver
           // can leave visible cards without dependencies until it delivers them.
+          // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] These anchors only initialize React Flow. DagRoutedEdge ignores its calculated endpoint coordinates and draws the authoritative layout edge.points; nodesConnectable=false disables connection gestures. Their positions cannot change the routed path or create a second geometry contract.
           handles: [
             {
               type: "target",
