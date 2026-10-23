@@ -3496,19 +3496,41 @@ test("connects to the server's event stream on load", async ({ page }) => {
 test("recovers the selection when a bookmarked run is not being served", async ({
   page,
 }) => {
-  // The run the fallback lands on is whichever the server serves first — its
-  // newest activity, which the supervising journeys' writes decide — so it is
-  // read off the list rather than assumed.
-  const listed = await page.request.get(
-    `${RUN_LIST_PATH}?include_settled=true&limit=1`,
-  );
-  const first = parseRunList(await listed.json()).runs[0]?.run_id ?? "";
-  expect(first).not.toBe("");
+  // The fallback lands on the newest launch, as the browser orders runs: a late
+  // write to an older run never selects it over a newer one. Several fixture runs
+  // share a launch time and the order among them follows the activity the other
+  // journeys write, so the landing is held to that set rather than to one of it.
+  const launches = new Map<string, number>();
+  let cursor: string | undefined;
+  do {
+    const query = new URLSearchParams({ include_settled: "true" });
+    if (cursor) query.set("cursor", cursor);
+    const listed = parseRunList(
+      await (await page.request.get(`${RUN_LIST_PATH}?${query}`)).json(),
+    );
+    for (const run of listed.runs) {
+      const startedAt = run.launch?.started_at;
+      if (startedAt !== undefined)
+        launches.set(run.run_id, Date.parse(startedAt));
+    }
+    cursor = listed.next_cursor;
+  } while (cursor);
+  const newest = Math.max(...launches.values());
+  const newestLaunched = [...launches]
+    .filter(([, startedAt]) => startedAt === newest)
+    .map(([run]) => run);
+  expect(newestLaunched).not.toEqual([]);
+  const landed = () => new URL(page.url()).searchParams.get("run") ?? "";
+  const onNewestLaunch = {
+    message: `the address names a newest launch: ${newestLaunched.join(", ")}`,
+  };
   await openObservatory(page, "/?run=absent-run&node=dashboard");
   // The server serves no such run, so the view falls back to a real one and
   // rewrites the address rather than stranding the operator on an empty graph.
   await expect(graphNodes(page).first()).toBeVisible();
-  await expect.poll(() => new URL(page.url()).search).toContain(`run=${first}`);
+  await expect
+    .poll(() => newestLaunched.includes(landed()), onNewestLaunch)
+    .toBe(true);
 
   // The same fallback from the overall reading keeps the operator in it: only the
   // run under the view is rewritten, so a stale bookmark never also moves them.
@@ -3518,7 +3540,9 @@ test("recovers the selection when a bookmarked run is not being served", async (
     "aria-selected",
     "true",
   );
-  await expect.poll(() => new URL(page.url()).search).toContain(`run=${first}`);
+  await expect
+    .poll(() => newestLaunched.includes(landed()), onNewestLaunch)
+    .toBe(true);
 });
 
 test("reflows navigation, detail, and metrics at a narrow viewport", async ({
