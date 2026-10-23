@@ -123,6 +123,7 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
             stopping,
             view: view.map(Arc::new),
         })
+        .layer(axum::middleware::from_fn(crate::encoding::negotiate))
 }
 // llmlint: ignore-end[authorization_enforced_server_side]
 

@@ -15,7 +15,7 @@
 //! metadata for the sidebar, and refreshes each **subscribed** run's long-lived
 //! [`RunView`] with `RunView::refresh`, which reads, parses and folds only what
 //! was appended; the payloads are kept current from those records by
-//! [`crate::payload::live`]. A run nobody shows is never opened, and two tabs on
+//! `payload::live`. A run nobody shows is never opened, and two tabs on
 //! one view share one reading of it.
 //!
 //! The SDK's telemetry document is the one part of a detail that folds the whole

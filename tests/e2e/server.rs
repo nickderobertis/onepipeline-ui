@@ -47,7 +47,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(24), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(25), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -19822,3 +19822,66 @@ fn a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes() {
     serving.stop_on(Stop::Terminate);
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// A body served gzip-encoded, decoded.
+fn gunzipped(body: &[u8]) -> Value {
+    use std::io::Read;
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(body)
+        .read_to_string(&mut text)
+        .expect("the body is gzip");
+    serde_json::from_str(&text).expect("the body is JSON")
+}
+
+#[test]
+fn a_response_is_gzip_encoded_exactly_when_the_request_takes_gzip() {
+    let serving = two_runs();
+    let path = "/api/v2/runs?include_settled=true";
+    let plain = http::get_raw(serving.address, path);
+    assert_eq!(plain.header("content-encoding"), None);
+    let mut want: Value = serde_json::from_slice(&plain.body).expect("JSON");
+    want["observed_at"] = Value::Null;
+
+    // A browser's header: gzip among others. The body is the same document,
+    // in fewer bytes, and says what it was served under.
+    let encoded = http::get_raw_with(
+        serving.address,
+        path,
+        &[("Accept-Encoding", "gzip, deflate, br, zstd")],
+    );
+    assert_eq!(encoded.status, 200);
+    assert_eq!(encoded.header("content-encoding"), Some("gzip"));
+    assert_eq!(encoded.header("vary"), Some("accept-encoding"));
+    assert_eq!(encoded.header("content-type"), plain.header("content-type"));
+    assert!(
+        encoded.body.len() < plain.body.len(),
+        "{} encoded bytes for {} plain ones",
+        encoded.body.len(),
+        plain.body.len()
+    );
+    let mut served = gunzipped(&encoded.body);
+    served["observed_at"] = Value::Null;
+    assert_eq!(served, want);
+
+    // A request that refuses gzip, or names only what this server does not
+    // speak, is served the body as it is.
+    for refused in ["gzip;q=0, br", "br", "identity", "*;q=0"] {
+        let served = http::get_raw_with(serving.address, path, &[("Accept-Encoding", refused)]);
+        assert_eq!(served.status, 200, "{refused}");
+        assert_eq!(served.header("content-encoding"), None, "{refused}");
+        assert_eq!(served.header("vary"), Some("accept-encoding"), "{refused}");
+        let mut body: Value = serde_json::from_slice(&served.body).expect("plain JSON");
+        body["observed_at"] = Value::Null;
+        assert_eq!(body, want, "{refused}");
+    }
+
+    // An error is the error contract either way, encoded when asked.
+    let missing = http::get_raw_with(
+        serving.address,
+        "/api/v2/runs/no-such-run",
+        &[("Accept-Encoding", "gzip")],
+    );
+    assert_eq!(missing.status, 404);
+    assert_eq!(missing.header("content-encoding"), Some("gzip"));
+    assert!(gunzipped(&missing.body)["error"]["code"].is_string());
+}

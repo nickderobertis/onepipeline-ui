@@ -1912,3 +1912,68 @@ fn a_run_that_moves_every_poll_has_its_row_pushed_at_most_once_per_interval_and_
         "every append was pushed: {pushed} rows for {appended} appends"
     );
 }
+
+#[test]
+fn a_stream_asked_for_gzip_sends_each_frame_encoded_as_it_happens() {
+    let live = Live::start(|root| growing_run(root, fixture_run::RUN_ID));
+    let subscribed = live.subscribe(&json!({
+        "view": { "type": "detail", "run_id": fixture_run::RUN_ID }
+    }));
+    let subscription = subscribed["subscription"].as_str().expect("an id");
+    let after = subscribed["initial"]["snapshot"]["id"]
+        .as_str()
+        .expect("a snapshot id");
+    let mut stream = http::gzip_stream(
+        live.address(),
+        &format!("/api/v2/events?subscription={subscription}&after={after}"),
+    );
+    assert_eq!(stream.status, 200);
+    assert_eq!(stream.header("content-encoding"), Some("gzip"));
+    assert_eq!(stream.header("vary"), Some("accept-encoding"));
+    assert!(stream
+        .header("content-type")
+        .is_some_and(|value| value.starts_with("text/event-stream")));
+    let journal = live.journal(fixture_run::RUN_ID);
+    let mut decoded = 0;
+    for marker in 0..3 {
+        live_journal::append_lines(
+            &journal,
+            &[activity(
+                &journal,
+                fixture_run::RUN_ID,
+                fixture_run::NODE_ID,
+                &format!("encoded {marker}"),
+            )],
+        );
+        // The record's patch decodes from what has arrived, with no frame
+        // after it: the encoder flushed it rather than holding it for the
+        // next. Its run's sidebar row may come first.
+        let deadline = Instant::now() + PATIENCE;
+        let frame = loop {
+            let frame = stream
+                .frame_within(deadline.saturating_duration_since(Instant::now()))
+                .unwrap_or_else(|| panic!("record {marker}'s patch was held back"));
+            decoded += frame.id.len() + frame.event.len() + frame.data.len();
+            if frame.event == "detail.patch" {
+                break frame;
+            }
+            assert_eq!(frame.event, "run.changed");
+        };
+        let data = frame.json();
+        assert_eq!(data["subscription"], subscription);
+        assert!(
+            frame.data.contains(&format!("encoded {marker}")),
+            "the frame carries record {marker}: {}",
+            frame.data
+        );
+        while let Some(frame) = stream.frame_within(QUIET) {
+            decoded += frame.id.len() + frame.event.len() + frame.data.len();
+        }
+    }
+    // What crossed the wire is smaller than what it decoded to.
+    assert!(
+        stream.wire < decoded,
+        "{} encoded bytes for {decoded} decoded ones",
+        stream.wire
+    );
+}

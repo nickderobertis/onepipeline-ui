@@ -81,7 +81,13 @@ impl Raw {
 /// compared byte for byte against a file on disk, and the content type beside
 /// it is part of what is asserted.
 pub fn get_raw(address: SocketAddr, path: &str) -> Raw {
-    let mut reader = request(address, path, &[]);
+    get_raw_with(address, path, &[])
+}
+
+/// [`get_raw`], sending `headers` with the request: what a browser asks for
+/// beside the path, such as the encodings it takes.
+pub fn get_raw_with(address: SocketAddr, path: &str, headers: &[(&str, &str)]) -> Raw {
+    let mut reader = request(address, path, headers);
     let (status, headers) = head_with_headers(&mut reader);
     let mut body = Vec::new();
     reader.read_to_end(&mut body).expect("read the body");
@@ -411,8 +417,16 @@ impl Stream {
     }
 
     fn take_frame(&mut self) -> Option<Frame> {
-        let end = self.buffered.find("\n\n")?;
-        let block: String = self.buffered.drain(..end + 2).collect();
+        take_frame(&mut self.buffered)
+    }
+}
+
+/// The first whole frame `buffered` holds, taken off its front; comments are
+/// dropped on the way.
+fn take_frame(buffered: &mut String) -> Option<Frame> {
+    loop {
+        let end = buffered.find("\n\n")?;
+        let block: String = buffered.drain(..end + 2).collect();
         let field = |name: &str| {
             block
                 .lines()
@@ -420,11 +434,119 @@ impl Stream {
                 .map(|value| value.trim().to_owned())
         };
         // A block with no `data:` is a comment: a keep-alive, not a frame.
-        let data = field("data:")?;
-        Some(Frame {
+        let Some(data) = field("data:") else {
+            continue;
+        };
+        return Some(Frame {
             id: field("id:").unwrap_or_default(),
             event: field("event:").unwrap_or_default(),
             data,
-        })
+        });
+    }
+}
+
+/// An open `text/event-stream` the request asked to be served gzip-encoded,
+/// read one frame at a time by decoding each chunk as it arrives.
+///
+/// A frame read from this is one the server's encoder had already flushed:
+/// nothing here waits for the body to end, so a frame the encoder held back
+/// is a frame that does not arrive.
+pub struct GzipStream {
+    reader: BufReader<TcpStream>,
+    /// The status the stream opened with.
+    pub status: u16,
+    /// Every header, lower-cased name and trimmed value, in the order sent.
+    pub headers: Vec<(String, String)>,
+    decoder: flate2::write::GzDecoder<Vec<u8>>,
+    decoded: String,
+    /// Part of a chunk-size line a bounded wait ran out in the middle of.
+    partial: String,
+    /// How many encoded body bytes have arrived: what crossed the wire.
+    pub wire: usize,
+}
+
+/// Open `path` as a stream, asking for it gzip-encoded.
+pub fn gzip_stream(address: SocketAddr, path: &str) -> GzipStream {
+    let mut reader = request(address, path, &[("Accept-Encoding", "gzip")]);
+    let (status, headers) = head_with_headers(&mut reader);
+    GzipStream {
+        reader,
+        status,
+        headers,
+        decoder: flate2::write::GzDecoder::new(Vec::new()),
+        decoded: String::new(),
+        partial: String::new(),
+        wire: 0,
+    }
+}
+
+impl GzipStream {
+    /// The value of the header `name`, or `None` when none was sent.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(sent, _)| sent == &name.to_ascii_lowercase())
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// The next frame, or `None` if none decodes within `patience` or the
+    /// stream ended.
+    pub fn frame_within(&mut self, patience: Duration) -> Option<Frame> {
+        let deadline = std::time::Instant::now() + patience;
+        let frame = loop {
+            if let Some(frame) = take_frame(&mut self.decoded) {
+                break Some(frame);
+            }
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                break None;
+            }
+            self.reader
+                .get_ref()
+                .set_read_timeout(Some(left))
+                .expect("read timeout");
+            let mut line = std::mem::take(&mut self.partial);
+            match self.reader.read_line(&mut line) {
+                Ok(0) => break None,
+                Ok(_) => {}
+                Err(err)
+                    if matches!(
+                        err.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    self.partial = line;
+                    break None;
+                }
+                Err(err) => panic!("read from the stream: {err}"),
+            }
+            let size = usize::from_str_radix(line.trim(), 16)
+                .unwrap_or_else(|_| panic!("not a chunk size: {line:?}"));
+            if size == 0 {
+                break None;
+            }
+            // The chunk itself is read whole: the server writes it at once.
+            self.reader
+                .get_ref()
+                .set_read_timeout(Some(TIMEOUT))
+                .expect("read timeout");
+            let mut chunk = vec![0; size + 2];
+            self.reader
+                .read_exact(&mut chunk)
+                .expect("read a whole chunk");
+            self.wire += size;
+            self.decoder
+                .write_all(&chunk[..size])
+                .expect("the chunk decodes as gzip");
+            self.decoder.flush().expect("flush the decoder");
+            let out = std::mem::take(self.decoder.get_mut());
+            self.decoded
+                .push_str(std::str::from_utf8(&out).expect("the stream is UTF-8"));
+        };
+        self.reader
+            .get_ref()
+            .set_read_timeout(Some(TIMEOUT))
+            .expect("read timeout");
+        frame
     }
 }

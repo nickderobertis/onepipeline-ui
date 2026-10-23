@@ -46,6 +46,7 @@
 pub mod api;
 pub mod cli;
 pub mod contract;
+mod encoding;
 pub mod error;
 pub mod filter;
 pub mod live;

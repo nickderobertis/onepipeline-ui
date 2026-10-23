@@ -122,6 +122,11 @@ bundled-ui = []
 [dependencies]
 axum = "0.8"
 clap = { version = "4.6", features = ["derive"] }
+# The gzip `Content-Encoding` a response is served under when the client asks
+# for it (`src/encoding.rs`). Its write-side encoder sync-flushes on demand, so
+# an event stream is compressed one frame at a time and no frame waits for the
+# next. The default backend is pure Rust (miniz_oxide).
+flate2 = "1.1"
 futures-core = "0.3"
 # Exact, not a range: `just bootstrap` provisions the `onepipeline` CLI at the
 # version the lock pins this library to, because the two speak a versioned
