@@ -28,7 +28,13 @@ import {
   subscriptionViewSchema,
 } from "@onepipeline-ui/dag-model";
 import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import {
+  expect,
+  type Locator,
+  type Page,
+  type Request,
+  test,
+} from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
 import {
   graphNodeList,
@@ -2444,11 +2450,29 @@ test("collapses a run of near-identical records and puts it back", async ({
   ).toHaveCount(2);
 });
 
+/** Whether `request` subscribes to `nodeId`'s timeline on `runId`. */
+function subscribesToNode(
+  request: Request,
+  runId: string,
+  nodeId: string,
+): boolean {
+  if (!SUBSCRIBE(new URL(request.url())) || request.method() !== "POST")
+    return false;
+  const view = subscriptionViewSchema.parse(request.postDataJSON().view);
+  return (
+    view.type === "timeline" &&
+    view.scope === "node" &&
+    view.run_id === runId &&
+    view.node === nodeId
+  );
+}
+
 /**
- * Wait for the real detail and scoped timeline before inspecting their rendering.
- * Headers alone are insufficient: a reset can interrupt the body.
- * The heading is mounted before either read lands. Network time belongs to the
- * enclosing journey's budget, not the shorter window for a DOM assertion.
+ * Wait for the real subscription to a node's timeline, which carries the run's
+ * detail beside it, before inspecting their rendering. Headers alone are
+ * insufficient: a reset can interrupt the body. The heading is mounted before
+ * the subscription lands. Network time belongs to the enclosing journey's
+ * budget, not the shorter window for a DOM assertion.
  */
 async function readNodeTranscript(
   page: Page,
@@ -2459,21 +2483,9 @@ async function readNodeTranscript(
   await Promise.all([
     page.waitForResponse(
       async (response) =>
-        new URL(response.url()).pathname === API_V2_PATHS.run(runId) &&
+        subscribesToNode(response.request(), runId, nodeId) &&
         response.ok() &&
         (await response.finished()) === null,
-      { timeout: 0 },
-    ),
-    page.waitForResponse(
-      async (response) => {
-        const url = new URL(response.url());
-        return (
-          url.pathname === API_V2_PATHS.timeline(runId) &&
-          url.searchParams.get("node") === nodeId &&
-          response.ok() &&
-          (await response.finished()) === null
-        );
-      },
       { timeout: 0 },
     ),
     read(),
@@ -2489,13 +2501,16 @@ test("collapses every kind of run the same way and at the same count", async ({
     { kind: "dispatch", name: /^worker \(/ },
     { kind: "criterion-checked", name: "criterion-checked" },
   ];
-  // Keep the slow-read regression real: forward to the API after the old
-  // fifteen-second assertion window, without replacing its response.
-  await delayReads(
-    page,
-    new RegExp(`${API_V2_PATHS.timeline(runId)}\\?.*node=${narrow_node}(&|$)`),
-    16_000,
-  );
+  // Keep the slow-read regression real: forward the node's subscription to the
+  // API after the old fifteen-second assertion window, without replacing its
+  // response.
+  // llmlint: ignore[e2e_not_mocked] the same delay `delayReads` makes, keyed on the subscription's body rather than its URL because the node a subscription shows is named there: the request is forwarded to the real API unchanged and its answer is the server's own.
+  await page.route(SUBSCRIBE, async (intercepted) => {
+    if (!subscribesToNode(intercepted.request(), runId, narrow_node))
+      return intercepted.fallback();
+    await new Promise((resolve) => setTimeout(resolve, 16_000));
+    await intercepted.continue();
+  });
   await readNodeTranscript(page, runId, narrow_node, () =>
     openObservatory(page, `/?run=${runId}&node=${narrow_node}`),
   );
@@ -2539,19 +2554,21 @@ test("recovers a node transcript with Refresh after a connection reset", async (
 }) => {
   const { threshold, narrow_node } = fixture().collapse;
   const runId = runs().busy;
-  const isTimeline = (url: URL) =>
-    url.pathname === API_V2_PATHS.timeline(runId) &&
-    url.searchParams.get("node") === narrow_node;
+  const isNodeView = (request: Request) =>
+    subscribesToNode(request, runId, narrow_node);
+  let aborted = false;
   // llmlint: ignore[e2e_not_mocked] inject only a transport failure, as a connection reset would; the retry reaches the real API and its unchanged fixture. No response or client is doubled.
-  await page.route(isTimeline, (route) => route.abort("connectionreset"), {
-    times: 1,
+  await page.route(SUBSCRIBE, (route) => {
+    if (aborted || !isNodeView(route.request())) return route.fallback();
+    aborted = true;
+    return route.abort("connectionreset");
   });
-  const reset = page.waitForEvent("requestfailed", (request) =>
-    isTimeline(new URL(request.url())),
-  );
+  const reset = page.waitForEvent("requestfailed", isNodeView);
   await openObservatory(page, `/?run=${runId}&node=${narrow_node}`);
   expect((await reset).failure()?.errorText).toContain("ERR_CONNECTION_RESET");
-  await expect(page.getByRole("alert")).toContainText("Timeline unavailable");
+  // The node's detail and timeline arrive together, so nothing of the node is
+  // held when its one read fails: the page says the live read failed.
+  await expect(page.getByRole("alert")).toContainText("Live telemetry issue");
   await expect(readingRows(page)).toHaveCount(0);
 
   await readNodeTranscript(page, runId, narrow_node, () =>
@@ -2564,7 +2581,7 @@ test("recovers a node transcript with Refresh after a connection reset", async (
     reading(page).getByRole("article", { name: "criterion-checked" }),
   ).toHaveCount(threshold - 1);
   await expect(
-    page.getByText("Timeline unavailable", { exact: true }),
+    page.getByText("Live telemetry issue", { exact: true }),
   ).toHaveCount(0);
 });
 
