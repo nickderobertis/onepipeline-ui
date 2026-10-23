@@ -12,14 +12,9 @@
  * appends to the same journals the initial build wrote, as an executor appends to them.
  */
 
-import {
-  appendFileSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { appendLines } from "../load/journal.ts";
 import { thisHost } from "./this-host.mjs";
 
 /** The in-flight run every graph, node and timeline journey opens. */
@@ -805,10 +800,17 @@ class Journal {
 function appendEvent(dir, source, kind, labels, payload = {}) {
   const path = join(dir, "events.jsonl");
   const existing = readFileSync(path, "utf8");
-  const seq = existing.split("\n").filter(Boolean).length;
+  const records = existing.split("\n").filter(Boolean);
+  const seq = records.length;
+  // Never stamped before the record it follows, as no writer appending to a
+  // journal stamps one: a run whose last steps are timed a little past the
+  // corpus's "now" would otherwise take a record that moves nothing it shows.
+  const last = records.length
+    ? Date.parse(JSON.parse(records[records.length - 1]).ts)
+    : Number.NEGATIVE_INFINITY;
   const line = JSON.stringify({
     v: 1,
-    ts: stamp(now()),
+    ts: stamp(Math.max(now(), last + 1)),
     stream: `a-recording-host-${labels.run_id}`,
     seq,
     source,
@@ -817,7 +819,9 @@ function appendEvent(dir, source, kind, labels, payload = {}) {
     payload,
     artifacts: [],
   });
-  appendFileSync(path, `${line}\n`);
+  // Through the one fixture writer, which leaves the append receipt the
+  // engine's own writer would.
+  appendLines(path, [line]);
 }
 
 /**

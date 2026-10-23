@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   projectListSchema,
@@ -7,6 +7,7 @@ import {
 } from "@onepipeline-ui/dag-model";
 import { expect, test } from "@playwright/test";
 import { startFixtureServer } from "./fixture-server";
+import { appendRecords } from "./load/journal";
 
 test("groups effective labels and copy origins, filters open kinds in the URL, and orders by activity", async ({
   page,
@@ -211,10 +212,18 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
       .getByRole("button", { name: "Open project-centric", exact: true })
       .click();
     const oldRun = join(server.workspace, "runs/project-planning/events.jsonl");
-    appendFileSync(
-      oldRun,
-      `${JSON.stringify({ v: 1, ts: new Date().toISOString(), stream: "late-old-run", seq: 0, source: "pipeline", kind: "completion-requested", labels: { run_id: "project-planning" }, payload: {} })}\n`,
-    );
+    appendRecords(oldRun, [
+      {
+        v: 1,
+        ts: new Date().toISOString(),
+        stream: "late-old-run",
+        seq: 0,
+        source: "pipeline",
+        kind: "completion-requested",
+        labels: { run_id: "project-planning" },
+        payload: {},
+      },
+    ]);
     await page.reload();
     await expect(
       nav.getByRole("group", { name: "Project project-centric", exact: true }),
@@ -225,22 +234,30 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
       .click();
     await expect(page).toHaveURL(/run=project-design/);
     const path = join(server.workspace, "runs/project-unfamiliar/events.jsonl");
-    appendFileSync(
-      path,
-      `${JSON.stringify({ v: 1, ts: new Date().toISOString(), stream: "project-activity", seq: 0, source: "pipeline", kind: "run-started", labels: { run_id: "project-unfamiliar" }, payload: {} })}\n`,
-    );
+    appendRecords(path, [
+      {
+        v: 1,
+        ts: new Date().toISOString(),
+        stream: "project-activity",
+        seq: 0,
+        source: "pipeline",
+        kind: "run-started",
+        labels: { run_id: "project-unfamiliar" },
+        payload: {},
+      },
+    ]);
     await expect(
       nav.getByRole("group", { name: /^Project / }).first(),
     ).toHaveAccessibleName("Project another-project");
     await page.context().setOffline(true);
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(
-      page.getByRole("alert").filter({ hasText: "Projects unavailable" }),
+      page.getByRole("alert").filter({ hasText: "Live telemetry issue" }),
     ).toBeVisible();
     await page.context().setOffline(false);
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(
-      page.getByRole("alert").filter({ hasText: "Projects unavailable" }),
+      page.getByRole("alert").filter({ hasText: "Live telemetry issue" }),
     ).toHaveCount(0);
     await expect(
       nav.getByRole("button", { name: "Open project-centric", exact: true }),

@@ -84,6 +84,14 @@ export const API_V2_PATHS = {
     `/api/v2/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/agents`,
   projectAgents: (projectId: string) =>
     `/api/v2/projects/${encodeURIComponent(projectId)}/agents`,
+  /**
+   * A tab's subscription: `POST` creates one for the sidebar and at most one
+   * visible run view and answers its initial snapshot; `DELETE` of one retires
+   * it, so a view the tab no longer shows is no longer read.
+   */
+  subscriptions: "/api/v2/subscriptions",
+  subscription: (subscriptionId: string) =>
+    `/api/v2/subscriptions/${encodeURIComponent(subscriptionId)}`,
 } as const;
 export const API_V2_QUERY = {
   includeSettled: "include_settled",
@@ -138,6 +146,8 @@ export const API_V2_QUERY = {
   until: "until",
   /** How long a watch waits: whole seconds, `0` to read once, `none` to never give up. */
   timeout: "timeout",
+  /** Which subscription an event stream carries the changes of. */
+  subscription: "subscription",
   /** The heartbeat interval of a watch in whole seconds, `0` to turn it off. */
   tick: "tick",
 } as const;
@@ -242,8 +252,13 @@ export const API_V2_FILTER_PROFILES = {
  * field `18` served is served with the same meaning; the literal moves because a
  * client that has never seen the field shows a run a dozen agents ran under as
  * one nothing was launched for.
+ *
+ * `25` is pushed changes: the subscription routes and frames below, and the
+ * detail's `run.live_activity`. Every field `24` served is served with the same
+ * meaning; the literal moves because a client written against `24` re-reads
+ * whole payloads on every change and has never seen `live_activity`.
  */
-export const TELEMETRY_SCHEMA_VERSION = 24;
+export const TELEMETRY_SCHEMA_VERSION = 25;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -1182,13 +1197,42 @@ export const nodeDetailSchema = openObject({
     commit_url: z.string().url().optional(),
   }).optional(),
 });
+export interface LiveActivity {
+  event_id: string;
+  node: string;
+  step?: string;
+  at: number;
+  kind: string;
+  name: string;
+  detail: string;
+  events: number;
+}
+export const liveActivitySchema: z.ZodType<LiveActivity> = z.object({
+  event_id: z.string().min(1),
+  node: z.string().min(1),
+  step: z.string().min(1).optional(),
+  at: z.number().finite(),
+  kind: z.string(),
+  name: z.string(),
+  detail: z.string(),
+  events: z.number().int().nonnegative(),
+});
+export const liveActivityListSchema = z.array(liveActivitySchema);
+
 export const runDetailSchema = openObject({
   /** The exact SDK telemetry document, including counters and millisecond buckets. */
   telemetry: openObject({ schema_version: counter }).optional(),
   api_version: z.literal(2),
   telemetry_schema_version: z.literal(TELEMETRY_SCHEMA_VERSION),
   observed_at: timestamp,
-  run: runTelemetrySchema,
+  /**
+   * `live_activity` (schema 25): what each node was last seen doing from inside
+   * a turn, oldest first — the header's activity line, patched with the rest of
+   * the detail rather than pushed on a stream of its own.
+   */
+  run: runTelemetrySchema.extend({
+    live_activity: liveActivityListSchema.optional(),
+  }),
   graph: graphStateSchema.nullable(),
   conversations: runConversationsSchema,
   node_details: z.record(z.string(), nodeDetailSchema).optional().default({}),
@@ -1620,28 +1664,6 @@ export const sseEventNameSchema = z.enum([
   "run.removed",
 ]);
 export const sseEventDataSchema = arbitraryRecord;
-
-export interface LiveActivity {
-  event_id: string;
-  node: string;
-  step?: string;
-  at: number;
-  kind: string;
-  name: string;
-  detail: string;
-  events: number;
-}
-export const liveActivitySchema: z.ZodType<LiveActivity> = z.object({
-  event_id: z.string().min(1),
-  node: z.string().min(1),
-  step: z.string().min(1).optional(),
-  at: z.number().finite(),
-  kind: z.string(),
-  name: z.string(),
-  detail: z.string(),
-  events: z.number().int().nonnegative(),
-});
-export const liveActivityListSchema = z.array(liveActivitySchema);
 
 /**
  * Whether a string is a qualified project id: `<source>:<native>`, the source
@@ -2401,6 +2423,299 @@ export const projectAgentsSchema = openObject({
   ...agentsListing,
   project: z.string().min(1),
 });
+
+/**
+ * The pushed-changes protocol `docs/contract.md` states under "Subscriptions":
+ * a tab subscribes to the sidebar and at most one visible run view, is answered
+ * with the state it shows at one publication boundary, and is then pushed only
+ * what changed — a trimmed row per run that moved, and a patch of the visible
+ * payload. Every object here is strict: a field the contract does not name is a
+ * frame this client does not understand, never one it reads past.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+export const subscriptionIdSchema = z.string().regex(UUID);
+/** `<epoch UUID>:<unsigned decimal sequence>`, written one way only. */
+export const eventIdSchema = z
+  .string()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(0|[1-9][0-9]*)$/u,
+  );
+
+/** What a tab shows besides the sidebar: nothing, or one run view. */
+export const subscriptionViewSchema = z.union([
+  z.strictObject({ type: z.literal("sidebar") }),
+  z.strictObject({
+    type: z.literal("detail"),
+    run_id: z.string().min(1),
+    filter: z.string().min(1).optional(),
+  }),
+  z.strictObject({
+    type: z.literal("timeline"),
+    run_id: z.string().min(1),
+    scope: z.literal("run"),
+    filter: z.string().min(1).optional(),
+  }),
+  z.strictObject({
+    type: z.literal("timeline"),
+    run_id: z.string().min(1),
+    scope: z.literal("node"),
+    node: z.string().min(1),
+    filter: z.string().min(1).optional(),
+  }),
+  z.strictObject({ type: z.literal("channel"), run_id: z.string().min(1) }),
+]);
+
+/**
+ * One run as the sidebar renders it, and nothing more: its displayed identity,
+ * project, kind, state, node counts, last activity and launch time.
+ */
+export const sidebarRowSchema = z.strictObject({
+  id: z.string().min(1),
+  name: z.string(),
+  group: z.strictObject({ project: z.string(), name: z.string() }).nullable(),
+  kind: z.string().nullable(),
+  state: z.string().min(1),
+  nodes: z.strictObject({
+    total: counter,
+    done: counter,
+    failed: counter,
+    running: counter,
+  }),
+  updated_at: timestamp,
+  started_at: timestamp.optional(),
+});
+/** The fields a sidebar row carries, in the order the contract lists them. */
+export const SIDEBAR_ROW_FIELDS = Object.keys(sidebarRowSchema.shape);
+
+export const visibleStateSchema = z.union([
+  z.strictObject({ type: z.literal("sidebar") }),
+  z.strictObject({
+    type: z.literal("detail"),
+    run_id: z.string().min(1),
+    detail: runDetailSchema,
+  }),
+  z.strictObject({
+    type: z.literal("timeline"),
+    run_id: z.string().min(1),
+    scope: z.literal("run"),
+    detail: runDetailSchema,
+    timeline: runTimelineSchema,
+  }),
+  z.strictObject({
+    type: z.literal("timeline"),
+    run_id: z.string().min(1),
+    scope: z.literal("node"),
+    node: z.string().min(1),
+    detail: runDetailSchema,
+    timeline: runTimelineSchema,
+  }),
+  z.strictObject({
+    type: z.literal("channel"),
+    run_id: z.string().min(1),
+    detail: runDetailSchema,
+    channel: channelQueueSchema,
+  }),
+]);
+
+export const subscriptionSnapshotSchema = z.strictObject({
+  id: eventIdSchema,
+  sidebar: z.array(sidebarRowSchema),
+  visible: visibleStateSchema,
+});
+
+/** One step of a patch path: an object key or a non-negative array index. */
+const pathSchema = z.array(z.union([z.string(), counter]));
+export const patchOpSchema = z.union([
+  z.strictObject({ p: pathSchema, v: z.unknown() }),
+  z.strictObject({ p: pathSchema, a: z.array(z.unknown()) }),
+  z.strictObject({ p: pathSchema, d: z.literal(true) }),
+]);
+
+const frameCommon = {
+  id: eventIdSchema,
+  base: eventIdSchema,
+  subscription: subscriptionIdSchema,
+};
+export const resetReasonSchema = z.enum([
+  "unknown-cursor",
+  "stale-cursor",
+  "server-restarted",
+]);
+export const resetFrameSchema = z.strictObject({
+  ...frameCommon,
+  type: z.literal("reset"),
+  reason: resetReasonSchema,
+  snapshot: subscriptionSnapshotSchema,
+});
+export const subscriptionFrameSchema = z.union([
+  resetFrameSchema,
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("run.changed"),
+    row: sidebarRowSchema,
+  }),
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("run.removed"),
+    run_id: z.string().min(1),
+  }),
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("detail.patch"),
+    run_id: z.string().min(1),
+    ops: z.array(patchOpSchema),
+  }),
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("timeline.patch"),
+    run_id: z.string().min(1),
+    scope: z.literal("run"),
+    ops: z.array(patchOpSchema),
+  }),
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("timeline.patch"),
+    run_id: z.string().min(1),
+    scope: z.literal("node"),
+    node: z.string().min(1),
+    ops: z.array(patchOpSchema),
+  }),
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("channel.patch"),
+    run_id: z.string().min(1),
+    ops: z.array(patchOpSchema),
+  }),
+]);
+/** Every frame type a subscription stream carries, as its SSE event name. */
+export const SUBSCRIPTION_FRAME_TYPES = [
+  "reset",
+  "run.changed",
+  "run.removed",
+  "detail.patch",
+  "timeline.patch",
+  "channel.patch",
+] as const;
+
+/** `201` to `POST /api/v2/subscriptions`. */
+export const subscribedSchema = z.strictObject({
+  subscription: subscriptionIdSchema,
+  view: subscriptionViewSchema,
+  initial: z.union([
+    z.strictObject({
+      type: z.literal("snapshot"),
+      snapshot: subscriptionSnapshotSchema,
+    }),
+    resetFrameSchema,
+  ]),
+});
+
+/** `410` to a stream asked for a subscription this server cannot serve. */
+export const subscriptionUnavailableSchema = z.strictObject({
+  code: z.literal("subscription-unavailable"),
+  reason: z.enum(["expired", "server-restarted", "unknown"]),
+});
+
+export type SubscriptionView = z.infer<typeof subscriptionViewSchema>;
+export type SidebarRow = z.infer<typeof sidebarRowSchema>;
+export type VisibleState = z.infer<typeof visibleStateSchema>;
+export type SubscriptionSnapshot = z.infer<typeof subscriptionSnapshotSchema>;
+export type PatchOp = z.infer<typeof patchOpSchema>;
+export type ResetFrame = z.infer<typeof resetFrameSchema>;
+export type SubscriptionFrame = z.infer<typeof subscriptionFrameSchema>;
+export type Subscribed = z.infer<typeof subscribedSchema>;
+export type SubscriptionUnavailable = z.infer<
+  typeof subscriptionUnavailableSchema
+>;
+
+/** Why a patch could not be applied: the protocol error a client shows. */
+export class PatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PatchError";
+  }
+}
+
+/**
+ * Apply `ops` to `target` atomically, returning the patched copy and leaving
+ * `target` untouched — or throwing {@link PatchError} for any operation the
+ * contract does not allow: replacing or deleting the root, a parent that does
+ * not exist, an index past its array's end, an append to a non-array, or a
+ * deletion inside an array. Only what a path walks through is copied, so a
+ * patch costs what it changes rather than the payload.
+ */
+export function applyPatch<T>(target: T, ops: readonly PatchOp[]): T {
+  let root: unknown = target;
+  for (const op of ops) root = applyOne(root, op);
+  // The payload the operations were written against, patched: the server diffs
+  // one envelope into the next of the same schema, and a reader that must hold
+  // the result to that schema parses it, as the client's activity line does.
+  return root as T;
+}
+
+type Json = unknown;
+function applyOne(root: Json, op: PatchOp): Json {
+  const path = op.p;
+  if ("a" in op) {
+    return update(root, path, (array) => {
+      if (!Array.isArray(array))
+        throw new PatchError("an append's path names an array");
+      return [...array, ...op.a];
+    });
+  }
+  const last = path.at(-1);
+  if (last === undefined)
+    throw new PatchError("the root is never replaced or deleted");
+  return update(root, path.slice(0, -1), (parent) => {
+    if ("v" in op) {
+      if (Array.isArray(parent) && typeof last === "number") {
+        if (last >= parent.length)
+          throw new PatchError("a set replaces an existing element");
+        const next = [...parent];
+        next[last] = op.v;
+        return next;
+      }
+      if (isObject(parent) && typeof last === "string")
+        return { ...parent, [last]: op.v };
+      throw new PatchError("a set's path does not match its parent");
+    }
+    if (isObject(parent) && typeof last === "string") {
+      if (!Object.hasOwn(parent, last))
+        throw new PatchError("a deletion names an existing member");
+      const rest = { ...parent };
+      delete rest[last];
+      return rest;
+    }
+    throw new PatchError("a deletion names an object member");
+  });
+}
+
+function isObject(value: Json): value is Record<string, Json> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Replace the value at `path` with `change(it)`, copying only the spine. */
+function update(
+  value: Json,
+  path: readonly (string | number)[],
+  change: (value: Json) => Json,
+): Json {
+  const [step, ...rest] = path;
+  if (step === undefined) return change(value);
+  if (Array.isArray(value) && typeof step === "number") {
+    if (step >= value.length)
+      throw new PatchError("an index on the path does not exist");
+    const next = [...value];
+    next[step] = update(value[step], rest, change);
+    return next;
+  }
+  if (isObject(value) && typeof step === "string") {
+    if (!Object.hasOwn(value, step))
+      throw new PatchError("a parent on the path does not exist");
+    return { ...value, [step]: update(value[step], rest, change) };
+  }
+  throw new PatchError("a path step does not match its parent");
+}
 
 export type Timing = z.infer<typeof timingSchema>;
 export type FailureClass = z.infer<typeof failureClassSchema>;

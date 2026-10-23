@@ -474,6 +474,17 @@ engine release's own resolution. Browser adoption remains removed under the
 current contract; this binary reads runs driven by the engine CLI. This
 changes the engine types carried by ApiError::from_engine and the other
 engine-typed public items.
+0.85.0 is the engine whose `RunView` refreshes in place: `refresh` reads,
+parses and folds only the records appended since the view last read, answering
+`Unchanged`, `Appended { first }` or `Reread`, and a refreshed view equals a
+fresh `open`. The read API's subscriptions keep each subscribed run's view
+current with it and build their patches from the appended records, rather than
+re-reading the whole journal per change. `RunView` gained a private field, so
+the timeline's canonical store is read through the crate's own `payload::Run`
+rather than a rebuilt view. It links onetaskgraph 0.10.0, so the dev-only
+`onetaskgraph-*` requirements move to that release with it. This changes the
+engine types carried by ApiError::from_engine and the other engine-typed
+public items.
 0.86.0 links onetaskgraph 0.11.0 (through 0.10.0), the plan-store release
 whose copy binds to an existing destination task the caller names, keeps a
 destination item's status on update when asked, and copies named members into
@@ -489,3 +500,19 @@ it serves changes. It links the same onevcs 0.56.3 and oneagentgraph 0.7.1 as
 0.84.1, and no route or MSRV changes. This changes the engine types carried by
 ApiError::from_engine and the other engine-typed public items, and
 `payload::timeline` now takes the view mutably.
+0.87.0 is the released engine this branch's live updates were built against
+(engine-incremental-read): its `RunView::refresh` and `Refreshed` are 0.86.0's,
+and its writeback copies a run's members into an existing destination project
+with a members-only copy, falling back to a full copy only for a routed
+destination that has no member project yet. It links the same onetaskgraph
+0.11.0, onevcs 0.56.3 and oneagentgraph 0.7.1, and no route or MSRV changes.
+The timeline reads its canonical events through the crate's `payload::Run`, so
+`payload::timeline` takes the view by shared reference again. This changes the
+engine types carried by ApiError::from_engine and the other engine-typed public
+items.
+0.87.1 is engine-incremental-read's published release, which this branch
+adopts in place of 0.87.0. Its library source is 0.87.0's: the release differs
+only in its version and in the engine's own test harness, so the linked
+dependencies, routes, MSRV and every served payload are unchanged beyond the
+release `/healthz` reports. This changes the engine types carried by
+ApiError::from_engine and the other engine-typed public items.

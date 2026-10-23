@@ -25,8 +25,11 @@ export function DagGraph({
   nodes: nodeViews,
   selectedNodeId,
   onSelectNode,
+  journalSeq,
 }: {
   readonly nodes: readonly NodeView[];
+  /** The journal sequence number of the last record this view has rendered. */
+  readonly journalSeq?: number;
   readonly selectedNodeId?: string;
   readonly onSelectNode: (nodeId: string) => void;
 }) {
@@ -126,7 +129,7 @@ export function DagGraph({
   }, [nodeViews, reasons, selectedNodeId]);
 
   return (
-    <div className="graph-wrap">
+    <div className="graph-wrap" data-journal-seq={journalSeq}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -143,6 +146,13 @@ export function DagGraph({
         // graph arrives whole or cropped. Kept below what the narrowest viewport in
         // the matrix needs; the controls zoom in from there.
         minZoom={0.05}
+        // `fitView` alone waits for a resize observation of every card, and a card
+        // already carries its laid-out size, so on a loaded browser that holds those
+        // observations back the graph opened unfitted — at scale 1, cropped — until
+        // the window was resized: nothing else hands React Flow its nodes again once
+        // a quiet run's changes are pushed rather than re-read. The canvas is fitted
+        // as soon as it exists, from the sizes the layout already gave.
+        onInit={(flow) => void flow.fitView()}
         onNodeClick={(_, node) => onSelectNode(node.id)}
         aria-label="DAG execution graph"
       >

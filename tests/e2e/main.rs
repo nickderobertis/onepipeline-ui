@@ -45,6 +45,7 @@ mod ensure_baseline;
 mod ensure_sibling;
 mod judged_tier;
 mod linked_report;
+mod live;
 // llmlint: ignore-block[e2e_not_mocked] the real `docker run` is a manylinux
 // image compiling the whole release binary, minutes per target, which ci.yml's
 // `wheel` legs run for real — then install and smoke-test — on every pull request
@@ -78,6 +79,8 @@ mod harness_history;
 mod http;
 #[path = "../support/journal_schema.rs"]
 mod journal_schema;
+#[path = "../support/live_journal.rs"]
+mod live_journal;
 #[path = "../support/release_declaration.rs"]
 mod release_declaration;
 #[path = "../support/scratch_repo.rs"]

@@ -66,6 +66,12 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUN_AGENTS, "run-agents.json"),
     (routes::RUN_NODE_AGENTS, "run-node-agents.json"),
     (routes::PROJECT_AGENTS, "project-agents.json"),
+    // Neither subscription route is enveloped: the first answers the
+    // subscription and its snapshot, and the second answers nothing — what it
+    // pins is every frame the subscription it retires carried, as the real
+    // server served them (`tests/e2e/live.rs`).
+    (routes::SUBSCRIPTIONS, "subscriptions.json"),
+    (routes::SUBSCRIPTION, "subscription-frames.json"),
 ];
 
 /// The store the served process would build over a workspace's runs root: the
@@ -134,7 +140,7 @@ fn the_route_table_documents_no_route_the_contract_does_not() {
         .lines()
         .filter_map(|line| {
             let (method, rest) = line.split_once(' ')?;
-            matches!(method, "GET" | "POST")
+            matches!(method, "GET" | "POST" | "DELETE")
                 .then(|| (method, rest.split_whitespace().next().unwrap_or_default()))
         })
         .collect();
@@ -163,7 +169,7 @@ fn the_readme_indexes_every_route_and_names_the_served_schema() {
         .lines()
         .filter_map(|line| {
             let (method, rest) = line.split_once(' ')?;
-            matches!(method, "GET" | "POST")
+            matches!(method, "GET" | "POST" | "DELETE")
                 .then(|| (method, rest.split_whitespace().next().unwrap_or_default()))
         })
         .collect();
@@ -1120,7 +1126,14 @@ fn the_health_body_round_trips_and_names_the_release_this_crate_links() {
 #[test]
 fn every_enveloped_fixture_round_trips_byte_for_byte() {
     for (route, fixture) in ROUTE_FIXTURES {
-        if route == routes::HEALTHZ || route == routes::EVENTS {
+        if [
+            routes::HEALTHZ,
+            routes::EVENTS,
+            routes::SUBSCRIPTIONS,
+            routes::SUBSCRIPTION,
+        ]
+        .contains(&route)
+        {
             continue; // Not enveloped, and enveloped one level down, and a list of frames.
         }
         let raw = read_fixture(fixture);
@@ -1176,7 +1189,7 @@ fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent()
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 24);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 25);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
@@ -4018,5 +4031,52 @@ fn timeline_record_fields_follow_the_producers_published_payloads() {
     assert!(
         missing.is_empty(),
         "panel fields no producer declares: {missing:?}"
+    );
+}
+
+/// The subscription bounds `docs/contract.md` states are the ones the hub
+/// keeps: its retained frames and the grace a disconnected subscription has.
+#[test]
+fn the_subscription_bounds_the_contract_states_are_the_ones_the_hub_keeps() {
+    use onepipeline_ui::contract::{DISCONNECTED_GRACE, RETAINED_FRAMES};
+    let contract = contract_text();
+    let thousands = |value: usize| {
+        let digits = value.to_string();
+        let (head, tail) = digits.split_at(digits.len() - 3);
+        format!("{head},{tail}")
+    };
+    assert!(
+        contract.contains(&format!(
+            "its latest **{}** emitted frames",
+            thousands(RETAINED_FRAMES)
+        )),
+        "docs/contract.md does not state the {RETAINED_FRAMES} retained frames the hub keeps"
+    );
+    assert!(
+        contract.contains(&format!(
+            "for at most **{} seconds**",
+            DISCONNECTED_GRACE.as_secs()
+        )),
+        "docs/contract.md does not state the {:?} grace the hub keeps",
+        DISCONNECTED_GRACE
+    );
+    assert!(
+        contract.contains(&format!(
+            "at most once every **{} polls**",
+            onepipeline_ui::live::ROW_POLLS_PER_READ
+        )),
+        "docs/contract.md does not state how often the hub reads a run's row"
+    );
+    // And the telemetry fold's interval, and the bound it keeps on a run that
+    // never goes quiet: twice it.
+    let refold = onepipeline_ui::live::TELEMETRY_REFOLD.as_secs();
+    assert!(
+        contract.contains(&format!("at least {refold} seconds after the last fold")),
+        "docs/contract.md does not state the {refold} s refold interval the hub keeps"
+    );
+    assert!(
+        contract.contains(&format!("once it is {} seconds behind", refold * 2)),
+        "docs/contract.md does not state the {} s bound the hub keeps",
+        refold * 2
     );
 }

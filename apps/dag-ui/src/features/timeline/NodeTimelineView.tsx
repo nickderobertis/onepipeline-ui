@@ -645,6 +645,7 @@ function TranscriptItem({
       aria-label={row.displayLabel}
       className="transcript-item"
       data-dispatch-group={row.dispatch?.label}
+      data-journal-seq={row.rowKind === "event" ? row.event.seq : undefined}
       data-selected={selected}
       ref={(element) => register(row.id, element)}
     >

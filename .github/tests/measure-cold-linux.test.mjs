@@ -246,6 +246,52 @@ test("--fixture is applied on --commit as one commit, and the commit stays the b
   }
 });
 
+test("a fixture that changes a binary file applies it whole", () => {
+  const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
+  try {
+    const d = doubles(dir);
+    const work = join(dir, "work");
+    // A rebaselined screenshot from this repository's own history: a diff
+    // without its binary contents is one git refuses to apply.
+    const changed = git(
+      "log",
+      "-1",
+      "--no-merges",
+      "--diff-filter=M",
+      "--format=%H",
+      "--",
+      "*.png",
+    );
+    assert.ok(changed, "this repository's history rebaselines a screenshot");
+    const run = measure(
+      [
+        "--commit",
+        `${changed}~1`,
+        "--fixture",
+        `${changed}~1...${changed}`,
+        "--label",
+        "b",
+        "--workdir",
+        work,
+        "--keep",
+      ],
+      dir,
+      d,
+    );
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.equal(
+      execFileSync("git", ["-C", join(work, "b"), "rev-parse", "HEAD^{tree}"], {
+        encoding: "utf8",
+      }).trim(),
+      git("rev-parse", `${changed}^{tree}`),
+      "the clone holds the changed commit's tree, its images included",
+    );
+  } finally {
+    writable(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a fixture that does not apply, or a provisioning that fails, stops before anything is timed", () => {
   const dir = mkdtempSync(join(tmpdir(), "measure-cold-"));
   try {
@@ -425,7 +471,9 @@ test("a run whose trees rm cannot clear says which, and keeps the measured statu
     assert.ok(!existsSync(stale.log), "nothing was provisioned");
 
     // Caches the timed run must start without.
-    const sticky = doubles(mkdtempSync(join(dir, "d-")), { stickyCache: true });
+    const sticky = doubles(mkdtempSync(join(dir, "d-")), {
+      stickyCache: true,
+    });
     const warm = measure(
       ["--commit", "HEAD", "--label", "warm", "--workdir", work],
       dir,
@@ -436,7 +484,9 @@ test("a run whose trees rm cannot clear says which, and keeps the measured statu
     assert.doesNotMatch(readFileSync(sticky.log, "utf8"), /ci-test-linux/);
 
     // A cleanup that fails after the run: the measured status stands.
-    const after = doubles(mkdtempSync(join(dir, "d-")), { stickyAfter: true });
+    const after = doubles(mkdtempSync(join(dir, "d-")), {
+      stickyAfter: true,
+    });
     const run = measure(
       ["--commit", "HEAD", "--label", "after", "--workdir", work],
       dir,

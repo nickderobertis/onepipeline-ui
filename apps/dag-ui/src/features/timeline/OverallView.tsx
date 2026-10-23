@@ -51,6 +51,7 @@ export function OverallView({
   nodes,
   timeline,
   timelineError,
+  journalSeq,
   onSelectNode,
   selectedItemId,
   onSelectItem,
@@ -60,6 +61,8 @@ export function OverallView({
   readonly nodes: readonly NodeView[];
   readonly timeline?: RunTimeline;
   readonly timelineError?: Error;
+  /** The journal sequence number of the last record this view has rendered. */
+  readonly journalSeq?: number;
   readonly onSelectNode: (nodeId: string) => void;
   readonly selectedItemId?: string;
   readonly onSelectItem: (itemId?: string) => void;
@@ -105,7 +108,7 @@ export function OverallView({
   }, [onSelectItem, selectedItemId]);
 
   return (
-    <div className="overall-view">
+    <div className="overall-view" data-journal-seq={journalSeq}>
       <ScrollArea className="h-full">
         <div className="p-[34px] max-sm:p-3">
           <section className="overall-hero">

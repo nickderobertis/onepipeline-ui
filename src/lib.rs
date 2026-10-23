@@ -46,9 +46,12 @@
 pub mod api;
 pub mod cli;
 pub mod contract;
+mod encoding;
 pub mod error;
 pub mod filter;
+pub mod live;
 pub mod liveness;
+pub mod patch;
 pub mod payload;
 pub mod server;
 pub mod store;

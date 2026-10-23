@@ -8,7 +8,9 @@
 use axum::http::StatusCode;
 use thiserror::Error;
 
-use crate::contract::{ArtifactId, ConversationId, ErrorBody, ErrorEnvelope, ProjectId, RunId};
+use crate::contract::{
+    ArtifactId, ConversationId, ErrorBody, ErrorEnvelope, NodeId, ProjectId, RunId,
+};
 
 /// A failure of a read route.
 ///
@@ -50,6 +52,14 @@ pub enum ApiError {
     /// The project identifier in the path is not a usable one.
     #[error("invalid project id: {0}")]
     InvalidProjectId(String),
+    /// A subscription request the contract cannot read: a malformed view, an
+    /// id or a cursor that does not parse, or members it does not name. `400`,
+    /// not `422`: there is no baseline to guess at from a malformed cursor.
+    #[error("invalid subscription: {0}")]
+    InvalidSubscription(String),
+    /// A node scope naming a node the run's graph does not carry.
+    #[error("no node {0} in this run")]
+    NodeNotFound(NodeId),
     /// `?correlation=` is not a token the bus's own parser accepts.
     #[error("invalid correlation: {0}")]
     InvalidCorrelation(String),
@@ -195,6 +205,8 @@ impl ApiError {
             Self::InvalidDispatchId(_) => "invalid_dispatch_id",
             Self::InvalidProjectId(_) => "invalid_project_id",
             Self::InvalidCorrelation(_) => "invalid_correlation",
+            Self::InvalidSubscription(_) => "invalid_subscription",
+            Self::NodeNotFound(_) => "node_not_found",
             Self::ProjectNotFound(_) => "project_not_found",
             Self::Refused(_) => "refused",
             Self::NotOwner { .. } => "not_owner",
@@ -220,7 +232,7 @@ impl ApiError {
     #[must_use]
     pub fn status(&self) -> StatusCode {
         match self {
-            Self::RemovedShutdownScope(_) => StatusCode::BAD_REQUEST,
+            Self::RemovedShutdownScope(_) | Self::InvalidSubscription(_) => StatusCode::BAD_REQUEST,
             Self::InvalidRequest(_)
             | Self::InvalidRunId(_)
             | Self::InvalidNodeId(_)
@@ -234,6 +246,7 @@ impl ApiError {
             | Self::NoSuchRoute
             | Self::RunNotFound(_)
             | Self::ProjectNotFound(_)
+            | Self::NodeNotFound(_)
             | Self::ConversationNotFound(_)
             | Self::ArtifactNotFound(_)
             | Self::UnknownFilterProfile(_) => StatusCode::NOT_FOUND,

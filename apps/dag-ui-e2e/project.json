@@ -44,6 +44,27 @@
         }
       ]
     },
+    "test-load": {
+      "//": "Linux only: reads /proc for the server's CPU. A run is about an hour; its telemetry is what budgets reads, so it is never cached.",
+      "command": "cargo build --release --locked --features bundled-ui --bin onepipeline-api && npx playwright test --config apps/dag-ui-e2e/load/load.config.ts",
+      "cache": false,
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ]
+    },
+    "budgets": {
+      "//": "Telemetry-only: the budgets read what test-load recorded and measure nothing themselves.",
+      "command": "node_modules/.bin/onebudgetspec check apps/dag-ui-e2e/budgets.yaml",
+      "inputs": [
+        "{projectRoot}/budgets.yaml",
+        "{projectRoot}/request-load-budget.mjs",
+        "{projectRoot}/telemetry/request-load.json"
+      ],
+      "cache": true
+    },
     "lint": {
       "command": "node node_modules/@biomejs/biome/bin/biome check apps/dag-ui-e2e && npx eslint --max-warnings 0 apps/dag-ui-e2e"
     },
@@ -61,7 +82,21 @@
       "command": "npx playwright install chromium"
     },
     "check": {
-      "executor": "nx:noop"
+      "//": "The default check plus budgets, as github-workflows:check reaches its own: budgets read committed telemetry and are cached on it.",
+      "executor": "nx:noop",
+      "dependsOn": [
+        "format-check",
+        "lint",
+        "typecheck",
+        "build",
+        "test",
+        "test-baseline",
+        "test-cost",
+        "test-isolation",
+        "doc",
+        "coverage",
+        "budgets"
+      ]
     }
   }
 }

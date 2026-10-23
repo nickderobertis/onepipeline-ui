@@ -1,0 +1,292 @@
+[
+  {
+    "id": "00000000-0000-4000-8000-0000000e9c00:2",
+    "base": "00000000-0000-4000-8000-0000000e9c00:1",
+    "subscription": "00000000-0000-4000-8000-00000005ab00",
+    "type": "run.changed",
+    "row": {
+      "id": "run-20260807-a1b2c3",
+      "name": "run-20260807-a1b2c3",
+      "group": {
+        "project": "authoring:contract-interface",
+        "name": "contract"
+      },
+      "kind": null,
+      "state": "parked",
+      "nodes": {
+        "total": 2,
+        "done": 0,
+        "failed": 0,
+        "running": 1
+      },
+      "updated_at": "2026-08-07T12:00:10.000Z",
+      "started_at": "2026-08-07T12:00:00.000Z"
+    }
+  },
+  {
+    "id": "00000000-0000-4000-8000-0000000e9c00:2",
+    "base": "00000000-0000-4000-8000-0000000e9c00:1",
+    "subscription": "00000000-0000-4000-8000-00000005ab00",
+    "type": "run.removed",
+    "run_id": "run-20260807-d4e5f6"
+  },
+  {
+    "id": "00000000-0000-4000-8000-0000000e9c00:2",
+    "base": "00000000-0000-4000-8000-0000000e9c00:1",
+    "subscription": "00000000-0000-4000-8000-00000005ab00",
+    "type": "detail.patch",
+    "run_id": "run-20260807-a1b2c3",
+    "ops": [
+      {
+        "p": [
+          "run",
+          "last_event"
+        ],
+        "v": "push"
+      },
+      {
+        "p": [
+          "run",
+          "last_progress_at"
+        ],
+        "v": 1786104010
+      },
+      {
+        "p": [
+          "run",
+          "timing",
+          "publication_wait_seconds"
+        ],
+        "v": 1
+      },
+      {
+        "p": [
+          "run",
+          "timing",
+          "wall_seconds"
+        ],
+        "v": 10
+      },
+      {
+        "p": [
+          "run",
+          "timing",
+          "wall_ms"
+        ],
+        "v": 10000
+      },
+      {
+        "p": [
+          "run",
+          "timing",
+          "fractions",
+          "setup"
+        ],
+        "v": 0.1
+      },
+      {
+        "p": [
+          "run",
+          "timing",
+          "fractions",
+          "scheduling"
+        ],
+        "v": 0.2
+      },
+      {
+        "p": [
+          "run",
+          "node_work_ms",
+          "wall_ms"
+        ],
+        "v": 10000
+      },
+      {
+        "p": [
+          "telemetry",
+          "wall_ms"
+        ],
+        "v": 10000
+      },
+      {
+        "p": [
+          "telemetry",
+          "buckets",
+          4,
+          "ms"
+        ],
+        "v": 1000
+      },
+      {
+        "p": [
+          "graph",
+          "last_seq"
+        ],
+        "v": 19
+      },
+      {
+        "p": [
+          "observed_at"
+        ],
+        "v": "2026-08-07T12:00:00Z"
+      }
+    ]
+  },
+  {
+    "id": "00000000-0000-4000-8000-0000000e9c00:2",
+    "base": "00000000-0000-4000-8000-0000000e9c00:1",
+    "subscription": "00000000-0000-4000-8000-00000005ab00",
+    "type": "timeline.patch",
+    "run_id": "run-20260807-a1b2c3",
+    "scope": "run",
+    "ops": [
+      {
+        "p": [
+          "spans",
+          1,
+          "events"
+        ],
+        "a": [
+          {
+            "id": "e19",
+            "record_id": "a-recording-host-4242.19",
+            "stream": "a-recording-host-4242",
+            "seq": 19,
+            "journal_order": 19,
+            "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+            "kind": "push",
+            "at": "2026-08-07T12:00:10.000Z",
+            "node_id": "contract-interface"
+          }
+        ]
+      },
+      {
+        "p": [
+          "observed_at"
+        ],
+        "v": "2026-08-07T12:00:00Z"
+      }
+    ]
+  },
+  {
+    "id": "00000000-0000-4000-8000-0000000e9c00:2",
+    "base": "00000000-0000-4000-8000-0000000e9c00:1",
+    "subscription": "00000000-0000-4000-8000-00000005ab00",
+    "type": "timeline.patch",
+    "run_id": "run-20260807-a1b2c3",
+    "scope": "node",
+    "node": "contract-interface",
+    "ops": [
+      {
+        "p": [
+          "spans",
+          0,
+          "events"
+        ],
+        "a": [
+          {
+            "id": "e19",
+            "record_id": "a-recording-host-4242.19",
+            "stream": "a-recording-host-4242",
+            "seq": 19,
+            "journal_order": 19,
+            "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+            "kind": "push",
+            "at": "2026-08-07T12:00:10.000Z",
+            "node_id": "contract-interface",
+            "dispatch_group": {
+              "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+              "label": "Dispatch 1",
+              "order": 30,
+              "started_at": "2026-08-07T12:00:02.000Z"
+            }
+          }
+        ]
+      },
+      {
+        "p": [
+          "observed_at"
+        ],
+        "v": "2026-08-07T12:00:00Z"
+      }
+    ]
+  },
+  {
+    "id": "00000000-0000-4000-8000-0000000e9c00:2",
+    "base": "00000000-0000-4000-8000-0000000e9c00:1",
+    "subscription": "00000000-0000-4000-8000-00000005ab00",
+    "type": "channel.patch",
+    "run_id": "run-20260807-a1b2c3",
+    "ops": [
+      {
+        "p": [
+          "surfaces"
+        ],
+        "a": [
+          {
+            "id": 0,
+            "kind": "question",
+            "message": "pinned",
+            "source": "proposal",
+            "blocking": false,
+            "queued_at": 1786104000000
+          }
+        ]
+      },
+      {
+        "p": [
+          "waiting"
+        ],
+        "a": [
+          {
+            "id": 0,
+            "kind": "question",
+            "message": "pinned",
+            "source": "proposal",
+            "blocking": false,
+            "queued_at": 1786104000000
+          }
+        ]
+      },
+      {
+        "p": [
+          "observed_at"
+        ],
+        "v": "2026-08-07T12:00:00Z"
+      }
+    ]
+  },
+  {
+    "id": "00000000-0000-4000-8000-0000000e9c00:1",
+    "base": "00000000-0000-4000-8000-0000000e9c00:2",
+    "subscription": "00000000-0000-4000-8000-00000005ab00",
+    "type": "reset",
+    "reason": "unknown-cursor",
+    "snapshot": {
+      "id": "00000000-0000-4000-8000-0000000e9c00:1",
+      "sidebar": [
+        {
+          "id": "run-20260807-a1b2c3",
+          "name": "run-20260807-a1b2c3",
+          "group": {
+            "project": "authoring:contract-interface",
+            "name": "contract"
+          },
+          "kind": null,
+          "state": "active",
+          "nodes": {
+            "total": 2,
+            "done": 0,
+            "failed": 0,
+            "running": 1
+          },
+          "updated_at": "2026-08-07T12:00:00Z",
+          "started_at": "2026-08-07T12:00:00.000Z"
+        }
+      ],
+      "visible": {
+        "type": "sidebar"
+      }
+    }
+  }
+]

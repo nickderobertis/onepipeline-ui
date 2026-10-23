@@ -1,7 +1,7 @@
 import { expect, type Locator, test } from "@playwright/test";
 import { delayGraphMeasurements } from "./delayed-graph-measurements";
 import { runs } from "./fixture-facts";
-import { graphNodes } from "./observatory-locators";
+import { graphNodeList, graphNodes } from "./observatory-locators";
 
 test.beforeEach(async ({ page }) => {
   await delayGraphMeasurements(page);
@@ -36,4 +36,41 @@ test("draws dependencies before node measurements arrive and after a resize", as
   await expect(edge).toHaveCount(0);
   await page.goto(`/?run=${runs().live}&view=graph`);
   await expectDrawn(edge);
+});
+
+test("fits the whole graph to its canvas before node measurements arrive", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto(`/?run=${runs().live}&view=graph`);
+  await expect(graphNodes(page, "running")).toHaveAccessibleName(
+    "dashboard: running",
+  );
+  // A quiet run's page is handed its nodes once, and its changes are pushed
+  // rather than re-read, so nothing hands the canvas its nodes again: a fit
+  // that waited for every card's resize observation never happens.
+  const canvas = page.getByRole("application", { name: "DAG execution graph" });
+  const cards = graphNodes(page);
+  await expect(cards).toHaveCount(
+    await graphNodeList(page).getByRole("listitem").count(),
+  );
+  await expect
+    .poll(async () => {
+      const bounds = await canvas.boundingBox();
+      if (bounds === null) return ["no canvas"];
+      const outside: string[] = [];
+      for (const card of await cards.all()) {
+        const box = await card.boundingBox();
+        if (
+          box === null ||
+          box.x < bounds.x ||
+          box.y < bounds.y ||
+          box.x + box.width > bounds.x + bounds.width ||
+          box.y + box.height > bounds.y + bounds.height
+        )
+          outside.push((await card.getAttribute("aria-label")) ?? "a card");
+      }
+      return outside;
+    })
+    .toEqual([]);
 });

@@ -722,9 +722,14 @@ test("says in run details when the status read fails, and shows the readings aga
     await expect(header).toContainText(before.summary);
     await expect(header.getByRole("alert")).toHaveCount(0);
 
-    // The API goes away under an open page: the next status poll is refused,
-    // and the last readings stay beside the alert that says so.
+    // The status is read each time the reader opens the run details, never on
+    // a timer. The API goes away under an open page: the read the reader asks
+    // for by opening them again is refused, and the last readings stay beside
+    // the alert that says so.
+    const summary = page.getByText("Run details", { exact: true });
     await server.stopServing();
+    await summary.click();
+    await summary.click();
     await expect(header.getByRole("alert")).toContainText(
       "Status unavailable",
       { timeout: 30_000 },
@@ -733,6 +738,8 @@ test("says in run details when the status read fails, and shows the readings aga
 
     await server.serveRebuilt();
     const after = await read();
+    await summary.click();
+    await summary.click();
     await expect(header.getByRole("alert")).toHaveCount(0, {
       timeout: 30_000,
     });

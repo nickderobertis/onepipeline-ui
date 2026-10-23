@@ -35,15 +35,27 @@ import {
   type ShutdownReport,
   type SseEventName,
   type Stopped,
+  type Subscribed,
+  type SubscriptionView,
   type Surfaced,
   shutdownReportSchema,
   sseEventDataSchema,
   sseEventNameSchema,
   stoppedSchema,
+  subscribedSchema,
   surfacedSchema,
   type Unwatched,
   unwatchedSchema,
 } from "@onepipeline-ui/dag-model";
+
+import { LiveView, type LiveViewOptions } from "./subscription.js";
+
+export type {
+  LiveCause,
+  LiveState,
+  LiveViewOptions,
+} from "./subscription.js";
+export { LiveView } from "./subscription.js";
 
 // llmlint: ignore-file[changed_behavior_has_e2e] client.e2e.test.ts crosses a real loopback HTTP
 // boundary through the package export. Bun has no native browser EventSource implementation, so
@@ -291,6 +303,65 @@ export class TelemetryClient {
     }
     source.onerror = (error) => options.onError?.(error);
     return { close: () => source.close() };
+  }
+
+  /**
+   * Subscribe to the sidebar and one visible run view, kept current by what the
+   * server pushes (`docs/contract.md`, "Subscriptions"). The returned view is
+   * changed in place when the tab moves to another view, and closed when it
+   * shows none.
+   */
+  live(options: LiveViewOptions): LiveView {
+    return new LiveView(
+      {
+        subscribe: (body) => this.createSubscription(body),
+        retire: (subscription, keepalive) =>
+          this.retireSubscription(subscription, keepalive),
+        open: (url) => this.#open(url),
+        url: (path) => this.#url(path),
+      },
+      options,
+    );
+  }
+
+  /** `POST /api/v2/subscriptions`: the subscription and its initial state. */
+  async createSubscription(body: {
+    readonly view: SubscriptionView;
+    readonly replaces?: string;
+    readonly resume?: string;
+  }): Promise<Subscribed> {
+    return this.#request(
+      this.#url(API_V2_PATHS.subscriptions),
+      subscribedSchema.parse,
+      json("POST", body),
+    );
+  }
+
+  /** `DELETE /api/v2/subscriptions/{subscription}`: idempotent. */
+  async retireSubscription(
+    subscription: string,
+    keepalive = false,
+  ): Promise<void> {
+    requireOpaqueId(subscription, "subscription ID");
+    let response: Response;
+    try {
+      response = await this.#fetch(
+        this.#url(API_V2_PATHS.subscription(subscription)),
+        { method: "DELETE", ...(keepalive ? { keepalive } : {}) },
+      );
+    } catch (error) {
+      throw new TelemetryClientError(
+        "Telemetry request failed",
+        undefined,
+        undefined,
+        { cause: error },
+      );
+    }
+    if (!response.ok && response.status !== 204)
+      throw new TelemetryClientError(
+        `Retiring a subscription failed with status ${response.status}`,
+        response.status,
+      );
   }
 
   /**

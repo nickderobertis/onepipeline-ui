@@ -26,14 +26,14 @@ import {
   TriangleAlert,
   Workflow,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChannelView } from "../features/control/ChannelView";
 import { RunActions } from "../features/control/RunActions";
 import { useRunControl } from "../features/control/useRunControl";
 import { DagGraph } from "../features/graph/DagGraph";
 import { HostPage } from "../features/host/HostPage";
+import { useHostListing } from "../features/host/useHostListing";
 import { RunNavigation } from "../features/navigation/RunNavigation";
-import { useProjects } from "../features/projects/useProjects";
 import { useDagTelemetry } from "../features/runs/useDagTelemetry";
 import {
   HostShutdownButtons,
@@ -43,7 +43,6 @@ import { ShutdownStatus } from "../features/shutdown/ShutdownStatus";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
 import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
-import { newestRuns } from "../lib/project-model";
 import { RecordDisclosure } from "../lib/RecordDisclosure";
 import {
   currentOverrides,
@@ -53,6 +52,7 @@ import {
   nodeViews,
 } from "../lib/run-model";
 import { StructuredFields } from "../lib/StructuredFields";
+import { sidebarGroups } from "../lib/sidebar-model";
 import { Timestamp } from "../lib/Timestamp";
 import {
   DETAIL_LEVELS,
@@ -78,94 +78,89 @@ const detailLevels = Object.entries(DETAIL_LEVELS) as [
   (typeof DETAIL_LEVELS)[DetailLevel],
 ][];
 
+/** How many times `value` has changed identity since this component mounted. */
+function useChangeCount(value: unknown): number {
+  const held = useRef<{ value: unknown; count: number }>({ value, count: 0 });
+  if (held.current.value !== value)
+    held.current = { value, count: held.current.count + 1 };
+  return held.current.count;
+}
+
+/** The Host page's listing is read whole, so there is never another page. */
+const noMorePages = () => Promise.resolve();
+
 export function App({
   client = defaultClient,
 }: {
   readonly client?: TelemetryClient;
 }) {
   const selection = useUrlSelection();
-  const timelineScope = useMemo(
-    () =>
-      selection.view === "overall"
-        ? {}
-        : selection.nodeId === undefined
-          ? undefined
-          : { nodeId: selection.nodeId },
-    [selection.view, selection.nodeId],
-  );
   // The reading the viewer asked for, as the filter profile the server names it
-  // by. Every read this app takes goes through it, so the graph, the timeline and
-  // the live stream can never be showing three different slices of one run.
+  // by. Every payload this app shows is read under it, so the graph, the
+  // timeline and the pushed changes can never be three different slices of one
+  // run.
   const filter = DETAIL_LEVELS[selection.detail].profile;
-  const telemetry = useDagTelemetry(
-    client,
-    selection.runId,
-    timelineScope,
+  const telemetry = useDagTelemetry(client, {
+    runId: selection.runId,
+    view:
+      selection.view === "overall"
+        ? "overall"
+        : selection.view === "channel"
+          ? "channel"
+          : selection.nodeId === undefined
+            ? "graph"
+            : "node",
+    nodeId: selection.nodeId,
     filter,
-    // An address naming no run opens the first one served, except on the Host
+    // An address naming no run opens the newest one served, except on the Host
     // page, which picks none itself; a run the address already names stays read.
-    !selection.host,
-  );
-  // The order is the server's — most recent activity first — and is never
-  // recomputed here.
-  const runs = telemetry.list?.runs ?? [];
+    selectFirst: !selection.host,
+    host: selection.host,
+  });
+  const rows = telemetry.rows;
   const selectedRunId = telemetry.runId;
   const lastActivity = telemetry.activity.at(-1);
   const detail = telemetry.detail;
   const nodes = useMemo(() => (detail ? nodeViews(detail) : []), [detail]);
-  const [projectRefresh, setProjectRefresh] = useState(0);
-  const projects = useProjects(
-    client,
-    telemetry.invalidations + projectRefresh,
-    true,
-  );
-  useEffect(() => {
-    if (projects.list)
-      telemetry.reconcileRuns(
-        projects.list.projects.flatMap((group) => group.runs),
-      );
-  }, [projects.list, telemetry.reconcileRuns]);
-  const hostList =
-    telemetry.list && projects.list
-      ? {
-          ...telemetry.list,
-          runs: projects.list.projects.flatMap((group) => group.runs),
-          next_cursor: undefined,
-        }
-      : telemetry.list;
-  const control = useRunControl(client, selectedRunId, telemetry.invalidations);
+  const control = useRunControl(client, selectedRunId);
   // Held here rather than under the run's view: a shutdown is minutes long, and
   // what it is doing stays on screen whichever run or list the reader moves to.
   const hostShutdowns = useHostShutdowns(client);
+  // The full listing is the Host page's own read, taken when it opens and on its
+  // refresh control: nothing else on the page needs more than the sidebar rows.
+  // While a host shutdown is out, it is also what the shutdown's progress is
+  // read off, so it is read again whenever a pushed row says a run moved.
+  const [hostRefresh, setHostRefresh] = useState(0);
+  const shuttingDown = hostShutdowns.host.state.phase === "sending";
+  const rowChanges = useChangeCount(rows);
+  const { list: hostList, error: hostListError } = useHostListing(
+    client,
+    selection.host || shuttingDown,
+    hostRefresh + (shuttingDown ? rowChanges : 0),
+  );
   const graph = detail === undefined ? undefined : graphOf(detail);
   const selectedNode = nodes.find(({ id }) => id === selection.nodeId);
   useEffect(() => {
-    if (selection.host || !projects.list) return;
-    const groups = projects.list.projects;
+    if (selection.host || !rows) return;
+    const groups = sidebarGroups(rows);
     const currentGroup = groups.find((group) =>
-      group.runs.some((run) => run.run_id === selection.runId),
+      group.rows.some((row) => row.id === selection.runId),
     );
-    const current = currentGroup?.runs.find(
-      (run) => run.run_id === selection.runId,
+    const current = currentGroup?.rows.find(
+      (row) => row.id === selection.runId,
     );
     const candidates =
-      (currentGroup ? newestRuns(currentGroup.runs) : undefined) ??
-      [
-        ...groups.filter((group) => group.project !== null),
-        ...groups.filter((group) => group.project === null),
-      ].flatMap((group) => newestRuns(group.runs));
+      currentGroup?.rows ?? groups.flatMap((group) => group.rows);
     const visible = candidates.filter(
-      (run) =>
-        !run.labels?.kind || !selection.hiddenKinds.includes(run.labels.kind),
+      (row) => !row.kind || !selection.hiddenKinds.includes(row.kind),
     );
     if (
       (!selection.runId ||
-        (current?.labels?.kind &&
-          selection.hiddenKinds.includes(current.labels.kind))) &&
+        (current?.kind && selection.hiddenKinds.includes(current.kind))) &&
       visible[0]
     )
-      selection.selectRun(visible[0].run_id);
-  }, [projects.list, selection]);
+      selection.selectRun(visible[0].id);
+  }, [rows, selection]);
 
   useEffect(() => {
     if (selectedRunId && selection.runId && selection.runId !== selectedRunId) {
@@ -191,7 +186,7 @@ export function App({
       <TimelinePopoverLayer />
       <div className="app-shell">
         <RunNavigation
-          projects={projects.list?.projects}
+          rows={rows}
           selectedRunId={selectedRunId}
           onSelect={selection.selectRun}
           onHost={selection.selectHost}
@@ -254,8 +249,8 @@ export function App({
               )}
               <Button
                 onClick={() => {
-                  setProjectRefresh((value) => value + 1);
-                  void telemetry.refresh();
+                  setHostRefresh((value) => value + 1);
+                  telemetry.refresh();
                 }}
                 size="sm"
                 type="button"
@@ -269,6 +264,7 @@ export function App({
             <RecordDisclosure
               label="Run details"
               className="run-header-details"
+              onOpen={control.reread}
             >
               <p>Launching session: {launchLabel(detail.launch)}</p>
               {/* A reading already shown stays beside this, so a failed re-read
@@ -325,35 +321,32 @@ export function App({
               variant="destructive"
             >
               <TriangleAlert />
-              <AlertTitle>
-                Live telemetry issue
-                {projects.error && " · Projects unavailable"}
-              </AlertTitle>
+              <AlertTitle>Live telemetry issue</AlertTitle>
               <AlertDescription>{telemetry.error.message}</AlertDescription>
             </Alert>
           )}
-          {projects.error && !telemetry.error && (
-            <Alert variant="destructive">
-              <AlertTitle>Projects unavailable</AlertTitle>
-              <AlertDescription>{projects.error.message}</AlertDescription>
-            </Alert>
+          {telemetry.notice && (
+            <p className="live-notice" role="status">
+              {telemetry.notice}
+            </p>
           )}
           <ShutdownStatus
             label="Shutdown of the entire host"
             onDismiss={hostShutdowns.host.dismiss}
-            rows={runs}
+            rows={hostList?.runs ?? []}
             state={hostShutdowns.host.state}
           />
           {selection.host ? (
             <HostPage
               client={client}
-              onRefresh={() => setProjectRefresh((value) => value + 1)}
+              listError={hostListError}
+              onRefresh={() => setHostRefresh((value) => value + 1)}
               list={hostList}
             >
               <HostShutdownButtons
                 list={hostList}
-                loadMore={telemetry.loadMore}
-                loadingMore={telemetry.loadingMore}
+                loadMore={noMorePages}
+                loadingMore={false}
                 shutdowns={hostShutdowns}
               />
             </HostPage>
@@ -422,10 +415,11 @@ export function App({
                 ) : detail && selectedRunId ? (
                   selection.view === "channel" ? (
                     <ChannelView
+                      channel={telemetry.channel}
                       client={client}
                       decisions={graph?.decisions ?? []}
                       filter={filter}
-                      invalidations={telemetry.invalidations}
+                      journalSeq={graph?.last_seq}
                       observedAt={detail.observed_at}
                       overrides={graph && currentOverrides(graph)}
                       runId={selectedRunId}
@@ -434,6 +428,7 @@ export function App({
                     <OverallView
                       client={client}
                       detail={detail}
+                      journalSeq={graph?.last_seq}
                       nodes={nodes}
                       timeline={telemetry.timeline}
                       timelineError={telemetry.timelineError}
@@ -459,6 +454,7 @@ export function App({
                     />
                   ) : (
                     <DagGraph
+                      journalSeq={graph?.last_seq}
                       nodes={nodes}
                       selectedNodeId={selection.nodeId}
                       onSelectNode={selection.selectNode}

@@ -199,6 +199,16 @@ impl RunStore {
         self
     }
 
+    /// The runs root this store reads.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// How often a live reader looks at the runs root again.
+    pub(crate) fn poll(&self) -> Duration {
+        self.poll
+    }
+
     /// The session this store acts as, as the engine is handed it: the empty
     /// string for an unattributed server, which the engine reads as nobody.
     fn session(&self) -> &str {
@@ -228,7 +238,7 @@ impl RunStore {
     /// is what the engine itself falls back to; a stream this host holds no
     /// record for declares nothing, so a session on it is served no role rather
     /// than one guessed at.
-    fn declared(&self, view: &RunView) -> DeclaredMembers {
+    pub(crate) fn declared(&self, view: &RunView) -> DeclaredMembers {
         let mut graph_runs: Vec<&str> = view
             .launch
             .observer_runs
@@ -306,7 +316,7 @@ impl RunStore {
     /// Joined from a **validated** run id, which is the whole of why a raw
     /// `String` never reaches here: the id is a bare name by the time it is one
     /// of these, so this join cannot leave the root.
-    fn paths_of(&self, run: &RunId) -> RunPaths {
+    pub(crate) fn paths_of(&self, run: &RunId) -> RunPaths {
         RunPaths::under(&self.root, run.as_str())
     }
 
@@ -317,12 +327,12 @@ impl RunStore {
     /// that is not large took a long time because the survey behind it was
     /// gigabytes. A run this build cannot read is the same answer to a caller as
     /// a run that is not there, and both are this route's not-found.
-    fn view(&self, run: &RunId) -> Result<RunView, ApiError> {
+    pub(crate) fn view(&self, run: &RunId) -> Result<RunView, ApiError> {
         RunView::open(&self.paths_of(run)).map_err(|_| ApiError::RunNotFound(run.clone()))
     }
 
     /// Wrap a payload in the schema-version envelope every route serves.
-    fn envelope(payload: Value) -> Envelope<Value> {
+    pub(crate) fn envelope(payload: Value) -> Envelope<Value> {
         Envelope {
             api_version: API_VERSION,
             telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
@@ -347,7 +357,10 @@ impl RunStore {
     /// read has always been. A name is resolved against the run's own profiles,
     /// so `planner` and `detailed` answer for every run and a launch-defined name
     /// answers only for the run that defined it.
-    fn resolve(view: &RunView, spec: Option<&FilterSpec>) -> Result<EventFilter, ApiError> {
+    pub(crate) fn resolve(
+        view: &RunView,
+        spec: Option<&FilterSpec>,
+    ) -> Result<EventFilter, ApiError> {
         match spec {
             None => Ok(EventFilter::default()),
             Some(spec) => spec.resolve(&LaunchProfiles::of(
@@ -765,7 +778,7 @@ impl RunApi for RunStore {
     }
 
     fn timeline(&self, run: &RunId, query: &TimelineQuery) -> Result<Envelope<Value>, ApiError> {
-        let mut view = self.view(run)?;
+        let view = self.view(run)?;
         let filter = Self::resolve(&view, query.filter.as_ref())?;
         let scope = match &query.scope {
             TimelineScope::Run => Scope::Run,
@@ -774,7 +787,7 @@ impl RunApi for RunStore {
         // llmlint: ignore-block[authorization_enforced_server_side] the contract has one server acting session and no caller principal, so authenticating this read would invent a public access model. The only history read is named by this run's own SDK pointers and resolved through typed_session_record's StoreRoot confinement, exactly as the existing artifact route; no caller-supplied history path is accepted.
         let agents = self.agents_of(run, AgentScope::Run)?;
         let declared = self.declared(&view);
-        let timeline = payload::timeline(&mut view, &declared, &scope, &filter);
+        let timeline = payload::timeline(&view, &declared, &scope, &filter);
         Ok(Self::envelope(payload::timeline_harnesses(
             timeline, &view, &scope, &agents,
         )))
