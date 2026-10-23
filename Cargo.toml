@@ -1,6 +1,6 @@
 [package]
 name = "onepipeline-ui"
-version = "0.46.0"
+version = "0.48.0"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
@@ -173,11 +173,14 @@ onemessagebus = "0.9.1"
 # `scripts/semver-check.sh` refuses a release that moved this line while the
 # commits release-plz versions from announce no break.
 #
-# The engine pin also fixes the linked plan-store family. The test-only sibling
-# requirements follow its lock so the reader and fixture producer share one
-# resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
+# The engine pin also fixes the linked plan-store family. A host holds its
+# plan-store CLI, this engine and this reader to one store release, so a store
+# change it adopts — currently the cheaper plan-copy and approval calls — reaches
+# the host only once this line names the engine release that links it. The
+# test-only sibling requirements follow its lock so the reader and fixture
+# producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.85.0"
+onepipeline = "=0.86.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -239,8 +242,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.10.0"
-onetaskgraph-plugin-api = "=0.10.0"
+onetaskgraph-core = "=0.11.0"
+onetaskgraph-plugin-api = "=0.11.0"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # engine-driven journey over a panel-judged member reads the provider block it was

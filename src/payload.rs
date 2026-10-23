@@ -5146,7 +5146,9 @@ pub(crate) fn timeline_over(
 ) -> Value {
     // Continued sessions can relay one producer record repeatedly. Canonicalize
     // before transcript numbering and all span folds, so duplicate journal lines
-    // affect neither event addresses nor counts nor intervals.
+    // affect neither event addresses nor counts nor intervals. The engine's view
+    // can only be opened from disk, so the canonical events stand in for the
+    // journal's in place and are handed back before this returns.
     let mut seen = BTreeSet::new();
     let repeated = view
         .events
@@ -6538,10 +6540,14 @@ fn run_level_spans(view: &Run<'_>, lens: &Lens<'_>, first: &Envelope, ends: &End
             "transport_role".into(),
             json!(relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()),
         );
-        if let Some(role) = relayed
+        // A graph-started record can precede this session's member records
+        // without stamping any member itself. Read the session's stamp across
+        // its records; an undeclared member still rules out a persona fallback.
+        let member = relayed.iter().find_map(|(_, event)| member_label(event));
+        let persona = relayed
             .first()
-            .and_then(|(_, event)| lens.transcripts.declared.role_of(event))
-        {
+            .and_then(|(_, event)| event.labels.persona.as_deref());
+        if let Some(role) = lens.transcripts.declared.agent_role(member, persona) {
             span.insert("agent_role".into(), json!(role));
         }
         span.insert(

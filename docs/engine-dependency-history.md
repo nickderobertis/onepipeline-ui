@@ -485,3 +485,18 @@ rather than a rebuilt view. It links onetaskgraph 0.10.0, so the dev-only
 `onetaskgraph-*` requirements move to that release with it. This changes the
 engine types carried by ApiError::from_engine and the other engine-typed
 public items.
+0.86.0 links onetaskgraph 0.11.0 (through 0.10.0), the plan-store release
+whose copy binds to an existing destination task the caller names, keeps a
+destination item's status on update when asked, and copies named members into
+an existing project without reading or writing the project — the cheaper calls
+a plan copy and approval on the host make. A host holds its plan-store CLI, the
+engine and this reader to one store release, so the dev-only `onetaskgraph-*`
+requirements move to 0.11.0 with it, and the journeys' direct `CopyRequest`s
+name the new `status_policy` (`Source`, the earlier behaviour) and
+`target_task` (none). Its `RunView` gains a private refresh cursor and can no
+longer be built field by field, so the timeline route canonicalizes repeated
+records in the view's own events and restores them before returning; nothing
+it serves changes. It links the same onevcs 0.56.3 and oneagentgraph 0.7.1 as
+0.84.1, and no route or MSRV changes. This changes the engine types carried by
+ApiError::from_engine and the other engine-typed public items, and
+`payload::timeline` now takes the view mutably.

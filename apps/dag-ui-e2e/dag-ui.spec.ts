@@ -2183,11 +2183,15 @@ test("switches the reading between decisions and detailed activity", async ({
   // leave the browser: the switch is two named profiles the server defines for
   // every run, and the word on the wire is what proves which two.
   // llmlint: ignore-block[tests_mirror_real_usage] the word is the property under test and nothing on screen carries it: the switch's two settings are the two *named* profiles the server defines for every run — `planner` and `detailed`, the engine's own names, which are what make the browser and the CLI narrow to the same thing — and every reader-visible effect asserted below (fewer markers, no refusal, the same dispatch drawn) would hold just as well under an inline spec that narrows the same records without being the profile the CLI shares, or under a launch-defined alias of it. The requests are read, never altered or answered.
-  const asked: string[] = [];
-  page.on("request", (request) => {
-    if (new URL(request.url()).pathname !== API_V2_PATHS.subscriptions) return;
-    const view = subscriptionViewSchema.parse(request.postDataJSON().view);
-    if ("filter" in view && view.filter !== undefined) asked.push(view.filter);
+  const asked: { filter: string; started: number }[] = [];
+  const network = await page.context().newCDPSession(page);
+  await network.send("Network.enable");
+  network.on("Network.requestWillBeSent", ({ request, wallTime }) => {
+    if (new URL(request.url).pathname !== API_V2_PATHS.subscriptions) return;
+    if (request.postData === undefined) return;
+    const view = subscriptionViewSchema.parse(JSON.parse(request.postData).view);
+    if ("filter" in view && view.filter !== undefined)
+      asked.push({ filter: view.filter, started: wallTime * 1000 });
   });
   // llmlint: ignore-end[tests_mirror_real_usage]
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
@@ -2211,18 +2215,45 @@ test("switches the reading between decisions and detailed activity", async ({
   const detailed = await markers().count();
   // Under the engine's own name for the whole stream — `detailed`, which is what
   // it renamed `monitor` to when it stopped naming an observer member.
-  expect(new Set(asked)).toEqual(new Set(["detailed"]));
+  expect(new Set(asked.map(({ filter }) => filter))).toEqual(
+    new Set(["detailed"]),
+  );
 
   // Narrowing to the decisions is one click, and fewer records are drawn — but
   // not none, because a decision is a record too.
-  const before = asked.length;
+  // Stamp the click in the browser before React handles it. CDP supplies each
+  // request's issuance time on the same epoch clock, even if its notification
+  // reaches this process after the click. Reads issued by the preceding step
+  // therefore stay with that step.
+  await choice("Decisions").evaluate((button) => {
+    button.addEventListener(
+      "click",
+      () => {
+        button.setAttribute(
+          "data-reading-switch-start",
+          String(performance.timeOrigin + performance.now()),
+        );
+      },
+      { capture: true, once: true },
+    );
+  });
   await choice("Decisions").click();
+  const before = Number(
+    await choice("Decisions").getAttribute("data-reading-switch-start"),
+  );
+  expect(before).toBeGreaterThan(0);
   await expect(page).toHaveURL(/detail=decisions/);
   await expect(choice("Decisions")).toHaveAttribute("aria-pressed", "true");
   await expect(timeline(page).getByTestId("timeline-axis")).toBeVisible();
   await expect.poll(() => markers().count()).toBeLessThan(detailed);
   expect(await markers().count()).toBeGreaterThan(0);
-  expect(new Set(asked.slice(before))).toEqual(new Set(["planner"]));
+  expect(
+    new Set(
+      asked
+        .filter(({ started }) => started >= before)
+        .map(({ filter }) => filter),
+    ),
+  ).toEqual(new Set(["planner"]));
   // The node's own dispatch is still drawn at the bounds the run recorded: a
   // filter narrows what is listed, never what the run did.
   await expect(
@@ -2411,36 +2442,128 @@ test("collapses a run of near-identical records and puts it back", async ({
   ).toHaveCount(2);
 });
 
+/**
+ * Wait for the real detail and scoped timeline before inspecting their rendering.
+ * Headers alone are insufficient: a reset can interrupt the body.
+ * The heading is mounted before either read lands. Network time belongs to the
+ * enclosing journey's budget, not the shorter window for a DOM assertion.
+ */
+async function readNodeTranscript(
+  page: Page,
+  runId: string,
+  nodeId: string,
+  read: () => Promise<void>,
+): Promise<void> {
+  await Promise.all([
+    page.waitForResponse(
+      async (response) =>
+        new URL(response.url()).pathname === API_V2_PATHS.run(runId) &&
+        response.ok() &&
+        (await response.finished()) === null,
+      { timeout: 0 },
+    ),
+    page.waitForResponse(
+      async (response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === API_V2_PATHS.timeline(runId) &&
+          url.searchParams.get("node") === nodeId &&
+          response.ok() &&
+          (await response.finished()) === null
+        );
+      },
+      { timeout: 0 },
+    ),
+    read(),
+  ]);
+}
+
 test("collapses every kind of run the same way and at the same count", async ({
   page,
 }) => {
   const { threshold, narrow_node, wide_node } = fixture().collapse;
-  // The two kinds of row this list can hold a run of: dispatched sessions, which
-  // are spans, and journal records, which are moments. A reader meets one
-  // collapsing behaviour here rather than one per kind, so both are asked the same
-  // questions on the same corpus.
-  for (const kind of ["dispatch", "criterion-checked"]) {
-    await openObservatory(page, `/?run=${runs().busy}&node=${narrow_node}`);
-    await expect(readingRows(page).first()).toBeVisible();
+  const runId = runs().busy;
+  const kinds = [
+    { kind: "dispatch", name: /^worker \(/ },
+    { kind: "criterion-checked", name: "criterion-checked" },
+  ];
+  // Keep the slow-read regression real: forward to the API after the old
+  // fifteen-second assertion window, without replacing its response.
+  await delayReads(
+    page,
+    new RegExp(`${API_V2_PATHS.timeline(runId)}\\?.*node=${narrow_node}(&|$)`),
+    16_000,
+  );
+  await readNodeTranscript(page, runId, narrow_node, () =>
+    openObservatory(page, `/?run=${runId}&node=${narrow_node}`),
+  );
+  // Both kinds are present before absence of a collapse control can prove anything.
+  for (const { kind, name } of kinds) {
+    await expect(reading(page).getByRole("article", { name })).toHaveCount(
+      threshold - 1,
+    );
     await expect(
       reading(page).getByRole("button", {
         name: RegExp(`more ${kind} events`),
       }),
     ).toHaveCount(0);
+  }
 
-    await openObservatory(page, `/?run=${runs().busy}&node=${wide_node}`);
+  await readNodeTranscript(page, runId, wide_node, () =>
+    openObservatory(page, `/?run=${runId}&node=${wide_node}`),
+  );
+  for (const { kind, name } of kinds) {
+    const rows = reading(page).getByRole("article", { name });
     const control = reading(page).getByRole("button", {
       name: `Show ${threshold - 2} more ${kind} events`,
+      exact: true,
     });
-    await expect(control).toBeVisible();
+    await expect(rows).toHaveCount(2);
     await expect(control).toHaveAttribute("aria-expanded", "false");
     await control.click();
-    await expect(
-      reading(page).getByRole("button", {
-        name: `Collapse ${threshold - 2} more ${kind} events`,
-      }),
-    ).toHaveAttribute("aria-expanded", "true");
+    await expect(rows).toHaveCount(threshold);
+    const back = reading(page).getByRole("button", {
+      name: `Collapse ${threshold - 2} more ${kind} events`,
+      exact: true,
+    });
+    await expect(back).toHaveAttribute("aria-expanded", "true");
+    await back.click();
+    await expect(rows).toHaveCount(2);
   }
+});
+
+test("recovers a node transcript with Refresh after a connection reset", async ({
+  page,
+}) => {
+  const { threshold, narrow_node } = fixture().collapse;
+  const runId = runs().busy;
+  const isTimeline = (url: URL) =>
+    url.pathname === API_V2_PATHS.timeline(runId) &&
+    url.searchParams.get("node") === narrow_node;
+  // llmlint: ignore[e2e_not_mocked] inject only a transport failure, as a connection reset would; the retry reaches the real API and its unchanged fixture. No response or client is doubled.
+  await page.route(isTimeline, (route) => route.abort("connectionreset"), {
+    times: 1,
+  });
+  const reset = page.waitForEvent("requestfailed", (request) =>
+    isTimeline(new URL(request.url())),
+  );
+  await openObservatory(page, `/?run=${runId}&node=${narrow_node}`);
+  expect((await reset).failure()?.errorText).toContain("ERR_CONNECTION_RESET");
+  await expect(page.getByRole("alert")).toContainText("Timeline unavailable");
+  await expect(readingRows(page)).toHaveCount(0);
+
+  await readNodeTranscript(page, runId, narrow_node, () =>
+    page.getByRole("button", { name: "Refresh", exact: true }).click(),
+  );
+  await expect(
+    reading(page).getByRole("article", { name: /^worker \(/ }),
+  ).toHaveCount(threshold - 1);
+  await expect(
+    reading(page).getByRole("article", { name: "criterion-checked" }),
+  ).toHaveCount(threshold - 1);
+  await expect(
+    page.getByText("Timeline unavailable", { exact: true }),
+  ).toHaveCount(0);
 });
 
 test("draws what a ready node was waiting for as spans of its own", async ({
@@ -3126,10 +3249,15 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
   const runLevel = page.getByRole("region", { name: "Run-level timeline" });
 
   // Every plot starts on the same clock, which is what makes a column of one row
-  // mean the same instant as the column above it.
-  const before = await axisTicks(graphLine(page));
-  expect(await axisTicks(dashboard)).toBe(before);
-  expect(await axisTicks(runLevel)).toBe(before);
+  // mean the same instant as the column above it. The live range ends at the
+  // server's latest observation, which can advance between reading one row and
+  // the next, so the three are read again until one reading has them agree.
+  let before = "";
+  await expect(async () => {
+    before = await axisTicks(graphLine(page));
+    expect(await axisTicks(dashboard)).toBe(before);
+    expect(await axisTicks(runLevel)).toBe(before);
+  }).toPass({ timeout: 15_000 });
 
   // Zooming *one* row reframes all of them, because there is one range and every
   // plot is drawn against it.
@@ -3305,13 +3433,21 @@ test("drills from a graph row into that node's own view", async ({ page }) => {
   await expandGraphRows(page);
   const foundation = graphRow(page, "foundation");
   await foundation.getByRole("button", { name: "Expand timeline" }).click();
-  // The first of them: this node kept two pieces of evidence — its member's report
-  // and its gate's log — and either segment is the same way in.
-  await foundation
+  // The report and gate log share a name and can overlap at this zoom. The gate
+  // is drawn after the report; select that specific, exposed segment rather than
+  // whichever verification happens to occur first in the DOM.
+  const verification = foundation
     .getByRole("button", { name: /^foundation · Verification/ })
-    .first()
-    .click();
+    .and(
+      foundation.locator(
+        `[aria-describedby="timeline-detail-verification-foundation-${fixture().artifacts.gate}"]`,
+      ),
+    );
+  await verification.click();
   await expect(page).toHaveURL(/node=foundation/);
+  await expect(
+    page.getByRole("region", { name: "Timeline for foundation" }),
+  ).toBeVisible();
 
   // Silence counts as one of its segments: the row *is* the node, working or not.
   await page.getByRole("tab", { name: "Overall" }).click();

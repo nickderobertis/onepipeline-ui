@@ -1727,6 +1727,71 @@ fn a_session_with_no_member_is_read_by_its_persona_only_where_a_graph_declared_t
 }
 
 #[test]
+fn observer_sessions_on_multiple_streams_keep_their_declared_roles() {
+    let streams = [
+        "dag-scope-1786925520009-4311",
+        "dag-scope-1786925520008-4311",
+    ];
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_lanes(root, fixture_run::LANES_RUN_ID);
+        let launch_path = dir.join("launch.json");
+        let mut launch: Value = serde_json::from_slice(&fs::read(&launch_path).unwrap()).unwrap();
+        launch.as_object_mut().unwrap().remove("observer_runs");
+        launch["graph_run"] = json!(streams[0]);
+        fs::write(launch_path, serde_json::to_vec(&launch).unwrap()).unwrap();
+        for stream in streams {
+            fixture_run::declare_graph(root, stream, &["monitor", "check-in"]);
+            // The graph opens before any member does. It carries neither a
+            // member nor a session; session grouping attaches it to this
+            // stream's first conversation once that conversation is recorded.
+            fixture_run::append_relayed_on(
+                &dir,
+                stream,
+                "graph-started",
+                json!({"run_id": stream, "onepipeline.run_id": fixture_run::LANES_RUN_ID}),
+                json!({}),
+            );
+            let members = if stream == streams[0] {
+                ["monitor", "check-in", "stranger"]
+            } else {
+                ["check-in", "monitor", "stranger"]
+            };
+            for member in members {
+                let session = format!("{stream}.{member}");
+                fixture_run::append_relayed_on(
+                    &dir,
+                    stream,
+                    "turn-started",
+                    json!({"run_id": stream, "onepipeline.run_id": fixture_run::LANES_RUN_ID, "session": session,
+                           "member": member, "persona": "monitor"}),
+                    json!({"turn": 1}),
+                );
+            }
+        }
+    });
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::LANES_RUN_ID,
+        ),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let timeline = response.json();
+    let spans = timeline["spans"].as_array().expect("spans");
+    for stream in streams {
+        for member in ["monitor", "check-in", "stranger"] {
+            let span = span_named(spans, &format!("run-session.{stream}.{member}"));
+            assert_eq!(
+                role_of(span),
+                (member != "stranger").then_some(member),
+                "{span}"
+            );
+        }
+    }
+}
+
+#[test]
 fn the_graph_records_are_read_from_where_the_engine_keeps_them_when_nothing_names_them() {
     // The host an operator's own server runs on: the engine wrote every graph
     // run's record under `HOME`, and nothing set `ONEAGENTGRAPH_STATE_DIR`. The
@@ -16131,11 +16196,13 @@ fn launch_copied_from_plan_task_renderings(
             engine.copy(&onetaskgraph_core::CopyRequest {
                 items: onetaskgraph_core::CopyItems::new(vec![drafted]).expect("one item"),
                 scope: onetaskgraph_core::CopyScope::Projects { tasks: true },
+                status_policy: onetaskgraph_core::StatusPolicy::Source,
                 destination: onetaskgraph_plugin_api::SourceName::try_from(
                     COPY_DESTINATION.to_owned(),
                 )
                 .expect("a source name"),
                 match_by: None,
+                target_task: None,
                 recreate: false,
                 create: false,
                 dry_run: false,
