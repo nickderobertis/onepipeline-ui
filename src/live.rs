@@ -677,6 +677,14 @@ impl Hub {
         };
         let rows = sidebar.snapshot();
         let mut state = lock(&shared.state);
+        // The reading is held for this subscription from the boundary on: a tick
+        // that let it go between its opening and now — when no subscription yet
+        // wanted it — would leave the subscription with nothing refreshing it.
+        if let (Some(live), Some(run)) = (&live, visible.run()) {
+            lock(&shared.runs)
+                .entry(run.to_owned())
+                .or_insert_with(|| Arc::clone(live));
+        }
         let seq = state.next;
         state.next += 1;
         let subscription = SubscriptionId::mint();
@@ -883,18 +891,20 @@ impl Hub {
         let wanted: Vec<Visible> = {
             let mut state = lock(&shared.state);
             state.expire();
-            state
+            let wanted: Vec<Visible> = state
                 .subscriptions
                 .values()
                 .map(|held| Visible::of(&held.view))
-                .collect()
-        };
-        // Runs no subscription shows any more are let go.
-        lock(&shared.runs).retain(|run, _| {
+                .collect();
+            // Runs no subscription shows any more are let go — under the lock a
+            // subscription is registered under, so one being made keeps its run.
+            lock(&shared.runs).retain(|run, _| {
+                wanted
+                    .iter()
+                    .any(|visible| visible.run() == Some(run.as_str()))
+            });
             wanted
-                .iter()
-                .any(|visible| visible.run() == Some(run.as_str()))
-        });
+        };
         if wanted.is_empty() {
             return;
         }
@@ -942,7 +952,11 @@ impl Hub {
                 run.declared = shared.store.declared(&run.view);
                 None
             }
-            Err(_) => {
+            Err(error) => {
+                eprintln!(
+                    "onepipeline-api: {} could not be refreshed, and is let go: {error}",
+                    run.run.as_str()
+                );
                 // The run went away: its row's removal reaches every sidebar,
                 // and the view showing it is left as it was.
                 lock(&shared.runs).remove(run.run.as_str());

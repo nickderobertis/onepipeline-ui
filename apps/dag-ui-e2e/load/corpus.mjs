@@ -261,21 +261,50 @@ function writeRun(
   return journal.at;
 }
 
+/**
+ * The corpus's two sizes: this host's scale, which every budget is stated over,
+ * and the journeys' — the same shapes and names at a size a functional journey
+ * can write and wait on in seconds.
+ */
+const SCALES = {
+  host: {
+    openLiveRecords: OPEN_LIVE_RECORDS,
+    otherLive: 10,
+    stopped: 10,
+    runs: RUNS,
+    settledBig: 1000,
+    settledSmall: 40,
+  },
+  journey: {
+    openLiveRecords: 1_500,
+    otherLive: 2,
+    stopped: 2,
+    runs: 10,
+    settledBig: 60,
+    settledSmall: 20,
+  },
+};
+
 /** Write the whole corpus under `root`; returns what the harness needs to know. */
-export function buildLoadCorpus(root) {
+export function buildLoadCorpus(root, scaleName = "host") {
+  const scale = SCALES[scaleName];
+  if (scale === undefined) throw new Error(`no corpus scale ${scaleName}`);
+  const otherLiveRuns = OTHER_LIVE_RUNS.slice(0, scale.otherLive);
   mkdirSync(root, { recursive: true });
   const now = Date.now();
   const day = 24 * 60 * 60 * 1000;
   let index = 0;
   // The open live run: 15 nodes, the last (`dashboard`) still running, and
-  // 116,000 records over the last day.
+  // its records over the last day.
   const openNodes = Array.from({ length: 14 }, (_, n) => `step-${n}`).concat(
     LIVE_NODE,
   );
   // run-started, a dispatch per node, a settlement per node but the last.
   const header = 2 * openNodes.length;
-  const perNode = Math.floor((OPEN_LIVE_RECORDS - header) / openNodes.length);
-  const extra = OPEN_LIVE_RECORDS - header - perNode * openNodes.length;
+  const perNode = Math.floor(
+    (scale.openLiveRecords - header) / openNodes.length,
+  );
+  const extra = scale.openLiveRecords - header - perNode * openNodes.length;
   writeRun(
     root,
     OPEN_LIVE_RUN,
@@ -284,22 +313,22 @@ export function buildLoadCorpus(root) {
     openNodes,
     perNode,
     now - day,
-    Math.floor(day / OPEN_LIVE_RECORDS),
+    Math.floor(day / scale.openLiveRecords),
     extra,
   );
-  for (const runId of OTHER_LIVE_RUNS) {
+  for (const runId of otherLiveRuns) {
     writeRun(
       root,
       runId,
       projectOf(index++),
       "live",
       ["prepare", "build", OTHER_LIVE_NODE],
-      400,
+      scale === SCALES.host ? 400 : 20,
       now - 2 * 60 * 60 * 1000,
       5_000,
     );
   }
-  for (let stopped = 0; stopped < 10; stopped += 1) {
+  for (let stopped = 0; stopped < scale.stopped; stopped += 1) {
     writeRun(
       root,
       `load-stopped-${String(stopped).padStart(2, "0")}`,
@@ -307,12 +336,12 @@ export function buildLoadCorpus(root) {
       "stopped",
       ["prepare", "build", "publish"],
       // The opened stopped run is mid-sized; the rest are this host's median.
-      stopped === 0 ? 1000 : 40,
+      stopped === 0 ? scale.settledBig : scale.settledSmall,
       now - (2 + stopped) * day,
       2_000,
     );
   }
-  for (let settled = 0; index < RUNS; settled += 1) {
+  for (let settled = 0; index < scale.runs; settled += 1) {
     // Mostly this host's median journal (~124 records), every tenth at its p90
     // (~3,000), the opened one at p90 too.
     const big = settled % 10 === 0;
@@ -322,24 +351,27 @@ export function buildLoadCorpus(root) {
       projectOf(index++),
       "settled",
       ["prepare", "build", "publish"],
-      big ? 1000 : 40,
+      big ? scale.settledBig : scale.settledSmall,
       now - (3 + settled / 10) * day,
       2_000,
     );
   }
   return {
-    runs: RUNS,
-    projects: PROJECTS,
+    runs: scale.runs,
+    projects: Math.min(PROJECTS, scale.runs),
     openLiveRun: OPEN_LIVE_RUN,
+    openLiveRecords: scale.openLiveRecords,
     settledRun: SETTLED_OPEN_RUN,
     stoppedRun: STOPPED_OPEN_RUN,
-    otherLiveRuns: OTHER_LIVE_RUNS,
+    otherLiveRuns,
+    liveNode: LIVE_NODE,
     openProject: projectOf(0),
   };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const root = process.argv[2];
-  if (root === undefined) throw new Error("usage: load-corpus.mjs ROOT");
-  console.log(JSON.stringify(buildLoadCorpus(root)));
+  const [root, scale] = process.argv.slice(2);
+  if (root === undefined)
+    throw new Error("usage: corpus.mjs ROOT [host|journey]");
+  console.log(JSON.stringify(buildLoadCorpus(root, scale)));
 }

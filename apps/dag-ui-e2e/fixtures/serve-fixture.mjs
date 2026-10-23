@@ -54,6 +54,7 @@ import {
   resolve,
 } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildLoadCorpus } from "../load/corpus.mjs";
 import { FIXTURE_FACTS_NAME } from "./facts-file.ts";
 import harnessBinaries from "./harness-binaries.json" with { type: "json" };
 import {
@@ -396,6 +397,7 @@ function parseArgs(argv) {
     "--unresolved-workspaces",
     "--preserved-corpus",
     "--project-centric-corpus",
+    "--live-updates-corpus",
     "--review-corpus",
     "--review-loop-corpus",
   ]);
@@ -685,6 +687,16 @@ if (args.stall) {
             );
           },
           facts: projectCentricFacts,
+        };
+      } else if (args["live-updates-corpus"]) {
+        // The load corpus's shapes at the journeys' size: a live run, other
+        // live runs, stopped and settled runs, as `load/corpus.mjs` writes them.
+        let written;
+        corpus = {
+          build: (root) => {
+            written = buildLoadCorpus(root, "journey");
+          },
+          facts: () => written,
         };
       } else if (args["preserved-corpus"]) {
         corpus = { build: buildPreservedRuns, facts: preservedFacts };

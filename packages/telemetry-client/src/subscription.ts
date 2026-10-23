@@ -53,7 +53,8 @@ export interface LiveTransport {
     replaces?: string;
     resume?: string;
   }): Promise<Subscribed>;
-  retire(subscription: string): Promise<void>;
+  /** `keepalive` lets the retirement outlive a page being unloaded. */
+  retire(subscription: string, keepalive?: boolean): Promise<void>;
   open(url: URL): EventSource;
   url(path: string): URL;
 }
@@ -98,6 +99,8 @@ export class LiveView {
     this.#options.onDisconnected?.();
   };
   readonly #online = () => this.#connect();
+  /** A page going away retires its subscription rather than leaving it to expire. */
+  readonly #pagehide = () => this.close(true);
 
   constructor(transport: LiveTransport, options: LiveViewOptions) {
     this.#transport = transport;
@@ -105,6 +108,7 @@ export class LiveView {
     this.#view = options.view;
     globalThis.addEventListener?.("offline", this.#offline);
     globalThis.addEventListener?.("online", this.#online);
+    globalThis.addEventListener?.("pagehide", this.#pagehide);
     void this.#create({});
   }
 
@@ -125,15 +129,18 @@ export class LiveView {
   }
 
   /** End the subscription: its stream closes and the server stops reading for it. */
-  close(): void {
+  close(unloading = false): void {
     if (this.#closed) return;
     this.#closed = true;
     this.#generation += 1;
     globalThis.removeEventListener?.("offline", this.#offline);
     globalThis.removeEventListener?.("online", this.#online);
+    globalThis.removeEventListener?.("pagehide", this.#pagehide);
     this.#disconnect();
     if (this.#subscription !== undefined)
-      void this.#transport.retire(this.#subscription).catch(() => undefined);
+      void this.#transport
+        .retire(this.#subscription, unloading)
+        .catch(() => undefined);
   }
 
   async #create(options: { replaces?: string; resume?: string }) {

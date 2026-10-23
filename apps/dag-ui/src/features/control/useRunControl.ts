@@ -25,11 +25,7 @@ export function useRunControl(
 ): RunControl {
   const [revision, setRevision] = useState(0);
   const reread = useCallback(() => setRevision((current) => current + 1), []);
-  const status = useRead(
-    runId,
-    () => client.getStatus(runId ?? ""),
-    revision,
-  );
+  const status = useRead(runId, () => client.getStatus(runId ?? ""), revision);
   const stop = useCallback(
     async (force: boolean) => {
       try {

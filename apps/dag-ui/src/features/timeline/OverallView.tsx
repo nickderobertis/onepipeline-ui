@@ -61,10 +61,7 @@ export function OverallView({
   readonly nodes: readonly NodeView[];
   readonly timeline?: RunTimeline;
   readonly timelineError?: Error;
-  /**
-   * The journal sequence number of the last record whose change this view has
-   * rendered: the detail's, as of the timeline's latest change.
-   */
+  /** The journal sequence number of the last record this view has rendered. */
   readonly journalSeq?: number;
   readonly onSelectNode: (nodeId: string) => void;
   readonly selectedItemId?: string;

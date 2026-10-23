@@ -78,22 +78,6 @@ const detailLevels = Object.entries(DETAIL_LEVELS) as [
   (typeof DETAIL_LEVELS)[DetailLevel],
 ][];
 
-/**
- * The journal sequence number a view has rendered the change of: the detail's
- * latest, taken when `payload` — the view's own share of what was pushed — last
- * changed, so a view whose payload has not caught up with the detail does not
- * claim the detail's records as rendered.
- */
-function useRenderedSeq(
-  latest: number | undefined,
-  payload: unknown,
-): number | undefined {
-  const held = useRef<{ payload: unknown; seq?: number }>({ payload });
-  if (held.current.payload !== payload || held.current.seq === undefined)
-    held.current = { payload, seq: payload === undefined ? undefined : latest };
-  return held.current.seq;
-}
-
 /** How many times `value` has changed identity since this component mounted. */
 function useChangeCount(value: unknown): number {
   const held = useRef<{ value: unknown; count: number }>({ value, count: 0 });
@@ -156,7 +140,6 @@ export function App({
   );
   const graph = detail === undefined ? undefined : graphOf(detail);
   const selectedNode = nodes.find(({ id }) => id === selection.nodeId);
-  const overallSeq = useRenderedSeq(graph?.last_seq, telemetry.timeline);
   useEffect(() => {
     if (selection.host || !rows) return;
     const groups = sidebarGroups(rows);
@@ -444,7 +427,7 @@ export function App({
                     <OverallView
                       client={client}
                       detail={detail}
-                      journalSeq={overallSeq}
+                      journalSeq={graph?.last_seq}
                       nodes={nodes}
                       timeline={telemetry.timeline}
                       timelineError={telemetry.timelineError}

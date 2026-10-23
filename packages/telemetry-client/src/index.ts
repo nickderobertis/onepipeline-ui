@@ -315,7 +315,8 @@ export class TelemetryClient {
     return new LiveView(
       {
         subscribe: (body) => this.createSubscription(body),
-        retire: (subscription) => this.retireSubscription(subscription),
+        retire: (subscription, keepalive) =>
+          this.retireSubscription(subscription, keepalive),
         open: (url) => this.#open(url),
         url: (path) => this.#url(path),
       },
@@ -337,13 +338,16 @@ export class TelemetryClient {
   }
 
   /** `DELETE /api/v2/subscriptions/{subscription}`: idempotent. */
-  async retireSubscription(subscription: string): Promise<void> {
+  async retireSubscription(
+    subscription: string,
+    keepalive = false,
+  ): Promise<void> {
     requireOpaqueId(subscription, "subscription ID");
     let response: Response;
     try {
       response = await this.#fetch(
         this.#url(API_V2_PATHS.subscription(subscription)),
-        { method: "DELETE" },
+        { method: "DELETE", ...(keepalive ? { keepalive } : {}) },
       );
     } catch (error) {
       throw new TelemetryClientError(
