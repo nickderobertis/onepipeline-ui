@@ -147,6 +147,27 @@ struct Retained {
     data: Arc<str>,
 }
 
+/// Why a stream was answered with one whole re-send rather than a replay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResetReason {
+    /// A cursor this subscription never issued, or none it still holds.
+    UnknownCursor,
+    /// A cursor older than the frames it retains.
+    StaleCursor,
+    /// A cursor another process issued.
+    ServerRestarted,
+}
+
+impl ResetReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::UnknownCursor => "unknown-cursor",
+            Self::StaleCursor => "stale-cursor",
+            Self::ServerRestarted => "server-restarted",
+        }
+    }
+}
+
 /// Every type of frame a subscription stream carries, as its SSE event name
 /// and its data's `type` spell it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -826,10 +847,11 @@ impl Hub {
             }
             SubscribeOrigin::Resume(resume) => {
                 let reason = if resume.epoch == shared.epoch {
-                    "unknown-cursor"
+                    ResetReason::UnknownCursor
                 } else {
-                    "server-restarted"
-                };
+                    ResetReason::ServerRestarted
+                }
+                .as_str();
                 json!({
                     "type": "reset", "id": id, "base": resume.to_string(),
                     "subscription": subscription, "reason": reason, "snapshot": snapshot,
@@ -899,15 +921,15 @@ impl Hub {
         let mut replay = Vec::new();
         let reset_reason = match (after, resumable) {
             (None, _) => None,
-            (Some(_), None) => Some("server-restarted"),
-            (Some(_), Some(seq)) if seq > last || seq < first => Some("unknown-cursor"),
-            (Some(_), Some(seq)) if seq < boundary => Some("stale-cursor"),
+            (Some(_), None) => Some(ResetReason::ServerRestarted),
+            (Some(_), Some(seq)) if seq > last || seq < first => Some(ResetReason::UnknownCursor),
+            (Some(_), Some(seq)) if seq < boundary => Some(ResetReason::StaleCursor),
             (Some(_), Some(seq))
                 if seq == boundary || held.frames.iter().any(|frame| frame.seq == seq) =>
             {
                 None
             }
-            (Some(_), Some(_)) => Some("unknown-cursor"),
+            (Some(_), Some(_)) => Some(ResetReason::UnknownCursor),
         };
         match (reset_reason, after) {
             (Some(reason), Some(after)) => {
@@ -921,7 +943,7 @@ impl Hub {
                 let id = self.id(seq);
                 let data = json!({
                     "id": id, "base": after.to_string(), "subscription": subscription,
-                    "type": "reset", "reason": reason,
+                    "type": "reset", "reason": reason.as_str(),
                     "snapshot": { "id": id, "sidebar": sidebar.snapshot(), "visible": visible_state },
                 })
                 .to_string();

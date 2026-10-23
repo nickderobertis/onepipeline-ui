@@ -56,6 +56,7 @@ import harnessBinaries from "../fixtures/harness-binaries.json" with {
   type: "json",
 };
 import { treeCpuSeconds } from "./cpu";
+import { frameArrivals, lagStats, percentile, renderedAt } from "./lag";
 import {
   type Measured,
   telemetrySchema,
@@ -389,27 +390,6 @@ const perMinute = (amount: number) => (amount * 60_000) / WINDOW_MS;
 const round = (value: number, places = 3) =>
   Math.round(value * 10 ** places) / 10 ** places;
 
-function percentile(values: readonly number[], p: number): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  return (
-    sorted[
-      Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)
-    ] ?? null
-  );
-}
-
-function stats(lags: readonly number[], records: number) {
-  return {
-    records,
-    shown: lags.length,
-    never_shown: records - lags.length,
-    p50_s: percentile(lags, 50),
-    p95_s: percentile(lags, 95),
-    max_s: lags.length === 0 ? null : Math.max(...lags),
-  };
-}
-
 function address(served: Served, variant: Variant): string {
   const { settledRun, stoppedRun, openLiveRun, liveNode } = served.facts;
   if (variant.kind === "nothing-open" || variant.kind === "host")
@@ -594,28 +574,34 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
         .split("\n")
         .filter(Boolean)
         .map((line) => appendedSchema.parse(JSON.parse(line)));
-      const renderedAt = (seq: number): number | undefined =>
-        variant.view === "node"
-          ? observed.rows[String(seq)]
-          : observed.roots.find(([shown]) => shown >= seq)?.[1];
-      const lagOf = (items: typeof appended) =>
-        items.flatMap(({ seq, at }) => {
-          const shown = renderedAt(seq);
-          return shown === undefined ? [] : [round((shown - at) / 1000)];
-        });
-      // Frame arrival, beside it: the first frame after each append.
-      const arrivals = appended.flatMap(({ at }) => {
-        const first = recorder.frames.find((frame) => frame.at >= at);
-        return first === undefined ? [] : [round((first.at - at) / 1000)];
-      });
+      const rowsShown = variant.view === "node";
+      const arrivals = frameArrivals(appended, recorder.frames);
+      // Two clocks read independently agree for every record shown: none is
+      // rendered before it was appended, nor before a frame reached the page.
+      for (const { seq, at } of appended) {
+        const shown = renderedAt(observed, rowsShown, seq);
+        if (shown === undefined) continue;
+        expect(
+          shown,
+          `record ${seq} rendered before it was appended`,
+        ).toBeGreaterThanOrEqual(at);
+        const arrived = recorder.frames.find((frame) => frame.at >= at)?.at;
+        expect(
+          arrived,
+          `record ${seq} rendered with no frame after it`,
+        ).toBeDefined();
+        expect(
+          shown + 50,
+          `record ${seq} rendered before its frame arrived`,
+        ).toBeGreaterThanOrEqual(arrived ?? 0);
+      }
       const burst = appended.filter((item) => item.burst);
       lag = {
-        measured_as:
-          variant.view === "node"
-            ? "the record's row appearing on the node timeline"
-            : "the view root's data-journal-seq reaching the record's number",
-        ...stats(lagOf(appended), appended.length),
-        during_burst: stats(lagOf(burst), burst.length),
+        measured_as: rowsShown
+          ? "the record's row appearing on the node timeline"
+          : "the view root's data-journal-seq reaching the record's number",
+        ...lagStats(appended, observed, rowsShown),
+        during_burst: lagStats(burst, observed, rowsShown),
         frame_arrival: {
           p50_s: percentile(arrivals, 50),
           p95_s: percentile(arrivals, 95),
@@ -623,6 +609,23 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
         },
       };
     }
+    // The stream's bytes held to the frames it carried: at least every frame's
+    // data, and no more than that with each frame's SSE framing and the
+    // heartbeats beside them.
+    const streamBytes = bytes
+      .filter(({ route }) => route.startsWith("GET /api/v2/events"))
+      .reduce((sum, { bytes: count }) => sum + count, 0);
+    const frameBytes = frames.reduce((sum, { bytes: count }) => sum + count, 0);
+    expect(
+      streamBytes,
+      "stream bytes against the frames they carried",
+    ).toBeGreaterThanOrEqual(frameBytes);
+    expect(
+      streamBytes,
+      "stream bytes against the frames they carried",
+    ).toBeLessThan(
+      frameBytes + frames.length * 512 + (WINDOW_MS / 1000) * 64 + 4_096,
+    );
     const received = bytes.reduce((sum, { bytes: count }) => sum + count, 0);
     return variantSchema.parse({
       kind: variant.kind,
