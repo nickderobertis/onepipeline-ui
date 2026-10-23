@@ -16196,11 +16196,13 @@ fn launch_copied_from_plan_task_renderings(
             engine.copy(&onetaskgraph_core::CopyRequest {
                 items: onetaskgraph_core::CopyItems::new(vec![drafted]).expect("one item"),
                 scope: onetaskgraph_core::CopyScope::Projects { tasks: true },
+                status_policy: onetaskgraph_core::StatusPolicy::Source,
                 destination: onetaskgraph_plugin_api::SourceName::try_from(
                     COPY_DESTINATION.to_owned(),
                 )
                 .expect("a source name"),
                 match_by: None,
+                target_task: None,
                 recreate: false,
                 create: false,
                 dry_run: false,

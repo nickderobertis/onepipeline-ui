@@ -3243,10 +3243,15 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
   const runLevel = page.getByRole("region", { name: "Run-level timeline" });
 
   // Every plot starts on the same clock, which is what makes a column of one row
-  // mean the same instant as the column above it.
-  const before = await axisTicks(graphLine(page));
-  expect(await axisTicks(dashboard)).toBe(before);
-  expect(await axisTicks(runLevel)).toBe(before);
+  // mean the same instant as the column above it. The live range ends at the
+  // server's latest observation, which can advance between reading one row and
+  // the next, so the three are read again until one reading has them agree.
+  let before = "";
+  await expect(async () => {
+    before = await axisTicks(graphLine(page));
+    expect(await axisTicks(dashboard)).toBe(before);
+    expect(await axisTicks(runLevel)).toBe(before);
+  }).toPass({ timeout: 15_000 });
 
   // Zooming *one* row reframes all of them, because there is one range and every
   // plot is drawn against it.

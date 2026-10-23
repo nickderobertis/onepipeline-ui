@@ -765,7 +765,7 @@ impl RunApi for RunStore {
     }
 
     fn timeline(&self, run: &RunId, query: &TimelineQuery) -> Result<Envelope<Value>, ApiError> {
-        let view = self.view(run)?;
+        let mut view = self.view(run)?;
         let filter = Self::resolve(&view, query.filter.as_ref())?;
         let scope = match &query.scope {
             TimelineScope::Run => Scope::Run,
@@ -773,7 +773,8 @@ impl RunApi for RunStore {
         };
         // llmlint: ignore-block[authorization_enforced_server_side] the contract has one server acting session and no caller principal, so authenticating this read would invent a public access model. The only history read is named by this run's own SDK pointers and resolved through typed_session_record's StoreRoot confinement, exactly as the existing artifact route; no caller-supplied history path is accepted.
         let agents = self.agents_of(run, AgentScope::Run)?;
-        let timeline = payload::timeline(&view, &self.declared(&view), &scope, &filter);
+        let declared = self.declared(&view);
+        let timeline = payload::timeline(&mut view, &declared, &scope, &filter);
         Ok(Self::envelope(payload::timeline_harnesses(
             timeline, &view, &scope, &agents,
         )))
