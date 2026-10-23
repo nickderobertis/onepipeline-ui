@@ -2438,6 +2438,7 @@ test("collapses a run of near-identical records and puts it back", async ({
 
 /**
  * Wait for the real detail and scoped timeline before inspecting their rendering.
+ * Headers alone are insufficient: a reset can interrupt the body.
  * The heading is mounted before either read lands. Network time belongs to the
  * enclosing journey's budget, not the shorter window for a DOM assertion.
  */
@@ -2447,29 +2448,28 @@ async function readNodeTranscript(
   nodeId: string,
   read: () => Promise<void>,
 ): Promise<void> {
-  const [detail, timeline] = await Promise.all([
+  await Promise.all([
     page.waitForResponse(
-      (response) =>
+      async (response) =>
         new URL(response.url()).pathname === API_V2_PATHS.run(runId) &&
-        response.ok(),
+        response.ok() &&
+        (await response.finished()) === null,
       { timeout: 0 },
     ),
     page.waitForResponse(
-      (response) => {
+      async (response) => {
         const url = new URL(response.url());
         return (
           url.pathname === API_V2_PATHS.timeline(runId) &&
           url.searchParams.get("node") === nodeId &&
-          response.ok()
+          response.ok() &&
+          (await response.finished()) === null
         );
       },
       { timeout: 0 },
     ),
     read(),
   ]);
-  // Headers alone do not mean the payload has arrived.
-  expect(await detail.finished()).toBeNull();
-  expect(await timeline.finished()).toBeNull();
 }
 
 test("collapses every kind of run the same way and at the same count", async ({
