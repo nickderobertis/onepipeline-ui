@@ -353,8 +353,18 @@ impl Visible {
 #[derive(Default)]
 struct Sidebar {
     read: bool,
-    rows: BTreeMap<RunId, (Stamps, Arc<str>)>,
+    /// Each run's row, what its files looked like when it was read, and when.
+    rows: BTreeMap<RunId, (Stamps, Arc<str>, Instant)>,
 }
+
+/// How many polls pass between two readings of one run's sidebar row.
+///
+/// A row is read again at most this often however often its run moves: the
+/// sidebar shows state, counts and activity, which a few seconds' coalescing
+/// leaves as they were, while a run appending every second would otherwise be
+/// read — and its row pushed to every tab — every poll. The open run's own
+/// view is patched every poll regardless.
+pub const ROW_POLLS_PER_READ: u32 = 10;
 
 /// What a run's files look like: the journal, the bounded summary, the label
 /// overlay and the result — every file a row is read from or moves with.
@@ -390,6 +400,7 @@ impl Sidebar {
     /// — its bounded summary, never its journal — only when one of them moved,
     /// and announced only when the row the sidebar shows came out different.
     fn poll(&mut self, store: &RunStore) -> Vec<RowChange> {
+        let reread = store.poll() * ROW_POLLS_PER_READ;
         let mut changes = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
         let Ok(entries) = std::fs::read_dir(store.root()) else {
@@ -408,8 +419,12 @@ impl Sidebar {
                 continue;
             }
             seen.insert(run.clone());
-            if self.rows.get(&run).is_some_and(|(held, _)| *held == stamps) {
-                continue;
+            match self.rows.get(&run) {
+                Some((held, _, _)) if *held == stamps => continue,
+                // Moved, but read too recently: read once the interval is up,
+                // to what the run then holds.
+                Some((_, _, read_at)) if self.read && read_at.elapsed() < reread => continue,
+                _ => {}
             }
             let Ok(summary) = RunSummary::of(&paths) else {
                 continue;
@@ -417,8 +432,9 @@ impl Sidebar {
             let row: Arc<str> = payload::sidebar_row(&run, &summary, &paths)
                 .to_string()
                 .into();
-            let moved = self.rows.get(&run).is_none_or(|(_, held)| *held != row);
-            self.rows.insert(run, (stamps, Arc::clone(&row)));
+            let moved = self.rows.get(&run).is_none_or(|(_, held, _)| *held != row);
+            self.rows
+                .insert(run, (stamps, Arc::clone(&row), Instant::now()));
             if moved && self.read {
                 changes.push(RowChange::Changed(row));
             }
@@ -444,7 +460,7 @@ impl Sidebar {
         let mut rows: Vec<Value> = self
             .rows
             .values()
-            .filter_map(|(_, row)| serde_json::from_str(row).ok())
+            .filter_map(|(_, row, _)| serde_json::from_str(row).ok())
             .collect();
         rows.sort_by(|left: &Value, right: &Value| {
             right["updated_at"]

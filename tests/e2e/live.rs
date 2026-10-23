@@ -959,16 +959,18 @@ fn a_label_change_without_growth_is_reread_and_served_as_what_changed() {
         fs::metadata(live.journal(run)).expect("a journal").len(),
         journal_before
     );
-    let frames = tab.drain();
-    assert!(frames
+    // The row is read at most once every few polls, so it arrives within the
+    // patience rather than with the patches.
+    let row = frame_of(&mut tab, "run.changed");
+    assert_eq!(
+        row["row"]["kind"], "follow-ups",
+        "the sidebar row carries the new kind"
+    );
+    tab.drain();
+    assert!(tab
+        .frames
         .iter()
         .all(|frame| frame["type"] != "reset" && frame["type"] != "snapshot"));
-    assert!(
-        frames
-            .iter()
-            .any(|frame| frame["type"] == "run.changed" && frame["row"]["kind"] == "follow-ups"),
-        "the sidebar row carries the new kind: {frames:#?}"
-    );
     assert_eq!(
         unstamped(tab.state["visible"]["detail"].clone()),
         fresh(
@@ -1844,5 +1846,69 @@ fn a_subscribed_run_that_could_not_be_read_for_a_moment_is_patched_again_once_it
             &format!("/api/v2/runs/{run}?include_conversations=false"),
         ),
         "the detail once the run could be read again",
+    );
+}
+
+#[test]
+fn a_run_that_moves_every_poll_has_its_row_pushed_at_most_once_per_interval_and_ends_current() {
+    let live = Live::start(|root| {
+        growing_run(root, fixture_run::RUN_ID);
+        growing_run(root, fixture_run::OTHER_RUN_ID);
+        fs::remove_file(root.join(fixture_run::OTHER_RUN_ID).join("result.json"))
+            .expect("unsettle it");
+    });
+    let mut tab = Tab::open(&live, &json!({ "type": "sidebar" }));
+    let other = live.journal(fixture_run::OTHER_RUN_ID);
+    // One record every poll, for a while: the run moves on every tick.
+    let poll = Duration::from_millis(50);
+    let started = Instant::now();
+    let mut appended = 0;
+    let mut last = Value::Null;
+    while started.elapsed() < Duration::from_secs(3) {
+        let record = activity(
+            &other,
+            fixture_run::OTHER_RUN_ID,
+            fixture_run::NODE_ID,
+            &format!("tick {appended}"),
+        );
+        last = serde_json::from_str::<Value>(&record).expect("a record")["ts"].clone();
+        live_journal::append_lines(&other, &[record]);
+        appended += 1;
+        std::thread::sleep(poll);
+    }
+    let elapsed = started.elapsed();
+    // Its row is read again once the interval is up, to what the run then
+    // holds: the last record among them.
+    let updated = |tab: &Tab| {
+        tab.state["sidebar"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .find(|row| row["id"] == fixture_run::OTHER_RUN_ID)
+            .map(|row| row["updated_at"].clone())
+    };
+    let deadline = Instant::now() + PATIENCE;
+    while updated(&tab).as_ref() != Some(&last) && Instant::now() < deadline {
+        tab.drain();
+    }
+    assert_eq!(
+        updated(&tab),
+        Some(last),
+        "the tab's row ends on the run's last record"
+    );
+    let pushed = tab
+        .frames
+        .iter()
+        .filter(|frame| frame["type"] == "run.changed")
+        .count();
+    let interval = poll * onepipeline_ui::live::ROW_POLLS_PER_READ;
+    let most = usize::try_from(elapsed.as_millis() / interval.as_millis()).expect("small") + 2;
+    assert!(
+        (1..=most).contains(&pushed),
+        "{appended} appends over {elapsed:?} pushed {pushed} rows; at most {most} at one per {interval:?}"
+    );
+    assert!(
+        pushed < appended,
+        "every append was pushed: {pushed} rows for {appended} appends"
     );
 }
