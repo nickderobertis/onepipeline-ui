@@ -5,8 +5,10 @@ import { useRead } from "../../lib/useRead";
 /**
  * The whole listing the Host page shows and a host shutdown names its runs
  * from: the run list's host facts with every project's runs, read when the
- * Host page opens and on its refresh control, and never on a change — the
- * sidebar's pushed rows are what keep the rest of the page current.
+ * Host page opens and on its refresh control. Its caller asks for it again
+ * while a host shutdown is out, which is the one time a pushed row moving is
+ * reason to read it; otherwise the sidebar's pushed rows keep the rest of the
+ * page current.
  */
 export function useHostListing(
   client: TelemetryClient,

@@ -237,8 +237,9 @@ function sameView(
 function activityOf(detail: RunDetail | undefined): readonly LiveActivity[] {
   const candidate = detail?.run.live_activity;
   if (candidate === undefined) return [];
-  // Patched in place since the snapshot was validated, so read through the
-  // schema again: a malformed entry is no activity line rather than a crash.
+  // The live view validates each patched detail as a whole; the activity line
+  // is read through its own schema too, so an entry it cannot read is no line
+  // rather than a crash.
   const parsed = liveActivityListSchema.safeParse(candidate);
   return parsed.success ? parsed.data : [];
 }

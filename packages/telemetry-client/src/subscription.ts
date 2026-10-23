@@ -170,6 +170,16 @@ export class LiveView {
     const initial = subscribed.initial;
     if (initial.type === "snapshot") {
       this.#take(initial.snapshot, { kind: "snapshot" });
+    } else if (
+      initial.subscription !== subscribed.subscription ||
+      initial.snapshot.id !== initial.id
+    ) {
+      // A recreation's reset belongs to the subscription it made and is its
+      // own snapshot's boundary; one that is not is no state to resume from.
+      this.#fail(
+        new Error("A recreated subscription's reset is not its own snapshot"),
+      );
+      return;
     } else {
       this.#take(initial.snapshot, { kind: "reset", reason: initial.reason });
     }

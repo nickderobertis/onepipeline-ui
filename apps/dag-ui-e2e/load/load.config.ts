@@ -7,8 +7,8 @@ import { defineConfig } from "@playwright/test";
  * No `webServer`: every variant starts its own `onepipeline-api serve` over its
  * own freshly generated corpus, so neither the journeys' servers nor one
  * variant's grown journals are paid for by another. One worker, no timeout —
- * a whole run is twenty variants of two minutes each, and its recorded figures
- * are what `../budgets.yaml` reads.
+ * a whole run is every variant `telemetry.ts` declares, two minutes each, and
+ * its recorded figures are what `../budgets.yaml` reads.
  */
 export default defineConfig({
   testDir: import.meta.dirname,
