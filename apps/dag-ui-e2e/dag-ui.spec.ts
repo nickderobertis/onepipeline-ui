@@ -2189,7 +2189,9 @@ test("switches the reading between decisions and detailed activity", async ({
   network.on("Network.requestWillBeSent", ({ request, wallTime }) => {
     if (new URL(request.url).pathname !== API_V2_PATHS.subscriptions) return;
     if (request.postData === undefined) return;
-    const view = subscriptionViewSchema.parse(JSON.parse(request.postData).view);
+    const view = subscriptionViewSchema.parse(
+      JSON.parse(request.postData).view,
+    );
     if ("filter" in view && view.filter !== undefined)
       asked.push({ filter: view.filter, started: wallTime * 1000 });
   });

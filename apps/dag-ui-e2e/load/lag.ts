@@ -5,6 +5,10 @@
  * protocol. Pure, so `load-lag.spec.ts` holds it to records of known timing.
  */
 
+import { percentile, type RecordLag, summarizeLags } from "./telemetry";
+
+export { percentile };
+
 /** One record the writer appended to the open run. */
 export interface Appended {
   readonly seq: number;
@@ -18,20 +22,6 @@ export interface Rendered {
   readonly rows: Readonly<Record<string, number>>;
   /** Each rise of a view root's sequence number, with when it rose. */
   readonly roots: readonly (readonly [number, number])[];
-}
-
-/** The `p`th percentile, nearest rank, or `null` for no values. */
-export function percentile(
-  values: readonly number[],
-  p: number,
-): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  return (
-    sorted[
-      Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)
-    ] ?? null
-  );
 }
 
 const seconds = (ms: number) => Math.round(ms) / 1000;
@@ -50,24 +40,37 @@ export function renderedAt(
     : rendered.roots.find(([shown]) => shown >= seq)?.[1];
 }
 
+/**
+ * Every appended record's own lag, in append order: its sequence number,
+ * whether the burst wrote it, the seconds from its append to the page
+ * rendering it (`null` when it never did), and the seconds until the first
+ * frame reached the page after it (`null` when none did).
+ */
+export function recordLags(
+  appended: readonly Appended[],
+  rendered: Rendered,
+  rowsShown: boolean,
+  frames: readonly { readonly at: number }[] = [],
+): RecordLag[] {
+  return appended.map(({ seq, at, burst }) => {
+    const shown = renderedAt(rendered, rowsShown, seq);
+    const arrived = frames.find((frame) => frame.at >= at)?.at;
+    return {
+      seq,
+      burst,
+      lag_s: shown === undefined ? null : seconds(shown - at),
+      frame_s: arrived === undefined ? null : seconds(arrived - at),
+    };
+  });
+}
+
 /** Each shown record's lag in seconds, and the summary of them. */
 export function lagStats(
   appended: readonly Appended[],
   rendered: Rendered,
   rowsShown: boolean,
 ) {
-  const lags = appended.flatMap(({ seq, at }) => {
-    const shown = renderedAt(rendered, rowsShown, seq);
-    return shown === undefined ? [] : [seconds(shown - at)];
-  });
-  return {
-    records: appended.length,
-    shown: lags.length,
-    never_shown: appended.length - lags.length,
-    p50_s: percentile(lags, 50),
-    p95_s: percentile(lags, 95),
-    max_s: lags.length === 0 ? null : Math.max(...lags),
-  };
+  return summarizeLags(recordLags(appended, rendered, rowsShown));
 }
 
 /** For each record, how long until the first frame arrived after its append. */

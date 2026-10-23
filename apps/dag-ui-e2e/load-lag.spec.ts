@@ -7,7 +7,14 @@
  */
 
 import { expect, test } from "@playwright/test";
-import { frameArrivals, lagStats, percentile, renderedAt } from "./load/lag";
+import {
+  frameArrivals,
+  lagStats,
+  percentile,
+  recordLags,
+  renderedAt,
+} from "./load/lag";
+import { summarizeLags } from "./load/telemetry";
 
 const appended = [
   { seq: 10, at: 1_000, burst: false },
@@ -57,4 +64,20 @@ test("frame arrival is the first frame at or after each append", () => {
   ]);
   expect(percentile([5, 1, 3, 2, 4], 95)).toBe(5);
   expect(percentile([5, 1, 3, 2, 4], 50)).toBe(3);
+});
+
+test("every appended record carries its own lag and frame arrival, in append order", () => {
+  const rendered = { rows: {}, roots: [[11, 2_500]] as const };
+  const frames = [{ at: 1_040 }, { at: 2_400 }];
+  // 12 and 13 never rendered and no frame followed them: each is still an
+  // entry of its own, its lag absent rather than zero.
+  expect(recordLags(appended, rendered, false, frames)).toStrictEqual([
+    { seq: 10, burst: false, lag_s: 1.5, frame_s: 0.04 },
+    { seq: 11, burst: false, lag_s: 0.5, frame_s: 0.4 },
+    { seq: 12, burst: true, lag_s: null, frame_s: null },
+    { seq: 13, burst: true, lag_s: null, frame_s: null },
+  ]);
+  expect(
+    summarizeLags(recordLags(appended, rendered, false, frames)),
+  ).toStrictEqual(lagStats(appended, rendered, false));
 });
