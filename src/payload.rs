@@ -5146,9 +5146,7 @@ pub(crate) fn timeline_over(
 ) -> Value {
     // Continued sessions can relay one producer record repeatedly. Canonicalize
     // before transcript numbering and all span folds, so duplicate journal lines
-    // affect neither event addresses nor counts nor intervals. The engine's view
-    // can only be opened from disk, so the canonical events stand in for the
-    // journal's in place and are handed back before this returns.
+    // affect neither event addresses nor counts nor intervals.
     let mut seen = BTreeSet::new();
     let repeated = view
         .events
