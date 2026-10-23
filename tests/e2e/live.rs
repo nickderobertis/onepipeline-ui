@@ -1581,10 +1581,13 @@ fn a_run_that_never_goes_quiet_still_has_its_telemetry_folded_again() {
         .status()
         .expect("node runs the load writer");
     assert!(writer.success(), "the load writer failed");
+    // A tick that moved, whichever way the engine read it: on a loaded host a
+    // writer this fast can outrun the appended read, which the engine then
+    // answers with a reread, and the fold is owed on that tick all the same.
     let folded_while_growing = live
         .refreshes()
         .iter()
-        .any(|line| line["refresh"] == "appended" && !line["telemetry_fold_ms"].is_null());
+        .any(|line| line["refresh"] != "unchanged" && !line["telemetry_fold_ms"].is_null());
     assert!(
         folded_while_growing,
         "the fold never caught up while the run kept moving: {:#?}",
