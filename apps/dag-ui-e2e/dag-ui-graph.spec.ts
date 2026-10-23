@@ -40,15 +40,10 @@ test.beforeEach(async ({ page }) => {
 
 async function expectDrawn(edge: Locator): Promise<void> {
   await expect(edge).toBeAttached();
-  // A horizontal SVG path has zero bounding-box height, so Playwright's
-  // visibility check rejects it even though its stroke is drawn.
+  // A horizontal SVG edge has zero bounding-box height, so Playwright's
+  // visibility check rejects it. Its rendered geometry must still span a gap.
   await expect
-    .poll(() =>
-      edge
-        .locator("path")
-        .first()
-        .evaluate((path: SVGPathElement) => path.getTotalLength()),
-    )
+    .poll(() => edge.evaluate((group: SVGGElement) => group.getBBox().width))
     .toBeGreaterThan(0);
 }
 
