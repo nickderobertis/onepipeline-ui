@@ -1004,19 +1004,6 @@ fn a_surface_raised_through_the_engine_reaches_the_channel_view_as_a_patch() {
     assert!(messages.contains(&"is the journey live?"), "{messages:?}");
 }
 
-/// Count each kind of frame a tab received, for the journeys that say what a
-/// view was and was not sent.
-#[allow(dead_code)]
-fn kinds(frames: &[Value]) -> BTreeMap<String, usize> {
-    let mut counted = BTreeMap::new();
-    for frame in frames {
-        *counted
-            .entry(frame["type"].as_str().unwrap_or_default().to_owned())
-            .or_insert(0) += 1;
-    }
-    counted
-}
-
 /// The UUID every served epoch and subscription id is written as in a golden.
 const PINNED_EPOCH: &str = "00000000-0000-4000-8000-0000000e9c00";
 const PINNED_SUBSCRIPTION: &str = "00000000-0000-4000-8000-00000005ab00";
@@ -1352,4 +1339,110 @@ fn the_fixture_writers_receipts_are_the_engines_field_for_field() {
     // And the server read the fixture's append as an append of one record.
     assert_eq!(refresh["refresh"], "appended", "{refresh}");
     assert_eq!(refresh["records"], 1, "{refresh}");
+}
+
+#[test]
+fn a_disconnected_subscription_expires_after_the_grace_and_a_quiet_connected_one_does_not() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start_with(
+        |root| growing_run(root, run),
+        &[(onepipeline_ui::live::DISCONNECTED_GRACE_ENV, "1500")],
+    );
+    // One subscription nothing ever connects to, and one whose stream stays
+    // open and is sent nothing for longer than the grace.
+    let abandoned = live.subscribe(&json!({ "view": { "type": "sidebar" } }));
+    let abandoned = abandoned["subscription"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    let mut quiet = Tab::open(&live, &json!({ "type": "sidebar" }));
+    std::thread::sleep(Duration::from_millis(3_000));
+    assert!(
+        quiet.drain().is_empty(),
+        "nothing moved, so nothing was sent"
+    );
+
+    let gone = http::get(
+        live.address(),
+        &format!("/api/v2/events?subscription={abandoned}"),
+    );
+    assert_eq!(gone.status, 410, "{}", gone.body);
+    assert_eq!(
+        gone.json(),
+        json!({ "code": "subscription-unavailable", "reason": "expired" })
+    );
+
+    // The connected one is still served: what moves now reaches it.
+    let journal = live.journal(run);
+    live_journal::append_lines(
+        &journal,
+        &[activity(&journal, run, fixture_run::NODE_ID, "still here")],
+    );
+    let row = frame_of(&mut quiet, "run.changed");
+    assert_eq!(row["row"]["id"], run);
+}
+
+#[test]
+fn a_stale_telemetry_fold_catches_up_once_the_run_goes_quiet_without_holding_back_the_change() {
+    let run = fixture_run::RUN_ID;
+    let mut held_back = Vec::new();
+    let live = Live::start_with(
+        |root| {
+            fixture_run::write(root, run);
+            let journal = root.join(run).join("events.jsonl");
+            let total = fs::read_to_string(&journal)
+                .expect("a journal")
+                .lines()
+                .count();
+            held_back = live_journal::hold_back(&journal, total / 2);
+        },
+        &[(onepipeline_ui::live::TELEMETRY_REFOLD_ENV, "1500")],
+    );
+    let mut tab = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
+    // Let the fold the subscription opened with age past the interval, so the
+    // first change is the one the refold has to catch up with.
+    std::thread::sleep(Duration::from_millis(1_600));
+    let mut seen = live.refreshes().len();
+    live_journal::append_lines(&live.journal(run), &held_back[..1]);
+    let first = live.next_refresh(run, &mut seen);
+    assert_eq!(first["refresh"], "appended", "{first}");
+    assert!(
+        first["telemetry_fold_ms"].is_null(),
+        "the change waited on a fold: {first}"
+    );
+    // A second change straight after is sent at once, without the fold.
+    live_journal::append_lines(&live.journal(run), &held_back[1..2]);
+    let second = live.next_refresh(run, &mut seen);
+    assert!(
+        second["telemetry_fold_ms"].is_null(),
+        "the change waited on a fold: {second}"
+    );
+    let _ = frame_of(&mut tab, "detail.patch");
+    // Then, with nothing appended, the fold catches up within the interval
+    // and the detail becomes what a fresh read serves.
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        let refolded = live
+            .refreshes()
+            .iter()
+            .any(|line| !line["telemetry_fold_ms"].is_null() && line["refresh"] == "unchanged");
+        if refolded {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the stale fold never caught up: {:#?}",
+            live.refreshes()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    tab.drain();
+    same(
+        &unstamped(tab.state["visible"]["detail"].clone()),
+        &fresh(
+            live.address(),
+            &format!("/api/v2/runs/{run}?include_conversations=false"),
+        ),
+        "the detail once the fold caught up",
+    );
 }

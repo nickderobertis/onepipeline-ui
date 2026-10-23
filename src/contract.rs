@@ -1577,10 +1577,12 @@ fn check_segment(value: &str, max_len: usize) -> Result<(), String> {
 ///
 /// `docs/contract.md`'s bound: the latest frames, plus the cursor before the
 /// oldest of them. A cursor older than that boundary is answered with a reset.
+/// `tests/contract.rs` holds the contract's wording of it to this.
 pub const RETAINED_FRAMES: usize = 4096;
 
 /// How long a disconnected subscription keeps recording its changes before it
 /// expires. A connected stream never expires, however quiet it is.
+/// `tests/contract.rs` holds the contract's wording of it to this.
 pub const DISCONNECTED_GRACE: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// A subscription's id: an opaque UUID this process minted.
@@ -1854,16 +1856,27 @@ impl SubscriptionView {
     }
 }
 
+/// How a subscription comes to be: fresh, in place of another, or recreated
+/// after the one a tab held was lost — the three a body can say, and never two
+/// of them at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscribeOrigin {
+    /// A tab subscribing for the first time.
+    Fresh,
+    /// The subscription this one replaces, retired once this one is made.
+    Replaces(SubscriptionId),
+    /// The last frame applied, when recreating a subscription the server no
+    /// longer has; answered with a reset rather than a snapshot.
+    Resume(EventId),
+}
+
 /// The body of `POST /api/v2/subscriptions`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscribeRequest {
     /// What the tab shows.
     pub view: SubscriptionView,
-    /// The subscription this one replaces, retired once this one is made.
-    pub replaces: Option<SubscriptionId>,
-    /// The last frame applied, when recreating a subscription the server no
-    /// longer has; answered with a reset rather than a snapshot.
-    pub resume: Option<EventId>,
+    /// Whether it is fresh, a replacement, or a recreation.
+    pub origin: SubscribeOrigin,
 }
 
 impl SubscribeRequest {
@@ -1902,19 +1915,20 @@ impl SubscribeRequest {
             .map(SubscriptionId::try_from)
             .transpose()?;
         let resume = text("resume")?.map(EventId::try_from).transpose()?;
-        if replaces.is_some() && resume.is_some() {
-            return Err(ApiError::InvalidSubscription(
-                "replaces and resume are mutually exclusive".to_owned(),
-            ));
-        }
+        let origin = match (replaces, resume) {
+            (None, None) => SubscribeOrigin::Fresh,
+            (Some(replaced), None) => SubscribeOrigin::Replaces(replaced),
+            (None, Some(resumed)) => SubscribeOrigin::Resume(resumed),
+            (Some(_), Some(_)) => {
+                return Err(ApiError::InvalidSubscription(
+                    "replaces and resume are mutually exclusive".to_owned(),
+                ))
+            }
+        };
         let view =
             SubscriptionView::parse(object.get("view").ok_or_else(|| {
                 ApiError::InvalidSubscription("the body names no view".to_owned())
             })?)?;
-        Ok(Self {
-            view,
-            replaces,
-            resume,
-        })
+        Ok(Self { view, origin })
     }
 }

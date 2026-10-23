@@ -41,21 +41,22 @@ pub enum Op {
     /// Set the object member at `path`, or replace the existing array element
     /// there.
     Set {
-        /// Where.
+        /// The member or element replaced: never the root.
         path: Vec<Step>,
         /// The value it now holds.
         value: Value,
     },
     /// Append `values` to the array at `path`.
     Append {
-        /// The array.
+        /// The array that grows, which may be the root only when the root is
+        /// an array.
         path: Vec<Step>,
         /// What it gains, in order.
         values: Vec<Value>,
     },
     /// Delete the object member at `path`.
     Delete {
-        /// The member.
+        /// An object member — never an array element, so no index shifts.
         path: Vec<Step>,
     },
 }

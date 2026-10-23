@@ -489,6 +489,7 @@ fn subscription_events(
 }
 
 /// `POST /api/v2/subscriptions`: the subscription and its initial state, `201`.
+// llmlint: ignore[authorization_enforced_server_side] a subscription is a read: it serves exactly what the read routes beside it serve — the run list's rows, a run's detail, timeline and channel — to the same caller those routes serve, under `docs/contract.md`'s one surface with no principal but the server's one `--session` and `--bind` on loopback by default, and it creates read state only, never ownership of a run. What this handler owes is the boundary it keeps: the body, the view, the filter and every id are parsed and refused before anything is opened.
 async fn subscribe(State(serving): Store, raw: String) -> Response {
     let request = match SubscribeRequest::parse(&raw) {
         Ok(request) => request,

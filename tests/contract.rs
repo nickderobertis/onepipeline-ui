@@ -4033,3 +4033,31 @@ fn timeline_record_fields_follow_the_producers_published_payloads() {
         "panel fields no producer declares: {missing:?}"
     );
 }
+
+/// The subscription bounds `docs/contract.md` states are the ones the hub
+/// keeps: its retained frames and the grace a disconnected subscription has.
+#[test]
+fn the_subscription_bounds_the_contract_states_are_the_ones_the_hub_keeps() {
+    use onepipeline_ui::contract::{DISCONNECTED_GRACE, RETAINED_FRAMES};
+    let contract = contract_text();
+    let thousands = |value: usize| {
+        let digits = value.to_string();
+        let (head, tail) = digits.split_at(digits.len() - 3);
+        format!("{head},{tail}")
+    };
+    assert!(
+        contract.contains(&format!(
+            "its latest **{}** emitted frames",
+            thousands(RETAINED_FRAMES)
+        )),
+        "docs/contract.md does not state the {RETAINED_FRAMES} retained frames the hub keeps"
+    );
+    assert!(
+        contract.contains(&format!(
+            "for at most **{} seconds**",
+            DISCONNECTED_GRACE.as_secs()
+        )),
+        "docs/contract.md does not state the {:?} grace the hub keeps",
+        DISCONNECTED_GRACE
+    );
+}

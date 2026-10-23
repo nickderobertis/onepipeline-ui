@@ -489,6 +489,8 @@ impl LiveTimeline {
         }
     }
 
+    // Each argument is one input the run-scope refresh reads, all borrowed from
+    // the one live reading; bundling them would be a struct built only to pass.
     #[allow(clippy::too_many_arguments)]
     fn refreshed_run(
         &mut self,
