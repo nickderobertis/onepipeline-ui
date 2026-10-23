@@ -82,7 +82,21 @@
       "command": "npx playwright install chromium"
     },
     "check": {
-      "executor": "nx:noop"
+      "//": "The default check plus budgets, as github-workflows:check reaches its own: budgets read committed telemetry and are cached on it.",
+      "executor": "nx:noop",
+      "dependsOn": [
+        "format-check",
+        "lint",
+        "typecheck",
+        "build",
+        "test",
+        "test-baseline",
+        "test-cost",
+        "test-isolation",
+        "doc",
+        "coverage",
+        "budgets"
+      ]
     }
   }
 }
