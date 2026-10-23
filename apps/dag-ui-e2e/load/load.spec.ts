@@ -709,4 +709,16 @@ test("request load, frames, lag and server CPU in every page state", async ({
     variants: results,
   });
   writeFileSync(TELEMETRY, `${JSON.stringify(document, null, 2)}\n`);
+  // Laid out as the repository's formatter lays it out, so the recorded file
+  // is committed as written and the project's lint passes over it.
+  execFileSync(
+    process.execPath,
+    [
+      join(REPO, "node_modules/@biomejs/biome/bin/biome"),
+      "format",
+      "--write",
+      TELEMETRY,
+    ],
+    { cwd: REPO, stdio: ["ignore", "ignore", "inherit"] },
+  );
 });

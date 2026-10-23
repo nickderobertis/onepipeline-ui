@@ -17,9 +17,7 @@
     "nothing-open": {
       "kind": "nothing-open",
       "tabs": 1,
-      "load_s": [
-        6.9
-      ],
+      "load_s": [6.9],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0592,
@@ -58,9 +56,7 @@
       "kind": "settled",
       "view": "graph",
       "tabs": 1,
-      "load_s": [
-        7.36
-      ],
+      "load_s": [7.36],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0599,
@@ -99,9 +95,7 @@
       "kind": "settled",
       "view": "overall",
       "tabs": 1,
-      "load_s": [
-        8.43
-      ],
+      "load_s": [8.43],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0594,
@@ -140,9 +134,7 @@
       "kind": "settled",
       "view": "node",
       "tabs": 1,
-      "load_s": [
-        7.61
-      ],
+      "load_s": [7.61],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0597,
@@ -181,9 +173,7 @@
       "kind": "stopped",
       "view": "graph",
       "tabs": 1,
-      "load_s": [
-        7.37
-      ],
+      "load_s": [7.37],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0599,
@@ -222,9 +212,7 @@
       "kind": "stopped",
       "view": "overall",
       "tabs": 1,
-      "load_s": [
-        7.91
-      ],
+      "load_s": [7.91],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0597,
@@ -263,9 +251,7 @@
       "kind": "stopped",
       "view": "node",
       "tabs": 1,
-      "load_s": [
-        7.6
-      ],
+      "load_s": [7.6],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0597,
@@ -304,9 +290,7 @@
       "kind": "live",
       "view": "graph",
       "tabs": 1,
-      "load_s": [
-        9.39
-      ],
+      "load_s": [9.39],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0888,
@@ -371,10 +355,7 @@
       "kind": "live",
       "view": "graph",
       "tabs": 2,
-      "load_s": [
-        9.4,
-        2.27
-      ],
+      "load_s": [9.4, 2.27],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0866,
@@ -439,9 +420,7 @@
       "kind": "live",
       "view": "overall",
       "tabs": 1,
-      "load_s": [
-        14.71
-      ],
+      "load_s": [14.71],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.4168,
@@ -510,10 +489,7 @@
       "kind": "live",
       "view": "overall",
       "tabs": 2,
-      "load_s": [
-        15.27,
-        5.26
-      ],
+      "load_s": [15.27, 5.26],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.4209,
@@ -582,9 +558,7 @@
       "kind": "live",
       "view": "node",
       "tabs": 1,
-      "load_s": [
-        11.4
-      ],
+      "load_s": [11.4],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.8311,
@@ -653,10 +627,7 @@
       "kind": "live",
       "view": "node",
       "tabs": 2,
-      "load_s": [
-        11.64,
-        4.42
-      ],
+      "load_s": [11.64, 4.42],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.8286,
@@ -725,9 +696,7 @@
       "kind": "live",
       "view": "channel",
       "tabs": 1,
-      "load_s": [
-        9.39
-      ],
+      "load_s": [9.39],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0882,
@@ -792,10 +761,7 @@
       "kind": "live",
       "view": "channel",
       "tabs": 2,
-      "load_s": [
-        9.39,
-        2.27
-      ],
+      "load_s": [9.39, 2.27],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0865,
@@ -859,9 +825,7 @@
     "host": {
       "kind": "host",
       "tabs": 1,
-      "load_s": [
-        6.89
-      ],
+      "load_s": [6.89],
       "requests_per_min": 2,
       "requests_per_min_by_route": {
         "GET /api/v2/host": 0.5,
