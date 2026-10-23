@@ -50,13 +50,13 @@ use crate::serving::{address_of, ask_to_stop, wait_within, Stop, STOP_DEADLINE};
 
 /// The syscalls a read of a runs root is made of.
 ///
-/// Named rather than traced wholesale, because everything else a server does —
-/// sockets, futexes, clocks — is noise this is not about, and a trace that
-/// carried it would be slower to take and no more informative. `statx` and
-/// `newfstatat` are both here because which one a metadata lookup compiles to is
+/// Named rather than traced wholesale: sockets and futexes are noise this is
+/// not about. Sleeps are included so the idle journey can distinguish waiting
+/// from spinning without depending on how promptly a host schedules wakeups.
+/// `statx` and `newfstatat` are both here because which one a metadata lookup compiles to is
 /// the libc's business rather than this server's, and a count that saw only one
 /// of them would report a lookup as free on half the machines that run it.
-const TRACED: &str = "openat,read,pread64,newfstatat,statx,fstat,execve";
+const TRACED: &str = "openat,read,pread64,newfstatat,statx,fstat,execve,clock_nanosleep";
 
 /// How much of each string argument strace prints.
 ///
@@ -78,6 +78,8 @@ pub enum Op {
     List(PathBuf),
     /// A program was started.
     Exec(String),
+    /// The thread asked the kernel to sleep for this duration.
+    Sleep(std::time::Duration),
 }
 
 impl Op {
@@ -87,7 +89,7 @@ impl Op {
             Self::Open(path) | Self::Read(path, _) | Self::Lookup(path) | Self::List(path) => {
                 Some(path)
             }
-            Self::Exec(_) => None,
+            Self::Exec(_) | Self::Sleep(_) => None,
         }
     }
 }
@@ -142,7 +144,7 @@ impl Cost {
                 // operation a run-list read is allowed per tick, and counting it
                 // as either would hide it inside a number that is allowed to be
                 // non-zero.
-                Op::List(_) | Op::Exec(_) => {}
+                Op::List(_) | Op::Exec(_) | Op::Sleep(_) => {}
             }
         }
         counts
@@ -154,6 +156,18 @@ impl Cost {
         self.ops
             .iter()
             .filter(|op| matches!(op, Op::List(listed) if listed == directory))
+            .count()
+    }
+
+    /// Successful relative sleeps requesting at least one poll interval.
+    ///
+    /// Count the wait requested of the kernel, not when a loaded host finally
+    /// woke the thread. A listing can straddle the opening marker, so journeys
+    /// allow one listing beside these waits.
+    pub fn poll_sleeps(&self) -> usize {
+        self.ops
+            .iter()
+            .filter(|op| matches!(op, Op::Sleep(duration) if *duration >= std::time::Duration::from_millis(TRACED_POLL_MS)))
             .count()
     }
 
@@ -249,11 +263,8 @@ pub struct Traced {
 /// How often a traced server re-reads the runs root, unless a journey says
 /// otherwise.
 ///
-/// Slower than the suite's usual 50ms because a traced tick is a *counted*
-/// thing: the journeys that bound what an idle subscriber costs divide a
-/// measured interval by this to say how many ticks should have happened, and a
-/// fast poll makes that quotient large enough that one scheduling hiccup reads
-/// as a broken bound.
+/// Long enough that the tracer can observe individual ticks without making
+/// tracing overhead dominate the poll interval.
 pub const TRACED_POLL_MS: u64 = 200;
 
 impl Traced {
@@ -377,10 +388,20 @@ impl Traced {
         }
     }
 
+    /// Operations observed so far, for a readiness wait on completed polls.
+    ///
+    /// A syscall still being written can be absent here; callers wait for more
+    /// observations and use `finish` for the final cost assertions.
+    pub fn cost_so_far(&self) -> Cost {
+        Cost {
+            ops: read_trace(self.traces.path(), &self.binary),
+        }
+    }
+
     /// Stop the server and read what it did.
     ///
     /// The trace is only whole once the process has exited, so this is the only
-    /// way to a [`Cost`].
+    /// way to a complete [`Cost`].
     pub fn finish(mut self) -> Cost {
         ask_to_stop(&mut self.child, Stop::Terminate);
         let status = wait_within(&mut self.child, STOP_DEADLINE);
@@ -479,6 +500,14 @@ fn parse(line: &str) -> Option<Op> {
         // `fstat` names no path of its own; it describes a descriptor this trace
         // has already attributed, and counting it would double every open.
         "fstat" => None,
+        "clock_nanosleep" if !failed && line.contains(", 0, {") => {
+            let seconds = line.split_once("tv_sec=")?.1.split_once(',')?.0;
+            let nanos = line.split_once("tv_nsec=")?.1.split_once('}')?.0;
+            Some(Op::Sleep(std::time::Duration::new(
+                seconds.parse().ok()?,
+                nanos.parse().ok()?,
+            )))
+        }
         "execve" => Some(Op::Exec(quoted(line)?.to_owned())),
         _ => None,
     }
