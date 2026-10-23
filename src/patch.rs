@@ -424,8 +424,8 @@ mod tests {
         ] {
             assert!(Op::from_json(&refused).is_err(), "{refused}");
         }
-        // The root and an array element are not even writable as a set or a
-        // deletion: the wire refuses them, and no `Op` can hold them.
+        // The root cannot be set or deleted, and an array element cannot be
+        // deleted (it can be set): the wire refuses them, and no `Op` holds them.
         for refused in [
             json!({"p": [], "v": {}}),
             json!({"p": [], "d": true}),

@@ -40,6 +40,7 @@ use crate::filter::EventFilter;
 use crate::patch::{self, Op, Step};
 use crate::telemetry::RunTelemetry;
 
+// llmlint: ignore-block[invalid_states_unrepresentable] node owners here are the journal's own `labels.node` strings, not route identifiers: a live share must group records exactly as the engine's fold and a fresh read of this payload group them, by the label as recorded — including a label no route could name — or a patched payload would come out different from the one a fresh read serves. A `NodeId` is what a route accepts, and narrowing to it here would split or drop records the fold keeps together.
 /// Who owns a record in a payload.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum Owner {
@@ -94,6 +95,7 @@ pub(crate) struct Indexed {
     /// The last record that decides whether a historical exit still holds.
     last_boundary: Option<usize>,
 }
+// llmlint: ignore-end[invalid_states_unrepresentable]
 
 impl Indexed {
     /// Index every record `view` holds.

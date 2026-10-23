@@ -90,7 +90,7 @@ struct Shared {
     /// The sidebar's rows. Taken before a run or the state.
     sidebar: Mutex<Sidebar>,
     /// Each subscribed run's reading. The map is held only to look one up.
-    runs: Mutex<HashMap<String, Arc<Mutex<LiveRun>>>>,
+    runs: Mutex<HashMap<RunId, Arc<Mutex<LiveRun>>>>,
     polling: AtomicBool,
     trace: Option<PathBuf>,
     refold: Duration,
@@ -304,10 +304,14 @@ impl Visible {
     }
 
     fn run(&self) -> Option<&str> {
+        self.run_id().map(RunId::as_str)
+    }
+
+    fn run_id(&self) -> Option<&RunId> {
         match self {
             Self::Sidebar => None,
             Self::Detail { run, .. } | Self::Timeline { run, .. } | Self::Channel { run } => {
-                Some(run.as_str())
+                Some(run)
             }
         }
     }
@@ -327,7 +331,7 @@ impl Visible {
 #[derive(Default)]
 struct Sidebar {
     read: bool,
-    rows: BTreeMap<String, (Stamps, Arc<str>)>,
+    rows: BTreeMap<RunId, (Stamps, Arc<str>)>,
 }
 
 /// What a run's files look like: the journal, the bounded summary, the label
@@ -381,12 +385,8 @@ impl Sidebar {
             if stamps.0[0].is_none() {
                 continue;
             }
-            seen.insert(name.clone());
-            if self
-                .rows
-                .get(&name)
-                .is_some_and(|(held, _)| *held == stamps)
-            {
+            seen.insert(run.clone());
+            if self.rows.get(&run).is_some_and(|(held, _)| *held == stamps) {
                 continue;
             }
             let Ok(summary) = RunSummary::of(&paths) else {
@@ -395,25 +395,22 @@ impl Sidebar {
             let row: Arc<str> = payload::sidebar_row(&run, &summary, &paths)
                 .to_string()
                 .into();
-            let moved = self.rows.get(&name).is_none_or(|(_, held)| *held != row);
-            self.rows.insert(name, (stamps, Arc::clone(&row)));
+            let moved = self.rows.get(&run).is_none_or(|(_, held)| *held != row);
+            self.rows.insert(run, (stamps, Arc::clone(&row)));
             if moved && self.read {
                 changes.push(RowChange::Changed(row));
             }
         }
-        let gone: Vec<String> = self
+        let gone: Vec<RunId> = self
             .rows
             .keys()
-            .filter(|name| !seen.contains(*name))
+            .filter(|run| !seen.contains(*run))
             .cloned()
             .collect();
-        for name in gone {
-            self.rows.remove(&name);
+        for run in gone {
+            self.rows.remove(&run);
             if self.read {
-                // Every row was listed under a name that parsed as a run id.
-                if let Ok(run) = RunId::try_from(name.as_str()) {
-                    changes.push(RowChange::Removed(run));
-                }
+                changes.push(RowChange::Removed(run));
             }
         }
         self.read = true;
@@ -793,9 +790,9 @@ impl Hub {
         // The reading is held for this subscription from the boundary on: a tick
         // that let it go between its opening and now — when no subscription yet
         // wanted it — would leave the subscription with nothing refreshing it.
-        if let (Some(live), Some(run)) = (&live, visible.run()) {
+        if let (Some(live), Some(run)) = (&live, visible.run_id()) {
             lock(&shared.runs)
-                .entry(run.to_owned())
+                .entry(run.clone())
                 .or_insert_with(|| Arc::clone(live));
         }
         let seq = state.next;
@@ -884,7 +881,7 @@ impl Hub {
         };
         let visible = Visible::of(&view);
         let live = visible
-            .run()
+            .run_id()
             .and_then(|run| lock(&shared.runs).get(run).cloned());
         let sidebar = lock(&shared.sidebar);
         let mut run = live.as_ref().map(|live| lock(live));
@@ -962,14 +959,12 @@ impl Hub {
 
     /// The reading of `run`, opened if no subscription holds it yet.
     fn live_run(&self, run: &RunId) -> Result<Arc<Mutex<LiveRun>>, ApiError> {
-        if let Some(live) = lock(&self.0.runs).get(run.as_str()) {
+        if let Some(live) = lock(&self.0.runs).get(run) {
             return Ok(Arc::clone(live));
         }
         let opened = Arc::new(Mutex::new(LiveRun::open(&self.0.store, run)?));
         Ok(Arc::clone(
-            lock(&self.0.runs)
-                .entry(run.as_str().to_owned())
-                .or_insert(opened),
+            lock(&self.0.runs).entry(run.clone()).or_insert(opened),
         ))
     }
 
@@ -1011,11 +1006,8 @@ impl Hub {
                 .collect();
             // Runs no subscription shows any more are let go — under the lock a
             // subscription is registered under, so one being made keeps its run.
-            lock(&shared.runs).retain(|run, _| {
-                wanted
-                    .iter()
-                    .any(|visible| visible.run() == Some(run.as_str()))
-            });
+            lock(&shared.runs)
+                .retain(|run, _| wanted.iter().any(|visible| visible.run_id() == Some(run)));
             wanted
         };
         if wanted.is_empty() {
@@ -1093,7 +1085,7 @@ impl Hub {
                 );
                 // The run went away: its row's removal reaches every sidebar,
                 // and the view showing it is left as it was.
-                lock(&shared.runs).remove(run.run.as_str());
+                lock(&shared.runs).remove(&run.run);
                 return;
             }
         };

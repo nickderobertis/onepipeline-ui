@@ -1615,3 +1615,44 @@ fn a_view_a_switch_left_behind_is_no_longer_kept_current() {
         "no timeline entry was rendered for a view nobody shows: {after}"
     );
 }
+
+#[test]
+fn a_stream_or_a_retirement_the_contract_cannot_read_is_refused() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let subscribed = live.subscribe(&json!({ "view": { "type": "sidebar" } }));
+    let subscription = subscribed["subscription"].as_str().expect("an id");
+    for path in [
+        // A view's subscription says what it shows; nothing else narrows it.
+        format!("/api/v2/events?subscription={subscription}&run_id={run}"),
+        format!("/api/v2/events?subscription={subscription}&filter=planner"),
+        // An id that is not one this process could have minted.
+        "/api/v2/events?subscription=not-a-subscription".to_owned(),
+        "/api/v2/events?subscription=".to_owned(),
+        format!(
+            "/api/v2/events?subscription={}",
+            subscription.to_uppercase()
+        ),
+    ] {
+        let refused = http::get(live.address(), &path);
+        assert_eq!(refused.status, 400, "{path}: {}", refused.body);
+        assert_eq!(
+            refused.json()["error"]["code"],
+            "invalid_subscription",
+            "{path}"
+        );
+    }
+    // A Last-Event-ID that is not text is refused rather than read as none.
+    let refused = http::get_with_header(
+        live.address(),
+        &format!("/api/v2/events?subscription={subscription}"),
+        "Last-Event-ID",
+        b"\xff\xfe",
+    );
+    assert_eq!(refused.status, 400, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], "invalid_subscription");
+    // And a retirement naming no subscription id is refused, never a no-op.
+    let refused = http::delete(live.address(), "/api/v2/subscriptions/not-a-subscription");
+    assert_eq!(refused.status, 400, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], "invalid_subscription");
+}

@@ -235,6 +235,31 @@ pub fn get(address: SocketAddr, path: &str) -> Response {
     }
 }
 
+/// `GET path` with one header whose value is the bytes given — which need not
+/// be text — read to completion.
+pub fn get_with_header(address: SocketAddr, path: &str, name: &str, value: &[u8]) -> Response {
+    let mut stream = connect(address);
+    stream
+        .set_read_timeout(Some(TIMEOUT))
+        .expect("read timeout");
+    let mut request =
+        format!("GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n{name}: ")
+            .into_bytes();
+    request.extend_from_slice(value);
+    request.extend_from_slice(b"\r\n\r\n");
+    stream.write_all(&request).expect("write the request");
+    stream.flush().expect("flush the request");
+    let mut reader = BufReader::new(stream);
+    let (status, chunked) = head(&mut reader);
+    let mut raw = Vec::new();
+    reader.read_to_end(&mut raw).expect("read the body");
+    let body = String::from_utf8_lossy(&raw).into_owned();
+    Response {
+        status,
+        body: if chunked { dechunk(&body) } else { body },
+    }
+}
+
 /// A chunked body, joined. Sizes are hex, each chunk ends with CRLF, and a zero
 /// size ends the body.
 fn dechunk(raw: &str) -> String {
