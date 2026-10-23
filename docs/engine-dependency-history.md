@@ -510,3 +510,9 @@ The timeline reads its canonical events through the crate's `payload::Run`, so
 `payload::timeline` takes the view by shared reference again. This changes the
 engine types carried by ApiError::from_engine and the other engine-typed public
 items.
+0.87.1 is engine-incremental-read's published release, which this branch
+adopts in place of 0.87.0. Its library source is 0.87.0's: the release differs
+only in its version and in the engine's own test harness, so the linked
+dependencies, routes, MSRV and every served payload are unchanged beyond the
+release `/healthz` reports. This changes the engine types carried by
+ApiError::from_engine and the other engine-typed public items.

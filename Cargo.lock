@@ -1675,9 +1675,9 @@ dependencies = [
 
 [[package]]
 name = "onepipeline"
-version = "0.87.0"
+version = "0.87.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c7d291cc7eba18461cc9d80838a252e0985f4ee9db3a83a95d0f70a21425710"
+checksum = "95ad914cf4ad75baebe532b67b97896414d1d4bb23f8886de5a02fdbfff4b214"
 dependencies = [
  "async-trait",
  "clap",
