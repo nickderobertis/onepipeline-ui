@@ -3244,7 +3244,12 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
       .locator(".graph-timeline")
       .getByTestId("timeline-axis")
       .evaluateAll((axes) =>
-        axes.map((axis) => (axis as HTMLElement).innerText),
+        axes.map((axis) => {
+          if (!(axis instanceof HTMLElement)) {
+            throw new Error("Timeline axis must be an HTML element");
+          }
+          return axis.innerText;
+        }),
       );
     expect(ticks.length).toBeGreaterThan(3);
     expect(new Set(ticks).size).toBe(1);
