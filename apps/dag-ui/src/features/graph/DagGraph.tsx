@@ -6,7 +6,13 @@
 // journeys to catch what moved. The two hooks it does have — useConversation and
 // useStickyBottom — are the ones that were extracted upstream.
 import { layoutDag } from "@onepipeline-ui/dag-layout";
-import { Background, Controls, type Edge, ReactFlow } from "@xyflow/react";
+import {
+  Background,
+  Controls,
+  type Edge,
+  Position,
+  ReactFlow,
+} from "@xyflow/react";
 import { useMemo } from "react";
 import { isUnhealthy, type NodeView, nodeReason } from "../../lib/run-model";
 import { type DagFlowNode, DagNodeCard } from "./DagNodeCard";
@@ -79,6 +85,29 @@ export function DagGraph({
           // size, so the card is drawn at it from the first frame.
           width: node.width,
           height: node.height,
+          measured: { width: node.width, height: node.height },
+          // React Flow also gates edges on handle bounds. These point anchors
+          // are already known by the routed layout; waiting for ResizeObserver
+          // can leave visible cards without dependencies until it delivers them.
+          // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] These anchors only initialize React Flow. DagRoutedEdge ignores its calculated endpoint coordinates and draws the authoritative layout edge.points; nodesConnectable=false disables connection gestures. Their positions cannot change the routed path or create a second geometry contract.
+          handles: [
+            {
+              type: "target",
+              position: Position.Left,
+              x: 0,
+              y: node.height / 2,
+              width: 0,
+              height: 0,
+            },
+            {
+              type: "source",
+              position: Position.Right,
+              x: node.width,
+              y: node.height / 2,
+              width: 0,
+              height: 0,
+            },
+          ],
         }),
       ),
       edges: layout.edges.map(
