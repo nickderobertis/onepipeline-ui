@@ -32,10 +32,12 @@ function variant(
     kind,
     ...(view === undefined ? {} : { view }),
     tabs,
+    load_s: Array.from({ length: tabs }, () => 3),
     requests_per_min: n,
     requests_per_min_by_route: { "GET /api/v2/events?after&subscription": n },
     mb_per_min: n / 10,
     bytes_per_min_by_route: {},
+    frames_per_min: n * 100,
     frames_by_type: {},
     repeated_snapshot: {
       in_window: resent,
@@ -58,7 +60,14 @@ function variant(
             p50_s: n / 20,
             p95_s: n / 10,
             max_s: n / 5,
-            during_burst: { p95_s: n / 10 },
+            during_burst: {
+              records: 400,
+              shown: 400,
+              never_shown: 0,
+              p50_s: n / 20,
+              p95_s: n / 10,
+              max_s: n / 5,
+            },
             frame_arrival: { p50_s: 0.05, p95_s: 0.1, max_s: 0.2 },
           },
         }
@@ -158,7 +167,7 @@ test("telemetry missing a variant, or carrying a figure no measurement makes, is
   delete missing.variants["stopped-node"];
   const negative = telemetry();
   negative.variants["live-graph"] = {
-    ...(negative.variants["live-graph"] as object),
+    ...variant("live", "graph", 1, 1),
     requests_per_min: -1,
   };
   for (const document of [missing, negative, { schema_version: 2 }])

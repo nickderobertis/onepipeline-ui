@@ -56,6 +56,13 @@ import { z } from "zod";
 import harnessBinaries from "../fixtures/harness-binaries.json" with {
   type: "json",
 };
+import {
+  type Measured,
+  telemetrySchema,
+  VARIANTS,
+  type Variant,
+  variantSchema,
+} from "./telemetry";
 
 const REPO = resolve(import.meta.dirname, "../../..");
 const WRITER = join(import.meta.dirname, "writer.mjs");
@@ -72,40 +79,6 @@ const WINDOW_MS =
 const RATE = 50;
 const BURST = 400;
 const CLOCK_TICKS = 100;
-
-type Kind = "nothing-open" | "settled" | "stopped" | "live" | "host";
-interface Variant {
-  readonly name: string;
-  readonly kind: Kind;
-  readonly view?: "graph" | "overall" | "node" | "channel";
-  readonly tabs: number;
-}
-
-const VIEWS = ["graph", "overall", "node"] as const;
-const VARIANTS: readonly Variant[] = [
-  { name: "nothing-open", kind: "nothing-open", tabs: 1 },
-  ...VIEWS.map((view) => ({
-    name: `settled-${view}`,
-    kind: "settled" as const,
-    view,
-    tabs: 1,
-  })),
-  ...VIEWS.map((view) => ({
-    name: `stopped-${view}`,
-    kind: "stopped" as const,
-    view,
-    tabs: 1,
-  })),
-  ...[...VIEWS, "channel" as const].flatMap((view) =>
-    [1, 2].map((tabs) => ({
-      name: `live-${view}${tabs === 1 ? "" : "-2-tabs"}`,
-      kind: "live" as const,
-      view,
-      tabs,
-    })),
-  ),
-  { name: "host", kind: "host", tabs: 1 },
-];
 
 /** A developer's look at some variants: each name one of the variants above. */
 const ONLY = process.env.LOAD_ONLY?.split(",").map((name) =>
@@ -510,7 +483,7 @@ const appendedSchema = z.object({
   burst: z.boolean(),
 });
 
-async function measure(browser: Browser, variant: Variant) {
+async function measure(browser: Browser, variant: Variant): Promise<Measured> {
   const served = await serveFresh(variant.name);
   const contexts: BrowserContext[] = [];
   try {
@@ -524,10 +497,30 @@ async function measure(browser: Browser, variant: Variant) {
       contexts.push(context);
       const page = await context.newPage();
       await page.addInitScript(OBSERVER);
-      recorders.push(await record(page));
+      const recorder = await record(page);
+      recorders.push(recorder);
+      const subscribed = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v2/subscriptions" &&
+          response.request().method() === "POST",
+      );
       await page.goto(`${served.origin}${address(served, variant)}`);
       loads.push(await loaded(page, variant));
       pages.push(page);
+      // The byte accounting held to a response of known size: what the
+      // recorder counted for the page's subscription is that answer's body,
+      // give or take its chunk framing.
+      const body = (await (await subscribed).body()).length;
+      const counted = recorder.bytes
+        .filter(({ route }) => route === "POST /api/v2/subscriptions")
+        .reduce((sum, { bytes: count }) => sum + count, 0);
+      expect(
+        counted,
+        "bytes counted for the subscription",
+      ).toBeGreaterThanOrEqual(body);
+      expect(counted, "bytes counted for the subscription").toBeLessThan(
+        body + 4_096,
+      );
     }
     const [page, recorder] = [pages[0], recorders[0]];
     if (page === undefined || recorder === undefined)
@@ -573,7 +566,15 @@ async function measure(browser: Browser, variant: Variant) {
       variant.view === "node"
         ? Promise.all(pages.map((tab) => keepRunsOpen(tab, () => !watching)))
         : Promise.resolve([]);
-    await new Promise((resolveExit) => writer.once("exit", resolveExit));
+    const [code, signal] = await new Promise<[number | null, string | null]>(
+      (resolveExit) =>
+        writer.once("exit", (exited, killed) => resolveExit([exited, killed])),
+    );
+    // A workload that did not run to its end is no measurement of it.
+    if (code !== 0)
+      throw new Error(
+        `the workload writer for ${variant.name} ended ${signal ?? `with ${code}`}`,
+      );
     const end = Math.max(Date.now(), start + WINDOW_MS);
     const cpu = treeCpuSeconds(pid) - cpuStart;
     // A moment for what was appended at the very end to land.
@@ -668,7 +669,7 @@ async function measure(browser: Browser, variant: Variant) {
       };
     }
     const received = bytes.reduce((sum, { bytes: count }) => sum + count, 0);
-    return {
+    return variantSchema.parse({
       kind: variant.kind,
       ...(variant.view === undefined ? {} : { view: variant.view }),
       tabs: variant.tabs,
@@ -691,7 +692,7 @@ async function measure(browser: Browser, variant: Variant) {
         cores_per_tab: round(cpu / (WINDOW_MS / 1000) / variant.tabs, 4),
       },
       ...(lag === undefined ? {} : { lag }),
-    };
+    });
   } finally {
     for (const context of contexts) await context.close();
     await stopServing(served);
@@ -701,7 +702,7 @@ async function measure(browser: Browser, variant: Variant) {
 test("request load, frames, lag and server CPU in every page state", async ({
   browser,
 }) => {
-  const results: Record<string, unknown> = {};
+  const results: Record<string, Measured> = {};
   for (const variant of VARIANTS) {
     if (ONLY !== undefined && !ONLY.includes(variant.name)) continue;
     const measured = await measure(browser, variant);
@@ -726,28 +727,22 @@ test("request load, frames, lag and server CPU in every page state", async ({
   // A partial run is a developer's look, never the recorded telemetry.
   if (ONLY !== undefined) return;
   mkdirSync(join(import.meta.dirname, "../telemetry"), { recursive: true });
-  writeFileSync(
-    TELEMETRY,
-    `${JSON.stringify(
-      {
-        schema_version: 1,
-        recorded_at: new Date().toISOString(),
-        commit,
-        dirty,
-        window_s: WINDOW_MS / 1000,
-        workload: {
-          runs: 150,
-          projects: 30,
-          other_live_runs: 10,
-          records_per_minute_per_live_run: RATE,
-          burst_records: BURST,
-          open_live_run_records_at_start: 116_000,
-          fresh_server_and_corpus_per_variant: true,
-        },
-        variants: results,
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  const document = telemetrySchema.parse({
+    schema_version: 1,
+    recorded_at: new Date().toISOString(),
+    commit,
+    dirty,
+    window_s: WINDOW_MS / 1000,
+    workload: {
+      runs: 150,
+      projects: 30,
+      other_live_runs: 10,
+      records_per_minute_per_live_run: RATE,
+      burst_records: BURST,
+      open_live_run_records_at_start: 116_000,
+      fresh_server_and_corpus_per_variant: true,
+    },
+    variants: results,
+  });
+  writeFileSync(TELEMETRY, `${JSON.stringify(document, null, 2)}\n`);
 });

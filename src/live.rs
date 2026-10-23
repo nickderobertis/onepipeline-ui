@@ -123,8 +123,21 @@ struct Subscription {
     /// The cursor before the oldest retained frame.
     boundary: u64,
     frames: VecDeque<Retained>,
-    connection: Option<mpsc::Sender<Event>>,
-    disconnected_at: Option<Instant>,
+    link: Link,
+}
+
+/// Whether a subscription's stream is open: connected to the sender its
+/// frames go to, or disconnected since an instant its grace runs from — never
+/// both, and never neither.
+enum Link {
+    Connected(mpsc::Sender<Event>),
+    Disconnected(Instant),
+}
+
+impl Link {
+    fn drop_now() -> Self {
+        Self::Disconnected(Instant::now())
+    }
 }
 
 #[derive(Clone)]
@@ -437,7 +450,7 @@ struct LiveRun {
     telemetry: Folded,
     agents: Option<Agents>,
     agents_stamp: Option<(u64, SystemTime)>,
-    liveness: &'static str,
+    liveness: onepipeline::views::DriverLiveness,
 }
 
 /// A payload, and the instant it was last read at — the envelope's
@@ -488,7 +501,7 @@ impl LiveRun {
         Ok(Self {
             run: run.clone(),
             telemetry: Folded::of(&view),
-            liveness: view.liveness().as_str(),
+            liveness: view.liveness(),
             indexed,
             declared,
             details: HashMap::new(),
@@ -798,10 +811,9 @@ impl Hub {
                 last: seq,
                 boundary: seq,
                 frames: VecDeque::new(),
-                connection: None,
                 // Recording from now, for at most the grace, until a stream
                 // connects.
-                disconnected_at: Some(Instant::now()),
+                link: Link::drop_now(),
             },
         );
         drop(state);
@@ -939,8 +951,7 @@ impl Hub {
             .subscriptions
             .get_mut(&subscription)
             .expect("held above");
-        held.connection = Some(sender);
-        held.disconnected_at = None;
+        held.link = Link::Connected(sender);
         drop(state);
         drop(run);
         drop(sidebar);
@@ -978,7 +989,7 @@ impl Hub {
             if self.0.stopping.load(Ordering::Relaxed) {
                 // Every stream ends, so a shutdown is not held open by a tab.
                 for held in lock(&self.0.state).subscriptions.values_mut() {
-                    held.connection = None;
+                    held.link = Link::drop_now();
                 }
                 return;
             }
@@ -1068,7 +1079,7 @@ impl Hub {
             run.agents_stamp = agents_stamp;
             run.agents = onepipeline::verbs::agents(&paths, AgentScope::Run).ok();
         }
-        let liveness = run.view.liveness().as_str();
+        let liveness = run.view.liveness();
         let liveness_moved = liveness != run.liveness;
         run.liveness = liveness;
         // The whole-journal fold is caught up on a tick that carries no change,
@@ -1261,12 +1272,11 @@ impl Hub {
                 held.boundary = oldest.seq;
             }
         }
-        if let Some(connection) = &held.connection {
+        if let Link::Connected(connection) = &held.link {
             if connection.try_send(frame_event(&id, kind, &data)).is_err() {
                 // Gone, or too far behind: it reconnects and replays from what
                 // is retained.
-                held.connection = None;
-                held.disconnected_at = Some(Instant::now());
+                held.link = Link::drop_now();
             }
         }
     }
@@ -1326,21 +1336,15 @@ impl State {
     fn expire(&mut self, grace: Duration) {
         let now = Instant::now();
         for held in self.subscriptions.values_mut() {
-            if held
-                .connection
-                .as_ref()
-                .is_some_and(mpsc::Sender::is_closed)
-            {
-                held.connection = None;
-                held.disconnected_at = Some(now);
+            if matches!(&held.link, Link::Connected(sender) if sender.is_closed()) {
+                held.link = Link::Disconnected(now);
             }
         }
         let expired: Vec<SubscriptionId> = self
             .subscriptions
             .iter()
             .filter(|(_, held)| {
-                held.disconnected_at
-                    .is_some_and(|at| now.duration_since(at) > grace)
+                matches!(held.link, Link::Disconnected(at) if now.duration_since(at) > grace)
             })
             .map(|(id, _)| *id)
             .collect();

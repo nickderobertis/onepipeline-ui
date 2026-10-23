@@ -1635,6 +1635,23 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       "contract validation",
     );
     expect(screen.getByText("dashboard")).toBeInTheDocument();
+    // And a well-formed frame after it is not applied: the stream stopped.
+    act(() =>
+      push("run.changed", {
+        row: {
+          id: LIVE_RUN,
+          name: LIVE_RUN,
+          group: null,
+          kind: null,
+          state: "settled",
+          nodes: { total: 8, done: 8, failed: 0, running: 0 },
+          updated_at: "2026-07-26T12:31:00.000Z",
+        },
+      }),
+    );
+    expect(
+      screen.getByRole("button", { name: RegExp(LIVE_RUN) }),
+    ).not.toHaveTextContent("8 done");
   });
 
   test("surfaces a patch that does not apply rather than guessing at it", async () => {

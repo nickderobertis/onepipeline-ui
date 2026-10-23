@@ -178,15 +178,27 @@ const appendsSchema = z.record(
  */
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [verb, ...journals] = process.argv.slice(2);
+  const usage = (why: string): never => {
+    console.error(
+      `journal.ts: ${why}\nusage: journal.ts append < {journal: [lines]} | receipt JOURNAL…`,
+    );
+    process.exit(2);
+  };
   if (verb === "receipt" && journals.length > 0) {
     for (const journal of journals) receiptFor(journal);
   } else if (verb === "append" && journals.length === 0) {
-    const appends = appendsSchema.parse(JSON.parse(readFileSync(0, "utf8")));
-    for (const [journal, lines] of Object.entries(appends))
-      appendLines(journal, lines);
+    let input: unknown;
+    try {
+      input = JSON.parse(readFileSync(0, "utf8"));
+    } catch {
+      usage("standard input is not JSON");
+    }
+    const appends = appendsSchema.safeParse(input);
+    if (!appends.success) usage(appends.error.message);
+    else
+      for (const [journal, lines] of Object.entries(appends.data))
+        appendLines(journal, lines);
   } else {
-    throw new Error(
-      "usage: journal.ts append < {journal: [lines]} | receipt JOURNAL…",
-    );
+    usage("no such command");
   }
 }

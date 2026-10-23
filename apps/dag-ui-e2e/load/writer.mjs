@@ -41,8 +41,23 @@ const optionsSchema = z
     "the burst lands inside the window",
   );
 
+/** The options, or a usage error — exit 2 — naming what is wrong with them. */
+function optionsOf(text) {
+  let parsed;
+  try {
+    parsed = optionsSchema.safeParse(JSON.parse(text ?? "null"));
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed?.success) return parsed.data;
+  console.error(
+    `writer.mjs: ${parsed?.error.message ?? "the options are not JSON"}\nusage: writer.mjs '<json options>'`,
+  );
+  process.exit(2);
+}
+
 const { root, log, durationMs, rate, runs, burst, burstRun, burstAt, openRun } =
-  optionsSchema.parse(JSON.parse(process.argv[2] ?? "null"));
+  optionsOf(process.argv[2]);
 const HOST = "a-recording-host";
 
 const state = new Map(

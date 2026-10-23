@@ -698,3 +698,51 @@ test("a page that goes away retires its subscription rather than leaving it to e
   });
   await context.close();
 });
+
+test("a server that restarted is recovered from: the page resubscribes from what it applied and is told it was re-sent whole", async ({
+  page,
+}) => {
+  const wire = await watch(page);
+  const run = facts.openLiveRun;
+  const node = facts.liveNode;
+  await page.goto(`${server.origin}${address(run, "graph", node)}`);
+  await shown(page, "graph", node);
+  await streamsAnew(wire, undefined);
+  const before = streaming(wire);
+  // The server goes away and comes back as another process, over its corpus
+  // written afresh: the subscription the page held is one it never issued.
+  await server.stopServing();
+  await server.serveRebuilt();
+  // The stream is refused as unavailable, and the page creates the same view
+  // again, naming the last frame it applied …
+  await expect
+    .poll(
+      () =>
+        wire.requests.some(
+          ({ method, path, body }) =>
+            method === "POST" &&
+            path === API_V2_PATHS.subscriptions &&
+            z.object({ resume: z.string() }).safeParse(body).success,
+        ),
+      { message: "the page never resubscribed with resume", timeout: 30_000 },
+    )
+    .toBe(true);
+  // … says what it was sent, and streams the new subscription.
+  await expect(
+    page.getByRole("status").filter({ hasText: "re-sent whole" }),
+  ).toContainText("server-restarted");
+  await streamsAnew(wire, before);
+  // And it is live again: a record appended now is rendered.
+  const seq = recordActivity(
+    server,
+    run,
+    node,
+    `after the restart ${Date.now()}`,
+  );
+  await expect
+    .poll(() => renderedSeq(page, "graph"), {
+      message: `the restarted page never rendered record ${seq}`,
+      timeout: FRAME_PATIENCE,
+    })
+    .toBeGreaterThanOrEqual(seq);
+});

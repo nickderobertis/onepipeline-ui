@@ -371,7 +371,9 @@ export function buildLoadCorpus(root, scaleName = "host") {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [root, scale = "host"] = process.argv.slice(2);
-  if (root === undefined || (scale !== "host" && scale !== "journey"))
-    throw new Error("usage: corpus.mjs ROOT [host|journey]");
+  if (root === undefined || (scale !== "host" && scale !== "journey")) {
+    console.error("usage: corpus.mjs ROOT [host|journey]");
+    process.exit(2);
+  }
   console.log(JSON.stringify(buildLoadCorpus(root, scale)));
 }
