@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
-import { appendRecords } from "./load/journal.mjs";
+import { appendRecords } from "./load/journal";
 
 test("Remote retains publication and release and follows each check's destination", async ({
   page,

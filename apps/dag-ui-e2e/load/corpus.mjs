@@ -19,7 +19,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { receiptFor } from "./journal.mjs";
+import { receiptFor } from "./journal.ts";
 
 export const OPEN_LIVE_RUN = "load-live-open";
 export const SETTLED_OPEN_RUN = "load-settled-000";
@@ -370,8 +370,8 @@ export function buildLoadCorpus(root, scaleName = "host") {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const [root, scale] = process.argv.slice(2);
-  if (root === undefined)
+  const [root, scale = "host"] = process.argv.slice(2);
+  if (root === undefined || (scale !== "host" && scale !== "journey"))
     throw new Error("usage: corpus.mjs ROOT [host|journey]");
   console.log(JSON.stringify(buildLoadCorpus(root, scale)));
 }

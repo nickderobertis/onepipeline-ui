@@ -1,12 +1,14 @@
 import {
   API_V2_PATHS,
   API_V2_QUERY,
+  projectListSchema,
   type SidebarRow,
   type SubscriptionView,
   subscriptionViewSchema,
 } from "@onepipeline-ui/dag-model";
 import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { vi } from "vitest";
+import { z } from "zod";
 import {
   channelQueue,
   HISTORY_RUN,
@@ -352,9 +354,10 @@ async function subscriptionResponder(
   next: () => number,
   views: SubscriptionView[],
 ): Promise<Response> {
-  const parsed = subscriptionViewSchema.safeParse(
-    (body as { view?: unknown } | undefined)?.view,
-  );
+  const parsed = z
+    .object({ view: subscriptionViewSchema })
+    .transform(({ view }) => view)
+    .safeParse(body);
   if (!parsed.success)
     return Response.json(
       { error: { code: "invalid_subscription", message: "a malformed view" } },
@@ -373,9 +376,9 @@ async function subscriptionResponder(
   };
   const projects = await read(API_V2_PATHS.projects);
   if (!projects.ok) return projects;
-  const sidebar = (
-    (await projects.json()) as { projects: { runs: [] }[] }
-  ).projects.flatMap((group) => group.runs.map(sidebarRowOf));
+  const sidebar = projectListSchema
+    .parse(await projects.json())
+    .projects.flatMap((group) => group.runs.map(sidebarRowOf));
   const filter = "filter" in view && view.filter ? { filter: view.filter } : {};
   let visible: Record<string, unknown> = { type: "sidebar" };
   if (view.type !== "sidebar") {

@@ -235,9 +235,10 @@ function sameView(
 
 /** The header's live activity line, as the detail carries it. */
 function activityOf(detail: RunDetail | undefined): readonly LiveActivity[] {
-  const candidate = (detail?.run as Record<string, unknown> | undefined)
-    ?.live_activity;
+  const candidate = detail?.run.live_activity;
   if (candidate === undefined) return [];
+  // Patched in place since the snapshot was validated, so read through the
+  // schema again: a malformed entry is no activity line rather than a crash.
   const parsed = liveActivityListSchema.safeParse(candidate);
   return parsed.success ? parsed.data : [];
 }

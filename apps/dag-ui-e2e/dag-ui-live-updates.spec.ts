@@ -5,7 +5,7 @@
  * Every journey here drives the shipped view against the real
  * `onepipeline-api serve --ui` over the load corpus's shapes at the journeys'
  * size (`--live-updates-corpus`), grows journals through the one fixture writer
- * the engine's receipts are held to (`load/journal.mjs`), and reads what the
+ * the engine's receipts are held to (`load/journal.ts`), and reads what the
  * page sent off the browser's own requests and what it was sent off the
  * DevTools protocol's record of each server-sent frame. Every wait for a frame
  * is bounded and names the frame it was waiting for.
@@ -21,7 +21,7 @@ import {
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
-import { appendRecords } from "./load/journal.mjs";
+import { appendRecords } from "./load/journal";
 
 /** How long a journey waits for one frame before naming it missing. */
 const FRAME_PATIENCE = 15_000;
@@ -121,6 +121,22 @@ async function frameArrives(
   if (found?.frame === undefined) throw new Error(`no ${name} frame arrived`);
   return found.frame;
 }
+
+// llmlint: ignore-block[e2e_uses_accessible_selectors] the journal sequence number is the property under test and no accessible surface carries one: a row is identified to a reader by its label, which a run repeats across records, and the number is what says *which* record reached the page. These are the attributes the view writes for exactly this reading — on each node-timeline row, and on the Graph and Overall roots once the change is rendered — and every other assertion in this file goes through roles and names.
+/** The node timeline's row for the record numbered `seq`. */
+const rowOf = (page: Page, seq: number) =>
+  page.locator(`article[data-journal-seq="${seq}"]`);
+
+/** The journal sequence number the Graph or Overall view says it has rendered. */
+async function renderedSeq(page: Page, view: string): Promise<number> {
+  const root = page.locator(
+    view === "graph"
+      ? ".graph-wrap[data-journal-seq]"
+      : ".overall-view[data-journal-seq]",
+  );
+  return Number(await root.getAttribute("data-journal-seq"));
+}
+// llmlint: ignore-end[e2e_uses_accessible_selectors]
 
 /** The journal of `run` in the server's corpus. */
 const journalOf = (server: FixtureServer, run: string) =>
@@ -384,23 +400,22 @@ test("a record appended to the open live run reaches every view as a patch, with
     const seq = recordActivity(server, run, node, marker);
     if (view === "node") {
       // The node timeline's row for that record appears, carrying its number.
-      await expect(
-        page.locator(`article[data-journal-seq="${seq}"]`),
-      ).toHaveCount(1, { timeout: FRAME_PATIENCE });
+      await expect(rowOf(page, seq)).toHaveCount(1, {
+        timeout: FRAME_PATIENCE,
+      });
     } else {
       // The view's root says it has rendered that record's change.
-      const root = page.locator(
-        view === "graph" ? ".graph-wrap" : ".overall-view",
-      );
       await expect
-        .poll(async () => Number(await root.getAttribute("data-journal-seq")), {
+        .poll(() => renderedSeq(page, view), {
           message: `the ${view} view never rendered record ${seq}; it was sent ${JSON.stringify(wire.frames.filter(({ at }) => at >= since).map(({ type, frame }) => [type, frame === undefined]))}`,
           timeout: FRAME_PATIENCE,
         })
         .toBeGreaterThanOrEqual(seq);
     }
     // And the header's activity line says what the node just did.
-    await expect(page.locator(".last-activity")).toContainText(marker);
+    await expect(
+      page.getByRole("button", { name: `${node}: Bash ${marker}` }),
+    ).toBeVisible();
     await frameArrives(
       wire,
       "detail.patch",
@@ -568,12 +583,9 @@ test("a dropped stream resumes from its last frame, and every change made meanwh
     node,
     `before the drop ${Date.now()}`,
   );
-  await expect(page.locator(`article[data-journal-seq="${warm}"]`)).toHaveCount(
-    1,
-    {
-      timeout: FRAME_PATIENCE,
-    },
-  );
+  await expect(rowOf(page, warm)).toHaveCount(1, {
+    timeout: FRAME_PATIENCE,
+  });
   const lastFrame = wire.frames.at(-1)?.frame?.id;
   expect(lastFrame).toBeDefined();
 
@@ -601,19 +613,15 @@ test("a dropped stream resumes from its last frame, and every change made meanwh
     .at(-1);
   expect(new URLSearchParams(resumed?.search).get("after")).toBe(lastFrame);
   // … and each record made meanwhile is on the timeline exactly once.
-  await expect(
-    page.locator(`article[data-journal-seq="${away.at(-1)}"]`),
-  ).toHaveCount(1, { timeout: FRAME_PATIENCE });
+  await expect(rowOf(page, away.at(-1) ?? -1)).toHaveCount(1, {
+    timeout: FRAME_PATIENCE,
+  });
   await expandRuns(page);
   for (const seq of away)
-    await expect(
-      page.locator(`article[data-journal-seq="${seq}"]`),
-    ).toHaveCount(1, { timeout: FRAME_PATIENCE });
+    await expect(rowOf(page, seq)).toHaveCount(1, { timeout: FRAME_PATIENCE });
   await page.waitForTimeout(1_000);
   for (const seq of [warm, ...away])
-    await expect(
-      page.locator(`article[data-journal-seq="${seq}"]`),
-    ).toHaveCount(1);
+    await expect(rowOf(page, seq)).toHaveCount(1);
   expect(
     wire.frames.filter(({ type }) => type === "snapshot" || type === "reset"),
   ).toEqual([]);
@@ -650,4 +658,43 @@ test("a dropped stream resumes from its last frame, and every change made meanwh
       expect(patched.has("timeline.patch")).toBe(false);
     if (view !== "channel") expect(patched.has("channel.patch")).toBe(false);
   }
+});
+
+test("a page that goes away retires its subscription rather than leaving it to expire", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const wire = await watch(page);
+  await page.goto(
+    `${server.origin}${address(facts.openLiveRun, "graph", facts.liveNode)}`,
+  );
+  await shown(page, "graph", facts.liveNode);
+  await streamsAnew(wire, undefined);
+  const subscription = streaming(wire);
+  await page.close({ runBeforeUnload: true });
+  // Retired as the page went, within seconds — not left recording for the
+  // two minutes a dropped connection is kept, which would answer `expired`.
+  await expect
+    .poll(
+      async () =>
+        (
+          await fetch(
+            `${server.origin}/api/v2/events?subscription=${subscription}`,
+          )
+        ).status,
+      {
+        message: "the closed page's subscription was not retired",
+        timeout: FRAME_PATIENCE,
+      },
+    )
+    .toBe(410);
+  const gone = await fetch(
+    `${server.origin}/api/v2/events?subscription=${subscription}`,
+  );
+  expect(await gone.json()).toStrictEqual({
+    code: "subscription-unavailable",
+    reason: "unknown",
+  });
+  await context.close();
 });

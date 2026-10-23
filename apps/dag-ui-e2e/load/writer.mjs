@@ -6,7 +6,7 @@
  * live run at `rate` records per minute, staggered so ten runs at one rate do
  * not land in one poll, and one burst of `burst` records to `burstRun` in one
  * write `burstAt` milliseconds into the window. Every record goes through the
- * single fixture writer (`journal.mjs`), receipt and all, and every record of
+ * single fixture writer (`journal.ts`), receipt and all, and every record of
  * the run the page has open is logged with its journal sequence number and the
  * wall-clock instant its write returned — the append the lag is measured from.
  *
@@ -15,12 +15,34 @@
  */
 
 import { appendFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { appendRecords } from "./journal.mjs";
+import { isAbsolute, join } from "node:path";
+import { z } from "zod";
+import { appendRecords } from "./journal.ts";
 
-const options = JSON.parse(process.argv[2]);
+const runName = z.string().regex(/^[A-Za-z0-9._-]+$/u);
+const optionsSchema = z
+  .object({
+    root: z.string().refine(isAbsolute, "root is an absolute path"),
+    log: z.string().refine(isAbsolute, "log is an absolute path"),
+    durationMs: z.number().int().positive(),
+    rate: z.number().positive().finite(),
+    runs: z.array(z.object({ run: runName, node: runName })).min(1),
+    burst: z.number().int().nonnegative(),
+    burstRun: runName,
+    burstAt: z.number().int().nonnegative(),
+    openRun: runName,
+  })
+  .refine(
+    (options) => options.runs.some(({ run }) => run === options.burstRun),
+    "the burst lands on a run this writer grows",
+  )
+  .refine(
+    (options) => options.burstAt <= options.durationMs,
+    "the burst lands inside the window",
+  );
+
 const { root, log, durationMs, rate, runs, burst, burstRun, burstAt, openRun } =
-  options;
+  optionsSchema.parse(JSON.parse(process.argv[2] ?? "null"));
 const HOST = "a-recording-host";
 
 const state = new Map(

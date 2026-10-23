@@ -7,7 +7,7 @@ import {
 } from "@onepipeline-ui/dag-model";
 import { expect, test } from "@playwright/test";
 import { startFixtureServer } from "./fixture-server";
-import { appendRecords } from "./load/journal.mjs";
+import { appendRecords } from "./load/journal";
 
 test("groups effective labels and copy origins, filters open kinds in the URL, and orders by activity", async ({
   page,

@@ -48,19 +48,26 @@ import {
   type Browser,
   type BrowserContext,
   type CDPSession,
+  expect,
   type Page,
   test,
 } from "@playwright/test";
+import { z } from "zod";
 import harnessBinaries from "../fixtures/harness-binaries.json" with {
   type: "json",
 };
-import { buildLoadCorpus } from "./corpus.mjs";
 
 const REPO = resolve(import.meta.dirname, "../../..");
 const WRITER = join(import.meta.dirname, "writer.mjs");
 const TELEMETRY = join(import.meta.dirname, "../telemetry/request-load.json");
-const WINDOW_MS = Number(process.env.LOAD_WINDOW_S ?? "120") * 1000;
-const ONLY = process.env.LOAD_ONLY?.split(",");
+const CORPUS = join(import.meta.dirname, "corpus.mjs");
+/** How long each variant is watched once loaded: whole seconds, 120 by default. */
+const WINDOW_MS =
+  z.coerce
+    .number()
+    .int()
+    .positive()
+    .parse(process.env.LOAD_WINDOW_S ?? "120") * 1000;
 /** Records per minute on every live run: the p90 active-minute rate of this host. */
 const RATE = 50;
 const BURST = 400;
@@ -100,7 +107,15 @@ const VARIANTS: readonly Variant[] = [
   { name: "host", kind: "host", tabs: 1 },
 ];
 
-// ---------------------------------------------------------------- the server
+/** A developer's look at some variants: each name one of the variants above. */
+const ONLY = process.env.LOAD_ONLY?.split(",").map((name) =>
+  z
+    .string()
+    .refine((asked) => VARIANTS.some((variant) => variant.name === asked), {
+      message: `LOAD_ONLY names a variant there is none of: ${name}`,
+    })
+    .parse(name),
+);
 
 function releaseBinary(): string {
   const target = process.env.CARGO_TARGET_DIR ?? join(REPO, "target");
@@ -175,19 +190,43 @@ function treeCpuSeconds(pid: number): number {
   return ticks / CLOCK_TICKS;
 }
 
+/** What `corpus.mjs` says about the corpus it wrote. */
+const corpusSchema = z.object({
+  runs: z.number().int().positive(),
+  projects: z.number().int().positive(),
+  openLiveRun: z.string().min(1),
+  openLiveRecords: z.number().int().positive(),
+  settledRun: z.string().min(1),
+  stoppedRun: z.string().min(1),
+  otherLiveRuns: z.array(z.string().min(1)).min(1),
+  liveNode: z.string().min(1),
+});
+
+/** The executables a server here must never find on its PATH. */
+const HARNESSES = z.array(z.string().min(1)).parse(harnessBinaries);
+
 interface Served {
   readonly origin: string;
   readonly runsRoot: string;
   readonly workspace: string;
   readonly server: ChildProcess;
-  readonly facts: ReturnType<typeof buildLoadCorpus>;
+  readonly facts: z.infer<typeof corpusSchema>;
 }
 
 /** A fresh corpus and a fresh server over it, isolated as the fixtures are. */
 async function serveFresh(name: string): Promise<Served> {
   const workspace = mkdtempSync(join(tmpdir(), `dag-ui-e2e-load-${name}-`));
   const runsRoot = join(workspace, "runs");
-  const facts = buildLoadCorpus(runsRoot, "host");
+  // Written by its own command, the way the fixture server writes the
+  // journeys' corpus, and read back through the shape it states.
+  const facts = corpusSchema.parse(
+    JSON.parse(
+      execFileSync(process.execPath, [CORPUS, runsRoot, "host"], {
+        encoding: "utf8",
+        maxBuffer: 1 << 20,
+      }),
+    ),
+  );
   const bin = join(workspace, "bin");
   mkdirSync(bin);
   const staged = join(bin, "onepipeline-api");
@@ -205,10 +244,7 @@ async function serveFresh(name: string): Promise<Served> {
       ...(process.env.PATH ?? "")
         .split(delimiter)
         .filter(
-          (dir) =>
-            !(harnessBinaries as string[]).some((binary) =>
-              existsSync(join(dir, binary)),
-            ),
+          (dir) => !HARNESSES.some((binary) => existsSync(join(dir, binary))),
         ),
     ].join(delimiter),
     ONEHARNESS_CONFIG: providerConfig,
@@ -269,8 +305,6 @@ async function stopServing(served: Served): Promise<void> {
     await new Promise((resolveExit) => served.server.once("exit", resolveExit));
   rmSync(served.workspace, { recursive: true, force: true });
 }
-
-// ------------------------------------------------------------- the recorders
 
 /** An API path as a route: ids replaced, query keys kept, values dropped. */
 function routeOf(method: string, url: URL): string {
@@ -338,12 +372,12 @@ async function record(page: Page): Promise<Recorder> {
   return recorder;
 }
 
+// llmlint: ignore-block[e2e_uses_accessible_selectors] this is a passive DOM observer, not a locator: it times the moment each record's change is in the document, which is the measurement the budget is stated over, and the `data-journal-seq` attribute is the one the view writes for exactly that reading — no role or name carries a journal sequence number. Everything the harness *does* to the page goes through roles and names (`keepRunsOpen`, `loaded`).
 /**
  * Watch the page for each record the writer appends to the open run: when the
  * node timeline's row for a record appears, and when a view root's
- * `data-journal-seq` reaches a number. A collapsed run of rows is opened as it
- * forms, the way a reader opens it to read its middle, so every record's row
- * reaches the DOM.
+ * `data-journal-seq` reaches a number. It only watches; opening a collapsed run
+ * of rows, as a reader does to read its middle, is {@link keepRunsOpen}'s.
  */
 const OBSERVER = `
 (() => {
@@ -366,21 +400,11 @@ const OBSERVER = `
       }
     }
   };
-  // Only the newest run of rows: it is the one the appended records join.
-  const expand = () => {
-    const transcript = document.querySelector('[aria-label="Node transcript"]');
-    if (!transcript) return;
-    const controls = [...transcript.querySelectorAll("button")].filter(
-      (button) => /Show \\d+ more/.test(button.textContent || ""),
-    );
-    controls.at(-1)?.click();
-  };
   new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       if (mutation.type === "attributes") look(mutation.target);
       else for (const node of mutation.addedNodes) look(node);
     }
-    expand();
   }).observe(document, {
     subtree: true,
     childList: true,
@@ -389,6 +413,24 @@ const OBSERVER = `
   });
 })();
 `;
+// llmlint: ignore-end[e2e_uses_accessible_selectors]
+
+/**
+ * Open the node transcript's newest collapsed run whenever one forms, through
+ * its own control, as a reader does to read the rows it stands for — the run
+ * the appended records join — until `until` says to stop.
+ */
+async function keepRunsOpen(page: Page, until: () => boolean): Promise<void> {
+  const control = page
+    .getByRole("region", { name: "Node transcript" })
+    .getByRole("button", { name: /^Show \d+ more/u })
+    .last();
+  while (!until()) {
+    if ((await control.count()) > 0)
+      await control.click().catch(() => undefined);
+    await page.waitForTimeout(200);
+  }
+}
 
 /** The page has finished loading: its view drawn, and two quiet seconds after. */
 async function loaded(page: Page, variant: Variant): Promise<number> {
@@ -414,8 +456,6 @@ async function loaded(page: Page, variant: Variant): Promise<number> {
   await page.waitForTimeout(2_000);
   return (Date.now() - started) / 1000;
 }
-
-// ------------------------------------------------------------- the summaries
 
 const perMinute = (amount: number) => (amount * 60_000) / WINDOW_MS;
 const round = (value: number, places = 3) =>
@@ -457,6 +497,18 @@ function address(served: Served, variant: Variant): string {
     ? `/?run=${run}&view=graph&node=${node}`
     : `/?run=${run}&view=${variant.view}`;
 }
+
+/** What the observer recorded: each row's first appearance, each root's rise. */
+const observedSchema = z.object({
+  rows: z.record(z.string(), z.number()),
+  roots: z.array(z.tuple([z.number(), z.number()])),
+});
+/** One record `writer.mjs` appended to the open run, as it logged it. */
+const appendedSchema = z.object({
+  seq: z.number().int().nonnegative(),
+  at: z.number().int().positive(),
+  burst: z.boolean(),
+});
 
 async function measure(browser: Browser, variant: Variant) {
   const served = await serveFresh(variant.name);
@@ -516,15 +568,21 @@ async function measure(browser: Browser, variant: Variant) {
       await page.waitForTimeout(WINDOW_MS / 4);
       await page.getByRole("button", { name: "Refresh host" }).click();
     }
+    let watching = true;
+    const opening =
+      variant.view === "node"
+        ? Promise.all(pages.map((tab) => keepRunsOpen(tab, () => !watching)))
+        : Promise.resolve([]);
     await new Promise((resolveExit) => writer.once("exit", resolveExit));
     const end = Math.max(Date.now(), start + WINDOW_MS);
     const cpu = treeCpuSeconds(pid) - cpuStart;
     // A moment for what was appended at the very end to land.
     await page.waitForTimeout(3_000);
-    const observed = (await page.evaluate("window.__journal")) as {
-      rows: Record<string, number>;
-      roots: [number, number][];
-    };
+    watching = false;
+    await opening;
+    const observed = observedSchema.parse(
+      await page.evaluate("window.__journal"),
+    );
 
     // The stream is made to reconnect: whatever it re-sends whole is counted.
     const beforeReconnect = Date.now();
@@ -579,10 +637,7 @@ async function measure(browser: Browser, variant: Variant) {
       const appended = readFileSync(log, "utf8")
         .split("\n")
         .filter(Boolean)
-        .map(
-          (line) =>
-            JSON.parse(line) as { seq: number; at: number; burst: boolean },
-        );
+        .map((line) => appendedSchema.parse(JSON.parse(line)));
       const renderedAt = (seq: number): number | undefined =>
         variant.view === "node"
           ? observed.rows[String(seq)]
@@ -649,8 +704,15 @@ test("request load, frames, lag and server CPU in every page state", async ({
   const results: Record<string, unknown> = {};
   for (const variant of VARIANTS) {
     if (ONLY !== undefined && !ONLY.includes(variant.name)) continue;
-    results[variant.name] = await measure(browser, variant);
-    console.log(`${variant.name} ${JSON.stringify(results[variant.name])}`);
+    const measured = await measure(browser, variant);
+    results[variant.name] = measured;
+    console.log(`${variant.name} ${JSON.stringify(measured)}`);
+    // What every page state does, whatever it costs: a healthy stream re-sends
+    // nothing whole, and every record appended to the open live run reaches the
+    // view showing it. The figures themselves are the budgets' to judge.
+    expect(measured.repeated_snapshot.in_window.frames, variant.name).toBe(0);
+    if (measured.lag !== undefined)
+      expect(measured.lag.never_shown, `${variant.name} never showed`).toBe(0);
   }
   const commit = execFileSync("git", ["rev-parse", "HEAD"], {
     cwd: REPO,

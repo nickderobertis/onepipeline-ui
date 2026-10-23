@@ -2,7 +2,6 @@ import {
   API_V2_PATHS,
   API_V2_QUERY,
   applyPatch,
-  type PatchOp,
   type ResetFrame,
   type SidebarRow,
   SUBSCRIPTION_FRAME_TYPES,
@@ -206,7 +205,10 @@ export class LiveView {
     for (const type of SUBSCRIPTION_FRAME_TYPES) {
       source.addEventListener(type, (raw) => {
         if (this.#source !== source) return;
-        this.#receive((raw as MessageEvent<string>).data);
+        // A named server-sent event is always delivered as a `MessageEvent`
+        // whose data is the frame's text; anything else is not a frame.
+        if (raw instanceof MessageEvent && typeof raw.data === "string")
+          this.#receive(raw.data);
       });
     }
     source.onerror = () => {
@@ -299,36 +301,43 @@ function applyFrame(
         sidebar: state.sidebar.filter((row) => row.id !== frame.run_id),
         visible: state.visible,
       };
-    case "detail.patch":
-      return {
-        sidebar: state.sidebar,
-        visible: patched(state.visible, frame.run_id, "detail", frame.ops),
-      };
-    case "timeline.patch":
-      return {
-        sidebar: state.sidebar,
-        visible: patched(state.visible, frame.run_id, "timeline", frame.ops),
-      };
-    case "channel.patch":
-      return {
-        sidebar: state.sidebar,
-        visible: patched(state.visible, frame.run_id, "channel", frame.ops),
-      };
+    default:
+      return { sidebar: state.sidebar, visible: patched(state.visible, frame) };
   }
 }
 
+/**
+ * The visible state with one patch applied — to the payload of exactly the
+ * view the frame names, its run, its scope and its node, or not at all.
+ */
 function patched(
   visible: VisibleState,
-  runId: string,
-  member: "detail" | "timeline" | "channel",
-  ops: readonly PatchOp[],
+  frame: Extract<
+    SubscriptionFrame,
+    { type: "detail.patch" | "timeline.patch" | "channel.patch" }
+  >,
 ): VisibleState {
-  if (visible.type === "sidebar" || visible.run_id !== runId)
-    throw new Error(`a ${member} patch for a run this tab does not show`);
-  const held = (visible as Record<string, unknown>)[member];
-  if (held === undefined)
-    throw new Error(`a ${member} patch for a view that holds no ${member}`);
-  return { ...visible, [member]: applyPatch(held, ops) } as VisibleState;
+  const refused = (what: string) =>
+    new Error(`a ${frame.type} for ${what} this tab does not show`);
+  if (visible.type === "sidebar" || visible.run_id !== frame.run_id)
+    throw refused("a run");
+  switch (frame.type) {
+    case "detail.patch":
+      return { ...visible, detail: applyPatch(visible.detail, frame.ops) };
+    case "timeline.patch": {
+      if (visible.type !== "timeline" || visible.scope !== frame.scope)
+        throw refused("a timeline");
+      if (
+        frame.scope === "node" &&
+        (visible.scope !== "node" || visible.node !== frame.node)
+      )
+        throw refused("a node's timeline");
+      return { ...visible, timeline: applyPatch(visible.timeline, frame.ops) };
+    }
+    case "channel.patch":
+      if (visible.type !== "channel") throw refused("a channel");
+      return { ...visible, channel: applyPatch(visible.channel, frame.ops) };
+  }
 }
 
 function sameView(left: SubscriptionView, right: SubscriptionView): boolean {

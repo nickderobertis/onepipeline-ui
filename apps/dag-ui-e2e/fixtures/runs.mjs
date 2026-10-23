@@ -14,7 +14,7 @@
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { appendLines } from "../load/journal.mjs";
+import { appendLines } from "../load/journal.ts";
 import { thisHost } from "./this-host.mjs";
 
 /** The in-flight run every graph, node and timeline journey opens. */

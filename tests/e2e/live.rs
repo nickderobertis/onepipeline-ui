@@ -1437,12 +1437,26 @@ fn a_stale_telemetry_fold_catches_up_once_the_run_goes_quiet_without_holding_bac
         std::thread::sleep(Duration::from_millis(50));
     }
     tab.drain();
+    // A run still being recorded is timed against the clock, so the instants a
+    // fold and a later read are taken at differ; everything the fold counts
+    // off the records is held to a fresh read.
+    let unclocked = |mut detail: Value| {
+        if let Some(run) = detail["run"].as_object_mut() {
+            run.remove("timing");
+            run.remove("node_work_ms");
+        }
+        if let Some(telemetry) = detail["telemetry"].as_object_mut() {
+            telemetry.remove("wall_ms");
+            telemetry.remove("buckets");
+        }
+        detail
+    };
     same(
-        &unstamped(tab.state["visible"]["detail"].clone()),
-        &fresh(
+        &unclocked(unstamped(tab.state["visible"]["detail"].clone())),
+        &unclocked(fresh(
             live.address(),
             &format!("/api/v2/runs/{run}?include_conversations=false"),
-        ),
+        )),
         "the detail once the fold caught up",
     );
 }

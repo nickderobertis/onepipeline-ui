@@ -19,45 +19,131 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { report } from "@onebudgetspec/sdk";
 
+import { z } from "zod";
+
 class UsageError extends Error {}
 
 const METRICS = ["settled", "live", "lag", "wire", "cpu"];
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
-function shape(condition, what) {
-  if (!condition)
-    throw new Error(
-      `the telemetry has no ${what}; ACTION: run dag-ui-e2e:test-load on this tree to record it`,
-    );
-}
+/** A measured figure: finite and never negative. */
+const figure = z.number().finite().nonnegative();
+const seconds = figure.nullable();
+const lagSchema = z.object({
+  measured_as: z.string().min(1),
+  records: z.number().int().positive(),
+  shown: z.number().int().nonnegative(),
+  never_shown: z.literal(0),
+  p50_s: seconds,
+  p95_s: figure,
+  max_s: seconds,
+  during_burst: z.object({ p95_s: seconds }).passthrough(),
+  frame_arrival: z.object({
+    p50_s: seconds,
+    p95_s: seconds,
+    max_s: seconds,
+  }),
+});
+const resent = z.object({
+  frames: z.number().int().nonnegative(),
+  bytes: z.number().int().nonnegative(),
+});
+const variantSchema = z.object({
+  kind: z.enum(["nothing-open", "settled", "stopped", "live", "host"]),
+  view: z.enum(["graph", "overall", "node", "channel"]).optional(),
+  tabs: z.number().int().positive(),
+  requests_per_min: figure,
+  requests_per_min_by_route: z.record(z.string(), figure),
+  mb_per_min: figure,
+  bytes_per_min_by_route: z.record(z.string(), figure),
+  frames_by_type: z.record(
+    z.string(),
+    z.object({ frames_per_min: figure, bytes_per_min: figure }),
+  ),
+  repeated_snapshot: z.object({
+    in_window: resent,
+    at_load: resent,
+    after_reconnect: resent,
+  }),
+  server_cpu: z.object({
+    seconds: figure,
+    window_s: z.number().positive(),
+    cores: figure,
+    cores_per_tab: figure,
+  }),
+  lag: lagSchema.optional(),
+});
+/**
+ * Every variant `load.spec.ts` records: a figure missing from the telemetry is
+ * an unrecorded state, never a state that cost nothing.
+ */
+const VIEWS = ["graph", "overall", "node"];
+const REQUIRED = [
+  "nothing-open",
+  ...VIEWS.flatMap((view) => [`settled-${view}`, `stopped-${view}`]),
+  ...[...VIEWS, "channel"].flatMap((view) => [
+    `live-${view}`,
+    `live-${view}-2-tabs`,
+  ]),
+  "host",
+];
+const telemetrySchema = z.object({
+  schema_version: z.literal(1),
+  recorded_at: z.iso.datetime(),
+  commit: z.string().regex(/^[0-9a-f]{40}$/u),
+  dirty: z.boolean(),
+  window_s: z.number().positive(),
+  workload: z.object({
+    runs: z.literal(150),
+    projects: z.literal(30),
+    other_live_runs: z.literal(10),
+    records_per_minute_per_live_run: z.literal(50),
+    burst_records: z.literal(400),
+    open_live_run_records_at_start: z.literal(116_000),
+    fresh_server_and_corpus_per_variant: z.literal(true),
+  }),
+  variants: z
+    .record(z.string(), variantSchema)
+    .refine((variants) => REQUIRED.every((name) => name in variants), {
+      message: `every variant is recorded: ${REQUIRED.join(", ")}`,
+    })
+    .refine(
+      (variants) =>
+        Object.values(variants)
+          .filter((variant) => variant.kind === "live" && variant.tabs === 1)
+          .every((variant) => variant.lag !== undefined),
+      { message: "every one-tab live variant records its lag" },
+    ),
+});
 
 function load(path) {
-  const telemetry = JSON.parse(readFileSync(resolve(ROOT, path), "utf8"));
-  shape(telemetry?.schema_version === 1, "schema_version 1");
-  shape(
-    telemetry.variants !== null && typeof telemetry.variants === "object",
-    "variants",
+  const parsed = telemetrySchema.safeParse(
+    JSON.parse(readFileSync(resolve(ROOT, path), "utf8")),
   );
-  return telemetry;
+  if (!parsed.success)
+    throw new Error(
+      `the telemetry is not what dag-ui-e2e:test-load records (${parsed.error.issues
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+        .join(
+          "; ",
+        )}); ACTION: run dag-ui-e2e:test-load on this tree to record it`,
+    );
+  return parsed.data;
 }
 
 /** The variants of `kinds`, one tab each unless `tabs` says otherwise. */
 function variants(telemetry, kinds, tabs = [1]) {
-  const found = Object.entries(telemetry.variants).filter(
+  return Object.entries(telemetry.variants).filter(
     ([, variant]) =>
       kinds.includes(variant.kind) && tabs.includes(variant.tabs),
   );
-  shape(found.length > 0, `${kinds.join(" or ")} variants`);
-  return found;
 }
 
-/** The largest of `figure` over `found`, and every one of them by name. */
-function worst(found, figure) {
+/** The largest of `measure` over `found`, and every one of them by name. */
+function worst(found, measure) {
   const each = Object.fromEntries(
-    found.map(([name, variant]) => [name, figure(variant)]),
+    found.map(([name, variant]) => [name, measure(variant)]),
   );
-  for (const [name, value] of Object.entries(each))
-    shape(typeof value === "number", `figure for ${name}`);
   return { value: Math.max(...Object.values(each)), each };
 }
 
@@ -98,11 +184,6 @@ const MEASURES = {
   },
   lag(telemetry) {
     const found = variants(telemetry, ["live"]);
-    for (const [name, variant] of found)
-      shape(
-        variant.lag?.records > 0 && variant.lag.never_shown === 0,
-        `lag for every record ${name} appended`,
-      );
     const { value } = worst(found, (variant) => variant.lag.p95_s);
     return {
       value,
@@ -152,7 +233,7 @@ const MEASURES = {
     const found = variants(telemetry, ["live"], [1, 2]);
     const { value } = worst(
       found,
-      (variant) => variant.server_cpu?.cores_per_tab,
+      (variant) => variant.server_cpu.cores_per_tab,
     );
     return {
       value,

@@ -27,14 +27,38 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { z } from "zod";
+
+/** `SystemTime` as serde writes it. */
+const systemTimeSchema = z.object({
+  secs_since_epoch: z.number().int().nonnegative(),
+  nanos_since_epoch: z.number().int().nonnegative(),
+});
+/** The journal's metadata, as the engine's `Stamp` reads it. */
+const stampSchema = z.object({
+  len: z.number().int().nonnegative(),
+  modified: systemTimeSchema,
+  created: systemTimeSchema.optional(),
+  identity: z
+    .tuple([z.number(), z.number(), z.number(), z.number()])
+    .optional(),
+});
+/** A receipt, as the engine's `appendstamp::Receipt` writes one. */
+const receiptSchema = z.object({
+  schema_version: z.literal(1),
+  epoch: z.string().min(1),
+  stamp: stampSchema,
+});
+type Stamp = z.infer<typeof stampSchema>;
+type Receipt = z.infer<typeof receiptSchema>;
 
 /** The receipt beside one journal. */
-export function receiptPath(journal) {
+export function receiptPath(journal: string): string {
   return journal.replace(/\.jsonl$/u, ".append.json");
 }
 
 /** `SystemTime` as serde writes it, from a nanosecond count. */
-function systemTime(nanoseconds) {
+function systemTime(nanoseconds: bigint) {
   return {
     secs_since_epoch: Number(nanoseconds / 1_000_000_000n),
     nanos_since_epoch: Number(nanoseconds % 1_000_000_000n),
@@ -42,53 +66,63 @@ function systemTime(nanoseconds) {
 }
 
 /** The journal's metadata, as the engine's `Stamp` reads it. */
-export function stampOf(journal) {
+export function stampOf(journal: string): Stamp {
   const about = statSync(journal, { bigint: true });
-  const stamp = {
+  return {
     len: Number(about.size),
     modified: systemTime(about.mtimeNs),
+    // `metadata.created()` is the birth time where the filesystem records one,
+    // and absent where it does not — which Node reports as the epoch.
+    ...(about.birthtimeNs > 0n
+      ? { created: systemTime(about.birthtimeNs) }
+      : {}),
+    identity: [
+      Number(about.dev),
+      Number(about.ino),
+      Number(about.ctimeNs / 1_000_000_000n),
+      Number(about.ctimeNs % 1_000_000_000n),
+    ],
   };
-  // `metadata.created()` is the birth time where the filesystem records one,
-  // and absent where it does not — which Node reports as the epoch.
-  if (about.birthtimeNs > 0n) stamp.created = systemTime(about.birthtimeNs);
-  stamp.identity = [
-    Number(about.dev),
-    Number(about.ino),
-    Number(about.ctimeNs / 1_000_000_000n),
-    Number(about.ctimeNs % 1_000_000_000n),
-  ];
-  return stamp;
 }
 
-function sameStamp(left, right) {
+function sameStamp(left: Stamp, right: Stamp): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function readReceipt(journal) {
+/**
+ * The receipt on disk, or `undefined` for none — and for one this writer would
+ * not have written, which, like the engine, it reads as no continuity at all.
+ */
+function readReceipt(journal: string): Receipt | undefined {
   const path = receiptPath(journal);
   if (!existsSync(path)) return undefined;
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    const parsed = receiptSchema.safeParse(
+      JSON.parse(readFileSync(path, "utf8")),
+    );
+    return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;
   }
 }
 
-function writeReceipt(journal, receipt) {
+function writeReceipt(journal: string, receipt: Receipt): void {
   const path = receiptPath(journal);
   const staged = `${path}.tmp`;
   writeFileSync(staged, `${JSON.stringify(receipt, null, 2)}\n`);
   renameSync(staged, path);
 }
 
+const freshEpoch = () => `load-${process.pid}-${process.hrtime.bigint()}`;
+
 /**
  * Start a receipt for a journal written whole, as a writer that has just
  * appended its last record leaves one.
  */
-export function receiptFor(journal) {
+export function receiptFor(journal: string): void {
   writeReceipt(journal, {
     schema_version: 1,
-    epoch: `load-${process.pid}-${process.hrtime.bigint()}`,
+    epoch: freshEpoch(),
     stamp: stampOf(journal),
   });
 }
@@ -98,7 +132,10 @@ export function receiptFor(journal) {
  * publish the receipt the engine's writer would. The epoch continues only when
  * the receipt on disk describes the journal as this write found it.
  */
-export function appendRecords(journal, records) {
+export function appendRecords(
+  journal: string,
+  records: readonly Record<string, unknown>[],
+): void {
   appendLines(
     journal,
     records.map((record) => JSON.stringify(record)),
@@ -106,27 +143,34 @@ export function appendRecords(journal, records) {
 }
 
 /** {@link appendRecords}, for lines already serialized: each is written as given. */
-export function appendLines(journal, lines) {
+export function appendLines(journal: string, lines: readonly string[]): void {
   const before = stampOf(journal);
   const previous = readReceipt(journal);
   const epoch =
-    previous?.schema_version === 1 && sameStamp(previous.stamp, before)
+    previous !== undefined && sameStamp(previous.stamp, before)
       ? previous.epoch
-      : `load-${process.pid}-${process.hrtime.bigint()}`;
+      : freshEpoch();
   appendFileSync(journal, lines.map((line) => `${line}\n`).join(""));
-  writeReceipt(journal, {
-    schema_version: 1,
-    epoch,
-    stamp: stampOf(journal),
-  });
+  writeReceipt(journal, { schema_version: 1, epoch, stamp: stampOf(journal) });
 }
+
+/** What `append` reads on standard input: each journal and its lines, in order. */
+const appendsSchema = z.record(
+  z.string().endsWith(".jsonl"),
+  z.array(
+    z
+      .string()
+      .min(1)
+      .refine((line) => !line.includes("\n")),
+  ),
+);
 
 /**
  * The command the crate's journeys append through, so a record they append is
  * written by this module and no other:
  *
- *     node journal.mjs append    < {"JOURNAL": ["line", …], …}
- *     node journal.mjs receipt JOURNAL…
+ *     node journal.ts append    < {"JOURNAL": ["line", …], …}
+ *     node journal.ts receipt JOURNAL…
  *
  * `append` takes one JSON object on standard input naming each journal and the
  * lines to append to it, in order, each journal in one write; `receipt` leaves
@@ -134,15 +178,15 @@ export function appendLines(journal, lines) {
  */
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [verb, ...journals] = process.argv.slice(2);
-  if (verb === "receipt") {
+  if (verb === "receipt" && journals.length > 0) {
     for (const journal of journals) receiptFor(journal);
-  } else if (verb === "append") {
-    const input = readFileSync(0, "utf8");
-    for (const [journal, lines] of Object.entries(JSON.parse(input)))
+  } else if (verb === "append" && journals.length === 0) {
+    const appends = appendsSchema.parse(JSON.parse(readFileSync(0, "utf8")));
+    for (const [journal, lines] of Object.entries(appends))
       appendLines(journal, lines);
   } else {
     throw new Error(
-      "usage: journal.mjs append < {journal: [lines]} | receipt JOURNAL…",
+      "usage: journal.ts append < {journal: [lines]} | receipt JOURNAL…",
     );
   }
 }

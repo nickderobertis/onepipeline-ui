@@ -2647,6 +2647,9 @@ export class PatchError extends Error {
 export function applyPatch<T>(target: T, ops: readonly PatchOp[]): T {
   let root: unknown = target;
   for (const op of ops) root = applyOne(root, op);
+  // The payload the operations were written against, patched: the server diffs
+  // one envelope into the next of the same schema, and a reader that must hold
+  // the result to that schema parses it, as the client's activity line does.
   return root as T;
 }
 

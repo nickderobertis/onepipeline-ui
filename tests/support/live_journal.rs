@@ -9,7 +9,7 @@
 //! the whole journal otherwise — so a fixture that appended bare lines would make
 //! every live update a whole re-read, which is not what a run the engine drives
 //! costs. The engine exports no appender, so this hands every append to
-//! `apps/dag-ui-e2e/load/journal.mjs` — the single fixture writer the browser
+//! `apps/dag-ui-e2e/load/journal.ts` — the single fixture writer the browser
 //! fixtures and the load workload use too — and `tests/e2e/live.rs` holds the
 //! receipts it writes field for field to ones the linked engine wrote. The
 //! journeys count the refresh outcomes the server reports, so a receipt the
@@ -32,7 +32,7 @@ pub fn receipt_path(journal: &Path) -> PathBuf {
 
 /// The fixture writer, from this crate's root.
 fn writer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui-e2e/load/journal.mjs")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui-e2e/load/journal.ts")
 }
 
 fn node() -> Command {

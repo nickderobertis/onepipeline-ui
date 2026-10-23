@@ -73,10 +73,13 @@ function harness(): Harness {
         const body = JSON.parse(String(init?.body));
         bodies.push(body);
         return state.answer(body);
-      }) as typeof fetch,
+      }) as typeof fetch, // `typeof fetch` carries overloads and a `preconnect` member no double implements and the client never reaches for; this answers the one call signature it makes.
       eventSource: (url) => {
         const source = new Source(url);
         sources.push(source);
+        // `EventSource` is a DOM class Node does not ship; the client uses its
+        // listener, `readyState`, `onopen`/`onerror` and `close` surface, which
+        // `Source` implements over a real `EventTarget`.
         return source as unknown as EventSource;
       },
     }),
@@ -94,6 +97,13 @@ function harness(): Harness {
       ),
   };
   return state;
+}
+
+/** The `index`th stream the client opened, which the test is waiting on. */
+function sourceAt(h: Harness, index: number): Source {
+  const source = h.sources[index];
+  if (source === undefined) throw new Error(`no stream ${index} was opened`);
+  return source;
 }
 
 function open(h: Harness) {
@@ -116,7 +126,7 @@ test("applies each frame onto the one before it, once, and resumes from what it 
   const h = harness();
   const { states } = open(h);
   await vi.waitFor(() => expect(h.sources).toHaveLength(1));
-  const source = h.sources[0] as Source;
+  const source = sourceAt(h, 0);
   expect(new URL(source.url).searchParams.get("after")).toBe(id(1));
   expect(new URL(source.url).searchParams.get("subscription")).toBe(
     SUBSCRIPTION,
@@ -137,16 +147,14 @@ test("applies each frame onto the one before it, once, and resumes from what it 
   expect(states).toHaveLength(2);
   expect(source.closed).toBe(true);
   expect(h.sources).toHaveLength(2);
-  expect(new URL((h.sources[1] as Source).url).searchParams.get("after")).toBe(
-    id(3),
-  );
+  expect(new URL(sourceAt(h, 1).url).searchParams.get("after")).toBe(id(3));
 });
 
 test("applies a reset once as the new base, and stops at a patch it cannot apply", async () => {
   const h = harness();
   const { states, errors } = open(h);
   await vi.waitFor(() => expect(h.sources).toHaveLength(1));
-  const source = h.sources[0] as Source;
+  const source = sourceAt(h, 0);
   source.frame("reset", {
     id: id(5),
     base: id(1),
@@ -169,7 +177,7 @@ test("applies a reset once as the new base, and stops at a patch it cannot apply
   });
   source.frame("run.changed", { id: id(7), base: id(6), row: row("running") });
   expect(errors.map((error) => error.message)).toStrictEqual([
-    "A patch could not be applied: a detail patch for a run this tab does not show",
+    "A patch could not be applied: a detail.patch for a run this tab does not show",
   ]);
   expect(states.at(-1)?.[0].applied).toBe(id(5));
 });
@@ -178,7 +186,7 @@ test("refuses a frame the contract does not allow", async () => {
   const h = harness();
   const { states, errors } = open(h);
   await vi.waitFor(() => expect(h.sources).toHaveLength(1));
-  (h.sources[0] as Source).frame("run.changed", {
+  sourceAt(h, 0).frame("run.changed", {
     id: id(2),
     base: id(1),
     row: { ...row("running"), liveness: "ACTIVE" },
@@ -201,14 +209,14 @@ test("replaces the subscription for a new view and retires it when closed", asyn
       { status: 201 },
     );
   live.change({ type: "channel", run_id: "run-1" });
-  expect((h.sources[0] as Source).closed).toBe(true);
+  expect(sourceAt(h, 0).closed).toBe(true);
   await vi.waitFor(() => expect(h.sources).toHaveLength(2));
   expect(h.bodies.at(-1)).toStrictEqual({
     view: { type: "channel", run_id: "run-1" },
     replaces: SUBSCRIPTION,
   });
   live.close();
-  expect((h.sources[1] as Source).closed).toBe(true);
+  expect(sourceAt(h, 1).closed).toBe(true);
   await vi.waitFor(() => expect(h.deleted).toStrictEqual([NEXT_SUBSCRIPTION]));
 });
 
@@ -216,7 +224,7 @@ test("recreates a subscription the server no longer serves from what it applied"
   const h = harness();
   const { states } = open(h);
   await vi.waitFor(() => expect(h.sources).toHaveLength(1));
-  const source = h.sources[0] as Source;
+  const source = sourceAt(h, 0);
   source.frame("run.changed", { id: id(2), base: id(1), row: row("settled") });
   h.answer = (body) =>
     Response.json(
@@ -247,8 +255,6 @@ test("recreates a subscription the server no longer serves from what it applied"
     kind: "reset",
     reason: "unknown-cursor",
   });
-  expect(new URL((h.sources[1] as Source).url).searchParams.get("after")).toBe(
-    id(8),
-  );
+  expect(new URL(sourceAt(h, 1).url).searchParams.get("after")).toBe(id(8));
   await settle();
 });
