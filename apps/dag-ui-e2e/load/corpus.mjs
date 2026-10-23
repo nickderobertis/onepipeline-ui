@@ -20,6 +20,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { receiptFor } from "./journal.ts";
 import { toolOutput } from "./output.mjs";
 // The workload every budget is stated over, declared once for this writer,
@@ -373,7 +374,13 @@ export function buildLoadCorpus(root, scaleName = "host") {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Recognised as run by comparing URLs, as `journal.ts` is: a path prefixed
+// with `file://` is not how `import.meta.url` spells a Windows path or one
+// with a character a URL escapes, and a corpus that was never written exits 0.
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   const [root, scale = "host"] = process.argv.slice(2);
   if (root === undefined || (scale !== "host" && scale !== "journey")) {
     console.error("usage: corpus.mjs ROOT [host|journey]");
