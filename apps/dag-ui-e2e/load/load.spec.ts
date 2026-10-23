@@ -287,7 +287,10 @@ async function record(page: Page): Promise<Recorder> {
   cdp.on("Network.dataReceived", (event) => {
     recorder.bytes.push({
       at: Date.now(),
-      bytes: event.encodedDataLength || event.dataLength,
+      // The bytes that came over the network: a chunk Chromium hands the page
+      // again from its own buffers reports no encoded length and is no new
+      // traffic, so its decoded length is not counted in its place.
+      bytes: event.encodedDataLength,
       route: recorder.routes.get(event.requestId) ?? "other",
     });
   });
