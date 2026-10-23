@@ -1743,3 +1743,64 @@ fn a_cursor_another_subscription_was_sent_is_not_one_this_one_resumes_from() {
     );
     assert_eq!(reset["base"], foreign.as_str());
 }
+
+#[test]
+fn a_sidebar_keeps_its_rows_through_a_root_or_a_run_it_could_not_read_and_moves_once_it_can() {
+    use std::os::unix::fs::PermissionsExt;
+    let run = fixture_run::RUN_ID;
+    let other = fixture_run::OTHER_RUN_ID;
+    let live = Live::start(|root| {
+        growing_run(root, run);
+        growing_run(root, other);
+    });
+    let mut tab = Tab::open(&live, &json!({ "type": "sidebar" }));
+    let root = live
+        .serving
+        .run_dir(run)
+        .parent()
+        .expect("a runs root")
+        .to_path_buf();
+    let listable = fs::metadata(&root).expect("a root").permissions();
+
+    // The root cannot be listed for a moment: no run is announced as gone.
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o000)).expect("lock the root");
+    std::thread::sleep(Duration::from_millis(400));
+    fs::set_permissions(&root, listable).expect("unlock the root");
+    tab.drain();
+    assert!(
+        tab.frames
+            .iter()
+            .all(|frame| frame["type"] != "run.removed"),
+        "a root it could not list read as runs gone: {:#?}",
+        tab.frames
+    );
+
+    // One run cannot be read while it moves: its row stays as it was …
+    let launch = live.serving.run_dir(other).join("launch.json");
+    let recorded = fs::read(&launch).expect("a launch record");
+    fs::write(&launch, b"{ not a launch record").expect("break the launch record");
+    let journal = live.journal(other);
+    live_journal::append_lines(
+        &journal,
+        &[activity(
+            &journal,
+            other,
+            fixture_run::NODE_ID,
+            "unreadable",
+        )],
+    );
+    std::thread::sleep(Duration::from_millis(400));
+    tab.drain();
+    assert!(
+        tab.frames
+            .iter()
+            .all(|frame| frame["type"] != "run.removed"),
+        "a run it could not read read as gone: {:#?}",
+        tab.frames
+    );
+    // … and once it can, the row moves to what the run recorded meanwhile.
+    fs::write(&launch, recorded).expect("restore the launch record");
+    let moved = frame_of(&mut tab, "run.changed");
+    assert_eq!(moved["row"]["id"], other);
+    assert_eq!(tab.state["sidebar"].as_array().map(Vec::len), Some(2));
+}

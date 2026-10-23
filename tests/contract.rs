@@ -4060,4 +4060,16 @@ fn the_subscription_bounds_the_contract_states_are_the_ones_the_hub_keeps() {
         "docs/contract.md does not state the {:?} grace the hub keeps",
         DISCONNECTED_GRACE
     );
+    // And the telemetry fold's interval, and the bound it keeps on a run that
+    // never goes quiet: twice it.
+    let refold = onepipeline_ui::live::TELEMETRY_REFOLD.as_secs();
+    assert!(
+        contract.contains(&format!("at least {refold} seconds after the last fold")),
+        "docs/contract.md does not state the {refold} s refold interval the hub keeps"
+    );
+    assert!(
+        contract.contains(&format!("once it is {} seconds behind", refold * 2)),
+        "docs/contract.md does not state the {} s bound the hub keeps",
+        refold * 2
+    );
 }
