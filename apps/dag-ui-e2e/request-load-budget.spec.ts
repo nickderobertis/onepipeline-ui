@@ -13,27 +13,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
-import { summarizeLags } from "./load/telemetry";
 
 const REPO = resolve(import.meta.dirname, "../..");
 const RUNNER = join(import.meta.dirname, "request-load-budget.mjs");
 const CHECK = join(REPO, "node_modules/.bin/onebudgetspec");
 
 const views = ["graph", "overall", "node"] as const;
-
-/**
- * 500 appended records, the last 400 the burst's: 450 shown after `n / 20`
- * seconds and the 50 slowest after `n / 10`, so their 95th percentile is
- * `n / 10`.
- */
-function perRecord(n: number) {
-  return Array.from({ length: 500 }, (_, at) => ({
-    seq: 116_000 + at,
-    burst: at >= 100,
-    lag_s: at % 10 === 0 ? n / 10 : n / 20,
-    frame_s: 0.05,
-  }));
-}
 
 /** One variant's figures, every one of them `n` scaled. */
 function variant(
@@ -54,15 +39,6 @@ function variant(
     bytes_per_min_by_route: {},
     frames_per_min: n * 100,
     frames_by_type: {},
-    frames_by_stream: {
-      "1:sidebar": {
-        view: "sidebar",
-        frames_per_min: n * 100,
-        bytes_per_min: n * 1_000,
-        wire_bytes_per_min: n * 300,
-        frames_by_type: {},
-      },
-    },
     repeated_snapshot: {
       in_window: resent,
       at_load: resent,
@@ -82,12 +58,21 @@ function variant(
       ? {
           lag: {
             measured_as: "test",
-            ...summarizeLags(perRecord(n)),
-            during_burst: summarizeLags(
-              perRecord(n).filter(({ burst }) => burst),
-            ),
-            frame_arrival: { p50_s: 0.05, p95_s: 0.05, max_s: 0.05 },
-            per_record: perRecord(n),
+            records: 500,
+            shown: 500,
+            never_shown: 0,
+            p50_s: n / 20,
+            p95_s: n / 10,
+            max_s: n / 5,
+            during_burst: {
+              records: 400,
+              shown: 400,
+              never_shown: 0,
+              p50_s: n / 20,
+              p95_s: n / 10,
+              max_s: n / 5,
+            },
+            frame_arrival: { p50_s: 0.05, p95_s: 0.1, max_s: 0.2 },
           },
         }
       : {}),
@@ -110,7 +95,7 @@ function telemetry() {
     variants[`live-${view}-2-tabs`] = variant("live", view, 2, n * 3);
   }
   return {
-    schema_version: 3,
+    schema_version: 2,
     recorded_at: "2026-10-23T00:00:00.000Z",
     commit: "0".repeat(40),
     dirty: false,
@@ -215,29 +200,13 @@ test("telemetry missing a variant, or carrying a figure no measurement makes, is
   const withoutLoad: Record<string, unknown> = variant("live", "node", 1, 2);
   delete withoutLoad.host_load;
   unloaded.variants["live-node"] = withoutLoad;
-  const older = { ...telemetry(), schema_version: 2 };
-  // A lag whose summary states a quicker p95 than its records add up to, and
-  // one whose records omit one it counted: a figure no record carries.
-  const quicker = telemetry();
-  const quick = variant("live", "node", 1, 2);
-  quicker.variants["live-node"] = {
-    ...quick,
-    lag: { ...quick.lag, p95_s: 0.01 },
-  };
-  const dropped = telemetry();
-  const short = variant("live", "node", 1, 2);
-  dropped.variants["live-node"] = {
-    ...short,
-    lag: { ...short.lag, per_record: short.lag?.per_record.slice(1) },
-  };
+  const older = { ...telemetry(), schema_version: 1 };
   for (const document of [
     missing,
     negative,
     unloaded,
     older,
-    quicker,
-    dropped,
-    { schema_version: 3 },
+    { schema_version: 2 },
   ])
     for (const { verdict } of check(document)) expect(verdict).toBe("error");
 });

@@ -50,41 +50,6 @@ export const VARIANTS: readonly Variant[] = [
   { name: "host", kind: "host", tabs: 1 },
 ];
 
-/** The `p`th percentile, nearest rank, or `null` for no values. */
-export function percentile(
-  values: readonly number[],
-  p: number,
-): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  return (
-    sorted[
-      Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)
-    ] ?? null
-  );
-}
-
-/** One appended record's own lag, as `lag.ts` measures it. */
-export interface RecordLag {
-  readonly seq: number;
-  readonly burst: boolean;
-  readonly lag_s: number | null;
-  readonly frame_s: number | null;
-}
-
-/** The counts and percentiles of `records`' lags: what a summary states. */
-export function summarizeLags(records: readonly RecordLag[]) {
-  const lags = records.flatMap(({ lag_s }) => (lag_s === null ? [] : [lag_s]));
-  return {
-    records: records.length,
-    shown: lags.length,
-    never_shown: records.length - lags.length,
-    p50_s: percentile(lags, 50),
-    p95_s: percentile(lags, 95),
-    max_s: lags.length === 0 ? null : Math.max(...lags),
-  };
-}
-
 /** A measured figure: finite and never negative. */
 const figure = z.number().finite().nonnegative();
 const seconds = figure.nullable();
@@ -109,56 +74,14 @@ const lagStats = z
       ),
     "a lag's percentiles are present exactly when it showed records",
   );
-const recordLag = z.object({
-  seq: z.number().int().nonnegative(),
-  burst: z.boolean(),
-  lag_s: seconds,
-  frame_s: seconds,
-});
-const sameSummary = (
-  stated: z.infer<typeof lagStats>,
-  records: readonly RecordLag[],
-) => JSON.stringify(stated) === JSON.stringify(summarizeLags(records));
-/**
- * A live view's lag: one entry per appended record, and the summaries, which
- * are exactly what those entries add up to — a figure no record carries is
- * refused rather than read.
- */
-export const lagSchema = z
-  .intersection(
-    lagStats,
-    z.object({
-      measured_as: z.string().min(1),
-      during_burst: lagStats,
-      frame_arrival: z.object({
-        p50_s: seconds,
-        p95_s: seconds,
-        max_s: seconds,
-      }),
-      per_record: z.array(recordLag),
-    }),
-  )
-  .refine(
-    (lag) =>
-      new Set(lag.per_record.map(({ seq }) => seq)).size ===
-        lag.per_record.length &&
-      sameSummary(
-        {
-          records: lag.records,
-          shown: lag.shown,
-          never_shown: lag.never_shown,
-          p50_s: lag.p50_s,
-          p95_s: lag.p95_s,
-          max_s: lag.max_s,
-        },
-        lag.per_record,
-      ) &&
-      sameSummary(
-        lag.during_burst,
-        lag.per_record.filter(({ burst }) => burst),
-      ),
-    "a lag's summaries are what its per-record entries add up to, one per record",
-  );
+export const lagSchema = z.intersection(
+  lagStats,
+  z.object({
+    measured_as: z.string().min(1),
+    during_burst: lagStats,
+    frame_arrival: z.object({ p50_s: seconds, p95_s: seconds, max_s: seconds }),
+  }),
+);
 /** The host's load averages and its cores, as `os.loadavg()` reads them. */
 const hostLoad = z.object({
   load_1m: figure,
@@ -166,10 +89,6 @@ const hostLoad = z.object({
   load_15m: figure,
   cores: z.number().int().positive(),
 });
-const framesByType = z.record(
-  z.string(),
-  z.object({ frames_per_min: figure, bytes_per_min: figure }),
-);
 const resent = z.object({
   frames: z.number().int().nonnegative(),
   bytes: z.number().int().nonnegative(),
@@ -184,19 +103,9 @@ export const variantSchema = z.object({
   mb_per_min: figure,
   bytes_per_min_by_route: z.record(z.string(), figure),
   frames_per_min: figure,
-  frames_by_type: framesByType,
-  // Each event stream the first tab held in the window, by the view its
-  // subscription was for and the order the tab opened it: its frames, the
-  // bytes they carried and the bytes the wire took for them.
-  frames_by_stream: z.record(
+  frames_by_type: z.record(
     z.string(),
-    z.object({
-      view: z.string().min(1),
-      frames_per_min: figure,
-      bytes_per_min: figure,
-      wire_bytes_per_min: figure,
-      frames_by_type: framesByType,
-    }),
+    z.object({ frames_per_min: figure, bytes_per_min: figure }),
   ),
   repeated_snapshot: z.object({
     in_window: resent,
@@ -217,7 +126,7 @@ export const variantSchema = z.object({
 export type Measured = z.infer<typeof variantSchema>;
 
 export const telemetrySchema = z.object({
-  schema_version: z.literal(3),
+  schema_version: z.literal(2),
   recorded_at: z.iso.datetime(),
   commit: z.string().regex(/^[0-9a-f]{40}$/u),
   dirty: z.boolean(),

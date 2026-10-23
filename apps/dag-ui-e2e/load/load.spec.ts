@@ -14,8 +14,7 @@
  * - every request the page sends, by route (`page.on("request")`);
  * - every byte it receives, by route and stream, and every server-sent frame
  *   with its type and size (the DevTools protocol's Network domain);
- * - for every record appended to the open live run, its own lag (one entry per
- *   record, by sequence number) from its append to
+ * - for every record appended to the open live run, the lag from its append to
  *   the page rendering it: on a node's timeline the appearance of that record's
  *   row (`article[data-journal-seq]`), and on Graph, Overall and Channel the view
  *   root's `data-journal-seq` reaching its number, both seen by a DOM observer;
@@ -58,10 +57,9 @@ import harnessBinaries from "../fixtures/harness-binaries.json" with {
   type: "json",
 };
 import { treeCpuSeconds } from "./cpu";
-import { frameArrivals, percentile, recordLags, renderedAt } from "./lag";
+import { frameArrivals, lagStats, percentile, renderedAt } from "./lag";
 import {
   type Measured,
-  summarizeLags,
   telemetrySchema,
   VARIANTS,
   type Variant,
@@ -251,38 +249,14 @@ function routeOf(method: string, url: URL): string {
   return `${method} ${keys.length === 0 ? path : `${path}?${keys.join("&")}`}`;
 }
 
-/** What `POST /api/v2/subscriptions` answers, as far as a stream's label reads it. */
-const subscribedSchema = z.object({
-  subscription: z.string().min(1),
-  view: z.looseObject({
-    type: z.string().min(1),
-    scope: z.string().optional(),
-  }),
-});
-
-/** A subscription's view as a stream is labelled by: its type and scope. */
-function viewLabel(view: z.infer<typeof subscribedSchema>["view"]): string {
-  return view.scope === undefined ? view.type : `${view.type}:${view.scope}`;
-}
-
 /** The frames a reading restates whole, which a healthy stream never sends. */
 const FULL_RESEND = new Set(["snapshot", "reset"]);
 
 interface Recorder {
   requests: { at: number; route: string }[];
-  bytes: { at: number; bytes: number; route: string; request: string }[];
-  frames: {
-    at: number;
-    type: string;
-    bytes: number;
-    data: string;
-    request: string;
-  }[];
+  bytes: { at: number; bytes: number; route: string }[];
+  frames: { at: number; type: string; bytes: number; data: string }[];
   routes: Map<string, string>;
-  /** Each event stream's request, in the order the page opened them, by subscription. */
-  streams: Map<string, string>;
-  /** The view each subscription the page made was for, as the server normalized it. */
-  views: Map<string, string>;
   /** The `Content-Encoding` each event stream the page opened was served under. */
   streamEncodings: string[];
 }
@@ -293,27 +267,8 @@ async function record(page: Page): Promise<Recorder> {
     bytes: [],
     frames: [],
     routes: new Map(),
-    streams: new Map(),
-    views: new Map(),
     streamEncodings: [],
   };
-  page.on("response", (response) => {
-    if (
-      new URL(response.url()).pathname !== "/api/v2/subscriptions" ||
-      response.request().method() !== "POST" ||
-      response.status() !== 201
-    )
-      return;
-    response
-      .json()
-      .then((body: unknown) => {
-        const { subscription, view } = subscribedSchema.parse(body);
-        recorder.views.set(subscription, viewLabel(view));
-      })
-      // A page closing mid-read leaves its stream unlabelled, which
-      // `byStream` refuses rather than guesses.
-      .catch(() => undefined);
-  });
   page.on("request", (request) => {
     const url = new URL(request.url());
     if (!url.pathname.startsWith("/api/")) return;
@@ -326,9 +281,6 @@ async function record(page: Page): Promise<Recorder> {
   await cdp.send("Network.enable");
   cdp.on("Network.requestWillBeSent", (event) => {
     const url = new URL(event.request.url);
-    const subscription = url.searchParams.get("subscription");
-    if (url.pathname === "/api/v2/events" && subscription !== null)
-      recorder.streams.set(event.requestId, subscription);
     recorder.routes.set(
       event.requestId,
       url.pathname.startsWith("/api/")
@@ -344,7 +296,6 @@ async function record(page: Page): Promise<Recorder> {
       // traffic, so its decoded length is not counted in its place.
       bytes: event.encodedDataLength,
       route: recorder.routes.get(event.requestId) ?? "other",
-      request: event.requestId,
     });
   });
   cdp.on("Network.responseReceived", (event) => {
@@ -361,7 +312,6 @@ async function record(page: Page): Promise<Recorder> {
       type: event.eventName,
       bytes: Buffer.byteLength(event.data),
       data: event.data,
-      request: event.requestId,
     });
   });
   return recorder;
@@ -656,59 +606,21 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
         (bytesByRoute[route] ?? 0) + perMinute(count),
       );
     const frames = inWindow(recorder.frames);
-    const byType = (items: Recorder["frames"]) => {
-      const counted: Record<
-        string,
-        { frames_per_min: number; bytes_per_min: number }
-      > = {};
-      for (const frame of items) {
-        const entry = counted[frame.type] ?? {
-          frames_per_min: 0,
-          bytes_per_min: 0,
-        };
-        counted[frame.type] = entry;
-        entry.frames_per_min = round(entry.frames_per_min + perMinute(1));
-        entry.bytes_per_min = Math.round(
-          entry.bytes_per_min + perMinute(frame.bytes),
-        );
-      }
-      return counted;
-    };
-    const framesByType = byType(frames);
-    // Each stream the tab held in the window, named by its subscription's view
-    // and the order the tab opened streams in, so a reconnect or a switch of
-    // view reads as a second stream rather than as more of the first.
-    const framesByStream: Record<
+    const framesByType: Record<
       string,
-      {
-        view: string;
-        frames_per_min: number;
-        bytes_per_min: number;
-        wire_bytes_per_min: number;
-        frames_by_type: ReturnType<typeof byType>;
-      }
+      { frames_per_min: number; bytes_per_min: number }
     > = {};
-    [...recorder.streams].forEach(([request, subscription], opened) => {
-      const carried = frames.filter((frame) => frame.request === request);
-      const wire = bytes
-        .filter((chunk) => chunk.request === request)
-        .reduce((sum, { bytes: count }) => sum + count, 0);
-      if (carried.length === 0 && wire === 0) return;
-      const view = recorder.views.get(subscription);
-      if (view === undefined)
-        throw new Error(
-          `${variant.name}: stream ${request} reads subscription ${subscription}, which the page was never answered`,
-        );
-      framesByStream[`${opened + 1}:${view}`] = {
-        view,
-        frames_per_min: round(perMinute(carried.length)),
-        bytes_per_min: Math.round(
-          perMinute(carried.reduce((sum, { bytes: count }) => sum + count, 0)),
-        ),
-        wire_bytes_per_min: Math.round(perMinute(wire)),
-        frames_by_type: byType(carried),
+    for (const frame of frames) {
+      const entry = framesByType[frame.type] ?? {
+        frames_per_min: 0,
+        bytes_per_min: 0,
       };
-    });
+      framesByType[frame.type] = entry;
+      entry.frames_per_min = round(entry.frames_per_min + perMinute(1));
+      entry.bytes_per_min = Math.round(
+        entry.bytes_per_min + perMinute(frame.bytes),
+      );
+    }
     const repeated = (items: Recorder["frames"]) => ({
       frames: items.filter(({ type }) => FULL_RESEND.has(type)).length,
       bytes: items
@@ -747,24 +659,18 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
           `record ${seq} rendered before its frame arrived`,
         ).toBeGreaterThanOrEqual(arrived ?? 0);
       }
-      const perRecord = recordLags(
-        appended,
-        observed,
-        rowsShown,
-        recorder.frames,
-      );
+      const burst = appended.filter((item) => item.burst);
       lag = {
         measured_as: rowsShown
           ? "the record's row appearing on the node timeline"
           : "the view root's data-journal-seq reaching the record's number",
-        ...summarizeLags(perRecord),
-        during_burst: summarizeLags(perRecord.filter(({ burst }) => burst)),
+        ...lagStats(appended, observed, rowsShown),
+        during_burst: lagStats(burst, observed, rowsShown),
         frame_arrival: {
           p50_s: percentile(arrivals, 50),
           p95_s: percentile(arrivals, 95),
           max_s: arrivals.length === 0 ? null : Math.max(...arrivals),
         },
-        per_record: perRecord,
       };
     }
     // The stream's bytes held to the frames it carried. Every stream the page
@@ -805,7 +711,6 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
       bytes_per_min_by_route: bytesByRoute,
       frames_per_min: round(perMinute(frames.length)),
       frames_by_type: framesByType,
-      frames_by_stream: framesByStream,
       repeated_snapshot: {
         in_window: repeated(frames),
         at_load: repeated(loadPhase),
@@ -855,7 +760,7 @@ test("request load, frames, lag and server CPU in every page state", async ({
   if (ONLY !== undefined) return;
   mkdirSync(join(import.meta.dirname, "../telemetry"), { recursive: true });
   const document = telemetrySchema.parse({
-    schema_version: 3,
+    schema_version: 2,
     recorded_at: new Date().toISOString(),
     commit,
     dirty,

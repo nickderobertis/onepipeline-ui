@@ -18,7 +18,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { report } from "@onebudgetspec/sdk";
-import { percentile, telemetrySchema } from "./load/telemetry.ts";
+import { telemetrySchema } from "./load/telemetry.ts";
 
 class UsageError extends Error {}
 
@@ -93,16 +93,7 @@ const MEASURES = {
   },
   lag(telemetry) {
     const found = variants(telemetry, ["live"]);
-    // Read off each record's own lag, which the telemetry's summaries are
-    // held to: the figure is the per-record 95th percentile.
-    const { value } = worst(found, (variant) =>
-      percentile(
-        variant.lag.per_record.flatMap(({ lag_s }) =>
-          lag_s === null ? [] : [lag_s],
-        ),
-        95,
-      ),
-    );
+    const { value } = worst(found, (variant) => variant.lag.p95_s);
     return {
       value,
       detail: Object.fromEntries(
@@ -111,7 +102,6 @@ const MEASURES = {
           {
             measured_as: lag.measured_as,
             records: lag.records,
-            never_shown: lag.never_shown,
             p50_s: lag.p50_s,
             p95_s: lag.p95_s,
             max_s: lag.max_s,
@@ -141,7 +131,6 @@ const MEASURES = {
             {
               bytes_per_min_by_route: variant.bytes_per_min_by_route,
               frames_by_type: variant.frames_by_type,
-              frames_by_stream: variant.frames_by_stream,
               repeated_snapshot: variant.repeated_snapshot,
             },
           ]),
