@@ -9,19 +9,27 @@ import { spawn } from "node:child_process";
 import { expect, test } from "@playwright/test";
 import { treeCpuSeconds } from "./load/cpu";
 
-/** Busy-loop for `ms` of wall clock, which on an idle core is as much CPU. */
+/**
+ * Busy-loop until the process has used `ms` of CPU. Counted in CPU rather than
+ * wall clock, so a host other work is contending for still burns the whole of it.
+ */
 const burn = (ms: number) =>
-  `const end = Date.now() + ${ms}; while (Date.now() < end) {}`;
+  `const from = process.cpuUsage();
+   for (;;) {
+     const used = process.cpuUsage(from);
+     if (used.user + used.system >= ${ms * 1_000}) break;
+   }`;
 
 test("a tree's CPU counts the process and its descendants, live and reaped", async () => {
   // The parent burns a second, then starts a child that burns a second while
-  // the parent waits on it, then lingers so the tree can be read.
+  // the parent waits on it, then lingers until it is stopped so the tree can be
+  // read however long the host takes to schedule the burning.
   const parent = spawn(process.execPath, [
     "-e",
     `${burn(1_000)};
      const { spawnSync } = require("node:child_process");
      spawnSync(process.execPath, ["-e", ${JSON.stringify(burn(1_000))}]);
-     setTimeout(() => {}, 5_000);`,
+     setInterval(() => {}, 60_000);`,
   ]);
   try {
     const pid = parent.pid ?? 0;
