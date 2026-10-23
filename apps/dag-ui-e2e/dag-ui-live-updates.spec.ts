@@ -18,7 +18,7 @@ import {
   type SubscriptionFrame,
   subscriptionFrameSchema,
 } from "@onepipeline-ui/dag-model";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, type Request, test } from "@playwright/test";
 import { z } from "zod";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
 import { appendRecords } from "./load/journal";
@@ -65,6 +65,8 @@ interface Wire {
     readonly search: string;
     readonly body: unknown;
   }[];
+  /** Each subscription the page was answered with, in the order it asked. */
+  readonly answers: { readonly asked: number; readonly id: string }[];
   readonly frames: {
     readonly at: number;
     readonly type: string;
@@ -73,10 +75,14 @@ interface Wire {
 }
 
 async function watch(page: Page): Promise<Wire> {
-  const wire: Wire = { requests: [], frames: [] };
+  const wire: Wire = { requests: [], answers: [], frames: [] };
+  // Which request each response answers, by the request itself: two requests
+  // can carry the same body.
+  const index = new WeakMap<Request, number>();
   page.on("request", (request) => {
     const url = new URL(request.url());
     if (!url.pathname.startsWith("/api/")) return;
+    index.set(request, wire.requests.length);
     wire.requests.push({
       at: Date.now(),
       method: request.method(),
@@ -84,6 +90,20 @@ async function watch(page: Page): Promise<Wire> {
       search: url.search,
       body: request.method() === "POST" ? request.postDataJSON() : undefined,
     });
+  });
+  page.on("response", async (response) => {
+    const request = response.request();
+    if (
+      request.method() !== "POST" ||
+      new URL(response.url()).pathname !== API_V2_PATHS.subscriptions ||
+      response.status() !== 201
+    )
+      return;
+    const asked = index.get(request) ?? -1;
+    const answered = z
+      .object({ subscription: z.string() })
+      .parse(await response.json());
+    wire.answers.push({ asked, id: answered.subscription });
   });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Network.enable");
@@ -274,29 +294,45 @@ const streaming = (wire: Wire): string | undefined => {
     : (new URLSearchParams(stream.search).get("subscription") ?? undefined);
 };
 
+/** The kind of subscription each view the page shows is answered by. */
+const SUBSCRIBES: Record<string, string> = {
+  graph: "detail",
+  overall: "timeline",
+  channel: "channel",
+  node: "timeline",
+};
+
 /**
- * Wait until the page streams a subscription other than `previous`, and every
- * subscription it has made has opened its stream — one switch can make two, as
- * a node's timeline is reached through the graph.
+ * Wait until the page streams a subscription other than `previous` — the one
+ * it was answered with last, and, given the `view` it moved to, of that view's
+ * kind. One switch can make two subscriptions, as a node's timeline is reached
+ * through the graph, and the first of them may be overtaken before it streams
+ * at all, or stream for a moment before the second is asked for.
  */
-async function streamsAnew(wire: Wire, previous: string | undefined) {
-  const made = () =>
-    wire.requests.filter(
-      ({ method, path }) =>
-        method === "POST" && path === API_V2_PATHS.subscriptions,
-    ).length;
-  const streamed = () =>
-    new Set(
-      wire.requests
-        .filter(({ path }) => path === API_V2_PATHS.events)
-        .map(({ search }) => new URLSearchParams(search).get("subscription")),
-    ).size;
+async function streamsAnew(
+  wire: Wire,
+  previous: string | undefined | null,
+  view?: string,
+) {
+  const newest = () =>
+    wire.answers.reduce<(typeof wire.answers)[number] | undefined>(
+      (latest, answer) =>
+        latest === undefined || answer.asked > latest.asked ? answer : latest,
+      undefined,
+    );
+  const kind = (answer: (typeof wire.answers)[number] | undefined) =>
+    z
+      .object({ view: z.object({ type: z.string() }) })
+      .safeParse(
+        answer === undefined ? undefined : wire.requests[answer.asked]?.body,
+      ).data?.view.type;
   await expect
     .poll(
       () =>
         streaming(wire) !== undefined &&
-        streaming(wire) !== previous &&
-        streamed() >= made(),
+        (previous === null || streaming(wire) !== previous) &&
+        streaming(wire) === newest()?.id &&
+        (view === undefined || kind(newest()) === SUBSCRIBES[view]),
       {
         message: "the page opened no stream for its new subscription",
         timeout: FRAME_PATIENCE,
@@ -304,6 +340,9 @@ async function streamsAnew(wire: Wire, previous: string | undefined) {
     )
     .toBe(true);
 }
+
+/** Wait until the page streams the subscription it was answered with last. */
+const streamsSettled = (wire: Wire) => streamsAnew(wire, null);
 
 /** The requests a window of the page made, as `METHOD path`. */
 const requestsSince = (wire: Wire, since: number) =>
@@ -356,7 +395,7 @@ test("a finished run's pages send no request the page with nothing open does not
         const previous = streaming(wire);
         await page.goto(`${server.origin}${address(run, view, "publish")}`);
         await shown(page, view, "publish");
-        await streamsAnew(wire, previous);
+        await streamsAnew(wire, previous, view);
         const since = Date.now();
         await frameArrives(
           wire,
@@ -543,10 +582,11 @@ test("no run-list snapshot follows the first read, on connection or after a reco
   // subscription, naming the one it replaces, and the view left behind is
   // neither subscribed nor read.
   for (const view of ["channel", "node", "graph"]) {
+    await streamsSettled(wire);
     const before = streaming(wire);
     const since = Date.now();
     await switchTo(page, view, node);
-    await streamsAnew(wire, before);
+    await streamsAnew(wire, before, view);
     // The first subscription the switch made named the one it replaces (a
     // node's timeline is reached through the graph, which subscribes too).
     expect(
@@ -629,10 +669,11 @@ test("a dropped stream resumes from its last frame, and every change made meanwh
   // Every view the page moves among leaves the one it left unsubscribed and
   // unread: its subscription is gone, and nothing reads its payload.
   for (const view of ["graph", "overall", "channel", "node"]) {
+    await streamsSettled(wire);
     const before = streaming(wire);
     const since = Date.now();
     await switchTo(page, view, node);
-    await streamsAnew(wire, before);
+    await streamsAnew(wire, before, view);
     expect(
       (
         await page.request.get(
