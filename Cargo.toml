@@ -168,9 +168,12 @@ onemessagebus = "0.9.1"
 # `scripts/semver-check.sh` refuses a release that moved this line while the
 # commits release-plz versions from announce no break.
 #
-# The engine pin also fixes the linked plan-store family. The test-only sibling
-# requirements follow its lock so the reader and fixture producer share one
-# resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
+# The engine pin also fixes the linked plan-store family. A host holds its
+# plan-store CLI, this engine and this reader to one store release, so a store
+# change it adopts — currently the cheaper plan-copy and approval calls — reaches
+# the host only once this line names the engine release that links it. The
+# test-only sibling requirements follow its lock so the reader and fixture
+# producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
 onepipeline = "=0.86.0"
 serde = { version = "1", features = ["derive"] }
