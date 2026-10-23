@@ -710,15 +710,25 @@ fn a_cursor_the_subscription_cannot_resume_from_is_answered_with_one_named_reset
 #[test]
 fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
     // Many runs, each grown once per poll while the stream is away, so the
-    // subscription records more frames than it retains.
+    // subscription records more frames than it retains. A moving run's row is
+    // pushed at most once every `ROW_POLLS_PER_READ` polls, so on a loaded host
+    // that takes longer than the contract's grace for a subscription nothing is
+    // connected to; this journey is about retention, so its grace is longer.
     let runs: Vec<String> = (0..60)
         .map(|index| format!("retained-{index:02}"))
         .collect();
-    let live = Live::start(|root| {
-        for run in &runs {
-            growing_run(root, run);
-        }
-    });
+    let grace = Duration::from_secs(600);
+    let live = Live::start_with(
+        |root| {
+            for run in &runs {
+                growing_run(root, run);
+            }
+        },
+        &[(
+            onepipeline_ui::live::DISCONNECTED_GRACE_ENV,
+            &grace.as_millis().to_string(),
+        )],
+    );
     let subscribed = live.subscribe(&json!({ "view": { "type": "sidebar" } }));
     let subscription = subscribed["subscription"]
         .as_str()
@@ -736,7 +746,7 @@ fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
     // retained frames behind, is dropped, and on reconnecting is answered with
     // the one explicit re-send rather than a replay that lost frames.
     let stalled = Tab::open(&live, &json!({ "type": "sidebar" }));
-    let deadline = Instant::now() + Duration::from_secs(240);
+    let deadline = Instant::now() + grace;
     let mut counted = 0;
     while counted <= onepipeline_ui::contract::RETAINED_FRAMES {
         let appends: Vec<(PathBuf, Vec<String>)> = runs
@@ -755,7 +765,7 @@ fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
         counted += counter.drain().len();
         assert!(
             Instant::now() < deadline,
-            "only {counted} frames were sent before the deadline"
+            "only {counted} frames were sent within the subscription's grace"
         );
     }
     let mut stream = http::stream(
