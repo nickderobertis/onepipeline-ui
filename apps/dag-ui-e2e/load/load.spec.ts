@@ -41,7 +41,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { availableParallelism, loadavg, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import {
@@ -440,6 +440,17 @@ const appendedSchema = z.object({
  */
 const LANDING_PATIENCE_MS = 20_000;
 
+/** The host's load averages now, and how many cores it has. */
+function hostLoad() {
+  const [load1, load5, load15] = loadavg();
+  return {
+    load_1m: round(load1 ?? 0, 2),
+    load_5m: round(load5 ?? 0, 2),
+    load_15m: round(load15 ?? 0, 2),
+    cores: availableParallelism(),
+  };
+}
+
 /** Whether the page shows every record the writer logged appending. */
 function everyRecordShown(
   observed: z.infer<typeof observedSchema>,
@@ -506,6 +517,7 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
     const pid = served.server.pid ?? 0;
     const start = Date.now();
     const cpuStart = treeCpuSeconds(pid);
+    const loadStart = hostLoad();
     const writer = spawn(
       process.execPath,
       [
@@ -548,6 +560,7 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
       );
     const end = Math.max(Date.now(), start + WINDOW_MS);
     const cpu = treeCpuSeconds(pid) - cpuStart;
+    const loadEnd = hostLoad();
     // A moment for what was appended at the very end to land, and on a live
     // run until every record appended to it is shown, within a patience. The
     // window's figures are already taken, and a record that lands late is
@@ -703,6 +716,7 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
         at_load: repeated(loadPhase),
         after_reconnect: repeated(reconnectPhase),
       },
+      host_load: { start: loadStart, end: loadEnd },
       server_cpu: {
         seconds: round(cpu, 2),
         window_s: WINDOW_MS / 1000,
@@ -746,7 +760,7 @@ test("request load, frames, lag and server CPU in every page state", async ({
   if (ONLY !== undefined) return;
   mkdirSync(join(import.meta.dirname, "../telemetry"), { recursive: true });
   const document = telemetrySchema.parse({
-    schema_version: 1,
+    schema_version: 2,
     recorded_at: new Date().toISOString(),
     commit,
     dirty,

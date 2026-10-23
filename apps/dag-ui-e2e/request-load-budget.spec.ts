@@ -44,6 +44,10 @@ function variant(
       at_load: resent,
       after_reconnect: resent,
     },
+    host_load: {
+      start: { load_1m: n, load_5m: n, load_15m: n, cores: 8 },
+      end: { load_1m: n, load_5m: n, load_15m: n, cores: 8 },
+    },
     server_cpu: {
       seconds: n * 12,
       window_s: 120,
@@ -91,7 +95,7 @@ function telemetry() {
     variants[`live-${view}-2-tabs`] = variant("live", view, 2, n * 3);
   }
   return {
-    schema_version: 1,
+    schema_version: 2,
     recorded_at: "2026-10-23T00:00:00.000Z",
     commit: "0".repeat(40),
     dirty: false,
@@ -115,6 +119,7 @@ const resultSchema = z.object({
       id: z.string(),
       verdict: z.string(),
       actual: z.number().nullable().optional(),
+      detail: z.string().nullable().optional(),
     }),
   ),
 });
@@ -160,6 +165,25 @@ test("each metric reports the costliest variant's figure from recorded telemetry
     "runner-wire": 0.2,
     "runner-cpu": 0.3,
   });
+  // Each reading carries the host's load as every variant was measured, so a
+  // contended figure says so beside it.
+  for (const { id, detail } of results) {
+    const loads = z
+      .object({
+        host_load_by_variant: z.record(
+          z.string(),
+          z.object({
+            start: z.object({ load_5m: z.number() }),
+            end: z.object({ load_5m: z.number() }),
+          }),
+        ),
+      })
+      .parse(JSON.parse(detail ?? "null")).host_load_by_variant;
+    expect(loads["live-node"]?.start.load_5m, id).toBe(2);
+    expect(Object.keys(loads), id).toHaveLength(
+      Object.keys(telemetry().variants).length,
+    );
+  }
 });
 
 test("telemetry missing a variant, or carrying a figure no measurement makes, is refused", () => {
@@ -170,7 +194,20 @@ test("telemetry missing a variant, or carrying a figure no measurement makes, is
     ...variant("live", "graph", 1, 1),
     requests_per_min: -1,
   };
-  for (const document of [missing, negative, { schema_version: 2 }])
+  // A variant measured without the host's load beside it, and a document of
+  // the version before the host's load was recorded.
+  const unloaded = telemetry();
+  const withoutLoad: Record<string, unknown> = variant("live", "node", 1, 2);
+  delete withoutLoad.host_load;
+  unloaded.variants["live-node"] = withoutLoad;
+  const older = { ...telemetry(), schema_version: 1 };
+  for (const document of [
+    missing,
+    negative,
+    unloaded,
+    older,
+    { schema_version: 2 },
+  ])
     for (const { verdict } of check(document)) expect(verdict).toBe("error");
 });
 

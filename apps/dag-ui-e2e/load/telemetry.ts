@@ -82,6 +82,13 @@ export const lagSchema = z.intersection(
     frame_arrival: z.object({ p50_s: seconds, p95_s: seconds, max_s: seconds }),
   }),
 );
+/** The host's load averages and its cores, as `os.loadavg()` reads them. */
+const hostLoad = z.object({
+  load_1m: figure,
+  load_5m: figure,
+  load_15m: figure,
+  cores: z.number().int().positive(),
+});
 const resent = z.object({
   frames: z.number().int().nonnegative(),
   bytes: z.number().int().nonnegative(),
@@ -112,11 +119,14 @@ export const variantSchema = z.object({
     cores_per_tab: figure,
   }),
   lag: lagSchema.optional(),
+  // How busy the host was as the window opened and closed: a wall-clock
+  // figure measured on a contended host reads as the host's, not the view's.
+  host_load: z.object({ start: hostLoad, end: hostLoad }),
 });
 export type Measured = z.infer<typeof variantSchema>;
 
 export const telemetrySchema = z.object({
-  schema_version: z.literal(1),
+  schema_version: z.literal(2),
   recorded_at: z.iso.datetime(),
   commit: z.string().regex(/^[0-9a-f]{40}$/u),
   dirty: z.boolean(),

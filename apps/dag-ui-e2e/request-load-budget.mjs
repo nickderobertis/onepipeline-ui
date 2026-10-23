@@ -181,6 +181,12 @@ try {
       window_s: telemetry.window_s,
       workload: telemetry.workload,
       ...detail,
+      host_load_by_variant: Object.fromEntries(
+        Object.entries(telemetry.variants).map(([name, variant]) => [
+          name,
+          variant.host_load,
+        ]),
+      ),
     }),
   );
   console.log(JSON.stringify({ metric: values.metric, value }));
