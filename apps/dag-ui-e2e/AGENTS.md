@@ -56,6 +56,16 @@ that would not start.
 
 ## The screens: what they are, and why they cannot quietly change
 
+The Graph capture deliberately holds native node resize observations with
+`delayGraphMeasurements`, as does `dag-ui-graph.spec.ts`. React Flow otherwise
+needs those observations to initialize dimensions and handle bounds before it
+will mount an edge, even when the routed layout already knows its path. Keep
+the graph independent of that delivery: a quiet page with visible cards does
+not prove its dependencies were drawn. The capture checks every in-run edge
+from the served plan; the journey also checks nonzero SVG geometry before and
+after resize and navigation. Horizontal edges have zero bounding-box height,
+so Playwright's visibility assertion cannot establish that they are drawn.
+
 `gallery.screens.spec.ts` drives the same surfaces against the same stack as the
 journeys beside it, but it asserts nothing and writes images. Those images are two
 things at once. They are the operator's eyes — a column that crowds its neighbour or
