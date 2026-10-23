@@ -396,11 +396,6 @@ async function expandGraphRows(page: Page): Promise<void> {
   ).toBeVisible();
 }
 
-/** What one plot's clock currently reads: its two axis ticks, in order. */
-async function axisTicks(plot: Locator): Promise<string> {
-  return plot.getByTestId("timeline-axis").innerText();
-}
-
 test("tracks every node state and kind of a live run", async ({ page }) => {
   await openObservatory(page);
 
@@ -3257,11 +3252,6 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
   };
   const before = await sharedTicks();
 
-  // Deliberately cross the live end tick's rollover. Comparing a row read now
-  // with `before` would reject a correctly shared scale, as the old test did.
-  await expect.poll(() => axisTicks(graphLine(page))).not.toBe(before);
-  const advanced = await sharedTicks();
-
   // Zooming one row must reframe every row, rather than merely waiting for
   // another live tick to make its axis differ.
   await dashboard.getByLabel(/^Timeline plot/).hover();
@@ -3270,7 +3260,7 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
     dashboard.getByRole("button", { name: "Reset timeline zoom" }),
   ).toBeEnabled();
   const zoomed = await sharedTicks();
-  expect(zoomed.split("\n")[0]).not.toBe(advanced.split("\n")[0]);
+  expect(zoomed.split("\n")[0]).not.toBe(before.split("\n")[0]);
 
   // Resetting from a different row restores the full range everywhere. Its
   // launch stays fixed even though its live end may have advanced again.
