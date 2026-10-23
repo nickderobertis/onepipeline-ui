@@ -4,13 +4,16 @@
  * the one fixture writer, receipt and all, logs every record it appends to the
  * open run with its sequence number, and lands the burst in one write — and a
  * workload it cannot run is a usage error that appends nothing, which the
- * harness reads as no measurement rather than as a quiet window.
+ * harness reads as no measurement rather than as a quiet window. The tool
+ * output those records carry compresses as real text does, so an encoded
+ * figure measured over them is not flattered by filler.
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
 
@@ -99,6 +102,24 @@ test("the writer grows every run it is given and logs each open-run record", () 
     expect(lines(other).length).toBeGreaterThan(before.other);
     // Through the fixture writer: the receipt's epoch continued.
     expect(epoch(corpus.openLiveRun)).toBe(before.epoch);
+    // Each record's tool output is text of a real tool call's size, and the
+    // stream of them gzips like text: to about a third, never to the sliver
+    // one repeated character gzips to.
+    const outputs = lines(corpus.openLiveRun)
+      .slice(before.open)
+      .map(
+        (line) =>
+          z
+            .object({ payload: z.object({ output: z.string() }) })
+            .parse(JSON.parse(line)).payload.output,
+      );
+    for (const output of outputs) expect(output).toHaveLength(900);
+    expect(new Set(outputs).size).toBe(outputs.length);
+    const text = outputs.join("");
+    const ratio = gzipSync(text).length / Buffer.byteLength(text);
+    expect(ratio, `the outputs gzip to ${ratio} of their size`).toBeGreaterThan(
+      0.2,
+    );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

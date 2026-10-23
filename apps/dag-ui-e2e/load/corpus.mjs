@@ -14,12 +14,14 @@
  *
  * Record mix and sizes follow this host's largest recorded journal (98 MB over
  * 116,888 records): heartbeats ~55 %, tool activity ~30 % at ~1.3 KB, check
- * polls ~6 %, and the turns and settlements around them.
+ * polls ~6 %, and the turns and settlements around them. Tool output is real
+ * text (`output.mjs`), so it compresses as a real host's does.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { receiptFor } from "./journal.ts";
+import { toolOutput } from "./output.mjs";
 
 export const OPEN_LIVE_RUN = "load-live-open";
 export const SETTLED_OPEN_RUN = "load-settled-000";
@@ -39,8 +41,6 @@ export const projectOf = (index) =>
 const HOST = "a-recording-host";
 const stamp = (millis) => new Date(millis).toISOString();
 export const streamOf = (runId) => `${HOST}-${runId}`;
-/** Filler with the size of real tool output, so bytes per record are realistic. */
-const OUTPUT = "x".repeat(900);
 
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
@@ -160,7 +160,7 @@ class Journal {
             name: "Bash",
             detail: `step ${index} of ${node}`,
             truncated: false,
-            output: OUTPUT,
+            output: toolOutput(index),
             index,
           },
         );

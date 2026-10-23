@@ -18,6 +18,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { appendRecords } from "./journal.ts";
+import { toolOutput } from "./output.mjs";
 
 // A bare path segment, never `.` or `..`: a run is a directory under the root.
 const runName = z.string().regex(/^(?!\.{1,2}$)[A-Za-z0-9._-]+$/u);
@@ -93,7 +94,7 @@ function record(run, entry, at) {
       name: "Bash",
       detail: `lm ${run} ${entry.n}`,
       truncated: false,
-      output: "y".repeat(900),
+      output: toolOutput(seq),
       index: seq,
     },
     artifacts: [],
