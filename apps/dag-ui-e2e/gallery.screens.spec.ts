@@ -297,10 +297,9 @@ const SURFACES: readonly Surface[] = [
         "dashboard: running",
       );
       await expect(graphNodes(page, "failed").first()).toBeVisible();
-      // React Flow draws an edge only once it has measured both ends' handles, and
-      // a page whose cards are drawn but whose edges are not yet is quiet enough to
-      // pass `settleReads` — one capture in a few came out with no edges at all. So
-      // every dependency the served plan draws is waited for by its own name.
+      // A quiet page can still be missing dependencies. Ask for every in-run
+      // edge in the served plan by name so a graph with cards but no edges can
+      // never become an accepted capture.
       const response = await page.request.get(
         `/api/v2/runs/${runs().live}?include_conversations=false`,
       );
