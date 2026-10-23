@@ -19862,8 +19862,24 @@ fn a_response_is_gzip_encoded_exactly_when_the_request_takes_gzip() {
     let mut served = gunzipped(&encoded.body);
     served["observed_at"] = Value::Null;
     assert_eq!(served, want);
+    // Gzip taken by weight, by its alias, or by the wildcard is taken alike.
+    for taken in [
+        "br;q=1.0, gzip;q=0.8",
+        "gzip; Q=0.001",
+        "x-gzip",
+        "*",
+        "br, *;q=0.5",
+    ] {
+        let encoded = http::get_raw_with(serving.address, path, &[("Accept-Encoding", taken)]);
+        assert_eq!(encoded.status, 200, "{taken}");
+        assert_eq!(encoded.header("content-encoding"), Some("gzip"), "{taken}");
+        let mut served = gunzipped(&encoded.body);
+        served["observed_at"] = Value::Null;
+        assert_eq!(served, want, "{taken}");
+    }
 
-    // A request that refuses gzip, or names only what this server does not
+    // A request that refuses gzip, by name even where the wildcard takes
+    // everything else, or names only what this server does not
     // speak, is served the body as it is.
     // A weight HTTP does not spell is no offer of gzip either.
     for refused in [
@@ -19871,6 +19887,7 @@ fn a_response_is_gzip_encoded_exactly_when_the_request_takes_gzip() {
         "br",
         "identity",
         "*;q=0",
+        "*, gzip;q=0",
         "gzip;q=2",
         "gzip;q=nan",
     ] {
