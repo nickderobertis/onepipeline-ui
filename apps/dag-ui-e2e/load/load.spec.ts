@@ -446,9 +446,10 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
       loads.push(await loaded(page, variant));
       pages.push(page);
       // The byte accounting held to a response of known size: what the
-      // recorder counted for the page's subscription is that answer's body,
-      // give or take its chunk framing.
-      const body = (await (await subscribed).body()).length;
+      // recorder counted for the page's subscription is that answer's body as
+      // the browser itself sized it, give or take its chunk framing.
+      const body = (await (await subscribed).request().sizes())
+        .responseBodySize;
       const counted = recorder.bytes
         .filter(({ route }) => route === "POST /api/v2/subscriptions")
         .reduce((sum, { bytes: count }) => sum + count, 0);
