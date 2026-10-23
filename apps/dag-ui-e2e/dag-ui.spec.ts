@@ -2179,11 +2179,13 @@ test("switches the reading between decisions and detailed activity", async ({
   // leave the browser: the switch is two named profiles the server defines for
   // every run, and the word on the wire is what proves which two.
   // llmlint: ignore-block[tests_mirror_real_usage] the word is the property under test and nothing on screen carries it: the switch's two settings are the two *named* profiles the server defines for every run — `planner` and `detailed`, the engine's own names, which are what make the browser and the CLI narrow to the same thing — and every reader-visible effect asserted below (fewer markers, no refusal, the same dispatch drawn) would hold just as well under an inline spec that narrows the same records without being the profile the CLI shares, or under a launch-defined alias of it. The requests are read, never altered or answered.
-  const asked: string[] = [];
-  page.on("request", (request) => {
-    const filter = new URL(request.url()).searchParams.get("filter");
-    if (filter !== null && request.url().includes("/api/v2/"))
-      asked.push(filter);
+  const asked: { filter: string; started: number }[] = [];
+  const network = await page.context().newCDPSession(page);
+  await network.send("Network.enable");
+  network.on("Network.requestWillBeSent", ({ request, wallTime }) => {
+    const filter = new URL(request.url).searchParams.get("filter");
+    if (filter !== null && request.url.includes("/api/v2/"))
+      asked.push({ filter, started: wallTime * 1000 });
   });
   // llmlint: ignore-end[tests_mirror_real_usage]
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
@@ -2207,18 +2209,45 @@ test("switches the reading between decisions and detailed activity", async ({
   const detailed = await markers().count();
   // Under the engine's own name for the whole stream — `detailed`, which is what
   // it renamed `monitor` to when it stopped naming an observer member.
-  expect(new Set(asked)).toEqual(new Set(["detailed"]));
+  expect(new Set(asked.map(({ filter }) => filter))).toEqual(
+    new Set(["detailed"]),
+  );
 
   // Narrowing to the decisions is one click, and fewer records are drawn — but
   // not none, because a decision is a record too.
-  const before = asked.length;
+  // Stamp the click in the browser before React handles it. CDP supplies each
+  // request's issuance time on the same epoch clock, even if its notification
+  // reaches this process after the click. Reads issued by the preceding step
+  // therefore stay with that step.
+  await choice("Decisions").evaluate((button) => {
+    button.addEventListener(
+      "click",
+      () => {
+        button.setAttribute(
+          "data-reading-switch-start",
+          String(performance.timeOrigin + performance.now()),
+        );
+      },
+      { capture: true, once: true },
+    );
+  });
   await choice("Decisions").click();
+  const before = Number(
+    await choice("Decisions").getAttribute("data-reading-switch-start"),
+  );
+  expect(before).toBeGreaterThan(0);
   await expect(page).toHaveURL(/detail=decisions/);
   await expect(choice("Decisions")).toHaveAttribute("aria-pressed", "true");
   await expect(timeline(page).getByTestId("timeline-axis")).toBeVisible();
   await expect.poll(() => markers().count()).toBeLessThan(detailed);
   expect(await markers().count()).toBeGreaterThan(0);
-  expect(new Set(asked.slice(before))).toEqual(new Set(["planner"]));
+  expect(
+    new Set(
+      asked
+        .filter(({ started }) => started >= before)
+        .map(({ filter }) => filter),
+    ),
+  ).toEqual(new Set(["planner"]));
   // The node's own dispatch is still drawn at the bounds the run recorded: a
   // filter narrows what is listed, never what the run did.
   await expect(

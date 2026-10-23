@@ -370,11 +370,24 @@ fn an_idle_subscriber_opens_nothing_reads_nothing_and_does_not_spin() {
     // recording anything.
     let marker = serving.mark("marker-idle-stream");
     let opened = Instant::now();
-    let idle = Duration::from_millis(TRACED_POLL_MS * 10);
-    assert!(
-        stream.frame_within(idle).is_none(),
-        "a store where nothing recorded anything woke its subscriber"
-    );
+    // Count completed polls rather than demanding that the host schedule ten
+    // wakeups in exactly ten intervals. The deadline detects a stopped poller;
+    // lateness changes only how long this readiness wait takes.
+    let deadline = opened + Duration::from_secs(30);
+    let mut woke = false;
+    loop {
+        if stream
+            .frame_within(Duration::from_millis(TRACED_POLL_MS))
+            .is_some()
+        {
+            woke = true;
+            break;
+        }
+        let ticks = serving.cost_so_far().since(&marker).listings_of(&root);
+        if ticks >= 10 || Instant::now() >= deadline {
+            break;
+        }
+    }
     let elapsed = opened.elapsed();
     drop(stream);
     let cost = serving.finish().since(&marker);
@@ -383,19 +396,21 @@ fn an_idle_subscriber_opens_nothing_reads_nothing_and_does_not_spin() {
     // allowed to do. A tick is one listing of the runs root — which is what lets
     // a run that appeared since the last tick be noticed.
     let ticks = cost.listings_of(&root);
-    // A count of poll intervals inside a bounded wait this journey itself set,
-    // so the quotient is tens rather than anything a `usize` could lose.
-    #[allow(clippy::cast_possible_truncation)]
-    let due = (elapsed.as_millis() / u128::from(TRACED_POLL_MS)) as usize;
     assert!(
-        ticks <= due + 1,
-        "the subscriber took {ticks} ticks over {elapsed:?}, where a poll of \
-         {TRACED_POLL_MS}ms is {due} — it is spinning rather than waiting"
+        !woke,
+        "a store where nothing recorded anything woke its subscriber"
     );
     assert!(
-        ticks + 1 >= due,
-        "the subscriber took {ticks} ticks over {elapsed:?}, where a poll of \
-         {TRACED_POLL_MS}ms is {due} — it is not polling at all"
+        ticks >= 10,
+        "the subscriber completed only {ticks} polls within {elapsed:?} — it stopped polling"
+    );
+    // Each tick must ask the kernel to wait. The trace stamps a sleep when it
+    // starts, so one begun before the marker can precede a tick counted here.
+    // Scheduling delays cannot change how many waits the subscriber requested.
+    let sleeps = cost.poll_sleeps();
+    assert!(
+        ticks <= sleeps + 1,
+        "the subscriber took {ticks} ticks but requested only {sleeps} poll sleeps — it is spinning"
     );
 
     for n in 0..3 {
