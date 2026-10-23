@@ -35,7 +35,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -56,6 +55,7 @@ import { z } from "zod";
 import harnessBinaries from "../fixtures/harness-binaries.json" with {
   type: "json",
 };
+import { treeCpuSeconds } from "./cpu";
 import {
   type Measured,
   telemetrySchema,
@@ -78,7 +78,6 @@ const WINDOW_MS =
 /** Records per minute on every live run: the p90 active-minute rate of this host. */
 const RATE = 50;
 const BURST = 400;
-const CLOCK_TICKS = 100;
 
 /** A developer's look at some variants: each name one of the variants above. */
 const ONLY = process.env.LOAD_ONLY?.split(",").map((name) =>
@@ -113,54 +112,6 @@ function freePort(): Promise<number> {
       );
     });
   });
-}
-
-/** The process and every descendant of it, by pid, as `/proc` lists them now. */
-function tree(pid: number): number[] {
-  const found = [pid];
-  for (let index = 0; index < found.length; index += 1) {
-    const at = found[index] ?? 0;
-    for (const task of safeList(`/proc/${at}/task`))
-      for (const child of readSafe(`/proc/${at}/task/${task}/children`)
-        .split(" ")
-        .filter(Boolean))
-        found.push(Number(child));
-  }
-  return found;
-}
-
-const safeList = (path: string): string[] => {
-  try {
-    return readdirSync(path);
-  } catch {
-    return [];
-  }
-};
-const readSafe = (path: string): string => {
-  try {
-    return readFileSync(path, "utf8");
-  } catch {
-    return "";
-  }
-};
-
-/**
- * CPU seconds the server's process tree has used so far: each live process's
- * user and system time, with what its children it has already reaped used.
- */
-function treeCpuSeconds(pid: number): number {
-  let ticks = 0;
-  for (const member of tree(pid)) {
-    const stat = readSafe(`/proc/${member}/stat`);
-    if (stat === "") continue;
-    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-    ticks +=
-      Number(fields[11]) +
-      Number(fields[12]) +
-      Number(fields[13]) +
-      Number(fields[14]);
-  }
-  return ticks / CLOCK_TICKS;
 }
 
 /** What `corpus.mjs` says about the corpus it wrote. */

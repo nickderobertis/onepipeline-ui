@@ -19,7 +19,8 @@ import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { appendRecords } from "./journal.ts";
 
-const runName = z.string().regex(/^[A-Za-z0-9._-]+$/u);
+// A bare path segment, never `.` or `..`: a run is a directory under the root.
+const runName = z.string().regex(/^(?!\.{1,2}$)[A-Za-z0-9._-]+$/u);
 const optionsSchema = z
   .object({
     root: z.string().refine(isAbsolute, "root is an absolute path"),
