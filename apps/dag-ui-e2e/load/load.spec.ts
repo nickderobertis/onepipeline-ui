@@ -43,6 +43,7 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
+import { gzipSync } from "node:zlib";
 import {
   type Browser,
   type BrowserContext,
@@ -254,8 +255,10 @@ const FULL_RESEND = new Set(["snapshot", "reset"]);
 interface Recorder {
   requests: { at: number; route: string }[];
   bytes: { at: number; bytes: number; route: string }[];
-  frames: { at: number; type: string; bytes: number }[];
+  frames: { at: number; type: string; bytes: number; data: string }[];
   routes: Map<string, string>;
+  /** The `Content-Encoding` each event stream the page opened was served under. */
+  streamEncodings: string[];
 }
 
 async function record(page: Page): Promise<Recorder> {
@@ -264,6 +267,7 @@ async function record(page: Page): Promise<Recorder> {
     bytes: [],
     frames: [],
     routes: new Map(),
+    streamEncodings: [],
   };
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -294,11 +298,20 @@ async function record(page: Page): Promise<Recorder> {
       route: recorder.routes.get(event.requestId) ?? "other",
     });
   });
+  cdp.on("Network.responseReceived", (event) => {
+    if (!recorder.routes.get(event.requestId)?.startsWith("GET /api/v2/events"))
+      return;
+    const encoding = Object.entries(event.response.headers).find(
+      ([name]) => name.toLowerCase() === "content-encoding",
+    )?.[1];
+    recorder.streamEncodings.push(encoding ?? "identity");
+  });
   cdp.on("Network.eventSourceMessageReceived", (event) => {
     recorder.frames.push({
       at: Date.now(),
       type: event.eventName,
       bytes: Buffer.byteLength(event.data),
+      data: event.data,
     });
   });
   return recorder;
@@ -613,9 +626,16 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
         },
       };
     }
-    // The stream's bytes held to the frames it carried: at least every frame's
-    // data, and no more than that with each frame's SSE framing and the
-    // heartbeats beside them.
+    // The stream's bytes held to the frames it carried. Every stream the page
+    // opened was served gzip-encoded, as the browser asked, so it is at least
+    // what the frames' data gzips to as one block at the highest level, which
+    // a stream flushed frame by frame cannot beat. And it is no more than the
+    // frames unencoded, with each frame's SSE framing and the heartbeats
+    // beside them.
+    expect(
+      new Set(recorder.streamEncodings),
+      "the encoding each stream was served under",
+    ).toStrictEqual(new Set(["gzip"]));
     const streamBytes = bytes
       .filter(({ route }) => route.startsWith("GET /api/v2/events"))
       .reduce((sum, { bytes: count }) => sum + count, 0);
@@ -623,7 +643,9 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
     expect(
       streamBytes,
       "stream bytes against the frames they carried",
-    ).toBeGreaterThanOrEqual(frameBytes);
+    ).toBeGreaterThanOrEqual(
+      gzipSync(frames.map(({ data }) => data).join(""), { level: 9 }).length,
+    );
     expect(
       streamBytes,
       "stream bytes against the frames they carried",
