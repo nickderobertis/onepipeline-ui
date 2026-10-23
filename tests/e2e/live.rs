@@ -1499,6 +1499,9 @@ fn a_stale_telemetry_fold_catches_up_once_the_run_goes_quiet_without_holding_bac
     );
 }
 
+/// Unix-only: the queue is made unreadable with a POSIX permission bit, and
+/// Windows denies a read through an ACL this journey cannot set.
+#[cfg(unix)]
 #[test]
 fn a_channel_that_could_not_be_read_for_a_moment_reaches_the_view_once_it_can() {
     use std::os::unix::fs::PermissionsExt;
@@ -1756,6 +1759,9 @@ fn a_cursor_another_subscription_was_sent_is_not_one_this_one_resumes_from() {
     assert_eq!(reset["base"], foreign.as_str());
 }
 
+/// Unix-only: the runs root is made unlistable with a POSIX permission bit, and
+/// Windows denies a listing through an ACL this journey cannot set.
+#[cfg(unix)]
 #[test]
 fn a_sidebar_keeps_its_rows_through_a_root_or_a_run_it_could_not_read_and_moves_once_it_can() {
     use std::os::unix::fs::PermissionsExt;
