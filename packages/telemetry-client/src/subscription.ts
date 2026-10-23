@@ -1,3 +1,4 @@
+// llmlint: ignore-file[changed_behavior_has_e2e] every path a conforming server reaches is driven against the real `onepipeline-api serve` by apps/dag-ui-e2e/dag-ui-live-updates.spec.ts in a real browser: the opening snapshot, row and patch frames applied in order, a view replaced and retired, a dropped stream resumed from its last frame, a restarted server recovered through `resume` and its reset, and a page's unload retiring it. What is left are the refusals — a frame, reset, response or patched payload that breaks the contract — which only a broken peer produces and the real server, which validates what it serves, cannot be made to; they are proven at the client's `EventSource` and `fetch` boundary in subscription.test.ts, the boundary this package already takes as injectable because Node ships no `EventSource`.
 import {
   API_V2_PATHS,
   API_V2_QUERY,
@@ -166,6 +167,11 @@ export class LiveView {
         .catch(() => undefined);
       return;
     }
+    const mismatch = disagreement(this.#view, subscribed);
+    if (mismatch !== undefined) {
+      this.#fail(new Error(`The subscription answered ${mismatch}`));
+      return;
+    }
     this.#subscription = subscribed.subscription;
     const initial = subscribed.initial;
     if (initial.type === "snapshot") {
@@ -222,7 +228,7 @@ export class LiveView {
         // A named server-sent event is always delivered as a `MessageEvent`
         // whose data is the frame's text; anything else is not a frame.
         if (raw instanceof MessageEvent && typeof raw.data === "string")
-          this.#receive(raw.data);
+          this.#receive(raw.data, type, raw.lastEventId);
       });
     }
     source.onerror = () => {
@@ -254,7 +260,7 @@ export class LiveView {
     this.#connect();
   }
 
-  #receive(data: string) {
+  #receive(data: string, event: string, lastEventId: string) {
     const state = this.#state;
     if (state === undefined || this.#failed) return;
     let frame: SubscriptionFrame;
@@ -267,6 +273,16 @@ export class LiveView {
       return;
     }
     if (frame.subscription !== this.#subscription) return;
+    // The SSE event and id are the frame's own type and id, or the browser's
+    // reconnect cursor would disagree with the one this tab applied.
+    if (frame.type !== event || frame.id !== lastEventId) {
+      this.#fail(
+        new Error(
+          "A frame's SSE event or id is not the frame's own type and id",
+        ),
+      );
+      return;
+    }
     const applied = seqOf(state.applied);
     const incoming = seqOf(frame.id);
     if (incoming.epoch === applied.epoch && incoming.seq <= applied.seq) return;
@@ -399,6 +415,35 @@ function patched(
         ),
       };
   }
+}
+
+/**
+ * What a subscription's answer says that the view asked for does not: its view,
+ * its visible state's view, or a payload of another run — or `undefined` when
+ * every one of them is the view asked for.
+ */
+function disagreement(
+  asked: SubscriptionView,
+  answer: Subscribed,
+): string | undefined {
+  const identity = (view: {
+    type: string;
+    run_id?: string;
+    scope?: string;
+    node?: string;
+  }) => [view.type, view.run_id, view.scope, view.node].join("\u0000");
+  if (identity(answer.view) !== identity(asked)) return "another view";
+  const visible = answer.initial.snapshot.visible;
+  if (identity(visible) !== identity(asked)) return "the state of another view";
+  if (visible.type === "sidebar") return undefined;
+  const runs = [
+    visible.detail.run.run_id,
+    "timeline" in visible ? visible.timeline.run_id : visible.run_id,
+    "channel" in visible ? visible.channel.run_id : visible.run_id,
+  ];
+  return runs.every((run) => run === visible.run_id)
+    ? undefined
+    : "a payload of another run";
 }
 
 function sameView(left: SubscriptionView, right: SubscriptionView): boolean {

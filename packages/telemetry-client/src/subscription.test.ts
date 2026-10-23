@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { type LiveCause, type LiveState, TelemetryClient } from "./index.js";
@@ -195,26 +196,49 @@ test("refuses a frame the contract does not allow", async () => {
   expect(states).toHaveLength(1);
 });
 
+/** A payload this repository's own server serves, as `tests/contract.rs` pins it. */
+const served = (name: string): unknown =>
+  JSON.parse(
+    readFileSync(
+      new URL(`../../../tests/fixtures/${name}`, import.meta.url),
+      "utf8",
+    ),
+  );
+const SERVED_RUN = "run-20260807-a1b2c3";
+
 test("replaces the subscription for a new view and retires it when closed", async () => {
   const h = harness();
-  const { live } = open(h);
+  const { live, errors } = open(h);
   await vi.waitFor(() => expect(h.sources).toHaveLength(1));
+  // Answered as the server answers the Channel view: its detail and queue.
   h.answer = (body) =>
     Response.json(
       {
         subscription: NEXT_SUBSCRIPTION,
         view: body.view,
-        initial: { type: "snapshot", snapshot: snapshot(4) },
+        initial: {
+          type: "snapshot",
+          snapshot: {
+            ...snapshot(4),
+            visible: {
+              type: "channel",
+              run_id: SERVED_RUN,
+              detail: served("run.json"),
+              channel: served("run-channel.json"),
+            },
+          },
+        },
       },
       { status: 201 },
     );
-  live.change({ type: "channel", run_id: "run-1" });
+  live.change({ type: "channel", run_id: SERVED_RUN });
   expect(sourceAt(h, 0).closed).toBe(true);
   await vi.waitFor(() => expect(h.sources).toHaveLength(2));
   expect(h.bodies.at(-1)).toStrictEqual({
-    view: { type: "channel", run_id: "run-1" },
+    view: { type: "channel", run_id: SERVED_RUN },
     replaces: SUBSCRIPTION,
   });
+  expect(errors).toStrictEqual([]);
   live.close();
   expect(sourceAt(h, 1).closed).toBe(true);
   await vi.waitFor(() => expect(h.deleted).toStrictEqual([NEXT_SUBSCRIPTION]));
@@ -289,4 +313,45 @@ test("refuses a reset whose snapshot is not its own, and orders ids past the saf
     "A reset frame names a snapshot other than itself",
   ]);
   expect(states.at(-1)?.[0].applied).toBe(`${EPOCH}:${huge + 1n}`);
+});
+
+test("refuses an answer for another view, and a frame whose SSE event or id is not its own", async () => {
+  const other = harness();
+  other.answer = () =>
+    Response.json(
+      {
+        subscription: SUBSCRIPTION,
+        view: { type: "channel", run_id: "run-1" },
+        initial: { type: "snapshot", snapshot: snapshot(1) },
+      },
+      { status: 201 },
+    );
+  const answered = open(other);
+  await vi.waitFor(() =>
+    expect(answered.errors[0]?.message).toBe(
+      "The subscription answered another view",
+    ),
+  );
+  expect(other.sources).toHaveLength(0);
+
+  const h = harness();
+  const { states, errors } = open(h);
+  await vi.waitFor(() => expect(h.sources).toHaveLength(1));
+  // The frame arrives under another SSE event name than its own type.
+  sourceAt(h, 0).dispatchEvent(
+    new MessageEvent("run.removed", {
+      data: JSON.stringify({
+        type: "run.changed",
+        subscription: SUBSCRIPTION,
+        id: id(2),
+        base: id(1),
+        row: row("settled"),
+      }),
+      lastEventId: id(2),
+    }),
+  );
+  expect(errors.map(({ message }) => message)).toStrictEqual([
+    "A frame's SSE event or id is not the frame's own type and id",
+  ]);
+  expect(states).toHaveLength(1);
 });
