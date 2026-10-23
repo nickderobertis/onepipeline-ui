@@ -540,10 +540,17 @@ test("no run-list snapshot follows the first read, on connection or after a reco
   const node = facts.liveNode;
   await page.goto(`${server.origin}${address(run, "graph", node)}`);
   await shown(page, "graph", node);
-  const firstStream = wire.requests.filter(
-    ({ path }) => path === API_V2_PATHS.events,
-  );
-  expect(firstStream).toHaveLength(1);
+  // The view renders from the subscription's snapshot, so on a loaded host the
+  // stream may open only after it: wait for it, then hold it to one.
+  const streams = () =>
+    wire.requests.filter(({ path }) => path === API_V2_PATHS.events);
+  await expect
+    .poll(() => streams().length, {
+      message: "the stream never opened",
+      timeout: FRAME_PATIENCE,
+    })
+    .toBeGreaterThan(0);
+  expect(streams()).toHaveLength(1);
   // The stream opens after the snapshot the subscription answered with.
   const opened = Date.now();
   recordActivity(server, run, node, `before the reconnect ${opened}`);
