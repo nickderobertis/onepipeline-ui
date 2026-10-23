@@ -408,3 +408,56 @@ test("refuses an answer under another filter, and a reset re-sending another vie
   ]);
   expect(live.states).toHaveLength(1);
 });
+
+test("refuses a frame from another epoch, and a patch moving a payload to another run", async () => {
+  const h = harness();
+  const { states, errors } = open(h);
+  await vi.waitFor(() => expect(h.sources).toHaveLength(1));
+  const elsewhere = "0198a5b3-2c4d-4e60-8f01-00000000dead";
+  sourceAt(h, 0).frame("run.changed", {
+    id: `${elsewhere}:2`,
+    base: id(1),
+    row: row("settled"),
+  });
+  expect(errors.map(({ message }) => message)).toStrictEqual([
+    "A frame names another server's epoch",
+  ]);
+  expect(states).toHaveLength(1);
+
+  const detailed = harness();
+  detailed.answer = (body) =>
+    Response.json(
+      {
+        subscription: SUBSCRIPTION,
+        view: body.view,
+        initial: {
+          type: "snapshot",
+          snapshot: {
+            ...snapshot(1),
+            visible: {
+              type: "detail",
+              run_id: SERVED_RUN,
+              detail: served("run.json"),
+            },
+          },
+        },
+      },
+      { status: 201 },
+    );
+  const moved: string[] = [];
+  detailed.client.live({
+    view: { type: "detail", run_id: SERVED_RUN },
+    onState: () => undefined,
+    onError: (error) => moved.push(error.message),
+  });
+  await vi.waitFor(() => expect(detailed.sources).toHaveLength(1));
+  sourceAt(detailed, 0).frame("detail.patch", {
+    id: id(2),
+    base: id(1),
+    run_id: SERVED_RUN,
+    ops: [{ p: ["run", "run_id"], v: "another-run" }],
+  });
+  expect(moved).toStrictEqual([
+    "A patch could not be applied: a detail.patch moved its payload to another run",
+  ]);
+});

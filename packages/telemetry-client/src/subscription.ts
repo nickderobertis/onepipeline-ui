@@ -303,6 +303,12 @@ export class LiveView {
       this.#take(frame.snapshot, { kind: "reset", reason: frame.reason });
       return;
     }
+    // Every frame but a reset is issued by the process that issued the state
+    // it patches; one from another epoch patches state it never served.
+    if (incoming.epoch !== applied.epoch) {
+      this.#fail(new Error("A frame names another server's epoch"));
+      return;
+    }
     if (frame.base !== state.applied) {
       this.#resume();
       return;
@@ -384,11 +390,27 @@ function patched(
     new Error(`a ${frame.type} for ${what} this tab does not show`);
   if (visible.type === "sidebar" || visible.run_id !== frame.run_id)
     throw refused("a run");
+  // A patch keeps its payload the run's: one that moved it to another run is
+  // no patch of this view.
+  const ofRun = <T extends { run_id: string }>(payload: T): T => {
+    if (payload.run_id !== visible.run_id)
+      throw new Error(`a ${frame.type} moved its payload to another run`);
+    return payload;
+  };
   switch (frame.type) {
     case "detail.patch":
       return {
         ...visible,
-        detail: patchedAs(runDetailSchema, visible.detail, frame.ops, "detail"),
+        detail: (() => {
+          const detail = patchedAs(
+            runDetailSchema,
+            visible.detail,
+            frame.ops,
+            "detail",
+          );
+          ofRun(detail.run);
+          return detail;
+        })(),
       };
     case "timeline.patch": {
       if (visible.type !== "timeline" || visible.scope !== frame.scope)
@@ -400,11 +422,8 @@ function patched(
         throw refused("a node's timeline");
       return {
         ...visible,
-        timeline: patchedAs(
-          runTimelineSchema,
-          visible.timeline,
-          frame.ops,
-          "timeline",
+        timeline: ofRun(
+          patchedAs(runTimelineSchema, visible.timeline, frame.ops, "timeline"),
         ),
       };
     }
@@ -412,11 +431,8 @@ function patched(
       if (visible.type !== "channel") throw refused("a channel");
       return {
         ...visible,
-        channel: patchedAs(
-          channelQueueSchema,
-          visible.channel,
-          frame.ops,
-          "channel",
+        channel: ofRun(
+          patchedAs(channelQueueSchema, visible.channel, frame.ops, "channel"),
         ),
       };
   }

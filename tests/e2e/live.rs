@@ -1656,3 +1656,90 @@ fn a_stream_or_a_retirement_the_contract_cannot_read_is_refused() {
     assert_eq!(refused.status, 400, "{}", refused.body);
     assert_eq!(refused.json()["error"]["code"], "invalid_subscription");
 }
+
+#[test]
+fn a_retired_subscription_recreated_from_its_own_cursor_is_answered_unknown_cursor() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let mut tab = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
+    let journal = live.journal(run);
+    live_journal::append_lines(
+        &journal,
+        &[activity(&journal, run, fixture_run::NODE_ID, "applied")],
+    );
+    let _ = frame_of(&mut tab, "detail.patch");
+    let applied = tab.applied.clone();
+    // The subscription goes; the tab recreates its view from the frame it
+    // applied — a cursor of this very process, which no live subscription holds.
+    let retired = http::delete(
+        live.address(),
+        &format!("/api/v2/subscriptions/{}", tab.subscription),
+    );
+    assert_eq!(retired.status, 204);
+    let recreated =
+        live.subscribe(&json!({ "view": { "type": "detail", "run_id": run }, "resume": applied }));
+    let initial = &recreated["initial"];
+    assert_eq!(initial["type"], "reset");
+    assert_eq!(
+        initial["reason"], "unknown-cursor",
+        "the same epoch, but a cursor nothing holds"
+    );
+    assert_eq!(initial["base"], applied.as_str());
+    assert_eq!(initial["subscription"], recreated["subscription"]);
+    assert_eq!(initial["snapshot"]["id"], initial["id"]);
+}
+
+#[test]
+fn a_cursor_another_subscription_was_sent_is_not_one_this_one_resumes_from() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    // Two subscriptions sent frames from one sequence, interleaved.
+    let mut mine = Tab::open(&live, &json!({ "type": "sidebar" }));
+    let mut theirs = Tab::open(&live, &json!({ "type": "sidebar" }));
+    let journal = live.journal(run);
+    let mut sent_to_them = Vec::new();
+    for marker in ["one", "two", "three"] {
+        live_journal::append_lines(
+            &journal,
+            &[activity(&journal, run, fixture_run::NODE_ID, marker)],
+        );
+        let _ = frame_of(&mut mine, "run.changed");
+        let theirs_frame = frame_of(&mut theirs, "run.changed");
+        sent_to_them.push(theirs_frame["id"].as_str().expect("an id").to_owned());
+        mine.frames.clear();
+        theirs.frames.clear();
+    }
+    let (_, first_mine) = mine.state["id"]
+        .as_str()
+        .expect("an id")
+        .split_once(':')
+        .expect("epoch:seq");
+    let (_, last_mine) = mine.applied.split_once(':').expect("epoch:seq");
+    // The frame the other subscription was sent first: after this one's
+    // snapshot, before the last frame this one was sent.
+    let foreign = sent_to_them[0].clone();
+    let (_, foreign_seq) = foreign.split_once(':').expect("epoch:seq");
+    let seq = |text: &str| text.parse::<u64>().expect("a sequence");
+    assert!(
+        seq(first_mine) < seq(foreign_seq) && seq(foreign_seq) < seq(last_mine),
+        "the other subscription's cursor lies inside this one's range"
+    );
+    let Tab {
+        subscription,
+        stream,
+        ..
+    } = mine;
+    drop(stream);
+    let mut resumed = http::stream(
+        live.address(),
+        &format!("/api/v2/events?subscription={subscription}&after={foreign}"),
+        None,
+    );
+    let reset = resumed.frame_within(PATIENCE).expect("a reset").json();
+    assert_eq!(reset["type"], "reset");
+    assert_eq!(
+        reset["reason"], "unknown-cursor",
+        "a cursor this subscription was never sent"
+    );
+    assert_eq!(reset["base"], foreign.as_str());
+}
