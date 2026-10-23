@@ -1003,18 +1003,32 @@ fn a_surface_raised_through_the_engine_reaches_the_channel_view_as_a_patch() {
     let live = Live::start(|root| growing_run(root, run));
     let mut tab = Tab::open(&live, &json!({ "type": "channel", "run_id": run }));
     let mut seen = live.refreshes().len();
-    // The engine's own writer journals the surface, receipt and all.
-    let raised = http::post(
-        live.address(),
-        &format!("/api/v2/runs/{run}/channel/surface"),
-        &json!({ "kind": "question", "message": "is the journey live?" }).to_string(),
-    );
-    assert_eq!(raised.status, 200, "{}", raised.body);
-    let refresh = live.next_refresh(run, &mut seen);
-    assert_eq!(
-        refresh["refresh"], "appended",
-        "the engine's own append is read as one: {refresh}"
-    );
+    // The engine's own writer journals the surface, receipt and all. Its receipt
+    // lands just after the record, and a poll between the two is answered with a
+    // re-read; so the journey raises until one append is read as one, and every
+    // other read is that re-read rather than anything else.
+    let mut reads = Vec::new();
+    while !reads
+        .iter()
+        .any(|read: &Value| read["refresh"] == "appended")
+    {
+        assert!(
+            reads.len() < 5,
+            "the engine's own append is never read as one: {reads:#?}"
+        );
+        let raised = http::post(
+            live.address(),
+            &format!("/api/v2/runs/{run}/channel/surface"),
+            &json!({ "kind": "question", "message": "is the journey live?" }).to_string(),
+        );
+        assert_eq!(raised.status, 200, "{}", raised.body);
+        let read = live.next_refresh(run, &mut seen);
+        assert!(
+            ["appended", "reread"].contains(&read["refresh"].as_str().unwrap_or_default()),
+            "{read}"
+        );
+        reads.push(read);
+    }
     let deadline = Instant::now() + PATIENCE;
     let mut frames = Vec::new();
     while !frames
