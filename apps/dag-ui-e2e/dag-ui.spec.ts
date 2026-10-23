@@ -2436,36 +2436,128 @@ test("collapses a run of near-identical records and puts it back", async ({
   ).toHaveCount(2);
 });
 
+/**
+ * Wait for the real detail and scoped timeline before inspecting their rendering.
+ * Headers alone are insufficient: a reset can interrupt the body.
+ * The heading is mounted before either read lands. Network time belongs to the
+ * enclosing journey's budget, not the shorter window for a DOM assertion.
+ */
+async function readNodeTranscript(
+  page: Page,
+  runId: string,
+  nodeId: string,
+  read: () => Promise<void>,
+): Promise<void> {
+  await Promise.all([
+    page.waitForResponse(
+      async (response) =>
+        new URL(response.url()).pathname === API_V2_PATHS.run(runId) &&
+        response.ok() &&
+        (await response.finished()) === null,
+      { timeout: 0 },
+    ),
+    page.waitForResponse(
+      async (response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === API_V2_PATHS.timeline(runId) &&
+          url.searchParams.get("node") === nodeId &&
+          response.ok() &&
+          (await response.finished()) === null
+        );
+      },
+      { timeout: 0 },
+    ),
+    read(),
+  ]);
+}
+
 test("collapses every kind of run the same way and at the same count", async ({
   page,
 }) => {
   const { threshold, narrow_node, wide_node } = fixture().collapse;
-  // The two kinds of row this list can hold a run of: dispatched sessions, which
-  // are spans, and journal records, which are moments. A reader meets one
-  // collapsing behaviour here rather than one per kind, so both are asked the same
-  // questions on the same corpus.
-  for (const kind of ["dispatch", "criterion-checked"]) {
-    await openObservatory(page, `/?run=${runs().busy}&node=${narrow_node}`);
-    await expect(readingRows(page).first()).toBeVisible();
+  const runId = runs().busy;
+  const kinds = [
+    { kind: "dispatch", name: /^worker \(/ },
+    { kind: "criterion-checked", name: "criterion-checked" },
+  ];
+  // Keep the slow-read regression real: forward to the API after the old
+  // fifteen-second assertion window, without replacing its response.
+  await delayReads(
+    page,
+    new RegExp(`${API_V2_PATHS.timeline(runId)}\\?.*node=${narrow_node}(&|$)`),
+    16_000,
+  );
+  await readNodeTranscript(page, runId, narrow_node, () =>
+    openObservatory(page, `/?run=${runId}&node=${narrow_node}`),
+  );
+  // Both kinds are present before absence of a collapse control can prove anything.
+  for (const { kind, name } of kinds) {
+    await expect(reading(page).getByRole("article", { name })).toHaveCount(
+      threshold - 1,
+    );
     await expect(
       reading(page).getByRole("button", {
         name: RegExp(`more ${kind} events`),
       }),
     ).toHaveCount(0);
+  }
 
-    await openObservatory(page, `/?run=${runs().busy}&node=${wide_node}`);
+  await readNodeTranscript(page, runId, wide_node, () =>
+    openObservatory(page, `/?run=${runId}&node=${wide_node}`),
+  );
+  for (const { kind, name } of kinds) {
+    const rows = reading(page).getByRole("article", { name });
     const control = reading(page).getByRole("button", {
       name: `Show ${threshold - 2} more ${kind} events`,
+      exact: true,
     });
-    await expect(control).toBeVisible();
+    await expect(rows).toHaveCount(2);
     await expect(control).toHaveAttribute("aria-expanded", "false");
     await control.click();
-    await expect(
-      reading(page).getByRole("button", {
-        name: `Collapse ${threshold - 2} more ${kind} events`,
-      }),
-    ).toHaveAttribute("aria-expanded", "true");
+    await expect(rows).toHaveCount(threshold);
+    const back = reading(page).getByRole("button", {
+      name: `Collapse ${threshold - 2} more ${kind} events`,
+      exact: true,
+    });
+    await expect(back).toHaveAttribute("aria-expanded", "true");
+    await back.click();
+    await expect(rows).toHaveCount(2);
   }
+});
+
+test("recovers a node transcript with Refresh after a connection reset", async ({
+  page,
+}) => {
+  const { threshold, narrow_node } = fixture().collapse;
+  const runId = runs().busy;
+  const isTimeline = (url: URL) =>
+    url.pathname === API_V2_PATHS.timeline(runId) &&
+    url.searchParams.get("node") === narrow_node;
+  // llmlint: ignore[e2e_not_mocked] inject only a transport failure, as a connection reset would; the retry reaches the real API and its unchanged fixture. No response or client is doubled.
+  await page.route(isTimeline, (route) => route.abort("connectionreset"), {
+    times: 1,
+  });
+  const reset = page.waitForEvent("requestfailed", (request) =>
+    isTimeline(new URL(request.url())),
+  );
+  await openObservatory(page, `/?run=${runId}&node=${narrow_node}`);
+  expect((await reset).failure()?.errorText).toContain("ERR_CONNECTION_RESET");
+  await expect(page.getByRole("alert")).toContainText("Timeline unavailable");
+  await expect(readingRows(page)).toHaveCount(0);
+
+  await readNodeTranscript(page, runId, narrow_node, () =>
+    page.getByRole("button", { name: "Refresh", exact: true }).click(),
+  );
+  await expect(
+    reading(page).getByRole("article", { name: /^worker \(/ }),
+  ).toHaveCount(threshold - 1);
+  await expect(
+    reading(page).getByRole("article", { name: "criterion-checked" }),
+  ).toHaveCount(threshold - 1);
+  await expect(
+    page.getByText("Timeline unavailable", { exact: true }),
+  ).toHaveCount(0);
 });
 
 test("draws what a ready node was waiting for as spans of its own", async ({
