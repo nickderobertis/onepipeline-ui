@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.48.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.48.0...v0.48.1) - 2026-10-23
+
+### Fixed
+
+- *(test)* capture the Graph view only once its edges are drawn ([#443](https://github.com/nickderobertis/onepipeline-ui/pull/443))
+
 ## [0.48.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.47.0...v0.48.0) - 2026-10-23
 
 ### Performance
