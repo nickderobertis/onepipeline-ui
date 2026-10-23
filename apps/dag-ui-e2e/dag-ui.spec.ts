@@ -3242,35 +3242,45 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
   const dashboard = graphRow(page, "dashboard");
   const runLevel = page.getByRole("region", { name: "Run-level timeline" });
 
-  // Every plot starts on the same clock, which is what makes a column of one row
-  // mean the same instant as the column above it.
-  const before = await axisTicks(graphLine(page));
-  expect(await axisTicks(dashboard)).toBe(before);
-  expect(await axisTicks(runLevel)).toBe(before);
+  // Read every axis in one browser task: a telemetry update can advance the
+  // live range between separate locator reads, even though every row shares it.
+  const sharedTicks = async () => {
+    const ticks = await page
+      .locator(".graph-timeline")
+      .getByTestId("timeline-axis")
+      .evaluateAll((axes) =>
+        axes.map((axis) => (axis as HTMLElement).innerText),
+      );
+    expect(ticks.length).toBeGreaterThan(3);
+    expect(new Set(ticks).size).toBe(1);
+    return ticks[0] ?? "";
+  };
+  const before = await sharedTicks();
 
-  // Zooming *one* row reframes all of them, because there is one range and every
-  // plot is drawn against it.
+  // Deliberately cross the live end tick's rollover. Comparing a row read now
+  // with `before` would reject a correctly shared scale, as the old test did.
+  await expect.poll(() => axisTicks(graphLine(page))).not.toBe(before);
+  const advanced = await sharedTicks();
+
+  // Zooming one row must reframe every row, rather than merely waiting for
+  // another live tick to make its axis differ.
   await dashboard.getByLabel(/^Timeline plot/).hover();
   await page.mouse.wheel(0, -300);
-  await expect.poll(() => axisTicks(dashboard)).not.toBe(before);
-  const zoomed = await axisTicks(dashboard);
-  expect(await axisTicks(graphLine(page))).toBe(zoomed);
-  expect(await axisTicks(runLevel)).toBe(zoomed);
+  await expect(
+    dashboard.getByRole("button", { name: "Reset timeline zoom" }),
+  ).toBeEnabled();
+  const zoomed = await sharedTicks();
+  expect(zoomed.split("\n")[0]).not.toBe(advanced.split("\n")[0]);
 
-  // And resetting from any of them puts every one of them back.
+  // Resetting from a different row restores the full range everywhere. Its
+  // launch stays fixed even though its live end may have advanced again.
   await runLevel.getByRole("button", { name: "Reset timeline zoom" }).click();
   await expect(
     runLevel.getByRole("button", { name: "Reset timeline zoom" }),
   ).toBeDisabled();
-  // The live range ends at the server's latest observation, which may have
-  // advanced since `before`. Its launch tick stays fixed; every row must still
-  // show the same full range after reset.
-  await expect
-    .poll(async () => (await axisTicks(graphLine(page))).split("\n")[0])
-    .toBe(before.split("\n")[0]);
-  const reset = await axisTicks(graphLine(page));
-  expect(await axisTicks(dashboard)).toBe(reset);
-  expect(await axisTicks(runLevel)).toBe(reset);
+  const reset = await sharedTicks();
+  expect(reset).not.toBe(zoomed);
+  expect(reset.split("\n")[0]).toBe(before.split("\n")[0]);
 });
 
 test("draws the stretches the run recorded nothing in", async ({ page }) => {
