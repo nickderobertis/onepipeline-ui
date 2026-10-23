@@ -115,7 +115,7 @@ git -C "$clone" checkout --quiet -B measure "$sha" \
 git -C "$clone" update-ref refs/remotes/origin/main "$sha" \
   || fail "could not point the clone's origin/main at $sha" "check that $clone/.git is writable, then re-run"
 if [ -n "$fixture" ]; then
-  git -C "$root" diff "$fixture" | git -C "$clone" apply --index \
+  git -C "$root" diff --binary "$fixture" | git -C "$clone" apply --index \
     || fail "the fixture $fixture does not apply on $sha" "pick a fixture whose files $sha still has unchanged"
   git -C "$clone" -c user.name=measure -c user.email=measure@localhost commit --quiet -m "fixture: $fixture" \
     || fail "could not commit the fixture $fixture on $sha (git's reason is above)" "if git says there is nothing to commit, $sha already holds the fixture; otherwise fix what git names, then re-run"
