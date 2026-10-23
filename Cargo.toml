@@ -210,7 +210,7 @@ libc = "0.2"
 # declares the stacking, review and landing kinds that engine relays. 0.56.3 is
 # the release engine 0.79.0 resolves (^0.56.2), and declares
 # `publication-resumed`, which `payload::vcs` copies; engine 0.79.1 resolves the
-# same release (^0.56.3), as do 0.82.0, 0.84.0, 0.84.1 and 0.86.0.
+# same release (^0.56.3), as do 0.82.0, 0.84.0 and 0.84.1.
 onevcs = "=0.56.3"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
@@ -229,10 +229,7 @@ predicates = "3"
 # call into `Engine::create_task`, so a journey makes that call rather than
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
-# engine cannot share: the lock then resolves the one copy it links. 0.11.0 is
-# the release engine 0.86.0 pins, carrying the cheaper plan-copy and approval
-# calls a host's plan-store CLI makes; a host holds that CLI, the engine and
-# this reader to one store release, so this moves with the engine to it.
+# engine cannot share: the lock then resolves the one copy it links.
 onetaskgraph-core = "=0.11.0"
 onetaskgraph-plugin-api = "=0.11.0"
 schemars = "1"
