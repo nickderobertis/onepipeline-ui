@@ -434,6 +434,25 @@ const appendedSchema = z.object({
   burst: z.boolean(),
 });
 
+/**
+ * How long past the window the page is given to show the last records
+ * appended to it, after which a record not shown is reported as never shown.
+ */
+const LANDING_PATIENCE_MS = 20_000;
+
+/** Whether the page shows every record the writer logged appending. */
+function everyRecordShown(
+  observed: z.infer<typeof observedSchema>,
+  log: string,
+  rowsShown: boolean,
+): boolean {
+  return readFileSync(log, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => appendedSchema.parse(JSON.parse(line)))
+    .every(({ seq }) => renderedAt(observed, rowsShown, seq) !== undefined);
+}
+
 async function measure(browser: Browser, variant: Variant): Promise<Measured> {
   const served = await serveFresh(variant.name);
   const contexts: BrowserContext[] = [];
@@ -529,8 +548,23 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
       );
     const end = Math.max(Date.now(), start + WINDOW_MS);
     const cpu = treeCpuSeconds(pid) - cpuStart;
-    // A moment for what was appended at the very end to land.
+    // A moment for what was appended at the very end to land, and on a live
+    // run until every record appended to it is shown, within a patience. The
+    // window's figures are already taken, and a record that lands late is
+    // timed from its append however long it took.
     await page.waitForTimeout(3_000);
+    if (growing) {
+      const patience = Date.now() + LANDING_PATIENCE_MS;
+      while (
+        Date.now() < patience &&
+        !everyRecordShown(
+          observedSchema.parse(await page.evaluate("window.__journal")),
+          log,
+          variant.view === "node",
+        )
+      )
+        await page.waitForTimeout(250);
+    }
     watching = false;
     await opening;
     const observed = observedSchema.parse(
