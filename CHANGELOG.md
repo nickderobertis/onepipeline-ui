@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.47.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.46.0...v0.47.0) - 2026-10-23
+
+### Added
+
+- *(deps)* [**breaking**] one project-centric navigation with run kinds and a Host page ([#432](https://github.com/nickderobertis/onepipeline-ui/pull/432))
+
+### Fixed
+
+- serve the recorded agent role for observer-graph sessions ([#436](https://github.com/nickderobertis/onepipeline-ui/pull/436))
+
 ## [0.46.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.45.2...v0.46.0) - 2026-10-22
 
 ### Added
