@@ -1878,24 +1878,37 @@ fn a_run_that_moves_every_poll_has_its_row_pushed_at_most_once_per_interval_and_
     });
     let mut tab = Tab::open(&live, &json!({ "type": "sidebar" }));
     let other = live.journal(fixture_run::OTHER_RUN_ID);
-    // One record every poll, for a while: the run moves on every tick.
+    // One record every poll, for a while: the run moves on every tick. The
+    // load workload's writer appends from one process, so the pace holds on a
+    // loaded host, where a writer spawned per record falls behind the interval.
     let poll = Duration::from_millis(50);
+    let log = live._trace_dir.path().join("moving.jsonl");
+    let options = json!({
+        "root": other.parent().and_then(Path::parent).expect("a runs root"),
+        "log": log, "durationMs": 3_000, "rate": 1_200,
+        "runs": [{ "run": fixture_run::OTHER_RUN_ID, "node": fixture_run::NODE_ID }],
+        "burst": 0, "burstRun": fixture_run::OTHER_RUN_ID, "burstAt": 0,
+        "openRun": fixture_run::OTHER_RUN_ID,
+    });
     let started = Instant::now();
-    let mut appended = 0;
-    let mut last = Value::Null;
-    while started.elapsed() < Duration::from_secs(3) {
-        let record = activity(
-            &other,
-            fixture_run::OTHER_RUN_ID,
-            fixture_run::NODE_ID,
-            &format!("tick {appended}"),
-        );
-        last = serde_json::from_str::<Value>(&record).expect("a record")["ts"].clone();
-        live_journal::append_lines(&other, &[record]);
-        appended += 1;
-        std::thread::sleep(poll);
-    }
+    let writer = std::process::Command::new("node")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui-e2e/load/writer.mjs"))
+        .arg(options.to_string())
+        .status()
+        .expect("node runs the load writer");
     let elapsed = started.elapsed();
+    assert!(writer.success(), "the load writer failed");
+    let appended = fs::read_to_string(&log)
+        .expect("the writer's log")
+        .lines()
+        .count();
+    let last = fs::read_to_string(&other)
+        .expect("a journal")
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str::<Value>(line).ok())
+        .expect("a last record")["ts"]
+        .clone();
     // Its row is read again once the interval is up, to what the run then
     // holds: the last record among them.
     let updated = |tab: &Tab| {
