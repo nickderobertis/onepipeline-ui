@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod";
+import workload from "./workload.json" with { type: "json" };
 
 export const VIEWS = ["graph", "overall", "node"] as const;
 export const KINDS = [
@@ -132,12 +133,16 @@ export const telemetrySchema = z.object({
   dirty: z.boolean(),
   window_s: z.number().positive(),
   workload: z.object({
-    runs: z.literal(150),
-    projects: z.literal(30),
-    other_live_runs: z.literal(10),
-    records_per_minute_per_live_run: z.literal(50),
-    burst_records: z.literal(400),
-    open_live_run_records_at_start: z.literal(116_000),
+    runs: z.literal(workload.runs),
+    projects: z.literal(workload.projects),
+    other_live_runs: z.literal(workload.other_live_runs),
+    records_per_minute_per_live_run: z.literal(
+      workload.records_per_minute_per_live_run,
+    ),
+    burst_records: z.literal(workload.burst_records),
+    open_live_run_records_at_start: z.literal(
+      workload.open_live_run_records_at_start,
+    ),
     fresh_server_and_corpus_per_variant: z.literal(true),
   }),
   // Every variant is recorded: a figure missing from the telemetry is an

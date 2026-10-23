@@ -22,19 +22,23 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { receiptFor } from "./journal.ts";
 import { toolOutput } from "./output.mjs";
+// The workload every budget is stated over, declared once for this writer,
+// the journey that drives it and the schema its recording is held to.
+import workload from "./workload.json" with { type: "json" };
+
+export const PROJECTS = workload.projects;
+export const RUNS = workload.runs;
+export const OPEN_LIVE_RECORDS = workload.open_live_run_records_at_start;
 
 export const OPEN_LIVE_RUN = "load-live-open";
 export const SETTLED_OPEN_RUN = "load-settled-000";
 export const STOPPED_OPEN_RUN = "load-stopped-00";
 export const OTHER_LIVE_RUNS = Array.from(
-  { length: 10 },
+  { length: workload.other_live_runs },
   (_, index) => `load-live-${String(index).padStart(2, "0")}`,
 );
 export const LIVE_NODE = "dashboard";
 export const OTHER_LIVE_NODE = "work";
-export const PROJECTS = 30;
-export const RUNS = 150;
-export const OPEN_LIVE_RECORDS = 116_000;
 export const projectOf = (index) =>
   `local-md:load-project-${String(index % PROJECTS).padStart(2, "0")}`;
 

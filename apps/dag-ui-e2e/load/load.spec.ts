@@ -65,6 +65,7 @@ import {
   type Variant,
   variantSchema,
 } from "./telemetry";
+import declared from "./workload.json" with { type: "json" };
 
 const REPO = resolve(import.meta.dirname, "../../..");
 const WRITER = join(import.meta.dirname, "writer.mjs");
@@ -77,9 +78,6 @@ const WINDOW_MS =
     .int()
     .positive()
     .parse(process.env.LOAD_WINDOW_S ?? "120") * 1000;
-/** Records per minute on every live run: the p90 active-minute rate of this host. */
-const RATE = 50;
-const BURST = 400;
 
 /** A developer's look at some variants: each name one of the variants above. */
 const ONLY = process.env.LOAD_ONLY?.split(",").map((name) =>
@@ -526,9 +524,9 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
           root: served.runsRoot,
           log,
           durationMs: WINDOW_MS,
-          rate: RATE,
+          rate: declared.records_per_minute_per_live_run,
           runs,
-          burst: BURST,
+          burst: declared.burst_records,
           // The burst lands on the open run when it is growing, so the lag
           // during a burst is the open run's own; on another live run otherwise.
           burstRun: growing ? openLiveRun : otherLiveRuns[0],
@@ -771,8 +769,8 @@ test("request load, frames, lag and server CPU in every page state", async ({
       runs: workload?.runs,
       projects: workload?.projects,
       other_live_runs: workload?.otherLiveRuns.length,
-      records_per_minute_per_live_run: RATE,
-      burst_records: BURST,
+      records_per_minute_per_live_run: declared.records_per_minute_per_live_run,
+      burst_records: declared.burst_records,
       open_live_run_records_at_start: workload?.openLiveRecords,
       fresh_server_and_corpus_per_variant: true,
     },

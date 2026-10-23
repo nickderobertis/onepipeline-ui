@@ -202,7 +202,6 @@ pub fn post_within(address: SocketAddr, path: &str, body: &str, patience: Durati
     }
 }
 
-/// `DELETE path`, read to completion.
 /// `DELETE path` with `headers`, read to completion with its headers kept.
 pub fn delete_raw_with(address: SocketAddr, path: &str, headers: &[(&str, &str)]) -> Raw {
     let mut stream = connect(address);

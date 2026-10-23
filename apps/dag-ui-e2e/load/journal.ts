@@ -69,6 +69,12 @@ function systemTime(nanoseconds: bigint) {
 /** The journal's metadata, as the engine's `Stamp` reads it. */
 export function stampOf(journal: string): Stamp {
   const about = statSync(journal, { bigint: true });
+  const identity: NonNullable<Stamp["identity"]> = [
+    Number(about.dev),
+    Number(about.ino),
+    Number(about.ctimeNs / 1_000_000_000n),
+    Number(about.ctimeNs % 1_000_000_000n),
+  ];
   return {
     len: Number(about.size),
     modified: systemTime(about.mtimeNs),
@@ -79,16 +85,7 @@ export function stampOf(journal: string): Stamp {
       : {}),
     // The engine stamps a file's identity on unix alone, so a receipt that
     // carried one on Windows would never match the journal it describes.
-    ...(process.platform === "win32"
-      ? {}
-      : {
-          identity: [
-            Number(about.dev),
-            Number(about.ino),
-            Number(about.ctimeNs / 1_000_000_000n),
-            Number(about.ctimeNs % 1_000_000_000n),
-          ] as [number, number, number, number],
-        }),
+    ...(process.platform === "win32" ? {} : { identity }),
   };
 }
 
