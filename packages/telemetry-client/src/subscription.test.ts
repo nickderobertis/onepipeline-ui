@@ -355,3 +355,56 @@ test("refuses an answer for another view, and a frame whose SSE event or id is n
   ]);
   expect(states).toHaveLength(1);
 });
+
+test("refuses an answer under another filter, and a reset re-sending another view's state", async () => {
+  const filtered = harness();
+  filtered.answer = () =>
+    Response.json(
+      {
+        subscription: SUBSCRIPTION,
+        view: { type: "detail", run_id: SERVED_RUN, filter: "planner" },
+        initial: {
+          type: "snapshot",
+          snapshot: {
+            ...snapshot(1),
+            visible: {
+              type: "detail",
+              run_id: SERVED_RUN,
+              detail: served("run.json"),
+            },
+          },
+        },
+      },
+      { status: 201 },
+    );
+  const errors: string[] = [];
+  filtered.client.live({
+    view: { type: "detail", run_id: SERVED_RUN, filter: "detailed" },
+    onState: () => undefined,
+    onError: (error) => errors.push(error.message),
+  });
+  await vi.waitFor(() =>
+    expect(errors).toStrictEqual(["The subscription answered another filter"]),
+  );
+
+  const h = harness();
+  const live = open(h);
+  await vi.waitFor(() => expect(h.sources).toHaveLength(1));
+  sourceAt(h, 0).frame("reset", {
+    id: id(5),
+    base: id(1),
+    reason: "stale-cursor",
+    snapshot: {
+      ...snapshot(5),
+      visible: {
+        type: "detail",
+        run_id: SERVED_RUN,
+        detail: served("run.json"),
+      },
+    },
+  });
+  expect(live.errors.map(({ message }) => message)).toStrictEqual([
+    "A reset frame re-sent the state of another view",
+  ]);
+  expect(live.states).toHaveLength(1);
+});

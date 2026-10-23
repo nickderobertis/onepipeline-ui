@@ -295,6 +295,11 @@ export class LiveView {
         );
         return;
       }
+      const mismatch = stateDisagreement(this.#view, frame.snapshot);
+      if (mismatch !== undefined) {
+        this.#fail(new Error(`A reset frame re-sent ${mismatch}`));
+        return;
+      }
       this.#take(frame.snapshot, { kind: "reset", reason: frame.reason });
       return;
     }
@@ -417,23 +422,48 @@ function patched(
   }
 }
 
+/** A view's identity: its type, run, scope and node. */
+function identity(view: {
+  type: string;
+  run_id?: string;
+  scope?: string;
+  node?: string;
+}): string {
+  return [view.type, view.run_id, view.scope, view.node].join("\u0000");
+}
+
 /**
- * What a subscription's answer says that the view asked for does not: its view,
- * its visible state's view, or a payload of another run — or `undefined` when
- * every one of them is the view asked for.
+ * A filter as the server writes it back: a profile by its name, and an inline
+ * spec as its parsed members in key order — the server re-serializes one.
  */
-function disagreement(
+function filterKey(filter: string | undefined): string | undefined {
+  if (filter === undefined || !filter.startsWith("{")) return filter;
+  const sorted = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(sorted)
+      : typeof value === "object" && value !== null
+        ? Object.fromEntries(
+            Object.entries(value)
+              .sort(([left], [right]) => left.localeCompare(right))
+              .map(([key, member]) => [key, sorted(member)]),
+          )
+        : value;
+  try {
+    return JSON.stringify(sorted(JSON.parse(filter)));
+  } catch {
+    return filter;
+  }
+}
+
+/**
+ * What a snapshot shows that `asked` does not: another view's state, or a
+ * payload of another run — or `undefined` when it is `asked`'s throughout.
+ */
+function stateDisagreement(
   asked: SubscriptionView,
-  answer: Subscribed,
+  snapshot: SubscriptionSnapshot,
 ): string | undefined {
-  const identity = (view: {
-    type: string;
-    run_id?: string;
-    scope?: string;
-    node?: string;
-  }) => [view.type, view.run_id, view.scope, view.node].join("\u0000");
-  if (identity(answer.view) !== identity(asked)) return "another view";
-  const visible = answer.initial.snapshot.visible;
+  const visible = snapshot.visible;
   if (identity(visible) !== identity(asked)) return "the state of another view";
   if (visible.type === "sidebar") return undefined;
   const runs = [
@@ -444,6 +474,22 @@ function disagreement(
   return runs.every((run) => run === visible.run_id)
     ? undefined
     : "a payload of another run";
+}
+
+/**
+ * What a subscription's answer says that the view asked for does not: its view
+ * or its filter, or a state {@link stateDisagreement} refuses.
+ */
+function disagreement(
+  asked: SubscriptionView,
+  answer: Subscribed,
+): string | undefined {
+  if (identity(answer.view) !== identity(asked)) return "another view";
+  const filterOf = (view: SubscriptionView) =>
+    "filter" in view ? view.filter : undefined;
+  if (filterKey(filterOf(answer.view)) !== filterKey(filterOf(asked)))
+    return "another filter";
+  return stateDisagreement(asked, answer.initial.snapshot);
 }
 
 function sameView(left: SubscriptionView, right: SubscriptionView): boolean {
