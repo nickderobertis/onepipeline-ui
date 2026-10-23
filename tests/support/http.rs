@@ -203,6 +203,29 @@ pub fn post_within(address: SocketAddr, path: &str, body: &str, patience: Durati
 }
 
 /// `DELETE path`, read to completion.
+/// `DELETE path` with `headers`, read to completion with its headers kept.
+pub fn delete_raw_with(address: SocketAddr, path: &str, headers: &[(&str, &str)]) -> Raw {
+    let mut stream = connect(address);
+    let mut request = format!("DELETE {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n");
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    stream
+        .write_all(request.as_bytes())
+        .expect("write the request");
+    stream.flush().expect("flush the request");
+    let mut reader = BufReader::new(stream);
+    let (status, headers) = head_with_headers(&mut reader);
+    let mut body = Vec::new();
+    reader.read_to_end(&mut body).expect("read the body");
+    Raw {
+        status,
+        headers,
+        body,
+    }
+}
+
 pub fn delete(address: SocketAddr, path: &str) -> Response {
     let mut stream = connect(address);
     stream

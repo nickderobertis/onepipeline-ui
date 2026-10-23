@@ -19865,7 +19865,15 @@ fn a_response_is_gzip_encoded_exactly_when_the_request_takes_gzip() {
 
     // A request that refuses gzip, or names only what this server does not
     // speak, is served the body as it is.
-    for refused in ["gzip;q=0, br", "br", "identity", "*;q=0"] {
+    // A weight HTTP does not spell is no offer of gzip either.
+    for refused in [
+        "gzip;q=0, br",
+        "br",
+        "identity",
+        "*;q=0",
+        "gzip;q=2",
+        "gzip;q=nan",
+    ] {
         let served = http::get_raw_with(serving.address, path, &[("Accept-Encoding", refused)]);
         assert_eq!(served.status, 200, "{refused}");
         assert_eq!(served.header("content-encoding"), None, "{refused}");
@@ -19884,4 +19892,25 @@ fn a_response_is_gzip_encoded_exactly_when_the_request_takes_gzip() {
     assert_eq!(missing.status, 404);
     assert_eq!(missing.header("content-encoding"), Some("gzip"));
     assert!(gunzipped(&missing.body)["error"]["code"].is_string());
+
+    // A response with no body is sent with none, encoded or not: a retired
+    // subscription's 204 carries no gzip stream to decode.
+    let subscribed = http::post(
+        serving.address,
+        "/api/v2/subscriptions",
+        &json!({ "view": { "type": "sidebar" } }).to_string(),
+    );
+    assert_eq!(subscribed.status, 201);
+    let subscription = subscribed.json()["subscription"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    let retired = http::delete_raw_with(
+        serving.address,
+        &format!("/api/v2/subscriptions/{subscription}"),
+        &[("Accept-Encoding", "gzip")],
+    );
+    assert_eq!(retired.status, 204);
+    assert_eq!(retired.header("content-encoding"), None);
+    assert!(retired.body.is_empty(), "{:?}", retired.body);
 }
