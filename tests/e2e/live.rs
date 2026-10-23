@@ -735,13 +735,19 @@ fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
     let deadline = Instant::now() + Duration::from_secs(240);
     let mut counted = 0;
     while counted <= onepipeline_ui::contract::RETAINED_FRAMES {
-        for run in &runs {
-            let journal = live.serving.run_dir(run).join("events.jsonl");
-            live_journal::append_lines(
-                &journal,
-                &[activity(&journal, run, fixture_run::NODE_ID, "churn")],
-            );
-        }
+        let appends: Vec<(PathBuf, Vec<String>)> = runs
+            .iter()
+            .map(|run| {
+                let journal = live.serving.run_dir(run).join("events.jsonl");
+                let line = activity(&journal, run, fixture_run::NODE_ID, "churn");
+                (journal, vec![line])
+            })
+            .collect();
+        let borrowed: Vec<(&Path, &[String])> = appends
+            .iter()
+            .map(|(journal, lines)| (journal.as_path(), lines.as_slice()))
+            .collect();
+        live_journal::append_many(&borrowed);
         counted += counter.drain().len();
         assert!(
             Instant::now() < deadline,
@@ -1262,4 +1268,88 @@ fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pin
             pin(&reset),
         ]),
     );
+}
+
+/// Every member name of a JSON object, nested ones as `parent.child`, sorted.
+fn field_names(value: &Value, prefix: &str, names: &mut Vec<String>) {
+    if let Value::Object(members) = value {
+        for (key, member) in members {
+            let name = format!("{prefix}{key}");
+            field_names(member, &format!("{name}."), names);
+            names.push(name);
+        }
+    }
+    names.sort();
+}
+
+#[test]
+fn the_fixture_writers_receipts_are_the_engines_field_for_field() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let journal = live.journal(run);
+    let receipt = || -> Value {
+        serde_json::from_slice(&fs::read(live_journal::receipt_path(&journal)).expect("a receipt"))
+            .expect("a receipt parses")
+    };
+    let surface = |message: &str| {
+        let raised = http::post(
+            live.address(),
+            &format!("/api/v2/runs/{run}/channel/surface"),
+            &json!({ "kind": "question", "message": message }).to_string(),
+        );
+        assert_eq!(raised.status, 200, "{}", raised.body);
+    };
+    // A tab on the run, so the server holds it open and traces each refresh.
+    let _tab = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
+    let mut seen = live.refreshes().len();
+    // The engine's own writer appends, then the fixture writer, then the engine.
+    surface("the engine writes first");
+    let engine_first = receipt();
+    live.next_refresh(run, &mut seen);
+    live_journal::append_lines(
+        &journal,
+        &[activity(
+            &journal,
+            run,
+            fixture_run::NODE_ID,
+            "the fixture writes",
+        )],
+    );
+    let fixture = receipt();
+    let written = fs::metadata(&journal).expect("a journal").len();
+    let refresh = live.next_refresh(run, &mut seen);
+    surface("the engine writes again");
+    let engine_second = receipt();
+
+    let names = |value: &Value| {
+        let mut names = Vec::new();
+        field_names(value, "", &mut names);
+        names
+    };
+    assert_eq!(
+        names(&fixture),
+        names(&engine_first),
+        "the fixture's receipt names the engine's fields"
+    );
+    assert_eq!(names(&engine_second), names(&fixture));
+    assert_eq!(fixture["schema_version"], engine_first["schema_version"]);
+    // Each continues the other's epoch, which the engine does only when the
+    // receipt on disk describes the journal exactly as its own stamp reads it:
+    // the fixture's stamp is the engine's, value for value.
+    assert_eq!(
+        fixture["epoch"], engine_first["epoch"],
+        "the fixture continued the engine's epoch"
+    );
+    assert_eq!(
+        engine_second["epoch"], fixture["epoch"],
+        "the engine continued the fixture's epoch"
+    );
+    assert_eq!(
+        fixture["stamp"]["len"],
+        json!(written),
+        "the stamp is the journal after the write"
+    );
+    // And the server read the fixture's append as an append of one record.
+    assert_eq!(refresh["refresh"], "appended", "{refresh}");
+    assert_eq!(refresh["records"], 1, "{refresh}");
 }

@@ -12,14 +12,9 @@
  * appends to the same journals the initial build wrote, as an executor appends to them.
  */
 
-import {
-  appendFileSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { appendLines } from "../load/journal.mjs";
 import { thisHost } from "./this-host.mjs";
 
 /** The in-flight run every graph, node and timeline journey opens. */
@@ -817,7 +812,9 @@ function appendEvent(dir, source, kind, labels, payload = {}) {
     payload,
     artifacts: [],
   });
-  appendFileSync(path, `${line}\n`);
+  // Through the one fixture writer, which leaves the append receipt the
+  // engine's own writer would.
+  appendLines(path, [line]);
 }
 
 /**

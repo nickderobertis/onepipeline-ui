@@ -1,8 +1,8 @@
-import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
+import { appendRecords } from "./load/journal.mjs";
 
 test("Remote retains publication and release and follows each check's destination", async ({
   page,
@@ -62,9 +62,8 @@ test("Remote displays incomplete check records without inventing a status or lin
   try {
     const run = runs().live;
     // A recorded check from a writer that supplied its conclusion but no status or URL.
-    appendFileSync(
-      join(server.workspace, "runs", run, "events.jsonl"),
-      `${JSON.stringify({
+    appendRecords(join(server.workspace, "runs", run, "events.jsonl"), [
+      {
         v: 1,
         ts: new Date().toISOString(),
         stream: "legacy-check-fixture",
@@ -83,8 +82,8 @@ test("Remote displays incomplete check records without inventing a status or lin
           // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
         },
         artifacts: [],
-      })}\n`,
-    );
+      },
+    ]);
     await page.goto(
       `${server.origin}/?run=${run}&node=missing-artifact&tab=remote`,
     );

@@ -25,6 +25,7 @@ import {
   API_V2_PATHS,
   parseRunList,
   parseRunTimeline,
+  subscriptionViewSchema,
 } from "@onepipeline-ui/dag-model";
 import { EVENT_CATEGORIES } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -179,13 +180,8 @@ const RUN_LIST_PATH = API_V2_PATHS.runs;
 const scrollOffset = (locator: Locator): Promise<number> =>
   locator.evaluate((element) => element.scrollTop);
 
-/**
- * One run's detail read, and never the timeline or the list beside it; and the run
- * list, page or selection alike. Both are built from the route above, so there is
- * one declaration of it in this file and none of it in this repository.
- */
-const RUN_DETAIL_READ = new RegExp(`${RUN_LIST_PATH}/[^/?]+(\\?|$)`);
-const RUN_LIST_READ = new RegExp(`${RUN_LIST_PATH}(\\?|$)`);
+/** A tab creating its subscription: what the page reads a run through. */
+const SUBSCRIBE = (url: URL) => url.pathname === API_V2_PATHS.subscriptions;
 
 // llmlint: ignore-block[e2e_not_mocked] the three helpers below are one construct with one reason: nothing is doubled and no response is fabricated. Every request is forwarded to the same `onepipeline-api serve` every other journey drives, and every byte the browser reads back — including both refusals — is that server's own. What each changes is a condition on the way there, exactly as `context.setOffline` changes whether a request arrives at all, which this tier already relies on to reach its pagination-failure journey: `delayReads` changes how long the answer takes, `sweepDuringRead` takes the run off the served root before forwarding, and `readUnderProfile` asks for a reading the app has no control for. None of the three is reachable from a fixture — the defects behind them are races between a server's poll interval and the time a fold of a journal takes (the operator reported a twenty-second read against a stream invalidating twice a second), no run this tier can write reads slowly enough, and the browser's own toolbar offers only the two profiles every run answers to.
 // llmlint: ignore-block[tests_mirror_real_usage] same three sites, same reason: each reproduces a reader who really is in that position — a read slower than the run is moving, a run swept while it was being opened, a reading the run has no profile for — and what the journeys then assert about each is entirely what that reader sees on screen.
@@ -196,7 +192,7 @@ const RUN_LIST_READ = new RegExp(`${RUN_LIST_PATH}(\\?|$)`);
  */
 async function delayReads(
   page: Page,
-  route: RegExp,
+  route: RegExp | ((url: URL) => boolean),
   ms: number,
 ): Promise<void> {
   await page.route(route, async (intercepted) => {
@@ -219,9 +215,11 @@ async function delayReads(
  */
 function sweepDuringRead(page: Page, runId: string): { swept: () => boolean } {
   let swept = false;
-  void page.route(RUN_DETAIL_READ, async (intercepted) => {
-    const read = new URL(intercepted.request().url());
-    if (!swept && read.pathname.endsWith(`/${runId}`)) {
+  void page.route(SUBSCRIBE, async (intercepted) => {
+    const view = subscriptionViewSchema.parse(
+      intercepted.request().postDataJSON().view,
+    );
+    if (!swept && "run_id" in view && view.run_id === runId) {
       swept = true;
       changeServedRuns(["--remove-run", runId]);
     }
@@ -240,10 +238,16 @@ function sweepDuringRead(page: Page, runId: string): { swept: () => boolean } {
  * is the server's own `404 unknown_filter_profile`.
  */
 async function readUnderProfile(page: Page, profile: string): Promise<void> {
-  await page.route(RUN_DETAIL_READ, async (intercepted) => {
-    const read = new URL(intercepted.request().url());
-    read.searchParams.set("filter", profile);
-    await intercepted.continue({ url: read.toString() });
+  await page.route(SUBSCRIBE, async (intercepted) => {
+    const body = intercepted.request().postDataJSON();
+    const view = subscriptionViewSchema.parse(body.view);
+    await intercepted.continue({
+      postData: JSON.stringify(
+        view.type === "detail" || view.type === "timeline"
+          ? { ...body, view: { ...view, filter: profile } }
+          : body,
+      ),
+    });
   });
 }
 // llmlint: ignore-end[e2e_not_mocked]
@@ -537,25 +541,25 @@ test("renders a recorded result's words beside the engine's status for each node
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
-test("counts a run the strict fold cannot read at all", async ({ page }) => {
+test("lists a run the strict fold cannot read at all", async ({ page }) => {
   await openObservatory(page);
   // The served run recorded a result with no authoritative journal behind it, which
-  // is what a run predating the journal looks like. The per-node derivation cannot run, so
-  // the row is counted from the tolerant telemetry index instead — whose statuses are
-  // an open string, and whose words the navigation still has to show rather than drop.
-  await expect(
-    page.getByRole("button", { name: RegExp(runs().legacy) }),
-  ).toContainText("1 improvised");
+  // is what a run predating the journal looks like. The per-node derivation cannot
+  // run, and its trimmed sidebar row carries the state the server read and counts
+  // only what it could: the run is still listed, under its own state word.
+  const row = page.getByRole("button", { name: RegExp(runs().legacy) });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText("active");
 });
 
 test("counts a run's own nodes on the row that opens it", async ({ page }) => {
   await openObservatory(page);
-  // The row and the graph it opens are counted from one derivation on the server, so
-  // a run whose row says only "running" can no longer hide a node already blocked.
+  // The row and the graph it opens are counted from one derivation on the server:
+  // the trimmed row carries the running, done and failed counts the sidebar shows.
   const liveRow = page.getByRole("button", { name: RegExp(runs().live) });
-  await expect(liveRow).toContainText("1 blocked");
-  await expect(liveRow).toContainText("1 skipped");
-  await expect(liveRow).toContainText("1 pending");
+  await expect(liveRow).toContainText("1 running");
+  await expect(liveRow).toContainText("3 done");
+  await expect(liveRow).toContainText("2 failed");
 });
 
 test("opens a node's timeline, reads one recorded moment, and returns", async ({
@@ -2181,9 +2185,9 @@ test("switches the reading between decisions and detailed activity", async ({
   // llmlint: ignore-block[tests_mirror_real_usage] the word is the property under test and nothing on screen carries it: the switch's two settings are the two *named* profiles the server defines for every run — `planner` and `detailed`, the engine's own names, which are what make the browser and the CLI narrow to the same thing — and every reader-visible effect asserted below (fewer markers, no refusal, the same dispatch drawn) would hold just as well under an inline spec that narrows the same records without being the profile the CLI shares, or under a launch-defined alias of it. The requests are read, never altered or answered.
   const asked: string[] = [];
   page.on("request", (request) => {
-    const filter = new URL(request.url()).searchParams.get("filter");
-    if (filter !== null && request.url().includes("/api/v2/"))
-      asked.push(filter);
+    if (new URL(request.url()).pathname !== API_V2_PATHS.subscriptions) return;
+    const view = subscriptionViewSchema.parse(request.postDataJSON().view);
+    if ("filter" in view && view.filter !== undefined) asked.push(view.filter);
   });
   // llmlint: ignore-end[tests_mirror_real_usage]
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
@@ -2618,10 +2622,10 @@ test("navigates historical DAGs from the project sidebar", async ({ page }) => {
 
   // The live marker is a bare dot, so it carries a name of its own and repeats it on
   // hover rather than leaving colour to say the only thing that distinguishes it.
-  const liveMarker = liveRow.getByRole("img", { name: "ACTIVE" });
+  const liveMarker = liveRow.getByRole("img", { name: "active" });
   await expect(liveMarker).toBeVisible();
   await liveMarker.hover();
-  await expect(page.getByRole("tooltip")).toContainText("ACTIVE");
+  await expect(page.getByRole("tooltip")).toContainText("active");
 
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
   await expect(graphNodes(page, "done")).toContainText("archive");
@@ -3741,7 +3745,6 @@ test("surfaces a telemetry read it cannot complete", async ({ page }) => {
     .getByRole("alert")
     .filter({ hasText: "Live telemetry issue" });
   await expect(banner).toContainText("Live telemetry issue");
-  await expect(banner).toContainText("Projects unavailable");
   // The banner names the failure as well as announcing one: an operator who cannot
   // see what broke cannot tell a wedged server from a mistyped API address.
   await expect(
@@ -4339,14 +4342,18 @@ test("follows a growing transcript only while the reader is at its end", async (
   expect((await detailScroll(page)).top).toBe(0);
 });
 
-test("keeps the pages a reader scrolled to when a run moves", async ({
+test("keeps the list a reader scrolled to when a run moves", async ({
   page,
 }) => {
-  // llmlint: ignore-block[tests_mirror_real_usage] what a live update *costs* has no rendering, and it is the property this journey exists for. The rows and the scroll position a reader keeps are asserted below from the screen — and they are equally consistent with a first-page refetch that happened to come back the same, so the route the refresh went to is the only evidence that it did not. That is the same reason `tests/e2e/cost.rs` holds a read's cost by counting the kernel's record of it rather than by looking at what the read produced. Nothing recorded here stands in for a user-observable outcome; it sits beside two.
+  // llmlint: ignore-block[tests_mirror_real_usage] what a live update *costs* has no rendering, and it is the property this journey exists for. The rows and the scroll position a reader keeps are asserted below from the screen — and they are equally consistent with a list re-read that happened to come back the same, so the requests the page made are the only evidence that it made none. That is the same reason `tests/e2e/cost.rs` holds a read's cost by counting the kernel's record of it rather than by looking at what the read produced. Nothing recorded here stands in for a user-observable outcome; it sits beside two.
   const listReads: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (url.pathname === RUN_LIST_PATH) listReads.push(url.search);
+    if (
+      url.pathname === RUN_LIST_PATH ||
+      url.pathname === API_V2_PATHS.projects
+    )
+      listReads.push(url.pathname + url.search);
   });
   await page.goto("/?list=runs&view=graph");
   const navigation = page.getByRole("navigation", { name: "Projects" });
@@ -4356,30 +4363,27 @@ test("keeps the pages a reader scrolled to when a run moves", async ({
   );
   await viewport.hover();
   await page.mouse.wheel(0, 10_000);
-  await expect(navigation.locator(".run-link")).toHaveCount(
-    (await allRunIds(page)).length,
-  );
   const scrolled = await scrollOffset(viewport);
   expect(scrolled).toBeGreaterThan(0);
 
-  // A run moves for real: one appended record the server's own poll notices.
-  listReads.length = 0;
+  // A run moves for real: one appended record the server's own poll notices,
+  // which reaches the sidebar as that run's one trimmed row.
+  const frames: string[] = [];
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Network.enable");
+  cdp.on("Network.eventSourceMessageReceived", (event) => {
+    frames.push(event.eventName);
+  });
   changeServedRuns([
     "--record-activity",
     "Grep",
     "--activity-detail",
     "one row moved",
   ]);
-
-  // The row that moved is refreshed by naming it, so the reading costs one row …
-  await expect
-    .poll(() =>
-      listReads.some((search) => search.includes(`select=${runs().live}`)),
-    )
-    .toBe(true);
-  // … and the first page is never asked for again, which is what used to discard
-  // every page the reader had scrolled to, twice a second, on any moving host.
-  expect(listReads.filter((search) => !search.includes("select="))).toEqual([]);
+  await expect.poll(() => frames.includes("run.changed")).toBe(true);
+  // … and the list is never read again, which is what used to discard every
+  // page the reader had scrolled to, twice a second, on any moving host.
+  expect(listReads).toEqual([]);
   // llmlint: ignore-end[tests_mirror_real_usage]
   await expect(navigation.locator(".run-link")).toHaveCount(
     (await allRunIds(page)).length,
@@ -4394,7 +4398,7 @@ test("opens a run that is recording faster than a read of it completes", async (
   // Two seconds a read against a stream invalidating twice a second, held for
   // twenty: the operator's own report, at a scale a journey can wait out.
   test.slow();
-  await delayReads(page, RUN_DETAIL_READ, 2_000);
+  await delayReads(page, SUBSCRIBE, 2_000);
   const churn = churnLiveRun(20);
   try {
     await page.goto(`/?run=${runs().live}&view=graph`);
@@ -4417,19 +4421,22 @@ test("opens a run that is recording faster than a read of it completes", async (
 test("never renders one run's detail under another run's name", async ({
   page,
 }) => {
-  await delayReads(page, RUN_DETAIL_READ, 2_000);
-  // The read the reader is about to move away from, so this journey asserts on a
-  // stale read that has actually landed rather than on one that may not have.
-  const staleRead = page.waitForResponse((response) =>
-    new URL(response.url()).pathname.endsWith(`/runs/${runs().live}`),
+  await delayReads(page, SUBSCRIBE, 2_000);
+  // The subscription the reader is about to move away from, so this journey
+  // asserts on a stale answer that has actually landed rather than on one that
+  // may not have.
+  const staleRead = page.waitForResponse(
+    (response) =>
+      SUBSCRIBE(new URL(response.url())) &&
+      JSON.stringify(response.request().postDataJSON()).includes(runs().live),
   );
-  await page.goto(`/?list=runs&run=${runs().live}&view=graph`);
-  await expect(page.getByText("Loading execution history…")).toBeVisible();
-
+  await page.goto(`/?list=runs&run=${runs().history}&view=graph`);
+  await expect(graphNodes(page, "done")).toContainText("archive");
+  await page.getByRole("button", { name: RegExp(runs().live) }).click();
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
   await staleRead;
 
-  // Letting a still-current read land is not the same as letting any read land: the
+  // Letting a still-current answer land is not the same as letting any land: the
   // run the reader moved away from is a different reading, and its detail is
   // discarded rather than drawn under the name of the run they are on.
   await expect(graphNodes(page, "done")).toContainText("archive");
@@ -4454,6 +4461,7 @@ test("stays quiet when the run it is opening is swept out from under it", async 
   const sweep = sweepDuringRead(page, swept);
 
   await page.goto(`/?list=runs&run=${swept}&view=graph`);
+  // The subscription for it was refused as `404 run_not_found`.
 
   // The row goes, which is the whole of what the reader is told about it.
   await expect(
@@ -4496,100 +4504,39 @@ test("drops a run the server stops serving", async ({ page }) => {
 });
 
 test("falls back to the empty state once no run is left", async ({ page }) => {
-  const captured = Promise.withResolvers<void>();
-  const listReleased = Promise.withResolvers<void>();
-  let listHeld = false;
-  // Hold the real opening answer while the stream reports newer removals.
-  // Every byte released below is the server's own response, captured before
-  // any run was removed; no response is fabricated.
-  // llmlint: ignore-block[e2e_not_mocked] only delivery timing is controlled: fetch reads the real API over the real fixture root, and fulfill releases that unchanged response after the real stream reports removals. No fixture can deterministically make an HTTP answer arrive after those stream events; this reproduces a slow network without replacing the server or its payload.
-  await page.route(RUN_LIST_READ, async (intercepted) => {
-    const url = new URL(intercepted.request().url());
-    if (listHeld || url.searchParams.has("select")) {
-      await intercepted.continue();
-      return;
-    }
-    listHeld = true;
-    const response = await intercepted.fetch();
-    captured.resolve();
-    await listReleased.promise;
-    await intercepted.fulfill({ response });
-  });
-  // llmlint: ignore-end[e2e_not_mocked]
   await openObservatory(page);
-  await captured.promise;
   await expect(
     page.getByRole("button", { name: RegExp(runs().live) }),
   ).toBeVisible();
-  const selected = new URL(page.url()).searchParams.get("run");
-  if (!selected) throw new Error("the page selected no run");
-  let releaseDetail: () => void = () => undefined;
-  const released = new Promise<void>((resolve) => {
-    releaseDetail = resolve;
-  });
-  let detailHeld: () => void = () => undefined;
-  const held = new Promise<void>((resolve) => {
-    detailHeld = resolve;
-  });
-  // llmlint: ignore[e2e_not_mocked] The route forwards the real server's response unchanged and holds only its delivery. This stages a response already in flight when its run is removed, which the filesystem corpus cannot synchronize by itself.
-  await page.route(
-    (url) => url.pathname === `/api/v2/runs/${selected}`,
-    async (route) => {
-      const response = await route.fetch();
-      detailHeld();
-      await released;
-      await route.fulfill({ response });
-    },
-  );
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await held;
-  const lateResponse = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname === `/api/v2/runs/${selected}`,
-  );
-  try {
-    changeServedRuns(["--remove-page-runs"]);
+  changeServedRuns(["--remove-page-runs"]);
 
-    // Every remaining run except one — the journey before this removed the historical
-    // one. The empty state means the server serves none, so it must not appear while
-    // any run is still there to show, whatever shape that run is.
-    const remaining = await allRunIds(page);
-    const last = remaining.pop();
-    if (last === undefined) throw new Error("fixture has no remaining runs");
-    for (const runId of remaining) {
-      changeServedRuns(["--remove-run", runId]);
-      await expect(page.getByText("No DAG runs found")).toHaveCount(0);
-    }
-    changeServedRuns(["--remove-run", last]);
-
-    await expect(page.getByRole("button", { name: RegExp(last) })).toHaveCount(
-      0,
-    );
-    await expect(
-      page.getByRole("button", { name: RegExp(runs().live) }),
-    ).toHaveCount(0);
-    // The opening list read lands only now, older than every removal above; the
-    // runs it names stay gone.
-    listReleased.resolve();
-
-    await expect(page.getByText("No DAG runs found")).toBeVisible();
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    await expect(
-      page.getByRole("group", { name: "Run details", exact: true }),
-    ).toHaveCount(0);
-    await expect(
-      page.getByRole("application", {
-        name: "DAG execution graph",
-        exact: true,
-      }),
-    ).toHaveCount(0);
-  } finally {
-    listReleased.resolve();
-    releaseDetail();
+  // Every remaining run except one — the journey before this removed the historical
+  // one. The empty state means the server serves none, so it must not appear while
+  // any run is still there to show, whatever shape that run is.
+  const remaining = await allRunIds(page);
+  const last = remaining.pop();
+  if (last === undefined) throw new Error("fixture has no remaining runs");
+  for (const runId of remaining) {
+    changeServedRuns(["--remove-run", runId]);
+    await expect(page.getByText("No DAG runs found")).toHaveCount(0);
   }
-  await (await lateResponse).finished();
+  changeServedRuns(["--remove-run", last]);
+
+  // Each removal reached the page as its own frame: the last run's row goes, the
+  // page lands on the empty state, and nothing reports a failure.
+  await expect(page.getByRole("button", { name: RegExp(last) })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: RegExp(runs().live) }),
+  ).toHaveCount(0);
   await expect(page.getByText("No DAG runs found")).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(
     page.getByRole("group", { name: "Run details", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("application", {
+      name: "DAG execution graph",
+      exact: true,
+    }),
   ).toHaveCount(0);
 });

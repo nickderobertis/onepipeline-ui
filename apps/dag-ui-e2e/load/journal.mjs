@@ -9,7 +9,10 @@
  * reads the whole journal again (`Reread`) whenever it does not — so a fixture
  * that appended bare lines would make every live update a whole re-read, which is
  * not what a run the engine drives costs. The engine exports no appender, so the
- * corpus, the load writer and the journeys append through this one, which keeps
+ * corpus, the load writer, the browser fixtures and the crate's journeys
+ * (`tests/support/live_journal.rs`, through the command below) all append
+ * through this one — the single fixture writer, whose receipts
+ * `tests/e2e/live.rs` holds field for field to ones the engine wrote — which keeps
  * the receipt as the engine's writer keeps it (`onepipeline::appendstamp`,
  * `tests/golden/append-receipt-v1.json` in that crate). It is a cache the engine
  * reads, never an authority: a receipt this writes that the engine does not
@@ -96,19 +99,50 @@ export function receiptFor(journal) {
  * the receipt on disk describes the journal as this write found it.
  */
 export function appendRecords(journal, records) {
+  appendLines(
+    journal,
+    records.map((record) => JSON.stringify(record)),
+  );
+}
+
+/** {@link appendRecords}, for lines already serialized: each is written as given. */
+export function appendLines(journal, lines) {
   const before = stampOf(journal);
   const previous = readReceipt(journal);
   const epoch =
     previous?.schema_version === 1 && sameStamp(previous.stamp, before)
       ? previous.epoch
       : `load-${process.pid}-${process.hrtime.bigint()}`;
-  appendFileSync(
-    journal,
-    records.map((record) => `${JSON.stringify(record)}\n`).join(""),
-  );
+  appendFileSync(journal, lines.map((line) => `${line}\n`).join(""));
   writeReceipt(journal, {
     schema_version: 1,
     epoch,
     stamp: stampOf(journal),
   });
+}
+
+/**
+ * The command the crate's journeys append through, so a record they append is
+ * written by this module and no other:
+ *
+ *     node journal.mjs append    < {"JOURNAL": ["line", …], …}
+ *     node journal.mjs receipt JOURNAL…
+ *
+ * `append` takes one JSON object on standard input naming each journal and the
+ * lines to append to it, in order, each journal in one write; `receipt` leaves
+ * a fresh receipt for journals written whole.
+ */
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const [verb, ...journals] = process.argv.slice(2);
+  if (verb === "receipt") {
+    for (const journal of journals) receiptFor(journal);
+  } else if (verb === "append") {
+    const input = readFileSync(0, "utf8");
+    for (const [journal, lines] of Object.entries(JSON.parse(input)))
+      appendLines(journal, lines);
+  } else {
+    throw new Error(
+      "usage: journal.mjs append < {journal: [lines]} | receipt JOURNAL…",
+    );
+  }
 }

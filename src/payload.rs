@@ -1227,9 +1227,14 @@ pub fn sidebar_row(run: &RunId, summary: &RunSummary, paths: &RunPaths) -> Value
     row.insert(
         "group".into(),
         summary.group.as_ref().map_or(Value::Null, |group| {
+            // The engine's own name for a group: the launch's recorded name,
+            // else the project's native id — the part after its source.
+            let native = group
+                .split_once(':')
+                .map_or(group.as_str(), |(_, native)| native);
             json!({
                 "project": group,
-                "name": summary.name.as_deref().filter(|name| !name.is_empty()).unwrap_or(group),
+                "name": summary.name.as_deref().filter(|name| !name.is_empty()).unwrap_or(native),
             })
         }),
     );

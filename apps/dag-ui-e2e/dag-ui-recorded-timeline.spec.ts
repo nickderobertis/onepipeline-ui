@@ -1,4 +1,8 @@
-import { parseRunTimeline } from "@onepipeline-ui/dag-model";
+import {
+  API_V2_PATHS,
+  parseRunTimeline,
+  subscribedSchema,
+} from "@onepipeline-ui/dag-model";
 import { expect, test } from "@playwright/test";
 import corpus from "./fixtures/timeline-recorded.json" with { type: "json" };
 import { SERVED_UI_URL } from "./playwright.config";
@@ -643,19 +647,27 @@ test("filtering every dispatch boundary and graph record preserves served groups
     });
   await page.goto(`/?run=${run}&node=${retries.node}`);
   await expect(headings()).toHaveText(groups);
+  // The node's timeline under the decisions profile, as the subscription the
+  // switch makes is answered with it.
   const narrowed = page.waitForResponse((response) => {
-    const url = new URL(response.url());
-    return (
-      url.pathname.endsWith("/timeline") &&
-      url.searchParams.get("scope") === "node" &&
-      url.searchParams.get("filter") === "planner"
-    );
+    if (new URL(response.url()).pathname !== API_V2_PATHS.subscriptions)
+      return false;
+    const view = response.request().postDataJSON()?.view;
+    return view?.scope === "node" && view?.filter === "planner";
   });
   await page
     .getByRole("group", { name: "Level of detail" })
     .getByRole("button", { name: "Decisions" })
     .click();
-  const filtered = parseRunTimeline(await (await narrowed).json());
+  const subscribed = subscribedSchema.parse(await (await narrowed).json());
+  if (
+    subscribed.initial.type !== "snapshot" ||
+    subscribed.initial.snapshot.visible.type !== "timeline"
+  )
+    throw new Error("the switch was not answered with a timeline snapshot");
+  const filtered = parseRunTimeline(
+    subscribed.initial.snapshot.visible.timeline,
+  );
   const events = filtered.spans.flatMap((span) => span.events);
   expect(events.some((event) => event.kind === "gate-run")).toBe(true);
   expect(

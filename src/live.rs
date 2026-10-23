@@ -449,7 +449,12 @@ impl LiveRun {
                 scope, filter: key, ..
             } => {
                 if let TimelineScope::Node(node) = scope {
-                    let known = self.view.state.statuses().contains_key(node.as_str())
+                    // A node of the plan, recorded or not, or one a record names.
+                    let planned = detail["graph"]["plan"]["tasks"]
+                        .as_array()
+                        .is_some_and(|tasks| tasks.iter().any(|task| task["id"] == node.as_str()));
+                    let known = planned
+                        || self.view.state.statuses().contains_key(node.as_str())
                         || self
                             .view
                             .events

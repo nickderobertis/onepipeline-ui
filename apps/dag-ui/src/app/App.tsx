@@ -94,6 +94,14 @@ function useRenderedSeq(
   return held.current.seq;
 }
 
+/** How many times `value` has changed identity since this component mounted. */
+function useChangeCount(value: unknown): number {
+  const held = useRef<{ value: unknown; count: number }>({ value, count: 0 });
+  if (held.current.value !== value)
+    held.current = { value, count: held.current.count + 1 };
+  return held.current.count;
+}
+
 /** The Host page's listing is read whole, so there is never another page. */
 const noMorePages = () => Promise.resolve();
 
@@ -130,14 +138,22 @@ export function App({
   const lastActivity = telemetry.activity.at(-1);
   const detail = telemetry.detail;
   const nodes = useMemo(() => (detail ? nodeViews(detail) : []), [detail]);
-  // The full listing is the Host page's own read, taken when it opens and on its
-  // refresh control: nothing else on the page needs more than the sidebar rows.
-  const [hostRefresh, setHostRefresh] = useState(0);
-  const hostList = useHostListing(client, selection.host, hostRefresh);
   const control = useRunControl(client, selectedRunId);
   // Held here rather than under the run's view: a shutdown is minutes long, and
   // what it is doing stays on screen whichever run or list the reader moves to.
   const hostShutdowns = useHostShutdowns(client);
+  // The full listing is the Host page's own read, taken when it opens and on its
+  // refresh control: nothing else on the page needs more than the sidebar rows.
+  // While a host shutdown is out, it is also what the shutdown's progress is
+  // read off, so it is read again whenever a pushed row says a run moved.
+  const [hostRefresh, setHostRefresh] = useState(0);
+  const shuttingDown = hostShutdowns.host.state.phase === "sending";
+  const rowChanges = useChangeCount(rows);
+  const hostList = useHostListing(
+    client,
+    selection.host || shuttingDown,
+    hostRefresh + (shuttingDown ? rowChanges : 0),
+  );
   const graph = detail === undefined ? undefined : graphOf(detail);
   const selectedNode = nodes.find(({ id }) => id === selection.nodeId);
   const overallSeq = useRenderedSeq(graph?.last_seq, telemetry.timeline);
@@ -265,6 +281,7 @@ export function App({
             <RecordDisclosure
               label="Run details"
               className="run-header-details"
+              onOpen={control.reread}
             >
               <p>Launching session: {launchLabel(detail.launch)}</p>
               {/* A reading already shown stays beside this, so a failed re-read

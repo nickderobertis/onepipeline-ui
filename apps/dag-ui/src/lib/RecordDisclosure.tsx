@@ -6,12 +6,15 @@ import {
 } from "react";
 
 /** Keep large structured records out of the rendered tree until requested. */
-function useRecordDisclosure() {
+function useRecordDisclosure(onOpen?: () => void) {
   const [open, setOpen] = useState(false);
   const onToggle = useCallback(
-    (event: SyntheticEvent<HTMLDetailsElement>) =>
-      setOpen(event.currentTarget.open),
-    [],
+    (event: SyntheticEvent<HTMLDetailsElement>) => {
+      const opened = event.currentTarget.open;
+      setOpen(opened);
+      if (opened) onOpen?.();
+    },
+    [onOpen],
   );
   return { open, onToggle };
 }
@@ -19,13 +22,16 @@ function useRecordDisclosure() {
 export function RecordDisclosure({
   label,
   className,
+  onOpen,
   children,
 }: {
   readonly label: string;
   readonly className?: string;
+  /** Called each time the reader opens it, for a record read on request. */
+  readonly onOpen?: () => void;
   readonly children: ReactNode;
 }) {
-  const disclosure = useRecordDisclosure();
+  const disclosure = useRecordDisclosure(onOpen);
   return (
     <details
       aria-label={label}

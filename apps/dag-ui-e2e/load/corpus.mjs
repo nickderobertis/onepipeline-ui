@@ -169,7 +169,12 @@ class Journal {
           "vcs",
           "change-check",
           { node, persona: "worker", session },
-          { name: "ci", required: true, status: "in_progress", state: "pending" },
+          {
+            name: "ci",
+            required: true,
+            status: "in_progress",
+            state: "pending",
+          },
         );
       } else {
         this.emit("agentgraph", "member-heartbeat", member, {});
@@ -211,7 +216,17 @@ function launch(runId, project, startedAt) {
   };
 }
 
-function writeRun(root, runId, project, kind, nodes, perNode, startMs, stepMs, extra = 0) {
+function writeRun(
+  root,
+  runId,
+  project,
+  kind,
+  nodes,
+  perNode,
+  startMs,
+  stepMs,
+  extra = 0,
+) {
   const dir = join(root, runId);
   mkdirSync(dir, { recursive: true });
   const plan = planOf(nodes);
