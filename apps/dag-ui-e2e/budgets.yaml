@@ -1,0 +1,83 @@
+schema_version: 1
+# Every figure here is read from telemetry/request-load.json, which
+# `dag-ui-e2e:test-load` records over the workload each description states; the
+# one runner reports the figure and its breakdown and compares nothing. The
+# workload: 150 run directories across 30 projects (1 open run, 10 other live
+# runs, 10 stopped, 129 settled); the 10 other live runs each append 50 journal
+# records per minute with one 400-record burst in the window; each view held
+# 120 s after load; a fresh corpus and a fresh server for every variant.
+budgets:
+  - id: dag-ui-settled-requests-per-minute
+    description: >-
+      HTTP requests the Observatory's browser sends per minute with a settled or
+      stopped run open while other runs on the host change, the most expensive
+      of that run's Graph, Overall and node timeline views; detail reports each
+      view's figure, the figure with nothing open under the same activity, and
+      the requests by route. The open run is settled or stopped and its journal
+      does not change; one browser tab. Measured; telemetry analysis only,
+      approximately 2 seconds.
+    measure: reported
+    command: [node, request-load-budget.mjs, --telemetry, apps/dag-ui-e2e/telemetry/request-load.json, --metric, settled]
+    unit: requests/min
+    direction: max
+    threshold: 1
+  - id: dag-ui-live-requests-per-minute
+    description: >-
+      HTTP requests the Observatory's browser sends per minute with a live run
+      open while its journal and other runs' journals grow, the most expensive of
+      its Graph, Overall, node timeline and Channel views; detail reports each
+      view's figure and its requests by route. The open run is live, its journal
+      grown to 116,000 records and appended 50 records per minute, taking the
+      burst; one browser tab. Measured; telemetry analysis only, approximately 2
+      seconds.
+    measure: reported
+    command: [node, request-load-budget.mjs, --telemetry, apps/dag-ui-e2e/telemetry/request-load.json, --metric, live]
+    unit: requests/min
+    direction: max
+    threshold: 2
+  - id: dag-ui-live-update-lag-seconds
+    description: >-
+      The 95th-percentile time from a record being appended to the open live
+      run's journal until the page has rendered it — the node timeline's row for
+      that record appearing, or Graph, Overall or Channel marking that record's
+      change rendered on its root's data-journal-seq — per record, over every
+      record appended in the window, the slowest of the four views; detail
+      reports each view's p50, p95 and maximum, the p95 during the burst, and
+      frame arrival as a breakdown. Design bound; telemetry analysis only,
+      approximately 2 seconds.
+    measure: reported
+    command: [node, request-load-budget.mjs, --telemetry, apps/dag-ui-e2e/telemetry/request-load.json, --metric, lag]
+    unit: seconds
+    direction: max
+    threshold: 3
+  - id: dag-ui-wire-megabytes-per-minute
+    description: >-
+      Megabytes the Observatory's browser receives per minute (encoded bytes of
+      every response and event-stream frame), the most expensive page state over
+      nothing open, a settled and a stopped run on Graph, Overall and a node
+      timeline, the live run on Graph, Overall, a node timeline and Channel, and
+      the Host page; detail reports each state's figure, its bytes by route and
+      frame type, and the repeated full-snapshot frames and bytes, at load and
+      after a reconnect. Estimate; telemetry analysis only, approximately 2
+      seconds.
+    measure: reported
+    command: [node, request-load-budget.mjs, --telemetry, apps/dag-ui-e2e/telemetry/request-load.json, --metric, wire]
+    unit: mb/min
+    direction: max
+    threshold: 0.3
+  - id: dag-ui-server-cpu-cores-per-live-tab
+    description: >-
+      Maximum server-process-tree CPU seconds divided by the 120 observation
+      seconds and by live tab count, across one-tab and two-tab variants of
+      Graph, Overall, node timeline and Channel on the live run (116,000 records,
+      appending 50 per minute and taking the burst). Includes the server's total
+      CPU, idle work included, with no baseline subtracted; excludes browser and
+      corpus-writer processes. Detail reports total CPU seconds, average total
+      cores, per-tab cores, tab count and page state. Estimate (manager-approved);
+      telemetry analysis only, approximately 2 seconds.
+    measure: reported
+    command: [node, request-load-budget.mjs, --telemetry, apps/dag-ui-e2e/telemetry/request-load.json, --metric, cpu]
+    unit: cores/live-tab
+    direction: max
+    threshold: 0.5
+    labels: [host]

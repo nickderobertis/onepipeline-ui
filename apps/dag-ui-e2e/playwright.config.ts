@@ -219,7 +219,8 @@ export default defineConfig({
   // The gallery asserts nothing and `isolation/` runs *this* config rather than
   // being run by it; both would otherwise be selected, since the journeys and
   // they now share a directory.
-  testIgnore: ["**/*.screens.spec.ts", "isolation/**"],
+  // The load telemetry is `dag-ui-e2e:test-load`'s, in a config of its own.
+  testIgnore: ["**/*.screens.spec.ts", "isolation/**", "load/**"],
   globalTeardown: "./global-teardown.ts",
   outputDir: OUTPUT_DIR,
   /**
