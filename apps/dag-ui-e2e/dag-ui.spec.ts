@@ -3330,13 +3330,21 @@ test("drills from a graph row into that node's own view", async ({ page }) => {
   await expandGraphRows(page);
   const foundation = graphRow(page, "foundation");
   await foundation.getByRole("button", { name: "Expand timeline" }).click();
-  // The first of them: this node kept two pieces of evidence — its member's report
-  // and its gate's log — and either segment is the same way in.
-  await foundation
+  // The report and gate log share a name and can overlap at this zoom. The gate
+  // is drawn after the report; select that specific, exposed segment rather than
+  // whichever verification happens to occur first in the DOM.
+  const verification = foundation
     .getByRole("button", { name: /^foundation · Verification/ })
-    .first()
-    .click();
+    .and(
+      foundation.locator(
+        `[aria-describedby="timeline-detail-verification-foundation-${fixture().artifacts.gate}"]`,
+      ),
+    );
+  await verification.click();
   await expect(page).toHaveURL(/node=foundation/);
+  await expect(
+    page.getByRole("region", { name: "Timeline for foundation" }),
+  ).toBeVisible();
 
   // Silence counts as one of its segments: the row *is* the node, working or not.
   await page.getByRole("tab", { name: "Overall" }).click();
