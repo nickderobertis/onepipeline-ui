@@ -260,9 +260,10 @@ fn the_comparison_asks_for_every_route_the_contract_defines() {
     for route in routes::TABLE {
         // The event stream stays open rather than answering once, and opens
         // with the run list this already asks for. Server journeys cover it.
-        // A write route answers what the engine did; asking two servers to do
-        // it would perform the operation twice.
-        if route.path == routes::EVENTS || route.method == routes::Method::Post {
+        // A write route answers what the engine did, and retiring a
+        // subscription answers a bodiless 204; asking two servers to do either
+        // would perform the operation twice and compare no field.
+        if route.path == routes::EVENTS || route.method != routes::Method::Get {
             continue;
         }
         let route = route.path;
