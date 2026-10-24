@@ -516,3 +516,13 @@ only in its version and in the engine's own test harness, so the linked
 dependencies, routes, MSRV and every served payload are unchanged beyond the
 release `/healthz` reports. This changes the engine types carried by
 ApiError::from_engine and the other engine-typed public items.
+0.89.0 is engine-transcript-refs' published release. It links oneagentgraph
+0.8.0, whose turn records carry a `transcript` reference into the oneharness
+history file the turn was recorded in instead of a bounded copy, and the
+engine's public `views::transcript` resolver this crate now reads every turn's
+content through. It links oneharness-core 0.29.1, whose history writer opens
+every run with a `run-started` line carrying the whole prompt, onejudge
+0.21.0, onetaskgraph 0.11.1 and onevcs 0.56.9, which relays each check's
+`started_at` and `completed_at`. The test-only `onevcs`, `oneharness-core` and
+`onetaskgraph-*` requirements follow its lock. This changes the engine types
+carried by ApiError::from_engine and the other engine-typed public items.

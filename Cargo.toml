@@ -139,7 +139,7 @@ futures-core = "0.3"
 # library writes, and a requirement string cannot say "the same release" — so
 # `tests/packaging.rs` reconciles the two edges the lockfile records instead.
 # Why the store is linked at all, and read without a lock: `src/AGENTS.md`.
-oneharness-core = "0.28.2"
+oneharness-core = "0.29.1"
 # The run record `oneagentgraph` writes for every graph it runs, linked rather
 # than re-read by hand: a session's `agent_role` is served only where that
 # record's `declared_members` names the member the session was stamped with, so
@@ -147,10 +147,10 @@ oneharness-core = "0.28.2"
 # major `onepipeline` itself resolves — the record this reads was written by the
 # release the engine links — and never moved on its own: `tests/packaging.rs`
 # reconciles the two edges the lockfile records.
-oneagentgraph = "0.7.0"
+oneagentgraph = "0.8.0"
 # The document a settled member's report *is*, linked rather than copied — why,
 # and why it is unpinned, is in `src/AGENTS.md`.
-onejudge = "0.20.0"
+onejudge = "0.21.0"
 # The correlation a channel reply is answered under is that library's own
 # token, parsed by its own parser: `POST .../channel/reply?correlation=C` hands
 # the query through `onemessagebus::Correlation` rather than a copy of its
@@ -180,7 +180,7 @@ onemessagebus = "0.9.1"
 # test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.88.0"
+onepipeline = "=0.89.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -222,14 +222,15 @@ libc = "0.2"
 # declares the stacking, review and landing kinds that engine relays. 0.56.3 is
 # the release engine 0.79.0 resolves (^0.56.2), and declares
 # `publication-resumed`, which `payload::vcs` copies; engine 0.79.1 resolves the
-# same release (^0.56.3), as do 0.82.0, 0.84.0, 0.84.1 and 0.85.0.
-onevcs = "=0.56.3"
+# same release (^0.56.3), as do 0.82.0, 0.84.0, 0.84.1 and 0.85.0. 0.56.9 is the
+# release engine 0.89.0 resolves (^0.56.9), which relays each check's times.
+onevcs = "=0.56.9"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
 # `tests/contract.rs` holds `payload::graph::MESSAGE` and `REASONING` to it.
 # A test-only feature, so the shipped binary compiles none of it.
-oneharness-core = { version = "0.28.2", features = ["sdk-schema"] }
+oneharness-core = { version = "0.29.1", features = ["sdk-schema"] }
 predicates = "3"
 # The drift gate on the browser's copy of the reply envelope's commands reads
 # each op's fields off the engine's own `Command` through the schema that type
@@ -242,8 +243,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.11.0"
-onetaskgraph-plugin-api = "=0.11.0"
+onetaskgraph-core = "=0.11.1"
+onetaskgraph-plugin-api = "=0.11.1"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # engine-driven journey over a panel-judged member reads the provider block it was
