@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.51.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.50.0...v0.51.0) - 2026-10-24
+
+### Added
+
+- *(deps)* [**breaking**] show every conversation whole from its transcript, open it at any tool call, and time the timeline ([#457](https://github.com/nickderobertis/onepipeline-ui/pull/457))
+
+### Fixed
+
+- *(deps)* link the engine whose stop ends every turn a dispatch started ([#458](https://github.com/nickderobertis/onepipeline-ui/pull/458))
+
 ## [0.50.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.49.0...v0.50.0) - 2026-10-24
 
 ### Fixed
