@@ -18910,6 +18910,31 @@ fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_event
     );
 }
 
+/// `text` with every age it counts back from now, such as `1877h43m ago`,
+/// spelled `<age> ago`: an age is the one part of a rendering that two reads
+/// of one unchanged run can disagree on, by when each was asked.
+fn without_ages(text: &str) -> String {
+    let mut masked = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(" ago") {
+        let before = &rest[..at];
+        let age = before
+            .rfind(|c: char| !(c.is_ascii_digit() || "dhms".contains(c)))
+            .map_or(0, |space| space + 1);
+        let counted = &before[age..];
+        masked.push_str(&before[..age]);
+        masked.push_str(if counted.starts_with(|c: char| c.is_ascii_digit()) {
+            "<age>"
+        } else {
+            counted
+        });
+        masked.push_str(" ago");
+        rest = &rest[at + " ago".len()..];
+    }
+    masked.push_str(rest);
+    masked
+}
+
 /// A continuation's rework read off the store names the superseded node's
 /// settled head, `replaces_head`, where the store's provenance carried it — a
 /// field no record the engine wrote before carried. No route's contract serves
@@ -18947,10 +18972,14 @@ fn a_continued_rework_naming_the_head_it_replaced_is_served_as_one_that_names_no
     });
     // The twin as the headed run would read: its own run id is the one thing
     // that tells the two apart on any route, and the instant each answer was
-    // given the one thing that tells two answers apart.
+    // given the one thing that tells two answers apart — in `observed_at`, and
+    // in every age the rendered text counts back from it, which two reads
+    // either side of a minute's turn spell differently.
     let as_headed = |served: &Value| -> Value {
-        let mut read: Value = serde_json::from_str(&served.to_string().replace(&unheaded, &headed))
-            .expect("a served document re-read");
+        let mut read: Value = serde_json::from_str(&without_ages(
+            &served.to_string().replace(&unheaded, &headed),
+        ))
+        .expect("a served document re-read");
         if let Some(envelope) = read.as_object_mut() {
             envelope.remove("observed_at");
         }
