@@ -898,3 +898,53 @@ fn a_turn_reference_that_resolves_out_of_its_store_is_not_opened() {
         conversation.body
     );
 }
+
+/// A stored conversation is a transcript, served whole however long it is —
+/// where a log beside it of the same length is served as its end, and says so.
+#[test]
+fn a_stored_conversation_is_served_whole_where_a_log_is_served_as_its_end() {
+    const CONVERSATION: &str = "artifact-long-conversation";
+    const LOG: &str = "artifact-long-gate-log";
+    let whole = format!(
+        "the first thing said\n{}the last thing said\n",
+        "and then the next thing\n".repeat(4_000)
+    );
+    assert!(whole.len() > 64 * 1024);
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        fs::write(dir.join("artifacts").join(CONVERSATION), &whole).expect("the conversation");
+        fs::write(dir.join("artifacts").join(LOG), &whole).expect("the log");
+        let line = json!({
+            "v": 1,
+            "ts": "2026-08-07T12:05:00.000Z",
+            "stream": "a-recording-host-4243",
+            "seq": 9_000,
+            "source": "pipeline",
+            "kind": "verification-recorded",
+            "labels": { "run_id": fixture_run::RUN_ID, "node": fixture_run::SHIP_NODE_ID },
+            "payload": {},
+            "artifacts": [
+                { "id": CONVERSATION, "kind": "conversation", "bytes": whole.len() },
+                { "id": LOG, "kind": "log", "bytes": whole.len() },
+            ],
+        });
+        let journal = dir.join("events.jsonl");
+        let existing = fs::read_to_string(&journal).expect("the journal");
+        fs::write(&journal, format!("{existing}{line}\n")).expect("append the record");
+    });
+    let read = |id: &str| {
+        get(
+            &serving,
+            &format!("/api/v2/runs/{}/artifacts/{id}", fixture_run::RUN_ID),
+        )
+    };
+    let conversation = read(CONVERSATION);
+    assert_eq!(conversation["kind"], json!("conversation"));
+    assert_eq!(conversation["truncated"], json!(false));
+    assert_eq!(conversation["content"], json!(whole));
+    let log = read(LOG);
+    assert_eq!(log["kind"], json!("gate_log"));
+    assert_eq!(log["truncated"], json!(true));
+    let tail = log["content"].as_str().expect("the log's end");
+    assert!(tail.ends_with("the last thing said\n") && !tail.contains("the first thing said"));
+}
