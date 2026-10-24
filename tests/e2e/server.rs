@@ -2989,14 +2989,16 @@ fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
             );
         }
         // The same store, named as the producer names it, holding an id no
-        // record in it carries.
+        // record in it carries. Named in the writer's spelling, because the
+        // line below expects the path the resolver joins from it, and macOS
+        // reaches the temporary `store` through a symlink the writer resolved.
         fixture_run::relay_harness_session(
             &dir,
             &fixture_run::HarnessSession {
                 stream: HARNESS_STREAM,
                 node: fixture_run::NODE_ID,
                 member: "worker",
-                history_dir: Some(&store),
+                history_dir: Some(&recorded.dir),
                 history_project: &recorded.project,
                 history_session: &recorded.session,
                 history_id: UNRECORDED_HISTORY_ID,
