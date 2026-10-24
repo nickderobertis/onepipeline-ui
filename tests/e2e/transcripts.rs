@@ -22,8 +22,7 @@ use crate::serving::Serving;
 
 /// The recorded worker turn's project and session: a shell call, a file edit and
 /// a file read, under one candidate that never closed.
-const WORKER_PROJECT: &str =
-    "home-operator-.onevcs-workspaces-github.com-example-onepipeline-0000-runs-s-6f43533d573f-worktree";
+const WORKER_PROJECT: &str = "home-operator-worktree";
 const WORKER_SESSION: &str =
     "node-scope-1792280365528-3632625-worker-skill-20261018T004959Z-3100071";
 const WORKER_CANDIDATE: &str = "01a14c7c-a53b-7a83-aa13-3aef27d7f605";
@@ -277,16 +276,17 @@ fn a_referenced_turn_is_read_whole_and_each_call_described_in_one_line() {
                 "grep -rn \"RENDER_COST_ENV\\|_ENV: &str = \\\"ONEPIPELINE_[A-Z_]*\\(PROBE\\|RECORD\\|TRACE\\|COST\\|GATE\\|PAUSE\\)\" src | head; g…".to_owned()
             ),
             (2, recorded_output_line(WORKER_PROJECT, WORKER_SESSION, WORKER_CANDIDATE, 2)),
-            // A file edit: its verb and the path, cut the same way.
+            // A file edit: its verb and the path.
             (
                 17,
-                "Edit /home/operator/.onevcs/workspaces/github.com-example-onepipeline-0000/runs/s-6f43533d573f/worktree/crates/testfake…".to_owned()
+                "Edit /home/operator/worktree/crates/testfakes/src/bin/fake-oneagentgraph.rs"
+                    .to_owned()
             ),
             (18, recorded_output_line(WORKER_PROJECT, WORKER_SESSION, WORKER_CANDIDATE, 18)),
             // A file read.
             (
                 22,
-                "Read /home/operator/.onevcs/workspaces/github.com-example-onepipeline-0000/runs/s-6f43533d573f/worktree/src/driver.rs".to_owned()
+                "Read /home/operator/worktree/src/driver.rs".to_owned()
             ),
             // A search: its pattern.
             (4, ".plans/tasks/*.md".to_owned()),
