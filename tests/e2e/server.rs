@@ -18912,27 +18912,103 @@ fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_event
 
 /// `text` with every age it counts back from now, such as `1877h43m ago`,
 /// spelled `<age> ago`: an age is the one part of a rendering that two reads
-/// of one unchanged run can disagree on, by when each was asked.
+/// of one unchanged run can disagree on, by when each was asked. Only a whole
+/// word that is an age, followed by a whole word `ago`, is masked.
 fn without_ages(text: &str) -> String {
     let mut masked = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest.find(" ago") {
-        let before = &rest[..at];
-        let age = before
-            .rfind(|c: char| !(c.is_ascii_digit() || "dhms".contains(c)))
-            .map_or(0, |space| space + 1);
-        let counted = &before[age..];
-        masked.push_str(&before[..age]);
-        masked.push_str(if counted.starts_with(|c: char| c.is_ascii_digit()) {
+        let (before, after) = (&rest[..at], &rest[at + " ago".len()..]);
+        let start = before
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| c.is_whitespace())
+            .map_or(0, |(space, c)| space + c.len_utf8());
+        let word = &before[start..];
+        let ends_a_word = !after.starts_with(char::is_alphanumeric);
+        masked.push_str(&before[..start]);
+        masked.push_str(if ends_a_word && is_an_age(word) {
             "<age>"
         } else {
-            counted
+            word
         });
         masked.push_str(" ago");
-        rest = &rest[at + " ago".len()..];
+        rest = after;
     }
     masked.push_str(rest);
     masked
+}
+
+/// Whether `word` is an age as a rendering spells one: one or more counts,
+/// each its digits followed by one unit of `d`, `h`, `m` or `s`.
+fn is_an_age(word: &str) -> bool {
+    let mut rest = word;
+    while !rest.is_empty() {
+        let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        let mut tail = rest[digits..].chars();
+        if digits == 0 || !matches!(tail.next(), Some('d' | 'h' | 'm' | 's')) {
+            return false;
+        }
+        rest = tail.as_str();
+    }
+    !word.is_empty()
+}
+
+#[test]
+fn without_ages_spells_the_two_reads_ci_saw_a_minute_apart_alike() {
+    let earlier = "it had not reached its base when this settled 1877h43m ago — open the change";
+    let later = "it had not reached its base when this settled 1877h44m ago — open the change";
+    assert_ne!(earlier, later);
+    assert_eq!(without_ages(earlier), without_ages(later));
+    assert_eq!(
+        without_ages(earlier),
+        "it had not reached its base when this settled <age> ago — open the change"
+    );
+}
+
+#[test]
+fn without_ages_masks_every_age_in_a_rendering() {
+    assert_eq!(
+        without_ages("settled 2d ago, seen 5s ago\n  observed 1h0m30s ago"),
+        "settled <age> ago, seen <age> ago\n  observed <age> ago"
+    );
+}
+
+#[test]
+fn without_ages_leaves_prose_that_is_not_an_age_as_written() {
+    for prose in [
+        "long ago",
+        "a week ago",
+        "ms ago",
+        "12 ago",
+        "3m3 ago",
+        "x3m ago",
+        "in 3m agora",
+        "ago",
+        "",
+    ] {
+        assert_eq!(without_ages(prose), prose, "{prose:?}");
+    }
+}
+
+#[test]
+fn without_ages_keeps_text_whose_last_character_before_ago_is_multibyte() {
+    for text in ["é ago", "café ago", "— ago", "é3m ago", "naïve 🙂 ago"] {
+        assert_eq!(without_ages(text), text, "{text:?}");
+    }
+    assert_eq!(without_ages("café 3m ago — ✓"), "café <age> ago — ✓");
+    assert_eq!(without_ages("é\u{2003}3m ago"), "é\u{2003}<age> ago");
+}
+
+#[test]
+fn without_ages_returns_text_with_no_age_unchanged() {
+    for text in [
+        "dag-ui-review-loop  failed\n  api  done (change-review-draft)",
+        "agony, agora and sago",
+        "✓ ünïcödé — 日本語",
+    ] {
+        assert_eq!(without_ages(text), text, "{text:?}");
+    }
 }
 
 /// A continuation's rework read off the store names the superseded node's
