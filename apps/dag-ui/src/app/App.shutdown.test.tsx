@@ -1,3 +1,4 @@
+import { TELEMETRY_SCHEMA_VERSION } from "@onepipeline-ui/dag-model";
 import {
   act,
   cleanup,
@@ -7,7 +8,6 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { TELEMETRY_SCHEMA_VERSION } from "@onepipeline-ui/dag-model";
 import { defaultResponder, telemetryHarness } from "../test/telemetry-harness";
 import { App } from "./App";
 
