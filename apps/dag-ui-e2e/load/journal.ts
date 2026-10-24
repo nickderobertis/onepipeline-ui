@@ -114,7 +114,27 @@ function writeReceipt(journal: string, receipt: Receipt): void {
   const path = receiptPath(journal);
   const staged = `${path}.tmp`;
   writeFileSync(staged, `${JSON.stringify(receipt, null, 2)}\n`);
-  renameSync(staged, path);
+  // Windows can refuse replacement while the live reader has the receipt
+  // open. Keep the complete staged document and retry only that sharing race;
+  // a persistent refusal or any other filesystem error still fails the writer.
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      renameSync(staged, path);
+      return;
+    } catch (error) {
+      if (
+        process.platform !== "win32" ||
+        attempt >= 19 ||
+        !(error instanceof Error) ||
+        !("code" in error) ||
+        (error.code !== "EPERM" &&
+          error.code !== "EACCES" &&
+          error.code !== "EBUSY")
+      )
+        throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
 }
 
 const freshEpoch = () => `load-${process.pid}-${process.hrtime.bigint()}`;
