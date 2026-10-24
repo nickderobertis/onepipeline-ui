@@ -1079,12 +1079,22 @@ export const conversationUsageSchema = openObject({
   inputTokens: usageValue.optional(),
   outputTokens: usageValue.optional(),
 });
+/**
+ * One tool event of a turn, read whole from the transcript (schema 26):
+ * `toolCallId` is the harness's identity for the call where it minted one, and
+ * `output_truncated` / `input_truncated` appear only on a run recorded before
+ * turn records pointed at their transcript, where the recorder cut the copy and
+ * no whole copy exists.
+ */
 export const conversationToolEventSchema = openObject({
   index: counter,
   input: z.unknown().optional(),
   kind: z.string(),
   name: z.string().nullable().optional(),
   output: z.string().nullable().optional(),
+  toolCallId: z.string().min(1).optional(),
+  output_truncated: z.literal(true).optional(),
+  input_truncated: z.literal(true).optional(),
 });
 /**
  * What one judge of a stacked panel decided on the turn it is served on: its label
@@ -1218,6 +1228,12 @@ export interface LiveActivity {
   kind: string;
   name: string;
   detail: string;
+  /**
+   * The call in one line, as the server's transcript resolver describes it
+   * (schema 26) — the line a reader is shown, never derived here. Absent from a
+   * server on `25`, which this client refuses anyway.
+   */
+  description: string;
   events: number;
 }
 export const liveActivitySchema: z.ZodType<LiveActivity> = z.object({
@@ -1228,6 +1244,7 @@ export const liveActivitySchema: z.ZodType<LiveActivity> = z.object({
   kind: z.string(),
   name: z.string(),
   detail: z.string(),
+  description: z.string(),
   events: z.number().int().nonnegative(),
 });
 export const liveActivityListSchema = z.array(liveActivitySchema);
@@ -1540,6 +1557,21 @@ export const timelineEventSchema = openObject({
   // llmlint: ignore[boundary_inputs_validated] the pairing of `review` with a `kind` is the same constraint this parser may not enforce as the `surface` pairing above, and for the same reason: the review kinds are `onevcs`'s, released on its own schedule, so a conforming server relaying one under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `review` itself carries is validated above, down to refusing one that carries nothing.
   review: timelineReviewSchema.optional(),
   reference: timelineReferenceSchema.optional(),
+  /**
+   * A turn record's one line (timeline schema 14): the server's transcript
+   * resolver's description of the entry the record points at, or its
+   * `transcript unavailable: <path>: <why>`. Shown as served, never derived here.
+   */
+  description: z.string().optional(),
+  /**
+   * Where a `turn-activity` sits in the conversation its `reference` names: the
+   * producer's index and, where the harness minted one, the call's identity —
+   * what opening the row focuses that conversation on.
+   */
+  tool: openObject({
+    index: counter,
+    tool_call_id: z.string().min(1).optional(),
+  }).optional(),
 });
 /**
  * One discrete wait a `rollup` span absorbed, so a client can draw the stalls a run
@@ -1628,11 +1660,20 @@ export const timelineSpanSchema = openObject({
     });
   }
 });
+/**
+ * One stored artifact. A log is served as its end, with `truncated` saying so; a
+ * transcript or a report is served whole. An `oneharness_session` (schema 26)
+ * also carries `turns` — the invocation read whole from its history file as the
+ * one conversation turn it was — and `unavailable`, the resolver's own
+ * `transcript unavailable: <path>: <why>`, where none of it could be read.
+ */
 export const artifactContentSchema = openObject({
   id: z.string().min(1),
   kind: timelineReferenceKindSchema,
   content: z.string(),
   truncated: z.boolean(),
+  turns: z.array(conversationTurnSchema).optional(),
+  unavailable: z.string().optional(),
 });
 /**
  * The timeline envelope, which carries a version of its own beside the API's.

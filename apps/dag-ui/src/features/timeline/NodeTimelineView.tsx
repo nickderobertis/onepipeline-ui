@@ -42,6 +42,8 @@ import {
   NODE_TAB_LABELS,
   type NodeTab,
 } from "../../lib/useUrlSelection";
+import { CheckRuntime } from "../remote/CheckRuntime";
+import { TIMELINE_TIME_MARKS } from "./axis";
 import { ControlBadge } from "./ControlBadge";
 import { EventCategoryIcon } from "./event-category";
 import { NodeRelease } from "./release";
@@ -287,6 +289,7 @@ export function NodeTimelineView({
                         <th>Name</th>
                         <th>Status</th>
                         <th>Conclusion</th>
+                        <th>Runtime</th>
                         <th>Required</th>
                       </tr>
                     </thead>
@@ -308,6 +311,16 @@ export function NodeTimelineView({
                           </th>
                           <td>{check.status ?? "Not recorded"}</td>
                           <td>{check.conclusion ?? "—"}</td>
+                          <td>
+                            <CheckRuntime
+                              {...(check.started_at === undefined
+                                ? {}
+                                : { startedAt: check.started_at })}
+                              {...(check.completed_at === undefined
+                                ? {}
+                                : { completedAt: check.completed_at })}
+                            />
+                          </td>
                           <td>{check.required ? "Required" : "Optional"}</td>
                         </tr>
                       ))}
@@ -467,6 +480,7 @@ function NodeExecution({
         data-testid="node-timeline"
       >
         <Timeline
+          {...TIMELINE_TIME_MARKS}
           axis={{ origin: plotted[0] }}
           cursor={cursor}
           expanded={expanded}

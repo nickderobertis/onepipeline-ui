@@ -278,24 +278,43 @@ export function projectAgents(project: string) {
   return { ...runAgents(LIVE_RUN), run_id: undefined, project };
 }
 
-/** The transcript one harness run opens to, as the artifact route serves a oneharness session. */
+/**
+ * The transcript one harness run opens to, as the artifact route serves a
+ * oneharness session: its closing record as `content`, and the run read whole as
+ * the one conversation turn it was under `turns`.
+ */
 export function harnessTranscript(historyId: string) {
+  const text =
+    historyId === DASHBOARD_HISTORY_ID
+      ? DASHBOARD_TRANSCRIPT_TEXT
+      : `what harness run ${historyId} said`;
+  const prompt = `the prompt harness run ${historyId} was given`;
   return {
     ...verbEnvelope,
     id: historyId,
     kind: "oneharness_session",
     content: JSON.stringify(
-      {
-        history_id: historyId,
-        text:
-          historyId === DASHBOARD_HISTORY_ID
-            ? DASHBOARD_TRANSCRIPT_TEXT
-            : `what harness run ${historyId} said`,
-      },
+      { history_id: historyId, status: "ok", prompt, text },
       null,
       2,
     ),
     truncated: false,
+    turns: [
+      {
+        assistant: text,
+        failureKind: null,
+        harness: "claude-code:primary",
+        id: historyId,
+        model: null,
+        reasoning: null,
+        status: "ok",
+        timestamp: "2026-07-26T12:00:00Z",
+        tools: [],
+        unknown: {},
+        usage: {},
+        user: prompt,
+      },
+    ],
   };
 }
 

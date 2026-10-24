@@ -24,6 +24,7 @@ import type { NodeView } from "../../lib/run-model";
 import { StructuredFields } from "../../lib/StructuredFields";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration, formatDurationSeconds } from "../../lib/time";
+import { TIMELINE_TIME_MARKS } from "./axis";
 import {
   type GraphRow,
   type GraphSegment,
@@ -298,6 +299,7 @@ function GraphExecution({
   return (
     <div className="graph-timeline" data-rows-open={rowsOpen}>
       <Timeline
+        {...TIMELINE_TIME_MARKS}
         axis={{ origin: graph.range[0] }}
         expanded={false}
         items={graph.line.items}
@@ -403,6 +405,7 @@ function GraphRowView({
         </span>
       </header>
       <Timeline
+        {...TIMELINE_TIME_MARKS}
         axis={{ origin }}
         expanded={expanded}
         items={expanded ? row.items : row.line}

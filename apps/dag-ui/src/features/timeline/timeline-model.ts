@@ -905,6 +905,12 @@ function eventRow(event: TimelineEvent): TimelineRow {
     displayLabel: byAuthor(
       redirected ??
         surfaced ??
+        // A turn record's one line, exactly as the server described it: a shell
+        // call's command, a file tool's verb and path, a search's pattern. Never
+        // derived here, so this list and `onepipeline transcript` say the same.
+        (event.description !== undefined && event.description !== ""
+          ? event.description
+          : undefined) ??
         (event.kind === "retry-requested"
           ? "Retry requested"
           : (event.step_id ?? event.kind)),
