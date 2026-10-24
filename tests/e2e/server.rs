@@ -16604,7 +16604,6 @@ fn write_late_child_harness_standin(dir: &Path) -> PathBuf {
     standin
 }
 
-/// The pid a stand-in recorded in `path`, once it is there.
 #[cfg(unix)]
 fn recorded_pid(path: &Path) -> u32 {
     eventually(&format!("{} to be recorded", path.display()), || {
@@ -16689,7 +16688,6 @@ fn end_recorded(pid: u32) {
     }
 }
 
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this journey produces its run with the pinned engine CLI already provisioned by this tier, then stops it through the real read API. It needs only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 /// A stop through `POST /api/v2/runs/{run}/stop` that reports success leaves no
 /// process the run's node dispatch started running — including one the dispatch
 /// started while the stop was in progress, after the stop had listed the tree it
@@ -16709,7 +16707,9 @@ fn end_recorded(pid: u32) {
 fn a_stop_that_reports_success_leaves_no_process_its_dispatch_started_running() {
     let (workspace, root) = fixture_run::workspace();
     let dir = workspace.path().to_path_buf();
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states: a real one bills a model call and cannot be told when to start its next process. What this journey is about — the pinned engine CLI's driver and dispatch, the route, and the stop the linked engine runs in the server — is all real, and the stand-in only starts a child when released and records its pid.
     let standin = write_late_child_harness_standin(&dir);
+    // llmlint: ignore-end[e2e_not_mocked]
     write_extending_config(&dir, &standin);
     let graph = write_node_scope_graph(&dir);
     let run = fixture_run::RUN_ID;
