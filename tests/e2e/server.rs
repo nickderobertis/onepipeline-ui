@@ -16571,6 +16571,215 @@ fn an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names() {
     drop(driver);
     serving.stop_on(Stop::Terminate);
 }
+
+/// A harness stand-in whose turn holds until `<dir>/turn.go` exists, then starts
+/// a child of its own and keeps running: the next provider process a dispatch
+/// starts, placed by the journey rather than by a model's timing. It records its
+/// own pid in `turn.pid` once its turn is open, and the child's in
+/// `late-child.pid` once it has started it, each written whole by a rename so a
+/// reader never meets half a pid.
+#[cfg(unix)]
+fn write_late_child_harness_standin(dir: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let standin = dir.join("late-child-harness");
+    let file = |name: &str| format!("{:?}", dir.join(name).display().to_string());
+    fs::write(
+        &standin,
+        format!(
+            "#!/bin/sh\nIFS= read -r prompt\n\
+             echo $$ > {turn}.tmp && mv {turn}.tmp {turn}\n\
+             while [ ! -f {go} ]; do sleep 0.05; done\n\
+             sleep 600 &\n\
+             echo $! > {child}.tmp && mv {child}.tmp {child}\n\
+             wait\n",
+            turn = file("turn.pid"),
+            go = file("turn.go"),
+            child = file("late-child.pid"),
+        ),
+    )
+    .expect("the late-child harness stand-in");
+    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o700))
+        .expect("chmod the late-child harness stand-in");
+    standin
+}
+
+/// The pid a stand-in recorded in `path`, once it is there.
+#[cfg(unix)]
+fn recorded_pid(path: &Path) -> u32 {
+    eventually(&format!("{} to be recorded", path.display()), || {
+        path.is_file()
+    });
+    fs::read_to_string(path)
+        .expect("the recorded pid")
+        .trim()
+        .parse()
+        .expect("a pid")
+}
+
+/// Whether the process `pid` names has ended, counting a zombie as ended: a
+/// process whose parent the stop ended waits there only for `init` to reap it,
+/// and runs nothing.
+#[cfg(unix)]
+fn process_ended(pid: u32) -> bool {
+    if !process_is_live(pid) {
+        return true;
+    }
+    let state = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .expect("ps runs");
+    let state = String::from_utf8_lossy(&state.stdout);
+    state.trim().is_empty() || state.trim_start().starts_with('Z')
+}
+
+/// The connection by which the process `pid` holds at an engine ordering
+/// failpoint listening on `listener`, within [`DRIVER_PATIENCE`].
+///
+/// The failpoint announces the pid of the process meeting it, and any other
+/// process meeting it — one that inherited the same variable — is released at
+/// once, so only `pid` is held.
+#[cfg(unix)]
+fn held_by(listener: &std::net::TcpListener, pid: u32) -> std::net::TcpStream {
+    use std::io::{BufRead, Write};
+
+    listener
+        .set_nonblocking(true)
+        .expect("a non-blocking listener");
+    let deadline = std::time::Instant::now() + DRIVER_PATIENCE;
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream.set_nonblocking(false).expect("a blocking stream");
+                stream
+                    .set_read_timeout(Some(DRIVER_PATIENCE))
+                    .expect("a read timeout");
+                let mut announced = String::new();
+                std::io::BufReader::new(&stream)
+                    .read_line(&mut announced)
+                    .expect("the failpoint announces its pid");
+                if announced.trim() == pid.to_string() {
+                    return stream;
+                }
+                (&stream).write_all(b"g").expect("release another process");
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "pid {pid} never met the failpoint within {DRIVER_PATIENCE:?}"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => panic!("the failpoint's listener failed: {error}"),
+        }
+    }
+}
+
+/// End `pid` with `SIGKILL`, for a process this journey's own stand-in started
+/// and recorded and the stop under test left running.
+#[cfg(unix)]
+fn end_recorded(pid: u32) {
+    let Ok(raw) = i32::try_from(pid) else {
+        return;
+    };
+    // SAFETY: the pid is one this journey's stand-in recorded for a process it
+    // started; SIGKILL passes no memory to libc.
+    unsafe {
+        libc::kill(raw, libc::SIGKILL);
+    }
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this journey produces its run with the pinned engine CLI already provisioned by this tier, then stops it through the real read API. It needs only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+/// A stop through `POST /api/v2/runs/{run}/stop` that reports success leaves no
+/// process the run's node dispatch started running — including one the dispatch
+/// started while the stop was in progress, after the stop had listed the tree it
+/// was about to signal.
+///
+/// That is the race a stop under load meets: its listing is a moment old by the
+/// time its signals go out, and a dispatch that starts its next provider turn
+/// inside that moment starts a process no walk found, which is then handed to
+/// `init` and runs on spending what the stop was asked to stop. The stop runs in
+/// this server's process, through the engine it links, so the server is the one
+/// told where to hold.
+///
+/// A body the route refuses first leaves the dispatch running, so a stop that
+/// never reached the engine ends nothing.
+#[cfg(unix)]
+#[test]
+fn a_stop_that_reports_success_leaves_no_process_its_dispatch_started_running() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let standin = write_late_child_harness_standin(&dir);
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_dispatch(&root, run, &dir, &graph);
+
+    // llmlint: ignore-block[tests_mirror_real_usage] which side of the stop's listing the dispatch starts its process on is the property, and no request can place it. The linked engine's own ordering failpoint only orders the real processes; the launch, the dispatch, the route, the stop and every outcome asserted are the real binaries' own.
+    let listed = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback listener");
+    let gate = listed.local_addr().expect("an address").to_string();
+    let state = dir.join("state");
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+            ("ONEPIPELINE_TEST_STOP_LISTED_GATE", &gate),
+        ],
+    );
+    let driver = serving.drive_fixture(run);
+    let _driver = RetainedDriver(driver);
+    let turn = recorded_pid(&dir.join("turn.pid"));
+
+    let stop = format!("/api/v2/runs/{run}/stop");
+    let refused = http::post(serving.address, &stop, r#"{"force": "yes"}"#);
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], json!("invalid_request"));
+    assert!(
+        !process_ended(turn) && !process_ended(driver),
+        "a stop the route refused ended the dispatch it never reached"
+    );
+
+    let late_child = dir.join("late-child.pid");
+    let stopped = std::thread::scope(|scope| {
+        let stopping =
+            scope.spawn(|| http::post_within(serving.address, &stop, "", DRIVER_PATIENCE));
+        // The stop has listed the tree and holds before signalling any of it.
+        let mut at_the_listing = held_by(&listed, serving.pid());
+        fs::write(dir.join("turn.go"), "go").expect("the turn is released");
+        eventually("the dispatch to start a process after the listing", || {
+            late_child.is_file()
+        });
+        std::io::Write::write_all(&mut at_the_listing, b"g").expect("the stop is released");
+        stopping.join().expect("the stop answers")
+    });
+    // llmlint: ignore-end[tests_mirror_real_usage]
+    let child = recorded_pid(&late_child);
+    let started = [driver, turn, child];
+    let left: Vec<u32> = started
+        .iter()
+        .copied()
+        .filter(|pid| !process_ended(*pid))
+        .collect();
+    // Read the instant the stop answered, and only then cleaned up, by the pids
+    // the journey started or its stand-in recorded: once their parents are gone
+    // nothing else on this host reaches them.
+    for pid in &left {
+        end_recorded(*pid);
+    }
+    assert_eq!(stopped.status, 200, "{}", stopped.body);
+    let stopped = stopped.json();
+    assert_enveloped(&stopped);
+    assert_eq!(stopped["stopped"], json!(true), "{stopped}");
+    assert_eq!(stopped["teardown"], json!("signalled"), "{stopped}");
+    assert!(
+        left.is_empty(),
+        "pids {left:?} of {started:?} — the driver, the dispatch's turn and the child that \
+         turn started after the stop listed the tree — were still running once the stop \
+         reported success"
+    );
+}
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 // llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
