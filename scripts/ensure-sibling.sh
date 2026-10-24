@@ -143,9 +143,14 @@ replacing=""
 if [ -e "$binary" ] && reports_pin; then
   replacing="$binary reports onepipeline $version but is not stamped as built from $source"
 fi
-rm -f "$stamp" 2>/dev/null ||
-  fail "could not remove $stamp, the stamp of the build being replaced" \
-    "check $(dirname -- "$binary") is writable and nothing but a file is at $stamp, then retry"
+# Only a stamp that is there is removed: BSD `rm -f` refuses a path under a
+# non-directory where GNU's passes it, and that destination is refused below as
+# one that cannot be installed into.
+if [ -e "$stamp" ] || [ -L "$stamp" ]; then
+  rm -f "$stamp" 2>/dev/null ||
+    fail "could not remove $stamp, the stamp of the build being replaced" \
+      "check $(dirname -- "$binary") is writable and nothing but a file is at $stamp, then retry"
+fi
 
 # Forced for the reason `install_from_git` gives: without it cargo skips a version
 # its record lists, and whatever was copied over that install would be stamped.
