@@ -133,8 +133,8 @@ impl ApiError {
     ///
     /// [`ApiError::from_engine`] takes the engine's own [`onepipeline::Error`],
     /// so this crate's public surface follows the linked `onepipeline` release:
-    /// a consumer calling it
-    /// has to hand it a value of the very type this crate links. That is why
+    /// a consumer calling it has to hand it a value of the very type this crate
+    /// links and recompile when that type's release changes. That is why
     /// `Cargo.toml` pins the engine with an exact `onepipeline = "=…"`
     /// requirement — it is what holds the two surfaces together — and why
     /// moving that requirement across a `0.x` minor release is a breaking
