@@ -2666,7 +2666,8 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     let started = serde_json::to_value(oneagentgraph::event::TurnStarted {
         turn: 7,
         role: oneagentgraph::event::Party::User.as_str().to_string(),
-        instruction: "re-run the gate".into(),
+        instruction: Some("re-run the gate".into()),
+        transcript: None,
         instruction_truncated: true,
         started_at: "2026-08-07T12:00:00.000Z".into(),
         origin: None,
@@ -2692,7 +2693,8 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     let message = serde_json::to_value(oneagentgraph::event::TurnMessage {
         turn: 7,
         role: oneagentgraph::event::Party::Assistant.as_str().to_string(),
-        text: "the gate is green".into(),
+        text: Some("the gate is green".into()),
+        transcript: None,
         truncated: true,
         origin: None,
     })
@@ -2715,7 +2717,8 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     let activity = serde_json::to_value(oneagentgraph::event::TurnActivity {
         kind: graph::TOOL_RESULT.into(),
         name: None,
-        detail: "2 passed; 0 failed".into(),
+        detail: Some("2 passed; 0 failed".into()),
+        transcript: None,
         // Both bound flags set, because that library skips either when it is
         // false: read off an activity that cut nothing, this gate would name
         // neither field, and a rename of one would pass it unchanged.
@@ -2755,7 +2758,8 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         serde_json::to_value(oneagentgraph::event::TurnActivity {
             kind: "tool_call".into(),
             name: Some("bash".into()),
-            detail: "just gate".into(),
+            detail: Some("just gate".into()),
+            transcript: None,
             truncated: false,
             output: None,
             output_truncated: false,
