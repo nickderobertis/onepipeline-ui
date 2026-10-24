@@ -1626,12 +1626,17 @@ function writeLiveRun(root, checkOrigin) {
         conclusion,
         // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 (Cargo.lock) declares no change-check payload schema to validate this fixture against. Its change-check-times golden fixes the time/conclusion names; url exercises the consumer's existing optional check-address slot, not a claim that every producer records it. Older absent/null metadata remains optional; host Check does not write the event and cannot supply a false gate.
         url: `${checkOrigin}/healthz?check=${name}`,
+        // A finished check carries both of its own stamps, one still running
+        // only the start — which is what its runtime so far is counted from —
+        // and a queued one neither.
         ...(status === "completed"
           ? {
               started_at: stamp(journal.at - 4000),
               completed_at: stamp(journal.at),
             }
-          : {}),
+          : status === "in_progress"
+            ? { started_at: stamp(journal.at - 2000) }
+            : {}),
         // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
       },
       log === undefined ? [] : [{ id: log, kind: "log", bytes: 33 }],
