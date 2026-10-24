@@ -312,18 +312,21 @@ fn every_secret_the_workflows_read_is_in_the_manifest() {
 /// named in the dev-dependencies' prose and in `[package]`'s, and a substring
 /// search would read either as the requirement the resolver uses.
 fn dependency_requirement(cargo: &str, name: &str) -> String {
-    let mut inside = false;
-    for line in cargo.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            inside = line == "[dependencies]";
-        } else if inside {
-            if let Some(value) = line.strip_prefix(&format!("{name} = ")) {
-                return value.trim_matches('"').to_owned();
-            }
-        }
-    }
-    panic!("Cargo.toml declares no dependency on {name}");
+    let manifest: toml::Table = toml::from_str(cargo).expect("Cargo.toml parses");
+    let entry = manifest["dependencies"]
+        .get(name)
+        .unwrap_or_else(|| panic!("Cargo.toml declares no dependency on {name}"));
+    requirement_of(entry)
+        .unwrap_or_else(|| panic!("Cargo.toml declares {name} with no version requirement"))
+        .to_owned()
+}
+
+/// The version requirement a `[dependencies]` entry declares, in either spelling
+/// a manifest can carry: the bare string, or the table whose `version` key is it.
+fn requirement_of(entry: &toml::Value) -> Option<&str> {
+    entry
+        .as_str()
+        .or_else(|| entry.get("version").and_then(toml::Value::as_str))
 }
 
 /// The version of `dependency` that `package` resolved to, as `Cargo.lock`
@@ -553,31 +556,50 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// comparison of the two above passes for any release both moved to together —
 /// including one whose adopted runs write their plan's home nothing. It moves
 /// with the `onepipeline` pin and [`STORE_RELEASE`], as one change.
-const ENGINE_RELEASE: &str = "0.89.0";
+const ENGINE_RELEASE: &str = "0.89.2";
+
+/// Where the lock must resolve [`ENGINE_RELEASE`] from: crates.io, which serves
+/// the release a crates.io consumer and the sibling CLI `just bootstrap`
+/// provisions both reach. A git commit can carry the same version number while
+/// its library is another, so the version alone cannot tell the two apart.
+const ENGINE_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
 /// Every way `lock` and `manifest` fail to link exactly [`ENGINE_RELEASE`] of the
 /// engine, as a reader would be told them: a requirement that is not that release
-/// exactly, and a lock that resolves it at another release or more than one.
+/// exactly, a lock that resolves it at another release or more than one, and a
+/// resolution from anywhere but [`ENGINE_SOURCE`].
 fn engine_identity_disagreements(lock: &str, manifest: &str) -> Vec<String> {
     let mut found = Vec::new();
     let manifest: toml::Table = toml::from_str(manifest).expect("Cargo.toml parses");
     let exact = format!("={ENGINE_RELEASE}");
     let requirement = manifest["dependencies"]
         .get("onepipeline")
-        .and_then(toml::Value::as_str);
+        .and_then(requirement_of);
     if requirement != Some(exact.as_str()) {
         found.push(format!(
             "Cargo.toml requires onepipeline as {requirement:?}, not exactly {exact}"
         ));
     }
     let lock: toml::Table = toml::from_str(lock).expect("Cargo.lock parses");
-    let versions: BTreeSet<&str> = lock["package"]
+    let engines: Vec<&toml::Value> = lock["package"]
         .as_array()
         .expect("the lock lists packages")
         .iter()
         .filter(|package| package["name"].as_str() == Some("onepipeline"))
+        .collect();
+    let versions: BTreeSet<&str> = engines
+        .iter()
         .map(|package| package["version"].as_str().expect("a package version"))
         .collect();
+    for package in &engines {
+        let source = package.get("source").and_then(toml::Value::as_str);
+        if source != Some(ENGINE_SOURCE) {
+            found.push(format!(
+                "the lock resolves onepipeline {} from {source:?}, not {ENGINE_SOURCE}",
+                package["version"].as_str().expect("a package version")
+            ));
+        }
+    }
     if versions.is_empty() {
         found.push("the lock resolves no onepipeline".to_owned());
     }
@@ -665,6 +687,30 @@ fn an_engine_moved_together_or_resolved_twice_is_refused_naming_it() {
                  where the binary links one"
             ),
         ]
+    );
+}
+
+/// A lock resolving the engine's own release number from a git commit is refused
+/// naming where it came from: the version agrees and the requirement agrees, so
+/// the source is the only thing that tells them apart.
+#[test]
+fn the_same_engine_release_from_another_source_is_refused_naming_it() {
+    let lock = read("Cargo.lock");
+    let manifest = read("Cargo.toml");
+    let git = "git+https://github.com/nickderobertis/onepipeline?rev=f06d041c5e3e398d348858207d9f8e5d9add017a#f06d041c5e3e398d348858207d9f8e5d9add017a";
+    let entry = format!(
+        "name = \"onepipeline\"\nversion = \"{ENGINE_RELEASE}\"\nsource = \"{ENGINE_SOURCE}\""
+    );
+    assert_eq!(lock.matches(&entry).count(), 1, "one pinned engine source");
+    let from_git = lock.replace(
+        &entry,
+        &format!("name = \"onepipeline\"\nversion = \"{ENGINE_RELEASE}\"\nsource = \"{git}\""),
+    );
+    assert_eq!(
+        engine_identity_disagreements(&from_git, &manifest),
+        [format!(
+            "the lock resolves onepipeline {ENGINE_RELEASE} from Some(\"{git}\"), not {ENGINE_SOURCE}"
+        )]
     );
 }
 

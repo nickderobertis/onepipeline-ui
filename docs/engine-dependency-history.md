@@ -526,3 +526,25 @@ every run with a `run-started` line carrying the whole prompt, onejudge
 `started_at` and `completed_at`. The test-only `onevcs`, `oneharness-core` and
 `onetaskgraph-*` requirements follow its lock. This changes the engine types
 carried by ApiError::from_engine and the other engine-typed public items.
+The git commit f06d041 on onepipeline's main (#1128), after 0.89.1, is the
+engine whose stop ends every process a node dispatch started, including a
+provider turn a dispatch starts while the stop is in progress. A host holds
+this reader and its engine to one linked engine, so it can adopt that stop
+only once this crate links it. No release carries it yet and its library is
+still versioned 0.89.1, so this links that commit from git, and
+`tests/packaging.rs` holds the lock to that source as well as to the version.
+`POST /api/v2/runs/{run}/stop` runs the teardown in this process, so the
+server now ends what the stop used to miss. No route, payload or MSRV
+changes, and it links the same onetaskgraph 0.11.1, onevcs 0.56.9 and
+oneagentgraph 0.8.0 as 0.89.0. This changes the engine types carried by
+ApiError::from_engine and the other engine-typed public items.
+0.89.2 is the published release carrying that stop fix, which this crate
+adopts in place of the git commit, so the lock resolves the engine from
+crates.io again and `tests/packaging.rs` holds it to that source. Beside the
+stop it carries #1117, whose retirement pass leaves alone a branch a node
+comes to name while the pass runs; that is internal to the engine's
+maintenance. It links the same onetaskgraph 0.11.1, onevcs 0.56.9,
+oneagentgraph 0.8.0 and oneharness-core 0.29.1 as 0.89.0, and no route,
+payload or MSRV changes beyond the release `/healthz` reports. This changes the
+engine types carried by ApiError::from_engine and the other engine-typed public
+items.

@@ -16,7 +16,10 @@
 //! an archive in it, so a Release with no archive for this host is the default.
 //! The recipe under test is the real one, run out of a copy of the real justfile
 //! over the real `Cargo.lock`, so the version it pins to is the version this
-//! tree resolves — and what it asked cargo for is readable here. The copy is the
+//! tree resolves — and what it asked cargo for is readable here. The one line of
+//! that lock a journey sets is where the library resolves from, crates.io or one
+//! git commit, because each journey is about one of the two whichever this tree
+//! links today. The copy is the
 //! point rather than a shortcut: the recipe writes into `justfile_directory()`,
 //! and a journey that let it write into the repository would provision over the
 //! very binary the rest of the suite is reading.
@@ -105,6 +108,20 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// The lock's source for a library resolved from crates.io.
+const REGISTRY: &str = "registry+https://github.com/rust-lang/crates.io-index";
+
+/// The repository a fast adoption links the engine from.
+const GIT_REPOSITORY: &str = "https://github.com/nickderobertis/onepipeline";
+
+/// The commit those journeys pin it to, as a lock names an exact `rev`.
+const GIT_COMMIT: &str = "f06d041c5e3e398d348858207d9f8e5d9add017a";
+
+/// The lock's source for the library linked at [`GIT_COMMIT`].
+fn git_source() -> String {
+    format!("git+{GIT_REPOSITORY}?rev={GIT_COMMIT}#{GIT_COMMIT}")
+}
+
 /// A scratch tree carrying the real recipe, the real pin, and a `cargo` that
 /// records rather than installs.
 struct Fixture {
@@ -113,8 +130,50 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// A tree with no `.tools/` at all — a clone nobody has bootstrapped.
+    /// A tree with no `.tools/` at all — a clone nobody has bootstrapped — whose
+    /// lock resolves the library from crates.io.
     fn new() -> Self {
+        let fixture = Self::copied();
+        fixture.pin_source(REGISTRY);
+        fixture
+    }
+
+    /// The same, with the lock linking the library at [`GIT_COMMIT`]: a fast
+    /// adoption, whose commit reports the release version it was cut after.
+    fn git() -> Self {
+        let fixture = Self::copied();
+        fixture.pin_source(&git_source());
+        fixture
+    }
+
+    /// Set where the copied lock resolves `onepipeline` from, leaving every other
+    /// line of it as this tree resolves it.
+    fn pin_source(&self, source: &str) {
+        let path = self.dir.path().join("Cargo.lock");
+        let lock = fs::read_to_string(&path).expect("the copied lock");
+        let blocks: Vec<String> = lock
+            .split("\n[[package]]\n")
+            .map(|block| {
+                if !block.lines().any(|line| line == "name = \"onepipeline\"") {
+                    return block.to_owned();
+                }
+                let mut lines: Vec<String> = block
+                    .lines()
+                    .filter(|line| !line.starts_with("source = "))
+                    .map(str::to_owned)
+                    .collect();
+                let version = lines
+                    .iter()
+                    .position(|line| line.starts_with("version = "))
+                    .expect("the engine's block names its version");
+                lines.insert(version + 1, format!("source = \"{source}\""));
+                lines.join("\n") + if block.ends_with('\n') { "\n" } else { "" }
+            })
+            .collect();
+        fs::write(&path, blocks.join("\n[[package]]\n")).expect("rewrite the copied lock");
+    }
+
+    fn copied() -> Self {
         let dir = TempDir::new().expect("temp dir");
         fs::create_dir_all(dir.path().join("scripts")).expect("the copy's scripts directory");
         for name in [
@@ -131,7 +190,13 @@ impl Fixture {
         // Records what the recipe asked for, and answers with the status the case
         // under test is about. A successful install leaves a program in
         // `<root>/bin` reporting the version it was asked for — or
-        // INSTALL_REPORTS — as `cargo install` leaves the CLI there.
+        // INSTALL_REPORTS — as `cargo install` leaves the CLI there, and records
+        // the package it installed in `<root>/.crates2.json` under the id cargo
+        // gives it: the version and the source, the commit for a git install —
+        // or INSTALL_RECORDS. A git install's package version is the pinned one.
+        // Unforced, it skips a package its record already lists, as cargo does,
+        // leaving whatever is at the path. STAMP_BLOCKED leaves a directory where the recipe writes its stamp, the
+        // way a stray `mkdir` or a botched cache restore would.
         //
         // llmlint: ignore-block[e2e_not_mocked] the real call downloads and
         // compiles the sibling CLI, which is the one thing an offline,
@@ -148,11 +213,16 @@ impl Fixture {
              set -eu\n\
              printf '%s\\n' \"$*\" >> \"$CARGO_CALLS\"\n\
              [ \"${INSTALL_STATUS:-0}\" = 0 ] || exit \"$INSTALL_STATUS\"\n\
-             version=; root=\n\
-             while [ $# -gt 0 ]; do case \"$1\" in --version) version=\"$2\"; shift 2 ;; --root) root=\"$2\"; shift 2 ;; *) shift ;; esac; done\n\
+             version=; root=; git=; rev=; force=\n\
+             while [ $# -gt 0 ]; do case \"$1\" in --version) version=\"$2\"; shift 2 ;; --root) root=\"$2\"; shift 2 ;; --git) git=\"$2\"; shift 2 ;; --rev) rev=\"$2\"; shift 2 ;; --force) force=1; shift ;; *) shift ;; esac; done\n\
+             source=registry+https://github.com/rust-lang/crates.io-index\n\
+             if [ -n \"$git\" ]; then version=\"$GIT_PACKAGE_VERSION\"; source=\"git+$git?rev=$rev#$rev\"; fi\n\
+             if [ -z \"$force\" ] && grep -qF \"onepipeline $version ($source)\" \"$root/.crates2.json\" 2>/dev/null; then exit 0; fi\n\
              mkdir -p \"$root/bin\"\n\
              printf '#!/usr/bin/env bash\\nprintf \"onepipeline %s\\\\n\"\\n' \"${INSTALL_REPORTS:-$version}\" > \"$root/bin/onepipeline$SIBLING_EXE\"\n\
-             chmod +x \"$root/bin/onepipeline$SIBLING_EXE\"\n",
+             chmod +x \"$root/bin/onepipeline$SIBLING_EXE\"\n\
+             printf '{\"installs\":{\"onepipeline %s (%s)\":{}}}\\n' \"$version\" \"${INSTALL_RECORDS:-$source}\" > \"$root/.crates2.json\"\n\
+             [ -z \"${STAMP_BLOCKED:-}\" ] || mkdir -p \"$root/bin/onepipeline$SIBLING_EXE.source\"\n",
         );
         // llmlint: ignore-end[e2e_not_mocked]
 
@@ -195,6 +265,7 @@ impl Fixture {
             .env("PATH", &self.search_path)
             .env("CARGO_CALLS", self.dir.path().join("cargo-calls"))
             .env("SIBLING_EXE", std::env::consts::EXE_SUFFIX)
+            .env("GIT_PACKAGE_VERSION", Release::linked().as_str())
             .env(
                 "ONEPIPELINE_UI_SIBLING_RELEASES",
                 self.dir.path().join("releases"),
@@ -308,9 +379,29 @@ impl Fixture {
         Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
     }
 
+    fn provisioned_path(&self) -> PathBuf {
+        self.dir
+            .path()
+            .join(".tools/bin")
+            .join(provisioned_sibling())
+    }
+
+    fn stamp_path(&self) -> PathBuf {
+        self.dir
+            .path()
+            .join(".tools/bin")
+            .join(format!("{}.source", provisioned_sibling()))
+    }
+
     /// Everything the recipe asked `cargo` for, in order.
     fn calls(&self) -> String {
         fs::read_to_string(self.dir.path().join("cargo-calls")).unwrap_or_default()
+    }
+
+    /// Forget what the recipe asked `cargo` for so far, so a journey's next run
+    /// is read on its own.
+    fn forget_calls(&self) {
+        let _ = fs::remove_file(self.dir.path().join("cargo-calls"));
     }
 }
 
@@ -360,7 +451,7 @@ fn host_triple() -> String {
 /// lockfile, and into the tree rather than onto the machine.
 fn pinned_install() -> String {
     format!(
-        "install onepipeline --version {} --locked --root .tools --quiet",
+        "install onepipeline --version {} --locked --force --root .tools --quiet",
         Release::linked().as_str()
     )
 }
@@ -388,12 +479,22 @@ fn a_tree_with_no_sibling_provisions_the_pinned_one() {
     );
 }
 
-/// A sibling already at the pin is left alone, so the gate pays the version probe
-/// and nothing else on every run after the first.
+/// The install the recipe must ask for under a git pin: that exact commit,
+/// forced past cargo's own record, into the tree.
+fn git_install() -> String {
+    format!(
+        "install onepipeline --git {GIT_REPOSITORY} --rev {GIT_COMMIT} --locked --force --root .tools --quiet"
+    )
+}
+
+/// A sibling the recipe provisioned is left alone, so the gate pays the version
+/// probe and nothing else on every run after the first.
 #[test]
-fn a_sibling_already_at_the_pin_is_not_reinstalled() {
+fn a_sibling_the_recipe_provisioned_is_not_reinstalled() {
     let fixture = Fixture::new();
-    fixture.sibling_in_the_tree(Release::linked().as_str());
+    let first = fixture.run();
+    assert!(first.status.success(), "{}", stderr(&first));
+    fixture.forget_calls();
 
     let output = fixture.run();
 
@@ -407,6 +508,61 @@ fn a_sibling_already_at_the_pin_is_not_reinstalled() {
         "",
         "the pinned sibling was reinstalled, so every gate run pays for a build"
     );
+}
+
+/// A build copied over one cargo installed is rebuilt, not skipped: cargo's own
+/// record still lists the version, and an unforced install would leave the copy
+/// at the path for the recipe to stamp as the pinned build.
+#[test]
+fn a_build_copied_over_a_cargo_install_is_rebuilt() {
+    for (fixture, install) in [
+        (Fixture::new(), pinned_install()),
+        (Fixture::git(), git_install()),
+    ] {
+        let first = fixture.run();
+        assert!(first.status.success(), "{}", stderr(&first));
+        let installed = fs::read(fixture.provisioned_path()).expect("the installed build");
+        fixture.sibling_in_the_tree(Release::linked().as_str());
+        fixture.forget_calls();
+
+        let output = fixture.run();
+
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_eq!(fixture.calls().trim_end(), install);
+        assert_eq!(
+            fs::read(fixture.provisioned_path()).expect("the provisioned build"),
+            installed,
+            "the copied build was left at the path, and stamped as the pinned one"
+        );
+    }
+}
+
+/// A build at the pinned version that the recipe did not stamp is replaced rather
+/// than used: its `--version` cannot say which source it was built from, and a
+/// build of the same version from the other source speaks for an engine this tree
+/// does not link.
+#[test]
+fn an_unstamped_sibling_at_the_pinned_version_is_replaced() {
+    for (fixture, install) in [
+        (Fixture::new(), pinned_install()),
+        (Fixture::git(), git_install()),
+    ] {
+        fixture.sibling_in_the_tree(Release::linked().as_str());
+
+        let output = fixture.run();
+
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert_eq!(
+            fixture.calls().trim_end(),
+            install,
+            "a build nobody stamped was taken for the pinned sibling"
+        );
+        assert!(
+            stderr(&output).contains("is not stamped as built from"),
+            "the replacement does not say why:\n{}",
+            stderr(&output)
+        );
+    }
 }
 
 /// A sibling at any other release is refused rather than used. It speaks a
@@ -455,19 +611,249 @@ fn a_sibling_on_path_is_never_taken_for_the_provisioned_one() {
 /// Provisioning that could not happen stops the run and says what is missing,
 /// because the alternative is every journey after it failing on a missing file
 /// with no reason attached — which is what sent this change.
+///
+/// Under a git pin it names the commit's source as well, since the version alone
+/// names a release that is not what failed to build.
 #[test]
 fn provisioning_that_fails_says_which_release_could_not_be_installed() {
-    let fixture = Fixture::new();
-    let output = fixture.run_with(&[("INSTALL_STATUS", "1")]);
+    for (fixture, source) in [(Fixture::new(), None), (Fixture::git(), Some(git_source()))] {
+        let output = fixture.run_with(&[("INSTALL_STATUS", "1")]);
 
+        assert!(
+            !output.status.success(),
+            "an install that failed reported success"
+        );
+        let stderr = stderr(&output);
+        assert!(
+            stderr.contains(Release::linked().as_str())
+                && stderr.contains("onepipeline")
+                && stderr.contains("ACTION:"),
+            "the failure does not name the release that could not be provisioned:\n{stderr}"
+        );
+        if let Some(source) = source {
+            assert!(
+                stderr.contains(&source),
+                "the failure does not name the source it could not build:\n{stderr}"
+            );
+        }
+    }
+}
+
+/// A build the recipe cannot stamp is not provisioned: without the stamp no
+/// later run could tell it from a same-version build of another source, so the
+/// recipe fails naming the stamp and what to do rather than reporting success.
+#[test]
+fn a_build_that_cannot_be_stamped_fails_the_recipe() {
+    for fixture in [Fixture::new(), Fixture::git()] {
+        let output = fixture.run_with(&[("STAMP_BLOCKED", "1")]);
+
+        assert!(
+            !output.status.success(),
+            "an unstamped build reported success"
+        );
+        let stderr = stderr(&output);
+        assert!(
+            stderr.contains("could not write")
+                && stderr.contains(".source")
+                && stderr.contains("ACTION:"),
+            "the failure does not name the stamp and what to do:\n{stderr}"
+        );
+    }
+}
+
+/// A stamp that is not two lines naming a source and a digest — cut short, or
+/// overwritten — is no stamp, and the build is provisioned again rather than the
+/// recipe failing on it.
+#[test]
+fn a_malformed_stamp_is_provisioned_over() {
+    for (fixture, install) in [
+        (Fixture::new(), pinned_install()),
+        (Fixture::git(), git_install()),
+    ] {
+        for stamp in ["", "only a source line\n", "\0\0\0"] {
+            let first = fixture.run();
+            assert!(first.status.success(), "{}", stderr(&first));
+            fs::write(fixture.stamp_path(), stamp).expect("damage the stamp");
+            fixture.forget_calls();
+
+            let output = fixture.run();
+
+            assert!(output.status.success(), "{stamp:?}: {}", stderr(&output));
+            assert_eq!(fixture.calls().trim_end(), install, "{stamp:?}");
+        }
+    }
+}
+
+/// A host on which nothing can hash the provisioned binary fails the recipe naming
+/// both hashers and what to do — when it asks whether a stamped build is still the
+/// stamped bytes, and when it stamps a build it just installed — rather than
+/// reading the failure as a match or as a stamp.
+#[cfg(unix)]
+#[test]
+fn a_host_that_cannot_hash_the_binary_fails_naming_the_hashers() {
+    let no_hashers = [
+        (
+            "sha256sum",
+            "#!/usr/bin/env bash\necho 'no GNU hasher here' >&2\nexit 127\n",
+        ),
+        (
+            "shasum",
+            "#!/usr/bin/env bash\necho 'no perl hasher here' >&2\nexit 127\n",
+        ),
+    ];
+    let said = "(sha256sum: no GNU hasher here; shasum: no perl hasher here)";
+
+    // Probing a build an earlier run stamped: nothing is installed over it.
+    let stamped = Fixture::git();
+    let first = stamped.run();
+    assert!(first.status.success(), "{}", stderr(&first));
+    stamped.forget_calls();
+    let path = stamped.path_with("no-hashers", &no_hashers);
+    let probing = stamped.run_with(&[("PATH", &path)]);
     assert!(
-        !output.status.success(),
-        "an install that failed reported success"
+        !probing.status.success(),
+        "an unhashable build passed its probe"
     );
-    let stderr = stderr(&output);
     assert!(
-        stderr.contains(Release::linked().as_str()) && stderr.contains("onepipeline"),
-        "the failure does not name the release that could not be provisioned:\n{stderr}"
+        stderr(&probing).contains(said) && stderr(&probing).contains("ACTION:"),
+        "{}",
+        stderr(&probing)
+    );
+    assert_eq!(
+        stamped.calls(),
+        "",
+        "the recipe reinstalled over a build it could not hash"
+    );
+
+    // Stamping a build it just installed: the install happens, the stamp does not.
+    for fixture in [Fixture::new(), Fixture::git()] {
+        let path = fixture.path_with("no-hashers", &no_hashers);
+        let stamping = fixture.run_with(&[("PATH", &path)]);
+        assert!(
+            !stamping.status.success(),
+            "an unhashable build was stamped"
+        );
+        assert!(
+            stderr(&stamping).contains(said) && stderr(&stamping).contains("ACTION:"),
+            "{}",
+            stderr(&stamping)
+        );
+        assert!(
+            !fixture.stamp_path().is_file(),
+            "a stamp was written without a digest"
+        );
+    }
+}
+
+/// A stamp the recipe cannot take away before replacing the build it describes
+/// stops the recipe naming it, before anything is installed: the stale stamp would
+/// otherwise outlive the build it vouched for.
+#[test]
+fn a_stamp_that_cannot_be_removed_stops_the_recipe_before_installing() {
+    for fixture in [Fixture::new(), Fixture::git()] {
+        fixture.sibling_in_the_tree(Release::linked().as_str());
+        fs::create_dir_all(fixture.stamp_path().join("held")).expect("a directory at the stamp");
+
+        let output = fixture.run();
+
+        assert!(
+            !output.status.success(),
+            "the recipe went on past its stamp"
+        );
+        let stderr = stderr(&output);
+        assert!(
+            stderr.contains("could not remove")
+                && stderr.contains(".source")
+                && stderr.contains("ACTION:"),
+            "the refusal does not name the stamp and what to do:\n{stderr}"
+        );
+        assert_eq!(fixture.calls(), "", "the recipe installed past its stamp");
+    }
+}
+
+/// The package id the recipe reads a git install's source out of is the one a
+/// real `cargo install --git` records: `NAME VERSION (git+URL?rev=SHA#SHA)` in
+/// the root's `.crates2.json`. The cargo stand-in the other journeys use writes
+/// the same id, so this is what holds both to cargo itself.
+///
+/// Asked of a one-file crate in a local repository, so it compiles in seconds and
+/// reaches no network; the URL scheme differs from the https one the recipe
+/// accepts, and the shape around it is what the recipe matches.
+#[cfg(unix)]
+#[test]
+fn cargo_records_a_git_install_under_the_id_the_recipe_reads() {
+    let scratch = TempDir::new().expect("temp dir");
+    let repository = scratch.path().join("probe");
+    fs::create_dir_all(repository.join("src")).expect("the probe crate");
+    fs::write(
+        repository.join("Cargo.toml"),
+        "[package]\nname = \"record-probe\"\nversion = \"0.3.7\"\nedition = \"2021\"\n",
+    )
+    .expect("the probe manifest");
+    fs::write(repository.join("src/main.rs"), "fn main() {}\n").expect("the probe source");
+    let git = |arguments: &[&str]| {
+        let output = Command::new("git")
+            .args([
+                "-c",
+                "user.name=probe",
+                "-c",
+                "user.email=probe@example.invalid",
+            ])
+            .args(arguments)
+            .current_dir(&repository)
+            .output()
+            .expect("git is on PATH");
+        assert!(
+            output.status.success(),
+            "git {arguments:?}: {}",
+            stderr(&output)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "probe"]);
+    let commit = git(&["rev-parse", "HEAD"]);
+    let url = format!("file://{}", repository.display());
+    let root = scratch.path().join("root");
+
+    let installed = Command::new("cargo")
+        .args([
+            "install",
+            "record-probe",
+            "--git",
+            &url,
+            "--rev",
+            &commit,
+            "--force",
+            "--quiet",
+            "--root",
+        ])
+        .arg(&root)
+        .env("CARGO_TARGET_DIR", scratch.path().join("target"))
+        .output()
+        .expect("cargo is on PATH");
+    assert!(
+        installed.status.success(),
+        "cargo install: {}",
+        stderr(&installed)
+    );
+
+    let record: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(".crates2.json")).expect("cargo's install record"),
+    )
+    .expect("the record parses");
+    let ids: Vec<&String> = record["installs"]
+        .as_object()
+        .expect("the record lists installs")
+        .keys()
+        .collect();
+    assert_eq!(
+        ids,
+        [&format!(
+            "record-probe 0.3.7 (git+{url}?rev={commit}#{commit})"
+        )],
+        "cargo records a git install under another id than the recipe reads"
     );
 }
 
@@ -498,6 +884,169 @@ fn a_release_archive_for_this_host_is_installed_without_compiling() {
         Some(format!("onepipeline {}", Release::linked().as_str()).as_str()),
         "the archive's binary is not the provisioned sibling"
     );
+}
+
+/// A sibling installed from its release archive is stamped and left alone after:
+/// with the Release gone from the mirror, the next run neither fetches nor
+/// compiles, so a bootstrap pays for the archive once.
+#[cfg(unix)]
+#[test]
+fn a_sibling_installed_from_its_archive_is_not_fetched_again() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), None);
+    let first = fixture.run();
+    assert!(first.status.success(), "{}", stderr(&first));
+    fs::remove_dir_all(fixture.dir.path().join("releases")).expect("withdraw the Release");
+    fs::create_dir_all(fixture.dir.path().join("releases")).expect("the empty mirror");
+
+    let output = fixture.run();
+
+    assert!(
+        output.status.success(),
+        "a tree provisioned from the archive failed the check:\n{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the archived sibling was not taken as provisioned, so the recipe compiled it"
+    );
+    assert_eq!(
+        fixture.provisioned_version().as_deref(),
+        Some(format!("onepipeline {}", Release::linked().as_str()).as_str()),
+        "the archive's binary is no longer the provisioned sibling"
+    );
+}
+
+/// Under a git pin the CLI is compiled from that exact commit, although a Release
+/// of the same version publishes an archive for this host: that release is the
+/// build without the commit the lock links. Once provisioned it is left alone,
+/// and a build copied over it afterwards is replaced.
+#[cfg(unix)]
+#[test]
+fn a_git_pin_is_compiled_from_its_exact_commit_and_never_fetched() {
+    let fixture = Fixture::git();
+    fixture.publish_archive(Release::linked().as_str(), None);
+
+    let output = fixture.run();
+
+    assert!(
+        output.status.success(),
+        "provisioning the pinned commit failed:\n{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        fixture.calls().trim_end(),
+        git_install(),
+        "the recipe did not compile the commit the lock links"
+    );
+    assert_eq!(
+        fixture.provisioned_version().as_deref(),
+        Some(format!("onepipeline {}", Release::linked().as_str()).as_str())
+    );
+
+    fixture.forget_calls();
+    let again = fixture.run();
+    assert!(again.status.success(), "{}", stderr(&again));
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the provisioned commit was rebuilt, so every gate run pays for a build"
+    );
+
+    fixture.sibling_in_the_tree(Release::linked().as_str());
+    let replaced = fixture.run();
+    assert!(replaced.status.success(), "{}", stderr(&replaced));
+    assert_eq!(
+        fixture.calls().trim_end(),
+        git_install(),
+        "a build copied over the provisioned one was kept"
+    );
+}
+
+/// A tree that provisioned a release's archive and then moved its lock to an
+/// engine commit of the same version — the start of every fast adoption — has the
+/// release build replaced by the commit's, and moving back provisions the release
+/// from its archive again without compiling.
+#[cfg(unix)]
+#[test]
+fn a_release_build_of_the_same_version_is_replaced_once_the_lock_links_a_commit() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), None);
+    let released = fixture.run();
+    assert!(released.status.success(), "{}", stderr(&released));
+    assert_eq!(fixture.calls(), "", "the release was compiled, not fetched");
+
+    fixture.pin_source(&git_source());
+    let adopted = fixture.run();
+
+    assert!(adopted.status.success(), "{}", stderr(&adopted));
+    assert_eq!(
+        fixture.calls().trim_end(),
+        git_install(),
+        "the release build of the same version was taken for the linked commit"
+    );
+    assert!(
+        stderr(&adopted).contains(&format!("is not stamped as built from {}", git_source())),
+        "the replacement does not name the source it was held to:\n{}",
+        stderr(&adopted)
+    );
+
+    fixture.forget_calls();
+    fixture.pin_source(REGISTRY);
+    let returned = fixture.run();
+    assert!(returned.status.success(), "{}", stderr(&returned));
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "a registry pin compiled instead of fetching its release's archive"
+    );
+}
+
+/// A git install is held to cargo's own record of where it installed from: an
+/// install cargo records from any other source is refused, and nothing is left
+/// where the journeys look.
+#[cfg(unix)]
+#[test]
+fn a_git_install_cargo_records_from_another_source_is_refused() {
+    let fixture = Fixture::git();
+
+    let output = fixture.run_with(&[("INSTALL_RECORDS", REGISTRY)]);
+
+    assert!(
+        !output.status.success(),
+        "an install from another source was accepted"
+    );
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains(".crates2.json")
+            && stderr.contains(&git_source())
+            && stderr.contains("ACTION:"),
+        "the refusal does not name the record, the source and what to do:\n{stderr}"
+    );
+    assert_eq!(
+        fixture.provisioned_version(),
+        None,
+        "the unverified build was left where the journeys look"
+    );
+}
+
+/// A commit whose binary reports another version than the lock resolves for it is
+/// refused rather than stamped.
+#[cfg(unix)]
+#[test]
+fn a_git_install_that_reports_another_version_is_refused() {
+    let fixture = Fixture::git();
+
+    let output = fixture.run_with(&[("INSTALL_REPORTS", "0.0.1-stray")]);
+
+    assert!(!output.status.success(), "a stray version was accepted");
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("answers 'onepipeline 0.0.1-stray'") && stderr.contains("ACTION:"),
+        "the refusal does not say what the binary answered and what to do:\n{stderr}"
+    );
+    assert_eq!(fixture.provisioned_version(), None);
 }
 
 /// An archive that does not match the checksum published beside it is refused,
@@ -873,14 +1422,33 @@ fn every_refusal_names_what_to_do_and_compiles_nothing() {
 #[test]
 fn a_malformed_call_is_refused_as_usage() {
     let fixture = Fixture::new();
+    let bin = ".tools/bin/onepipeline";
+    let short = format!("git+{GIT_REPOSITORY}?rev=f06d041#{GIT_COMMIT}");
+    let branch = format!("git+{GIT_REPOSITORY}?branch=main#{GIT_COMMIT}");
+    let unpinned = format!("git+{GIT_REPOSITORY}#{GIT_COMMIT}");
+    let elsewhere = format!("git+{GIT_REPOSITORY}?rev={GIT_COMMIT}#{}", "0".repeat(40));
+    let plain = format!("git+http://example.invalid/onepipeline?rev={GIT_COMMIT}#{GIT_COMMIT}");
     for (arguments, binary) in [
-        (&[][..], ".tools/bin/onepipeline"),
-        (&["not-a-version"][..], ".tools/bin/onepipeline"),
+        (&[][..], bin),
+        (&["not-a-version", REGISTRY][..], bin),
         // One good line is not a good version: the rest would reach the URL.
-        (&["1.2.3\n../../elsewhere"][..], ".tools/bin/onepipeline"),
-        // A second argument is refused as usage rather than ignored.
-        (&["1.2.3", "--unknown"][..], ".tools/bin/onepipeline"),
-        (&["1.2.3"][..], ""),
+        (&["1.2.3\n../../elsewhere", REGISTRY][..], bin),
+        // The source is required: the version alone cannot name the build.
+        (&["1.2.3"][..], bin),
+        // A third argument is refused as usage rather than ignored.
+        (&["1.2.3", REGISTRY, "--unknown"][..], bin),
+        (&["1.2.3", REGISTRY][..], ""),
+        // A source this script cannot provision exactly: another registry, a
+        // path, and git sources that name no one full commit — a short rev, a
+        // branch, none at all, a resolved commit other than the rev — or that
+        // would be fetched over plain http.
+        (&["1.2.3", "sparse+https://example.invalid/index/"][..], bin),
+        (&["1.2.3", "path+file:///elsewhere"][..], bin),
+        (&["1.2.3", short.as_str()][..], bin),
+        (&["1.2.3", branch.as_str()][..], bin),
+        (&["1.2.3", unpinned.as_str()][..], bin),
+        (&["1.2.3", elsewhere.as_str()][..], bin),
+        (&["1.2.3", plain.as_str()][..], bin),
     ] {
         let output = Command::new("bash")
             .arg("scripts/ensure-sibling.sh")
