@@ -556,14 +556,13 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// comparison of the two above passes for any release both moved to together —
 /// including one whose adopted runs write their plan's home nothing. It moves
 /// with the `onepipeline` pin and [`STORE_RELEASE`], as one change.
-const ENGINE_RELEASE: &str = "0.89.1";
+const ENGINE_RELEASE: &str = "0.89.2";
 
-/// Where the lock must resolve [`ENGINE_RELEASE`] from: onepipeline's merged
-/// stop fix (#1128), which ends every process a node dispatch started. No
-/// release carries it yet and its library still calls itself 0.89.1, so the
-/// version alone cannot tell it from the crates.io 0.89.1 that leaves a late
-/// turn running. It moves to the registry with the release that carries it.
-const ENGINE_SOURCE: &str = "git+https://github.com/nickderobertis/onepipeline?rev=f06d041c5e3e398d348858207d9f8e5d9add017a#f06d041c5e3e398d348858207d9f8e5d9add017a";
+/// Where the lock must resolve [`ENGINE_RELEASE`] from: crates.io, which serves
+/// the release a crates.io consumer and the sibling CLI `just bootstrap`
+/// provisions both reach. A git commit can carry the same version number while
+/// its library is another, so the version alone cannot tell the two apart.
+const ENGINE_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
 /// Every way `lock` and `manifest` fail to link exactly [`ENGINE_RELEASE`] of the
 /// engine, as a reader would be told them: a requirement that is not that release
@@ -647,16 +646,13 @@ fn an_engine_moved_together_or_resolved_twice_is_refused_naming_it() {
         &entry,
         &format!("name = \"onepipeline\"\nversion = \"{moved_to}\"\n"),
     );
-    let requirement = format!("onepipeline = {{ version = \"={ENGINE_RELEASE}\"");
+    let requirement = format!("onepipeline = \"={ENGINE_RELEASE}\"");
     assert_eq!(
         manifest.matches(&requirement).count(),
         1,
         "one onepipeline requirement"
     );
-    let moved_manifest = manifest.replace(
-        &requirement,
-        &format!("onepipeline = {{ version = \"={moved_to}\""),
-    );
+    let moved_manifest = manifest.replace(&requirement, &format!("onepipeline = \"={moved_to}\""));
 
     // Moved together, the two still agree with each other — the case the
     // comparison of requirement and lock cannot see.
@@ -685,10 +681,6 @@ fn an_engine_moved_together_or_resolved_twice_is_refused_naming_it() {
     assert_eq!(
         doubled,
         [
-            format!(
-                "the lock resolves onepipeline 0.79.1 from \
-                 Some(\"registry+https://github.com/rust-lang/crates.io-index\"), not {ENGINE_SOURCE}"
-            ),
             format!("the lock resolves onepipeline 0.79.1, not the engine release {ENGINE_RELEASE}"),
             format!(
                 "the lock resolves onepipeline at 2 releases, {{\"0.79.1\", \"{ENGINE_RELEASE}\"}}, \
@@ -698,22 +690,26 @@ fn an_engine_moved_together_or_resolved_twice_is_refused_naming_it() {
     );
 }
 
-/// A lock resolving the engine's own release number from crates.io, which
-/// carries no stop fix, is refused naming where it came from: the version agrees
-/// and the requirement agrees, so the source is the only thing that tells them
-/// apart.
+/// A lock resolving the engine's own release number from a git commit is refused
+/// naming where it came from: the version agrees and the requirement agrees, so
+/// the source is the only thing that tells them apart.
 #[test]
 fn the_same_engine_release_from_another_source_is_refused_naming_it() {
     let lock = read("Cargo.lock");
     let manifest = read("Cargo.toml");
-    let registry = "registry+https://github.com/rust-lang/crates.io-index";
-    let pinned = format!("source = \"{ENGINE_SOURCE}\"");
-    assert_eq!(lock.matches(&pinned).count(), 1, "one pinned engine source");
-    let from_registry = lock.replace(&pinned, &format!("source = \"{registry}\""));
+    let git = "git+https://github.com/nickderobertis/onepipeline?rev=f06d041c5e3e398d348858207d9f8e5d9add017a#f06d041c5e3e398d348858207d9f8e5d9add017a";
+    let entry = format!(
+        "name = \"onepipeline\"\nversion = \"{ENGINE_RELEASE}\"\nsource = \"{ENGINE_SOURCE}\""
+    );
+    assert_eq!(lock.matches(&entry).count(), 1, "one pinned engine source");
+    let from_git = lock.replace(
+        &entry,
+        &format!("name = \"onepipeline\"\nversion = \"{ENGINE_RELEASE}\"\nsource = \"{git}\""),
+    );
     assert_eq!(
-        engine_identity_disagreements(&from_registry, &manifest),
+        engine_identity_disagreements(&from_git, &manifest),
         [format!(
-            "the lock resolves onepipeline {ENGINE_RELEASE} from Some(\"{registry}\"), not {ENGINE_SOURCE}"
+            "the lock resolves onepipeline {ENGINE_RELEASE} from Some(\"{git}\"), not {ENGINE_SOURCE}"
         )]
     );
 }
