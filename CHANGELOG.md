@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.50.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.49.0...v0.50.0) - 2026-10-24
+
+### Fixed
+
+- *(deps)* [**breaking**] follow onepipeline 0.89.0's types in the read API's public surface ([#455](https://github.com/nickderobertis/onepipeline-ui/pull/455))
+- *(deps)* link the engine that links the status-preserving plan store ([#453](https://github.com/nickderobertis/onepipeline-ui/pull/453))
+
 ## [0.49.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.48.1...v0.49.0) - 2026-10-24
 
 ### Added
