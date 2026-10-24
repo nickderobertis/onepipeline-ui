@@ -304,17 +304,20 @@ test("a tool call recorded while the reader watches is described in a line and o
   const row = listed.getByRole("button", { name: `Open ${command}` });
   await expect(row).toBeVisible({ timeout: 15_000 });
   await row.click();
-  // Opened on the conversation, focused on that call: its entry is the one
-  // marked current.
-  const marked = (call: string) =>
+  // Opened on the conversation, focused on that call: its details are the ones
+  // opened, and its entry is the one marked current.
+  const details = (call: string) =>
     detail(page)
       .getByRole("button", { name: "Bash tool details" })
-      .filter({ hasText: call })
-      .evaluate(
-        (button) =>
-          button.closest("[aria-current]")?.getAttribute("aria-current") ??
-          null,
-      );
+      .filter({ hasText: call });
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] the design system's `TurnCard` marks the focused tool call with `aria-current` on its accordion item, an element with no role of its own, so no role query can reach the state the acceptance criterion names; the call is found by its button's accessible name and only the item's state is read from it.
+  const marked = (call: string) =>
+    details(call).evaluate(
+      (button) =>
+        button.closest("[aria-current]")?.getAttribute("aria-current") ?? null,
+    );
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
+  await expect(details(command)).toHaveAttribute("aria-expanded", "true");
   await expect.poll(() => marked(command)).toBe("true");
   await expect(
     detail(page).getByLabel("Bash tool input").first(),
@@ -376,6 +379,7 @@ test("a tool call recorded while the reader watches is described in a line and o
   const unnamedRow = listed.getByRole("button", { name: `Open ${unnamed}` });
   await expect(unnamedRow).toBeVisible({ timeout: 15_000 });
   await unnamedRow.click();
+  await expect(details(unnamed)).toHaveAttribute("aria-expanded", "true");
   await expect.poll(() => marked(unnamed)).toBe("true");
   await expect.poll(() => marked(command)).toBeNull();
 });

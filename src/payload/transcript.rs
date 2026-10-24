@@ -523,15 +523,28 @@ fn location_of(reference: &TranscriptRef) -> Option<&Transcript> {
 const REMEMBERED_BYTES: usize = 32 * 1024 * 1024;
 const REMEMBERED_ENTRIES: usize = 16 * 1024;
 
-/// The resolutions this process has made, oldest first out.
-#[derive(Default)]
+/// The resolutions this process has made, oldest first out, within a bound.
 struct Remembered {
     entries: HashMap<String, Resolved>,
     order: VecDeque<(String, usize)>,
     bytes: usize,
+    /// The most text kept, in bytes; an entry larger than this is not kept.
+    max_bytes: usize,
+    /// The most entries kept.
+    max_entries: usize,
 }
 
 impl Remembered {
+    fn within(max_bytes: usize, max_entries: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            bytes: 0,
+            max_bytes,
+            max_entries,
+        }
+    }
+
     fn get(&self, key: &str) -> Option<Resolved> {
         self.entries.get(key).cloned()
     }
@@ -541,10 +554,10 @@ impl Remembered {
             return;
         }
         let size = key.len() + resolved.description.len() + text_len(&resolved.text);
-        if size > REMEMBERED_BYTES {
+        if size > self.max_bytes || self.max_entries == 0 {
             return;
         }
-        while self.bytes + size > REMEMBERED_BYTES || self.order.len() >= REMEMBERED_ENTRIES {
+        while self.bytes + size > self.max_bytes || self.order.len() >= self.max_entries {
             let Some((oldest, freed)) = self.order.pop_front() else {
                 break;
             };
@@ -576,5 +589,62 @@ fn text_len(text: &Text) -> usize {
 
 fn remembered() -> &'static Mutex<Remembered> {
     static REMEMBERED: OnceLock<Mutex<Remembered>> = OnceLock::new();
-    REMEMBERED.get_or_init(|| Mutex::new(Remembered::default()))
+    REMEMBERED.get_or_init(|| Mutex::new(Remembered::within(REMEMBERED_BYTES, REMEMBERED_ENTRIES)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn said(words: &str) -> Resolved {
+        Resolved {
+            text: Text::Message(words.to_owned()),
+            description: String::new(),
+            cut: false,
+        }
+    }
+
+    /// What one entry costs against the byte bound: its key and its text.
+    fn cost(key: &str, words: &str) -> usize {
+        key.len() + words.len()
+    }
+
+    #[test]
+    fn an_entry_larger_than_the_whole_bound_is_never_kept() {
+        let mut remembered = Remembered::within(cost("k", "0123456789") - 1, 8);
+        remembered.keep("k".into(), &said("0123456789"));
+        assert!(remembered.get("k").is_none());
+        assert_eq!(remembered.bytes, 0);
+    }
+
+    #[test]
+    fn the_oldest_entries_go_first_once_the_bytes_would_pass_the_bound() {
+        let mut remembered = Remembered::within(cost("a", "aaaa") * 2, 8);
+        remembered.keep("a".into(), &said("aaaa"));
+        remembered.keep("b".into(), &said("bbbb"));
+        remembered.keep("c".into(), &said("cccc"));
+        assert!(remembered.get("a").is_none(), "the oldest was let go");
+        assert_eq!(remembered.get("b"), Some(said("bbbb")));
+        assert_eq!(remembered.get("c"), Some(said("cccc")));
+        assert_eq!(remembered.bytes, cost("b", "bbbb") + cost("c", "cccc"));
+    }
+
+    #[test]
+    fn the_oldest_entries_go_first_once_the_count_would_pass_the_bound() {
+        let mut remembered = Remembered::within(usize::MAX, 2);
+        for key in ["a", "b", "c"] {
+            remembered.keep(key.into(), &said(key));
+        }
+        assert!(remembered.get("a").is_none());
+        assert_eq!(remembered.order.len(), 2);
+    }
+
+    #[test]
+    fn an_entry_already_kept_is_not_counted_twice() {
+        let mut remembered = Remembered::within(usize::MAX, 8);
+        remembered.keep("a".into(), &said("aaaa"));
+        remembered.keep("a".into(), &said("aaaa"));
+        assert_eq!(remembered.order.len(), 1);
+        assert_eq!(remembered.bytes, cost("a", "aaaa"));
+    }
 }

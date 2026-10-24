@@ -660,3 +660,198 @@ fn a_run_recorded_before_references_reads_each_session_whole_wherever_a_whole_co
     assert_eq!(call["output"], json!(kept_tail), "{call}");
     assert_eq!(call["output_truncated"], json!(true), "{call}");
 }
+
+/// The node timeline's description of each `turn-activity` the referenced
+/// session relayed, by the producer's index.
+fn descriptions(serving: &Serving) -> Vec<(u64, String)> {
+    get(
+        serving,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=node&node={}",
+            fixture_run::RUN_ID,
+            fixture_run::SHIP_NODE_ID
+        ),
+    )["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .filter(|span| span["kind"] == "node")
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter(|event| {
+            event["kind"] == "turn-activity" && event["reference"]["value"] == REFERENCED
+        })
+        .map(|event| {
+            (
+                event["tool"]["index"].as_u64().expect("an index"),
+                event["description"]
+                    .as_str()
+                    .expect("a description")
+                    .to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// Relay one `turn-activity` per `(project, session, candidate, index)` under the
+/// referenced session, after the turn that opens it.
+fn relay_activities(dir: &Path, store: &Path, entries: &[(&str, &str, &str, u64)]) {
+    let relay = |kind: &str, payload: Value| {
+        fixture_run::append_relayed(
+            dir,
+            "agentgraph",
+            kind,
+            json!({
+                "run_id": fixture_run::RUN_ID,
+                "node": fixture_run::SHIP_NODE_ID,
+                "member": "worker",
+                "persona": "worker",
+                "session": REFERENCED,
+            }),
+            payload,
+        );
+    };
+    relay(
+        "turn-started",
+        json!({
+            "transcript": reference(store, JUDGE_PROJECT, JUDGE_SESSION, JUDGE_CANDIDATE),
+            "turn": 1,
+            "role": "assistant",
+            "started_at": "2026-08-07T12:04:00.000Z",
+        }),
+    );
+    for (project, session, candidate, index) in entries {
+        relay(
+            "turn-activity",
+            json!({
+                "transcript": activity_reference(store, project, session, candidate, *index, None),
+                "kind": "tool_call",
+                "name": "Bash",
+                "index": index,
+            }),
+        );
+    }
+}
+
+/// What a resolved entry is remembered as is only ever what the file holds now:
+/// a file removed after it was read is said to be gone on the next read, and an
+/// entry not yet written when it was first asked for is read once it is.
+#[test]
+fn a_remembered_reading_follows_the_history_file_as_it_changes() {
+    let host = tempfile::tempdir().expect("the host's directories");
+    let store = recorded_store(host.path());
+    let worker_file = store
+        .join(WORKER_PROJECT)
+        .join(format!("{WORKER_SESSION}.jsonl"));
+    let judge_file = store
+        .join(JUDGE_PROJECT)
+        .join(format!("{JUDGE_SESSION}.jsonl"));
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        relay_activities(
+            &dir,
+            &store,
+            &[
+                (WORKER_PROJECT, WORKER_SESSION, WORKER_CANDIDATE, 22),
+                (JUDGE_PROJECT, JUDGE_SESSION, JUDGE_CANDIDATE, 99),
+            ],
+        );
+    });
+    let read = descriptions(&serving);
+    assert!(read[0].1.starts_with("Read /home/operator/"), "{read:?}");
+    assert_eq!(
+        read[1].1,
+        format!(
+            "transcript unavailable: {}: missing-entry",
+            judge_file.display()
+        )
+    );
+
+    // The read file goes away; the entry not written yet is written.
+    fs::remove_file(&worker_file).expect("remove the worker's file");
+    let mut written = recorded_event(JUDGE_PROJECT, JUDGE_SESSION, JUDGE_CANDIDATE, 4);
+    written["index"] = json!(99);
+    let mut line = serde_json::from_str::<Value>(
+        fs::read_to_string(&judge_file)
+            .expect("the judge's file")
+            .lines()
+            .find(|line| line.contains("\"type\":\"event\""))
+            .expect("an event line"),
+    )
+    .expect("a history line");
+    line["event"] = written;
+    let mut appended = fs::read_to_string(&judge_file).expect("the judge's file");
+    appended.push_str(&format!("{line}\n"));
+    fs::write(&judge_file, appended).expect("append the entry");
+
+    let reread = descriptions(&serving);
+    assert_eq!(
+        reread,
+        vec![
+            (
+                22,
+                format!(
+                    "transcript unavailable: {}: missing-file",
+                    worker_file.display()
+                )
+            ),
+            (99, ".plans/tasks/*.md".to_owned()),
+        ]
+    );
+}
+
+/// A turn record's reference is confined to the store it names before anything
+/// opens it: a project directory in that store that is a symlink to another
+/// store's reads as unreadable, and nothing of the other store is served.
+#[cfg(unix)]
+#[test]
+fn a_turn_reference_that_resolves_out_of_its_store_is_not_opened() {
+    const ELSEWHERE: &str = "a conversation this store never held";
+    let host = tempfile::tempdir().expect("the host's directories");
+    let store = recorded_store(host.path());
+    let outside = harness_history::record(
+        &host.path().join("another-store"),
+        "a worker of another store",
+        ELSEWHERE,
+        ELSEWHERE,
+    );
+    let linked = "a-project-that-leaves-the-store";
+    std::os::unix::fs::symlink(
+        outside.path.parent().expect("the other store's project"),
+        store.join(linked),
+    )
+    .expect("plant the link");
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        relay_activities(
+            &dir,
+            &store,
+            &[(linked, &outside.session, &outside.history_id, 0)],
+        );
+    });
+    let read = descriptions(&serving);
+    assert_eq!(
+        read,
+        vec![(
+            0,
+            format!(
+                "transcript unavailable: {}: unreadable",
+                store
+                    .join(linked)
+                    .join(format!("{}.jsonl", outside.session))
+                    .display()
+            )
+        )]
+    );
+    let conversation = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/conversations/{REFERENCED}",
+            fixture_run::RUN_ID
+        ),
+    );
+    assert!(
+        !conversation.body.contains(ELSEWHERE),
+        "{}",
+        conversation.body
+    );
+}
