@@ -21,6 +21,6 @@ operator's home directory, worktree path and employer name were replaced
 project directory is named for that worktree as oneharness names it. The
 worktree path is short because the path to this file is held, joined to the
 deepest checkout of this repository a Windows test makes, under Windows'
-260-character limit (`tests/packaging.rs`). Ids,
+260-character limit (`tests/checkout_paths.rs`). Ids,
 indices, tool-call identities, harnesses, models, timings and usage are as
 recorded.
