@@ -3260,28 +3260,45 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
 
   // Read every axis in one browser task: a telemetry update can advance the
   // live range between separate locator reads, even though every row shares it.
-  // One scale is one window: every axis opens and closes on the same markers.
-  // How densely each marks the time between follows that row's own width — a
-  // row whose lanes scroll is a scrollbar narrower — so the outer markers are
-  // what is compared. Polled, because each row measures its width once laid out.
+  // One scale is one window. How densely each axis marks the time inside it
+  // follows that row's own width — a row whose lanes scroll is a scrollbar
+  // narrower — so what is compared is the window each axis's markers place
+  // themselves in: the instant each stands for and where along the axis it is
+  // drawn give the instants at the axis's two ends, to the tenth of a second.
+  // The live end may advance, so the window is `start\nend`, and the launch end
+  // is what stays fixed. Polled, because each row measures its width once laid
+  // out.
   const sharedTicks = async () => {
     let shared = "";
     await expect
       .poll(async () => {
-        const ticks = await page
+        const windows = await page
           .locator(".graph-timeline")
           .getByTestId("timeline-axis")
           .evaluateAll((axes) =>
             axes.map((axis) => {
-              if (!(axis instanceof HTMLElement)) {
-                throw new Error("Timeline axis must be an HTML element");
-              }
-              const lines = axis.innerText.split("\n").filter(Boolean);
-              return `${lines[0]}\n${lines.at(-1)}`;
+              const marks = [...axis.querySelectorAll("[data-tick-time]")].map(
+                (mark) => ({
+                  at: Number(mark.getAttribute("data-tick-time")),
+                  share:
+                    Number.parseFloat(
+                      (mark as HTMLElement).style.left || "NaN",
+                    ) / 100,
+                }),
+              );
+              const [first, second] = marks;
+              if (first === undefined || second === undefined) return "";
+              const span =
+                (second.at - first.at) / (second.share - first.share);
+              const start = first.at - first.share * span;
+              const tenth = (instant: number) => Math.round(instant / 100);
+              return `${tenth(start)}\n${tenth(start + span)}`;
             }),
           );
-        shared = ticks[0] ?? "";
-        return ticks.length > 3 && new Set(ticks).size === 1;
+        shared = windows[0] ?? "";
+        return (
+          windows.length > 3 && shared !== "" && new Set(windows).size === 1
+        );
       })
       .toBe(true);
     return shared;
@@ -3295,7 +3312,7 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
   await expect(
     dashboard.getByRole("button", { name: "Reset timeline zoom" }),
   ).toBeEnabled();
-  // Zoomed in, the markers step at a finer interval across a narrower window.
+  // Zoomed in, every row shows the same narrower window.
   const zoomed = await sharedTicks();
   expect(zoomed).not.toBe(before);
 
