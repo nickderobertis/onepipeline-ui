@@ -251,39 +251,69 @@ test("a fixture that changes a binary file applies it whole", () => {
   try {
     const d = doubles(dir);
     const work = join(dir, "work");
-    // A rebaselined screenshot from this repository's own history: a diff
-    // without its binary contents is one git refuses to apply.
-    const changed = git(
-      "log",
-      "-1",
-      "--no-merges",
-      "--diff-filter=M",
-      "--format=%H",
-      "--",
-      "*.png",
+    // Give the script its own checkout: no commit in the caller's history is
+    // needed, even when the caller is a depth-1 clone.
+    const checkout = join(dir, "checkout");
+    mkdirSync(join(checkout, "scripts/measure-cold-linux.d"), {
+      recursive: true,
+    });
+    const script = join(checkout, "scripts/measure-cold-linux.sh");
+    copyFileSync(SCRIPT, script);
+    copyFileSync(
+      join(ROOT, "scripts/measure-cold-linux.d/docker"),
+      join(checkout, "scripts/measure-cold-linux.d/docker"),
     );
-    assert.ok(changed, "this repository's history rebaselines a screenshot");
-    const run = measure(
+    const fixtureGit = (...args) =>
+      execFileSync("git", ["-C", checkout, ...args], {
+        encoding: "utf8",
+      }).trim();
+    fixtureGit("init", "--quiet");
+    // Two one-pixel PNGs, with different pixel data and embedded NULs so git
+    // treats the modification as binary rather than a textual patch.
+    const images = [
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC",
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC",
+    ];
+    for (const [index, image] of images.entries()) {
+      writeFileSync(join(checkout, "pixel.png"), Buffer.from(image, "base64"));
+      fixtureGit("add", "-A");
+      fixtureGit(
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@localhost",
+        "commit",
+        "--quiet",
+        "-m",
+        `image ${index}`,
+      );
+    }
+    const run = spawnSync(
+      "bash",
       [
+        script,
         "--commit",
-        `${changed}~1`,
+        "HEAD~1",
         "--fixture",
-        `${changed}~1...${changed}`,
+        "HEAD~1...HEAD",
         "--label",
         "b",
         "--workdir",
         work,
         "--keep",
       ],
-      dir,
-      d,
+      {
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${d.bin}:${process.env.PATH}` },
+        cwd: dir,
+      },
     );
     assert.equal(run.status, 0, run.stdout + run.stderr);
     assert.equal(
       execFileSync("git", ["-C", join(work, "b"), "rev-parse", "HEAD^{tree}"], {
         encoding: "utf8",
       }).trim(),
-      git("rev-parse", `${changed}^{tree}`),
+      fixtureGit("rev-parse", "HEAD^{tree}"),
       "the clone holds the changed commit's tree, its images included",
     );
   } finally {
