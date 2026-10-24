@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.49.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.48.1...v0.49.0) - 2026-10-24
+
+### Added
+
+- *(deps)* [**breaking**] link the engine that skips withdrawn tasks and carries live-added images ([#446](https://github.com/nickderobertis/onepipeline-ui/pull/446))
+
+### Performance
+
+- keep the Observatory current from pushed changes instead of refetching ([#444](https://github.com/nickderobertis/onepipeline-ui/pull/444))
+
 ## [0.48.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.48.0...v0.48.1) - 2026-10-23
 
 ### Fixed
