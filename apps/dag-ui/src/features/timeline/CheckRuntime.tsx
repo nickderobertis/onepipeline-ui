@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatDuration, parseTimestamp } from "../../lib/time";
 
-/** How often a running check's elapsed time is re-read. */
+/** The runtime is shown to the second, so it need not be re-read faster. */
 const TICK_MS = 1_000;
 
 /**
@@ -33,7 +33,10 @@ export function CheckRuntime({
   return <>{formatDuration(now - started.getTime())} · running</>;
 }
 
-/** The current time, re-read every second while `ticking`. */
+/**
+ * The current time, kept moving only while something on screen counts from it,
+ * so a table of finished checks holds no timer at all.
+ */
 function useNow(ticking: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {

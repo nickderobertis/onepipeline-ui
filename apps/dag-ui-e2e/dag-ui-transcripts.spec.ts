@@ -76,7 +76,10 @@ async function openRow(page: Page, label: string | RegExp): Promise<void> {
 const detail = (page: Page) =>
   page.getByRole("region", { name: "Timeline item detail" });
 
-/** The whole of an element's text, as the browser holds it. */
+/**
+ * An element's text in full, rather than the trimmed match a text assertion
+ * makes: what is measured is how long the served text is.
+ */
 const textOf = async (page: Page, label: string): Promise<string> =>
   (await detail(page).getByLabel(label).first().textContent()) ?? "";
 

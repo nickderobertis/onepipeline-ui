@@ -547,7 +547,8 @@ struct Remembered {
     bytes: usize,
     /// The most text kept, in bytes; an entry larger than this is not kept.
     max_bytes: usize,
-    /// The most entries kept.
+    /// The most entries kept, so many small resolutions cannot grow the
+    /// index past what the byte bound alone allows.
     max_entries: usize,
 }
 
