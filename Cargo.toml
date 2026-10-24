@@ -180,7 +180,11 @@ onemessagebus = "0.9.1"
 # test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.89.0"
+# Linked at onepipeline's merged stop fix (#1128), which no release carries yet:
+# its library is still versioned 0.89.1, so `version` keeps the release
+# `/healthz` reports and the sibling CLI `just bootstrap` provisions. Move this
+# to the release that carries it once one publishes.
+onepipeline = { version = "=0.89.1", git = "https://github.com/nickderobertis/onepipeline", rev = "f06d041c5e3e398d348858207d9f8e5d9add017a" }
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the

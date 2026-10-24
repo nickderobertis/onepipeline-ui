@@ -35,6 +35,11 @@ export CARGO_TERM_QUIET := "true"
 # the comparison that would prove nothing. Provisioned into the tree rather than
 # taken from PATH for that reason, and exported so every tier asks the same one.
 onepipeline-version := `awk '/^name = "onepipeline"$/{found=1; next} found && /^version = /{gsub(/[",]/, "", $3); print $3; exit}' Cargo.lock`
+# Where the lock resolves that library from: crates.io, or during a fast adoption
+# the one git commit it links. The version alone cannot say which, because an
+# adopted commit still reports the last release's version, so the sibling is
+# provisioned from — and held to — this as well. Read off the same lock block.
+onepipeline-source := `awk '/^name = "onepipeline"$/{found=1; next} found && /^source = /{gsub(/"/, "", $3); print $3; exit} found && /^$/{exit}' Cargo.lock`
 
 # The extension `cargo install` gives the file it writes, so the name below is
 # the one the platform actually produced. Derived rather than spelled out a
@@ -97,11 +102,12 @@ _crate-bootstrap:
 # through the `onepipeline-ui:ensure-sibling` Nx target, because the binary they
 # need is clone-local (`AGENTS.md`).
 #
-# Fetched as the release's own archive for this host when that release publishes
-# one, checked against its published checksum and version, and compiled only when
-# it does not; `scripts/ensure-sibling.sh` holds the order and its refusals.
+# A crates.io pin is fetched as the release's own archive for this host when that
+# release publishes one, checked against its published checksum and version, and
+# compiled only when it does not; a git pin is compiled from its exact commit and
+# never fetched. `scripts/ensure-sibling.sh` holds the order and its refusals.
 _ensure-sibling:
-    @bash scripts/ensure-sibling.sh "{{onepipeline-version}}"
+    @bash scripts/ensure-sibling.sh "{{onepipeline-version}}" "{{onepipeline-source}}"
 
 # The base commit's own server, for the journeys that compare what this build
 # serves against what it served. Behind its own Nx target rather than inside the
