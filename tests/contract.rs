@@ -4084,3 +4084,31 @@ fn the_subscription_bounds_the_contract_states_are_the_ones_the_hub_keeps() {
         refold * 2
     );
 }
+
+/// The fields schema 26 and timeline schema 14 serve are each stated in
+/// `docs/contract.md`, beside the version that serves them: the description the
+/// engine's resolver gives a turn record and a live-activity entry, where a tool
+/// event sits, the harness session read whole, the line an unresolved reference
+/// is served as, and the runtime the browser reads off a check's own two stamps.
+#[test]
+fn the_contract_states_every_field_the_transcript_reading_serves() {
+    let text = contract_text();
+    for stated in [
+        "**Schema 26 is every turn read whole from its transcript.**",
+        "**Timeline schema 14 describes every turn record in one line.**",
+        "`views::transcript`",
+        "`transcript unavailable: <path>: <why>`",
+        "A live-activity entry gains **`description`** under schema 26",
+        "gains **`description`**: the linked engine resolver's one line",
+        "**`tool`**, `{index, tool_call_id?, turn?}`",
+        "A live tool event gains **`toolCallId`**",
+        "served whole and live as **`turns`**",
+        "**`unavailable`** carries the resolver's",
+        "`completed_at - started_at` for a finished check",
+    ] {
+        assert!(
+            text.contains(stated),
+            "docs/contract.md does not state: {stated}"
+        );
+    }
+}

@@ -1,6 +1,10 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { conversationSchema } from "@onepipeline-ui/dag-model";
+import {
+  artifactContentSchema,
+  conversationSchema,
+  runTimelineSchema,
+} from "@onepipeline-ui/dag-model";
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
@@ -120,7 +124,11 @@ test("a member that died is read whole off its history file, and a gone file is 
   // the file and why, on the row and in the conversation — never a blank.
   const gone = `${facts.sessions.removed?.session}.jsonl: missing-file`;
   await page.getByRole("button", { name: "Close detail" }).click();
-  await openRow(page, new RegExp(`^Open transcript unavailable: .*${gone}$`));
+  await page
+    .getByRole("region", { name: "Node transcript" })
+    .getByRole("button", { name: "Open turn-started" })
+    .nth(1)
+    .click();
   await expect(
     detail(page).getByRole("article", { name: /^Turn .*\.1 from / }),
   ).toContainText(
@@ -171,7 +179,7 @@ test("a run recorded before references is read whole wherever a whole copy exist
     ["neither", false],
   ] as const) {
     await openNode(page, facts.legacyRun, node);
-    await openRow(page, /^Open You are a strict, careful evaluator/);
+    await openRow(page, "turn-started");
     const turn = detail(page).getByRole("article", { name: /^Turn / });
     await expect(turn).toBeVisible();
     if (whole) {
@@ -280,4 +288,37 @@ test("a tool call recorded while the reader watches is described in a line and o
   await expect(
     detail(page).getByLabel("Bash tool input").first(),
   ).toContainText(command);
+});
+
+test("what the server serves of a turn is what the client's schemas read", async ({
+  page,
+}) => {
+  const read = async (path: string) =>
+    (await page.request.get(`${server.origin}/api/v2/runs/${path}`)).json();
+  // The node timeline, read by the schema the browser reads it with: every
+  // turn-activity row carries the served line and where it sits.
+  const timeline = runTimelineSchema.parse(
+    await read(`${facts.run}/timeline?scope=node&node=died`),
+  );
+  const activity = timeline.spans
+    .find((span) => span.kind === "node")
+    ?.events.filter((event) => event.kind === "turn-activity");
+  expect(activity?.length).toBeGreaterThan(0);
+  for (const event of activity ?? []) {
+    expect(event.description).toBeTruthy();
+    expect(event.tool?.turn).toBe(`${facts.conversations.died}.0`);
+    expect(event.reference).toEqual({
+      kind: "conversation",
+      value: facts.conversations.died,
+    });
+  }
+  // A standalone harness session, read by the artifact schema: its turn whole,
+  // its record served whole and never as a tail.
+  const drafted = facts.sessions.drafted;
+  const session = artifactContentSchema.parse(
+    await read(`${facts.run}/artifacts/${drafted?.historyId}`),
+  );
+  expect(session.truncated).toBe(false);
+  expect(session.unavailable).toBeUndefined();
+  expect(session.turns?.[0]?.user).toContain(facts.sentinels.session);
 });

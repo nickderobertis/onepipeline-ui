@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { runDetailSchema } from "@onepipeline-ui/dag-model";
 import { expect, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
@@ -21,14 +22,11 @@ test("Remote retains publication and release and follows each check's destinatio
   await expect(table.getByRole("row")).toHaveCount(6);
   // Each finished check's runtime is its own `completed_at` minus its own
   // `started_at`, as the host recorded them and the API served them.
-  const served = await (
-    await page.request.get(`/api/v2/runs/${runs().live}`)
-  ).json();
-  const checks: readonly {
-    name: string;
-    started_at?: string;
-    completed_at?: string;
-  }[] = served.node_details["remote-open"].verification.checks;
+  // Read by the schema the browser reads the detail with.
+  const served = runDetailSchema.parse(
+    await (await page.request.get(`/api/v2/runs/${runs().live}`)).json(),
+  );
+  const checks = served.node_details["remote-open"]?.verification.checks ?? [];
   const runtime = (name: string): string => {
     const check = checks.find((each) => each.name === name);
     if (check?.started_at === undefined || check.completed_at === undefined)

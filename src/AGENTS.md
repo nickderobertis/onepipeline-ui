@@ -453,16 +453,27 @@ turn is served as it always was. Both shapes are in `write_lanes`.
 
 ## The one store this crate opens that no run owns
 
-A `oneharness_session` artifact's bytes are the only ones this API serves from
-outside the runs root: `oneagentgraph` publishes a pointer and nothing is copied,
-so `payload::session_record` opens another tool's directory. Two records name
-one, in one spelling — the `oneharness-session` envelope a member's turn relays,
-and a line of the run's own **pointer file**, which the engine has every
-oneharness under any of its launches append (`onepipeline::agents`), so a nested
-turn no envelope relays is still named. `verbs::agents` reads that file and
-nothing else, and `payload::pointed_session` is the artifact route's second way
-in for an id no envelope recorded. Four constraints on both, each because the
-obvious alternative is worse:
+Every turn's words are read from outside the runs root: `oneagentgraph` 0.8
+publishes a `transcript` reference on each `turn-started`, `turn-message` and
+`turn-activity` and copies nothing, and a `oneharness_session` artifact is a
+pointer at one invocation. **All of it is read through the linked engine's
+`views::transcript` resolver, in `payload::transcript`, and through nothing
+else** — the CLI's `transcript`, `monitor` and `watch` read the same entries by
+the same rules, so the browser and the agent describe one call in the same
+words. A reference that resolves to nothing is served as the resolver's own
+`transcript unavailable: <path>: <why>`, never as a blank. The one other read of
+that store is `payload::closing_record`, which takes a closed invocation's
+*facts* — harness, model, status, timings, usage — off its closing record for a
+harness span's bounds and the artifact's `content`; the resolver carries none of
+them. Two records name an invocation, in one spelling — the
+`oneharness-session` envelope a member's turn relays, and a line of the run's own
+**pointer file**, which the engine has every oneharness under any of its
+launches append (`onepipeline::agents`), so a nested turn no envelope relays is
+still named; `verbs::agents` reads that file and nothing else. A run recorded
+before references keeps its bounded copies, and `payload::transcript::Sources`
+recovers a cut one whole from either of those two only where the whole entry
+begins (or, for a tool's output, ends) with the copy. The constraints, each
+because the obvious alternative is worse:
 
 - **Link `oneharness-core`; never spawn the `oneharness` CLI.** A process is a
   second contract — arguments, output shape, version — that nothing here pins.
@@ -490,7 +501,13 @@ obvious alternative is worse:
   that resolved *outside* and a path that resolved *nowhere* are different facts
   about the host: the first is said to the operator's log, naming the artifact
   and never where it went, and the second is a transcript that was rotated away
-  and is a plain `404`. The wire cannot tell them apart on purpose.
+  and is served as the resolver's `missing-file`. Every reference a turn record
+  carries is confined the same way before the resolver opens it
+  (`payload::transcript::resolve`), and one that escapes is `unreadable`.
+- **Remember what resolved, and only that.** A history file is append-only, so a
+  resolved entry never changes; `payload::transcript` keeps a bounded memory of
+  them so a live view does not rescan a turn's file for every record of it on
+  every patch. An entry not written yet is looked for again on the next read.
 
 ## What the wire asks for and no record fills
 

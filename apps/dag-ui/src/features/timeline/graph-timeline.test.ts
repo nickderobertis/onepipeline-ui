@@ -166,7 +166,9 @@ describe("the whole graph on one clock", () => {
     // only mark an idle segment carries into the DOM — so the stylesheet reaches it
     // through this prefix, and nothing else in either file says so. This is the gate
     // that stops the two from drifting apart in silence.
-    expect(stylesheet).toContain(`timeline-detail-${IDLE_ID_PREFIX}`);
+    expect(stylesheet).toContain(
+      `[aria-describedby^="timeline-detail-"][aria-describedby*="-${IDLE_ID_PREFIX}"]`,
+    );
   });
 
   test("carries what a click on a segment should open", () => {

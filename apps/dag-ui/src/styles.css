@@ -1219,9 +1219,12 @@ button.graph-row-name {
  *
  * Reached through the tooltip id the upstream plot derives from each item's own id,
  * because that is the only mark an idle segment carries into the DOM;
- * `IDLE_ID_PREFIX` in `graph-timeline.ts` is the one source of the prefix below.
+ * `IDLE_ID_PREFIX` in `graph-timeline.ts` is the one source of the prefix below. The
+ * plot puts its own instance id between `timeline-detail-` and the item's, so the
+ * item's prefix is matched where it follows that instance id's closing `-`.
  */
-.graph-timeline button[aria-describedby^="timeline-detail-idle-"] {
+.graph-timeline
+button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   border-color: var(--border);
   background-color: transparent;
   background-image: repeating-linear-gradient(

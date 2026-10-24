@@ -441,8 +441,17 @@ Escape key. It is a **timeline over a transcript**, both projected from
   exception table only for the kinds those rules would misfile; it is never served,
   and a kind no rule names still draws, under a default category of its own. The
   transcript row beside a marker carries the same glyph, so one record is
-  recognisable on both surfaces. The axis
-  reads local wall-clock time and elapsed-from-start, and the compact line and the
+  recognisable on both surfaces. A tool call's row is one line, the server's own
+  description of it — a shell call's command, a file tool's verb and path, a
+  search's pattern — and opening it opens the conversation turn it was made in,
+  focused on that call. Every conversation is read whole from the transcript the
+  turn was recorded in; a turn whose transcript is gone says so and names the
+  file, and only a run recorded before turns pointed at their transcript, with no
+  report and no history file left, shows the recorder's cut copy — under a note
+  saying so. The axis carries a marker at round second, minute or hour steps, and
+  a crosshair under the pointer reads that point's time and the time elapsed since
+  the plot's start; the markers read local wall-clock time and elapsed-from-start,
+  and the compact line and the
   expanded lanes always span the same window, so a moment does not move when the
   view is collapsed. An aggregate is plotted at the total it carries, not across
   the window its records happened to fall in. The compact line is sized to fit
@@ -521,7 +530,10 @@ Escape key. It is a **timeline over a transcript**, both projected from
   other, `edit-applied`, raised by that author.
 - the node's **task, completion criteria, dependencies and Remote** are tabs
   beside the timeline. Remote keeps the change request, branch, merge and release
-  information above a table of checks, with status, conclusion and requiredness.
+  information above a table of checks, with status, conclusion, runtime and
+  requiredness. A finished check's runtime is its own `completed_at` minus its own
+  `started_at`; a running one counts on from its start and says `running`; a queued
+  one shows none.
   Each recorded check URL opens its destination. The tab strip wraps at intermediate
   widths and scrolls on the phone so the timeline has room to be drawn.
 
@@ -634,6 +646,8 @@ being photographed.
 | `18-recorded-session-closed` | the closed session's recorded fields |
 | `19-recorded-node-dispatched` | the dispatch's attempt and persona |
 | `20-recorded-overall` | execution ending at settlement and the completion marker 41 hours later |
+| `22-node-timeline-crosshair` | the node timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
+| `23-overall-timeline-crosshair` | the overall timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the
