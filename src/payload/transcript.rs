@@ -38,7 +38,7 @@ use onepipeline::views::transcript::{
 use onepipeline::views::RunPaths;
 use serde_json::{json, Value};
 
-use crate::contract::{Confined, StoreRoot};
+use crate::contract::{Confined, PathSegment, StoreRoot};
 
 /// The relayed kind that points at a whole oneharness invocation.
 const HARNESS_SESSION: &str = "oneharness-session";
@@ -473,6 +473,19 @@ fn resolve(reference: &TranscriptRef) -> Result<Resolved, Unresolved> {
     let Some(path) = path_of(reference) else {
         return engine_resolve(reference);
     };
+    // A record's own bytes, held to bare names before anything on the host is
+    // looked up by them: a project or session that climbs or carries a separator
+    // names no file of the store, and nothing is joined, stat'd or opened for it.
+    let bare = location_of(reference).is_some_and(|location| {
+        PathSegment::try_from(location.history_project.as_str()).is_ok()
+            && PathSegment::try_from(location.history_session.as_str()).is_ok()
+    });
+    if !bare {
+        return Err(Unresolved {
+            path,
+            why: Why::Unreadable,
+        });
+    }
     if let Some(store) = store_of(reference).and_then(|dir| StoreRoot::read(&dir)) {
         if let Confined::Escaped = store.confine(&path) {
             eprintln!(

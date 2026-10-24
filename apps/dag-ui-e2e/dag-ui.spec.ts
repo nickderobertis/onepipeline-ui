@@ -3277,15 +3277,12 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
           .getByTestId("timeline-axis")
           .evaluateAll((axes) =>
             axes.map((axis) => {
-              const marks = [...axis.querySelectorAll("[data-tick-time]")].map(
-                (mark) => ({
+              const marks = [...axis.querySelectorAll("[data-tick-time]")]
+                .filter((mark) => mark instanceof HTMLElement)
+                .map((mark) => ({
                   at: Number(mark.getAttribute("data-tick-time")),
-                  share:
-                    Number.parseFloat(
-                      (mark as HTMLElement).style.left || "NaN",
-                    ) / 100,
-                }),
-              );
+                  share: Number.parseFloat(mark.style.left || "NaN") / 100,
+                }));
               const [first, second] = marks;
               if (first === undefined || second === undefined) return "";
               const span =

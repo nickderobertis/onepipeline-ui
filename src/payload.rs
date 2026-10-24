@@ -5132,8 +5132,10 @@ fn closing_record(
 /// through the engine's resolver and served as the one conversation turn it was:
 /// the prompt it was given, every event it recorded, and what it closed with.
 ///
-/// `content` is that turn as JSON, whole and never tailed, and `turns` the same
-/// turn structured. A pointer at a file or an entry the store no longer holds is
+/// `turns` is that turn, structured and whole. `content` is the invocation's own
+/// closing record — its harness, model, status, timings and usage — as JSON,
+/// whole and never tailed, with its prompt and reply the resolver's and its
+/// events left to `turns`. A pointer at a file or an entry the store no longer holds is
 /// served, not refused: its turn says `transcript unavailable: <path>: <why>` in
 /// the prompt's place, which is the resolver's own line, so a reader is told what
 /// is gone rather than shown nothing. `None` only for a pointer this API will not

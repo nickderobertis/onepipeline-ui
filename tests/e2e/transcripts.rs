@@ -867,23 +867,24 @@ fn a_turn_reference_that_resolves_out_of_its_store_is_not_opened() {
         relay_activities(
             &dir,
             &store,
-            &[(linked, &outside.session, &outside.history_id, 0)],
+            &[
+                (linked, &outside.session, &outside.history_id, 0),
+                // And one that climbs by name rather than through a link.
+                ("..", &outside.session, &outside.history_id, 1),
+            ],
         );
     });
     let read = descriptions(&serving);
-    assert_eq!(
-        read,
-        vec![(
-            0,
-            format!(
-                "transcript unavailable: {}: unreadable",
-                store
-                    .join(linked)
-                    .join(format!("{}.jsonl", outside.session))
-                    .display()
-            )
-        )]
-    );
+    let unreadable = |project: &str| {
+        format!(
+            "transcript unavailable: {}: unreadable",
+            store
+                .join(project)
+                .join(format!("{}.jsonl", outside.session))
+                .display()
+        )
+    };
+    assert_eq!(read, vec![(0, unreadable(linked)), (1, unreadable(".."))]);
     let conversation = http::get(
         serving.address,
         &format!(
