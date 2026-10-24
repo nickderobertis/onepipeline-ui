@@ -253,7 +253,7 @@ fn record_session(dir: &Path, name: &str, prompt: &str, text: &str, shape: &Shap
     // The identity the fixture result below reports, begun the way oneharness
     // begins one: this is what appends the pointer line.
     let identity: HarnessIdentity = "claude-code:alternate".parse().expect("an identity");
-    let history_id = writer.begin_harness_run(&identity);
+    let history_id = writer.begin_harness_run(&identity, prompt);
     if streamed {
         writer
             .append_event(history_id, "claude-code:alternate", message(text))
@@ -271,7 +271,7 @@ fn record_session(dir: &Path, name: &str, prompt: &str, text: &str, shape: &Shap
         )
         .expect("append the run oneharness had");
     let in_flight = in_flight.map(|said| {
-        let running = writer.begin_harness_run(&identity);
+        let running = writer.begin_harness_run(&identity, prompt);
         writer
             .append_event(running, "claude-code:alternate", message(said))
             .expect("append the event of the run in flight");
