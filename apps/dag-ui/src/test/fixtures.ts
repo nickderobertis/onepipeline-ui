@@ -63,7 +63,7 @@ export const CLAUDE_SESSION = "5e5510c1".repeat(4);
 
 export const runList = {
   api_version: 2,
-  telemetry_schema_version: 25,
+  telemetry_schema_version: 26,
   observed_at: "2026-07-26T12:00:00Z",
   runs: [
     // Counted over the same authoritative vocabulary the run detail serves, which is
@@ -93,7 +93,7 @@ export const LIVE_PROJECT_NAME = "observe-live-run";
  */
 export const projectList = {
   api_version: 2,
-  telemetry_schema_version: 25,
+  telemetry_schema_version: 26,
   observed_at: "2026-07-26T12:00:00Z",
   projects: [
     {
@@ -131,7 +131,7 @@ export const projectList = {
 /** The envelope every wrapped verb answers under. */
 const verbEnvelope = {
   api_version: 2,
-  telemetry_schema_version: 25,
+  telemetry_schema_version: 26,
   observed_at: "2026-07-26T12:00:00Z",
 };
 
@@ -278,24 +278,43 @@ export function projectAgents(project: string) {
   return { ...runAgents(LIVE_RUN), run_id: undefined, project };
 }
 
-/** The transcript one harness run opens to, as the artifact route serves a oneharness session. */
+/**
+ * The transcript one harness run opens to, as the artifact route serves a
+ * oneharness session: its closing record as `content`, and the run read whole as
+ * the one conversation turn it was under `turns`.
+ */
 export function harnessTranscript(historyId: string) {
+  const text =
+    historyId === DASHBOARD_HISTORY_ID
+      ? DASHBOARD_TRANSCRIPT_TEXT
+      : `what harness run ${historyId} said`;
+  const prompt = `the prompt harness run ${historyId} was given`;
   return {
     ...verbEnvelope,
     id: historyId,
     kind: "oneharness_session",
     content: JSON.stringify(
-      {
-        history_id: historyId,
-        text:
-          historyId === DASHBOARD_HISTORY_ID
-            ? DASHBOARD_TRANSCRIPT_TEXT
-            : `what harness run ${historyId} said`,
-      },
+      { history_id: historyId, status: "ok", prompt, text },
       null,
       2,
     ),
     truncated: false,
+    turns: [
+      {
+        assistant: text,
+        failureKind: null,
+        harness: "claude-code:primary",
+        id: historyId,
+        model: null,
+        reasoning: null,
+        status: "ok",
+        timestamp: "2026-07-26T12:00:00Z",
+        tools: [],
+        unknown: {},
+        usage: {},
+        user: prompt,
+      },
+    ],
   };
 }
 
@@ -505,7 +524,7 @@ export function runDetail(runId: string = LIVE_RUN) {
   const node = historical ? "archive" : "dashboard";
   return {
     api_version: 2,
-    telemetry_schema_version: 25,
+    telemetry_schema_version: 26,
     observed_at: "2026-07-26T12:00:00Z",
     // The launching session is served on the run itself, and on every list row.
     launch: {
@@ -728,7 +747,7 @@ function stamp(seconds: number): string {
 export function runTimeline(runId: string = LIVE_RUN) {
   return {
     api_version: 2,
-    timeline_schema_version: 13,
+    timeline_schema_version: 14,
     // Read shortly after the last record it carries, which is what a poll of a live
     // run actually returns. The graph-level view plots an unfinished run out to this
     // instant, so a stamp an hour past the record would say the run had spent an
@@ -1343,7 +1362,7 @@ export function busyTimeline(sessions: number) {
   );
   return {
     api_version: 2,
-    timeline_schema_version: 13,
+    timeline_schema_version: 14,
     observed_at: "2026-07-26T12:00:00Z",
     run_id: LIVE_RUN,
     spans: [

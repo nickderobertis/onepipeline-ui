@@ -1626,12 +1626,17 @@ function writeLiveRun(root, checkOrigin) {
         conclusion,
         // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 (Cargo.lock) declares no change-check payload schema to validate this fixture against. Its change-check-times golden fixes the time/conclusion names; url exercises the consumer's existing optional check-address slot, not a claim that every producer records it. Older absent/null metadata remains optional; host Check does not write the event and cannot supply a false gate.
         url: `${checkOrigin}/healthz?check=${name}`,
+        // A finished check carries both of its own stamps, one still running
+        // only the start — which is what its runtime so far is counted from —
+        // and a queued one neither.
         ...(status === "completed"
           ? {
               started_at: stamp(journal.at - 4000),
               completed_at: stamp(journal.at),
             }
-          : {}),
+          : status === "in_progress"
+            ? { started_at: stamp(journal.at - 2000) }
+            : {}),
         // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
       },
       log === undefined ? [] : [{ id: log, kind: "log", bytes: 33 }],
@@ -4243,5 +4248,563 @@ export function projectCentricFacts() {
   return {
     project: "local-md:project-centric",
     kinds: ["planning", "spikes", "main", "finalize", "design", "follow-ups"],
+  };
+}
+
+/**
+ * The run whose turns are read whole from their transcripts, and the run recorded
+ * before references whose sessions are read the best way each can be.
+ */
+export const TRANSCRIPTS_RUN = "dag-ui-transcripts";
+export const TRANSCRIPTS_LEGACY_RUN = "dag-ui-transcripts-legacy";
+
+/**
+ * The real sessions this corpus's history store is built from: recorded on an
+ * operator's host, trimmed and redacted (`tests/fixtures/history/README.md`).
+ */
+const RECORDED_HISTORY = new URL(
+  "../../../tests/fixtures/history/",
+  import.meta.url,
+);
+const RECORDED_JUDGE = {
+  project: "home-operator-projects-ai-orchestrator",
+  session:
+    "design-doc-1791501848591-2551400-worker-judge-20261008T232956Z-2575155",
+};
+
+/** The last words of every text a journey reads to its end. */
+export const TRANSCRIPT_SENTINELS = {
+  instruction:
+    "The whole instruction ends with this sentence, after the bound.",
+  output: "The whole output ends with this line, past sixty-four KiB.",
+  report: "The whole report ends with this sentence, past four thousand.",
+  reportHead: "The report opens with this sentence.",
+  session: "The whole drafting prompt ends with this sentence.",
+  log: "The gate log ends with this line.",
+};
+
+/** The gate log the reported node stored, longer than a log is served as. */
+export const TRANSCRIPT_LOG = "artifact-transcripts-gate";
+
+/** One recorded session's lines, as the fixture file holds them. */
+function recordedLines({ project, session }) {
+  return readFileSync(
+    new URL(`${project}/${session}.jsonl`, RECORDED_HISTORY),
+    "utf8",
+  )
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+/** `text`, grown past `bytes` with `filler`, ending on `sentinel`. */
+function grown(text, filler, bytes, sentinel) {
+  let whole = `${text}\n`;
+  while (Buffer.byteLength(whole) < bytes) whole += filler;
+  return `${whole}\n${sentinel}`;
+}
+
+/**
+ * One invocation of the recorded judge turn, re-addressed and re-sized, as the
+ * current oneharness writes one: an opening `run-started` line carrying the whole
+ * prompt, then each event as it happened, then — for one that closed — the
+ * closing line. The prompt and the read's output are grown past the recorder's
+ * old bounds so a reader can be shown they arrive whole.
+ */
+function writeSession(store, { session, historyId, started, closed, prompt }) {
+  const recorded = recordedLines(RECORDED_JUDGE);
+  const close = recorded.find((line) => line.type === "run");
+  const lines = [
+    {
+      type: "run-started",
+      schema_version: "1.11",
+      history_id: historyId,
+      harness_id: close.harness_id,
+      prompt,
+      started,
+    },
+    ...recorded
+      .filter((line) => line.type === "event")
+      .map((line) => ({
+        ...line,
+        run_id: historyId,
+        event: {
+          ...line.event,
+          output:
+            line.event.index === 1
+              ? grown(
+                  line.event.output,
+                  "test result: ok. 1 passed; 0 failed; 0 ignored\n",
+                  70 * 1024,
+                  TRANSCRIPT_SENTINELS.output,
+                )
+              : line.event.output,
+        },
+      })),
+    ...(closed ? [{ ...close, history_id: historyId, session, prompt }] : []),
+  ];
+  const dir = join(store, RECORDED_JUDGE.project);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${session}.jsonl`);
+  writeFileSync(
+    path,
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+  );
+  return path;
+}
+
+/** A `transcript` reference, as `oneagentgraph` 0.8 writes one. */
+function transcriptAt(store, session, historyId, extra = {}) {
+  return {
+    history_dir: store,
+    history_project: RECORDED_JUDGE.project,
+    history_session: session,
+    history_id: historyId,
+    ...extra,
+  };
+}
+
+/** The recorded judge turn's long prompt, grown past the old bound. */
+const longPrompt = (sentinel) =>
+  grown(
+    recordedLines(RECORDED_JUDGE).find((line) => line.type === "run").prompt,
+    "Read the whole plan out of the plan store, then land each node in order. ",
+    6 * 1024,
+    sentinel,
+  );
+
+/** The history ids and session files this corpus's store holds. */
+export const TRANSCRIPT_SESSIONS = {
+  died: {
+    session: "node-scope-1792900000000-4400-worker-skill-20261024T000000Z-4401",
+    historyId: "01a17000-0000-7000-8000-000000000001",
+  },
+  removed: {
+    session: "node-scope-1792900000000-4400-worker-skill-20261024T000100Z-4402",
+    historyId: "01a17000-0000-7000-8000-000000000002",
+  },
+  drafted: {
+    session: "pr-author-1792900000001-4400-20261024T000200Z-4403",
+    historyId: "01a17000-0000-7000-8000-000000000003",
+  },
+  live: {
+    session: "node-scope-1792900000002-4400-worker-skill-20261024T000300Z-4404",
+    historyId: "01a17000-0000-7000-8000-000000000004",
+  },
+  legacy: {
+    session: "node-scope-1792800000000-4500-worker-skill-20261020T000000Z-4501",
+    historyId: "01a16000-0000-7000-8000-000000000001",
+  },
+};
+
+/** The relayed session ids, `{stream}.{member}`. */
+const TRANSCRIPT_STREAM = "node-scope-1792900000000-4400";
+const DRAFTED_STREAM = "pr-author-1792900000001-4400";
+const LIVE_STREAM = "node-scope-1792900000002-4400";
+
+/** The tasks the transcripts run plans: what a reader opens each one for. */
+const TRANSCRIPT_TASKS = [
+  ["died", "A worker that died mid-turn, read whole from its history file."],
+  ["drafted", "A change request drafter's standalone harness session."],
+  ["reported", "A worker whose report is longer than a preview."],
+  ["live", "A worker still in its turn."],
+];
+
+/** The tasks the legacy run plans, one per reading a cut copy can get. */
+const LEGACY_TASKS = [
+  ["reported", "A member whose stored report holds the whole turn."],
+  ["historied", "A member with no report, whose history file the run names."],
+  ["neither", "A member with no report and no history file."],
+];
+
+function plannedRun(root, runId, tasks, start) {
+  const dir = runDir(root, runId);
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Read every turn whole" },
+    name: runId,
+    concurrency: tasks.length,
+    tasks: tasks.map(([id, what]) => ({
+      id,
+      persona: "worker",
+      task: `## What\n${what}\n\n## Acceptance criteria\nIt is read whole`,
+    })),
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  writeJson(
+    join(dir, "launch.json"),
+    launch(runId, "claude-code", CLAUDE_SESSION, stamp(start), 4243),
+  );
+  const journal = new Journal(dir, streamOf(runId), start);
+  journal.runId = runId;
+  journal.emit("pipeline", "run-started", { run_id: runId }, { plan });
+  return { dir, journal };
+}
+
+/** The corpus the transcript journeys read, under `root`. */
+export function buildTranscriptRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const store = join(root, "..", "transcript-history");
+  const start = now() - 10 * 60 * 1000;
+  const S = TRANSCRIPT_SESSIONS;
+  const instruction = longPrompt(TRANSCRIPT_SENTINELS.instruction);
+
+  writeSession(store, {
+    ...S.died,
+    started: stamp(start),
+    closed: false,
+    prompt: instruction,
+  });
+  // A turn whose history file was there and is gone: written, then removed, as a
+  // store that lost it leaves it.
+  rmSync(
+    writeSession(store, {
+      ...S.removed,
+      started: stamp(start),
+      closed: true,
+      prompt: instruction,
+    }),
+  );
+  writeSession(store, {
+    ...S.drafted,
+    started: stamp(start),
+    closed: true,
+    prompt: longPrompt(TRANSCRIPT_SENTINELS.session),
+  });
+  writeSession(store, {
+    ...S.live,
+    started: stamp(start),
+    closed: false,
+    prompt: instruction,
+  });
+
+  const { dir, journal } = plannedRun(
+    root,
+    TRANSCRIPTS_RUN,
+    TRANSCRIPT_TASKS,
+    start,
+  );
+  const run = { run_id: TRANSCRIPTS_RUN };
+  const recorded = recordedLines(RECORDED_JUDGE).filter(
+    (line) => line.type === "event",
+  );
+  const relayedSession = (stream, node, member, at) => {
+    const labels = {
+      ...run,
+      node,
+      member,
+      persona: member,
+      session: `${stream}.${member}`,
+    };
+    journal
+      .advance(1)
+      .emit("pipeline", "node-dispatched", { ...run, node, persona: member });
+    journal.advance(1).emit("agentgraph", "member-started", labels, {});
+    journal.advance(1).emit("agentgraph", "turn-started", labels, {
+      transcript: transcriptAt(store, at.session, at.historyId),
+      turn: 1,
+      role: "assistant",
+      started_at: stamp(journal.at),
+    });
+    for (const line of recorded) {
+      journal.advance(1).emit("agentgraph", "turn-activity", labels, {
+        transcript: transcriptAt(store, at.session, at.historyId, {
+          index: line.event.index,
+          ...(line.event.tool_call_id
+            ? { tool_call_id: line.event.tool_call_id }
+            : {}),
+        }),
+        kind: line.event.kind,
+        name: line.event.name,
+        ...(line.event.tool_call_id
+          ? { tool_call_id: line.event.tool_call_id }
+          : {}),
+        index: line.event.index,
+      });
+    }
+    return labels;
+  };
+
+  // A worker that died in its second turn: its first read whole off a file that
+  // never closed, its second pointing at a file the store no longer holds.
+  const died = relayedSession(TRANSCRIPT_STREAM, "died", "worker", S.died);
+  journal.advance(1).emit("agentgraph", "turn-started", died, {
+    transcript: transcriptAt(store, S.removed.session, S.removed.historyId),
+    turn: 2,
+    role: "assistant",
+    started_at: stamp(journal.at),
+  });
+  journal.advance(2).emit(
+    "agentgraph",
+    "member-died",
+    { ...run, node: "died", member: "worker", persona: "worker" },
+    {
+      signal: "SIGKILL",
+      detail: "the worker's process stopped mid-turn",
+    },
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: "died" },
+    {
+      status: "failed",
+      detail: "the worker died",
+    },
+  );
+
+  // A drafter's standalone invocation, pointed at and never relayed turn by turn.
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...run,
+    node: "drafted",
+    persona: "pr-author",
+  });
+  journal.advance(1).emit(
+    "agentgraph",
+    "oneharness-session",
+    { ...run, node: "drafted", member: "pr-author", persona: "pr-author" },
+    {
+      role: "agent",
+      turn: 1,
+      identity: "claude-code:alternate",
+      history_id: S.drafted.historyId,
+      history_dir: store,
+      history_project: RECORDED_JUDGE.project,
+      history_session: S.drafted.session,
+    },
+    [{ id: S.drafted.historyId, kind: "oneharness_session", bytes: 0 }],
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: "drafted" },
+    {
+      status: "done",
+      outcome: "published",
+    },
+  );
+
+  // A settled worker whose report is longer than the old preview.
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...run,
+    node: "reported",
+    persona: "worker",
+  });
+  const report = `${JSON.stringify(
+    {
+      schema_version: 8,
+      control: null,
+      verdicts: [
+        {
+          criterion: "it is read whole",
+          met: true,
+          reason: grown(
+            TRANSCRIPT_SENTINELS.reportHead,
+            "Every criterion was read against the branch it names. ",
+            6000,
+            TRANSCRIPT_SENTINELS.report,
+          ),
+        },
+      ],
+      usage: {},
+    },
+    null,
+    2,
+  )}\n`;
+  const settled = journal.advance(1).lines.length;
+  journal.emit(
+    "agentgraph",
+    "member-settled",
+    { ...run, node: "reported", member: "worker", persona: "worker" },
+    { completed: true, verdict: [], completion_reason: "it is read whole" },
+    [
+      {
+        id: `report-${journal.stream}-reported`,
+        kind: "report",
+        bytes: report.length,
+      },
+    ],
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: "reported" },
+    {
+      status: "done",
+      outcome: "merged",
+      detail: "Gate completed successfully",
+    },
+    [{ id: TRANSCRIPT_LOG, kind: "log", bytes: 0 }],
+  );
+
+  // A worker still in its turn, whose history file the journey grows.
+  relayedSession(LIVE_STREAM, "live", "worker", S.live);
+  journal.write();
+  retainReport(dir, journal.stream, settled, report);
+  // A gate log longer than the end of it a log is served as.
+  mkdirSync(join(dir, "artifacts"), { recursive: true });
+  writeFileSync(
+    join(dir, "artifacts", TRANSCRIPT_LOG),
+    grown(
+      "the first line the gate printed",
+      "test result: ok. 1 passed; 0 failed; 0 ignored\n",
+      80 * 1024,
+      TRANSCRIPT_SENTINELS.log,
+    ),
+  );
+
+  buildLegacyTranscriptRun(root, store, start);
+}
+
+/**
+ * A run recorded before references: every turn record carries the recorder's
+ * cut copy and flag, and nothing points at a transcript. One member left a
+ * report; one left none but its history file is named by the run; one left
+ * neither.
+ */
+function buildLegacyTranscriptRun(root, store, start) {
+  const S = TRANSCRIPT_SESSIONS;
+  const whole = longPrompt(TRANSCRIPT_SENTINELS.instruction);
+  writeSession(store, {
+    ...S.legacy,
+    started: stamp(start),
+    closed: true,
+    prompt: whole,
+  });
+  const { dir, journal } = plannedRun(
+    root,
+    TRANSCRIPTS_LEGACY_RUN,
+    LEGACY_TASKS,
+    start,
+  );
+  const run = { run_id: TRANSCRIPTS_LEGACY_RUN };
+  // The recorder kept a text's head, cut on a character boundary.
+  const bound = 4096;
+  const cut = (text) =>
+    Buffer.from(text)
+      .subarray(0, bound)
+      .toString("utf8")
+      .replace(/\uFFFD$/u, "");
+  const sessions = [];
+  let reported;
+  for (const [index, [node]] of LEGACY_TASKS.entries()) {
+    // Each member is a graph run of its own, on a stream of its own, and its
+    // session id is spelled from that stream.
+    const graph = new Journal(
+      dir,
+      `node-scope-179280000000${index}-4500`,
+      journal.at,
+    );
+    sessions.push(graph);
+    const member = { ...run, node, member: "worker", persona: "worker" };
+    journal
+      .advance(1)
+      .emit("pipeline", "node-dispatched", { ...run, node, persona: "worker" });
+    graph.at = journal.at;
+    graph.advance(1).emit(
+      "agentgraph",
+      "turn-started",
+      { ...member, session: `${graph.stream}.worker` },
+      {
+        turn: 1,
+        role: "assistant",
+        instruction: cut(whole),
+        instruction_truncated: true,
+        started_at: stamp(graph.at),
+      },
+    );
+    if (node === "neither") {
+      // Everything else the recorder cut of this turn, with nothing whole of
+      // any of it: its reply's head, its call's summary and its output's tail.
+      const labels = { ...member, session: `${graph.stream}.worker` };
+      graph.advance(1).emit("agentgraph", "turn-activity", labels, {
+        kind: "tool_call",
+        name: "Bash",
+        detail: "just check --all-targets ".repeat(10).slice(0, 160),
+        truncated: true,
+        tool_call_id: "toolu_01LegacyCutCall",
+        index: 0,
+      });
+      graph.advance(1).emit("agentgraph", "turn-activity", labels, {
+        kind: "tool_result",
+        name: "Bash",
+        detail: "",
+        output: "test result: ok. 1 passed\n".repeat(200).slice(-bound),
+        output_truncated: true,
+        tool_call_id: "toolu_01LegacyCutCall",
+        index: 1,
+      });
+      graph.advance(1).emit("agentgraph", "turn-message", labels, {
+        turn: 1,
+        role: "assistant",
+        text: cut("Landed every node in order. ".repeat(300)),
+        truncated: true,
+      });
+    }
+    if (node === "historied") {
+      graph.advance(1).emit(
+        "agentgraph",
+        "oneharness-session",
+        member,
+        {
+          role: "agent",
+          turn: 1,
+          identity: "claude-code:alternate",
+          history_id: S.legacy.historyId,
+          history_dir: store,
+          history_project: RECORDED_JUDGE.project,
+          history_session: S.legacy.session,
+        },
+        [{ id: S.legacy.historyId, kind: "oneharness_session", bytes: 0 }],
+      );
+    }
+    if (node === "reported") {
+      reported = { stream: graph.stream, seq: graph.lines.length };
+      graph
+        .advance(1)
+        .emit(
+          "agentgraph",
+          "member-settled",
+          member,
+          { completed: true, verdict: [], completion_reason: "landed" },
+          [{ id: `report-${graph.stream}`, kind: "report", bytes: 0 }],
+        );
+    }
+    journal.at = graph.at;
+  }
+  Journal.writeMerged(journal.path, [journal, ...sessions]);
+  retainReport(
+    dir,
+    reported.stream,
+    reported.seq,
+    `${JSON.stringify({
+      schema_version: 12,
+      transcript: {
+        messages: [
+          { role: "user", content: whole },
+          { role: "assistant", content: "landed every node in order" },
+        ],
+      },
+      completion_reason: "landed",
+      control: null,
+      supervisor_control: null,
+    })}\n`,
+  );
+}
+
+/** What the transcript journeys need to know about the corpus they read. */
+export function transcriptFacts() {
+  return {
+    run: TRANSCRIPTS_RUN,
+    legacyRun: TRANSCRIPTS_LEGACY_RUN,
+    sentinels: TRANSCRIPT_SENTINELS,
+    sessions: TRANSCRIPT_SESSIONS,
+    log: TRANSCRIPT_LOG,
+    project: RECORDED_JUDGE.project,
+    conversations: {
+      died: `${TRANSCRIPT_STREAM}.worker`,
+      live: `${LIVE_STREAM}.worker`,
+    },
+    drafted: DRAFTED_STREAM,
   };
 }

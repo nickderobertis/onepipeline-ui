@@ -136,6 +136,7 @@ test("a package consumer validates an API response through the public export", (
     kind: "tool_use",
     name: "Bash",
     detail: "just check",
+    description: "just check",
     events: 1,
     event_id: "e14",
   };
@@ -149,6 +150,11 @@ test("a package consumer validates an API response through the public export", (
   expect(() =>
     liveActivitySchema.parse({ ...activity, event_id: "" }),
   ).toThrow();
+  // A schema-25 entry carries no served line, and this client never makes one up.
+  const undescribed = JSON.parse(
+    JSON.stringify({ ...activity, description: undefined }),
+  );
+  expect(() => liveActivitySchema.parse(undescribed)).toThrow();
 });
 
 test("the checked-in v2 run-detail contract parses and v1 is rejected", async () => {
