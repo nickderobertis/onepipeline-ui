@@ -275,18 +275,21 @@ jobs:
         run: just setup-llmlint
       # What the two clone-local binaries below are built from, read where the
       # recipes read it, so a cache key cannot name one thing while the recipe
-      # provisions another: the release the lock pins the SDK to, and the commit
-      # this branch forked from (scripts/ensure-baseline-api.sh's resolution).
+      # provisions another: the release the lock pins the SDK to, with the source
+      # it resolves it from, and the commit this branch forked from
+      # (scripts/ensure-baseline-api.sh's resolution).
       - name: What the provisioned binaries are built from
         id: pins
         run: |
-          echo "onepipeline=$(just --evaluate onepipeline-version)" >> "$GITHUB_OUTPUT"
+          echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
           echo "base=$(git merge-base HEAD origin/main)" >> "$GITHUB_OUTPUT"
       - name: Restore the sibling CLI
         id: sibling
         uses: actions/cache/restore@v4
         with:
-          path: .tools/bin/onepipeline
+          path: |
+            .tools/bin/onepipeline
+            .tools/bin/onepipeline.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Restore the base commit's server
         id: baseline
@@ -304,7 +307,9 @@ jobs:
         if: github.ref == 'refs/heads/main' && steps.sibling.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: .tools/bin/onepipeline
+          path: |
+            .tools/bin/onepipeline
+            .tools/bin/onepipeline.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Which tier of the gate this build owes
         id: tier
@@ -377,12 +382,14 @@ jobs:
           tool: just,nextest,cargo-llvm-cov,cargo-auditable
       - name: What the provisioned sibling is built from
         id: pins
-        run: echo "onepipeline=$(just --evaluate onepipeline-version)" >> "$GITHUB_OUTPUT"
+        run: echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
       - name: Restore the sibling CLI
         id: sibling
         uses: actions/cache/restore@v4
         with:
-          path: .tools/bin/onepipeline.exe
+          path: |
+            .tools/bin/onepipeline.exe
+            .tools/bin/onepipeline.exe.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Bootstrap
         run: just bootstrap
@@ -390,7 +397,9 @@ jobs:
         if: github.ref == 'refs/heads/main' && steps.sibling.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: .tools/bin/onepipeline.exe
+          path: |
+            .tools/bin/onepipeline.exe
+            .tools/bin/onepipeline.exe.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Platform tiers, browser build and install (affected projects)
         run: just ci-test-windows
@@ -464,13 +473,15 @@ jobs:
       - name: What the provisioned sibling is built from
         id: pins
         if: steps.macos.outputs.required == 'true'
-        run: echo "onepipeline=$(just --evaluate onepipeline-version)" >> "$GITHUB_OUTPUT"
+        run: echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
       - name: Restore the sibling CLI
         id: sibling
         if: steps.macos.outputs.required == 'true'
         uses: actions/cache/restore@v4
         with:
-          path: .tools/bin/onepipeline
+          path: |
+            .tools/bin/onepipeline
+            .tools/bin/onepipeline.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Bootstrap
         if: steps.macos.outputs.required == 'true'

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Provision the sibling `onepipeline` CLI at the release the lock pins, into the
-# tree — the `_ensure-sibling` recipe's body.
+# Provision the sibling `onepipeline` CLI the lock pins, into the tree — the
+# `_ensure-sibling` recipe's body.
 #
 # The journeys hold what the read API serves to what this CLI prints, so it has to
 # be the release this build links and no other: a stray build on PATH speaks a
@@ -8,7 +8,21 @@
 # justfile exports, and why both ways of filling that path end in the same
 # version probe.
 #
-# Two ways to fill it, in this order:
+# Which build that is takes two facts off the lock, not one: the version, and
+# the source it resolves the library from. During a fast adoption the lock links
+# an engine commit that no release carries yet while its library still reports
+# the last release's version, so `--version` cannot tell the two apart. A git
+# source is therefore provisioned as `cargo install --git` of that exact commit,
+# held to cargo's own record of the source it installed, and never from a
+# Release — a Release of the same version is the build without the commit.
+#
+# Whatever fills the path, the binary is then stamped with the source it came
+# from and its own digest, in `<binary>.source`, and a binary is taken as
+# provisioned only when it reports the version and that stamp names this source
+# and these bytes. A build of the same version from another source, or one
+# copied over the stamped file, is replaced rather than used.
+#
+# A registry source is filled one of two ways, in this order:
 #   1. the release's own archive for this host's triple, from the onepipeline
 #      Release named by the pin, checked against the `.sha256` published beside
 #      it. Seconds, where compiling the CLI is the largest single cost of a clean
@@ -19,7 +33,10 @@
 #      archive that is not what it says it is is a fact somebody has to look at.
 #
 # Usage:
-#   ensure-sibling.sh VERSION
+#   ensure-sibling.sh VERSION SOURCE
+#
+# SOURCE is the lock's `source` for the library: crates.io's registry, or
+# `git+https://HOST/PATH?rev=SHA#SHA` with SHA a full commit.
 #
 # Reads ONEPIPELINE_UI_ONEPIPELINE_BIN, the path the justfile exports, and
 # ONEPIPELINE_UI_SIBLING_RELEASES, where the Releases are: an https base URL (the
@@ -37,10 +54,11 @@ fail() {
 }
 
 version="${1:-}"
+source="${2:-}"
 binary="${ONEPIPELINE_UI_ONEPIPELINE_BIN:-}"
-if [ $# -ne 1 ] || [ -z "$version" ] || [ -z "$binary" ]; then
-  echo "ensure-sibling: needs exactly the pinned version, and ONEPIPELINE_UI_ONEPIPELINE_BIN" >&2
-  echo "ACTION: run 'just _ensure-sibling', which passes both" >&2
+if [ $# -ne 2 ] || [ -z "$version" ] || [ -z "$source" ] || [ -z "$binary" ]; then
+  echo "ensure-sibling: needs exactly the pinned version and source, and ONEPIPELINE_UI_ONEPIPELINE_BIN" >&2
+  echo "ACTION: run 'just _ensure-sibling', which passes all three" >&2
   exit 2
 fi
 # The version reaches a URL and a file name, so it is held to what a release
@@ -52,28 +70,130 @@ fi
   exit 2
 }
 
+# The source reaches cargo's command line, so it is held to the two shapes this
+# script provisions rather than trusted. A git source has to name one exact
+# commit: a branch or a tag moves, and the build it provisioned would stop being
+# the one the lock links without anything here noticing.
+registry="registry+https://github.com/rust-lang/crates.io-index"
+if [ "$source" = "$registry" ]; then
+  git_url=""
+elif [[ "$source" =~ ^git\+(https://[A-Za-z0-9._/-]+)\?rev=([0-9a-f]{40})#([0-9a-f]{40})$ ]] &&
+  [ "${BASH_REMATCH[2]}" = "${BASH_REMATCH[3]}" ]; then
+  git_url="${BASH_REMATCH[1]}"
+  git_rev="${BASH_REMATCH[2]}"
+else
+  echo "ensure-sibling: '$source' is neither crates.io nor a git source pinned to one full commit" >&2
+  echo "ACTION: pin onepipeline in Cargo.toml to a crates.io version, or to a git commit with rev = \"<full sha>\", then re-run 'just _ensure-sibling'" >&2
+  exit 2
+fi
+stamp="$binary.source"
+
+# GNU's tool where it runs, else the one macOS ships.
+sha256_of() {
+  local sum gnu
+  if ! sum="$(sha256sum "$1" 2>&1)"; then
+    gnu="$sum"
+    sum="$(shasum -a 256 "$1" 2>&1)" ||
+      fail "neither sha256sum nor shasum could hash $1 (sha256sum: $gnu; shasum: $sum)" \
+        "if either says $1 is unreadable, free disk space and retry; otherwise install coreutils (sha256sum) or perl's shasum, then retry"
+  fi
+  printf '%s' "${sum%% *}"
+}
+
 # The probe reads the exported variable instead of having it interpolated into a
 # shell line: `justfile_directory()` is separated by backslashes on Windows, which
 # that line would spend as escapes, and a probe that cannot resolve reinstalls on
 # every run rather than failing — quietly, and only on that platform.
-probe() {
+reports_pin() {
   local reported
   reported="$("$binary" --version 2>/dev/null)" || return 1
   [ "$reported" = "onepipeline $version" ]
 }
-probe && exit 0
 
+# Provisioned: the pinned version, stamped as built from the pinned source, and
+# still the bytes that were stamped.
+probe() {
+  local stamped_source="" stamped_digest="" digest
+  reports_pin || return 1
+  { IFS= read -r stamped_source && IFS= read -r stamped_digest; } 2>/dev/null <"$stamp" || return 1
+  [ "$stamped_source" = "$source" ] || return 1
+  # A hasher that cannot run has already said so and named what to do.
+  digest="$(sha256_of "$binary")" || exit 1
+  [ "$stamped_digest" = "$digest" ]
+}
+
+stamp_source() {
+  local digest
+  digest="$(sha256_of "$binary")" || exit 1
+  printf '%s\n%s\n' "$source" "$digest" 2>/dev/null >"$stamp" ||
+    fail "could not write $stamp" "check $(dirname -- "$binary") is writable and nothing but a file is at $stamp, then retry"
+}
+
+# Take a refused build off the path before saying why. Best effort: the refusal
+# below is the diagnostic that matters, and a build left behind carries no stamp,
+# so no later run takes it for the pinned sibling.
+discard() {
+  rm -f "$binary" 2>/dev/null || true
+}
+
+probe && exit 0
+# Why a build at the pinned version is being replaced, said once, in the one line
+# whichever way of filling the path prints.
+replacing=""
+if [ -e "$binary" ] && reports_pin; then
+  replacing="$binary reports onepipeline $version but is not stamped as built from $source"
+fi
+rm -f "$stamp" 2>/dev/null ||
+  fail "could not remove $stamp, the stamp of the build being replaced" \
+    "check $(dirname -- "$binary") is writable and nothing but a file is at $stamp, then retry"
+
+# Forced for the reason `install_from_git` gives: without it cargo skips a version
+# its record lists, and whatever was copied over that install would be stamped.
 install_from_source() {
-  cargo install onepipeline --version "$version" --locked --root .tools --quiet ||
+  cargo install onepipeline --version "$version" --locked --force --root .tools --quiet ||
     fail "cannot provision onepipeline $version — the journeys that compare the read API against it cannot run without it" \
       "fix the cargo error above (crates.io reachable, toolchain installed), then re-run 'just bootstrap'"
-  probe || {
+  reports_pin || {
     local reported
     reported="$("$binary" --version 2>&1)" || reported="$reported (exit $?)"
     fail "cargo installed onepipeline $version, but $binary answers '$reported', not 'onepipeline $version'" \
       "remove .tools and re-run 'just bootstrap'; if it recurs, the crate's binary name or version output changed upstream"
   }
+  stamp_source
 }
+
+# The exact commit, forced: cargo skips a reinstall its own record calls current,
+# and this runs only because the file at the path is not what that record says.
+# Held afterwards to cargo's record of the source it installed from, as well as to
+# the version the binary reports.
+install_from_git() {
+  cargo install onepipeline --git "$git_url" --rev "$git_rev" --locked --force --root .tools --quiet ||
+    fail "cannot provision onepipeline $version from $source — the journeys that compare the read API against it cannot run without it" \
+      "fix the cargo error above (the repository reachable, toolchain installed), then re-run 'just bootstrap'"
+  reports_pin || {
+    local reported
+    reported="$("$binary" --version 2>&1)" || reported="$reported (exit $?)"
+    discard
+    fail "cargo installed onepipeline from $source, but $binary answers '$reported', not 'onepipeline $version'" \
+      "the lock and the commit disagree on the library's version; run 'cargo update -p onepipeline' and re-run 'just bootstrap'"
+  }
+  # The package id cargo records an install under, `NAME VERSION (SOURCE)`, is
+  # held to what a real `cargo install --git` writes by
+  # `cargo_records_a_git_install_under_the_id_the_recipe_reads` in
+  # tests/e2e/ensure_sibling.rs.
+  grep -qF "\"onepipeline $version ($source)\"" .tools/.crates2.json 2>/dev/null || {
+    discard
+    fail "cargo's install record in .tools/.crates2.json names no onepipeline $version from $source" \
+      "remove .tools and re-run 'just bootstrap'; if it recurs, cargo records git installs differently and this check needs teaching"
+  }
+  stamp_source
+}
+
+if [ -n "$git_url" ]; then
+  [ -z "$replacing" ] || echo "ensure-sibling: $replacing; compiling that commit in its place" >&2
+  install_from_git
+  exit 0
+fi
 
 host="$(rustc -vV 2>&1)" || fail "rustc -vV failed: $host" \
   "install the toolchain rust-toolchain.toml pins ('rustup toolchain install'), then retry"
@@ -136,22 +256,10 @@ fetch() {
   esac
 }
 
-# GNU's tool where it runs, else the one macOS ships.
-sha256_of() {
-  local sum gnu
-  if ! sum="$(sha256sum "$1" 2>&1)"; then
-    gnu="$sum"
-    sum="$(shasum -a 256 "$1" 2>&1)" ||
-      fail "neither sha256sum nor shasum could hash $1 (sha256sum: $gnu; shasum: $sum)" \
-        "if either says $1 is unreadable, free disk space and retry; otherwise install coreutils (sha256sum) or perl's shasum, then retry"
-  fi
-  printf '%s' "${sum%% *}"
-}
-
 status=0
 fetch "$asset" || status=$?
 if [ "$status" -eq 3 ]; then
-  echo "ensure-sibling: onepipeline v$version publishes no $asset; compiling it instead" >&2
+  echo "ensure-sibling: onepipeline v$version publishes no $asset; compiling it instead${replacing:+ ($replacing)}" >&2
   install_from_source
   exit 0
 fi
@@ -187,9 +295,11 @@ mkdir -p "$directory" && rm -f "$binary" && cp "$work/unpacked/$member" "$binary
   fail "could not install $member into $directory" \
     "check the directory is writable — a container run as root can leave it unwritable — and retry"
 
-probe || {
+reports_pin || {
   reported="$("$binary" --version 2>&1 || true)"
   rm -f "$binary"
   fail "the binary in $asset reports '$reported', not 'onepipeline $version'" \
     "report the mislabelled release upstream; the journeys need exactly the release the lock pins"
 }
+stamp_source
+[ -z "$replacing" ] || echo "ensure-sibling: $replacing; replaced it from $asset" >&2

@@ -129,7 +129,10 @@ the failure the pin exists to prevent. It is fetched as that release's own
 archive for the host, held to the `.sha256` published beside it and to its
 `--version`, and compiled only when the release ships no archive for the host
 (`scripts/ensure-sibling.sh`); an archive that fails either check is refused, never
-compiled around.
+compiled around. A git pin (fast adoption of an unreleased engine commit) is
+compiled from that exact commit and never fetched, because the commit still
+reports the last release's version: the binary is stamped with the lock's source
+and its own digest, and a same-version build from anywhere else is replaced.
 
 **Pull-request CI is four jobs, each one recipe.** `lint`, `test-linux`,
 `test-windows` and `test-macos`, and their caps (36 minutes for Linux, 30 for the others), are an interface other

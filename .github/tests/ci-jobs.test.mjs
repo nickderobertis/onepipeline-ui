@@ -220,18 +220,28 @@ export function requiredContextProblems(workflows) {
 // runner's OS and architecture always, every pinned file listed, and the value
 // read off the lockfile (or the commit) by the step that reads it there. A
 // cache's paths must be exactly one declared set — the baseline server travels
-// with the stamp naming its commit — so nothing rides along undeclared.
+// with the stamp naming its commit, and the sibling CLI with the stamp naming
+// the source it was built from — so nothing rides along undeclared. The sibling's
+// value names that source as well as the version, because a fast adoption links
+// an engine commit that reports the release version it was cut after.
 const SIBLING = {
   files: ["rust-toolchain.toml", "scripts/ensure-sibling.sh"],
   output: {
     step: "pins",
     name: "onepipeline",
-    reads: /just --evaluate onepipeline-version/,
+    reads:
+      /just --evaluate onepipeline-version.*just --evaluate onepipeline-source/,
   },
 };
 const CACHES = [
-  { paths: [".tools/bin/onepipeline"], ...SIBLING },
-  { paths: [".tools/bin/onepipeline.exe"], ...SIBLING },
+  {
+    paths: [".tools/bin/onepipeline", ".tools/bin/onepipeline.source"],
+    ...SIBLING,
+  },
+  {
+    paths: [".tools/bin/onepipeline.exe", ".tools/bin/onepipeline.exe.source"],
+    ...SIBLING,
+  },
   {
     paths: [
       ".tools/bin/onepipeline-api-baseline",
@@ -490,7 +500,13 @@ export function cacheRestoreProblems(workflows) {
         (step.uses ?? "").startsWith("actions/cache/save@") &&
         !/(^|&& )github\.ref == 'refs\/heads\/main' &&/.test(step.if ?? "")
       )
-        problems.push(`job ${id} saves ${step.with?.path} off main`);
+        problems.push(
+          `job ${id} saves ${String(step.with?.path ?? "")
+            .split("\n")
+            .map((path) => path.trim())
+            .filter(Boolean)
+            .join(", ")} off main`,
+        );
   }
   return problems;
 }
@@ -751,7 +767,9 @@ test("a cache key that omits the lockfile pin or a pinned tool is refused", () =
   }
   const extra = clone(load());
   const sibling = extra["ci.yml"].jobs["test-linux"].steps.find(
-    (s) => s.with?.path === ".tools/bin/onepipeline",
+    (s) =>
+      s.with?.path ===
+      ".tools/bin/onepipeline\n.tools/bin/onepipeline.source\n",
   );
   sibling.with.path = ".tools/bin/onepipeline\n.tools/bin/something-else";
   assert.ok(
@@ -781,6 +799,17 @@ test("a cache key that omits the lockfile pin or a pinned tool is refused", () =
   ).run = "echo onepipeline=0.0.0 >> $GITHUB_OUTPUT";
   assert.ok(
     cacheProblems(pinsElsewhere).some((p) =>
+      p.endsWith("step pins does not read onepipeline where the recipe does"),
+    ),
+  );
+  // The version alone names a release build and a fast adoption's commit alike.
+  const versionOnly = clone(load());
+  versionOnly["ci.yml"].jobs["test-linux"].steps.find(
+    (s) => s.id === "pins",
+  ).run =
+    'echo "onepipeline=$(just --evaluate onepipeline-version)" >> "$GITHUB_OUTPUT"';
+  assert.ok(
+    cacheProblems(versionOnly).some((p) =>
       p.endsWith("step pins does not read onepipeline where the recipe does"),
     ),
   );
@@ -971,7 +1000,7 @@ test("a borrowed build saved from here, or one no main job saves, is refused", (
           (s) => s.name === "Save the sibling CLI",
         ).if = "steps.sibling.outputs.cache-hit != 'true'";
       },
-      "job test-linux saves .tools/bin/onepipeline off main",
+      "job test-linux saves .tools/bin/onepipeline, .tools/bin/onepipeline.source off main",
     ],
   ];
   for (const [mutate, problem] of cases) {
