@@ -117,6 +117,7 @@ impl<'a> Run<'a> {
 }
 
 pub(crate) mod live;
+pub(crate) mod transcript;
 
 /// The bound on an artifact body served in one response.
 ///
@@ -3717,13 +3718,15 @@ struct Words {
 }
 
 impl Words {
-    /// The words among one turn's relayed `turn-activity` summaries.
-    fn of(summaries: &[&Envelope]) -> Self {
+    /// The words among one turn's relayed `turn-activity` summaries, each read
+    /// whole through [`transcript::read`] — `reads` is that reading of
+    /// `summaries`, position for position.
+    fn of(summaries: &[&Envelope], reads: &[Option<transcript::Read>]) -> Self {
         let mut words = Self::default();
-        for event in summaries {
-            let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
-            if let Some(kind) = field(graph::KIND) {
-                words.took(kind, field(graph::OUTPUT));
+        for (event, read) in summaries.iter().zip(reads) {
+            if let Some(kind) = event.payload.get(graph::KIND).and_then(Value::as_str) {
+                let said = read.as_ref().map(transcript::Read::words);
+                words.took(kind, said.as_deref());
             }
         }
         words
@@ -3787,13 +3790,13 @@ impl Words {
 /// published is served as an entry of its own rather than dropped: it is a thing
 /// the run recorded, and the whole point of reading a live turn is that nothing
 /// else holds it yet.
-fn live_tools(summaries: &[&Envelope]) -> Vec<Value> {
+fn live_tools(summaries: &[&Envelope], reads: &[Option<transcript::Read>]) -> Vec<Value> {
     let mut served: Vec<Value> = Vec::new();
     // Where each unanswered call landed in `served`, with the two things an
     // observation is joined by. Only calls are registered here: an observation
     // answers a call and is never answered itself.
     let mut open: Vec<(usize, Option<String>, Option<u64>)> = Vec::new();
-    for (position, event) in summaries.iter().enumerate() {
+    for (position, (event, read)) in summaries.iter().zip(reads).enumerate() {
         let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
         // The agent's own words are not a call and answer none: they are the
         // turn's `assistant` and `reasoning`, read by [`Words::of`]. Skipped in
@@ -3803,6 +3806,21 @@ fn live_tools(summaries: &[&Envelope]) -> Vec<Value> {
         }
         let recorded = event.payload.get(graph::INDEX).and_then(Value::as_u64);
         let identity = field(graph::TOOL_CALL_ID);
+        // What the entry holds, read whole: the call's input as the harness
+        // recorded it and what the tool returned, or — for a reference that
+        // resolved to nothing — the line saying so, in the output's place.
+        let (input, output) = match read {
+            Some(read) => match read.tool() {
+                Some((input, output)) => (input.unwrap_or(Value::Null), json!(output)),
+                None => (Value::Null, json!(read.words())),
+            },
+            None => (Value::Null, Value::Null),
+        };
+        // The recorder's own flags, served only on a copy it cut that nothing
+        // whole could be found for — never on text read out of a history file.
+        let cut = read.as_ref().is_some_and(transcript::Read::cut);
+        let output_cut = cut && truthy(event, graph::OUTPUT_TRUNCATED);
+        let input_cut = cut && truthy(event, graph::TRUNCATED);
         // `tool_result` is the one word the producer closes: it declares the
         // observation and leaves a *call's* kind open, because that word is the
         // harness's own (`tool_use` on one, `tool_call` on the next) and this
@@ -3816,8 +3834,8 @@ fn live_tools(summaries: &[&Envelope]) -> Vec<Value> {
         if field(graph::KIND) == Some(graph::TOOL_RESULT) {
             if let Some(at) = answered(&open, identity, recorded) {
                 let entry = open.remove(at).0;
-                served[entry][graph::OUTPUT] = json!(field(graph::OUTPUT));
-                if truthy(event, graph::OUTPUT_TRUNCATED) {
+                served[entry][graph::OUTPUT] = output;
+                if output_cut {
                     served[entry][graph::OUTPUT_TRUNCATED] = json!(true);
                 }
                 continue;
@@ -3829,16 +3847,27 @@ fn live_tools(summaries: &[&Envelope]) -> Vec<Value> {
             "index": recorded.map_or_else(|| json!(position), |index| json!(index)),
             "kind": field(graph::KIND).unwrap_or_default(),
             "name": field(graph::NAME),
-            "input": field(graph::DETAIL),
-            "output": field(graph::OUTPUT),
+            "input": input,
+            "output": output,
         });
-        if truthy(event, graph::OUTPUT_TRUNCATED) {
+        if let Some(identity) = identity {
+            entry["toolCallId"] = json!(identity);
+        }
+        if output_cut {
             entry[graph::OUTPUT_TRUNCATED] = json!(true);
+        }
+        if input_cut {
+            entry[INPUT_TRUNCATED] = json!(true);
         }
         served.push(entry);
     }
     served
 }
+
+/// Whether the recorder cut a call's input summary, on a copy nothing whole could
+/// be found for: the producer's own `truncated`, which on an activity is about
+/// its `detail`, served beside the `input` that detail became.
+const INPUT_TRUNCATED: &str = "input_truncated";
 
 /// Which unanswered call one observation answers, as a position in `open`.
 ///
@@ -4128,39 +4157,6 @@ struct LiveTurn<'a> {
 }
 
 impl LiveTurn<'_> {
-    /// The message this turn was given to answer, or `None` where the record that
-    /// opened it never reached the journal.
-    fn instruction(&self) -> Option<&str> {
-        self.started?
-            .payload
-            .get(graph::INSTRUCTION)
-            .and_then(Value::as_str)
-    }
-
-    /// This party's own words for this turn, or `None` where it published none.
-    ///
-    /// `None` rather than an empty string on purpose: a session that captured no
-    /// text still has to read as having captured none, and a single-sided member
-    /// publishes no `turn-message` at all — its words are in the report it leaves
-    /// when it settles, and nowhere else while it runs.
-    ///
-    /// Both member kinds publish at most one of these per turn per party. A
-    /// producer that published several wrote one reply in parts, so they are
-    /// joined in the order it published them: serving one part would drop the
-    /// rest, which is the one thing a transcript may not do.
-    fn text(&self) -> Option<String> {
-        if self.said.is_empty() {
-            return None;
-        }
-        Some(
-            self.said
-                .iter()
-                .filter_map(|event| event.payload.get(graph::TEXT).and_then(Value::as_str))
-                .collect::<Vec<_>>()
-                .join("\n\n"),
-        )
-    }
-
     /// When this turn began: the instant the producer stamped, from whichever of
     /// its two records carries one this crate can order.
     ///
@@ -4187,32 +4183,6 @@ impl LiveTurn<'_> {
         let started = millis_of(self.started_at()?)?;
         let finished = millis_of(self.finished_at()?)?;
         u64::try_from(finished.checked_sub(started)?).ok()
-    }
-
-    /// The producer's own flags for the two texts this turn serves, exactly where
-    /// it flagged one.
-    ///
-    /// They ride the `unknown` map every turn has always carried, because the
-    /// turn shape declares no field for them and this reading adds none. A text
-    /// the producer cut is served cut — the rest of it is in the report the member
-    /// stores when it settles — and a reader has to be able to tell that from a
-    /// reply that was simply short.
-    fn cut(&self) -> Map<String, Value> {
-        let mut flags = Map::new();
-        if self
-            .started
-            .is_some_and(|event| truthy(event, graph::INSTRUCTION_TRUNCATED))
-        {
-            flags.insert(graph::INSTRUCTION_TRUNCATED.into(), json!(true));
-        }
-        if self
-            .said
-            .iter()
-            .any(|event| truthy(event, graph::TRUNCATED))
-        {
-            flags.insert(graph::TRUNCATED.into(), json!(true));
-        }
-        flags
     }
 }
 
@@ -4246,6 +4216,41 @@ fn live_transcript<'a>(events: &[&'a Envelope]) -> BTreeMap<(u64, String), LiveT
         }
     }
     turns
+}
+
+/// This party's own words for one turn, in the order it published them.
+///
+/// Both member kinds publish at most one `turn-message` per turn per party. A
+/// producer that published several wrote one reply in parts, so they are joined
+/// in that order: serving one part would drop the rest, which is the one thing a
+/// transcript may not do.
+fn said_text(said: &[transcript::Read]) -> String {
+    said.iter()
+        .map(transcript::Read::words)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// The recorder's own flags for the two texts a turn serves, exactly where it
+/// cut one and nothing whole of it could be found.
+///
+/// They ride the `unknown` map every turn has always carried. A turn read out of
+/// its history file carries neither — the file holds the text whole — so they
+/// appear only on a run recorded before turn records pointed at their transcript,
+/// where neither the member's report nor a history file the run names holds the
+/// whole text, and a reader has to be told that the copy is all there is.
+fn recorder_cut(
+    instruction: Option<&transcript::Read>,
+    said: &[transcript::Read],
+) -> Map<String, Value> {
+    let mut flags = Map::new();
+    if instruction.is_some_and(transcript::Read::cut) {
+        flags.insert(graph::INSTRUCTION_TRUNCATED.into(), json!(true));
+    }
+    if said.iter().any(transcript::Read::cut) {
+        flags.insert(graph::TRUNCATED.into(), json!(true));
+    }
+    flags
 }
 
 /// Whether one turn record is a turn of this transcript — the agent's own.
@@ -4333,6 +4338,9 @@ fn conversation_document(
         Some(_) => BTreeMap::new(),
         None => live_transcript(&transcript.records),
     };
+    // Where a cut copy of a run recorded before references is recovered whole
+    // from, read only if one asks.
+    let sources = transcript::Sources::of(view.paths, &transcript.records);
     // What each judge of a stacked panel decided, over the whole store rather than
     // the reader's listing, for the reason every other figure on a row is.
     let decided = judge_decisions(view, session, reported);
@@ -4391,7 +4399,29 @@ fn conversation_document(
                 .zip(reported)
                 .and_then(|(turn, report)| agent_session(report, turn));
             let summaries = turn.map_or(&[][..], |turn| &turn.summaries[..]);
-            let live_words = Words::of(summaries);
+            // Every record of this turn read whole, for a session no report
+            // holds; a report is the whole of the reading where there is one.
+            let reads: Vec<Option<transcript::Read>> = match recorded {
+                Some(_) => Vec::new(),
+                None => summaries
+                    .iter()
+                    .map(|event| transcript::read(event, Some(&sources)))
+                    .collect(),
+            };
+            let instruction = relayed
+                .filter(|_| recorded.is_none())
+                .and_then(|live| live.started)
+                .and_then(|event| transcript::read(event, Some(&sources)));
+            let said: Vec<transcript::Read> = relayed
+                .filter(|_| recorded.is_none())
+                .map(|live| {
+                    live.said
+                        .iter()
+                        .filter_map(|event| transcript::read(event, Some(&sources)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let live_words = Words::of(summaries, &reads);
             let mut served = json!({
                 "assistant": match recorded {
                     // Explicitly absent rather than empty: the report holds this
@@ -4402,7 +4432,9 @@ fn conversation_document(
                     // supervisor's reach a reader as the next turn's prompt,
                     // which is what it was asked rather than what it said.
                     None => json!(live_words.assistant(
-                        relayed.filter(|_| event.is_some_and(agent_turn)).and_then(LiveTurn::text),
+                        relayed
+                            .filter(|_| event.is_some_and(agent_turn) && !said.is_empty())
+                            .map(|_| said_text(&said)),
                     )),
                 },
                 "durationMs": match ran {
@@ -4460,10 +4492,10 @@ fn conversation_document(
                 },
                 "tools": match recorded {
                     Some(turn) => Value::Array(turn.tools.clone()),
-                    None => Value::Array(live_tools(summaries)),
+                    None => Value::Array(live_tools(summaries, &reads)),
                 },
                 "unknown": with_attribution(
-                    relayed.map(LiveTurn::cut).unwrap_or_default(),
+                    recorder_cut(instruction.as_ref(), &said),
                     numbered
                         .and_then(|turn| u32::try_from(turn).ok())
                         .zip(reported)
@@ -4494,10 +4526,10 @@ fn conversation_document(
                 // asked and not what they were asked.
                 "user": match recorded {
                     Some(turn) => turn.user.clone(),
-                    None => relayed
-                        .and_then(LiveTurn::instruction)
-                        .unwrap_or_default()
-                        .to_owned(),
+                    None => instruction
+                        .as_ref()
+                        .map(transcript::Read::words)
+                        .unwrap_or_default(),
                 },
             });
             // The decisions on the turn they judged, and no key at all on a turn
@@ -4850,6 +4882,14 @@ pub(crate) fn artifact_over(view: &Run<'_>, id: &ArtifactId) -> Option<Value> {
             .map(|artifact| (event, artifact))
     });
     let (kind, bytes) = match recorded {
+        // A oneharness session is not bytes this crate tails: it is one
+        // invocation read whole, entry by entry, through the engine's resolver,
+        // and served as the conversation turn it was.
+        Some((event, recorded))
+            if ReferenceKind::of(&recorded.kind) == ReferenceKind::OneharnessSession =>
+        {
+            return harness_session(relayed_location(event)?, id, &event.ts);
+        }
         Some((event, recorded)) => {
             let kind = ReferenceKind::of(&recorded.kind);
             (kind, artifact_bytes(view, event, id, kind)?)
@@ -4859,13 +4899,23 @@ pub(crate) fn artifact_over(view: &Run<'_>, id: &ArtifactId) -> Option<Value> {
         // agents routes serve an entry for and this resolves on the same terms
         // as a relayed one, through the three fields the pointer line spells
         // exactly as the `oneharness-session` record does.
-        None => (
-            ReferenceKind::OneharnessSession,
-            pointed_session(view.paths, id)?,
-        ),
+        None => {
+            let (location, started) = pointed_location(view.paths, id)?;
+            return harness_session(location, id, &started);
+        }
     };
-    let truncated = bytes.len() > ARTIFACT_TAIL_BYTES;
-    let tail = &bytes[bytes.len().saturating_sub(ARTIFACT_TAIL_BYTES)..];
+    // A transcript and a report are served whole; a log is served as its end,
+    // because a producer promises no size for one.
+    let whole = matches!(
+        kind,
+        ReferenceKind::Conversation | ReferenceKind::WorkerReport
+    );
+    let truncated = !whole && bytes.len() > ARTIFACT_TAIL_BYTES;
+    let tail = if whole {
+        &bytes[..]
+    } else {
+        &bytes[bytes.len().saturating_sub(ARTIFACT_TAIL_BYTES)..]
+    };
     Some(json!({
         "id": id.as_str(),
         "kind": kind.as_str(),
@@ -4911,7 +4961,8 @@ fn artifact_bytes(
     // inheriting an answer that happens to compile.
     let path = match kind {
         ReferenceKind::WorkerReport => report_path(view, event),
-        ReferenceKind::OneharnessSession => return harness_session(event, id),
+        // Read whole by `artifact_over` before it asks for bytes.
+        ReferenceKind::OneharnessSession => return None,
         ReferenceKind::Conversation | ReferenceKind::GateLog | ReferenceKind::Pr => {
             view.paths.dir.join("artifacts").join(id.as_str())
         }
@@ -4931,100 +4982,134 @@ fn report_path(view: &Run<'_>, settlement: &Envelope) -> std::path::PathBuf {
     view.paths.report_for(&settlement.stream, settlement.seq)
 }
 
-/// The oneharness conversation one `oneharness_session` artifact names, rendered
-/// as the reader reads it.
-///
-/// The one artifact resolved outside the run directory: `oneagentgraph` publishes
-/// a pointer and nothing is copied. `src/AGENTS.md` holds why the record alone
-/// names the store, why this reads without locking, and why every component is
-/// checked; [`Confined`] holds what each outcome of the check means.
-///
-// llmlint: ignore[comments_earn_their_place] the paragraph the rule objects to is the one the manager required survive: the checks are on how a record *spelled* a path, and a bare name that climbs nowhere still lands anywhere if a component is a symlink, so the resolved path is proved under a `StoreRoot` before it is opened. That sentence is what stops a future reader relaxing the confinement this change exists to add. The design it links to is in `src/AGENTS.md` and is not repeated here.
-/// **The one thing that must not be relaxed here:** those checks are on how a
-/// record *spelled* a path, and a bare name that climbs nowhere still lands
-/// anywhere if a component of it is a symlink, so the resolved path is proved
-/// under a [`StoreRoot`] before it is opened.
-///
-/// What is served is [`history::read_session_display`]'s record rather than the
-/// file's bytes, which is what `docs/contract.md` names this artifact as.
-// llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated server acting as one session, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes or the run's own pointer file recorded, and the store, project and session are read off that record — and what the record names is confined below before it is opened.
-fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
+/// Where one relayed `oneharness-session` record says its invocation was recorded.
+fn relayed_location(event: &Envelope) -> Option<Located> {
     let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
-    session_record(
+    Located::of(
         field("history_dir"),
         field("history_project")?,
         field("history_session")?,
-        id,
+        field("history_id")?,
     )
 }
 
-/// The session a run's pointer file names for `id`, resolved exactly as a
-/// relayed `oneharness-session` record is.
+/// Where the run's pointer file says the invocation `id` was recorded, and when it
+/// began.
 ///
 /// The pointer line carries `history_dir`, `history_project` and
-/// `history_session` in the same spelling as that record, so the one resolver
-/// serves both; the file is read through the SDK's own `verbs::agents`, which
-/// opens the pointer file and nothing else. A run with no pointer file names
-/// nothing, and so does a file this build cannot read: an artifact route
+/// `history_session` in the same spelling as the relayed record, so the one
+/// reading serves both; the file is read through the SDK's own `verbs::agents`,
+/// which opens the pointer file and nothing else. A run with no pointer file
+/// names nothing, and so does a file this build cannot read: an artifact route
 /// answers a session that is there or `404`, never the file's own refusal.
-fn pointed_session(paths: &RunPaths, id: &ArtifactId) -> Option<Vec<u8>> {
+fn pointed_location(paths: &RunPaths, id: &ArtifactId) -> Option<(Located, String)> {
     let agents = onepipeline::verbs::agents(paths, AgentScope::Run).ok()?;
-    let session = agents.sessions.iter().find(|session| {
-        session
+    agents.sessions.iter().find_map(|session| {
+        let run = session
             .runs
             .iter()
-            .any(|run| run.history_id.to_string() == id.as_str())
-    })?;
-    session_record(
-        Some(&session.history_dir),
-        &session.history_project,
-        &session.history_session,
-        id,
-    )
+            .find(|run| run.history_id.to_string() == id.as_str())?;
+        let located = Located::of(
+            Some(&session.history_dir),
+            &session.history_project,
+            &session.history_session,
+            id.as_str(),
+        )?;
+        Some((located, run.started.to_string()))
+    })
 }
 
-/// One record of a oneharness session file, found through the three fields
-/// every pointer at one carries, and read only once its path is proved to
-/// land under the store the pointer named.
-fn typed_session_record(
+/// A history location a record named, proved readable before anything reads it.
+///
+/// `history_project` and `history_session` come off a record, which is external
+/// input exactly as a URL is: each is held to a bare name, and the file they name
+/// is proved to land under the store the record named — a bare name still lands
+/// anywhere if a component of it is a symlink — before the resolver opens it.
+/// `src/AGENTS.md` holds why the record alone names the store and why this reads
+/// without locking.
+struct Located(oneagentgraph::event::Transcript);
+
+impl Located {
+    // llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated server acting as one session, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes or the run's own pointer file recorded, and the store, project and session are read off that record — and what the record names is confined below before it is opened.
+    // llmlint: ignore[comments_earn_their_place] the sentence the rule objects to is the one the manager required survive: the checks are on how a record *spelled* a path, and a bare name that climbs nowhere still lands anywhere if a component is a symlink, so the resolved path is proved under a `StoreRoot` before it is opened. That sentence is what stops a future reader relaxing the confinement.
+    /// **The one thing that must not be relaxed here:** the checks are on how a
+    /// record *spelled* a path, and a bare name that climbs nowhere still lands
+    /// anywhere if a component of it is a symlink, so the resolved path is proved
+    /// under a [`StoreRoot`] before it is opened.
+    fn of(
+        history_dir: Option<&str>,
+        history_project: &str,
+        history_session: &str,
+        history_id: &str,
+    ) -> Option<Self> {
+        // An empty value names no store, which is what oneharness itself reads
+        // `history_dir = ""` as, so it falls back rather than being refused.
+        let named = match history_dir.filter(|value| !value.is_empty()) {
+            Some(named) => Some(NamedStore::try_from(named).ok()?),
+            None => None,
+        };
+        let dir = history::resolve_dir(named.as_ref().map(NamedStore::as_str))?;
+        let project = PathSegment::try_from(history_project).ok()?;
+        let session = PathSegment::try_from(history_session).ok()?;
+        if let Some(store) = StoreRoot::read(&dir) {
+            if let Some(listed) =
+                history::find_session_path(&dir, Some(project.as_str()), session.as_str())
+                    .ok()
+                    .flatten()
+            {
+                // Where it landed is deliberately absent — an operator needs to
+                // know their journal carries a pointer that escapes, and a reader
+                // must not be told what is on the host by reading the answer.
+                if let Confined::Escaped = store.confine(&listed) {
+                    eprintln!(
+                        "onepipeline-api: artifact {history_id}: refusing a oneharness session that resolves outside the store its record named"
+                    );
+                    return None;
+                }
+            }
+        }
+        serde_json::from_value(json!({
+            "history_dir": dir.to_string_lossy(),
+            "history_project": project.as_str(),
+            "history_session": session.as_str(),
+            "history_id": history_id,
+        }))
+        .ok()
+        .map(Self)
+    }
+    // llmlint: ignore-end[authorization_enforced_server_side]
+}
+
+/// What one oneharness invocation's closing record says *about* it — when it
+/// began and finished, the harness and model that ran it, how it ended and what
+/// it spent — and `None` for an invocation that has not closed.
+///
+/// Facts only: what the invocation *said* is read through the engine's resolver
+/// ([`harness_session`]), which carries none of these. Read through the same
+/// confinement every history read here is, and through
+/// [`history::read_session_display`], which takes no lock.
+fn closing_record(
     history_dir: Option<&str>,
     history_project: &str,
     history_session: &str,
     id: &ArtifactId,
 ) -> Option<HistoryRecord> {
-    // An empty value names no store, which is what oneharness itself reads
-    // `history_dir = ""` as, so it falls back rather than being refused.
-    let named = match history_dir.filter(|value| !value.is_empty()) {
-        Some(named) => Some(NamedStore::try_from(named).ok()?),
-        None => None,
-    };
-    let dir = history::resolve_dir(named.as_ref().map(NamedStore::as_str))?;
-    let store = StoreRoot::read(&dir)?;
-    let project = PathSegment::try_from(history_project).ok()?;
-    let session = PathSegment::try_from(history_session).ok()?;
-    let listed = history::find_session_path(&dir, Some(project.as_str()), session.as_str())
-        .ok()
-        .flatten()?;
-    let path = match store.confine(&listed) {
-        Confined::Under(path) => path,
-        // The artifact id and not the pointer: an id has crossed the identifier
-        // boundary and is safe to print, where every field of the pointer is a
-        // record's own bytes and one of them could otherwise write a line of
-        // this log itself. Where it landed is deliberately absent — an operator
-        // needs to know their journal carries a pointer that escapes, and a
-        // reader must not be told what is on the host by reading the answer.
-        Confined::Escaped => {
-            eprintln!(
-                "onepipeline-api: artifact {}: refusing a oneharness session that resolves outside the store its record named",
-                id.as_str()
-            );
-            return None;
-        }
-        Confined::Missing => return None,
+    let located = Located::of(history_dir, history_project, history_session, id.as_str())?;
+    let location = located.0;
+    let store = StoreRoot::read(Path::new(&location.history_dir))?;
+    let listed = history::find_session_path(
+        Path::new(&location.history_dir),
+        Some(&location.history_project),
+        &location.history_session,
+    )
+    .ok()
+    .flatten()?;
+    let Confined::Under(path) = store.confine(&listed) else {
+        return None;
     };
     // Only a finished run carries a `history_id`: an entry still in flight is
-    // keyed by its `run_id` and is not an artifact this route serves.
-    let record = history::read_session_display(path.as_path())
+    // keyed by its `run_id` and has no closing stamps to read.
+    history::read_session_display(path.as_path())
         .ok()?
         .into_iter()
         .find_map(|entry| match entry {
@@ -5032,26 +5117,132 @@ fn typed_session_record(
                 Some(record)
             }
             _ => None,
-        })?;
-    Some(record)
+        })
 }
-// llmlint: ignore-end[authorization_enforced_server_side]
 
-/// The artifact keeps its established serialization; timeline metadata consumes
-/// the producer's typed record without serializing and parsing its transcript.
-fn session_record(
-    history_dir: Option<&str>,
-    history_project: &str,
-    history_session: &str,
-    id: &ArtifactId,
-) -> Option<Vec<u8>> {
-    serde_json::to_vec_pretty(&typed_session_record(
-        history_dir,
-        history_project,
-        history_session,
+/// The oneharness invocation one `oneharness_session` artifact names, read whole
+/// through the engine's resolver and served as the one conversation turn it was:
+/// the prompt it was given, every event it recorded, and what it closed with.
+///
+/// `content` is that turn as JSON, whole and never tailed, and `turns` the same
+/// turn structured. A pointer at a file or an entry the store no longer holds is
+/// served, not refused: its turn says `transcript unavailable: <path>: <why>` in
+/// the prompt's place, which is the resolver's own line, so a reader is told what
+/// is gone rather than shown nothing. `None` only for a pointer this API will not
+/// follow — one that climbs, carries a separator or resolves out of its store.
+fn harness_session(located: Located, id: &ArtifactId, at: &str) -> Option<Value> {
+    let location = &located.0;
+    let read = transcript::session(location);
+    let record = closing_record(
+        Some(&location.history_dir),
+        &location.history_project,
+        &location.history_session,
         id,
-    )?)
-    .ok()
+    );
+    let unavailable = match (&read.instruction, &read.closed) {
+        (transcript::Read::Unavailable(_), None | Some(transcript::Read::Unavailable(_)))
+            if read.events.is_empty() =>
+        {
+            Some(read.instruction.description())
+        }
+        _ => None,
+    };
+    let mut words = Words::default();
+    let mut tools = Vec::new();
+    for (index, event) in &read.events {
+        match event.text() {
+            Some(text) => match transcript::tool_kind(text) {
+                Some(kind) => {
+                    let (input, output) = event.tool().unwrap_or_default();
+                    tools.push(json!({
+                        "index": index,
+                        "kind": transcript::kind_word(kind),
+                        "name": transcript::tool_name(text),
+                        "input": input,
+                        "output": output,
+                    }));
+                }
+                None => {
+                    words.took(transcript::words_kind(text), Some(&event.words()));
+                }
+            },
+            None => tools.push(json!({
+                "index": index,
+                "kind": graph::TOOL_RESULT,
+                "name": null,
+                "input": null,
+                "output": event.description(),
+            })),
+        }
+    }
+    let prompt = read.instruction.words();
+    let said = read.closed.as_ref().map(transcript::Read::words);
+    let fact = |name: &str| {
+        record
+            .as_ref()
+            .and_then(|record| serde_json::to_value(record).ok())
+            .and_then(|record| record.get(name).cloned())
+            .unwrap_or(Value::Null)
+    };
+    let turn = json!({
+        "assistant": words.assistant(said.clone().filter(|said| !said.is_empty())),
+        "durationMs": fact("duration_ms"),
+        "failureKind": fact("failure_kind"),
+        "finishedAt": fact("finished_at"),
+        "harness": record.as_ref().map_or("oneharness", |record| record.harness_id.as_str()),
+        "id": id.as_str(),
+        "model": fact("model"),
+        "reasoning": words.reasoning(),
+        "startedAt": fact("started_at"),
+        "status": match &record {
+            Some(_) => fact("status"),
+            None if read.closed.is_none() => json!("running"),
+            None => json!("unknown"),
+        },
+        "timestamp": record.as_ref().map_or(at, |record| record.timestamp.as_str()),
+        "tools": tools,
+        "unknown": {},
+        "usage": record.as_ref().map_or_else(|| json!({}), |record| json!({
+            "inputTokens": record.usage.input_tokens,
+            "outputTokens": record.usage.output_tokens,
+            "cacheReadTokens": record.usage.cache_read_tokens,
+            "cacheWriteTokens": record.usage.cache_write_tokens,
+            "costUsd": record.usage.cost_usd,
+        })),
+        "user": prompt,
+    });
+    // The invocation's own record of itself, whole: its facts as oneharness
+    // closed it, and its prompt and reply as the resolver reads them — its
+    // events are the turn's, structured, rather than a second copy here.
+    let mut content = match &record {
+        Some(record) => serde_json::to_value(record).ok()?,
+        None => json!({ "history_id": id.as_str(), "status": "running" }),
+    };
+    if let Value::Object(fields) = &mut content {
+        fields.shift_remove("events");
+        fields.insert("prompt".into(), json!(prompt));
+        // A run that closed saying nothing recorded no text, which the resolver
+        // reads as an empty one; the record's own `null` is the truer answer.
+        let silent = record.as_ref().is_some_and(|record| record.text.is_none());
+        fields.insert(
+            "text".into(),
+            match said {
+                Some(said) if !(silent && said.is_empty()) => json!(said),
+                _ => Value::Null,
+            },
+        );
+    }
+    let mut served = json!({
+        "id": id.as_str(),
+        "kind": ReferenceKind::OneharnessSession.as_str(),
+        "content": serde_json::to_string_pretty(&content).ok()?,
+        "truncated": false,
+        "turns": [turn],
+    });
+    if let Some(unavailable) = unavailable {
+        served["unavailable"] = json!(unavailable);
+    }
+    Some(served)
 }
 
 /// The scope a timeline request asks for.
@@ -5384,7 +5575,7 @@ pub(crate) fn timeline_harnesses_over(
             let recorded = ArtifactId::try_from(run.history_id.to_string().as_str())
                 .ok()
                 .and_then(|id| {
-                    typed_session_record(
+                    closing_record(
                         Some(&session.history_dir),
                         &session.history_project,
                         &session.history_session,
@@ -6332,6 +6523,30 @@ fn timeline_event(
     let fields = record_fields(event);
     if !fields.is_empty() {
         item.insert("fields".into(), Value::Object(fields));
+    }
+    // A turn record's one line, as the engine's resolver describes the entry it
+    // points at — a shell call's command, a file tool's verb and path, a search's
+    // pattern, a message's first line — or its `transcript unavailable` line. The
+    // browser shows this and never derives its own.
+    if let Some(read) = transcript::read(event, None) {
+        item.insert("description".into(), json!(read.description()));
+    }
+    // Where a tool event sits in the conversation it is a turn of: the producer's
+    // own index and, where the harness minted one, the call's identity — what a
+    // reader opening the row is focused on.
+    if event.kind.0 == graph::TURN_ACTIVITY {
+        if let Some(index) = event.payload.get(graph::INDEX).and_then(Value::as_u64) {
+            let mut tool = Map::new();
+            tool.insert("index".into(), json!(index));
+            if let Some(identity) = event
+                .payload
+                .get(graph::TOOL_CALL_ID)
+                .and_then(Value::as_str)
+            {
+                tool.insert("tool_call_id".into(), json!(identity));
+            }
+            item.insert("tool".into(), Value::Object(tool));
+        }
     }
     item.insert("kind".into(), json!(event.kind.0));
     item.insert("at".into(), json!(event.ts));
@@ -7531,6 +7746,13 @@ impl ActivityFold {
             entry.insert("step".into(), json!(step));
         }
         entry.insert("at".into(), json!(stamp));
+        // The call in one line, as the engine's resolver describes it.
+        entry.insert(
+            "description".into(),
+            json!(transcript::read(event, None)
+                .map(|read| read.description())
+                .unwrap_or_default()),
+        );
         for field in ["kind", "name", "detail"] {
             entry.insert(
                 field.into(),

@@ -257,8 +257,16 @@ export const API_V2_FILTER_PROFILES = {
  * detail's `run.live_activity`. Every field `24` served is served with the same
  * meaning; the literal moves because a client written against `24` re-reads
  * whole payloads on every change and has never seen `live_activity`.
+ *
+ * `26` reads every turn whole from its transcript: a conversation's prompts,
+ * replies and tool calls come out of the history file each record points at,
+ * with no cut flag on a run recorded with references and `transcript
+ * unavailable: <path>: <why>` where a reference resolves to nothing; a live tool
+ * event gains `toolCallId`, a live-activity entry `description`, and an
+ * `oneharness_session` artifact `turns` and `unavailable`. The literal moves
+ * because a client written against `25` shows a cut prompt as the whole of one.
  */
-export const TELEMETRY_SCHEMA_VERSION = 25;
+export const TELEMETRY_SCHEMA_VERSION = 26;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -331,8 +339,13 @@ export const TELEMETRY_SCHEMA_VERSION = 25;
  * planner changed what a running turn was doing is indistinguishable from any
  * other journal record — and the turn after it reads as a worker inexplicably
  * switching tasks.
+ *
+ * `14` describes every turn record in one line: a turn event gains
+ * `description`, the server's (the engine resolver's) one line for the entry it
+ * points at, and a `turn-activity` event `tool`, where it sits in its
+ * conversation. The browser shows the line and never derives its own.
  */
-export const TIMELINE_SCHEMA_VERSION = 13;
+export const TIMELINE_SCHEMA_VERSION = 14;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);

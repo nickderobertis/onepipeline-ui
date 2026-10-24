@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { TELEMETRY_SCHEMA_VERSION } from "@onepipeline-ui/dag-model";
 import { defaultResponder, telemetryHarness } from "../test/telemetry-harness";
 import { App } from "./App";
 
@@ -28,7 +29,7 @@ async function setupShutdown() {
       sent.push(String(init?.body));
       return Response.json({
         api_version: 2,
-        telemetry_schema_version: 25,
+        telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
         observed_at: "2026-08-07T12:00:00Z",
         scope: "host",
         root: "/runs",

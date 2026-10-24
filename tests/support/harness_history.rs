@@ -385,3 +385,15 @@ fn result(prompt: &str, text: &str, model: Model<'_>) -> RunResult {
     }
     serde_json::from_value(result).expect("the run result oneharness normalizes")
 }
+
+/// What an `oneharness_session` artifact's `content` is for one finished run:
+/// the record oneharness closed it with, whole, less the events — those are the
+/// served turn's, read entry by entry through the engine's resolver.
+pub fn served_record(record: &impl serde::Serialize) -> String {
+    let mut record = serde_json::to_value(record).expect("a record serializes");
+    record
+        .as_object_mut()
+        .expect("a record is an object")
+        .shift_remove("events");
+    serde_json::to_string_pretty(&record).expect("a record prints")
+}
