@@ -495,6 +495,11 @@ fn as_served_at(mut timeline: Value, base_schema: u64) -> Value {
             span.as_object_mut().expect("span").remove("dispatch_group");
         }
         for event in span["events"].as_array_mut().into_iter().flatten() {
+            // Schema 14 gives a `turn-activity` the `reference` the other turn
+            // records already carried, so the field is new on that kind alone.
+            if base_schema < 14 && event["kind"] == "turn-activity" {
+                event.as_object_mut().expect("event").remove("reference");
+            }
             for field in &added {
                 // A dotted field was added inside an object the event already
                 // carried, and only the leaf is newer than the base.

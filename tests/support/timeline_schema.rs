@@ -22,4 +22,6 @@ pub const TIMELINE_EVENT_ADDITIONS: &[(u64, &str)] = &[
     (13, "dispatch_group"),
     (13, "persona"),
     (13, "fields"),
+    (14, "description"),
+    (14, "tool"),
 ];
