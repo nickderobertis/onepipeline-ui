@@ -291,11 +291,15 @@ pub(crate) fn read(event: &Envelope, sources: Option<&dyn Candidates>) -> Option
 /// output's **tail**, so the whole text starts or ends with the copy; an entry
 /// that does not is some other turn's, however its location was found.
 fn recover(event: &Envelope, copy: &Text, source: &Transcript) -> Option<Resolved> {
-    let role = event.payload.get("role").and_then(Value::as_str);
     let reference = match event.kind.0.as_str() {
         "turn-started" => TranscriptRef::Instruction(source.clone()),
-        "turn-message" if role == Some("user") => TranscriptRef::Decision(source.clone()),
-        "turn-message" => TranscriptRef::Message(source.clone()),
+        // Only the agent's own words are a turn's reply; a supervisor's message
+        // is no agent turn's text, and is never read whole from here.
+        "turn-message"
+            if event.payload.get("role").and_then(Value::as_str) == Some("assistant") =>
+        {
+            TranscriptRef::Message(source.clone())
+        }
         "turn-activity" => TranscriptRef::Activity(ActivityTranscript {
             location: source.clone(),
             index: event.payload.get("index").and_then(Value::as_u64)?,

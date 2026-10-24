@@ -5046,6 +5046,9 @@ impl Located {
         history_session: &str,
         history_id: &str,
     ) -> Option<Self> {
+        // Checked first: it is what the refusal below is logged under, and a
+        // record's bytes must not reach the operator's log unchecked.
+        let history_id = ArtifactId::try_from(history_id).ok()?;
         // An empty value names no store, which is what oneharness itself reads
         // `history_dir = ""` as, so it falls back rather than being refused.
         let named = match history_dir.filter(|value| !value.is_empty()) {
@@ -5066,7 +5069,8 @@ impl Located {
                 // must not be told what is on the host by reading the answer.
                 if let Confined::Escaped = store.confine(&listed) {
                     eprintln!(
-                        "onepipeline-api: artifact {history_id}: refusing a oneharness session that resolves outside the store its record named"
+                        "onepipeline-api: artifact {}: refusing a oneharness session that resolves outside the store its record named",
+                        history_id.as_str()
                     );
                     return None;
                 }
@@ -5076,7 +5080,7 @@ impl Located {
             "history_dir": dir.to_string_lossy(),
             "history_project": project.as_str(),
             "history_session": session.as_str(),
-            "history_id": history_id,
+            "history_id": history_id.as_str(),
         }))
         .ok()
         .map(Self)

@@ -470,13 +470,19 @@ fn a_run_recorded_before_references_reads_each_session_whole_wherever_a_whole_co
     let neither_prompt = long_prompt("neither");
     let pointed_prompt = long_prompt("pointed");
     let (whole_output, kept_tail) = long_output();
+    let reply = |which: &str| {
+        format!(
+            "{which}: {}The reply ends here, after the bound.",
+            "Ran the gate and it passed. ".repeat(200)
+        )
+    };
     let recorded = harness_history::record_with_tool(
         &host.path().join("history"),
         "a worker that died before it settled",
         &historied_prompt,
         "just gate",
         &whole_output,
-        "the gate passed",
+        &reply(HISTORIED),
     );
     let report = serde_json::to_string(&onejudge::Report::new(
         onejudge::Transcript {
@@ -543,13 +549,16 @@ fn a_run_recorded_before_references_reads_each_session_whole_wherever_a_whole_co
                     "started_at": "2026-08-07T12:04:00.000Z",
                 }),
             );
+            // The call's summary, cut as the recorder cuts one: whitespace
+            // collapsed and the head kept.
             relay(
                 stream,
                 "turn-activity",
                 json!({
                     "kind": "tool_call",
                     "name": "Bash",
-                    "detail": "just gate",
+                    "detail": "{\"command\":\"just gate\"",
+                    "truncated": true,
                     "tool_call_id": harness_history::TOOL_CALL_ID,
                     "index": 0,
                 }),
@@ -565,6 +574,16 @@ fn a_run_recorded_before_references_reads_each_session_whole_wherever_a_whole_co
                     "output_truncated": true,
                     "tool_call_id": harness_history::TOOL_CALL_ID,
                     "index": 1,
+                }),
+            );
+            relay(
+                stream,
+                "turn-message",
+                json!({
+                    "turn": 1,
+                    "role": "assistant",
+                    "text": head(&reply(stream)),
+                    "truncated": true,
                 }),
             );
         }
@@ -643,6 +662,20 @@ fn a_run_recorded_before_references_reads_each_session_whole_wherever_a_whole_co
     let call = &historied["tools"][0];
     assert_eq!(call["output"], json!(whole_output), "{call}");
     assert!(call.get("output_truncated").is_none(), "{call}");
+    // The call's input as the harness recorded it, found by the call's identity,
+    // where the copy held a cut summary of it.
+    assert_eq!(call["input"], json!({ "command": "just gate" }), "{call}");
+    assert!(call.get("input_truncated").is_none(), "{call}");
+    // And the reply whole, from the same invocation.
+    assert_eq!(
+        historied["assistant"],
+        json!(reply(HISTORIED)),
+        "{historied}"
+    );
+    assert!(
+        historied["unknown"].get("truncated").is_none(),
+        "{historied}"
+    );
 
     // No report and no pointer relayed: the run's own pointer file names the
     // invocation at the node, and its prompt is recovered from there.
@@ -659,6 +692,15 @@ fn a_run_recorded_before_references_reads_each_session_whole_wherever_a_whole_co
     let call = &neither["tools"][0];
     assert_eq!(call["output"], json!(kept_tail), "{call}");
     assert_eq!(call["output_truncated"], json!(true), "{call}");
+    assert_eq!(call["input_truncated"], json!(true), "{call}");
+    // Its reply's copy, though the historied member's whole reply is in a file
+    // this member was pointed at: that invocation is another turn's.
+    assert_eq!(
+        neither["assistant"],
+        json!(head(&reply(NEITHER))),
+        "{neither}"
+    );
+    assert_eq!(neither["unknown"]["truncated"], json!(true), "{neither}");
 }
 
 /// The node timeline's description of each `turn-activity` the referenced
