@@ -886,6 +886,38 @@ fn a_release_archive_for_this_host_is_installed_without_compiling() {
     );
 }
 
+/// A sibling installed from its release archive is stamped and left alone after:
+/// with the Release gone from the mirror, the next run neither fetches nor
+/// compiles, so a bootstrap pays for the archive once.
+#[cfg(unix)]
+#[test]
+fn a_sibling_installed_from_its_archive_is_not_fetched_again() {
+    let fixture = Fixture::new();
+    fixture.publish_archive(Release::linked().as_str(), None);
+    let first = fixture.run();
+    assert!(first.status.success(), "{}", stderr(&first));
+    fs::remove_dir_all(fixture.dir.path().join("releases")).expect("withdraw the Release");
+    fs::create_dir_all(fixture.dir.path().join("releases")).expect("the empty mirror");
+
+    let output = fixture.run();
+
+    assert!(
+        output.status.success(),
+        "a tree provisioned from the archive failed the check:\n{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        fixture.calls(),
+        "",
+        "the archived sibling was not taken as provisioned, so the recipe compiled it"
+    );
+    assert_eq!(
+        fixture.provisioned_version().as_deref(),
+        Some(format!("onepipeline {}", Release::linked().as_str()).as_str()),
+        "the archive's binary is no longer the provisioned sibling"
+    );
+}
+
 /// Under a git pin the CLI is compiled from that exact commit, although a Release
 /// of the same version publishes an archive for this host: that release is the
 /// build without the commit the lock links. Once provisioned it is left alone,
