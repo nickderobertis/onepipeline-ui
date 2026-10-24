@@ -8,7 +8,11 @@
   "targets": {
     "test": {
       "command": "npx playwright test --config apps/dag-ui-e2e/playwright.config.ts",
-      "inputs": ["default", "apiServerSurface"],
+      "inputs": [
+        "default",
+        "apiServerSurface",
+        "{workspaceRoot}/tests/fixtures/history/**"
+      ],
       "dependsOn": [
         {
           "projects": ["dag-ui"],
