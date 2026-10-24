@@ -516,3 +516,15 @@ only in its version and in the engine's own test harness, so the linked
 dependencies, routes, MSRV and every served payload are unchanged beyond the
 release `/healthz` reports. This changes the engine types carried by
 ApiError::from_engine and the other engine-typed public items.
+The git commit f06d041 on onepipeline's main (#1128), after 0.89.1, is the
+engine whose stop ends every process a node dispatch started, including a
+provider turn a dispatch starts while the stop is in progress. A host holds
+this reader and its engine to one linked engine, so it can adopt that stop
+only once this crate links it. No release carries it yet and its library is
+still versioned 0.89.1, so this links that commit from git, and
+`tests/packaging.rs` holds the lock to that source as well as to the version.
+`POST /api/v2/runs/{run}/stop` runs the teardown in this process, so the
+server now ends what the stop used to miss. No route, payload or MSRV
+changes, and it links the same onetaskgraph 0.11.1, onevcs 0.56.9 and
+oneagentgraph 0.8.0 as 0.89.0. This changes the engine types carried by
+ApiError::from_engine and the other engine-typed public items.
