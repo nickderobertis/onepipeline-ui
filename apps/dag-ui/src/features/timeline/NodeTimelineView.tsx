@@ -42,8 +42,8 @@ import {
   NODE_TAB_LABELS,
   type NodeTab,
 } from "../../lib/useUrlSelection";
-import { CheckRuntime } from "../remote/CheckRuntime";
-import { TIMELINE_TIME_MARKS } from "./axis";
+import { boundedZoom, TIMELINE_TIME_MARKS } from "./axis";
+import { CheckRuntime } from "./CheckRuntime";
 import { ControlBadge } from "./ControlBadge";
 import { EventCategoryIcon } from "./event-category";
 import { NodeRelease } from "./release";
@@ -427,6 +427,9 @@ function NodeExecution({
   );
   const sync = useTimelineScrollSync(entries);
   const [expanded, setExpanded] = useState(false);
+  // Held here rather than inside the plot so every zoom is bounded: the plot's
+  // own zoom would narrow past the last labelled second.
+  const [zoom, setZoom] = useState<readonly [number, number]>();
   const compactItems = useMemo(
     () => compactTimelineItems(projection.items, projection.lanes),
     [projection.items, projection.lanes],
@@ -452,6 +455,17 @@ function NodeExecution({
         ...projection.markers.map(({ at }) => ({ start: at })),
       ]),
     [projection.items, projection.markers],
+  );
+  // The window of exactly what the plot is drawing, which is what it shows when
+  // nobody has zoomed it. Always handed to the plot, so every zoom passes through
+  // `boundedZoom` and none is held inside the plot where it could not be.
+  const shown = useMemo(
+    () =>
+      timeRange([
+        ...(expanded ? projection.items : compactItems),
+        ...compactMarkers.map(({ at }) => ({ start: at })),
+      ]),
+    [expanded, projection.items, compactItems, compactMarkers],
   );
   const cursor =
     sync.cursor === undefined
@@ -493,7 +507,17 @@ function NodeExecution({
           lanes={projection.lanes}
           markers={compactMarkers}
           onExpandedChange={setExpanded}
+          onRangeChange={(next) =>
+            // A reset asks for the whole window back; a live run's window keeps
+            // growing, so it is followed rather than pinned.
+            setZoom(
+              next[0] <= shown[0] && next[1] >= shown[1]
+                ? undefined
+                : boundedZoom(next),
+            )
+          }
           onSelect={(entry) => select(entry.id)}
+          range={zoom ?? shown}
           selectedId={selectedItemId}
         />
       </section>

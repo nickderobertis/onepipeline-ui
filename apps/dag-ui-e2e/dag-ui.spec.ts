@@ -3260,21 +3260,31 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
 
   // Read every axis in one browser task: a telemetry update can advance the
   // live range between separate locator reads, even though every row shares it.
+  // One scale is one window: every axis opens and closes on the same markers.
+  // How densely each marks the time between follows that row's own width — a
+  // row whose lanes scroll is a scrollbar narrower — so the outer markers are
+  // what is compared. Polled, because each row measures its width once laid out.
   const sharedTicks = async () => {
-    const ticks = await page
-      .locator(".graph-timeline")
-      .getByTestId("timeline-axis")
-      .evaluateAll((axes) =>
-        axes.map((axis) => {
-          if (!(axis instanceof HTMLElement)) {
-            throw new Error("Timeline axis must be an HTML element");
-          }
-          return axis.innerText;
-        }),
-      );
-    expect(ticks.length).toBeGreaterThan(3);
-    expect(new Set(ticks).size).toBe(1);
-    return ticks[0] ?? "";
+    let shared = "";
+    await expect
+      .poll(async () => {
+        const ticks = await page
+          .locator(".graph-timeline")
+          .getByTestId("timeline-axis")
+          .evaluateAll((axes) =>
+            axes.map((axis) => {
+              if (!(axis instanceof HTMLElement)) {
+                throw new Error("Timeline axis must be an HTML element");
+              }
+              const lines = axis.innerText.split("\n").filter(Boolean);
+              return `${lines[0]}\n${lines.at(-1)}`;
+            }),
+          );
+        shared = ticks[0] ?? "";
+        return ticks.length > 3 && new Set(ticks).size === 1;
+      })
+      .toBe(true);
+    return shared;
   };
   const before = await sharedTicks();
 
@@ -3714,14 +3724,17 @@ test("keeps the timeline's clock readable when its lanes outgrow the view", asyn
         .toBeLessThanOrEqual(1);
     }
     expect(await clipped()).toBe(0);
-    // Still the axis it was, not a stub of one: its markers, each naming the
-    // wall clock and the elapsed time the reader tracks lanes against.
-    const ticks = timeline(page).getByTestId("timeline-axis").locator("span");
-    await expect(ticks.nth(1)).toBeAttached();
+    // Still the axis it was, not a stub of one: however far the wheel that
+    // scrolled the region also zoomed the plot, a time is on screen — a marker
+    // naming the wall clock and the elapsed time the reader tracks lanes
+    // against.
+    const ticks = timeline(page).getByText(
+      /^\d{2}:\d{2}:\d{2}(?: [AP]M)? \+\d+(?:\.\d+)? (?:ms|s|min)$/,
+    );
+    await expect(ticks.first()).toBeInViewport();
     for (const tick of await ticks.allTextContents()) {
       expect(tick).toMatch(/\d{2}:\d{2}:\d{2}.*[+−]\d/u);
     }
-    await expect(ticks.first()).toBeInViewport();
   }
 });
 

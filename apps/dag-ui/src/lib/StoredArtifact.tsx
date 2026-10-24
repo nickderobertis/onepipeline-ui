@@ -66,7 +66,9 @@ export function StoredArtifact({
               not shown.
             </p>
           )}
-          <pre>{content}</pre>
+          <section aria-label={heading}>
+            <pre>{content}</pre>
+          </section>
         </>
       )}
     </>

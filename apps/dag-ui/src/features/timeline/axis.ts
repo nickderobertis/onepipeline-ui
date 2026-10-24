@@ -12,3 +12,26 @@ export const TIMELINE_TIME_MARKS = {
   crosshair: true,
   ticks: { minSpacingPx: 80 },
 } as const;
+
+/**
+ * The narrowest window a reader may zoom a timeline to, in milliseconds.
+ *
+ * The axis marks round steps no finer than a second, so a window narrower than
+ * one holds no marker at all and the reader is left with no time on screen. Two
+ * seconds always holds at least one whole second, so the clock stays readable
+ * at every zoom this view allows.
+ */
+export const MIN_ZOOM_MS = 2_000;
+
+/**
+ * `next`, widened about its middle to at least {@link MIN_ZOOM_MS}, so a zoom the
+ * reader asks for never leaves the axis without a labelled time.
+ */
+export function boundedZoom(
+  next: readonly [number, number],
+): readonly [number, number] {
+  const [start, end] = next;
+  if (end - start >= MIN_ZOOM_MS) return next;
+  const middle = (start + end) / 2;
+  return [middle - MIN_ZOOM_MS / 2, middle + MIN_ZOOM_MS / 2];
+}

@@ -31,7 +31,9 @@ const factsSchema = z.object({
     report: z.string(),
     reportHead: z.string(),
     session: z.string(),
+    log: z.string(),
   }),
+  log: z.string(),
   sessions: z.record(
     z.string(),
     z.object({ session: z.string(), historyId: z.string() }),
@@ -161,13 +163,33 @@ test("a stored report longer than a preview is shown whole", async ({
 }) => {
   await openNode(page, facts.run, "reported");
   await openRow(page, "member-settled");
-  const report = detail(page).locator("pre").first();
+  const report = detail(page).getByLabel("Worker report");
   await expect(report).toContainText(facts.sentinels.reportHead);
   await expect(report).toContainText(facts.sentinels.report);
   expect(((await report.textContent()) ?? "").length).toBeGreaterThan(4000);
   await expect(
     detail(page).getByRole("button", { name: /^Expand/ }),
   ).toHaveCount(0);
+});
+
+test("a log longer than the end of it the server keeps says its beginning is not shown", async ({
+  page,
+}) => {
+  await openNode(page, facts.run, "reported");
+  const plot = page.getByRole("region", { name: "Node timeline" });
+  await plot.getByRole("button", { name: "Expand timeline" }).click();
+  await plot
+    .getByRole("button", { name: new RegExp(`Verification.*${facts.log}`) })
+    .first()
+    .click();
+  const log = detail(page).getByLabel("Full log");
+  // The end of it, to its last line, and a line saying the rest is not shown —
+  // never a cut log passed off as the whole of one.
+  await expect(log).toContainText(facts.sentinels.log);
+  await expect(log).not.toContainText("the first line the gate printed");
+  await expect(detail(page)).toContainText(
+    "The server keeps the end of a log this long; its beginning is not shown.",
+  );
 });
 
 test("a run recorded before references is read whole wherever a whole copy exists", async ({
@@ -192,11 +214,13 @@ test("a run recorded before references is read whole wherever a whole copy exist
     } else {
       // Neither: the recorder's copy, said to be one.
       await expect(turn).not.toContainText(facts.sentinels.instruction);
-      await expect(
-        detail(page)
-          .getByRole("note")
-          .filter({ hasText: "Cut by the recorder" }),
-      ).toContainText("no whole copy exists");
+      const note = detail(page)
+        .getByRole("note")
+        .filter({ hasText: "Cut by the recorder" });
+      await expect(note).toContainText(
+        "cut its prompt, its reply, a tool's output, a tool's input to its bound",
+      );
+      await expect(note).toContainText("no whole copy exists");
     }
   }
 });
@@ -280,14 +304,80 @@ test("a tool call recorded while the reader watches is described in a line and o
   const row = listed.getByRole("button", { name: `Open ${command}` });
   await expect(row).toBeVisible({ timeout: 15_000 });
   await row.click();
-  // Opened on the conversation, focused on that call.
-  const current = detail(page).locator('[aria-current="true"]');
-  await expect(
-    current.getByRole("button", { name: "Bash tool details" }),
-  ).toBeVisible();
+  // Opened on the conversation, focused on that call: its entry is the one
+  // marked current.
+  const marked = (call: string) =>
+    detail(page)
+      .getByRole("button", { name: "Bash tool details" })
+      .filter({ hasText: call })
+      .evaluate(
+        (button) =>
+          button.closest("[aria-current]")?.getAttribute("aria-current") ??
+          null,
+      );
+  await expect.poll(() => marked(command)).toBe("true");
   await expect(
     detail(page).getByLabel("Bash tool input").first(),
   ).toContainText(command);
+
+  // A call the harness minted no identity for is found by the index the
+  // producer gave it, and opens focused the same way.
+  const unnamed = "just check --affected-by the-unnamed-call";
+  appendFileSync(
+    join(store, facts.project, `${live.session}.jsonl`),
+    `${JSON.stringify({
+      type: "event",
+      schema_version: "1.1",
+      run_id: live.historyId,
+      harness: "claude-code",
+      variant: "alternate",
+      harness_id: "claude-code:alternate",
+      event: {
+        kind: "tool_call",
+        name: "Bash",
+        input: { command: unnamed },
+        output: null,
+        index: index + 1,
+        tool_call_id: null,
+      },
+    })}\n`,
+  );
+  appendRecords(journal, [
+    {
+      v: 1,
+      ts: new Date().toISOString(),
+      stream,
+      seq: seq + 1,
+      source: "agentgraph",
+      kind: "turn-activity",
+      labels: {
+        run_id: facts.run,
+        node: "live",
+        member: "worker",
+        persona: "worker",
+        session: facts.conversations.live,
+      },
+      payload: {
+        transcript: {
+          history_dir: store,
+          history_project: facts.project,
+          history_session: live.session,
+          history_id: live.historyId,
+          index: index + 1,
+        },
+        kind: "tool_call",
+        name: "Bash",
+        index: index + 1,
+      },
+      artifacts: [],
+    },
+  ]);
+  await page.getByRole("button", { name: "Close detail" }).click();
+  const unnamedRow = listed.getByRole("button", { name: `Open ${unnamed}` });
+  await expect(unnamedRow).toBeVisible({ timeout: 15_000 });
+  await unnamedRow.click();
+  await expect.poll(() => marked(unnamed)).toBe("true");
+  await expect.poll(() => marked(command)).toBeNull();
 });
 
 test("what the server serves of a turn is what the client's schemas read", async ({

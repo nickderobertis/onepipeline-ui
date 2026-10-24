@@ -175,6 +175,67 @@ impl<'a> Sources<'a> {
     }
 }
 
+/// The whole invocations a cut copy may be recovered from.
+pub(crate) trait Candidates {
+    /// The invocations, read once and kept.
+    fn candidates(&self) -> &[Transcript];
+}
+
+impl Candidates for Sources<'_> {
+    fn candidates(&self) -> &[Transcript] {
+        self.get()
+    }
+}
+
+/// The invocation one turn ran as, among a session's sources: the one whose
+/// prompt begins with the instruction the turn's own record carried.
+///
+/// A turn's reply and its tool outputs are recovered from that invocation and
+/// no other. A tool's output is a tail, and two turns that ran the same command
+/// can have returned the same tail — so an output test alone cannot tell which
+/// turn's file it is reading, where the prompt each turn was given can.
+pub(crate) struct TurnSources<'a, 's> {
+    sources: &'s Sources<'a>,
+    started: Option<&'s Envelope>,
+    found: OnceCell<Vec<Transcript>>,
+}
+
+impl<'a, 's> TurnSources<'a, 's> {
+    /// The invocation the turn `started` opened, among `sources`.
+    pub(crate) fn of(sources: &'s Sources<'a>, started: Option<&'s Envelope>) -> Self {
+        Self {
+            sources,
+            started,
+            found: OnceCell::new(),
+        }
+    }
+}
+
+impl Candidates for TurnSources<'_, '_> {
+    fn candidates(&self) -> &[Transcript] {
+        self.found.get_or_init(|| {
+            let Some(copy) = self
+                .started
+                .and_then(|event| event.payload.get("instruction"))
+                .and_then(Value::as_str)
+            else {
+                return Vec::new();
+            };
+            self.sources
+                .get()
+                .iter()
+                .filter(|source| {
+                    matches!(
+                        resolve(&TranscriptRef::Instruction((*source).clone())),
+                        Ok(Resolved { text: Text::Instruction(whole), .. }) if whole.starts_with(copy)
+                    )
+                })
+                .cloned()
+                .collect()
+        })
+    }
+}
+
 /// Whether a relayed record belongs to `session` by its own label or by the
 /// `{stream}.{member}` a session id is minted from.
 fn spells(event: &Envelope, session: &str) -> bool {
@@ -195,7 +256,7 @@ fn location(fields: &Value) -> Option<Transcript> {
 
 /// What one relayed record's content reads as, or `None` for a record that
 /// carries no turn content.
-pub(crate) fn read(event: &Envelope, sources: Option<&Sources<'_>>) -> Option<Read> {
+pub(crate) fn read(event: &Envelope, sources: Option<&dyn Candidates>) -> Option<Read> {
     let reference = match TranscriptRef::of(&event.kind.0, &event.payload)? {
         Ok(reference) => reference,
         Err(unresolved) => return Some(Read::Unavailable(unresolved)),
@@ -216,7 +277,7 @@ pub(crate) fn read(event: &Envelope, sources: Option<&Sources<'_>>) -> Option<Re
     }
     let whole = sources.and_then(|sources| {
         sources
-            .get()
+            .candidates()
             .iter()
             .find_map(|source| recover(event, &copy.text, source))
     });

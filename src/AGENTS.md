@@ -472,7 +472,9 @@ launches append (`onepipeline::agents`), so a nested turn no envelope relays is
 still named; `verbs::agents` reads that file and nothing else. A run recorded
 before references keeps its bounded copies, and `payload::transcript::Sources`
 recovers a cut one whole from either of those two only where the whole entry
-begins (or, for a tool's output, ends) with the copy. The constraints, each
+begins (or, for a tool's output, ends) with the copy — and a turn's reply and
+outputs only from the invocation whose prompt that turn's own instruction copy
+begins (`TurnSources`), because two turns can return one output. The constraints, each
 because the obvious alternative is worse:
 
 - **Link `oneharness-core`; never spawn the `oneharness` CLI.** A process is a

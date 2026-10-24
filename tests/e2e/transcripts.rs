@@ -461,12 +461,14 @@ fn a_run_recorded_before_references_reads_each_session_whole_wherever_a_whole_co
     const REPORTED: &str = "node-scope-1786925520201-4311";
     const HISTORIED: &str = "node-scope-1786925520202-4311";
     const NEITHER: &str = "node-scope-1786925520203-4311";
+    const POINTED: &str = "node-scope-1786925520204-4311";
     const REPORT_ARTIFACT: &str = "report-node-scope-1786925520201-4311";
 
     let host = tempfile::tempdir().expect("the host's directories");
     let reported_prompt = long_prompt("reported");
     let historied_prompt = long_prompt("historied");
     let neither_prompt = long_prompt("neither");
+    let pointed_prompt = long_prompt("pointed");
     let (whole_output, kept_tail) = long_output();
     let recorded = harness_history::record_with_tool(
         &host.path().join("history"),
@@ -506,10 +508,29 @@ fn a_run_recorded_before_references_reads_each_session_whole_wherever_a_whole_co
                 payload,
             );
         };
+        // A member nothing relayed a pointer for, whose invocation the run's own
+        // pointer file names at the node it ran at — the record a member that died
+        // before it settled leaves.
+        harness_history::record_pointed(
+            &host.path().join("history"),
+            &harness_history::Pointed {
+                pointer_file: &onepipeline::views::RunPaths::under(root, fixture_run::RUN_ID)
+                    .oneharness_sessions(),
+                labels: &format!(
+                    "onepipeline.run_id={},onepipeline.node={}",
+                    fixture_run::RUN_ID,
+                    fixture_run::SHIP_NODE_ID
+                ),
+            },
+            "a worker the pointer file names",
+            &pointed_prompt,
+            "the pointed worker's reply",
+        );
         for (stream, prompt) in [
             (REPORTED, &reported_prompt),
             (HISTORIED, &historied_prompt),
             (NEITHER, &neither_prompt),
+            (POINTED, &pointed_prompt),
         ] {
             relay(
                 stream,
@@ -553,6 +574,22 @@ fn a_run_recorded_before_references_reads_each_session_whole_wherever_a_whole_co
             &dir,
             &fixture_run::HarnessSession {
                 stream: HISTORIED,
+                node: fixture_run::SHIP_NODE_ID,
+                member: "worker",
+                history_dir: Some(&recorded.dir),
+                history_project: &recorded.project,
+                history_session: &recorded.session,
+                history_id: &recorded.history_id,
+                bytes: recorded.bytes(),
+            },
+        );
+        // And one that names a whole invocation that is some other turn's: the
+        // member with neither is pointed at the historied member's file, whose
+        // prompt its copy is no cut of, so nothing may be taken from it.
+        fixture_run::relay_harness_session(
+            &dir,
+            &fixture_run::HarnessSession {
+                stream: NEITHER,
                 node: fixture_run::SHIP_NODE_ID,
                 member: "worker",
                 history_dir: Some(&recorded.dir),
@@ -607,7 +644,15 @@ fn a_run_recorded_before_references_reads_each_session_whole_wherever_a_whole_co
     assert_eq!(call["output"], json!(whole_output), "{call}");
     assert!(call.get("output_truncated").is_none(), "{call}");
 
-    // Neither: the copy, and the recorder's own flags saying it is one.
+    // No report and no pointer relayed: the run's own pointer file names the
+    // invocation at the node, and its prompt is recovered from there.
+    let pointed = turn_of(POINTED);
+    assert_eq!(pointed["user"], json!(pointed_prompt), "{pointed}");
+    assert!(pointed["unknown"].get("instruction_truncated").is_none());
+
+    // Neither: the copy, and the recorder's own flags saying it is one — though
+    // two whole invocations are named beside it, neither is one the copy is a
+    // cut of, so neither is read as its text.
     let neither = turn_of(NEITHER);
     assert_eq!(neither["user"], json!(head(&neither_prompt)), "{neither}");
     assert_eq!(neither["unknown"]["instruction_truncated"], json!(true));

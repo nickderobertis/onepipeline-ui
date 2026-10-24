@@ -32,8 +32,12 @@ function elapsed(text: string): { ms: number; unitMs: number } {
 
 /** The markers drawn on one timeline's axis, left to right. */
 async function ticksOf(timeline: Locator): Promise<Tick[]> {
-  const axis = timeline.getByTestId("timeline-axis");
-  const marks = axis.locator("[data-tick-time]");
+  // Found by what a reader reads on each: a wall-clock time and the elapsed
+  // time since the plot's start. The instant each stands for is the marker's own
+  // attribute, read once it is found.
+  const marks = timeline
+    .getByLabel("Timeline plot. Scroll to zoom or drag to select a range.")
+    .getByText(/^\d{2}:\d{2}:\d{2}(?: [AP]M)? \+\d+(?:\.\d+)? (?:ms|s|min)$/);
   await expect(marks.nth(1)).toBeVisible();
   const ticks: Tick[] = [];
   for (const mark of await marks.all()) {
@@ -118,3 +122,31 @@ test("a node's timeline marks time on its axis and reads it under the pointer", 
   await expect(timeline).toBeVisible();
   await crosshairAgrees(page, timeline);
 });
+
+for (const [where, url, region] of [
+  ["Overall", (run: string) => `/?run=${run}&view=overall`, "Graph timeline"],
+  ["a node's", (run: string) => `/?run=${run}&node=dashboard`, "Node timeline"],
+] as const) {
+  test(`${where} timeline keeps a time on screen at the deepest zoom it allows`, async ({
+    page,
+  }) => {
+    await page.goto(url(runs().live));
+    const timeline = page.getByRole("region", { name: region });
+    await timeline.scrollIntoViewIfNeeded();
+    const plot = timeline.getByLabel(
+      "Timeline plot. Scroll to zoom or drag to select a range.",
+    );
+    await plot.hover();
+    // Far past the narrowest window the view allows.
+    for (let step = 0; step < 60; step += 1) await page.mouse.wheel(0, -300);
+    await expect(
+      timeline.getByRole("button", { name: "Reset timeline zoom" }),
+    ).toBeEnabled();
+    // The wheel scrolls the page as well as zooming the plot; look at it again.
+    await timeline.scrollIntoViewIfNeeded();
+    const labels = plot.getByText(
+      /^\d{2}:\d{2}:\d{2}(?: [AP]M)? \+\d+(?:\.\d+)? (?:ms|s|min)$/,
+    );
+    await expect(labels.first()).toBeInViewport();
+  });
+}

@@ -729,7 +729,9 @@ const SURFACES: readonly Surface[] = [
       await expect(
         page
           .getByRole("region", { name: "Node timeline" })
-          .getByTestId("timeline-axis"),
+          .getByLabel(
+            "Timeline plot. Scroll to zoom or drag to select a range.",
+          ),
       ).toBeVisible();
     },
     point: (page) =>
@@ -744,7 +746,9 @@ const SURFACES: readonly Surface[] = [
       await expect(
         page
           .getByRole("region", { name: "Graph timeline" })
-          .getByTestId("timeline-axis"),
+          .getByLabel(
+            "Timeline plot. Scroll to zoom or drag to select a range.",
+          ),
       ).toBeVisible();
     },
     point: (page) =>

@@ -4280,7 +4280,11 @@ export const TRANSCRIPT_SENTINELS = {
   report: "The whole report ends with this sentence, past four thousand.",
   reportHead: "The report opens with this sentence.",
   session: "The whole drafting prompt ends with this sentence.",
+  log: "The gate log ends with this line.",
 };
+
+/** The gate log the reported node stored, longer than a log is served as. */
+export const TRANSCRIPT_LOG = "artifact-transcripts-gate";
 
 /** One recorded session's lines, as the fixture file holds them. */
 function recordedLines({ project, session }) {
@@ -4628,13 +4632,26 @@ export function buildTranscriptRuns(root) {
     {
       status: "done",
       outcome: "merged",
+      detail: "Gate completed successfully",
     },
+    [{ id: TRANSCRIPT_LOG, kind: "log", bytes: 0 }],
   );
 
   // A worker still in its turn, whose history file the journey grows.
   relayedSession(LIVE_STREAM, "live", "worker", S.live);
   journal.write();
   retainReport(dir, journal.stream, settled, report);
+  // A gate log longer than the end of it a log is served as.
+  mkdirSync(join(dir, "artifacts"), { recursive: true });
+  writeFileSync(
+    join(dir, "artifacts", TRANSCRIPT_LOG),
+    grown(
+      "the first line the gate printed",
+      "test result: ok. 1 passed; 0 failed; 0 ignored\n",
+      80 * 1024,
+      TRANSCRIPT_SENTINELS.log,
+    ),
+  );
 
   buildLegacyTranscriptRun(root, store, start);
 }
@@ -4696,6 +4713,34 @@ function buildLegacyTranscriptRun(root, store, start) {
         started_at: stamp(graph.at),
       },
     );
+    if (node === "neither") {
+      // Everything else the recorder cut of this turn, with nothing whole of
+      // any of it: its reply's head, its call's summary and its output's tail.
+      const labels = { ...member, session: `${graph.stream}.worker` };
+      graph.advance(1).emit("agentgraph", "turn-activity", labels, {
+        kind: "tool_call",
+        name: "Bash",
+        detail: "just check --all-targets ".repeat(10).slice(0, 160),
+        truncated: true,
+        tool_call_id: "toolu_01LegacyCutCall",
+        index: 0,
+      });
+      graph.advance(1).emit("agentgraph", "turn-activity", labels, {
+        kind: "tool_result",
+        name: "Bash",
+        detail: "",
+        output: "test result: ok. 1 passed\n".repeat(200).slice(-bound),
+        output_truncated: true,
+        tool_call_id: "toolu_01LegacyCutCall",
+        index: 1,
+      });
+      graph.advance(1).emit("agentgraph", "turn-message", labels, {
+        turn: 1,
+        role: "assistant",
+        text: cut("Landed every node in order. ".repeat(300)),
+        truncated: true,
+      });
+    }
     if (node === "historied") {
       graph.advance(1).emit(
         "agentgraph",
@@ -4754,6 +4799,7 @@ export function transcriptFacts() {
     legacyRun: TRANSCRIPTS_LEGACY_RUN,
     sentinels: TRANSCRIPT_SENTINELS,
     sessions: TRANSCRIPT_SESSIONS,
+    log: TRANSCRIPT_LOG,
     project: RECORDED_JUDGE.project,
     conversations: {
       died: `${TRANSCRIPT_STREAM}.worker`,
