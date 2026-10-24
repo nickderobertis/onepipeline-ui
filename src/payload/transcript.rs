@@ -538,6 +538,7 @@ struct Remembered {
     max_entries: usize,
 }
 
+// llmlint: ignore-block[changed_behavior_has_e2e] the bound is 32 MiB or 16,384 entries, so a journey would have to push that much transcript through a server to reach it; the unit tests below drive `keep` and `get` at small bounds for the refusal of an oversized entry and for eviction by bytes and by count, and what a read does after an eviction is a miss — a fresh resolution of the file — which `tests/e2e/transcripts.rs::a_remembered_reading_follows_the_history_file_as_it_changes` drives through the server.
 impl Remembered {
     fn within(max_bytes: usize, max_entries: usize) -> Self {
         Self {
@@ -573,6 +574,7 @@ impl Remembered {
         self.bytes += size;
     }
 }
+// llmlint: ignore-end[changed_behavior_has_e2e]
 
 fn text_len(text: &Text) -> usize {
     match text {
