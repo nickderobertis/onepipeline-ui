@@ -16,7 +16,7 @@
  *   serve-fixture.mjs --workspace DIR --port N [--ui]
  *                     [--shutdown-corpus [--live-dispatch-pid PID]
  *                      | --preserved-corpus | --review-corpus
- *                      | --review-loop-corpus]
+ *                      | --review-loop-corpus | --transcripts-corpus]
  *                                                  build the fixture and serve it,
  *                                                  the browser view beside it with --ui;
  *                                                  the shutdown journeys' own runs
@@ -63,6 +63,7 @@ import {
   buildReviewLoopRuns,
   buildRuns,
   buildShutdownRuns,
+  buildTranscriptRuns,
   churnLive,
   facts,
   graphRecordsFor,
@@ -78,6 +79,7 @@ import {
   SUPERVISOR_SESSION,
   settleDashboard,
   shutdownFacts,
+  transcriptFacts,
 } from "./runs.mjs";
 import { thisHost } from "./this-host.mjs";
 
@@ -398,6 +400,7 @@ function parseArgs(argv) {
     "--preserved-corpus",
     "--project-centric-corpus",
     "--live-updates-corpus",
+    "--transcripts-corpus",
     "--review-corpus",
     "--review-loop-corpus",
   ]);
@@ -688,6 +691,10 @@ if (args.stall) {
           },
           facts: projectCentricFacts,
         };
+      } else if (args["transcripts-corpus"]) {
+        // Turns read whole from their transcripts: a history store beside the
+        // runs root, built from sessions recorded on a real host.
+        corpus = { build: buildTranscriptRuns, facts: transcriptFacts };
       } else if (args["live-updates-corpus"]) {
         // The load corpus's shapes at the journeys' size: a live run, other
         // live runs, stopped and settled runs, as `load/corpus.mjs` writes them.

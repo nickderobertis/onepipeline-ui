@@ -106,13 +106,16 @@ for (const viewport of VIEWPORTS) {
           .getByRole("navigation")
           .getByRole("button", { name: "Host", exact: true }),
       ).toBeVisible();
+      // The call in the one line the server's resolver describes it in — the
+      // command's head, cut to its bound — and never one assembled here.
+      expect(namedActivity.description).toBe(`${command.slice(0, 119)}…`);
       const activity = header.getByRole("button", {
-        name: `dashboard: Bash ${command}`,
+        name: `dashboard: ${namedActivity.description}`,
         exact: true,
       });
       await expect(activity).toHaveAttribute(
         "title",
-        `dashboard: Bash ${command}`,
+        `dashboard: ${namedActivity.description}`,
       );
       const tabBox = await page
         .getByRole("tablist", { name: "DAG views" })
@@ -179,7 +182,10 @@ for (const viewport of VIEWPORTS) {
       );
       const detail = page.getByRole("region", { name: "Timeline item detail" });
       await expect(
-        detail.getByRole("heading", { name: "turn-activity", exact: true }),
+        detail.getByRole("heading", {
+          name: namedActivity.description,
+          exact: true,
+        }),
       ).toBeVisible();
       await expect(detail.getByRole("time").first()).toHaveAttribute(
         "datetime",

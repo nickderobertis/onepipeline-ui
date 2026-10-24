@@ -36,6 +36,8 @@
       "{workspaceRoot}/tests/e2e/cli.rs",
       "{workspaceRoot}/tests/e2e/live.rs",
       "{workspaceRoot}/tests/e2e/server.rs",
+      "{workspaceRoot}/tests/e2e/transcripts.rs",
+      "{workspaceRoot}/tests/fixtures/history/**",
       "{workspaceRoot}/tests/e2e/ui.rs",
       "{workspaceRoot}/tests/support/fixture_run.rs",
       "{workspaceRoot}/tests/support/harness_history.rs",

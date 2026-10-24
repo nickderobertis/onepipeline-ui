@@ -451,9 +451,10 @@ test("a record appended to the open live run reaches every view as a patch, with
         })
         .toBeGreaterThanOrEqual(seq);
     }
-    // And the header's activity line says what the node just did.
+    // And the header's activity line says what the node just did, in the line
+    // the server describes the call in: a shell call is its command.
     await expect(
-      page.getByRole("button", { name: `${node}: Bash ${marker}` }),
+      page.getByRole("button", { name: `${node}: ${marker}` }),
     ).toBeVisible();
     await frameArrives(
       wire,

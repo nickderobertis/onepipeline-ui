@@ -66,6 +66,7 @@ mod release_probe;
 mod release_status;
 mod semver_check;
 mod server;
+mod transcripts;
 mod ui;
 mod workspace_install;
 

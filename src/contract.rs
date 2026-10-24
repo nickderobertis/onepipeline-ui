@@ -157,7 +157,21 @@ pub const API_VERSION: u32 = 2;
 /// Every field 24 served is served with the same meaning and the same value; the
 /// version moves because a client written against 24 re-reads whole payloads on
 /// every change and has never seen `live_activity`.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 25;
+///
+/// **Schema 26 is every turn read whole from its transcript.** A conversation's
+/// prompts, replies, words and tool calls are read through the engine's
+/// `views::transcript` resolver out of the history file each turn record points
+/// at, so a run recorded with references serves no cut flag at all, and a
+/// reference that resolves to nothing serves `transcript unavailable: <path>:
+/// <why>` in the text's place. A live tool event gains `toolCallId` where the
+/// harness minted one; a live-activity entry gains `description`, the
+/// resolver's one line for the call; an `oneharness_session` artifact gains
+/// `turns`, the invocation read whole as one conversation turn, and
+/// `unavailable` where it could not be read; a transcript or report artifact is
+/// served whole rather than as its tail. Every other field 25 served is served
+/// with the same meaning; the version moves because a client written against 25
+/// shows a cut prompt as the whole of one and has never seen `description`.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 26;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
@@ -287,7 +301,16 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 25;
 /// session lanes use their own records, and post-execution commands remain
 /// markers. Producer identity, journal order, per-kind facts and harness launch
 /// scope are served separately from transcript addresses.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 13;
+///
+/// **Schema 14 describes every turn record in one line.** A `turn-started`,
+/// `turn-message` or `turn-activity` event gains `description`: the engine
+/// resolver's one line for the entry the record points at — a shell call's
+/// command, a file tool's verb and path, a search's pattern, a message's first
+/// line — or its `transcript unavailable` line. A `turn-activity` event gains
+/// `tool`, `{index, tool_call_id?, turn?}`, and the conversation `reference` of
+/// the turn it was published inside: where it sits in that conversation. Every
+/// other event is byte-for-byte what 13 served.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 14;
 
 /// The largest run-list page any request can ask for.
 ///

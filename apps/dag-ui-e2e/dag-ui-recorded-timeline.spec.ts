@@ -3,11 +3,47 @@ import {
   parseRunTimeline,
   subscribedSchema,
 } from "@onepipeline-ui/dag-model";
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import corpus from "./fixtures/timeline-recorded.json" with { type: "json" };
 import { SERVED_UI_URL } from "./playwright.config";
 
 const nodeUrl = `/?run=${corpus.run_id}&node=${corpus.node}`;
+
+/**
+ * The instant a timeline's plot ends at, read as a reader reads it: the
+ * crosshair's time with the pointer at the plot's right edge.
+ */
+async function plotEnd(page: Page, timeline: Locator): Promise<number> {
+  await timeline.scrollIntoViewIfNeeded();
+  const plot = timeline.getByLabel(
+    "Timeline plot. Scroll to zoom or drag to select a range.",
+  );
+  const box = await plot.boundingBox();
+  if (box === null) throw new Error("a plot drawn nowhere");
+  await page.mouse.move(box.x + box.width - 0.5, box.y + box.height / 2);
+  const crosshair = timeline.getByLabel("Timeline crosshair");
+  await expect(crosshair).toBeVisible();
+  const [stamp = ""] = ((await crosshair.textContent()) ?? "")
+    .trim()
+    .split(" ");
+  await page.mouse.move(box.x + box.width / 2, box.y - 40);
+  return Date.parse(stamp);
+}
+
+/** How far one pixel of a plot `width` wide spans, over `span` milliseconds. */
+const pixelOf = (span: number, width: number) => Math.ceil(span / width) + 1;
+
+/**
+ * The name a record's row is opened by: a tool call's one line as the server
+ * described it, and any other record's kind.
+ */
+const rowLabel = (event: {
+  readonly kind: string;
+  readonly description?: string | undefined;
+}): string =>
+  event.kind === "turn-activity" && event.description
+    ? event.description
+    : event.kind;
 
 test("recorded worker and drafter retain their records, intervals and kind-specific panels", async ({
   page,
@@ -38,8 +74,14 @@ test("recorded worker and drafter retain their records, intervals and kind-speci
     "gate-run",
     "session-closed",
   ]) {
+    const recorded = served.spans
+      .flatMap((span) => span.events)
+      .find((event) => event.kind === kind);
+    const label = recorded === undefined ? kind : rowLabel(recorded);
     await expect(
-      worker.getByRole("button", { name: `Open ${kind}`, exact: true }).first(),
+      worker
+        .getByRole("button", { name: `Open ${label}`, exact: true })
+        .first(),
     ).toBeAttached();
   }
   for (const kind of ["graph-started", "member-started", "turn-started"]) {
@@ -150,21 +192,19 @@ test("Overall ends at settlement and keeps the late completion as a marker", asy
   await page.goto(`/?run=${corpus.run_id}&view=overall`);
   const executionEnd = settlement?.ts;
   if (executionEnd === undefined) throw new Error("settlement");
-  const clock = await page.evaluate(
-    (stamp) =>
-      new Date(stamp).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      }),
-    executionEnd,
+  // The plot ends at the settlement: the crosshair at its right edge reads it.
+  const overall = page.getByRole("region", {
+    name: "Graph timeline",
+    exact: true,
+  });
+  const ended = await plotEnd(page, overall);
+  const started = Date.parse(
+    served.spans.find((span) => span.kind === "run")?.started_at ?? "",
   );
-  await expect(
-    page
-      .getByRole("region", { name: "Graph timeline", exact: true })
-      .getByText(clock, { exact: false })
-      .last(),
-  ).toContainText(clock);
+  const width = (await overall.boundingBox())?.width ?? 1;
+  expect(Math.abs(ended - Date.parse(executionEnd))).toBeLessThanOrEqual(
+    pixelOf(Date.parse(executionEnd) - started, width),
+  );
   // The fixed journal has pre-worker, post-drafter and post-publication
   // silence. Assert each interval, including the settlement closing the last.
   const recordedAt = (kind: string, persona?: string) => {
@@ -241,17 +281,15 @@ for (const terminal of corpus.terminations) {
       exact: true,
     });
     if (end === undefined) throw new Error("execution end");
-    const clock = await page.evaluate(
-      (stamp) =>
-        new Date(stamp).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        }),
-      end,
+    // The plot ends at the terminal record: the crosshair at its right edge
+    // reads it.
+    const ended = await plotEnd(page, graph);
+    const started = Date.parse(
+      served.spans.find((span) => span.kind === "run")?.started_at ?? "",
     );
-    await expect(graph.getByText(clock, { exact: false }).last()).toContainText(
-      clock,
+    const width = (await graph.boundingBox())?.width ?? 1;
+    expect(Math.abs(ended - Date.parse(end))).toBeLessThanOrEqual(
+      pixelOf(Date.parse(end) - started, width),
     );
     await late.getByRole("button", { name: /completion-requested/ }).click();
     await expect(
@@ -375,17 +413,20 @@ test("retries, equal timestamps and repeated relays keep every record under its 
       "gate-run",
       "session-closed",
     ]) {
-      const expected = own.events.filter(
-        (event) =>
-          event.kind === kind &&
-          event.persona === "engineer" &&
-          (index === 1
-            ? event.stream?.endsWith("-retry")
-            : !event.stream?.endsWith("-retry")),
-      ).length;
-      await expect(
-        group.getByRole("button", { name: `Open ${kind}`, exact: true }),
-      ).toHaveCount(expected);
+      const labels = own.events
+        .filter(
+          (event) =>
+            event.kind === kind &&
+            event.persona === "engineer" &&
+            (index === 1
+              ? event.stream?.endsWith("-retry")
+              : !event.stream?.endsWith("-retry")),
+        )
+        .map(rowLabel);
+      for (const label of new Set(labels.length === 0 ? [kind] : labels))
+        await expect(
+          group.getByRole("button", { name: `Open ${label}`, exact: true }),
+        ).toHaveCount(labels.filter((each) => each === label).length);
     }
   }
   for (const name of ["Change request drafter", "Review reply drafter"]) {
@@ -403,7 +444,10 @@ test("retries, equal timestamps and repeated relays keep every record under its 
   expect(tied[0]?.journal_order).toBeLessThan(tied[1]?.journal_order ?? 0);
   const activityButtons = page
     .getByRole("region", { name: "Dispatch 2", exact: true })
-    .getByRole("button", { name: "Open turn-activity", exact: true });
+    .getByRole("button", {
+      name: `Open ${tied[0] === undefined ? "turn-activity" : rowLabel(tied[0])}`,
+      exact: true,
+    });
   for (const index of [0, 1]) {
     await activityButtons.nth(index).click();
     await expect
@@ -692,15 +736,19 @@ test("filtering every dispatch boundary and graph record preserves served groups
         .getByRole("region", { name: label, exact: true })
         .getByRole("button", { name: "Open gate-run", exact: true }),
     ).toHaveCount(1);
-  for (const kind of [
+  const activityLabels = detailed.spans
+    .flatMap((span) => span.events)
+    .filter((event) => event.kind === "turn-activity")
+    .map(rowLabel);
+  for (const label of new Set([
     "node-dispatched",
     "node-settled",
     "graph-started",
     "member-started",
-    "turn-activity",
-  ])
+    ...activityLabels,
+  ]))
     await expect(
-      page.getByRole("button", { name: `Open ${kind}`, exact: true }),
+      page.getByRole("button", { name: `Open ${label}`, exact: true }),
     ).toHaveCount(0);
   await page
     .getByRole("group", { name: "Level of detail" })
@@ -740,7 +788,7 @@ for (const scope of ["node", "run"] as const) {
     await page.goto(`/?${bookmark}`);
     const detail = page.getByRole("region", { name: "Timeline item detail" });
     await expect(
-      detail.getByRole("heading", { name: kind, exact: true }),
+      detail.getByRole("heading", { name: rowLabel(event), exact: true }),
     ).toBeVisible();
     await expect(detail.getByRole("time").first()).toHaveAttribute(
       "datetime",

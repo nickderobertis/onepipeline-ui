@@ -776,8 +776,10 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
 }) => {
   await openObservatory(page, `/?run=${runs().live}&node=dashboard`);
   const transcript = page.getByRole("region", { name: "Node transcript" });
+  // A marker at every round step across the plot, each naming the wall clock
+  // and the elapsed time the reader tracks lanes against.
   const axis = timeline(page).getByTestId("timeline-axis");
-  await expect(axis.locator("span")).toHaveCount(2);
+  await expect(axis.locator("span").nth(1)).toBeVisible();
   for (const tick of await axis.locator("span").allTextContents()) {
     expect(tick).toMatch(/\d{2}:\d{2}:\d{2}.*[+−]\d/u);
   }
@@ -1418,15 +1420,13 @@ test("shows a verification and a publication as the records they are", async ({
   ).toHaveAttribute("data-timeline-shape", "span");
   await expect(itemDetail(page)).toContainText("Verification record");
   await expect(itemDetail(page)).toContainText("pre-push verification passed");
+  // The log the API served is shown whole — its oldest line and its newest —
+  // with nothing to expand first.
   await expect(itemDetail(page)).toContainText("full verification output");
-  await expect(itemDetail(page)).not.toContainText(
-    "oldest verification output",
-  );
-  await itemDetail(page).getByRole("button", { name: "Expand log" }).click();
   await expect(itemDetail(page)).toContainText("oldest verification output");
   await expect(
-    itemDetail(page).getByRole("button", { name: "Collapse log" }),
-  ).toBeVisible();
+    itemDetail(page).getByRole("button", { name: /^(Expand|Collapse) log$/ }),
+  ).toHaveCount(0);
   await expect(itemDetail(page)).not.toContainText("foundation/gate.log");
   await page.getByRole("button", { name: "Close detail" }).click();
 
@@ -1723,25 +1723,16 @@ test("reads the report a settled node's member left behind", async ({
   await expect(itemDetail(page)).not.toContainText(
     "/a/producing/librarys/scratch",
   );
-  await expect(itemDetail(page)).not.toContainText(
-    "the earliest ruling this report recorded",
-  );
-
-  // The rest of it is one control away, and that control is in the tab order and
-  // answers the keyboard like every other one here.
-  const expand = itemDetail(page).getByRole("button", {
-    name: "Expand report",
-  });
-  // llmlint: ignore-block[tests_mirror_real_usage] what this asserts is that the control answers the keyboard, so the focused-then-Enter path is the behaviour rather than a shortcut to it — a click would exercise the pointer path and prove nothing about the other one. The pointer path over this same control is driven by the collapse below it.
-  await expand.focus();
-  await page.keyboard.press("Enter");
-  // llmlint: ignore-end[tests_mirror_real_usage]
+  // And the whole of it, from its first ruling: a report is served whole and
+  // shown whole, with nothing to expand.
   await expect(itemDetail(page)).toContainText(
     "the earliest ruling this report recorded",
   );
   await expect(
-    itemDetail(page).getByRole("button", { name: "Collapse report" }),
-  ).toBeVisible();
+    itemDetail(page).getByRole("button", {
+      name: /^(Expand|Collapse) report$/,
+    }),
+  ).toHaveCount(0);
 
   // The record itself stays beside the report rather than being replaced by it.
   await expect(itemDetail(page)).toContainText("Recorded at");
@@ -1874,27 +1865,27 @@ test("reads a relayed turn and the oneharness conversation behind it", async ({
   );
 
   // The other half: a pointer at a conversation the store no longer holds. The
-  // record is still in the run, the route answers 404, and the panel says which
-  // of the two it is rather than leaving a blank pane — "nothing was written
-  // down" and "something was, and it is gone" send a reader to different places.
+  // record is still in the run, and the panel says it is gone in the resolver's
+  // own words — the file and why — rather than leaving a blank pane: "nothing was
+  // written down" and "something was, and it is gone" send a reader to
+  // different places.
   await openObservatory(page, `/?run=${runs().live}&node=missing-artifact`);
   const swept = page.waitForResponse(
     (response) =>
       response
         .url()
         .includes(`/artifacts/${fixture().artifacts.swept_harness_session}`) &&
-      response.status() === 404,
+      response.status() === 200,
   );
   await page
     .getByRole("region", { name: "Node transcript" })
     .getByRole("article", { name: "oneharness-session" })
     .getByRole("button")
     .click();
-  // Announced, not merely painted: the reader asked for a document and the panel
-  // answers in a live region, so a screen reader is told the read did not land
-  // rather than being left on a pane that silently stopped changing.
-  await expect(itemDetail(page).locator('[aria-live="polite"]')).toContainText(
-    "The history store holds no readable copy of that conversation.",
+  // Announced, not merely painted: an alert, so a screen reader is told the read
+  // did not land rather than being left on a pane that silently stopped changing.
+  await expect(itemDetail(page).getByRole("alert")).toContainText(
+    /transcript unavailable: .*\.jsonl: missing-entry/,
   );
   await swept;
 });
@@ -2046,9 +2037,14 @@ test("reads the checks a host observed on a publication", async ({ page }) => {
   // Each check's own state: the conclusion once it reached one, and the host's
   // status while it has not — so a required check still running cannot read as
   // one that passed, and one that never ran cannot hide.
-  await expect(facts).toContainText("gatecompletedsuccessRequired");
-  await expect(facts).toContainText("published-smokecompletedfailureOptional");
-  await expect(facts).toContainText("e2ein_progress—Required");
+  await expect(facts).toContainText("gatecompletedsuccess4sRequired");
+  await expect(facts).toContainText(
+    "published-smokecompletedfailure4sOptional",
+  );
+  // A running check counts on from its own start, and says it is running.
+  await expect(facts).toContainText(
+    /e2ein_progress—(\d+h )?(\d+m )?\d+s · runningRequired/,
+  );
 
   // And the same checks are read beside the change they ran on, from the
   // publication the plot draws.
@@ -3264,21 +3260,45 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
 
   // Read every axis in one browser task: a telemetry update can advance the
   // live range between separate locator reads, even though every row shares it.
+  // One scale is one window. How densely each axis marks the time inside it
+  // follows that row's own width — a row whose lanes scroll is a scrollbar
+  // narrower — so what is compared is the window each axis's markers place
+  // themselves in: the instant each stands for and where along the axis it is
+  // drawn give the instants at the axis's two ends, to the tenth of a second.
+  // The live end may advance, so the window is `start\nend`, and the launch end
+  // is what stays fixed. Polled, because each row measures its width once laid
+  // out.
   const sharedTicks = async () => {
-    const ticks = await page
-      .locator(".graph-timeline")
-      .getByTestId("timeline-axis")
-      .evaluateAll((axes) =>
-        axes.map((axis) => {
-          if (!(axis instanceof HTMLElement)) {
-            throw new Error("Timeline axis must be an HTML element");
-          }
-          return axis.innerText;
-        }),
-      );
-    expect(ticks.length).toBeGreaterThan(3);
-    expect(new Set(ticks).size).toBe(1);
-    return ticks[0] ?? "";
+    let shared = "";
+    await expect
+      .poll(async () => {
+        const windows = await page
+          .locator(".graph-timeline")
+          .getByTestId("timeline-axis")
+          .evaluateAll((axes) =>
+            axes.map((axis) => {
+              const marks = [...axis.querySelectorAll("[data-tick-time]")]
+                .filter((mark) => mark instanceof HTMLElement)
+                .map((mark) => ({
+                  at: Number(mark.getAttribute("data-tick-time")),
+                  share: Number.parseFloat(mark.style.left || "NaN") / 100,
+                }));
+              const [first, second] = marks;
+              if (first === undefined || second === undefined) return "";
+              const span =
+                (second.at - first.at) / (second.share - first.share);
+              const start = first.at - first.share * span;
+              const tenth = (instant: number) => Math.round(instant / 100);
+              return `${tenth(start)}\n${tenth(start + span)}`;
+            }),
+          );
+        shared = windows[0] ?? "";
+        return (
+          windows.length > 3 && shared !== "" && new Set(windows).size === 1
+        );
+      })
+      .toBe(true);
+    return shared;
   };
   const before = await sharedTicks();
 
@@ -3289,8 +3309,9 @@ test("keeps every graph row on one scale when any of them is zoomed", async ({
   await expect(
     dashboard.getByRole("button", { name: "Reset timeline zoom" }),
   ).toBeEnabled();
+  // Zoomed in, every row shows the same narrower window.
   const zoomed = await sharedTicks();
-  expect(zoomed.split("\n")[0]).not.toBe(before.split("\n")[0]);
+  expect(zoomed).not.toBe(before);
 
   // Resetting from a different row restores the full range everywhere. Its
   // launch stays fixed even though its live end may have advanced again.
@@ -3459,7 +3480,7 @@ test("drills from a graph row into that node's own view", async ({ page }) => {
     .getByRole("button", { name: /^foundation · Verification/ })
     .and(
       foundation.locator(
-        `[aria-describedby="timeline-detail-verification-foundation-${fixture().artifacts.gate}"]`,
+        `[aria-describedby$="-verification-foundation-${fixture().artifacts.gate}"]`,
       ),
     );
   await verification.click();
@@ -3717,14 +3738,17 @@ test("keeps the timeline's clock readable when its lanes outgrow the view", asyn
         .toBeLessThanOrEqual(1);
     }
     expect(await clipped()).toBe(0);
-    // Still the axis it was, not a stub of one: both ticks, each naming the wall
-    // clock and the elapsed time the reader tracks lanes against.
-    const ticks = timeline(page).getByTestId("timeline-axis").locator("span");
-    await expect(ticks).toHaveCount(2);
+    // Still the axis it was, not a stub of one: however far the wheel that
+    // scrolled the region also zoomed the plot, a time is on screen — a marker
+    // naming the wall clock and the elapsed time the reader tracks lanes
+    // against.
+    const ticks = timeline(page).getByText(
+      /^\d{2}:\d{2}:\d{2}(?: [AP]M)? \+\d+(?:\.\d+)? (?:ms|s|min)$/,
+    );
+    await expect(ticks.first()).toBeInViewport();
     for (const tick of await ticks.allTextContents()) {
       expect(tick).toMatch(/\d{2}:\d{2}:\d{2}.*[+−]\d/u);
     }
-    await expect(ticks.first()).toBeInViewport();
   }
 });
 
@@ -4006,7 +4030,7 @@ test("shows a turn the dispatch relays while its transcript is open", async ({
     "--activity-detail",
     "just gate",
   ]);
-  await expect(page.getByText("dashboard: Bash just gate")).toBeVisible();
+  await expect(page.getByText("dashboard: just gate")).toBeVisible();
 
   // Recorded the way the executor records one: an appended authoritative event.
   // Grown past what the session already holds — the fixture opens four turns on

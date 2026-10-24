@@ -229,6 +229,30 @@ interface Surface {
   readonly title: string;
   readonly mask?: (page: Page) => readonly Locator[];
   readonly open: (page: Page) => Promise<void>;
+  /**
+   * Where the pointer rests for the shot, for a surface that is about what the
+   * pointer shows; every other surface is shot with it parked off the page.
+   */
+  readonly point?: (page: Page) => Promise<void>;
+}
+
+/**
+ * Rest the pointer at the middle of a timeline's plot, so its crosshair reads the
+ * time and the elapsed time there. The middle of the plot is a fixed place at
+ * each viewport, so the shot is the same on every run of one build.
+ */
+async function pointAtPlot(page: Page, timeline: Locator): Promise<void> {
+  await timeline.scrollIntoViewIfNeeded();
+  const plot = timeline.getByLabel(
+    "Timeline plot. Scroll to zoom or drag to select a range.",
+  );
+  const box = await plot.boundingBox();
+  if (box === null) throw new Error("the plot is drawn nowhere");
+  await page.mouse.move(
+    Math.round(box.x + box.width / 2),
+    Math.round(box.y + box.height / 2),
+  );
+  await expect(timeline.getByLabel("Timeline crosshair")).toBeVisible();
 }
 
 const SURFACES: readonly Surface[] = [
@@ -696,6 +720,40 @@ const SURFACES: readonly Surface[] = [
       ).toBeVisible();
     },
   },
+  {
+    name: "22-node-timeline-crosshair",
+    title: "Node timeline: axis markers and the crosshair under the pointer",
+    open: async (page) => {
+      await page.goto(`/?run=${runs().live}&node=dashboard`);
+      await settleReads(page);
+      await expect(
+        page
+          .getByRole("region", { name: "Node timeline" })
+          .getByLabel(
+            "Timeline plot. Scroll to zoom or drag to select a range.",
+          ),
+      ).toBeVisible();
+    },
+    point: (page) =>
+      pointAtPlot(page, page.getByRole("region", { name: "Node timeline" })),
+  },
+  {
+    name: "23-overall-timeline-crosshair",
+    title: "Overall timeline: axis markers and the crosshair under the pointer",
+    open: async (page) => {
+      await page.goto(`/?run=${runs().live}&view=overall`);
+      await settleReads(page);
+      await expect(
+        page
+          .getByRole("region", { name: "Graph timeline" })
+          .getByLabel(
+            "Timeline plot. Scroll to zoom or drag to select a range.",
+          ),
+      ).toBeVisible();
+    },
+    point: (page) =>
+      pointAtPlot(page, page.getByRole("region", { name: "Graph timeline" })),
+  },
 ];
 
 /**
@@ -729,6 +787,7 @@ for (const size of VIEWPORTS) {
       test(`captures ${surface.title}`, async ({ page }) => {
         await surface.open(page);
         await parkPointer(page);
+        await surface.point?.(page);
         await settleReads(page);
         await settleMotion(page);
         await settleReads(page);

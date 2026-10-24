@@ -1,8 +1,8 @@
 {
   "api_version": 2,
-  "telemetry_schema_version": 25,
+  "telemetry_schema_version": 26,
   "observed_at": "2026-08-07T12:00:00Z",
-  "timeline_schema_version": 13,
+  "timeline_schema_version": 14,
   "run_id": "run-20260807-a1b2c3",
   "spans": [
     {
@@ -154,6 +154,7 @@
           "fields": {
             "Turn": 1
           },
+          "description": "",
           "kind": "turn-started",
           "at": "2026-08-07T12:00:03.000Z",
           "node_id": "contract-interface",
@@ -180,9 +181,14 @@
             "Tool": "Read",
             "Detail": "src/api.rs"
           },
+          "description": "Read src/api.rs",
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:03.500Z",
           "node_id": "contract-interface",
+          "reference": {
+            "kind": "conversation",
+            "value": "node-scope-1786925518098-3163646.worker"
+          },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
             "label": "Dispatch 1",
@@ -201,6 +207,7 @@
           "fields": {
             "Turn": 2
           },
+          "description": "",
           "kind": "turn-started",
           "at": "2026-08-07T12:00:04.000Z",
           "node_id": "contract-interface",
@@ -227,9 +234,14 @@
             "Tool": "Bash",
             "Detail": "just gate"
           },
+          "description": "just gate",
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:04.500Z",
           "node_id": "contract-interface",
+          "reference": {
+            "kind": "conversation",
+            "value": "node-scope-1786925518098-3163646.worker"
+          },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
             "label": "Dispatch 1",
@@ -623,6 +635,7 @@
           "fields": {
             "Turn": 1
           },
+          "description": "",
           "kind": "turn-started",
           "at": "2026-08-07T12:00:03.000Z",
           "node_id": "contract-interface",
@@ -649,9 +662,14 @@
             "Tool": "Read",
             "Detail": "src/api.rs"
           },
+          "description": "Read src/api.rs",
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:03.500Z",
           "node_id": "contract-interface",
+          "reference": {
+            "kind": "conversation",
+            "value": "node-scope-1786925518098-3163646.worker"
+          },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
             "label": "Dispatch 1",
@@ -670,6 +688,7 @@
           "fields": {
             "Turn": 2
           },
+          "description": "",
           "kind": "turn-started",
           "at": "2026-08-07T12:00:04.000Z",
           "node_id": "contract-interface",
@@ -696,9 +715,14 @@
             "Tool": "Bash",
             "Detail": "just gate"
           },
+          "description": "just gate",
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:04.500Z",
           "node_id": "contract-interface",
+          "reference": {
+            "kind": "conversation",
+            "value": "node-scope-1786925518098-3163646.worker"
+          },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
             "label": "Dispatch 1",
