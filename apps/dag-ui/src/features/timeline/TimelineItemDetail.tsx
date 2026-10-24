@@ -25,6 +25,7 @@ import type {
   AgentRole,
   DagConversation,
   Redirection as RedirectionRecord,
+  TimelineEvent,
   TimelineReference,
   TimelineRelease,
   TimelineSurface,
@@ -232,6 +233,14 @@ function JudgeDecisions({ turn }: { readonly turn: Turn }) {
 }
 
 /**
+ * The conversation turn an event row opens: the turn a tool event was published
+ * inside, and a turn record's own id otherwise.
+ */
+function turnOf(event: TimelineEvent): string {
+  return event.tool?.turn ?? event.id;
+}
+
+/**
  * Where opening a row puts the reader in its conversation: on the tool call a
  * `turn-activity` record is, by the identity the harness minted for it where the
  * served turn carries that identity, and by the producer's index otherwise. No
@@ -242,7 +251,8 @@ function focusOf(
   turns: readonly Turn[],
 ): ConversationFocus | undefined {
   if (row.rowKind !== "event" || row.event.tool === undefined) return undefined;
-  const turn = turns.find(({ id }) => id === row.event.id);
+  const opened = turnOf(row.event);
+  const turn = turns.find(({ id }) => id === opened);
   if (turn === undefined) return undefined;
   const { index, tool_call_id: toolCallId } = row.event.tool;
   return toolCallId !== undefined &&
@@ -296,10 +306,11 @@ function Session({
 }) {
   const [visible, setVisible] = useState(PAGE_SIZE);
   const availableTurns = transcript.conversation?.conversation.turns ?? [];
+  const opened = row.rowKind === "event" ? turnOf(row.event) : undefined;
   const turns: readonly Turn[] =
-    row.rowKind === "event"
-      ? availableTurns.filter(({ id }) => id === row.event.id)
-      : availableTurns;
+    opened === undefined
+      ? availableTurns
+      : availableTurns.filter(({ id }) => id === opened);
   const sync = useTimelineScrollSync(
     turns.map((turn) => ({ id: turn.id, time: Date.parse(turn.timestamp) })),
   );

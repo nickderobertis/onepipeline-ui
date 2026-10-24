@@ -1565,12 +1565,15 @@ export const timelineEventSchema = openObject({
   description: z.string().optional(),
   /**
    * Where a `turn-activity` sits in the conversation its `reference` names: the
-   * producer's index and, where the harness minted one, the call's identity —
-   * what opening the row focuses that conversation on.
+   * producer's index, the call's identity where the harness minted one, and the
+   * turn it was published inside — what opening the row focuses that
+   * conversation on.
    */
   tool: openObject({
     index: counter,
     tool_call_id: z.string().min(1).optional(),
+    /** The id of the conversation turn the event was published inside. */
+    turn: z.string().min(1).optional(),
   }).optional(),
 });
 /**

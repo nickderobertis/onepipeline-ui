@@ -185,6 +185,10 @@
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:03.500Z",
           "node_id": "contract-interface",
+          "reference": {
+            "kind": "conversation",
+            "value": "node-scope-1786925518098-3163646.worker"
+          },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
             "label": "Dispatch 1",
@@ -234,6 +238,10 @@
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:04.500Z",
           "node_id": "contract-interface",
+          "reference": {
+            "kind": "conversation",
+            "value": "node-scope-1786925518098-3163646.worker"
+          },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
             "label": "Dispatch 1",
@@ -658,6 +666,10 @@
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:03.500Z",
           "node_id": "contract-interface",
+          "reference": {
+            "kind": "conversation",
+            "value": "node-scope-1786925518098-3163646.worker"
+          },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
             "label": "Dispatch 1",
@@ -707,6 +719,10 @@
           "kind": "turn-activity",
           "at": "2026-08-07T12:00:04.500Z",
           "node_id": "contract-interface",
+          "reference": {
+            "kind": "conversation",
+            "value": "node-scope-1786925518098-3163646.worker"
+          },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
             "label": "Dispatch 1",

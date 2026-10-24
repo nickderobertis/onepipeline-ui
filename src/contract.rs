@@ -307,8 +307,9 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 26;
 /// resolver's one line for the entry the record points at — a shell call's
 /// command, a file tool's verb and path, a search's pattern, a message's first
 /// line — or its `transcript unavailable` line. A `turn-activity` event gains
-/// `tool`, `{index, tool_call_id?}`, where it sits in the conversation it is a
-/// turn of. Every other event is byte-for-byte what 13 served.
+/// `tool`, `{index, tool_call_id?, turn?}`, and the conversation `reference` of
+/// the turn it was published inside: where it sits in that conversation. Every
+/// other event is byte-for-byte what 13 served.
 pub const TIMELINE_SCHEMA_VERSION: u32 = 14;
 
 /// The largest run-list page any request can ask for.

@@ -109,26 +109,38 @@ impl Read {
 /// a conversation of a current run should pay.
 pub(crate) struct Sources<'a> {
     paths: &'a RunPaths,
-    records: &'a [&'a Envelope],
+    events: &'a [Envelope],
+    session: &'a str,
+    node: Option<&'a str>,
     found: OnceCell<Vec<Transcript>>,
 }
 
 impl<'a> Sources<'a> {
-    /// The sources of the session whose relayed records are `records`.
-    pub(crate) fn of(paths: &'a RunPaths, records: &'a [&'a Envelope]) -> Self {
+    /// The sources of `session`, among the run's `events`, at the node it ran at.
+    pub(crate) fn of(
+        paths: &'a RunPaths,
+        events: &'a [Envelope],
+        session: &'a str,
+        node: Option<&'a str>,
+    ) -> Self {
         Self {
             paths,
-            records,
+            events,
+            session,
+            node,
             found: OnceCell::new(),
         }
     }
 
     fn get(&self) -> &[Transcript] {
         self.found.get_or_init(|| {
+            // The session's own pointers: a `oneharness-session` carries no
+            // `session` label, so it is joined the way a settlement is — by the
+            // `{stream}.{member}` a session id is minted from.
             let mut found: Vec<Transcript> = self
-                .records
+                .events
                 .iter()
-                .filter(|event| event.kind.0 == HARNESS_SESSION)
+                .filter(|event| event.kind.0 == HARNESS_SESSION && spells(event, self.session))
                 .filter_map(|event| location(&json!(event.payload)))
                 .collect();
             // The run's pointer file names every invocation its launches began,
@@ -136,12 +148,8 @@ impl<'a> Sources<'a> {
             // included. A line counts for this session only where it was stamped
             // at the node the session ran at; the prefix test in `recover` is
             // what makes a line from another dispatch of that node harmless.
-            let node = self
-                .records
-                .iter()
-                .find_map(|event| event.labels.node.as_deref());
             if let (Some(node), Ok(agents)) = (
-                node,
+                self.node,
                 onepipeline::verbs::agents(self.paths, AgentScope::Run),
             ) {
                 for session in &agents.sessions {
@@ -165,6 +173,12 @@ impl<'a> Sources<'a> {
             found
         })
     }
+}
+
+/// Whether a relayed record belongs to `session` by its own label or by the
+/// `{stream}.{member}` a session id is minted from.
+fn spells(event: &Envelope, session: &str) -> bool {
+    super::session_label(event) == Some(session) || super::spells_session(event, session)
 }
 
 /// A history location, read off a record that names one — `None` for one this

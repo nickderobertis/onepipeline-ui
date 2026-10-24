@@ -4340,7 +4340,7 @@ fn conversation_document(
     };
     // Where a cut copy of a run recorded before references is recovered whole
     // from, read only if one asks.
-    let sources = transcript::Sources::of(view.paths, &transcript.records);
+    let sources = transcript::Sources::of(view.paths, view.events, session, node.as_deref());
     // What each judge of a stacked panel decided, over the whole store rather than
     // the reader's listing, for the reason every other figure on a row is.
     let decided = judge_decisions(view, session, reported);
@@ -5916,6 +5916,12 @@ fn stamp_dispatch_groups(view: &Run<'_>, node: &str, payload: &mut Value) {
 struct Turn {
     session: ConversationId,
     id: String,
+    /// Whether the record was published from *inside* the turn — a
+    /// `turn-activity` — rather than being one of the two records that describe
+    /// it. Such a record names the turn it sits in and the conversation it
+    /// belongs to, and keeps an id of its own: it is one event of the turn and
+    /// not the turn.
+    inside: bool,
 }
 
 /// The turn each envelope of the run became, indexed by its place in the merged
@@ -5932,24 +5938,30 @@ fn turn_ids(view: &Run<'_>, transcripts: &Transcripts<'_>) -> Vec<Option<Turn>> 
     // so a reader who opened the moment the turn closed and one who opened the
     // moment it began are handed the same transcript row — and a row the stored
     // report alone holds shifts the ones after it here exactly as it does there.
-    let mut named: BTreeMap<(&str, u64), String> = BTreeMap::new();
+    let mut named: BTreeMap<(&str, u64), (String, bool)> = BTreeMap::new();
     for session in &transcripts.sessions {
         for (index, row) in session.rows.iter().enumerate() {
+            let id = format!("{}.{index}", session.session);
             for record in row.records() {
-                named.insert(
-                    (record.stream.as_str(), record.seq),
-                    format!("{}.{index}", session.session),
-                );
+                named.insert((record.stream.as_str(), record.seq), (id.clone(), false));
+            }
+            // What the turn published from inside it, which a reader opens to
+            // that turn of the conversation, at that call.
+            for summary in row.relayed().map_or(&[][..], |turn| &turn.summaries[..]) {
+                named
+                    .entry((summary.stream.as_str(), summary.seq))
+                    .or_insert_with(|| (id.clone(), true));
             }
         }
     }
     view.events
         .iter()
         .map(|event| {
-            let id = named.get(&(event.stream.as_str(), event.seq))?;
+            let (id, inside) = named.get(&(event.stream.as_str(), event.seq))?;
             Some(Turn {
                 session: ConversationId::try_from(session_label(event)?).ok()?,
                 id: id.clone(),
+                inside: *inside,
             })
         })
         .collect()
@@ -6495,7 +6507,9 @@ fn timeline_event(
     let mut item = Map::new();
     item.insert(
         "id".into(),
-        json!(turn.map_or_else(|| format!("e{position}"), |turn| turn.id.clone())),
+        json!(turn
+            .filter(|turn| !turn.inside)
+            .map_or_else(|| format!("e{position}"), |turn| turn.id.clone())),
     );
     item.insert(
         "record_id".into(),
@@ -6538,6 +6552,9 @@ fn timeline_event(
         if let Some(index) = event.payload.get(graph::INDEX).and_then(Value::as_u64) {
             let mut tool = Map::new();
             tool.insert("index".into(), json!(index));
+            if let Some(turn) = turn.filter(|turn| turn.inside) {
+                tool.insert("turn".into(), json!(turn.id));
+            }
             if let Some(identity) = event
                 .payload
                 .get(graph::TOOL_CALL_ID)
