@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { runDetailSchema } from "@onepipeline-ui/dag-model";
 import { expect, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
@@ -19,12 +20,44 @@ test("Remote retains publication and release and follows each check's destinatio
   await expect(remote).toContainText("Release");
   const table = remote.getByRole("table", { name: "Remote checks" });
   await expect(table.getByRole("row")).toHaveCount(6);
-  for (const [name, status, conclusion, required] of [
-    ["gate", "completed", "success", "Required"],
-    ["published-smoke", "completed", "failure", "Optional"],
-    ["e2e", "in_progress", "—", "Required"],
-    ["queued-check", "queued", "—", "Optional"],
-    ["skipped-check", "completed", "skipped", "Required"],
+  // Each finished check's runtime is its own `completed_at` minus its own
+  // `started_at`, as the host recorded them and the API served them.
+  // Read by the schema the browser reads the detail with.
+  const served = runDetailSchema.parse(
+    await (await page.request.get(`/api/v2/runs/${runs().live}`)).json(),
+  );
+  const checks = served.node_details["remote-open"]?.verification.checks ?? [];
+  const runtime = (name: string): string => {
+    const check = checks.find((each) => each.name === name);
+    if (check?.started_at === undefined || check.completed_at === undefined)
+      throw new Error(`${name} recorded no finished run`);
+    const seconds =
+      (Date.parse(check.completed_at) - Date.parse(check.started_at)) / 1000;
+    if (!Number.isInteger(seconds) || seconds < 1 || seconds >= 60)
+      throw new Error(
+        `${name} ran ${seconds}s, which this reading cannot spell`,
+      );
+    return `${seconds}s`;
+  };
+  for (const [name, status, conclusion, ran, required] of [
+    ["gate", "completed", "success", runtime("gate"), "Required"],
+    [
+      "published-smoke",
+      "completed",
+      "failure",
+      runtime("published-smoke"),
+      "Optional",
+    ],
+    ["e2e", "in_progress", "—", /^(\d+h )?(\d+m )?\d+s · running$/, "Required"],
+    // Queued: no start, so no runtime — never a zero.
+    ["queued-check", "queued", "—", "", "Optional"],
+    [
+      "skipped-check",
+      "completed",
+      "skipped",
+      runtime("skipped-check"),
+      "Required",
+    ],
   ] as const) {
     const row = table
       .getByRole("row")
@@ -32,6 +65,7 @@ test("Remote retains publication and release and follows each check's destinatio
     await expect(row.getByRole("cell")).toHaveText([
       status,
       conclusion,
+      ran,
       required,
     ]);
     const destination = await row.getByRole("link").getAttribute("href");
@@ -43,6 +77,29 @@ test("Remote retains publication and release and follows each check's destinatio
     await expect(popup.getByText(/"onepipeline_version"/)).toBeVisible();
     await popup.close();
   }
+  // A running check's runtime is the time since its own start, and it keeps
+  // counting while the reader watches.
+  const running = table
+    .getByRole("row")
+    .filter({ has: page.getByRole("rowheader", { name: "e2e", exact: true }) })
+    .getByRole("cell")
+    .nth(2);
+  const started = Date.parse(
+    checks.find((each) => each.name === "e2e")?.started_at ?? "",
+  );
+  const seconds = async () => {
+    const shown = /^(?:(\d+)h )?(?:(\d+)m )?(\d+)s · running$/.exec(
+      (await running.textContent()) ?? "",
+    );
+    if (shown === null) return Number.NaN;
+    const [, hours = "0", minutes = "0", secs = "0"] = shown;
+    return Number(hours) * 3600 + Number(minutes) * 60 + Number(secs);
+  };
+  const before = await seconds();
+  expect(before).toBeGreaterThanOrEqual(
+    Math.floor((Date.now() - started) / 1000) - 2,
+  );
+  await expect.poll(seconds, { timeout: 5_000 }).toBeGreaterThan(before);
   for (const tab of ["pr", "checks"]) {
     await page.goto(`/?run=${runs().live}&node=remote-open&tab=${tab}`);
     await expect(
@@ -91,9 +148,11 @@ test("Remote displays incomplete check records without inventing a status or lin
     const row = table.getByRole("row").filter({
       has: page.getByRole("rowheader", { name: "legacy-check", exact: true }),
     });
+    // An unreadable start is no start: no runtime is made up for it.
     await expect(row.getByRole("cell")).toHaveText([
       "Not recorded",
       "skipped",
+      "",
       "Required",
     ]);
     await expect(row.getByRole("link")).toHaveCount(0);

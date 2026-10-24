@@ -221,11 +221,18 @@ ci-test-macos *args:
 # `target/debug/onepipeline-api` with the install's features, replacing the file
 # the test tiers running beside it in the same Nx run exec — the e2e tier's
 # `cli::` journeys found no binary there on macOS.
+# That sharing holds on Linux only. Windows and macOS name an executable's unit
+# without a hash, so a shared build directory still gives the install and the
+# test tiers one `deps/onepipeline_api` file: the install replaces it, and the
+# next tier's `cargo test --no-run` re-links `target/debug/onepipeline-api.exe`
+# while the e2e tier is executing it, which Windows refuses ("Access is denied",
+# CI run 40115634774). There the install builds in a directory of its own.
 # Install this revision the documented way and smoke-test the installed binary.
 # llmlint: ignore-block[diagnostics_error_or_absent] `_crate-lint` denies all compiler warnings over this same dev build with `clippy --all-targets -- -D warnings` in every CI selection that runs this install. RUSTFLAGS here would rebuild its shared units under another flag set; the install adds no source or feature clippy did not check.
 _crate-install-smoke:
     @{{packaging-priority}} cargo install --path . --locked --debug --quiet --root target/install-smoke \
-      --target-dir target/install-smoke/target --config 'build.build-dir="target"'
+      --target-dir target/install-smoke/target \
+      --config 'build.build-dir="{{ if os() == "linux" { "target" } else { "target/install-smoke/build" } }}"'
     @bin="$(cd target/install-smoke/bin && pwd)" \
       || { echo "cargo install wrote no target/install-smoke/bin: $(ls target/install-smoke 2>&1)" >&2; exit 1; }; \
       PATH="$bin:$PATH" bash scripts/smoke-published.sh --command "$bin/onepipeline-api" \

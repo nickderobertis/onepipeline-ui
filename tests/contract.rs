@@ -1189,12 +1189,12 @@ fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent()
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 25);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 26);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
     // nothing about.
-    assert_eq!(TIMELINE_SCHEMA_VERSION, 13);
+    assert_eq!(TIMELINE_SCHEMA_VERSION, 14);
     assert!(
         contract_text().contains(&format!("Timeline schema {TIMELINE_SCHEMA_VERSION}")),
         "docs/contract.md names no timeline schema {TIMELINE_SCHEMA_VERSION}"
@@ -2664,10 +2664,10 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     // `oneagentgraph` 0.2, which published two of them inline and had neither a
     // party, a per-turn bound, nor an observation on an activity.
     let started = serde_json::to_value(oneagentgraph::event::TurnStarted {
+        transcript: None,
         turn: 7,
         role: oneagentgraph::event::Party::User.as_str().to_string(),
         instruction: Some("re-run the gate".into()),
-        transcript: None,
         instruction_truncated: true,
         started_at: "2026-08-07T12:00:00.000Z".into(),
         origin: None,
@@ -2691,10 +2691,10 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     );
 
     let message = serde_json::to_value(oneagentgraph::event::TurnMessage {
+        transcript: None,
         turn: 7,
         role: oneagentgraph::event::Party::Assistant.as_str().to_string(),
         text: Some("the gate is green".into()),
-        transcript: None,
         truncated: true,
         origin: None,
     })
@@ -2715,10 +2715,10 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     );
 
     let activity = serde_json::to_value(oneagentgraph::event::TurnActivity {
+        transcript: None,
         kind: graph::TOOL_RESULT.into(),
         name: None,
         detail: Some("2 passed; 0 failed".into()),
-        transcript: None,
         // Both bound flags set, because that library skips either when it is
         // false: read off an activity that cut nothing, this gate would name
         // neither field, and a rename of one would pass it unchanged.
@@ -2756,10 +2756,10 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     );
     assert_eq!(
         serde_json::to_value(oneagentgraph::event::TurnActivity {
+            transcript: None,
             kind: "tool_call".into(),
             name: Some("bash".into()),
             detail: Some("just gate".into()),
-            transcript: None,
             truncated: false,
             output: None,
             output_truncated: false,
@@ -4083,4 +4083,32 @@ fn the_subscription_bounds_the_contract_states_are_the_ones_the_hub_keeps() {
         "docs/contract.md does not state the {} s bound the hub keeps",
         refold * 2
     );
+}
+
+/// The fields schema 26 and timeline schema 14 serve are each stated in
+/// `docs/contract.md`, beside the version that serves them: the description the
+/// engine's resolver gives a turn record and a live-activity entry, where a tool
+/// event sits, the harness session read whole, the line an unresolved reference
+/// is served as, and the runtime the browser reads off a check's own two stamps.
+#[test]
+fn the_contract_states_every_field_the_transcript_reading_serves() {
+    let text = contract_text();
+    for stated in [
+        "**Schema 26 is every turn read whole from its transcript.**",
+        "**Timeline schema 14 describes every turn record in one line.**",
+        "`views::transcript`",
+        "`transcript unavailable: <path>: <why>`",
+        "A live-activity entry gains **`description`** under schema 26",
+        "gains **`description`**: the linked engine resolver's one line",
+        "**`tool`**, `{index, tool_call_id?, turn?}`",
+        "A live tool event gains **`toolCallId`**",
+        "served whole and live as **`turns`**",
+        "**`unavailable`** carries the resolver's",
+        "`completed_at - started_at` for a finished check",
+    ] {
+        assert!(
+            text.contains(stated),
+            "docs/contract.md does not state: {stated}"
+        );
+    }
 }

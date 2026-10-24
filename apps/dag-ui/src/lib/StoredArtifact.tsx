@@ -1,18 +1,14 @@
-import { Button } from "@oneharness/ui";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
-import { useState } from "react";
 import { useRead } from "./useRead";
-
-/** How much of a stored artifact is shown before the reader asks for the rest. */
-const ARTIFACT_PREVIEW_CHARS = 4000;
 
 /**
  * One recorded artifact's bytes, read through the API's artifact route.
  *
  * Every caller asks by the opaque id its record stored and never by a path, so no
- * location on the producing host reaches the browser (`src/AGENTS.md`). The route
- * serves the *end* of a file rather than all of it, and this shows the end of
- * that again until the reader asks for the rest. A read that failed is *said*,
+ * location on the producing host reaches the browser (`src/AGENTS.md`). What the
+ * route serves is shown whole: a report whole, and a log as the end the route
+ * serves of it, with a line saying the beginning was left off where it was. A
+ * read that failed is *said*,
  * never left blank: the two sentences a caller gives are what tells "nothing was
  * recorded" from "something was, and this run has no readable copy of it".
  *
@@ -34,7 +30,7 @@ export function StoredArtifact({
   readonly heading: string;
   /** What to say when the record named no artifact this API can be asked for. */
   readonly missing: string;
-  /** What this document is called, in the controls that page through it. */
+  /** What this document is called, in the lines that describe it. */
   readonly noun: string;
   readonly runId: string;
   /** What to say when the artifact was named and the read did not answer. */
@@ -48,9 +44,6 @@ export function StoredArtifact({
     () => client.getArtifact(runId, servable ?? ""),
     0,
   );
-  // Which artifact the reader expanded, so opening another opens it folded.
-  const [expandedFor, setExpandedFor] = useState<string>();
-  const expanded = expandedFor === servable;
   const content = artifact.value?.content;
   return (
     <>
@@ -67,19 +60,15 @@ export function StoredArtifact({
         </p>
       ) : (
         <>
-          <pre>
-            {expanded ? content : content.slice(-ARTIFACT_PREVIEW_CHARS)}
-          </pre>
-          {content.length > ARTIFACT_PREVIEW_CHARS && (
-            <Button
-              onClick={() => setExpandedFor(expanded ? undefined : servable)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              {expanded ? `Collapse ${noun}` : `Expand ${noun}`}
-            </Button>
+          {artifact.value?.truncated === true && (
+            <p className="detail-note">
+              The server keeps the end of a {noun} this long; its beginning is
+              not shown.
+            </p>
           )}
+          <section aria-label={heading}>
+            <pre>{content}</pre>
+          </section>
         </>
       )}
     </>

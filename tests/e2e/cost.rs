@@ -907,11 +907,7 @@ fn a_session_is_recorded_and_served_without_reading_an_index_or_walking_the_stor
             .expect("the session holds its finished run");
         assert_eq!(
             body["content"].as_str(),
-            Some(
-                serde_json::to_string_pretty(&entry)
-                    .expect("a record")
-                    .as_str()
-            ),
+            Some(crate::harness_history::served_record(&entry).as_str()),
             "the session served is not the record the core renders for {}",
             session.history_id
         );

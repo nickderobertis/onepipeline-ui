@@ -165,6 +165,33 @@ pub fn record_from(dir: &Path, project: &Path, name: &str, prompt: &str, text: &
     )
 }
 
+/// [`record`], for a run that made one shell call — `command`, answered with
+/// `output` — before it closed on `text`: the call at index 0 and its result at
+/// index 1, both under [`TOOL_CALL_ID`], appended by the writer as a live run
+/// appends them.
+pub fn record_with_tool(
+    dir: &Path,
+    name: &str,
+    prompt: &str,
+    command: &str,
+    output: &str,
+    text: &str,
+) -> Recorded {
+    record_session(
+        dir,
+        name,
+        prompt,
+        text,
+        &Shape {
+            tool: Some((command, output)),
+            ..Shape::default()
+        },
+    )
+}
+
+/// The identity the harness minted for the call [`record_with_tool`] records.
+pub const TOOL_CALL_ID: &str = "toolu_01RecordedCall";
+
 /// A session launched under a run the engine stamped: the labels the launch
 /// carried, and the pointer file every harness run of it appends a line to.
 ///
@@ -216,6 +243,8 @@ struct Shape<'a> {
     streamed: bool,
     /// What a second, unfinished run of the session has said so far.
     in_flight: Option<&'a str>,
+    /// One shell call the run made, and what it returned.
+    tool: Option<(&'a str, &'a str)>,
 }
 
 impl Default for Shape<'_> {
@@ -226,6 +255,7 @@ impl Default for Shape<'_> {
             pointed: None,
             streamed: false,
             in_flight: None,
+            tool: None,
         }
     }
 }
@@ -237,6 +267,7 @@ fn record_session(dir: &Path, name: &str, prompt: &str, text: &str, shape: &Shap
         pointed,
         streamed,
         in_flight,
+        tool,
     } = *shape;
     // The directory the harness ran in. oneharness canonicalizes it and slugs
     // the result into the store's project layer, so it has to be a real one.
@@ -258,6 +289,22 @@ fn record_session(dir: &Path, name: &str, prompt: &str, text: &str, shape: &Shap
         writer
             .append_event(history_id, "claude-code:alternate", message(text))
             .expect("append the event the run streamed");
+    }
+    if let Some((command, output)) = tool {
+        for event in [
+            json!({ "kind": "tool_call", "name": "Bash", "input": { "command": command },
+                    "index": 0, "tool_call_id": TOOL_CALL_ID }),
+            json!({ "kind": "tool_result", "name": "Bash", "output": output,
+                    "index": 1, "tool_call_id": TOOL_CALL_ID }),
+        ] {
+            writer
+                .append_event(
+                    history_id,
+                    "claude-code:alternate",
+                    serde_json::from_value(event).expect("the event oneharness streams"),
+                )
+                .expect("append the call the run made");
+        }
     }
     let result = result(prompt, text, model);
     writer
@@ -384,4 +431,16 @@ fn result(prompt: &str, text: &str, model: Model<'_>) -> RunResult {
         ));
     }
     serde_json::from_value(result).expect("the run result oneharness normalizes")
+}
+
+/// What an `oneharness_session` artifact's `content` is for one finished run:
+/// the record oneharness closed it with, whole, less the events — those are the
+/// served turn's, read entry by entry through the engine's resolver.
+pub fn served_record(record: &impl serde::Serialize) -> String {
+    let mut record = serde_json::to_value(record).expect("a record serializes");
+    record
+        .as_object_mut()
+        .expect("a record is an object")
+        .shift_remove("events");
+    serde_json::to_string_pretty(&record).expect("a record prints")
 }

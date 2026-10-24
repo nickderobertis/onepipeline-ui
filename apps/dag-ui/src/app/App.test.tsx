@@ -1132,6 +1132,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
                 kind: "tool",
                 name: "Read",
                 detail: "server.py",
+                description: "Read src/server.py",
                 events: 12,
               },
             ],
@@ -1140,7 +1141,11 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       }),
     );
 
-    expect(await screen.findByText("dashboard: Read server.py")).toBeVisible();
+    // The server's own line for the call, never one assembled here from its
+    // name and the journal's summary.
+    expect(
+      await screen.findByText("dashboard: Read src/server.py"),
+    ).toBeVisible();
     // Work elsewhere in the run cannot change a session that has stopped recording,
     // so the operator reading it is neither re-served it nor shown a skeleton: the
     // very element they were reading is still the one on the page, and nothing was

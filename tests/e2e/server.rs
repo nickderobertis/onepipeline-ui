@@ -47,7 +47,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(25), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(26), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -657,7 +657,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(13));
+    assert_eq!(body["timeline_schema_version"], json!(14));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -2287,11 +2287,15 @@ fn a_settled_members_report_is_served_from_the_copy_the_run_retained() {
     }
 }
 
-/// A retained report longer than one response may carry is bounded exactly as a
-/// log is: the end of it, and the flag that says so.
+/// A retained report longer than any log tail is served whole: a report is a
+/// document a reader reads from its first criterion to its last, and the bound
+/// a log is served under would cut its beginning off.
 #[test]
-fn a_retained_report_bigger_than_one_response_is_served_as_its_tail() {
-    let report = report_document(&format!("{}the last thing it said", "n".repeat(70_000)));
+fn a_retained_report_bigger_than_a_log_tail_is_served_whole() {
+    let report = report_document(&format!(
+        "the first thing it said{}the last thing it said",
+        "n".repeat(70_000)
+    ));
     let serving = Serving::start(|root| {
         let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
         fixture_run::settle_member(
@@ -2315,14 +2319,13 @@ fn a_retained_report_bigger_than_one_response_is_served_as_its_tail() {
         ),
     )
     .json();
-    assert_eq!(body["truncated"], json!(true));
+    assert_eq!(body["truncated"], json!(false));
     assert_eq!(body["kind"], json!("worker_report"));
-    let content = body["content"].as_str().expect("content");
-    assert!(
-        content.ends_with(report.get(report.len() - 64..).expect("the report's end")),
-        "the tail is the end of the report"
+    assert_eq!(
+        body["content"].as_str(),
+        Some(report.as_str()),
+        "the whole report, its first sentence and its last"
     );
-    assert!(content.len() <= 64 * 1024);
 }
 
 /// A settlement whose report the run never kept.
@@ -2449,7 +2452,7 @@ fn a_oneharness_session_artifact_is_served_from_the_history_store_that_holds_it(
         store.path(),
         "a very talkative worker",
         "say more than one response can carry",
-        &"n".repeat(70_000),
+        &format!("{}the last thing it said", "n".repeat(70_000)),
     );
     let serving = Serving::start(|root| {
         let dir = fixture_run::write(root, fixture_run::RUN_ID);
@@ -2517,10 +2520,19 @@ fn a_oneharness_session_artifact_is_served_from_the_history_store_that_holds_it(
     );
     assert_eq!(content["prompt"], json!("land the wire contract"));
 
-    // A conversation longer than one response may carry is bounded exactly as a
-    // log is: the end of it, and the flag that says so. A transcript has no size
-    // its harness promised, and this is the one artifact kind whose bytes this
-    // server never wrote and cannot bound at the source.
+    // And the words are served structured, whole, as the one turn the
+    // invocation was: its prompt as the user's and its reply as the assistant's,
+    // read through the engine's resolver.
+    assert_eq!(body["turns"][0]["user"], json!("land the wire contract"));
+    assert_eq!(
+        body["turns"][0]["assistant"],
+        json!("the route table is landed")
+    );
+    assert_eq!(body["turns"][0]["model"], content["model"]);
+
+    // A conversation longer than a log's tail is served whole: a transcript is
+    // read from its first word to its last, and the tail a log is served as
+    // would have cut off what it was asked.
     let long = http::get(
         serving.address,
         &format!(
@@ -2531,16 +2543,14 @@ fn a_oneharness_session_artifact_is_served_from_the_history_store_that_holds_it(
     );
     assert_eq!(long.status, 200, "{}", long.body);
     let body = long.json();
-    assert_eq!(body["truncated"], json!(true));
-    let content = body["content"].as_str().expect("content");
+    assert_eq!(body["truncated"], json!(false));
+    let turn = &body["turns"][0];
+    assert_eq!(turn["user"], json!("say more than one response can carry"));
+    let reply = turn["assistant"].as_str().expect("the reply");
     assert!(
-        content.len() <= 64 * 1024,
-        "the body is bounded: {}",
-        content.len()
-    );
-    assert!(
-        content.ends_with("\"failure_kind\": null\n}"),
-        "the tail is the end of the record: {content}"
+        reply.len() > 70_000 && reply.ends_with("the last thing it said"),
+        "the whole reply, to its last sentence: {} bytes",
+        reply.len()
     );
 }
 
@@ -2670,17 +2680,17 @@ fn a_session_record_carries_the_model_the_harness_reported_and_the_refusal_it_ga
     );
 }
 
-/// A session whose next turn is still running is served by its finished run,
-/// exactly as the linked core renders that run — and the turn in flight, which
-/// has no record yet, is not an artifact.
+/// A session whose next turn is still running serves both: its finished run as
+/// the record the linked core closed it with, and the turn in flight live — the
+/// prompt it was given and what it has said so far, read out of the history
+/// file as it is written.
 ///
-/// The core renders a session as typed entries: each finished run's record, and
-/// an in-flight entry for a run that has streamed events but not closed. Only
-/// a record carries a `history_id`, so an artifact id selects a finished run
-/// and nothing else, and the bytes served for it are that record as the core
-/// serializes it — which is what a reader of `oneharness history show` sees.
+/// The writer opens every run with a line carrying its whole prompt and appends
+/// each event as it happens, so a run that has not closed is readable entry by
+/// entry through the engine's resolver; it has no closing record, so it is
+/// served `running` and with no reply of its own yet.
 #[test]
-fn a_session_with_a_turn_in_flight_serves_its_finished_run_and_not_the_running_one() {
+fn a_session_with_a_turn_in_flight_serves_its_finished_run_and_the_running_one_live() {
     use oneharness_core::domain::history::HistoryShowEntry;
 
     let store = tempfile::tempdir().expect("the oneharness history store");
@@ -2736,29 +2746,20 @@ fn a_session_with_a_turn_in_flight_serves_its_finished_run_and_not_the_running_o
     assert_eq!(body["kind"], json!("oneharness_session"));
     assert_eq!(
         body["content"].as_str(),
-        Some(
-            serde_json::to_string_pretty(finished)
-                .expect("the record")
-                .as_str()
-        ),
-        "the finished run is served as the core renders it"
+        Some(harness_history::served_record(finished).as_str()),
+        "the finished run is served as the core closed it"
     );
+    assert_eq!(body["turns"][0]["status"], json!("ok"), "{body}");
 
     let response = http::get(
         serving.address,
         &format!("/api/v2/runs/{}/artifacts/{running}", fixture_run::RUN_ID),
     );
-    assert_eq!(
-        response.status, 404,
-        "a run with no record yet is not an artifact: {}",
-        response.body
-    );
-    assert_eq!(
-        response.json()["error"]["code"],
-        json!("artifact_not_found"),
-        "{}",
-        response.body
-    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let turn = &response.json()["turns"][0];
+    assert_eq!(turn["status"], json!("running"), "{turn}");
+    assert_eq!(turn["user"], json!("land the wire contract"), "{turn}");
+    assert_eq!(turn["assistant"], json!("now landing the client"), "{turn}");
 }
 
 /// Reading one takes no lock and writes nothing under the store.
@@ -2988,14 +2989,16 @@ fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
             );
         }
         // The same store, named as the producer names it, holding an id no
-        // record in it carries.
+        // record in it carries. Named in the writer's spelling, because the
+        // line below expects the path the resolver joins from it, and macOS
+        // reaches the temporary `store` through a symlink the writer resolved.
         fixture_run::relay_harness_session(
             &dir,
             &fixture_run::HarnessSession {
                 stream: HARNESS_STREAM,
                 node: fixture_run::NODE_ID,
                 member: "worker",
-                history_dir: Some(&store),
+                history_dir: Some(&recorded.dir),
                 history_project: &recorded.project,
                 history_session: &recorded.session,
                 history_id: UNRECORDED_HISTORY_ID,
@@ -3022,6 +3025,9 @@ fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
         );
     }
 
+    // A pointer the run did record, at a file that holds no entry by that id:
+    // not a refusal, because nothing was followed anywhere it should not go, but
+    // the resolver's own line naming the file and why — never an empty session.
     let unknown = http::get(
         serving.address,
         &format!(
@@ -3029,8 +3035,22 @@ fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
             fixture_run::RUN_ID
         ),
     );
-    assert_eq!(unknown.status, 404, "{}", unknown.body);
-    assert_eq!(unknown.json()["error"]["code"], json!("artifact_not_found"));
+    assert_eq!(unknown.status, 200, "{}", unknown.body);
+    let unavailable = unknown.json()["unavailable"].clone();
+    assert_eq!(
+        unavailable,
+        json!(format!(
+            "transcript unavailable: {}: missing-entry",
+            recorded.path.display()
+        )),
+        "{}",
+        unknown.body
+    );
+    assert!(
+        !unknown.body.contains(HIDDEN_TRANSCRIPT),
+        "{}",
+        unknown.body
+    );
 }
 
 /// A pointer whose components *resolve* out of the store, which no check on how
@@ -3188,11 +3208,17 @@ fn a_history_pointer_that_resolves_out_of_the_store_is_refused_rather_than_opene
 
     // Asked for first, so that by the time the refusals below have been read off
     // the log a line about this one would already be on it.
+    // A dangling link resolves nowhere, so there is nothing to refuse: it is a
+    // transcript that went away, said in the resolver's own words.
     let vanished = artifact(VANISHED_HISTORY_ID);
-    assert_eq!(vanished.status, 404, "{}", vanished.body);
-    assert_eq!(
-        vanished.json()["error"]["code"],
-        json!("artifact_not_found")
+    assert_eq!(vanished.status, 200, "{}", vanished.body);
+    let said = vanished.json()["unavailable"].clone();
+    assert!(
+        said.as_str().is_some_and(|said| {
+            said.starts_with("transcript unavailable: ") && said.ends_with(": missing-file")
+        }),
+        "{}",
+        vanished.body
     );
 
     for (what, escaped) in [
@@ -4839,7 +4865,7 @@ fn a_notes_turn_is_served_where_the_record_names_one_and_nowhere_else() {
         &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(13));
+    assert_eq!(timeline["timeline_schema_version"], json!(14));
     // Every appended record is stamped at one instant, after everything the
     // live run wrote, so they are its last four edits in the order appended.
     let appended: Vec<Value> = events_on(&timeline)
@@ -6331,7 +6357,7 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
         ),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(13));
+    assert_eq!(timeline["timeline_schema_version"], json!(14));
     let drafted = review_events(&timeline, "change-drafted");
     assert_eq!(drafted.len(), 1, "{timeline}");
     assert_eq!(
@@ -11263,13 +11289,15 @@ fn an_agents_relayed_words_are_its_text_and_reasoning_and_never_its_tool_calls()
     assert_eq!(tools_only.len(), 1, "{tools_only:?}");
 
     // Tool activity alone is served as it always was: the call, carrying the
-    // observation that answered it, and no text or reasoning on the turn.
+    // observation that answered it and the identity the harness minted for it,
+    // and no text or reasoning on the turn.
     let expected_tools = json!([{
         "index": 2,
         "kind": "tool_call",
         "name": "bash",
         "input": "{\"command\":\"just check\"}",
         "output": "check passed",
+        "toolCallId": "t1",
     }]);
     assert_eq!(tools_only[0]["tools"], expected_tools);
     assert_eq!(tools_only[0]["assistant"], json!(null));
@@ -18882,6 +18910,107 @@ fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_event
     );
 }
 
+/// `text` with every age it counts back from now, such as `1877h43m ago`,
+/// spelled `<age> ago`: an age is the one part of a rendering that two reads
+/// of one unchanged run can disagree on, by when each was asked. Only a whole
+/// word that is an age, followed by a whole word `ago`, is masked.
+fn without_ages(text: &str) -> String {
+    let mut masked = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(" ago") {
+        let (before, after) = (&rest[..at], &rest[at + " ago".len()..]);
+        let start = before
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| c.is_whitespace())
+            .map_or(0, |(space, c)| space + c.len_utf8());
+        let word = &before[start..];
+        let ends_a_word = !after.starts_with(char::is_alphanumeric);
+        masked.push_str(&before[..start]);
+        masked.push_str(if ends_a_word && is_an_age(word) {
+            "<age>"
+        } else {
+            word
+        });
+        masked.push_str(" ago");
+        rest = after;
+    }
+    masked.push_str(rest);
+    masked
+}
+
+/// Whether `word` is an age as a rendering spells one: one or more counts,
+/// each its digits followed by one unit of `d`, `h`, `m` or `s`.
+fn is_an_age(word: &str) -> bool {
+    let mut rest = word;
+    while !rest.is_empty() {
+        let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        let mut tail = rest[digits..].chars();
+        if digits == 0 || !matches!(tail.next(), Some('d' | 'h' | 'm' | 's')) {
+            return false;
+        }
+        rest = tail.as_str();
+    }
+    !word.is_empty()
+}
+
+#[test]
+fn without_ages_spells_the_two_reads_ci_saw_a_minute_apart_alike() {
+    let earlier = "it had not reached its base when this settled 1877h43m ago — open the change";
+    let later = "it had not reached its base when this settled 1877h44m ago — open the change";
+    assert_ne!(earlier, later);
+    assert_eq!(without_ages(earlier), without_ages(later));
+    assert_eq!(
+        without_ages(earlier),
+        "it had not reached its base when this settled <age> ago — open the change"
+    );
+}
+
+#[test]
+fn without_ages_masks_every_age_in_a_rendering() {
+    assert_eq!(
+        without_ages("settled 2d ago, seen 5s ago\n  observed 1h0m30s ago"),
+        "settled <age> ago, seen <age> ago\n  observed <age> ago"
+    );
+}
+
+#[test]
+fn without_ages_leaves_prose_that_is_not_an_age_as_written() {
+    for prose in [
+        "long ago",
+        "a week ago",
+        "ms ago",
+        "12 ago",
+        "3m3 ago",
+        "x3m ago",
+        "in 3m agora",
+        "ago",
+        "",
+    ] {
+        assert_eq!(without_ages(prose), prose, "{prose:?}");
+    }
+}
+
+#[test]
+fn without_ages_keeps_text_whose_last_character_before_ago_is_multibyte() {
+    for text in ["é ago", "café ago", "— ago", "é3m ago", "naïve 🙂 ago"] {
+        assert_eq!(without_ages(text), text, "{text:?}");
+    }
+    assert_eq!(without_ages("café 3m ago — ✓"), "café <age> ago — ✓");
+    assert_eq!(without_ages("é\u{2003}3m ago"), "é\u{2003}<age> ago");
+}
+
+#[test]
+fn without_ages_returns_text_with_no_age_unchanged() {
+    for text in [
+        "dag-ui-review-loop  failed\n  api  done (change-review-draft)",
+        "agony, agora and sago",
+        "✓ ünïcödé — 日本語",
+    ] {
+        assert_eq!(without_ages(text), text, "{text:?}");
+    }
+}
+
 /// A continuation's rework read off the store names the superseded node's
 /// settled head, `replaces_head`, where the store's provenance carried it — a
 /// field no record the engine wrote before carried. No route's contract serves
@@ -18919,10 +19048,14 @@ fn a_continued_rework_naming_the_head_it_replaced_is_served_as_one_that_names_no
     });
     // The twin as the headed run would read: its own run id is the one thing
     // that tells the two apart on any route, and the instant each answer was
-    // given the one thing that tells two answers apart.
+    // given the one thing that tells two answers apart — in `observed_at`, and
+    // in every age the rendered text counts back from it, which two reads
+    // either side of a minute's turn spell differently.
     let as_headed = |served: &Value| -> Value {
-        let mut read: Value = serde_json::from_str(&served.to_string().replace(&unheaded, &headed))
-            .expect("a served document re-read");
+        let mut read: Value = serde_json::from_str(&without_ages(
+            &served.to_string().replace(&unheaded, &headed),
+        ))
+        .expect("a served document re-read");
         if let Some(envelope) = read.as_object_mut() {
             envelope.remove("observed_at");
         }

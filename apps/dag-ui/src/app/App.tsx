@@ -235,16 +235,13 @@ export function App({
                 <button
                   className="last-activity connection"
                   type="button"
-                  title={`${lastActivity.node}: ${[lastActivity.name, lastActivity.detail].filter(Boolean).join(" ") || lastActivity.kind}`}
+                  title={`${lastActivity.node}: ${activityLine(lastActivity)}`}
                   onClick={() => {
                     selection.selectNode(lastActivity.node);
                     selection.selectItem(lastActivity.event_id);
                   }}
                 >
-                  {lastActivity.node}:{" "}
-                  {[lastActivity.name, lastActivity.detail]
-                    .filter(Boolean)
-                    .join(" ") || lastActivity.kind}
+                  {lastActivity.node}: {activityLine(lastActivity)}
                 </button>
               )}
               <Button
@@ -474,4 +471,16 @@ export function App({
       </div>
     </TooltipProvider>
   );
+}
+
+/**
+ * What a node was last seen doing, in the one line the server's transcript
+ * resolver described the call in — never derived here, so the header and
+ * `onepipeline monitor` say the same thing about the same call.
+ */
+function activityLine(activity: {
+  readonly description: string;
+  readonly kind: string;
+}): string {
+  return activity.description || activity.kind;
 }
