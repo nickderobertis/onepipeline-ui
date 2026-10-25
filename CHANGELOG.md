@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.52.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.51.0...v0.52.0) - 2026-10-25
+
+### Added
+
+- [**breaking**] link the engine that holds nodes only on trackers their edges name ([#465](https://github.com/nickderobertis/onepipeline-ui/pull/465))
+
 ## [0.51.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.50.0...v0.51.0) - 2026-10-24
 
 ### Added
