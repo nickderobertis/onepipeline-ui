@@ -203,6 +203,59 @@ pub fn write_waiting_approval(root: &Path, run: &str, dir: &Path) -> PathBuf {
     write_undriven(root, run, dir, &plan, &[waiting])
 }
 
+/// The run [`write_held_on_source`] writes with the hold engine 0.90.0 journals.
+pub const SOURCE_HELD_RUN_ID: &str = "run-20260807-5c6d7e";
+/// The run [`write_held_on_source`] writes with the hold an earlier engine journalled.
+pub const SOURCE_HELD_EARLIER_RUN_ID: &str = "run-20260807-6d7e8f";
+/// The private tracker both holds name as unanswered.
+pub const HELD_SOURCE: &str = "vault";
+/// The reset the rate-limited provider gave, as epoch milliseconds.
+pub const HELD_SOURCE_RETRY_AT_MS: u64 = 1_786_104_600_000;
+
+/// The `source` hold reason the engine journals on `node-held` for a node whose
+/// tracker did not answer: one `unanswered` entry for [`HELD_SOURCE`], carrying
+/// `cause` and, for a rate limit whose provider gave a reset, `retry_at_ms` —
+/// or, with `rate_limited` false, the entry an engine before 0.90.0 wrote,
+/// which carries neither.
+pub fn source_hold(rate_limited: bool) -> Value {
+    let mut unanswered = json!({
+        "source": HELD_SOURCE,
+        "reason": "the tracker refused the read: 429 Too Many Requests",
+    });
+    if rate_limited {
+        unanswered["cause"] = json!("rate-limited");
+        unanswered["retry_at_ms"] = json!(HELD_SOURCE_RETRY_AT_MS);
+    }
+    json!({ "kind": "source", "unanswered": [unanswered] })
+}
+
+/// A run nothing is driving, launched from `dir` on this host, whose approval
+/// [`APPROVAL_NODE_ID`] the last driver recorded held on `hold` and never
+/// released — the run a browser adopts after its driver died mid-hold.
+pub fn write_held_on_source(root: &Path, run: &str, dir: &Path, hold: Value) -> PathBuf {
+    let plan = json!({
+        "schema_version": 2,
+        "goal": { "text": "get the change approved" },
+        "name": "approval",
+        "concurrency": 1,
+        "tasks": [
+            { "id": APPROVAL_NODE_ID, "kind": "human", "task": "Approve the change." },
+        ],
+    });
+    let held = json!({
+        "v": 1,
+        "ts": "2026-08-07T12:00:01.000Z",
+        "stream": "a-recording-host-4242",
+        "seq": 1,
+        "source": "pipeline",
+        "kind": "node-held",
+        "labels": { "run_id": run, "node": APPROVAL_NODE_ID },
+        "payload": { "reasons": [hold] },
+        "artifacts": [],
+    });
+    write_undriven(root, run, dir, &plan, &[held])
+}
+
 /// The launch record, plan and journal of a run nothing is driving: `plan`
 /// started, followed by `journalled`.
 fn write_undriven(
