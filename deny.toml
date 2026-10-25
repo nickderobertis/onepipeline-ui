@@ -80,3 +80,7 @@ skip-tree = []
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# The one git source: during a fast adoption `onepipeline` is linked from the
+# engine commit no release carries yet (`tests/packaging.rs`'s `ENGINE_SOURCE`
+# names the exact rev). Dropped with the crates.io pin that replaces it.
+allow-git = ["https://github.com/nickderobertis/onepipeline"]

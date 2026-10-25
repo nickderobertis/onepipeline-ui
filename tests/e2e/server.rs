@@ -20306,6 +20306,163 @@ fn browser_supervision_is_removed_and_shutdown_is_host_only() {
     assert!(host.json()["runs"].is_array());
 }
 
+/// The processes the process `pid` started that are still its children, as the
+/// kernel lists them under each of its threads.
+#[cfg(target_os = "linux")]
+fn children_of(pid: u32) -> Vec<u32> {
+    let mut children = Vec::new();
+    for task in fs::read_dir(format!("/proc/{pid}/task")).expect("the server's threads") {
+        // A thread that ended after the listing has no children left to list.
+        let listed =
+            fs::read_to_string(task.expect("a thread").path().join("children")).unwrap_or_default();
+        children.extend(listed.split_whitespace().map(|child| {
+            child
+                .parse::<u32>()
+                .expect("the kernel lists children as pids")
+        }));
+    }
+    children
+}
+
+/// No route this server answers starts, adopts or drives a run — the removed
+/// adopt and watch routes included — so a driver's teardown, observer graph
+/// and all, is never this process's to run.
+///
+/// The run under test is the one a driver takes over at once: undriven, its
+/// recorded driver proved gone, launched from a directory on this host, its one
+/// human action ready. Every route the contract declares is asked about it, the
+/// writes with bodies a client could send, and then the server is asked to
+/// stop it and to shut the host down. Had any of those started a driver, the
+/// launch record would name a new pid and count an adoption, the journal would
+/// carry `driver-adopted`, its liveness would read `ACTIVE` — and on Linux, the
+/// driver would be this server's child.
+#[cfg(unix)]
+#[test]
+fn no_route_starts_adopts_or_drives_a_run() {
+    use onepipeline_ui::contract::routes;
+
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_attestation(&root, run, &dir);
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+    let launch = |serving: &Serving| -> Value {
+        serde_json::from_str(
+            &fs::read_to_string(serving.run_dir(run).join("launch.json"))
+                .expect("the launch record"),
+        )
+        .expect("the launch record parses")
+    };
+    let recorded = launch(&serving);
+    let undriven = |serving: &Serving, after: &str| {
+        let now = launch(serving);
+        assert_eq!(
+            (&now["pid"], &now["host"], &now["adoptions"]),
+            (&recorded["pid"], &recorded["host"], &recorded["adoptions"]),
+            "after {after}, a driver claimed the run: {now}"
+        );
+        let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status"));
+        assert_eq!(status.status, 200, "{}", status.body);
+        assert_ne!(
+            status.json()["liveness"],
+            json!("ACTIVE"),
+            "after {after}, something is driving the run: {}",
+            status.body
+        );
+        let timeline = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json();
+        assert!(
+            !events_on(&timeline)
+                .iter()
+                .any(|event| event["kind"] == json!("driver-adopted")),
+            "after {after}, a driver adopted the run: {timeline}"
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            children_of(serving.pid()),
+            Vec::<u32>::new(),
+            "after {after}, the server has started a process"
+        );
+    };
+    undriven(&serving, "nothing");
+
+    // The removed supervision routes: refused, and nothing started behind them.
+    for (suffix, adopt) in [("adopt", true), ("watch", false)] {
+        let path = format!("/api/v2/runs/{run}/{suffix}");
+        let answer = if adopt {
+            http::post(serving.address, &path, r#"{"attach":true}"#)
+        } else {
+            http::get(serving.address, &path)
+        };
+        assert_eq!(answer.status, 404, "{path}: {}", answer.body);
+        assert_eq!(answer.json()["error"]["code"], json!("removed_route"));
+        undriven(&serving, &path);
+    }
+
+    // Every route the contract declares, but the two that end something, which
+    // are asked last. A body a client could send to each write.
+    let project = encoded(fixture_run::PLAN_PROJECT);
+    for route in routes::TABLE {
+        if [routes::RUN_STOP, routes::SHUTDOWN].contains(&route.path) {
+            continue;
+        }
+        let path = route
+            .path
+            .replace("{run}", run)
+            .replace("{project}", &project)
+            .replace("{node}", fixture_run::APPROVAL_NODE_ID)
+            .replace("{id}", fixture_run::CONVERSATION_ID)
+            .replace("{subscription}", "00000000-0000-4000-8000-000000000000");
+        let asked = format!("{} {path}", route.method.as_str());
+        match route.method {
+            routes::Method::Get if route.path == routes::EVENTS => {
+                let mut stream = http::stream(serving.address, &path, None);
+                assert!(
+                    stream.frame_within(DRIVER_PATIENCE).is_some(),
+                    "{asked} opened"
+                );
+            }
+            routes::Method::Get => {
+                let path = if route.path == routes::RUN_TIMELINE {
+                    format!("{path}?scope=run")
+                } else {
+                    path
+                };
+                http::get(serving.address, &path);
+            }
+            routes::Method::Post => {
+                let body = match route.path {
+                    routes::RUN_ATTEST => {
+                        json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string()
+                    }
+                    routes::SUBSCRIPTIONS => json!({ "run": run }).to_string(),
+                    _ => "{}".to_owned(),
+                };
+                http::post(serving.address, &path, &body);
+            }
+            routes::Method::Delete => {
+                http::delete(serving.address, &path);
+            }
+        }
+        undriven(&serving, &asked);
+    }
+
+    // Stopping the run and shutting the host down end things; neither drives.
+    let stop = http::post(serving.address, &format!("/api/v2/runs/{run}/stop"), "{}");
+    assert!(stop.status < 500, "{}", stop.body);
+    undriven(&serving, "the stop");
+    let host = http::post(
+        serving.address,
+        "/api/v2/shutdown",
+        r#"{"scope":"host", "grace":0}"#,
+    );
+    assert_eq!(host.status, 200, "{}", host.body);
+    undriven(&serving, "the host shutdown");
+}
+
 #[cfg(unix)]
 fn write_closing_harness_standin(dir: &Path, log: &Path) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;

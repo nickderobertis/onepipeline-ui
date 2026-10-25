@@ -558,11 +558,12 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// with the `onepipeline` pin and [`STORE_RELEASE`], as one change.
 const ENGINE_RELEASE: &str = "0.91.0";
 
-/// Where the lock must resolve [`ENGINE_RELEASE`] from: crates.io, which serves
-/// the release a crates.io consumer and the sibling CLI `just bootstrap`
-/// provisions both reach. A git commit can carry the same version number while
-/// its library is another, so the version alone cannot tell the two apart.
-const ENGINE_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
+/// Where the lock must resolve [`ENGINE_RELEASE`] from. A git commit can carry
+/// the same version number while its library is another, so the version alone
+/// cannot tell the two apart. During a fast adoption it is the engine commit no
+/// release carries yet — which `just bootstrap` compiles the sibling CLI from —
+/// and it returns to crates.io with the release that carries that commit.
+const ENGINE_SOURCE: &str = "git+https://github.com/nickderobertis/onepipeline?rev=670b837c123d69160052034b7ee827e100056505#670b837c123d69160052034b7ee827e100056505";
 
 /// Every way `lock` and `manifest` fail to link exactly [`ENGINE_RELEASE`] of the
 /// engine, as a reader would be told them: a requirement that is not that release
@@ -646,13 +647,18 @@ fn an_engine_moved_together_or_resolved_twice_is_refused_naming_it() {
         &entry,
         &format!("name = \"onepipeline\"\nversion = \"{moved_to}\"\n"),
     );
-    let requirement = format!("onepipeline = \"={ENGINE_RELEASE}\"");
-    assert_eq!(
-        manifest.matches(&requirement).count(),
-        1,
-        "one onepipeline requirement"
+    // The requirement's line, in whichever form it is written: a bare string, or
+    // the `version` key beside a fast adoption's git source.
+    let requirement = manifest
+        .lines()
+        .find(|line| line.starts_with("onepipeline = "))
+        .expect("one onepipeline requirement");
+    let exact = format!("\"={ENGINE_RELEASE}\"");
+    assert_eq!(requirement.matches(&exact).count(), 1, "{requirement}");
+    let moved_manifest = manifest.replace(
+        requirement,
+        &requirement.replace(&exact, &format!("\"={moved_to}\"")),
     );
-    let moved_manifest = manifest.replace(&requirement, &format!("onepipeline = \"={moved_to}\""));
 
     // Moved together, the two still agree with each other — the case the
     // comparison of requirement and lock cannot see.
@@ -681,6 +687,11 @@ fn an_engine_moved_together_or_resolved_twice_is_refused_naming_it() {
     assert_eq!(
         doubled,
         [
+            format!(
+                "the lock resolves onepipeline 0.79.1 from \
+                 Some(\"registry+https://github.com/rust-lang/crates.io-index\"), \
+                 not {ENGINE_SOURCE}"
+            ),
             format!("the lock resolves onepipeline 0.79.1, not the engine release {ENGINE_RELEASE}"),
             format!(
                 "the lock resolves onepipeline at 2 releases, {{\"0.79.1\", \"{ENGINE_RELEASE}\"}}, \
@@ -690,9 +701,10 @@ fn an_engine_moved_together_or_resolved_twice_is_refused_naming_it() {
     );
 }
 
-/// A lock resolving the engine's own release number from a git commit is refused
-/// naming where it came from: the version agrees and the requirement agrees, so
-/// the source is the only thing that tells them apart.
+/// A lock resolving the engine's own release number from another source — here
+/// another git commit — is refused naming where it came from: the version agrees
+/// and the requirement agrees, so the source is the only thing that tells them
+/// apart.
 #[test]
 fn the_same_engine_release_from_another_source_is_refused_naming_it() {
     let lock = read("Cargo.lock");
