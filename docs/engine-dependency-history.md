@@ -563,3 +563,18 @@ oneagentgraph 0.8.0, oneharness-core 0.29.1 and onejudge 0.21.0 are unchanged,
 and no route, payload or MSRV changes beyond the release `/healthz` reports.
 This changes the engine types carried by ApiError::from_engine and the other
 engine-typed public items.
+0.91.0 is the engine that classifies each task of a store project by its own
+declaration and repositories, never by the project it is filed under, so a
+private coordinating project holding the whole graph and its export edge may
+carry a public task, which becomes that edge's consumer; its boundary guidance
+(schema 2) says how such a plan is coordinated, and every refusal carries that
+in one line. Adopting a run from the browser makes this crate's linked engine
+its driver, and every live edit relayed through the reply route is judged by
+it, so a coordinating run keeps its export-backed consumer and the refusals this
+service relays carry the engine's own guidance only once this crate links that
+engine. It links onetaskgraph 0.12.1, whose lock-step family the test-only
+`onetaskgraph-*` requirements follow, and that store resolves tokio 1.54;
+onevcs 0.56.11, oneagentgraph 0.8.0, oneharness-core 0.29.1 and onejudge 0.21.0
+are unchanged, and no route, payload or MSRV changes beyond the release
+`/healthz` reports. This changes the engine types carried by
+ApiError::from_engine and the other engine-typed public items.

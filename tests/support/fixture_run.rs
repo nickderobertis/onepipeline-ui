@@ -425,6 +425,42 @@ pub fn configure_local_md_store(dir: &Path) -> PathBuf {
     store
 }
 
+/// [`configure_local_md_store`]'s source with its project written as a
+/// **private coordinating** one: the project itself is classified private,
+/// named [`EXPORT_PLAN_NAME`], and carries the plan's one export edge — from
+/// [`EXPORT_PRODUCER_NODE_ID`] to [`EXPORT_CONSUMER_NODE_ID`] — as its reserved
+/// `onepipeline.export_edges`. No task is written and nothing says what any task's
+/// visibility is: each task the journey files keeps its own. Answers the store's
+/// root.
+pub fn configure_private_coordination_store(dir: &Path) -> PathBuf {
+    let store = configure_local_md_store(dir);
+    write_store_item(
+        &store
+            .join("projects")
+            .join(format!("{LOCAL_MD_PROJECT}.md")),
+        &[
+            ("title", json!(EXPORT_PLAN_NAME)),
+            ("classification", json!("private")),
+            (
+                "metadata",
+                json!({
+                    "onepipeline.schema_version": onepipeline::plan::PLAN_SCHEMA_VERSION,
+                    "onepipeline.goal": { "text": "publish a generic example of private work" },
+                    "onepipeline.concurrency": 1,
+                    "onepipeline.export_edges": [{
+                        "from": EXPORT_PRODUCER_NODE_ID,
+                        "to": EXPORT_CONSUMER_NODE_ID,
+                        "source_directory": EXPORT_SOURCE_DIRECTORY,
+                        "target_directory": EXPORT_TARGET_DIRECTORY,
+                    }],
+                }),
+            ),
+        ],
+        "",
+    );
+    store
+}
+
 /// Configure the store [`PLAN_PROJECT`] names under `dir` — a `local-md`
 /// source of that name, through the `onetaskgraph.yaml` in `dir`, holding that
 /// project with no tasks — so a driver launched from `dir` reads its project's

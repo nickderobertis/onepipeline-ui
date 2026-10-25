@@ -16082,6 +16082,19 @@ fn provisioned_onepipeline(
     node_graph: &Path,
     arguments: &[&str],
 ) -> Vec<u8> {
+    provisioned_onepipeline_with_env(root, dir, node_graph, &[], arguments)
+}
+
+/// [`provisioned_onepipeline`] with `environment` set on top of what it sets, for a
+/// launch whose plan names repositories the linked `onevcs` has to resolve.
+#[cfg(unix)]
+fn provisioned_onepipeline_with_env(
+    root: &Path,
+    dir: &Path,
+    node_graph: &Path,
+    environment: &[(&str, &str)],
+    arguments: &[&str],
+) -> Vec<u8> {
     let output = std::process::Command::new(sibling::binary())
         .args(arguments)
         .current_dir(dir)
@@ -16097,6 +16110,7 @@ fn provisioned_onepipeline(
         // The plan-store user layer `Serving` gives its server, so `start`
         // reads the store this journey configures and none of the host's.
         .env("XDG_CONFIG_HOME", dir.join("config"))
+        .envs(environment.iter().copied())
         .output()
         .expect("the provisioned onepipeline runs");
     assert!(
@@ -17085,6 +17099,53 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
     standin
 }
 
+/// Every dispatch [`write_exporting_harness_standin`] recorded under `records`:
+/// each one's argv followed by the task it was handed, which the adapter writes
+/// as a stream-json `user` frame on stdin where the turn has control and as
+/// `-p`'s positional where oneharness refused it (see `write_harness_standin`) —
+/// so the text is read from whichever carried it.
+#[cfg(unix)]
+fn dispatched_tasks(records: &Path) -> Vec<String> {
+    fs::read_dir(records)
+        .expect("the dispatch records")
+        .map(|entry| entry.expect("a record").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("argv-"))
+        })
+        .map(|path| {
+            let argv = fs::read_to_string(&path).expect("an argv record");
+            let stdin_of = path.with_file_name(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .expect("a record name")
+                    .replacen("argv-", "stdin-", 1),
+            );
+            let stdin = fs::read_to_string(&stdin_of).expect("a stdin record");
+            let streamed = argv.contains("--input-format stream-json");
+            if stdin.is_empty() {
+                assert!(
+                    !streamed,
+                    "a stream-json turn was written no prompt frame: {argv}"
+                );
+                return argv;
+            }
+            assert!(
+                streamed,
+                "a prompt reached stdin outside a stream-json turn: {argv}"
+            );
+            let frame: Value = serde_json::from_str(&stdin).unwrap_or_else(|err| {
+                panic!("the prompt is not a stream-json frame: {err}: {stdin}")
+            });
+            let text = frame["message"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("the prompt frame carries no text: {frame}"));
+            format!("{argv}{text}")
+        })
+        .collect()
+}
+
 // llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 /// The publication boundary of the engine this binary links, driven through
 /// this server's routes over a plan spanning a private and a public repository
@@ -17202,7 +17263,228 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
             )
         })
     });
-    let detail = detail();
+    assert_the_consumer_built_on_the_export_alone(&detail(), &repos, &records);
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+/// A **private coordinating** plan — a `local-md` project classified private,
+/// holding the whole graph and its export edge, whose tasks state no visibility
+/// of their own — launched by the released `start` this crate pins, attested
+/// through this server and adopted through the pinned CLI, keeps its public task
+/// public and hands it only the export.
+///
+/// The engine this binary links classifies each task by its own declaration and
+/// repositories, never by the project it is filed under. One that tightened every
+/// task of a private project to private read the consumer, in the public
+/// repository, as private — which no export consumer may be — and refused the
+/// launch, so a coordinating plan could never carry a public task at all. Here
+/// the served plan carries no classification for the consumer; a live edit relayed
+/// through this server's reply route is refused by the server's own linked engine
+/// with the coordination guidance that engine documents; and after the attest
+/// route releases the approval and the adoption drives the run, the export reached
+/// the public origin and nothing private did.
+#[cfg(unix)]
+#[test]
+fn an_adopted_private_coordination_run_keeps_its_public_task_public_and_hands_it_only_the_export() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let repos = scratch_repo::seed_boundary(&dir);
+    let records = dir.join("dispatches");
+    // llmlint: ignore[e2e_not_mocked] the harness program is the one process this
+    // journey stands in for, on the terms `write_harness_standin` states. The store,
+    // the released `start`, the attest route, the pinned CLI driver, the engine's
+    // boundary, and the linked `onevcs` keeping, exporting and publishing over real
+    // git are all real; the stand-in only commits the work a real agent would leave.
+    let standin = write_exporting_harness_standin(&dir, &records);
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let producer = fixture_run::EXPORT_PRODUCER_NODE_ID;
+    let consumer = fixture_run::EXPORT_CONSUMER_NODE_ID;
+
+    fixture_run::configure_private_coordination_store(&dir);
+    let criteria = |task: &str| {
+        onetaskgraph_core::Body::plain(format!(
+            "{task}\n\n## Acceptance criteria\n\n- The work is done.\n"
+        ))
+    };
+    let approval = create_store_task(
+        &dir,
+        "Approve the example",
+        onetaskgraph_core::Body::plain("Approve the example."),
+        &[
+            ("onepipeline.id", json!(fixture_run::APPROVAL_NODE_ID)),
+            ("onepipeline.kind", json!("human")),
+        ],
+        &[],
+    );
+    let produced = create_store_task(
+        &dir,
+        "feat: generalize the example",
+        criteria("Write a generic example of the work."),
+        &[
+            ("onepipeline.id", json!(producer)),
+            ("onepipeline.repo", json!(repos.private.alias)),
+            ("onepipeline.publish", json!("preserve")),
+            ("onepipeline.persona", json!("engineer")),
+        ],
+        &[&approval],
+    );
+    create_store_task(
+        &dir,
+        "feat: add examples",
+        criteria("Build the public examples on the exported one."),
+        &[
+            ("onepipeline.id", json!(consumer)),
+            ("onepipeline.repo", json!(repos.public.alias)),
+            ("onepipeline.persona", json!("engineer")),
+        ],
+        &[&produced],
+    );
+
+    let state = dir.join("state");
+    let onevcs_home = dir.join(crate::serving::ONEVCS_HOME_DIR);
+    let environment = [
+        ("ONEPIPELINE_PROJECT_DIR", dir.display().to_string()),
+        ("XDG_STATE_HOME", state.display().to_string()),
+        (
+            scratch_repo::GIT_CONFIG_ENV,
+            repos.private.gitconfig.display().to_string(),
+        ),
+        (onevcs::branches::PREFIX_ENV, String::new()),
+        (
+            scratch_repo::GH_ENV,
+            repos.refusing_gh.display().to_string(),
+        ),
+    ];
+    let environment: Vec<(&str, &str)> = environment
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    let onevcs_home = onevcs_home.display().to_string();
+    let launching: Vec<(&str, &str)> = environment
+        .iter()
+        .copied()
+        .chain([(crate::serving::ONEVCS_HOME_ENV, onevcs_home.as_str())])
+        .collect();
+    let project = format!(
+        "{}:{}",
+        fixture_run::LOCAL_MD_SOURCE,
+        fixture_run::LOCAL_MD_PROJECT
+    );
+    let run = started_and_let_go(&provisioned_onepipeline_with_env(
+        &root,
+        &dir,
+        &graph,
+        &launching,
+        &["start", &project, "--detach"],
+    ));
+
+    let serving = Serving::start_in_as_with_env(workspace, fixture_run::SESSION, &environment);
+    let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    // The plan the server serves is the one the store's private project launched,
+    // and its consumer carries no classification: nothing made it private.
+    let launched = detail();
+    let tasks = launched["graph"]["plan"]["tasks"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the plan's tasks: {launched}"));
+    let task = |id: &str| -> &Value {
+        tasks
+            .iter()
+            .find(|task| task["id"] == json!(id))
+            .unwrap_or_else(|| panic!("the plan holds no {id:?}: {launched}"))
+    };
+    assert!(
+        task(consumer).get("classification").is_none(),
+        "the private project made its public task private: {}",
+        task(consumer)
+    );
+
+    // The supervision this server performs is its own linked engine's: a live edit
+    // giving a public task an ordinary dependency on the private producer is
+    // refused before anything is applied, naming nothing private, and the refusal
+    // carries the coordination this engine documents — one private coordinating
+    // plan whose tasks each keep their own visibility — rather than an older
+    // engine's guidance, which said nothing of how such a plan is coordinated.
+    let ordinary = json!({"version": 3, "commands": [{"op": "add", "node": {
+        "id": "outer",
+        "repo": repos.public.alias,
+        "persona": "engineer",
+        "title": "feat: ship outer",
+        "task": "Ship outer.\n\n## Acceptance criteria\n\n- outer is published.\n",
+        "deps": [producer],
+    }}]});
+    let refused = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/reply"),
+        &ordinary.to_string(),
+    );
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    let refused = refused.json();
+    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
+    let said = refused["error"]["message"]
+        .as_str()
+        .expect("the refusal's words");
+    assert!(
+        said.contains(
+            "inside one private coordinating plan whose tasks each keep their own visibility"
+        ),
+        "the refusal carries no coordination guidance: {said}"
+    );
+    for named in [
+        "outer",
+        producer,
+        consumer,
+        scratch_repo::PRIVATE_ALIAS,
+        fixture_run::EXPORT_PLAN_NAME,
+    ] {
+        assert!(!said.contains(named), "the refusal names {named:?}: {said}");
+    }
+    assert_eq!(
+        detail()["graph"]["plan"]["tasks"],
+        launched["graph"]["plan"]["tasks"],
+        "a refused edit changed the graph"
+    );
+
+    let attested = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/attest"),
+        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
+    );
+    assert_eq!(attested.status, 200, "{}", attested.body);
+    let driver = RetainedDriver(serving.drive_fixture(&run));
+    eventually("both nodes of the coordination run settled", || {
+        let graph = &detail()["graph"];
+        [producer, consumer].iter().all(|node| {
+            matches!(
+                graph["node_status"][node].as_str(),
+                Some("done" | "failed" | "skipped")
+            )
+        })
+    });
+    assert_the_consumer_built_on_the_export_alone(&detail(), &repos, &records);
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// What a settled mixed run of [`fixture_run::EXPORT_PRODUCER_NODE_ID`] and
+/// [`fixture_run::EXPORT_CONSUMER_NODE_ID`] owes, read off its served `detail`,
+/// the two repositories' origins and the dispatches recorded under `records`: the
+/// producer kept a neutral `export/` branch, the consumer settled `done` on a
+/// neutral `public/` one, the public origin holds the exported directory and none
+/// of the private history, and the consumer was told only the context the engine
+/// documents for its side.
+#[cfg(unix)]
+fn assert_the_consumer_built_on_the_export_alone(
+    detail: &Value,
+    repos: &scratch_repo::BoundaryRepos,
+    records: &Path,
+) {
+    let producer = fixture_run::EXPORT_PRODUCER_NODE_ID;
+    let consumer = fixture_run::EXPORT_CONSUMER_NODE_ID;
     let results = &detail["graph"]["node_results"];
     assert_eq!(
         results[producer]["outcome"],
@@ -17276,48 +17558,7 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
     // What each side was told: the consumer's dispatch carries exactly the context the
     // engine's contract documents for an export's consumer, and nothing of the private
     // side; the producer is told it is the private side of a mixed plan.
-    // Each dispatch is its argv and the task it was handed, which the adapter
-    // writes as a stream-json `user` frame on stdin where the turn has control and
-    // as `-p`'s positional where oneharness refused it (see
-    // `write_harness_standin`) — so the text is read from whichever carried it.
-    let dispatched: Vec<String> = fs::read_dir(&records)
-        .expect("the dispatch records")
-        .map(|entry| entry.expect("a record").path())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("argv-"))
-        })
-        .map(|path| {
-            let argv = fs::read_to_string(&path).expect("an argv record");
-            let stdin_of = path.with_file_name(
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .expect("a record name")
-                    .replacen("argv-", "stdin-", 1),
-            );
-            let stdin = fs::read_to_string(&stdin_of).expect("a stdin record");
-            let streamed = argv.contains("--input-format stream-json");
-            if stdin.is_empty() {
-                assert!(
-                    !streamed,
-                    "a stream-json turn was written no prompt frame: {argv}"
-                );
-                return argv;
-            }
-            assert!(
-                streamed,
-                "a prompt reached stdin outside a stream-json turn: {argv}"
-            );
-            let frame: Value = serde_json::from_str(&stdin).unwrap_or_else(|err| {
-                panic!("the prompt is not a stream-json frame: {err}: {stdin}")
-            });
-            let text = frame["message"]["content"][0]["text"]
-                .as_str()
-                .unwrap_or_else(|| panic!("the prompt frame carries no text: {frame}"));
-            format!("{argv}{text}")
-        })
-        .collect();
+    let dispatched = dispatched_tasks(records);
     assert_eq!(dispatched.len(), 2, "{dispatched:#?}");
     let told = |task: &str| -> &String {
         dispatched
@@ -17363,10 +17604,7 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
         "onevcs asked no host through {}: {asked:?}",
         scratch_repo::GH_ENV
     );
-    drop(driver);
-    serving.stop_on(Stop::Terminate);
 }
-// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// The plan writer a stacked-preserve journey adopts a run of.
 #[cfg(unix)]
