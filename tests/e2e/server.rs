@@ -19009,10 +19009,60 @@ fn write_held_once_harness_standin(dir: &Path, log: &Path) -> PathBuf {
 /// How long a dispatch's run holds a redirecting interrupt for the turn it
 /// aborted to end, before taking the redirect back and answering: oneharness's
 /// `REDIRECT_DELIVERY_DEADLINE`, a deliberate bound that crate keeps private, so
-/// mirrored here. A host shutdown whose redirect reaches a turn that never ends
-/// waits all of it out before the grace starts.
+/// mirrored here and held to the linked crate's declaration by
+/// [`the_mirrored_redirect_delivery_deadline_is_the_linked_oneharness_one`]. A
+/// host shutdown whose redirect reaches a turn that never ends waits all of it
+/// out before the grace starts.
 #[cfg(unix)]
 const REDIRECT_DELIVERY_DEADLINE_SECONDS: u64 = 60;
+
+/// The mirrored deadline is the one the `oneharness-core` this lock resolves
+/// declares, read from that crate's own source where cargo unpacked it: the
+/// constant is private, so its declaration is the one authority there is, and a
+/// release that moves or renames it fails here by name rather than leaving
+/// [`HELD_SHUTDOWN_PATIENCE`] derived from a bound nothing applies.
+#[cfg(unix)]
+#[test]
+fn the_mirrored_redirect_delivery_deadline_is_the_linked_oneharness_one() {
+    let metadata =
+        std::process::Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .args(["metadata", "--format-version", "1", "--locked", "--offline"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .expect("run cargo metadata");
+    assert!(
+        metadata.status.success(),
+        "{}",
+        String::from_utf8_lossy(&metadata.stderr)
+    );
+    let metadata: Value = serde_json::from_slice(&metadata.stdout).expect("cargo metadata's JSON");
+    let manifests: Vec<&str> = metadata["packages"]
+        .as_array()
+        .expect("the resolved packages")
+        .iter()
+        .filter(|package| package["name"] == json!("oneharness-core"))
+        .map(|package| package["manifest_path"].as_str().expect("a manifest path"))
+        .collect();
+    assert_eq!(
+        manifests.len(),
+        1,
+        "one oneharness-core resolution: {manifests:?}"
+    );
+    let control = Path::new(manifests[0])
+        .parent()
+        .expect("the crate's root")
+        .join("src/io/control.rs");
+    let source = fs::read_to_string(&control).expect("the linked oneharness's control module");
+    let declaration = format!(
+        "const REDIRECT_DELIVERY_DEADLINE: std::time::Duration = \
+         std::time::Duration::from_secs({REDIRECT_DELIVERY_DEADLINE_SECONDS});"
+    );
+    assert!(
+        source.contains(&declaration),
+        "{} no longer declares `{declaration}`",
+        control.display()
+    );
+}
 
 /// The grace the held dispatch's host shutdown names, counted from the moment
 /// the interrupt answers.
