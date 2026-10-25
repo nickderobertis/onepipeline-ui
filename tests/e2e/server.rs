@@ -19096,7 +19096,15 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
     )
     .expect("the store configuration");
 
-    let state = dir.join("state");
+    // The dispatch's control socket lives under the state directory, and on
+    // macOS a `$TMPDIR` workspace puts it past the 104-byte `sun_path`, where
+    // oneharness refuses control, the shutdown has no turn to redirect, and the
+    // deadline below is never applied. A short root keeps every platform on the
+    // one path this journey holds.
+    let short_state = tempfile::Builder::new()
+        .tempdir_in("/tmp")
+        .expect("a short state root");
+    let state = short_state.path().join("state");
     let onevcs_home = dir.join(crate::serving::ONEVCS_HOME_DIR);
     let environment: Vec<(&str, String)> = vec![
         ("CACHE_BOARD_TOKEN", board.token.clone()),
