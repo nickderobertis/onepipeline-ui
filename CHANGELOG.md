@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.53.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.53.0...v0.53.1) - 2026-10-25
+
+### Fixed
+
+- *(deps)* link the engine that ends a run's observer judge command when the run ends ([#508](https://github.com/nickderobertis/onepipeline-ui/pull/508))
+
 ## [0.53.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.52.0...v0.53.0) - 2026-10-25
 
 ### Added
