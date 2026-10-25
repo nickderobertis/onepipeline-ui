@@ -224,8 +224,8 @@ libc = "0.2"
 # `publication-resumed`, which `payload::vcs` copies; engine 0.79.1 resolves the
 # same release (^0.56.3), as do 0.82.0, 0.84.0, 0.84.1 and 0.85.0. 0.56.9 is the
 # release engine 0.89.0 resolves (^0.56.9), which relays each check's times.
-# 0.56.11 is the release engine 0.90.0 resolves (^0.56.11). 0.57.0 is the
-# release engine 0.92.0 resolves (^0.57.0), which honours a host's public phrases.
+# 0.56.11 is the release engine 0.90.0 resolves (^0.56.11), and 0.57.0 the one
+# engine 0.92.0 resolves (^0.57.0).
 onevcs = "=0.57.0"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
