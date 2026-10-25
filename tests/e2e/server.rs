@@ -19006,6 +19006,31 @@ fn write_held_once_harness_standin(dir: &Path, log: &Path) -> PathBuf {
     standin
 }
 
+/// How long a dispatch's run holds a redirecting interrupt for the turn it
+/// aborted to end, before taking the redirect back and answering: oneharness's
+/// `REDIRECT_DELIVERY_DEADLINE`, a deliberate bound that crate keeps private, so
+/// mirrored here and held to the dispatch's own answer by the journey that
+/// waits it out.
+#[cfg(unix)]
+const REDIRECT_DELIVERY_DEADLINE_SECONDS: u64 = 60;
+
+/// The grace the held dispatch's host shutdown names, counted from the moment
+/// the interrupt answers.
+#[cfg(unix)]
+const HELD_SHUTDOWN_GRACE_SECONDS: u64 = 1;
+
+/// How long a host shutdown over a dispatch that never ends its turn is given to
+/// answer: the delivery deadline, then the grace, then a margin of half that
+/// deadline for the kill, the teardown and the preserving push on a loaded host.
+/// [`DRIVER_PATIENCE`] alone is the deadline itself, so a shutdown that waits it
+/// out raced the request it answers.
+#[cfg(unix)]
+const HELD_SHUTDOWN_PATIENCE: Duration = Duration::from_secs(
+    REDIRECT_DELIVERY_DEADLINE_SECONDS
+        + HELD_SHUTDOWN_GRACE_SECONDS
+        + REDIRECT_DELIVERY_DEADLINE_SECONDS / 2,
+);
+
 // llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 /// A run driven by the pinned CLI marks its plan's home done once it settles;
 /// this reader serves the records that driver writes.
@@ -19145,16 +19170,37 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
         String::from_utf8_lossy(&landed.stdout).trim().to_owned()
     };
     let seeded_base = base();
+    let journal = root.join(&run).join("events.jsonl");
+    let recorded = || -> Vec<Value> {
+        fs::read_to_string(&journal)
+            .expect("the run's journal")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("a journal record"))
+            .collect()
+    };
+    // The shutdown learns a dispatch's turn only from the agentgraph records the
+    // driver relays into the run's journal. Until one lands it has no turn to ask
+    // and only waits out the grace, so the journey waits for the turn to be
+    // recorded and the shutdown always takes the same path.
+    eventually("the run's journal recorded the dispatch's turn", || {
+        recorded().iter().any(|record| {
+            record["source"] == json!("agentgraph")
+                && record["kind"] == json!("turn-started")
+                && record["labels"]["node"] == json!(node)
+        })
+    });
 
     // Put down mid-dispatch, before its node lands: the run is adoptable, the
     // service's base has not moved, and the home is where it was seeded.
-    // The waiting dispatch takes no interrupt, so it is ended once its grace
-    // is out; the route answers after that and the branch pushes.
+    // The waiting dispatch never ends the turn the shutdown's redirect aborts, so
+    // its run holds that redirect for the whole delivery deadline before taking
+    // it back; the grace counts from there, the dispatch is killed once it is
+    // out, the branch pushes, and only then does the route answer.
     let shutdown = http::post_within(
         serving.address,
         "/api/v2/shutdown",
-        r#"{"scope":"host", "grace": 1}"#,
-        DRIVER_PATIENCE,
+        &json!({"scope": "host", "grace": HELD_SHUTDOWN_GRACE_SECONDS}).to_string(),
+        HELD_SHUTDOWN_PATIENCE,
     );
     assert_eq!(shutdown.status, 200, "{}", shutdown.body);
     let shutdown = shutdown.json();
@@ -19165,6 +19211,19 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
         .collect();
     assert_eq!(stopped.len(), 1, "{shutdown}");
     assert_eq!(stopped[0]["node"], json!(node), "{shutdown}");
+    // The dispatch's own answer names the deadline it held the redirect for,
+    // which is what holds the mirrored bound above to the one the linked
+    // oneharness applies: a release that moves it fails here, by name.
+    assert_eq!(stopped[0]["ended"], json!("killed"), "{shutdown}");
+    assert!(
+        stopped[0]["detail"]
+            .as_str()
+            .expect("what the interrupt answered")
+            .contains(&format!(
+                "did not end within {REDIRECT_DELIVERY_DEADLINE_SECONDS}s"
+            )),
+        "{shutdown}"
+    );
     eventually("the launched driver let go of the run", || {
         !process_is_live(launched_pid)
     });
@@ -19193,12 +19252,9 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
 
     let pid = serving.drive_fixture(run.as_str());
     let driver = RetainedDriver(pid);
-    let journal = root.join(&run).join("events.jsonl");
     let homed = || -> Vec<Value> {
-        fs::read_to_string(&journal)
-            .expect("the run's journal")
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).expect("a journal record"))
+        recorded()
+            .into_iter()
             .filter(|record| {
                 record["source"] == json!("pipeline") && record["kind"] == json!("home-status")
             })
