@@ -446,7 +446,7 @@
       "toggles": {
         "viewport": "1024x768"
       },
-      "hash": "3a303aaef0678bf9b2d125de70b780bde43dbe04cc207fbc2b0ca0c667ddee73",
+      "hash": "2e65da021f188e62bd2bb4d35724de244c8ad313be092c57dae183fba709891d",
       "image": "12-host-1024x768.png"
     },
     {
@@ -454,7 +454,7 @@
       "toggles": {
         "viewport": "1280x800"
       },
-      "hash": "8c1e4055a2b131e71289f78e49800d2d264b26a97bbd0b299a3f5d4faa61480b",
+      "hash": "ec70ba4ea1ee13bfab90afd32a34ecf26d9eaefc1dc6ba62cb32ebc77a2fe246",
       "image": "12-host-1280x800.png"
     },
     {
@@ -462,7 +462,7 @@
       "toggles": {
         "viewport": "1440x900"
       },
-      "hash": "bb83cb88882f628f69f250a33ac4eea2cee1238f3f7f12b9c24aabd006b61d0c",
+      "hash": "2a9a4fae233d3f4fdc988c04016c00ead56496e224478b2800a627df6197c062",
       "image": "12-host-1440x900.png"
     },
     {
@@ -470,7 +470,7 @@
       "toggles": {
         "viewport": "1920x1080"
       },
-      "hash": "04b536d8afb0b40c6e1b6162dbd5b2d0b1b9d52687ec3d580a0867700c73efea",
+      "hash": "f7f1cc45f6be2f85ac9fa2940c452a0d358b23ccc2e35f507352092e7e425f13",
       "image": "12-host-1920x1080.png"
     },
     {
@@ -478,7 +478,7 @@
       "toggles": {
         "viewport": "390x844"
       },
-      "hash": "d52e14ae34966765094946643f15135e9cb4d25fb4297bb589d3e7c8b92aabad",
+      "hash": "ca36359d5959b35539a637fa40d4e6a15de0ba73428f38baf18cb34903666437",
       "image": "12-host-390x844.png"
     },
     {
