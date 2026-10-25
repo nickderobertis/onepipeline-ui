@@ -255,6 +255,7 @@ const captureAge = (row: number): number => 94_000 + row * 1_337_000;
  * place of this machine's, refusing a reading in which any of the machine's own
  * workspace path or host name survives the rewrite.
  */
+// llmlint: ignore-block[e2e_not_mocked,tests_mirror_real_usage] the user chose fixed host values for this capture, for the reason `CAPTURE_HOST` states; the request still reaches the real server, only the machine's own fields are rewritten, and the Host journeys in `dag-ui-shutdown.spec.ts` assert the real reading.
 async function fixHostReading(page: Page): Promise<void> {
   await page.route(`**${API_V2_PATHS.host}`, async (route) => {
     const response = await route.fetch();
@@ -290,6 +291,7 @@ async function fixHostReading(page: Page): Promise<void> {
     await route.fulfill({ response, json: fixed });
   });
 }
+// llmlint: ignore-end[e2e_not_mocked,tests_mirror_real_usage]
 
 /** One photographed surface: how to reach it, and how to know it has finished loading. */
 interface Surface {
