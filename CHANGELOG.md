@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.53.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.52.0...v0.53.0) - 2026-10-25
+
+### Added
+
+- [**breaking**] link the screened export coordination engine ([#489](https://github.com/nickderobertis/onepipeline-ui/pull/489))
+
 ## [0.52.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.51.0...v0.52.0) - 2026-10-25
 
 ### Added
