@@ -548,3 +548,18 @@ oneagentgraph 0.8.0 and oneharness-core 0.29.1 as 0.89.0, and no route,
 payload or MSRV changes beyond the release `/healthz` reports. This changes the
 engine types carried by ApiError::from_engine and the other engine-typed public
 items.
+0.90.0 is the engine that holds a node only on the trackers its edges name
+and, on a provider's rate limit, reads that tracker again at the reset the
+provider gave rather than asking every private tracker once a minute. Adopting
+a run from the browser makes this crate's linked engine its driver, so the
+adopted run is paced the way the command line paces it only once this crate
+links that engine. Its `node-held` record's `source` reason now carries `cause`
+and, for a rate limit with a reset, `retry_at_ms` on each unanswered source;
+the timeline serves that reason by its `kind` as it serves every hold, and a
+run journalled before those fields reads as it did. It links onetaskgraph
+0.12.0, whose lock-step family the test-only `onetaskgraph-*` requirements
+follow, and onevcs 0.56.11, which the test-only `onevcs` requirement follows;
+oneagentgraph 0.8.0, oneharness-core 0.29.1 and onejudge 0.21.0 are unchanged,
+and no route, payload or MSRV changes beyond the release `/healthz` reports.
+This changes the engine types carried by ApiError::from_engine and the other
+engine-typed public items.

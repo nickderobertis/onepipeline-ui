@@ -14954,6 +14954,110 @@ fn an_adopted_member_whose_judge_settings_name_a_composed_key_fails_before_any_t
 // llmlint: ignore-end[tests_mirror_real_usage]
 // llmlint: ignore-end[e2e_not_mocked]
 
+/// A node held on a private tracker that did not answer is drawn and adoptable
+/// whichever engine journalled the hold.
+///
+/// Engine 0.90.0 journals each unanswered source of a `source` hold with its
+/// `cause` and, for a rate limit whose provider gave a reset, `retry_at_ms`; an
+/// earlier engine journalled neither. One server holds a run of each, both
+/// driven by a driver proved dead mid-hold. Each is listed as one an adoption
+/// may take over, its held node keeps its node and an open `queued` span naming
+/// the `source` reason, and the `node-held` record stays among the node's
+/// events. Then the pinned engine CLI adopts each, as the browser's adoption
+/// does: it reads the hold back, settles the approval as waiting, and the same
+/// routes serve the adopted run.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+#[cfg(unix)]
+#[test]
+fn a_node_held_on_an_unanswered_source_renders_and_adopts_with_or_without_its_cause() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let runs = [
+        (fixture_run::SOURCE_HELD_RUN_ID, true),
+        (fixture_run::SOURCE_HELD_EARLIER_RUN_ID, false),
+    ];
+    for (run, rate_limited) in runs {
+        fixture_run::write_held_on_source(&root, run, &dir, fixture_run::source_hold(rate_limited));
+    }
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+    let node = fixture_run::APPROVAL_NODE_ID;
+    let listed = http::get(serving.address, "/api/v2/runs").json();
+    for (run, _) in runs {
+        let row = listed["runs"]
+            .as_array()
+            .expect("the listed runs")
+            .iter()
+            .find(|row| row["run_id"] == json!(run))
+            .cloned()
+            .unwrap_or_else(|| panic!("{run} is not listed: {listed}"));
+        assert_eq!(row["liveness"], json!("DRIVER DEAD"), "{row}");
+
+        let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+        assert!(
+            detail["graph"]["node_status"].get(node).is_some(),
+            "the held node is not drawn: {detail}"
+        );
+        let spans = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=node&node={node}"),
+        )
+        .json()["spans"]
+            .as_array()
+            .expect("spans")
+            .clone();
+        let queued = queued_spans(&spans);
+        assert_eq!(queued.len(), 1, "{spans:?}");
+        assert_eq!(
+            queued[0]["reasons"],
+            json!([{ "kind": "source" }]),
+            "{}",
+            queued[0]
+        );
+        assert_eq!(queued[0]["ended_at"], Value::Null, "{}", queued[0]);
+        let node_span = span_named(&spans, &format!("node.{node}"));
+        assert!(
+            node_span["events"]
+                .as_array()
+                .expect("events")
+                .iter()
+                .any(|event| event["kind"] == "node-held"),
+            "{node_span}"
+        );
+    }
+
+    for (run, _) in runs {
+        let pid = serving.drive_fixture(run);
+        let driver = RetainedDriver(pid);
+        eventually(
+            &format!("the driver adopted {run} and settled its approval"),
+            || {
+                http::get(serving.address, &format!("/api/v2/runs/{run}")).json()["graph"]
+                    ["node_status"][node]
+                    == json!("waiting")
+            },
+        );
+        eventually("the driver let go and was reaped", || !process_is_live(pid));
+        drop(driver);
+        let events = events_on(
+            &http::get(
+                serving.address,
+                &format!("/api/v2/runs/{run}/timeline?scope=run"),
+            )
+            .json(),
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event["kind"] == json!("driver-adopted"))
+                .count(),
+            1,
+            "{events:?}"
+        );
+    }
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 /// The pinned engine CLI drives a run whose plan lives in a
 /// `local-md` onetaskgraph store, on a host that offers **no** `onetaskgraph`
 /// executable. The engine this binary links compiles that store in, so the
