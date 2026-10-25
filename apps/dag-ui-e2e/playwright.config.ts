@@ -115,8 +115,8 @@ for (const server of held) {
 /**
  * A fixed name for the fixture directory, which only the screenshot tier asks for.
  *
- * The Host page prints paths under it, and `mkdtempSync`'s random suffix gives
- * their masks a different width on every capture. The capture runs in a container
+ * Served payloads carry paths under it, and `mkdtempSync`'s random suffix would
+ * give them a different width on every capture. The capture runs in a container
  * whose temporary directory nothing else shares; elsewhere `mkdirSync` refuses a
  * second run rather than sharing a directory.
  */

@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { runDetailSchema } from "@onepipeline-ui/dag-model";
+import {
+  API_V2_PATHS,
+  renderedRootSchema,
+  runDetailSchema,
+} from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CAPTURE_INSTANT_MS } from "./capture-clock";
 import { delayGraphMeasurements } from "./delayed-graph-measurements";
@@ -223,11 +227,76 @@ async function settleReads(page: Page): Promise<void> {
   );
 }
 
+/**
+ * The host the Host page is photographed as, in place of the one capturing it.
+ *
+ * Everything else on that page is the fixture's own, but a host reading is the
+ * machine's: its name, the fixture workspace's absolute paths, the disk's free and
+ * total bytes, and dispatch ages read off the server's wall clock — the recorded
+ * runs' ages grow by a day a day, and crossing a power of ten widened the age column
+ * and moved the whole table. A mask over those values still has the value's width,
+ * so each is replaced instead, with a realistic value that is the same on every host
+ * and every day. The real reading still reaches the page through the real server;
+ * only those fields of it are rewritten, and the Host journeys in
+ * `dag-ui-shutdown.spec.ts` keep asserting the real, unrewritten diagnostics.
+ */
+const CAPTURE_HOST = {
+  name: "build-host-01",
+  workspace: "/home/operator/.onepipeline",
+  freeBytes: 412_316_860_416,
+  totalBytes: 1_000_204_886_016,
+} as const;
+
+/** A dispatch's age in the capture: distinct per row, minutes to hours old. */
+const captureAge = (row: number): number => 94_000 + row * 1_337_000;
+
+/**
+ * Serve the Host page the real host reading with {@link CAPTURE_HOST}'s values in
+ * place of this machine's, refusing a reading in which any of the machine's own
+ * workspace path or host name survives the rewrite.
+ */
+// llmlint: ignore-block[e2e_not_mocked,tests_mirror_real_usage] the user chose fixed host values for this capture, for the reason `CAPTURE_HOST` states; the request still reaches the real server, only the machine's own fields are rewritten, and the Host journeys in `dag-ui-shutdown.spec.ts` assert the real reading.
+async function fixHostReading(page: Page): Promise<void> {
+  await page.route(`**${API_V2_PATHS.host}`, async (route) => {
+    const response = await route.fetch();
+    const served = renderedRootSchema.parse(await response.json());
+    const reading = served.reading;
+    if (reading === undefined)
+      throw new Error("the host read carried no reading");
+    const workspace = reading.root.replace(/[\\/]runs$/, "");
+    const rewritten = renderedRootSchema.parse(
+      JSON.parse(
+        JSON.stringify(served).replaceAll(workspace, CAPTURE_HOST.workspace),
+      ),
+    );
+    const fixed = {
+      ...rewritten,
+      reading: {
+        ...rewritten.reading,
+        host: CAPTURE_HOST.name,
+        free_space: rewritten.reading?.free_space.map((space) => ({
+          ...space,
+          free_bytes: CAPTURE_HOST.freeBytes,
+          total_bytes: CAPTURE_HOST.totalBytes,
+        })),
+        dispatches: rewritten.reading?.dispatches.map((dispatch, row) => ({
+          ...dispatch,
+          age_ms: captureAge(row),
+        })),
+      },
+    };
+    const body = JSON.stringify(fixed);
+    if (body.includes(workspace) || body.includes(`"${reading.host}"`))
+      throw new Error("the capture's host reading still names this machine");
+    await route.fulfill({ response, json: fixed });
+  });
+}
+// llmlint: ignore-end[e2e_not_mocked,tests_mirror_real_usage]
+
 /** One photographed surface: how to reach it, and how to know it has finished loading. */
 interface Surface {
   readonly name: string;
   readonly title: string;
-  readonly mask?: (page: Page) => readonly Locator[];
   readonly open: (page: Page) => Promise<void>;
   /**
    * Where the pointer rests for the shot, for a surface that is about what the
@@ -468,62 +537,14 @@ const SURFACES: readonly Surface[] = [
   },
   {
     name: "12-host",
-    // Only machine-specific values are masked — paths, capacity bytes, the host's
-    // name (the capture container's id) and dispatch ages read off the server's
-    // own clock; labels stay visible.
-    mask: (page) => [
-      page.getByRole("img", { name: "Diagnostic absolute path", exact: true }),
-      page
-        .getByRole("region", { name: "Host", exact: true })
-        .getByRole("status", {
-          name: /^(Host name|Runs root path|Filesystem root path|Measured root ancestor|Free capacity bytes|Total capacity bytes|Dispatch age milliseconds)$/,
-        }),
-    ],
     title: "Host resources, unwatched runs and host shutdown",
     open: async (page) => {
+      await fixHostReading(page);
       await page.goto("/?page=host");
       await settleReads(page);
-      // llmlint: ignore[tests_mirror_real_usage] The manager authorizes capture-only path spans for screenshot masks. Each span covers one rendered line fragment of an absolute path, avoiding a multiline bounding box that would hide surrounding prose. Text is checked byte-identical and layout is untouched; the real Host journey asserts full unmasked diagnostics. Product code and served values are unchanged.
-      await page
-        .getByRole("region", { name: "Host", exact: true })
-        .evaluate((host) => {
-          const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
-          const nodes: Text[] = [];
-          while (walker.nextNode()) {
-            const node = walker.currentNode;
-            if (
-              node instanceof Text &&
-              !node.parentElement?.hasAttribute("aria-label")
-            )
-              nodes.push(node);
-          }
-          for (const node of nodes) {
-            const original = node.data;
-            for (const match of original.matchAll(
-              /(?:[A-Za-z]:[\\/]|\/)[^\s:;)]+/g,
-            )) {
-              const range = document.createRange();
-              range.setStart(node, match.index);
-              range.setEnd(node, match.index + match[0].length);
-              for (const rect of range.getClientRects()) {
-                const span = document.createElement("span");
-                span.setAttribute("role", "img");
-                span.setAttribute("aria-label", "Diagnostic absolute path");
-                Object.assign(span.style, {
-                  position: "fixed",
-                  left: `${rect.left}px`,
-                  top: `${rect.top}px`,
-                  width: `${rect.width}px`,
-                  height: `${rect.height}px`,
-                  pointerEvents: "none",
-                });
-                host.append(span);
-              }
-            }
-            if (node.data !== original)
-              throw new Error("path masking changed diagnostic text");
-          }
-        });
+      await expect(
+        page.getByRole("status", { name: "Host name", exact: true }),
+      ).toHaveText(CAPTURE_HOST.name);
       await expect(
         page.getByRole("region", { name: "Free space" }),
       ).toBeVisible();
@@ -801,7 +822,6 @@ for (const size of VIEWPORTS) {
         await page.screenshot({
           path: join(gallery, image),
           animations: "disabled",
-          mask: [...(surface.mask?.(page) ?? [])],
         });
         captured.push({
           name: surface.name,
