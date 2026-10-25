@@ -567,6 +567,15 @@ fn a_build_without_the_bundle() -> PathBuf {
         "the crate tarball carries a built view, so a build of it is not a build without one"
     );
 
+    // The tarball's lock is its own: `cargo package` resolves every dependency
+    // from crates.io, so during a fast adoption it names the engine release
+    // where this checkout's lock names a git commit, and nothing here fetched
+    // that release. Fetched exactly as that lock pins it, so the build below
+    // stays offline and resolves nothing anew.
+    let mut fetch = cargo_in(&tree);
+    fetch.args(["fetch", "--locked", "--quiet"]);
+    run(fetch, "cargo fetch of the packaged crate");
+
     let mut build = cargo_in(&tree);
     build
         .env("RUSTC_WORKSPACE_WRAPPER", workspace_wrapper(&target))
