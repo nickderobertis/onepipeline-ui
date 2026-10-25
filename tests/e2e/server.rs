@@ -19009,8 +19009,8 @@ fn write_held_once_harness_standin(dir: &Path, log: &Path) -> PathBuf {
 /// How long a dispatch's run holds a redirecting interrupt for the turn it
 /// aborted to end, before taking the redirect back and answering: oneharness's
 /// `REDIRECT_DELIVERY_DEADLINE`, a deliberate bound that crate keeps private, so
-/// mirrored here and held to the dispatch's own answer by the journey that
-/// waits it out.
+/// mirrored here. A host shutdown whose redirect reaches a turn that never ends
+/// waits all of it out before the grace starts.
 #[cfg(unix)]
 const REDIRECT_DELIVERY_DEADLINE_SECONDS: u64 = 60;
 
@@ -19023,7 +19023,10 @@ const HELD_SHUTDOWN_GRACE_SECONDS: u64 = 1;
 /// answer: the delivery deadline, then the grace, then a margin of half that
 /// deadline for the kill, the teardown and the preserving push on a loaded host.
 /// [`DRIVER_PATIENCE`] alone is the deadline itself, so a shutdown that waits it
-/// out raced the request it answers.
+/// out raced the request it answers. The journey below takes the path that
+/// never redirects, so it answers in about the grace; the patience still covers
+/// the bound, so a release that redirects anyway fails on the answer it gave,
+/// by name, rather than on a request that gave up.
 #[cfg(unix)]
 const HELD_SHUTDOWN_PATIENCE: Duration = Duration::from_secs(
     REDIRECT_DELIVERY_DEADLINE_SECONDS
@@ -19098,16 +19101,26 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
 
     // The dispatch's control socket lives under the state directory, and on
     // macOS a `$TMPDIR` workspace puts it past the 104-byte `sun_path`, where
-    // oneharness refuses control, the shutdown has no turn to redirect, and the
-    // deadline below is never applied. A short root keeps every platform on the
-    // one path this journey holds.
+    // oneharness refuses control and the shutdown answers that it had no turn
+    // to redirect rather than trying the lever below. A short root keeps every
+    // platform on the one path this journey holds.
     let short_state = tempfile::Builder::new()
         .tempdir_in("/tmp")
         .expect("a short state root");
     let state = short_state.path().join("state");
+    // The shutdown's redirect is delivered by running `oneharness interrupt` from
+    // this variable or, unset, from PATH, so a host with an `oneharness` there
+    // waits out the dispatch's whole delivery deadline and one without it does
+    // not. Naming a program nothing writes puts every host on the second path:
+    // the lever fails at once and the grace alone ends the dispatch.
+    let interrupt_client = dir.join("no-oneharness-here");
     let onevcs_home = dir.join(crate::serving::ONEVCS_HOME_DIR);
     let environment: Vec<(&str, String)> = vec![
         ("CACHE_BOARD_TOKEN", board.token.clone()),
+        (
+            "ONEAGENTGRAPH_ONEHARNESS_BIN",
+            interrupt_client.display().to_string(),
+        ),
         ("ONEPIPELINE_PROJECT_DIR", dir.display().to_string()),
         ("XDG_STATE_HOME", state.display().to_string()),
         // The store's user layer: this workspace's own, empty, so the sources the
@@ -19200,10 +19213,9 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
 
     // Put down mid-dispatch, before its node lands: the run is adoptable, the
     // service's base has not moved, and the home is where it was seeded.
-    // The waiting dispatch never ends the turn the shutdown's redirect aborts, so
-    // its run holds that redirect for the whole delivery deadline before taking
-    // it back; the grace counts from there, the dispatch is killed once it is
-    // out, the branch pushes, and only then does the route answer.
+    // The shutdown cannot deliver its redirect, so the grace counts from at
+    // once; the waiting dispatch is killed once it is out, the branch pushes,
+    // and only then does the route answer.
     let shutdown = http::post_within(
         serving.address,
         "/api/v2/shutdown",
@@ -19219,19 +19231,21 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
         .collect();
     assert_eq!(stopped.len(), 1, "{shutdown}");
     assert_eq!(stopped[0]["node"], json!(node), "{shutdown}");
-    // The dispatch's own answer names the deadline it held the redirect for,
-    // which is what holds the mirrored bound above to the one the linked
-    // oneharness applies: a release that moves it fails here, by name.
-    assert_eq!(stopped[0]["ended"], json!("killed"), "{shutdown}");
+    // The answer names the client it could not run, which is what holds every
+    // host to the one path: a shutdown that found another `oneharness` would
+    // name a redirect here instead.
+    assert_eq!(stopped[0]["interrupt"], json!("failed"), "{shutdown}");
     assert!(
         stopped[0]["detail"]
             .as_str()
             .expect("what the interrupt answered")
             .contains(&format!(
-                "did not end within {REDIRECT_DELIVERY_DEADLINE_SECONDS}s"
+                "cannot run `{} interrupt`",
+                interrupt_client.display()
             )),
         "{shutdown}"
     );
+    assert_eq!(stopped[0]["ended"], json!("killed"), "{shutdown}");
     eventually("the launched driver let go of the run", || {
         !process_is_live(launched_pid)
     });
