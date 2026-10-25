@@ -662,17 +662,14 @@ impl ThisCrate {
 }
 
 /// The requirement itself, out of the line that declares it — what the refusal
-/// has to name on each side for a reader to see which move it is about. Read as
-/// TOML, so a requirement written as a bare string and one written as the
-/// `version` beside a fast adoption's git source read alike.
+/// has to name on each side for a reader to see which move it is about.
 fn engine_requirement(manifest: &str) -> String {
     let line = engine_requirement_line(manifest);
-    let declared: toml::Table = toml::from_str(&line).expect("the requirement line is TOML");
-    let requirement = &declared["onepipeline"];
-    requirement
-        .as_str()
-        .or_else(|| requirement.get("version").and_then(toml::Value::as_str))
-        .expect("the requirement names a version")
+    line.split_once('=')
+        .expect("a requirement is declared with an =")
+        .1
+        .trim()
+        .trim_matches('"')
         .to_owned()
 }
 
@@ -1702,7 +1699,7 @@ fn no_feature_gates_an_item_the_reading_leaves_out() {
 /// not recompile.
 const AN_EARLIER_ENGINE: &str = "=0.42.0";
 /// That requirement as a manifest declares it, in each of the two spellings one
-/// can: the bare string a release pin uses, and the table whose
+/// can: the bare string this crate's own manifest uses, and the table whose
 /// `version` key is the requirement.
 const AN_EARLIER_ENGINE_LINKED: &str = "\"=0.42.0\"";
 const AN_EARLIER_ENGINE_LINKED_AS_A_TABLE: &str = "{ version = \"=0.42.0\" }";

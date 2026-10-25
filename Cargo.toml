@@ -180,7 +180,7 @@ onemessagebus = "0.9.1"
 # test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = { version = "=0.91.0", git = "https://github.com/nickderobertis/onepipeline", rev = "670b837c123d69160052034b7ee827e100056505" }
+onepipeline = "=0.91.1"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
