@@ -17291,14 +17291,11 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
 fn an_adopted_private_coordination_run_keeps_its_public_task_public_and_hands_it_only_the_export() {
     let (workspace, root) = fixture_run::workspace();
     let dir = workspace.path().to_path_buf();
-    let repos = scratch_repo::seed_boundary(&dir);
     let records = dir.join("dispatches");
-    // llmlint: ignore[e2e_not_mocked] the harness program is the one process this
-    // journey stands in for, on the terms `write_harness_standin` states. The store,
-    // the released `start`, the attest route, the pinned CLI driver, the engine's
-    // boundary, and the linked `onevcs` keeping, exporting and publishing over real
-    // git are all real; the stand-in only commits the work a real agent would leave.
+    // llmlint: ignore-block[e2e_not_mocked] two third-party boundaries are doubled here and nothing else: `seed_boundary`'s refusing `gh`, because asking a real forge about a synthetic owner is a third-party host call no journey may make, and the harness program, on the terms `write_harness_standin` states, because a real one bills a model provider. The store, the released `start`, the reply and attest routes, the pinned CLI driver, the engine's boundary, and the linked `onevcs` keeping, exporting and publishing over real git are all real; the stand-in only commits the work a real agent would leave.
+    let repos = scratch_repo::seed_boundary(&dir);
     let standin = write_exporting_harness_standin(&dir, &records);
+    // llmlint: ignore-end[e2e_not_mocked]
     write_extending_config(&dir, &standin);
     let graph = write_node_scope_graph(&dir);
     let producer = fixture_run::EXPORT_PRODUCER_NODE_ID;
