@@ -19006,6 +19006,84 @@ fn write_held_once_harness_standin(dir: &Path, log: &Path) -> PathBuf {
     standin
 }
 
+/// How long a dispatch's run holds a redirecting interrupt for the turn it
+/// aborted to end, before taking the redirect back and answering: oneharness's
+/// `REDIRECT_DELIVERY_DEADLINE`, a deliberate bound that crate keeps private, so
+/// mirrored here and held to the linked crate's declaration by
+/// [`the_mirrored_redirect_delivery_deadline_is_the_linked_oneharness_one`]. A
+/// host shutdown whose redirect reaches a turn that never ends waits all of it
+/// out before the grace starts.
+#[cfg(unix)]
+const REDIRECT_DELIVERY_DEADLINE_SECONDS: u64 = 60;
+
+/// The mirrored deadline is the one the `oneharness-core` this lock resolves
+/// declares, read from that crate's own source where cargo unpacked it: the
+/// constant is private, so its declaration is the one authority there is, and a
+/// release that moves or renames it fails here by name rather than leaving
+/// [`HELD_SHUTDOWN_PATIENCE`] derived from a bound nothing applies.
+#[cfg(unix)]
+#[test]
+fn the_mirrored_redirect_delivery_deadline_is_the_linked_oneharness_one() {
+    let metadata =
+        std::process::Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .args(["metadata", "--format-version", "1", "--locked", "--offline"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .expect("run cargo metadata");
+    assert!(
+        metadata.status.success(),
+        "{}",
+        String::from_utf8_lossy(&metadata.stderr)
+    );
+    let metadata: Value = serde_json::from_slice(&metadata.stdout).expect("cargo metadata's JSON");
+    let manifests: Vec<&str> = metadata["packages"]
+        .as_array()
+        .expect("the resolved packages")
+        .iter()
+        .filter(|package| package["name"] == json!("oneharness-core"))
+        .map(|package| package["manifest_path"].as_str().expect("a manifest path"))
+        .collect();
+    assert_eq!(
+        manifests.len(),
+        1,
+        "one oneharness-core resolution: {manifests:?}"
+    );
+    let control = Path::new(manifests[0])
+        .parent()
+        .expect("the crate's root")
+        .join("src/io/control.rs");
+    let source = fs::read_to_string(&control).expect("the linked oneharness's control module");
+    let declaration = format!(
+        "const REDIRECT_DELIVERY_DEADLINE: std::time::Duration = \
+         std::time::Duration::from_secs({REDIRECT_DELIVERY_DEADLINE_SECONDS});"
+    );
+    assert!(
+        source.contains(&declaration),
+        "{} no longer declares `{declaration}`",
+        control.display()
+    );
+}
+
+/// The grace the held dispatch's host shutdown names, counted from the moment
+/// the interrupt answers.
+#[cfg(unix)]
+const HELD_SHUTDOWN_GRACE_SECONDS: u64 = 1;
+
+/// How long a host shutdown over a dispatch that never ends its turn is given to
+/// answer: the delivery deadline, then the grace, then a margin of half that
+/// deadline for the kill, the teardown and the preserving push on a loaded host.
+/// [`DRIVER_PATIENCE`] alone is the deadline itself, so a shutdown that waits it
+/// out raced the request it answers. The journey below takes the path that
+/// never redirects, so it answers in about the grace; the patience still covers
+/// the bound, so a release that redirects anyway fails on the answer it gave,
+/// by name, rather than on a request that gave up.
+#[cfg(unix)]
+const HELD_SHUTDOWN_PATIENCE: Duration = Duration::from_secs(
+    REDIRECT_DELIVERY_DEADLINE_SECONDS
+        + HELD_SHUTDOWN_GRACE_SECONDS
+        + REDIRECT_DELIVERY_DEADLINE_SECONDS / 2,
+);
+
 // llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 /// A run driven by the pinned CLI marks its plan's home done once it settles;
 /// this reader serves the records that driver writes.
@@ -19071,10 +19149,28 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
     )
     .expect("the store configuration");
 
-    let state = dir.join("state");
+    // The dispatch's control socket lives under the state directory, and on
+    // macOS a `$TMPDIR` workspace puts it past the 104-byte `sun_path`, where
+    // oneharness refuses control and the shutdown answers that it had no turn
+    // to redirect rather than trying the lever below. A short root keeps every
+    // platform on the one path this journey holds.
+    let short_state = tempfile::Builder::new()
+        .tempdir_in("/tmp")
+        .expect("a short state root");
+    let state = short_state.path().join("state");
+    // The shutdown's redirect is delivered by running `oneharness interrupt` from
+    // this variable or, unset, from PATH, so a host with an `oneharness` there
+    // waits out the dispatch's whole delivery deadline and one without it does
+    // not. Naming a program nothing writes puts every host on the second path:
+    // the lever fails at once and the grace alone ends the dispatch.
+    let interrupt_client = dir.join("no-oneharness-here");
     let onevcs_home = dir.join(crate::serving::ONEVCS_HOME_DIR);
     let environment: Vec<(&str, String)> = vec![
         ("CACHE_BOARD_TOKEN", board.token.clone()),
+        (
+            "ONEAGENTGRAPH_ONEHARNESS_BIN",
+            interrupt_client.display().to_string(),
+        ),
         ("ONEPIPELINE_PROJECT_DIR", dir.display().to_string()),
         ("XDG_STATE_HOME", state.display().to_string()),
         // The store's user layer: this workspace's own, empty, so the sources the
@@ -19145,16 +19241,36 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
         String::from_utf8_lossy(&landed.stdout).trim().to_owned()
     };
     let seeded_base = base();
+    let journal = root.join(&run).join("events.jsonl");
+    let recorded = || -> Vec<Value> {
+        fs::read_to_string(&journal)
+            .expect("the run's journal")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("a journal record"))
+            .collect()
+    };
+    // The shutdown learns a dispatch's turn only from the agentgraph records the
+    // driver relays into the run's journal. Until one lands it has no turn to ask
+    // and only waits out the grace, so the journey waits for the turn to be
+    // recorded and the shutdown always takes the same path.
+    eventually("the run's journal recorded the dispatch's turn", || {
+        recorded().iter().any(|record| {
+            record["source"] == json!("agentgraph")
+                && record["kind"] == json!("turn-started")
+                && record["labels"]["node"] == json!(node)
+        })
+    });
 
     // Put down mid-dispatch, before its node lands: the run is adoptable, the
     // service's base has not moved, and the home is where it was seeded.
-    // The waiting dispatch takes no interrupt, so it is ended once its grace
-    // is out; the route answers after that and the branch pushes.
+    // The shutdown cannot deliver its redirect, so the grace counts from at
+    // once; the waiting dispatch is killed once it is out, the branch pushes,
+    // and only then does the route answer.
     let shutdown = http::post_within(
         serving.address,
         "/api/v2/shutdown",
-        r#"{"scope":"host", "grace": 1}"#,
-        DRIVER_PATIENCE,
+        &json!({"scope": "host", "grace": HELD_SHUTDOWN_GRACE_SECONDS}).to_string(),
+        HELD_SHUTDOWN_PATIENCE,
     );
     assert_eq!(shutdown.status, 200, "{}", shutdown.body);
     let shutdown = shutdown.json();
@@ -19165,6 +19281,21 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
         .collect();
     assert_eq!(stopped.len(), 1, "{shutdown}");
     assert_eq!(stopped[0]["node"], json!(node), "{shutdown}");
+    // The answer names the client it could not run, which is what holds every
+    // host to the one path: a shutdown that found another `oneharness` would
+    // name a redirect here instead.
+    assert_eq!(stopped[0]["interrupt"], json!("failed"), "{shutdown}");
+    assert!(
+        stopped[0]["detail"]
+            .as_str()
+            .expect("what the interrupt answered")
+            .contains(&format!(
+                "cannot run `{} interrupt`",
+                interrupt_client.display()
+            )),
+        "{shutdown}"
+    );
+    assert_eq!(stopped[0]["ended"], json!("killed"), "{shutdown}");
     eventually("the launched driver let go of the run", || {
         !process_is_live(launched_pid)
     });
@@ -19193,12 +19324,9 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
 
     let pid = serving.drive_fixture(run.as_str());
     let driver = RetainedDriver(pid);
-    let journal = root.join(&run).join("events.jsonl");
     let homed = || -> Vec<Value> {
-        fs::read_to_string(&journal)
-            .expect("the run's journal")
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).expect("a journal record"))
+        recorded()
+            .into_iter()
             .filter(|record| {
                 record["source"] == json!("pipeline") && record["kind"] == json!("home-status")
             })
@@ -20304,6 +20432,163 @@ fn browser_supervision_is_removed_and_shutdown_is_host_only() {
     assert_eq!(host.status, 200, "{}", host.body);
     assert_eq!(host.json()["scope"], json!("host"));
     assert!(host.json()["runs"].is_array());
+}
+
+/// The processes the process `pid` started that are still its children, as the
+/// kernel lists them under each of its threads.
+#[cfg(target_os = "linux")]
+fn children_of(pid: u32) -> Vec<u32> {
+    let mut children = Vec::new();
+    for task in fs::read_dir(format!("/proc/{pid}/task")).expect("the server's threads") {
+        // A thread that ended after the listing has no children left to list.
+        let listed =
+            fs::read_to_string(task.expect("a thread").path().join("children")).unwrap_or_default();
+        children.extend(listed.split_whitespace().map(|child| {
+            child
+                .parse::<u32>()
+                .expect("the kernel lists children as pids")
+        }));
+    }
+    children
+}
+
+/// No route this server answers starts, adopts or drives a run — the removed
+/// adopt and watch routes included — so a driver's teardown, observer graph
+/// and all, is never this process's to run.
+///
+/// The run under test is the one a driver takes over at once: undriven, its
+/// recorded driver proved gone, launched from a directory on this host, its one
+/// human action ready. Every route the contract declares is asked about it, the
+/// writes with bodies a client could send, and then the server is asked to
+/// stop it and to shut the host down. Had any of those started a driver, the
+/// launch record would name a new pid and count an adoption, the journal would
+/// carry `driver-adopted`, its liveness would read `ACTIVE` — and on Linux, the
+/// driver would be this server's child.
+#[cfg(unix)]
+#[test]
+fn no_route_starts_adopts_or_drives_a_run() {
+    use onepipeline_ui::contract::routes;
+
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_attestation(&root, run, &dir);
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+    let launch = |serving: &Serving| -> Value {
+        serde_json::from_str(
+            &fs::read_to_string(serving.run_dir(run).join("launch.json"))
+                .expect("the launch record"),
+        )
+        .expect("the launch record parses")
+    };
+    let recorded = launch(&serving);
+    let undriven = |serving: &Serving, after: &str| {
+        let now = launch(serving);
+        assert_eq!(
+            (&now["pid"], &now["host"], &now["adoptions"]),
+            (&recorded["pid"], &recorded["host"], &recorded["adoptions"]),
+            "after {after}, a driver claimed the run: {now}"
+        );
+        let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status"));
+        assert_eq!(status.status, 200, "{}", status.body);
+        assert_ne!(
+            status.json()["liveness"],
+            json!("ACTIVE"),
+            "after {after}, something is driving the run: {}",
+            status.body
+        );
+        let timeline = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json();
+        assert!(
+            !events_on(&timeline)
+                .iter()
+                .any(|event| event["kind"] == json!("driver-adopted")),
+            "after {after}, a driver adopted the run: {timeline}"
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            children_of(serving.pid()),
+            Vec::<u32>::new(),
+            "after {after}, the server has started a process"
+        );
+    };
+    undriven(&serving, "nothing");
+
+    // The removed supervision routes: refused, and nothing started behind them.
+    for (suffix, adopt) in [("adopt", true), ("watch", false)] {
+        let path = format!("/api/v2/runs/{run}/{suffix}");
+        let answer = if adopt {
+            http::post(serving.address, &path, r#"{"attach":true}"#)
+        } else {
+            http::get(serving.address, &path)
+        };
+        assert_eq!(answer.status, 404, "{path}: {}", answer.body);
+        assert_eq!(answer.json()["error"]["code"], json!("removed_route"));
+        undriven(&serving, &path);
+    }
+
+    // Every route the contract declares, but the two that end something, which
+    // are asked last. A body a client could send to each write.
+    let project = encoded(fixture_run::PLAN_PROJECT);
+    for route in routes::TABLE {
+        if [routes::RUN_STOP, routes::SHUTDOWN].contains(&route.path) {
+            continue;
+        }
+        let path = route
+            .path
+            .replace("{run}", run)
+            .replace("{project}", &project)
+            .replace("{node}", fixture_run::APPROVAL_NODE_ID)
+            .replace("{id}", fixture_run::CONVERSATION_ID)
+            .replace("{subscription}", "00000000-0000-4000-8000-000000000000");
+        let asked = format!("{} {path}", route.method.as_str());
+        match route.method {
+            routes::Method::Get if route.path == routes::EVENTS => {
+                let mut stream = http::stream(serving.address, &path, None);
+                assert!(
+                    stream.frame_within(DRIVER_PATIENCE).is_some(),
+                    "{asked} opened"
+                );
+            }
+            routes::Method::Get => {
+                let path = if route.path == routes::RUN_TIMELINE {
+                    format!("{path}?scope=run")
+                } else {
+                    path
+                };
+                http::get(serving.address, &path);
+            }
+            routes::Method::Post => {
+                let body = match route.path {
+                    routes::RUN_ATTEST => {
+                        json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string()
+                    }
+                    routes::SUBSCRIPTIONS => json!({ "run": run }).to_string(),
+                    _ => "{}".to_owned(),
+                };
+                http::post(serving.address, &path, &body);
+            }
+            routes::Method::Delete => {
+                http::delete(serving.address, &path);
+            }
+        }
+        undriven(&serving, &asked);
+    }
+
+    // Stopping the run and shutting the host down end things; neither drives.
+    let stop = http::post(serving.address, &format!("/api/v2/runs/{run}/stop"), "{}");
+    assert!(stop.status < 500, "{}", stop.body);
+    undriven(&serving, "the stop");
+    let host = http::post(
+        serving.address,
+        "/api/v2/shutdown",
+        r#"{"scope":"host", "grace":0}"#,
+    );
+    assert_eq!(host.status, 200, "{}", host.body);
+    undriven(&serving, "the host shutdown");
 }
 
 #[cfg(unix)]

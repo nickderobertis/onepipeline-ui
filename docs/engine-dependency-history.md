@@ -578,3 +578,13 @@ onevcs 0.56.11, oneagentgraph 0.8.0, oneharness-core 0.29.1 and onejudge 0.21.0
 are unchanged, and no route, payload or MSRV changes beyond the release
 `/healthz` reports. This changes the engine types carried by
 ApiError::from_engine and the other engine-typed public items.
+0.91.1 is the engine whose driver ends a settled run's observer graph — and
+every process it started, a long-lived command judge included — before the
+driver exits. A host holds this reader and its engine to one linked engine, so
+it can adopt that fix only once this crate links it. This binary drives no run,
+so the fix changes nothing it serves, and a journey shows no route of the read
+API starts, adopts or drives a run. It links the same onetaskgraph 0.12.1,
+onevcs 0.56.11, oneagentgraph 0.8.0, oneharness-core 0.29.1 and onejudge 0.21.0
+as 0.91.0, and no route, payload or MSRV changes beyond the release `/healthz`
+reports. This changes the engine types carried by ApiError::from_engine and the
+other engine-typed public items.
