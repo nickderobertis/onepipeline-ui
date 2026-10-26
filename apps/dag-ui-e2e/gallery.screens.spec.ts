@@ -775,6 +775,34 @@ const SURFACES: readonly Surface[] = [
     point: (page) =>
       pointAtPlot(page, page.getByRole("region", { name: "Graph timeline" })),
   },
+  {
+    name: "24-held-graph",
+    title: "Graph view: finished work held for releases",
+    open: async (page) => {
+      await delayGraphMeasurements(page);
+      await page.goto(`/?run=${runs().awaiting}&view=graph`);
+      await settleReads(page);
+      await expect(
+        graphNodes(page, "complete-but-held").getByText(/^awaits /),
+      ).toBeVisible();
+      await expect(
+        graphNodes(page, "complete-but-draft").getByText(/^awaits /),
+      ).toBeVisible();
+    },
+  },
+  {
+    name: "25-held-node",
+    title: "Node view: a draft node naming every release it awaits",
+    open: async (page) => {
+      await page.goto(
+        `/?run=${runs().awaiting}&node=${fixture().awaiting.draft}`,
+      );
+      await settleReads(page);
+      await expect(
+        page.getByRole("region", { name: "Awaited releases" }),
+      ).toBeVisible();
+    },
+  },
 ];
 
 /**

@@ -648,6 +648,8 @@ being photographed.
 | `20-recorded-overall` | execution ending at settlement and the completion marker 41 hours later |
 | `22-node-timeline-crosshair` | the node timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
 | `23-overall-timeline-crosshair` | the overall timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
+| `24-held-graph` | a run holding finished work for releases: a held-unlanded and a draft node, each card naming what it awaits |
+| `25-held-node` | the draft node's view, naming every release it awaits in full above the settlement's detail |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the
