@@ -340,9 +340,12 @@ p {
   background: var(--background);
 }
 
+/* Sized by the layout: React Flow's node wrapper carries the width and height
+   `layoutDag` gave the card, which is the standard 200×72 unless the card carries
+   lines beneath its status word. */
 .dag-node {
   width: 200px;
-  height: 72px;
+  height: 100%;
   padding: 10px 13px;
   border: 1px solid var(--border);
   border-radius: 9px;

@@ -369,6 +369,49 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  test("names what a held node awaits even when its settlement recorded no detail", async () => {
+    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&node=followup`);
+    const held = () => {
+      const payload = runDetail(LIVE_RUN);
+      return {
+        ...payload,
+        graph: {
+          ...payload.graph,
+          node_status: {
+            ...payload.graph.node_status,
+            followup: "complete-but-held",
+          },
+          node_results: {
+            ...payload.graph.node_results,
+            followup: {
+              status: "complete-but-held",
+              outcome: "held-for-release",
+              // A blank sentence is no detail: the producer wrote nothing in it.
+              detail: "  ",
+              awaiting: [
+                { producer: "github.com/example/engine", target: "crate" },
+              ],
+            },
+          },
+        },
+      };
+    };
+    const { client } = telemetryHarness((url) =>
+      isRunDetail(url) ? Response.json(held()) : defaultResponder(url),
+    );
+    render(<App client={client} />);
+
+    const panel = await screen.findByRole("region", {
+      name: "Awaited releases",
+    });
+    expect(within(panel).getByRole("listitem")).toHaveTextContent(
+      "the crate release of github.com/example/engine",
+    );
+    // No empty Detail term under it, and no alarm over it.
+    expect(within(panel).queryByText("Detail")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   test("walks back to the graph from the breadcrumb button", async () => {
     window.history.replaceState(
       null,

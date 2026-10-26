@@ -6396,6 +6396,32 @@ fn finished_work_held_for_a_release_is_served_in_its_own_word_with_what_it_await
     );
 }
 
+#[test]
+fn an_awaiting_list_a_producer_wrote_badly_serves_only_the_releases_it_names() {
+    let run = fixture_run::MALFORMED_AWAITING_RUN_ID;
+    let serving = Serving::start(|root| {
+        fixture_run::write_malformed_awaiting(root, run);
+    });
+    let body = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    let results = &body["graph"]["node_results"];
+    // The one entry naming both a producer and a target, and none of the rest:
+    // a blank or missing field, or an entry that is not an object, names no release.
+    assert_eq!(
+        results[fixture_run::MIXED_AWAITING_NODE_ID]["awaiting"],
+        json!([{ "producer": fixture_run::AWAITED_PRODUCER, "target": "crate" }]),
+        "{results}"
+    );
+    // Nothing readable, or no list at all, is served no `awaiting` — never an
+    // empty list, which would read as a node waiting on nothing.
+    for node in [
+        fixture_run::UNREADABLE_AWAITING_NODE_ID,
+        fixture_run::LISTLESS_AWAITING_NODE_ID,
+    ] {
+        assert!(results[node].is_object(), "{node}: {results}");
+        assert!(results[node].get("awaiting").is_none(), "{node}: {results}");
+    }
+}
+
 /// The events of one kind a node's timeline lists, across its spans, oldest first.
 fn review_events<'a>(timeline: &'a Value, kind: &str) -> Vec<&'a Value> {
     let mut found = Vec::new();

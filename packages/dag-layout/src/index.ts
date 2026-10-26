@@ -11,6 +11,12 @@ export interface DagNode {
   readonly label: string;
   readonly kind: "agent" | "human" | "lifecycle";
   readonly state: DagNodeState;
+  /**
+   * Lines of text the card carries beneath its status word, each of which it grows
+   * by, so they are drawn inside its border rather than hanging below it. Absent is
+   * none: a card of the standard height.
+   */
+  readonly lines?: number;
 }
 
 /**
@@ -84,6 +90,11 @@ const NODE_WIDTH = 200;
 const NODE_HEIGHT = 72;
 const COLUMN_GAP = 80;
 const ROW_GAP = 32;
+/** What one extra line of text beneath a card's status word adds to its height. */
+const LINE_HEIGHT = 20;
+/** A node's card height: the standard card, and a line's height per line it carries. */
+const heightOf = (node: DagNode): number =>
+  NODE_HEIGHT + Math.max(0, Math.floor(node.lines ?? 0)) * LINE_HEIGHT;
 const NODE_STATES: ReadonlySet<string> = new Set(DAG_NODE_STATES);
 /**
  * What each status means to a renderer, in semantic tokens rather than colours.
@@ -193,7 +204,7 @@ export function layoutDag(input: DagLayoutInput): DagLayout {
   });
   graph.setDefaultEdgeLabel(() => ({}));
   for (const node of nodes) {
-    graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
+    graph.setNode(node.id, { width: NODE_WIDTH, height: heightOf(node) });
   }
   for (const edge of edges) {
     graph.setEdge(edge.source, edge.target, {}, edge.id);
@@ -214,15 +225,26 @@ export function layoutDag(input: DagLayoutInput): DagLayout {
       return leftY - rightY || compareOrdinal(left, right);
     });
   }
+  // Each column stacks its cards at their own heights, so a taller card pushes
+  // the ones below it down by what it grew; a column of standard cards sits on
+  // the same rows it always did.
+  const tops = new Map<string, number>();
+  for (const column of columnRows.values()) {
+    let top = 0;
+    for (const id of column) {
+      tops.set(id, top);
+      const node = byId.get(id);
+      top += (node === undefined ? NODE_HEIGHT : heightOf(node)) + ROW_GAP;
+    }
+  }
   const positioned = nodes.map((node): PositionedNode => {
     const rank = ranks.get(node.id) ?? 0;
-    const row = columnRows.get(rank)?.indexOf(node.id) ?? 0;
     return {
       ...node,
       x: rank * (NODE_WIDTH + COLUMN_GAP),
-      y: row * (NODE_HEIGHT + ROW_GAP),
+      y: tops.get(node.id) ?? 0,
       width: NODE_WIDTH,
-      height: NODE_HEIGHT,
+      height: heightOf(node),
       style: STATUS_STYLE[node.state],
     };
   });

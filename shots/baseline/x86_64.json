@@ -811,35 +811,35 @@
       "toggles": {
         "viewport": "1024x768"
       },
-      "hash": "79c8ca346fa457193dc9c3cb456aee1a3c583ffaddcd1e8e41511169af15f52f"
+      "hash": "7971a262367f7a5fcc75c1c4b56424cf2fc6ee6e5ec84db8eb278a117dba4292"
     },
     {
       "name": "24-held-graph",
       "toggles": {
         "viewport": "1280x800"
       },
-      "hash": "aec82bb1e75a21a7e671104c75deaf095909c46ed234ffc07722b0c10224e2e4"
+      "hash": "c62d788ffaeb732bf22d285e0d1e64bd7df105ce4c645bf2b64fe16563796d17"
     },
     {
       "name": "24-held-graph",
       "toggles": {
         "viewport": "1440x900"
       },
-      "hash": "aa9e7c1b7b716666ea529e06714ae1a3ce8552d904b6caf32f204eb7bc7b9f31"
+      "hash": "421a772442e9ecf443f5935c34dd48489fe9295dea3a71ee51100744743f9ecd"
     },
     {
       "name": "24-held-graph",
       "toggles": {
         "viewport": "1920x1080"
       },
-      "hash": "3b4cb92f3e3fc7420019d8180b53546a0929bbbe4b666664195a585846d698c3"
+      "hash": "504eea4b95c7551aaecf5d2db99d6f5aeea4364ee6b70572cfadf8ac303217d3"
     },
     {
       "name": "24-held-graph",
       "toggles": {
         "viewport": "390x844"
       },
-      "hash": "2b383243145ea048a3d5ef5d075dda2cd2b46f29b8a1bf764e09da7b2d88aeca"
+      "hash": "412a4bb100df543a5ea1077362182a6225aaaa400dc85d98576cc31e46d27a44"
     },
     {
       "name": "25-held-node",

@@ -5924,6 +5924,113 @@ pub fn write_awaiting_release(root: &Path, run: &str) -> PathBuf {
     dir
 }
 
+/// The run id of the malformed-awaiting fixture below.
+pub const MALFORMED_AWAITING_RUN_ID: &str = "run-20261026-b7d2f4";
+/// That run's node whose `awaiting` mixes one readable entry among unreadable ones.
+pub const MIXED_AWAITING_NODE_ID: &str = "mixed";
+/// That run's node whose `awaiting` holds no readable entry at all.
+pub const UNREADABLE_AWAITING_NODE_ID: &str = "unreadable";
+/// That run's node whose `awaiting` is not a list.
+pub const LISTLESS_AWAITING_NODE_ID: &str = "listless";
+
+/// A run whose held settlements a producer wrote badly: `awaiting` entries missing
+/// a producer or a target, blank, or not objects at all, and one `awaiting` that is
+/// not a list. Each is marked [`departing_by_design`], because the journey is about
+/// what a reader serves of a record no engine should write.
+pub fn write_malformed_awaiting(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "launcher": "claude-code",
+            "session": SESSION,
+            "pid": 4255,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let nodes = [
+        MIXED_AWAITING_NODE_ID,
+        UNREADABLE_AWAITING_NODE_ID,
+        LISTLESS_AWAITING_NODE_ID,
+    ];
+    let plan = json!({
+        "schema_version": 2,
+        "name": "malformed-awaiting",
+        "concurrency": 3,
+        "tasks": nodes
+            .iter()
+            .map(|node| json!({ "id": node, "persona": "worker", "task": "## What\nHold it." }))
+            .collect::<Vec<_>>(),
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    let held = |awaiting: Value| {
+        departing_by_design(
+            "node-settled",
+            json!({
+                "status": "complete-but-held",
+                "outcome": "held-for-release",
+                "branch": "feature/held",
+                "awaiting": awaiting,
+            }),
+        )
+    };
+    let mut journal = Journal::new("a-recording-host-4255");
+    journal.emit(
+        START,
+        "pipeline",
+        "run-started",
+        json!({ "run_id": run }),
+        run_started(plan),
+    );
+    for node in nodes {
+        journal.emit(
+            "2026-08-07T12:00:01.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": node, "persona": "worker" }),
+            json!({ "attempt": 1 }),
+        );
+    }
+    journal
+        .emit(
+            "2026-08-07T12:00:10.000Z",
+            "pipeline",
+            "node-settled",
+            json!({ "run_id": run, "node": MIXED_AWAITING_NODE_ID }),
+            held(json!([
+                { "producer": "", "target": "crate" },
+                { "target": "npm" },
+                "github.com/example/engine",
+                { "producer": AWAITED_PRODUCER, "target": "crate" },
+                { "producer": AWAITED_SECOND_PRODUCER, "target": "   " },
+            ])),
+        )
+        .emit(
+            "2026-08-07T12:00:11.000Z",
+            "pipeline",
+            "node-settled",
+            json!({ "run_id": run, "node": UNREADABLE_AWAITING_NODE_ID }),
+            held(json!([{ "producer": AWAITED_PRODUCER }, 7])),
+        )
+        .emit(
+            "2026-08-07T12:00:12.000Z",
+            "pipeline",
+            "node-settled",
+            json!({ "run_id": run, "node": LISTLESS_AWAITING_NODE_ID }),
+            held(json!({ "producer": AWAITED_PRODUCER, "target": "crate" })),
+        );
+    fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    declare_graph(root, &journal.stream, &["worker"]);
+    dir
+}
+
 /// The run id of the review-draft fixture below.
 pub const REVIEW_DRAFT_RUN_ID: &str = "run-20260807-5d4c3b";
 /// That run's node whose green change was kept a draft for its user's review.

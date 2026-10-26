@@ -60,6 +60,9 @@ export function DagGraph({
         label: node.label,
         kind: node.kind,
         state: node.status,
+        // The card carries its awaits line inside its border, so it is laid out
+        // one line taller.
+        ...(awaits.get(node.id) === undefined ? {} : { lines: 1 }),
       })),
       edges: nodeViews.flatMap((node) =>
         (node.task.deps ?? [])

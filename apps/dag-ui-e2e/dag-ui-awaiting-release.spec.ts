@@ -29,6 +29,34 @@ test.beforeEach(async ({ page }) => {
 const card = (page: Page, node: string, status: string): Locator =>
   page.getByRole("article", { name: `${node}: ${status}`, exact: true });
 
+/**
+ * Whether every piece of text a card draws lies inside the card's border box: its
+ * kind, its name, its status word and any line beneath them.
+ */
+const textInsideCard = (drawn: Locator): Promise<boolean> =>
+  drawn.evaluate((article: HTMLElement) => {
+    const border = article.getBoundingClientRect();
+    return [...article.querySelectorAll("*")]
+      .filter((element) =>
+        [...element.childNodes].some(
+          (child) =>
+            child.nodeType === Node.TEXT_NODE &&
+            (child.textContent ?? "").trim() !== "",
+        ),
+      )
+      .every((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const box = range.getBoundingClientRect();
+        return (
+          box.top >= border.top &&
+          box.bottom <= border.bottom &&
+          box.left >= border.left &&
+          box.right <= border.right
+        );
+      });
+  });
+
 /** Whether an element shows its whole text rather than clipping it. */
 const shownWhole = (element: Locator): Promise<boolean> =>
   element.evaluate(
@@ -47,21 +75,45 @@ test("a held and a draft node show their own words and the releases each awaits 
   const draftCard = card(page, draft, "complete-but-draft");
   await expect(heldCard).toBeVisible();
   await expect(draftCard).toBeVisible();
-  await expect(heldCard.locator(".node-status")).toHaveText(
-    "complete-but-held",
-  );
-  await expect(draftCard.locator(".node-status")).toHaveText(
-    "complete-but-draft",
-  );
+  await expect(
+    heldCard.getByText("complete-but-held", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    draftCard.getByText("complete-but-draft", { exact: true }),
+  ).toBeVisible();
 
   // One short line each: the first release's target and producer, and a count of
   // the rest — shown whole, not clipped by the 200-pixel card.
-  const heldLine = heldCard.locator(".node-awaits");
-  const draftLine = draftCard.locator(".node-awaits");
-  await expect(heldLine).toHaveText(`awaits crate of ${engine}`);
-  await expect(draftLine).toHaveText(`awaits crate of ${engine} +1`);
+  const heldLine = heldCard.getByText(`awaits crate of ${engine}`, {
+    exact: true,
+  });
+  const draftLine = draftCard.getByText(`awaits crate of ${engine} +1`, {
+    exact: true,
+  });
+  await expect(heldLine).toBeVisible();
+  await expect(draftLine).toBeVisible();
   expect(await shownWhole(heldLine)).toBe(true);
   expect(await shownWhole(draftLine)).toBe(true);
+  // Inside the card: the line's box within the card's, and nothing the card
+  // writes crossing its border.
+  for (const [drawn, line] of [
+    [heldCard, heldLine],
+    [draftCard, draftLine],
+  ] as const) {
+    const cardBox = await drawn.boundingBox();
+    const lineBox = await line.boundingBox();
+    if (cardBox === null || lineBox === null)
+      throw new Error("the card or its line is drawn nowhere");
+    expect(lineBox.y).toBeGreaterThanOrEqual(cardBox.y);
+    expect(lineBox.x).toBeGreaterThanOrEqual(cardBox.x);
+    expect(lineBox.y + lineBox.height).toBeLessThanOrEqual(
+      cardBox.y + cardBox.height,
+    );
+    expect(lineBox.x + lineBox.width).toBeLessThanOrEqual(
+      cardBox.x + cardBox.width,
+    );
+    expect(await textInsideCard(drawn)).toBe(true);
+  }
 
   // Neither is in flight and neither is a word the view does not know.
   for (const word of ["running", "unknown"]) {
@@ -70,10 +122,16 @@ test("a held and a draft node show their own words and the releases each awaits 
 
   // The view's own classification of each: no own work lost (the danger token a
   // failed or cancelled card wears) and no reason line, which the graph gives
-  // exactly the nodes it reads as unhealthy — blocked, skipped or lost.
+  // exactly the nodes it reads as unhealthy — blocked, skipped or lost. Each card
+  // says its kind, its name, its word and what it awaits, and nothing else.
+  await expect(heldCard).toHaveText(
+    `agent${held}complete-but-heldawaits crate of ${engine}`,
+  );
+  await expect(draftCard).toHaveText(
+    `agent${draft}complete-but-draftawaits crate of ${engine} +1`,
+  );
   for (const drawn of [heldCard, draftCard]) {
     await expect(drawn).not.toHaveClass(/token-danger/);
-    await expect(drawn.locator(".node-reason")).toHaveCount(0);
   }
   // The keyboard reading of the graph says the same, with no blocker named.
   const list = graphNodeList(page);
@@ -111,7 +169,9 @@ test("a held node's view names every release it awaits in full above its detail,
     await page.goto(`${SERVED_UI_URL}/?run=${runs().awaiting}&node=${node}`);
     const view = page.getByRole("region", { name: `Timeline for ${node}` });
     await expect(view).toBeVisible();
-    await expect(view.locator(".node-view-state")).toHaveText(status);
+    await expect(
+      view.locator("header").getByText(status, { exact: true }),
+    ).toBeVisible();
 
     const panel = view.getByRole("region", { name: "Awaited releases" });
     await expect(panel).toBeVisible();
@@ -135,7 +195,18 @@ test("a held node's view names every release it awaits in full above its detail,
     await expect(view.getByRole("alert")).toHaveCount(0);
   }
 
+  // A node awaiting nothing — the one that landed — has no such panel.
+  await page.goto(`${SERVED_UI_URL}/?run=${runs().awaiting}&node=engine`);
+  const landed = page.getByRole("region", { name: "Timeline for engine" });
+  await expect(
+    landed.locator("header").getByText("done", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    landed.getByRole("region", { name: "Awaited releases" }),
+  ).toHaveCount(0);
+
   // The draft's sentence names no release, so its entries came off `awaiting`.
+  await page.goto(`${SERVED_UI_URL}/?run=${runs().awaiting}&node=${draft}`);
   await expect(
     page
       .getByRole("region", { name: "Awaited releases" })
