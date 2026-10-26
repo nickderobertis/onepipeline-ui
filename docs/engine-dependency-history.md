@@ -598,3 +598,13 @@ requirement follows and whose event vocabulary is unchanged; onetaskgraph
 unchanged, and no route, payload or MSRV changes beyond the release `/healthz`
 reports. This changes the engine types carried by ApiError::from_engine and the
 other engine-typed public items.
+0.93.0 is the engine whose linked oneagentgraph 0.9.0 and onejudge 0.22.0 run a
+graph member's worker side under its own config, so a launch directory's
+oneharness config can no longer end an observer monitor on its first turn. A
+host holds this reader and its engine to one linked engine, so it can adopt that
+engine only once this crate links it. The direct `oneagentgraph` and `onejudge`
+requirements move to those releases, and the onetaskgraph family and its
+test-only exact requirements to 0.12.3, the release that engine pins; onevcs
+0.57.0 and oneharness-core 0.29.1 are unchanged, and no route, payload or MSRV
+changes beyond the release `/healthz` reports. This changes the engine types
+carried by ApiError::from_engine and the other engine-typed public items.
