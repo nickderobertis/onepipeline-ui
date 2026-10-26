@@ -14110,8 +14110,46 @@ fn harness_step(index: usize, command: &str) -> [oneharness_core::domain::events
 /// leaves no turn waiting on a release that will never come.
 #[cfg(unix)]
 fn install_held_harness(fakes: &Path) -> PathBuf {
-    use oneharness_core::domain::report::RunStreamEnvelope;
     fs::create_dir_all(fakes).expect("the double's directory");
+    let documents = held_harness();
+    for (name, text) in documents["files"].as_object().expect("the double's files") {
+        fs::write(fakes.join(name), text.as_str().expect("a file's text")).expect("a file");
+    }
+    let program = fakes.join("oneharness");
+    fs::write(
+        &program,
+        documents["program"]
+            .as_str()
+            .expect("the double's program")
+            .replace(HELD_HARNESS_FAKES, &fakes.display().to_string()),
+    )
+    .expect("the double");
+    // Owner-only: the pinned CLI starts this journey's dispatch as this user.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o700))
+            .expect("the double is executable");
+    }
+    program
+}
+
+/// The placeholder [`held_harness`]'s program names its directory by, which the
+/// installer replaces with the directory it writes the double's files into.
+#[cfg(unix)]
+const HELD_HARNESS_FAKES: &str = "@FAKES@";
+
+/// The browser tier's copy of [`held_harness`], which its held-turn journey
+/// installs the way [`install_held_harness`] does.
+#[cfg(unix)]
+const HELD_HARNESS_FIXTURE: &str = "apps/dag-ui-e2e/fixtures/held-turn-harness.json";
+
+/// Everything a held turn is dispatched over: the files of
+/// [`write_two_party_node_scope_graph`]'s graph, and what
+/// [`install_held_harness`] writes — each file the double reads, by name, and
+/// its program with its directory left as [`HELD_HARNESS_FAKES`].
+#[cfg(unix)]
+fn held_harness() -> Value {
+    use oneharness_core::domain::report::RunStreamEnvelope;
     let lines = |events: &[oneharness_core::domain::events::ActionEvent]| {
         events
             .iter()
@@ -14128,46 +14166,28 @@ fn install_held_harness(fakes: &Path) -> PathBuf {
     };
     let opening = harness_step(0, "cargo build");
     let held = harness_step(2, "cargo test");
-    fs::write(fakes.join("agent-opening.ndjson"), lines(&opening)).expect("the opening");
-    fs::write(fakes.join("agent-held.ndjson"), lines(&held)).expect("the held work");
     let mut events = opening.to_vec();
-    events.extend(held);
-    fs::write(
-        fakes.join("agent-result.ndjson"),
-        format!(
-            "{}\n",
-            serde_json::to_string(&RunStreamEnvelope::Result {
-                report: harness_report("Built the change.", Some(events)),
-            })
-            .expect("the result line")
-        ),
-    )
-    .expect("the result");
-    fs::write(
-        fakes.join("supervisor.json"),
-        serde_json::to_string(&harness_report(
-            &json!({ "completion": true, "reason": "the turn did what the task asked" })
-                .to_string(),
-            None,
-        ))
-        .expect("the supervisor's report"),
-    )
-    .expect("the supervisor's answer");
-    fs::write(
-        fakes.join("verdict.json"),
-        serde_json::to_string(&harness_report(
-            &json!({ "value": true, "reason": "the turn did what the task asked" }).to_string(),
-            None,
-        ))
-        .expect("the evaluator's report"),
-    )
-    .expect("the evaluator's answer");
-    let program = fakes.join("oneharness");
-    fs::write(
-        &program,
-        format!(
-            r#"#!/bin/sh
-fakes='{fakes}'
+    events.extend(held.clone());
+    let result = format!(
+        "{}\n",
+        serde_json::to_string(&RunStreamEnvelope::Result {
+            report: harness_report("Built the change.", Some(events)),
+        })
+        .expect("the result line")
+    );
+    let supervisor = serde_json::to_string(&harness_report(
+        &json!({ "completion": true, "reason": "the turn did what the task asked" }).to_string(),
+        None,
+    ))
+    .expect("the supervisor's report");
+    let verdict = serde_json::to_string(&harness_report(
+        &json!({ "value": true, "reason": "the turn did what the task asked" }).to_string(),
+        None,
+    ))
+    .expect("the evaluator's report");
+    let program = format!(
+        r#"#!/bin/sh
+fakes='{HELD_HARNESS_FAKES}'
 hold() {{
   i=0
   while [ ! -f "$fakes/$1" ]; do
@@ -14196,18 +14216,56 @@ case " $* " in
   esac
   ;;
 esac
-"#,
-            fakes = fakes.display()
-        ),
-    )
-    .expect("the double");
-    // Owner-only: the pinned CLI starts this journey's dispatch as this user.
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&program, fs::Permissions::from_mode(0o700))
-            .expect("the double is executable");
+"#
+    );
+    // llmlint: ignore[least_privilege_grants] `mode` is a required field of a two-party
+    // member, and `bypass` is the one approval mode oneagentgraph's contract names — there is
+    // no narrower one to choose, and without the field no turn ever opens. What it grants is
+    // handed to the stand-in `oneharness` above, which runs no tool at all.
+    let node_scope = "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: onejudge\n    \
+         base_config: ./onejudge.base.yaml\n    agent:\n      \
+         oneharness_config: ./oneharness.toml\n    judge:\n      \
+         oneharness_config: ./oneharness.toml\n    mode: bypass\n";
+    json!({
+        "graph": {
+            "oneharness.toml": "run_mode = \"fallback\"\nharnesses = [\"claude-code\"]\n",
+            "onejudge.base.yaml": "system_prompt: Do the work.\nuser:\n  persona: Review it.\n  \
+                done_when: the original task is complete\n  max_turns: 12\n",
+            "node-scope.yaml": node_scope,
+        },
+        "placeholder": HELD_HARNESS_FAKES,
+        "program": program,
+        "files": {
+            "agent-opening.ndjson": lines(&opening),
+            "agent-held.ndjson": lines(&held),
+            "agent-result.ndjson": result,
+            "supervisor.json": supervisor,
+            "verdict.json": verdict,
+        },
+    })
+}
+
+/// **The browser tier holds a turn with this suite's double.** Its held-turn
+/// journey installs [`HELD_HARNESS_FIXTURE`] rather than writing an `oneharness`
+/// of its own, so the document is what the linked `oneharness_core` serializes
+/// and onejudge reads here; rewritten with `UPDATE_CONTRACT_FIXTURES` set.
+#[cfg(unix)]
+#[test]
+fn the_browser_tiers_held_turn_double_is_the_one_this_suite_holds_turns_with() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(HELD_HARNESS_FIXTURE);
+    let rendered = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&held_harness()).expect("serialize")
+    );
+    if std::env::var_os("UPDATE_CONTRACT_FIXTURES").is_some() {
+        fs::write(&path, &rendered).expect("rewrite the browser tier's double");
+        return;
     }
-    program
+    assert!(
+        fs::read_to_string(&path).unwrap_or_default() == rendered,
+        "{HELD_HARNESS_FIXTURE} is not this suite's held-turn double — re-run with \
+         UPDATE_CONTRACT_FIXTURES=1 to accept the change deliberately"
+    );
 }
 
 /// The node-scope graph a dispatch of [`fixture_run::write_awaiting_dispatch`]'s
@@ -14217,31 +14275,13 @@ esac
 /// takes is one `oneharness run` of whatever `ONEAGENTGRAPH_ONEHARNESS_BIN` names.
 #[cfg(unix)]
 fn write_two_party_node_scope_graph(dir: &Path) -> PathBuf {
-    fs::write(
-        dir.join("oneharness.toml"),
-        "run_mode = \"fallback\"\nharnesses = [\"claude-code\"]\n",
-    )
-    .expect("the harness config");
-    fs::write(
-        dir.join("onejudge.base.yaml"),
-        "system_prompt: Do the work.\nuser:\n  persona: Review it.\n  \
-         done_when: the original task is complete\n  max_turns: 12\n",
-    )
-    .expect("the onejudge base config");
-    let graph = dir.join("node-scope.yaml");
-    // llmlint: ignore[least_privilege_grants] `mode` is a required field of a two-party
-    // member, and `bypass` is the one approval mode oneagentgraph's contract names — there is
-    // no narrower one to choose, and without the field no turn ever opens. What it grants is
-    // handed to the stand-in `oneharness` above, which runs no tool at all.
-    fs::write(
-        &graph,
-        "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: onejudge\n    \
-         base_config: ./onejudge.base.yaml\n    agent:\n      \
-         oneharness_config: ./oneharness.toml\n    judge:\n      \
-         oneharness_config: ./oneharness.toml\n    mode: bypass\n",
-    )
-    .expect("the node-scope graph");
-    graph
+    for (name, text) in held_harness()["graph"]
+        .as_object()
+        .expect("the graph's files")
+    {
+        fs::write(dir.join(name), text.as_str().expect("a file's text")).expect("a graph file");
+    }
+    dir.join("node-scope.yaml")
 }
 
 /// The notes a conversation's spool holds that it has not answered yet.
