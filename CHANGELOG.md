@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.55.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.54.0...v0.55.0) - 2026-10-26
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine that keeps every run's observer monitor on its own config ([#513](https://github.com/nickderobertis/onepipeline-ui/pull/513))
+
 ## [0.54.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.53.1...v0.54.0) - 2026-10-25
 
 ### Fixed
