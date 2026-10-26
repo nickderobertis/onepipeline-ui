@@ -147,10 +147,10 @@ oneharness-core = "0.29.1"
 # major `onepipeline` itself resolves — the record this reads was written by the
 # release the engine links — and never moved on its own: `tests/packaging.rs`
 # reconciles the two edges the lockfile records.
-oneagentgraph = "0.8.0"
+oneagentgraph = "0.9.0"
 # The document a settled member's report *is*, linked rather than copied — why,
 # and why it is unpinned, is in `src/AGENTS.md`.
-onejudge = "0.21.0"
+onejudge = "0.22.0"
 # The correlation a channel reply is answered under is that library's own
 # token, parsed by its own parser: `POST .../channel/reply?correlation=C` hands
 # the query through `onemessagebus::Correlation` rather than a copy of its
@@ -180,7 +180,7 @@ onemessagebus = "0.9.1"
 # test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.92.0"
+onepipeline = "=0.93.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -225,7 +225,7 @@ libc = "0.2"
 # same release (^0.56.3), as do 0.82.0, 0.84.0, 0.84.1 and 0.85.0. 0.56.9 is the
 # release engine 0.89.0 resolves (^0.56.9), which relays each check's times.
 # 0.56.11 is the release engine 0.90.0 resolves (^0.56.11). 0.57.0 is the
-# release engine 0.92.0 resolves (^0.57.0).
+# release engine 0.92.0 resolves (^0.57.0), as does 0.93.0.
 onevcs = "=0.57.0"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
@@ -245,8 +245,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.12.1"
-onetaskgraph-plugin-api = "=0.12.1"
+onetaskgraph-core = "=0.12.3"
+onetaskgraph-plugin-api = "=0.12.3"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # engine-driven journey over a panel-judged member reads the provider block it was
