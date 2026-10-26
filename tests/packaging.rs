@@ -556,16 +556,13 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// comparison of the two above passes for any release both moved to together —
 /// including one whose adopted runs write their plan's home nothing. It moves
 /// with the `onepipeline` pin and [`STORE_RELEASE`], as one change.
-const ENGINE_RELEASE: &str = "0.93.0";
+const ENGINE_RELEASE: &str = "0.93.1";
 
-/// Where the lock must resolve [`ENGINE_RELEASE`] from: crates.io once a release
-/// carries the engine this crate links, and during a fast adoption the one git
-/// commit `[patch.crates-io]` links, which `just bootstrap` provisions the
-/// sibling CLI from too. A git commit can carry the same version number while
+/// Where the lock must resolve [`ENGINE_RELEASE`] from: crates.io, which serves
+/// the release a crates.io consumer and the sibling CLI `just bootstrap`
+/// provisions both reach. A git commit can carry the same version number while
 /// its library is another, so the version alone cannot tell the two apart.
-/// Currently the commit linking onetaskgraph 0.12.5; it returns to crates.io
-/// with that engine's release.
-const ENGINE_SOURCE: &str = "git+https://github.com/nickderobertis/onepipeline?rev=dc6b5fd3813b459f0ce3f38dbeba1f7339c88d87#dc6b5fd3813b459f0ce3f38dbeba1f7339c88d87";
+const ENGINE_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
 /// Every way `lock` and `manifest` fail to link exactly [`ENGINE_RELEASE`] of the
 /// engine, as a reader would be told them: a requirement that is not that release
