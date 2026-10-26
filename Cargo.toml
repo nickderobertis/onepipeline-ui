@@ -246,8 +246,8 @@ predicates = "3"
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
 # engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.12.3"
-onetaskgraph-plugin-api = "=0.12.3"
+onetaskgraph-core = "=0.12.5"
+onetaskgraph-plugin-api = "=0.12.5"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # engine-driven journey over a panel-judged member reads the provider block it was
@@ -276,6 +276,13 @@ path = "tests/build_cache.rs"
 test = false
 
 # A CLI binary: optimize for a small, fast-starting artifact.
+# Fast adoption: the engine commit that links onetaskgraph 0.12.5, which carries
+# a public projection's id-only anchor, ahead of its release. It still reports
+# 0.93.0, so it stands in for that requirement above rather than replacing it;
+# drop this section when the release carrying it ships and the pin moves to it.
+[patch.crates-io]
+onepipeline = { git = "https://github.com/nickderobertis/onepipeline", rev = "dc6b5fd3813b459f0ce3f38dbeba1f7339c88d87" }
+
 [profile.release]
 strip = true
 lto = "thin"

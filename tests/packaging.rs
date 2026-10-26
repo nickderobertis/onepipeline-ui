@@ -558,11 +558,14 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// with the `onepipeline` pin and [`STORE_RELEASE`], as one change.
 const ENGINE_RELEASE: &str = "0.93.0";
 
-/// Where the lock must resolve [`ENGINE_RELEASE`] from: crates.io, which serves
-/// the release a crates.io consumer and the sibling CLI `just bootstrap`
-/// provisions both reach. A git commit can carry the same version number while
+/// Where the lock must resolve [`ENGINE_RELEASE`] from: crates.io once a release
+/// carries the engine this crate links, and during a fast adoption the one git
+/// commit `[patch.crates-io]` links, which `just bootstrap` provisions the
+/// sibling CLI from too. A git commit can carry the same version number while
 /// its library is another, so the version alone cannot tell the two apart.
-const ENGINE_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
+/// Currently the commit linking onetaskgraph 0.12.5; it returns to crates.io
+/// with that engine's release.
+const ENGINE_SOURCE: &str = "git+https://github.com/nickderobertis/onepipeline?rev=dc6b5fd3813b459f0ce3f38dbeba1f7339c88d87#dc6b5fd3813b459f0ce3f38dbeba1f7339c88d87";
 
 /// Every way `lock` and `manifest` fail to link exactly [`ENGINE_RELEASE`] of the
 /// engine, as a reader would be told them: a requirement that is not that release
@@ -674,7 +677,7 @@ fn an_engine_moved_together_or_resolved_twice_is_refused_naming_it() {
 
     let twice = format!(
         "{lock}\n[[package]]\nname = \"onepipeline\"\nversion = \"0.79.1\"\n\
-         source = \"registry+https://github.com/rust-lang/crates.io-index\"\n"
+         source = \"{ENGINE_SOURCE}\"\n"
     );
     let mut doubled = engine_identity_disagreements(&twice, &manifest);
     doubled.sort();
@@ -723,7 +726,7 @@ fn the_same_engine_release_from_another_source_is_refused_naming_it() {
 /// a comparison of the two and still link a store whose closure handling nothing
 /// here was proven against. It moves with the `onepipeline` pin, as one change, to
 /// the store release that engine links.
-const STORE_RELEASE: &str = "0.12.3";
+const STORE_RELEASE: &str = "0.12.5";
 
 /// The members of the plan-store family the shipped binary cannot be without:
 /// the store itself, the plugin boundary, and the GitHub plugin a board is read

@@ -608,3 +608,13 @@ test-only exact requirements to 0.12.3, the release that engine pins; onevcs
 0.57.0 and oneharness-core 0.29.1 are unchanged, and no route, payload or MSRV
 changes beyond the release `/healthz` reports. This changes the engine types
 carried by ApiError::from_engine and the other engine-typed public items.
+The engine commit `dc6b5fd3813b459f0ce3f38dbeba1f7339c88d87`, linked by git
+ahead of its release and still reporting 0.93.0, is the engine whose linked
+onetaskgraph 0.12.5 carries an anchor naming no destination into a public
+projection, so a mixed public/private plan whose public task owns a schema-2
+budget can be copied onto a board again. A host holds this reader and its engine
+to one linked engine, so it can adopt that store only once this crate links it.
+The onetaskgraph family and its test-only exact requirements move to 0.12.5;
+oneagentgraph 0.9.0, onejudge 0.22.0, onevcs 0.57.0 and oneharness-core 0.29.1
+are unchanged, and no route, payload, MSRV or `/healthz` release changes. The
+pin returns to crates.io when that engine is released.
