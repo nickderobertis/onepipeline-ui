@@ -608,3 +608,17 @@ test-only exact requirements to 0.12.3, the release that engine pins; onevcs
 0.57.0 and oneharness-core 0.29.1 are unchanged, and no route, payload or MSRV
 changes beyond the release `/healthz` reports. This changes the engine types
 carried by ApiError::from_engine and the other engine-typed public items.
+0.95.0 is the engine that holds a `local-direct` node's finished branch
+unlanded on its origin while a release it adopted early is still out: the node
+settles `complete-but-held` as `held-for-release`, and that settlement and an
+awaiting-release `complete-but-draft` one carry `awaiting`, the
+`[{producer, target}]` releases still awaited. A host holds this reader and its
+engine to one linked engine, so it can adopt that engine only once this crate
+links it. Both words join the node-status vocabulary this API serves
+(telemetry schema 27), where the draft one was served `unknown` and the held one
+as still `running`, and `graph.node_results[NODE]` serves `awaiting`. The
+onetaskgraph family and its test-only exact requirements move to 0.12.5, the
+release that engine pins; onevcs 0.57.0, oneagentgraph 0.9.0, onejudge 0.22.0
+and oneharness-core 0.29.1 are unchanged, and the MSRV is unchanged. This
+changes the engine types carried by ApiError::from_engine and the other
+engine-typed public items.

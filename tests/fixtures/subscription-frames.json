@@ -19,7 +19,7 @@
         "failed": 0,
         "running": 1
       },
-      "updated_at": "2026-08-07T12:00:10.000Z",
+      "updated_at": "2026-08-07T12:00:09.000Z",
       "started_at": "2026-08-07T12:00:00.000Z"
     }
   },
@@ -42,22 +42,22 @@
           "run",
           "last_event"
         ],
-        "v": "push"
+        "v": "gate-verdict"
       },
       {
         "p": [
           "run",
           "last_progress_at"
         ],
-        "v": 1786104010
+        "v": 1786104009
       },
       {
         "p": [
           "run",
           "timing",
-          "publication_wait_seconds"
+          "gate_seconds"
         ],
-        "v": 1
+        "v": 2
       },
       {
         "p": [
@@ -65,7 +65,7 @@
           "timing",
           "wall_seconds"
         ],
-        "v": 10
+        "v": 9
       },
       {
         "p": [
@@ -73,7 +73,7 @@
           "timing",
           "wall_ms"
         ],
-        "v": 10000
+        "v": 9000
       },
       {
         "p": [
@@ -82,7 +82,7 @@
           "fractions",
           "setup"
         ],
-        "v": 0.1
+        "v": 0.1111111111111111
       },
       {
         "p": [
@@ -91,7 +91,7 @@
           "fractions",
           "scheduling"
         ],
-        "v": 0.2
+        "v": 0.2222222222222222
       },
       {
         "p": [
@@ -99,30 +99,45 @@
           "node_work_ms",
           "wall_ms"
         ],
-        "v": 10000
+        "v": 9000
       },
       {
         "p": [
           "telemetry",
           "wall_ms"
         ],
-        "v": 10000
+        "v": 9000
       },
       {
         "p": [
           "telemetry",
           "buckets",
-          4,
+          3,
           "ms"
         ],
-        "v": 1000
+        "v": 2000
       },
       {
         "p": [
           "graph",
           "last_seq"
         ],
-        "v": 19
+        "v": 18
+      },
+      {
+        "p": [
+          "node_details",
+          "contract-interface",
+          "verification",
+          "records"
+        ],
+        "a": [
+          {
+            "ok": true,
+            "output_tail": "the gate ran and passed",
+            "artifact_id": "artifact-5c8f0a1b"
+          }
+        ]
       },
       {
         "p": [
@@ -142,21 +157,442 @@
     "ops": [
       {
         "p": [
-          "spans",
-          1,
-          "events"
+          "spans"
         ],
-        "a": [
+        "v": [
           {
-            "id": "e19",
-            "record_id": "a-recording-host-4242.19",
-            "stream": "a-recording-host-4242",
-            "seq": 19,
-            "journal_order": 19,
-            "dispatch_id": "run-20260807-a1b2c3.contract-interface",
-            "kind": "push",
-            "at": "2026-08-07T12:00:10.000Z",
-            "node_id": "contract-interface"
+            "id": "run.run-20260807-a1b2c3",
+            "kind": "run",
+            "label": "run-20260807-a1b2c3",
+            "started_at": "2026-08-07T12:00:00.000Z",
+            "ended_at": null,
+            "phase": "dispatching",
+            "events": [
+              {
+                "id": "e0",
+                "record_id": "a-recording-host-4242.0",
+                "stream": "a-recording-host-4242",
+                "seq": 0,
+                "journal_order": 0,
+                "kind": "run-started",
+                "at": "2026-08-07T12:00:00.000Z"
+              },
+              {
+                "id": "e3",
+                "record_id": "a-recording-host-4242.3",
+                "stream": "a-recording-host-4242",
+                "seq": 3,
+                "journal_order": 3,
+                "kind": "release-probed",
+                "at": "2026-08-07T12:00:01.300Z",
+                "release": {
+                  "identity": "github.com/nickderobertis/onepipeline",
+                  "target": "crate",
+                  "form": "registry-index",
+                  "outcome": "released",
+                  "version": "0.7.3",
+                  "elapsed_ms": 412
+                }
+              },
+              {
+                "id": "e4",
+                "record_id": "a-recording-host-4242.4",
+                "stream": "a-recording-host-4242",
+                "seq": 4,
+                "journal_order": 4,
+                "kind": "release-observed",
+                "at": "2026-08-07T12:00:01.350Z",
+                "release": {
+                  "identity": "github.com/nickderobertis/onepipeline",
+                  "target": "crate",
+                  "style": "automated",
+                  "version": "0.7.3",
+                  "landing_commit": "3c1d5e7f9081a2b3c4d5e6f708192a3b4c5d6e7f"
+                }
+              },
+              {
+                "id": "e6",
+                "record_id": "a-recording-host-4242.6",
+                "stream": "a-recording-host-4242",
+                "seq": 6,
+                "journal_order": 6,
+                "kind": "release-acknowledged",
+                "at": "2026-08-07T12:00:01.500Z",
+                "release": {
+                  "identity": "github.com/nickderobertis/onepipeline",
+                  "target": "npm",
+                  "version": "0.7.3",
+                  "landing_commit": "3c1d5e7f9081a2b3c4d5e6f708192a3b4c5d6e7f",
+                  "actor": "a-recording-host",
+                  "superseded": false
+                }
+              },
+              {
+                "id": "e7",
+                "record_id": "a-recording-host-4242.7",
+                "stream": "a-recording-host-4242",
+                "seq": 7,
+                "journal_order": 7,
+                "kind": "release-observed",
+                "at": "2026-08-07T12:00:01.550Z",
+                "release": {
+                  "identity": "github.com/nickderobertis/onepipeline",
+                  "target": "npm",
+                  "style": "human-step",
+                  "version": "0.7.3",
+                  "landing_commit": "3c1d5e7f9081a2b3c4d5e6f708192a3b4c5d6e7f"
+                }
+              }
+            ]
+          },
+          {
+            "id": "node.contract-interface",
+            "kind": "node",
+            "label": "contract-interface",
+            "started_at": "2026-08-07T12:00:01.000Z",
+            "ended_at": null,
+            "parent_id": "run.run-20260807-a1b2c3",
+            "node_id": "contract-interface",
+            "events": [
+              {
+                "id": "e1",
+                "record_id": "a-recording-host-4242.1",
+                "stream": "a-recording-host-4242",
+                "seq": 1,
+                "journal_order": 1,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "node-ready",
+                "at": "2026-08-07T12:00:01.000Z",
+                "node_id": "contract-interface"
+              },
+              {
+                "id": "e2",
+                "record_id": "a-recording-host-4242.2",
+                "stream": "a-recording-host-4242",
+                "seq": 2,
+                "journal_order": 2,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "release-wait",
+                "at": "2026-08-07T12:00:01.200Z",
+                "node_id": "contract-interface",
+                "release": {
+                  "awaiting": [
+                    {
+                      "dep": "sdk",
+                      "identity": "github.com/nickderobertis/onepipeline",
+                      "target": "crate",
+                      "style": "automated",
+                      "since": "2026-08-07T12:00:01.000Z",
+                      "waited_seconds": 12,
+                      "last_answer": "not-released"
+                    },
+                    {
+                      "dep": "sdk",
+                      "identity": "github.com/nickderobertis/onepipeline",
+                      "target": "npm",
+                      "style": "human-step",
+                      "action": "publish the npm wrapper from the tagged release",
+                      "since": "2026-08-07T12:00:01.000Z",
+                      "waited_seconds": 12,
+                      "last_answer": "awaiting-human-step"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "e5",
+                "record_id": "a-recording-host-4242.5",
+                "stream": "a-recording-host-4242",
+                "seq": 5,
+                "journal_order": 5,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "release-arrived",
+                "at": "2026-08-07T12:00:01.400Z",
+                "node_id": "contract-interface",
+                "release": {
+                  "dep": "sdk",
+                  "identity": "github.com/nickderobertis/onepipeline",
+                  "target": "crate",
+                  "style": "automated",
+                  "version": "0.7.3"
+                }
+              },
+              {
+                "id": "e8",
+                "record_id": "a-recording-host-4242.8",
+                "stream": "a-recording-host-4242",
+                "seq": 8,
+                "journal_order": 8,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "release-arrived",
+                "at": "2026-08-07T12:00:01.600Z",
+                "node_id": "contract-interface",
+                "release": {
+                  "dep": "sdk",
+                  "identity": "github.com/nickderobertis/onepipeline",
+                  "target": "npm",
+                  "style": "human-step",
+                  "version": "0.7.3"
+                }
+              },
+              {
+                "id": "e9",
+                "record_id": "a-recording-host-4242.9",
+                "stream": "a-recording-host-4242",
+                "seq": 9,
+                "journal_order": 9,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "release-adopted",
+                "at": "2026-08-07T12:00:01.800Z",
+                "node_id": "contract-interface",
+                "release": {
+                  "delivery": "next",
+                  "versions": [
+                    {
+                      "identity": "github.com/nickderobertis/onepipeline",
+                      "target": "crate",
+                      "version": "0.7.3"
+                    },
+                    {
+                      "identity": "github.com/nickderobertis/onepipeline",
+                      "target": "npm",
+                      "version": "0.7.3"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "e10",
+                "record_id": "a-recording-host-4242.10",
+                "stream": "a-recording-host-4242",
+                "seq": 10,
+                "journal_order": 10,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Attempt": 1,
+                  "Persona": "worker"
+                },
+                "kind": "node-dispatched",
+                "at": "2026-08-07T12:00:02.000Z",
+                "node_id": "contract-interface"
+              },
+              {
+                "id": "node-scope-1786925518098-3163646.worker.0",
+                "record_id": "a-recording-host-4242.11",
+                "stream": "a-recording-host-4242",
+                "seq": 11,
+                "journal_order": 11,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Turn": 1
+                },
+                "description": "",
+                "kind": "turn-started",
+                "at": "2026-08-07T12:00:03.000Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "conversation",
+                  "value": "node-scope-1786925518098-3163646.worker"
+                }
+              },
+              {
+                "id": "e12",
+                "record_id": "a-recording-host-4242.12",
+                "stream": "a-recording-host-4242",
+                "seq": 12,
+                "journal_order": 12,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Tool": "Read",
+                  "Detail": "src/api.rs"
+                },
+                "description": "Read src/api.rs",
+                "kind": "turn-activity",
+                "at": "2026-08-07T12:00:03.500Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "conversation",
+                  "value": "node-scope-1786925518098-3163646.worker"
+                }
+              },
+              {
+                "id": "node-scope-1786925518098-3163646.worker.1",
+                "record_id": "a-recording-host-4242.13",
+                "stream": "a-recording-host-4242",
+                "seq": 13,
+                "journal_order": 13,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Turn": 2
+                },
+                "description": "",
+                "kind": "turn-started",
+                "at": "2026-08-07T12:00:04.000Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "conversation",
+                  "value": "node-scope-1786925518098-3163646.worker"
+                }
+              },
+              {
+                "id": "e14",
+                "record_id": "a-recording-host-4242.14",
+                "stream": "a-recording-host-4242",
+                "seq": 14,
+                "journal_order": 14,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Tool": "Bash",
+                  "Detail": "just gate"
+                },
+                "description": "just gate",
+                "kind": "turn-activity",
+                "at": "2026-08-07T12:00:04.500Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "conversation",
+                  "value": "node-scope-1786925518098-3163646.worker"
+                }
+              },
+              {
+                "id": "e15",
+                "record_id": "a-recording-host-4242.15",
+                "stream": "a-recording-host-4242",
+                "seq": 15,
+                "journal_order": 15,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Usage": {
+                    "input_tokens": 159810,
+                    "output_tokens": 1728,
+                    "cache_read_tokens": 231481,
+                    "cache_write_tokens": 1068,
+                    "cost_usd": 53.79
+                  }
+                },
+                "kind": "turn-completed",
+                "at": "2026-08-07T12:00:05.000Z",
+                "node_id": "contract-interface"
+              },
+              {
+                "id": "e16",
+                "record_id": "node-scope-1786925518098-3163646.0",
+                "stream": "node-scope-1786925518098-3163646",
+                "seq": 0,
+                "journal_order": 16,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "member-settled",
+                "at": "2026-08-07T12:00:05.500Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "worker_report",
+                  "value": "report-node-scope-1786925518098-3163646"
+                }
+              },
+              {
+                "id": "e17",
+                "record_id": "a-recording-host-4242.16",
+                "stream": "a-recording-host-4242",
+                "seq": 16,
+                "journal_order": 17,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Branch": "feature/contract-interface",
+                  "Base": "main"
+                },
+                "kind": "session-opened",
+                "at": "2026-08-07T12:00:06.000Z",
+                "node_id": "contract-interface"
+              },
+              {
+                "id": "e18",
+                "record_id": "a-recording-host-4242.17",
+                "stream": "a-recording-host-4242",
+                "seq": 17,
+                "journal_order": 18,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "gate-started",
+                "at": "2026-08-07T12:00:07.000Z",
+                "node_id": "contract-interface"
+              },
+              {
+                "id": "e19",
+                "record_id": "a-recording-host-4242.18",
+                "stream": "a-recording-host-4242",
+                "seq": 18,
+                "journal_order": 19,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "gate-verdict",
+                "at": "2026-08-07T12:00:09.000Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "gate_log",
+                  "value": "artifact-5c8f0a1b"
+                }
+              }
+            ]
+          },
+          {
+            "id": "rollup.contract-interface.agent.worker",
+            "kind": "rollup",
+            "label": "dispatch",
+            "started_at": "2026-08-07T12:00:03.000Z",
+            "ended_at": "2026-08-07T12:00:05.500Z",
+            "parent_id": "node.contract-interface",
+            "node_id": "contract-interface",
+            "count": 1,
+            "agent_role": "worker",
+            "transport_role": "agent",
+            "events": []
+          },
+          {
+            "id": "verification.contract-interface.report-node-scope-1786925518098-3163646",
+            "kind": "verification",
+            "label": "report-node-scope-1786925518098-3163646",
+            "started_at": "2026-08-07T12:00:05.000Z",
+            "ended_at": "2026-08-07T12:00:05.500Z",
+            "parent_id": "node.contract-interface",
+            "node_id": "contract-interface",
+            "status": "ok",
+            "detail": {
+              "ok": true,
+              "output_tail": "",
+              "artifact_id": "report-node-scope-1786925518098-3163646"
+            },
+            "events": []
+          },
+          {
+            "id": "verification.contract-interface.artifact-5c8f0a1b",
+            "kind": "verification",
+            "label": "artifact-5c8f0a1b",
+            "started_at": "2026-08-07T12:00:07.000Z",
+            "ended_at": "2026-08-07T12:00:09.000Z",
+            "parent_id": "node.contract-interface",
+            "node_id": "contract-interface",
+            "status": "ok",
+            "detail": {
+              "ok": true,
+              "output_tail": "the gate ran and passed",
+              "artifact_id": "artifact-5c8f0a1b"
+            },
+            "events": []
+          },
+          {
+            "id": "publication.contract-interface",
+            "kind": "publication",
+            "label": "feature/contract-interface",
+            "started_at": "2026-08-07T12:00:07.000Z",
+            "ended_at": null,
+            "parent_id": "node.contract-interface",
+            "node_id": "contract-interface",
+            "events": []
           }
         ]
       },
@@ -179,21 +615,573 @@
     "ops": [
       {
         "p": [
-          "spans",
-          0,
-          "events"
+          "spans"
         ],
-        "a": [
+        "v": [
           {
-            "id": "e19",
-            "record_id": "a-recording-host-4242.19",
-            "stream": "a-recording-host-4242",
-            "seq": 19,
-            "journal_order": 19,
-            "dispatch_id": "run-20260807-a1b2c3.contract-interface",
-            "kind": "push",
-            "at": "2026-08-07T12:00:10.000Z",
+            "id": "node.contract-interface",
+            "kind": "node",
+            "label": "contract-interface",
+            "started_at": "2026-08-07T12:00:01.000Z",
+            "ended_at": null,
             "node_id": "contract-interface",
+            "events": [
+              {
+                "id": "e1",
+                "record_id": "a-recording-host-4242.1",
+                "stream": "a-recording-host-4242",
+                "seq": 1,
+                "journal_order": 1,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "node-ready",
+                "at": "2026-08-07T12:00:01.000Z",
+                "node_id": "contract-interface"
+              },
+              {
+                "id": "e2",
+                "record_id": "a-recording-host-4242.2",
+                "stream": "a-recording-host-4242",
+                "seq": 2,
+                "journal_order": 2,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "release-wait",
+                "at": "2026-08-07T12:00:01.200Z",
+                "node_id": "contract-interface",
+                "release": {
+                  "awaiting": [
+                    {
+                      "dep": "sdk",
+                      "identity": "github.com/nickderobertis/onepipeline",
+                      "target": "crate",
+                      "style": "automated",
+                      "since": "2026-08-07T12:00:01.000Z",
+                      "waited_seconds": 12,
+                      "last_answer": "not-released"
+                    },
+                    {
+                      "dep": "sdk",
+                      "identity": "github.com/nickderobertis/onepipeline",
+                      "target": "npm",
+                      "style": "human-step",
+                      "action": "publish the npm wrapper from the tagged release",
+                      "since": "2026-08-07T12:00:01.000Z",
+                      "waited_seconds": 12,
+                      "last_answer": "awaiting-human-step"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "e5",
+                "record_id": "a-recording-host-4242.5",
+                "stream": "a-recording-host-4242",
+                "seq": 5,
+                "journal_order": 5,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "release-arrived",
+                "at": "2026-08-07T12:00:01.400Z",
+                "node_id": "contract-interface",
+                "release": {
+                  "dep": "sdk",
+                  "identity": "github.com/nickderobertis/onepipeline",
+                  "target": "crate",
+                  "style": "automated",
+                  "version": "0.7.3"
+                }
+              },
+              {
+                "id": "e8",
+                "record_id": "a-recording-host-4242.8",
+                "stream": "a-recording-host-4242",
+                "seq": 8,
+                "journal_order": 8,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "release-arrived",
+                "at": "2026-08-07T12:00:01.600Z",
+                "node_id": "contract-interface",
+                "release": {
+                  "dep": "sdk",
+                  "identity": "github.com/nickderobertis/onepipeline",
+                  "target": "npm",
+                  "style": "human-step",
+                  "version": "0.7.3"
+                }
+              },
+              {
+                "id": "e9",
+                "record_id": "a-recording-host-4242.9",
+                "stream": "a-recording-host-4242",
+                "seq": 9,
+                "journal_order": 9,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "release-adopted",
+                "at": "2026-08-07T12:00:01.800Z",
+                "node_id": "contract-interface",
+                "release": {
+                  "delivery": "next",
+                  "versions": [
+                    {
+                      "identity": "github.com/nickderobertis/onepipeline",
+                      "target": "crate",
+                      "version": "0.7.3"
+                    },
+                    {
+                      "identity": "github.com/nickderobertis/onepipeline",
+                      "target": "npm",
+                      "version": "0.7.3"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "e10",
+                "record_id": "a-recording-host-4242.10",
+                "stream": "a-recording-host-4242",
+                "seq": 10,
+                "journal_order": 10,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Attempt": 1,
+                  "Persona": "worker"
+                },
+                "kind": "node-dispatched",
+                "at": "2026-08-07T12:00:02.000Z",
+                "node_id": "contract-interface",
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "node-scope-1786925518098-3163646.worker.0",
+                "record_id": "a-recording-host-4242.11",
+                "stream": "a-recording-host-4242",
+                "seq": 11,
+                "journal_order": 11,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Turn": 1
+                },
+                "description": "",
+                "kind": "turn-started",
+                "at": "2026-08-07T12:00:03.000Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "conversation",
+                  "value": "node-scope-1786925518098-3163646.worker"
+                },
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "e12",
+                "record_id": "a-recording-host-4242.12",
+                "stream": "a-recording-host-4242",
+                "seq": 12,
+                "journal_order": 12,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Tool": "Read",
+                  "Detail": "src/api.rs"
+                },
+                "description": "Read src/api.rs",
+                "kind": "turn-activity",
+                "at": "2026-08-07T12:00:03.500Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "conversation",
+                  "value": "node-scope-1786925518098-3163646.worker"
+                },
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "node-scope-1786925518098-3163646.worker.1",
+                "record_id": "a-recording-host-4242.13",
+                "stream": "a-recording-host-4242",
+                "seq": 13,
+                "journal_order": 13,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Turn": 2
+                },
+                "description": "",
+                "kind": "turn-started",
+                "at": "2026-08-07T12:00:04.000Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "conversation",
+                  "value": "node-scope-1786925518098-3163646.worker"
+                },
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "e14",
+                "record_id": "a-recording-host-4242.14",
+                "stream": "a-recording-host-4242",
+                "seq": 14,
+                "journal_order": 14,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Tool": "Bash",
+                  "Detail": "just gate"
+                },
+                "description": "just gate",
+                "kind": "turn-activity",
+                "at": "2026-08-07T12:00:04.500Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "conversation",
+                  "value": "node-scope-1786925518098-3163646.worker"
+                },
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "e15",
+                "record_id": "a-recording-host-4242.15",
+                "stream": "a-recording-host-4242",
+                "seq": 15,
+                "journal_order": 15,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Usage": {
+                    "input_tokens": 159810,
+                    "output_tokens": 1728,
+                    "cache_read_tokens": 231481,
+                    "cache_write_tokens": 1068,
+                    "cost_usd": 53.79
+                  }
+                },
+                "kind": "turn-completed",
+                "at": "2026-08-07T12:00:05.000Z",
+                "node_id": "contract-interface",
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "e16",
+                "record_id": "node-scope-1786925518098-3163646.0",
+                "stream": "node-scope-1786925518098-3163646",
+                "seq": 0,
+                "journal_order": 16,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "member-settled",
+                "at": "2026-08-07T12:00:05.500Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "worker_report",
+                  "value": "report-node-scope-1786925518098-3163646"
+                },
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "e17",
+                "record_id": "a-recording-host-4242.16",
+                "stream": "a-recording-host-4242",
+                "seq": 16,
+                "journal_order": 17,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Branch": "feature/contract-interface",
+                  "Base": "main"
+                },
+                "kind": "session-opened",
+                "at": "2026-08-07T12:00:06.000Z",
+                "node_id": "contract-interface",
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "e18",
+                "record_id": "a-recording-host-4242.17",
+                "stream": "a-recording-host-4242",
+                "seq": 17,
+                "journal_order": 18,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "gate-started",
+                "at": "2026-08-07T12:00:07.000Z",
+                "node_id": "contract-interface",
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "e19",
+                "record_id": "a-recording-host-4242.18",
+                "stream": "a-recording-host-4242",
+                "seq": 18,
+                "journal_order": 19,
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "kind": "gate-verdict",
+                "at": "2026-08-07T12:00:09.000Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "gate_log",
+                  "value": "artifact-5c8f0a1b"
+                },
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              }
+            ]
+          },
+          {
+            "id": "dispatch.node-scope-1786925518098-3163646.worker",
+            "kind": "dispatch",
+            "label": "node-scope-1786925518098-3163646.worker",
+            "started_at": "2026-08-07T12:00:03.000Z",
+            "ended_at": "2026-08-07T12:00:05.500Z",
+            "parent_id": "node.contract-interface",
+            "node_id": "contract-interface",
+            "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+            "transport_role": "agent",
+            "agent_role": "worker",
+            "status": "running",
+            "reference": {
+              "kind": "conversation",
+              "value": "node-scope-1786925518098-3163646.worker"
+            },
+            "events": [
+              {
+                "id": "node-scope-1786925518098-3163646.worker.0",
+                "record_id": "a-recording-host-4242.11",
+                "stream": "a-recording-host-4242",
+                "seq": 11,
+                "journal_order": 11,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Turn": 1
+                },
+                "description": "",
+                "kind": "turn-started",
+                "at": "2026-08-07T12:00:03.000Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "conversation",
+                  "value": "node-scope-1786925518098-3163646.worker"
+                },
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "e12",
+                "record_id": "a-recording-host-4242.12",
+                "stream": "a-recording-host-4242",
+                "seq": 12,
+                "journal_order": 12,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Tool": "Read",
+                  "Detail": "src/api.rs"
+                },
+                "description": "Read src/api.rs",
+                "kind": "turn-activity",
+                "at": "2026-08-07T12:00:03.500Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "conversation",
+                  "value": "node-scope-1786925518098-3163646.worker"
+                },
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "node-scope-1786925518098-3163646.worker.1",
+                "record_id": "a-recording-host-4242.13",
+                "stream": "a-recording-host-4242",
+                "seq": 13,
+                "journal_order": 13,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Turn": 2
+                },
+                "description": "",
+                "kind": "turn-started",
+                "at": "2026-08-07T12:00:04.000Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "conversation",
+                  "value": "node-scope-1786925518098-3163646.worker"
+                },
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "e14",
+                "record_id": "a-recording-host-4242.14",
+                "stream": "a-recording-host-4242",
+                "seq": 14,
+                "journal_order": 14,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Tool": "Bash",
+                  "Detail": "just gate"
+                },
+                "description": "just gate",
+                "kind": "turn-activity",
+                "at": "2026-08-07T12:00:04.500Z",
+                "node_id": "contract-interface",
+                "reference": {
+                  "kind": "conversation",
+                  "value": "node-scope-1786925518098-3163646.worker"
+                },
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              },
+              {
+                "id": "e15",
+                "record_id": "a-recording-host-4242.15",
+                "stream": "a-recording-host-4242",
+                "seq": 15,
+                "journal_order": 15,
+                "persona": "worker",
+                "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+                "fields": {
+                  "Usage": {
+                    "input_tokens": 159810,
+                    "output_tokens": 1728,
+                    "cache_read_tokens": 231481,
+                    "cache_write_tokens": 1068,
+                    "cost_usd": 53.79
+                  }
+                },
+                "kind": "turn-completed",
+                "at": "2026-08-07T12:00:05.000Z",
+                "node_id": "contract-interface",
+                "dispatch_group": {
+                  "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+                  "label": "Dispatch 1",
+                  "order": 30,
+                  "started_at": "2026-08-07T12:00:02.000Z"
+                }
+              }
+            ],
+            "dispatch_group": {
+              "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+              "label": "Dispatch 1",
+              "order": 30,
+              "started_at": "2026-08-07T12:00:02.000Z"
+            }
+          },
+          {
+            "id": "verification.contract-interface.report-node-scope-1786925518098-3163646",
+            "kind": "verification",
+            "label": "report-node-scope-1786925518098-3163646",
+            "started_at": "2026-08-07T12:00:05.000Z",
+            "ended_at": "2026-08-07T12:00:05.500Z",
+            "parent_id": "node.contract-interface",
+            "node_id": "contract-interface",
+            "status": "ok",
+            "detail": {
+              "ok": true,
+              "output_tail": "",
+              "artifact_id": "report-node-scope-1786925518098-3163646"
+            },
+            "events": [],
+            "dispatch_group": {
+              "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+              "label": "Dispatch 1",
+              "order": 30,
+              "started_at": "2026-08-07T12:00:02.000Z"
+            }
+          },
+          {
+            "id": "verification.contract-interface.artifact-5c8f0a1b",
+            "kind": "verification",
+            "label": "artifact-5c8f0a1b",
+            "started_at": "2026-08-07T12:00:07.000Z",
+            "ended_at": "2026-08-07T12:00:09.000Z",
+            "parent_id": "node.contract-interface",
+            "node_id": "contract-interface",
+            "status": "ok",
+            "detail": {
+              "ok": true,
+              "output_tail": "the gate ran and passed",
+              "artifact_id": "artifact-5c8f0a1b"
+            },
+            "events": [],
+            "dispatch_group": {
+              "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
+              "label": "Dispatch 1",
+              "order": 30,
+              "started_at": "2026-08-07T12:00:02.000Z"
+            }
+          },
+          {
+            "id": "publication.contract-interface",
+            "kind": "publication",
+            "label": "feature/contract-interface",
+            "started_at": "2026-08-07T12:00:07.000Z",
+            "ended_at": null,
+            "parent_id": "node.contract-interface",
+            "node_id": "contract-interface",
+            "events": [],
             "dispatch_group": {
               "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
               "label": "Dispatch 1",

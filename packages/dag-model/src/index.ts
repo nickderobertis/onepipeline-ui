@@ -265,8 +265,14 @@ export const API_V2_FILTER_PROFILES = {
  * event gains `toolCallId`, a live-activity entry `description`, and an
  * `oneharness_session` artifact `turns` and `unavailable`. The literal moves
  * because a client written against `25` shows a cut prompt as the whole of one.
+ *
+ * `27` is finished work held for a release: the node-status vocabulary gains
+ * `complete-but-draft` and `complete-but-held`, and a node's result gains
+ * `awaiting`, the releases its settlement still awaits. Every field `26` served is
+ * served with the same meaning; the literal moves because a client written against
+ * `26` switches on a vocabulary that holds neither word.
  */
-export const TELEMETRY_SCHEMA_VERSION = 26;
+export const TELEMETRY_SCHEMA_VERSION = 27;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -857,6 +863,16 @@ export const nodeReleaseSchema = openObject({
   style: z.string().min(1).optional(),
   version: z.string().min(1),
 });
+/**
+ * One release a node holding finished work still awaits (schema 27), as the engine's
+ * `node-settled` record lists it: `producer` is the producing repository's
+ * normalized origin and `target` the release target's name. Open strings, for the
+ * reason a {@link nodeReleaseSchema}'s `target` is one.
+ */
+export const awaitedReleaseSchema = openObject({
+  producer: z.string().min(1),
+  target: z.string().min(1),
+});
 export const graphResultItemSchema = openObject({
   kind: z.string().optional(),
   status: z.string().optional(),
@@ -890,6 +906,12 @@ export const graphResultItemSchema = openObject({
    * served an absent key rather than an empty object.
    */
   release: nodeReleaseSchema.nullable().optional(),
+  /**
+   * The releases a `complete-but-draft` or `complete-but-held` node still awaits,
+   * one per release in the record's order; absent, never empty, for a node whose
+   * settlement named none.
+   */
+  awaiting: z.array(awaitedReleaseSchema).min(1).optional(),
   detail: z.string().optional(),
   follow_ups: z.string().nullable().optional(),
   steps: z.array(stepResultSchema).optional(),
@@ -914,6 +936,8 @@ export const nodeStateSchema = z.enum([
   "waiting",
   "parked",
   "cancelled",
+  "complete-but-draft",
+  "complete-but-held",
 ]);
 /**
  * The one authoritative per-node status. `src/payload.rs`'s `NODE_STATUSES` maps
@@ -939,6 +963,11 @@ export const nodeStatusSchema = z.enum([
   "failed",
   "parked",
   "cancelled",
+  // Finished work waiting on a release before it may land (schema 27): held as a
+  // draft change request, or held unlanded on its origin where its publication
+  // opens none. `GraphResultItem.awaiting` names what each waits on.
+  "complete-but-draft",
+  "complete-but-held",
   "unknown",
 ]);
 /**
@@ -2807,6 +2836,7 @@ export type NodeControl = z.infer<typeof nodeControlSchema>;
 export type Redirection = z.infer<typeof redirectionSchema>;
 /** The release that carried one node's landed work. */
 export type NodeRelease = z.infer<typeof nodeReleaseSchema>;
+export type AwaitedRelease = z.infer<typeof awaitedReleaseSchema>;
 /** One thing a node is being held on until a release is out. */
 export type ReleaseAwaited = z.infer<typeof releaseAwaitedSchema>;
 /** What one release record said about itself. */

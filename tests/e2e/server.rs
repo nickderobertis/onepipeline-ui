@@ -47,7 +47,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(26), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(27), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -6267,6 +6267,133 @@ fn a_node_its_plan_kept_is_served_done_with_its_branch_and_head_and_never_landed
     assert!(!kept_line.contains("landed on its base"), "{kept_line}");
     let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status")).json();
     assert_eq!(status["node_status"][keep], json!("done"), "{status}");
+}
+
+#[test]
+fn finished_work_held_for_a_release_is_served_in_its_own_word_with_what_it_awaits() {
+    let run = fixture_run::AWAITING_RELEASE_RUN_ID;
+    let held = fixture_run::HELD_UNLANDED_NODE_ID;
+    let draft = fixture_run::HELD_DRAFT_NODE_ID;
+    let released = fixture_run::RELEASED_NODE_ID;
+    let serving = Serving::start(|root| {
+        fixture_run::write_awaiting_release(root, run);
+    });
+
+    // The run-summary row counts each under its own word, beside the run's other
+    // nodes, so neither reads as one still running or one the vocabulary lacks.
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let row = listed["runs"]
+        .as_array()
+        .expect("runs")
+        .iter()
+        .find(|row| row["run_id"] == json!(run))
+        .unwrap_or_else(|| panic!("no row for {run}: {listed}"));
+    let counts = &row["node_counts"];
+    assert_eq!(counts["complete-but-held"], json!(1), "{counts}");
+    assert_eq!(counts["complete-but-draft"], json!(1), "{counts}");
+    assert_eq!(counts["done"], json!(1), "{counts}");
+    for absent in ["running", "unknown"] {
+        assert!(counts.get(absent).is_none(), "{absent}: {counts}");
+    }
+
+    let body = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    let graph = &body["graph"];
+    for (node, word) in [(held, "complete-but-held"), (draft, "complete-but-draft")] {
+        assert_eq!(graph["node_status"][node], json!(word), "{graph}");
+        assert_eq!(graph["node_states"][node], json!(word), "{graph}");
+        assert_eq!(
+            graph["node_results"][node]["status"],
+            json!(word),
+            "{graph}"
+        );
+        assert_eq!(
+            graph["node_results"][node]["completed"],
+            json!(false),
+            "finished but not landed is not done: {graph}"
+        );
+        // Nothing to redirect: a held node has no turn in flight.
+        assert!(graph["node_control"].get(node).is_none(), "{graph}");
+    }
+    // The node behind them has not started: neither held node is settled.
+    assert_ne!(
+        graph["node_status"][fixture_run::BEHIND_HELD_NODE_ID],
+        json!("running"),
+        "{graph}"
+    );
+
+    // Each node's awaited releases, entry for entry as its record listed them.
+    let held_result = &graph["node_results"][held];
+    assert_eq!(
+        held_result["outcome"],
+        json!("held-for-release"),
+        "{held_result}"
+    );
+    assert_eq!(
+        held_result["awaiting"],
+        json!([{ "producer": fixture_run::AWAITED_PRODUCER, "target": "crate" }]),
+        "{held_result}"
+    );
+    let detail = held_result["detail"]
+        .as_str()
+        .expect("the settlement's sentence");
+    assert!(detail.starts_with("complete, and held unlanded: awaiting the crate release of"));
+    assert!(detail.contains(fixture_run::HELD_UNLANDED_HEAD), "{detail}");
+    let draft_result = &graph["node_results"][draft];
+    assert_eq!(
+        draft_result["outcome"],
+        json!("change-draft"),
+        "{draft_result}"
+    );
+    assert_eq!(
+        draft_result["awaiting"],
+        json!([
+            { "producer": fixture_run::AWAITED_PRODUCER, "target": "crate" },
+            { "producer": fixture_run::AWAITED_SECOND_PRODUCER, "target": "npm" },
+        ]),
+        "{draft_result}"
+    );
+    // Its sentence names no release, so the entries above came off the record.
+    assert!(
+        !draft_result["detail"]
+            .as_str()
+            .expect("a detail")
+            .contains("github.com"),
+        "{draft_result}"
+    );
+    // A node whose record carries none is served none — absent, never an empty list.
+    let released_result = &graph["node_results"][released];
+    assert_eq!(
+        released_result["status"],
+        json!("done"),
+        "{released_result}"
+    );
+    assert!(
+        released_result.get("awaiting").is_none(),
+        "{released_result}"
+    );
+
+    // The run's per-node telemetry rows carry the same words as the graph.
+    let rows = body["run"]["nodes"].as_array().expect("node rows");
+    for (node, word) in [(held, "complete-but-held"), (draft, "complete-but-draft")] {
+        let row = rows
+            .iter()
+            .find(|row| row["node"] == json!(node))
+            .unwrap_or_else(|| panic!("no row for {node}: {rows:?}"));
+        assert_eq!(row["status"], json!(word), "{row}");
+    }
+
+    // The status read serves the same words.
+    let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status")).json();
+    assert_eq!(
+        status["node_status"][held],
+        json!("complete-but-held"),
+        "{status}"
+    );
+    assert_eq!(
+        status["node_status"][draft],
+        json!("complete-but-draft"),
+        "{status}"
+    );
 }
 
 /// The events of one kind a node's timeline lists, across its spans, oldest first.
@@ -14414,18 +14541,22 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         notes_awaiting_an_answer(&dir) == 1
     });
     let activity = count("turn-activity");
-    let beats = count("member-heartbeat");
 
     // The held turn goes on working, and its member goes on heartbeating, while
-    // the note still waits on the turn to end — and all of it reaches the run's
-    // journal, which a writer waiting on the note would have held back.
+    // the note still waits on the turn to end — and all of it reaches the run,
+    // which a writer waiting on the note would have held back. The work reaches
+    // the journal; a heartbeat reaches the driver's liveness record beside it,
+    // where the engine keeps each member's latest beat rather than journalling
+    // every one, and it is read as the run's last write.
     fs::write(fakes.join("turn.go"), "go").expect("release the turn's further work");
     eventually("the held turn's further work to reach the journal", || {
         count("turn-activity") > activity
     });
+    let heard = move || detail()["run"]["last_progress_at"].as_u64().unwrap_or(0);
+    let since = heard();
     eventually(
-        "the member's heartbeat to keep reaching the journal",
-        || count("member-heartbeat") >= beats + 2,
+        "the member's heartbeat to keep the run's last write advancing",
+        || heard() >= since + 2,
     );
     assert_eq!(
         notes_awaiting_an_answer(&dir),
@@ -18283,11 +18414,17 @@ fn host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone() {
     assert!(text.contains("workers signalled"), "{text}");
     assert!(!text.contains("UNPROVEN"), "{text}");
 
-    // A teardown that could not signal its workers leaves them unproven.
-    set_teardown(
-        &serving.runs_root().join(fixture_run::STOPPED_RUN_ID),
-        "identity-declined",
-    );
+    drop(serving);
+
+    // A teardown that could not signal its workers leaves them unproven. A root
+    // of its own rather than the record above edited in place: a journal only
+    // grows, and the engine resumes a run it has read from the checkpoint it
+    // wrote, so a record rewritten behind that is never read again.
+    let serving = Serving::start(|root| {
+        let ended = fixture_run::write_stopped_mid_flight(root, fixture_run::STOPPED_RUN_ID);
+        fixture_run::driven_on_this_host(root, fixture_run::STOPPED_RUN_ID, ended_pid);
+        set_teardown(&ended, "identity-declined");
+    });
     let response = http::get(serving.address, "/api/v2/host");
     assert_eq!(response.status, 200, "{}", response.body);
     let host = response.json();

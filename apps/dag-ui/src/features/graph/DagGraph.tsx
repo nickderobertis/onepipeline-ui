@@ -14,7 +14,12 @@ import {
   ReactFlow,
 } from "@xyflow/react";
 import { useMemo } from "react";
-import { isUnhealthy, type NodeView, nodeReason } from "../../lib/run-model";
+import {
+  awaitedLine,
+  isUnhealthy,
+  type NodeView,
+  nodeReason,
+} from "../../lib/run-model";
 import { type DagFlowNode, DagNodeCard } from "./DagNodeCard";
 import { DagRoutedEdge } from "./DagRoutedEdge";
 
@@ -42,6 +47,11 @@ export function DagGraph({
     }
     return found;
   }, [nodeViews]);
+  // What each node holding finished work waits on, keyed as the reasons are.
+  const awaits = useMemo(
+    () => new Map(nodeViews.map((node) => [node.id, awaitedLine(node)])),
+    [nodeViews],
+  );
   const { nodes, edges } = useMemo(() => {
     const drawn = new Set(nodeViews.map((node) => node.id));
     const layout = layoutDag({
@@ -79,6 +89,9 @@ export function DagGraph({
             ...(reasons.get(node.id) === undefined
               ? {}
               : { reason: reasons.get(node.id) }),
+            ...(awaits.get(node.id) === undefined
+              ? {}
+              : { awaits: awaits.get(node.id) }),
           },
           // The node's own dimensions rather than a style: React Flow hides a card
           // it holds no size for, and every live update hands it new node objects
@@ -126,7 +139,7 @@ export function DagGraph({
         }),
       ),
     };
-  }, [nodeViews, reasons, selectedNodeId]);
+  }, [nodeViews, reasons, awaits, selectedNodeId]);
 
   return (
     <div className="graph-wrap" data-journal-seq={journalSeq}>
@@ -172,6 +185,9 @@ export function DagGraph({
               {reasons.get(node.id) === undefined
                 ? ""
                 : ` — ${reasons.get(node.id)}`}
+              {awaits.get(node.id) === undefined
+                ? ""
+                : ` — ${awaits.get(node.id)}`}
             </button>
           </li>
         ))}

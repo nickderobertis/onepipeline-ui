@@ -1189,7 +1189,7 @@ fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent()
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 26);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 27);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
@@ -4083,6 +4083,28 @@ fn the_subscription_bounds_the_contract_states_are_the_ones_the_hub_keeps() {
         "docs/contract.md does not state the {} s bound the hub keeps",
         refold * 2
     );
+}
+
+/// What schema 27 serves is stated in `docs/contract.md`, beside the version:
+/// both status words a node holding finished work for a release settles in, and
+/// the `awaiting` list its result carries.
+#[test]
+fn the_contract_states_the_words_and_the_field_finished_work_held_for_a_release_serves() {
+    let text = contract_text();
+    for stated in [
+        "**Schema 27 is finished work held for a release.**",
+        "**`complete-but-draft`**",
+        "**`complete-but-held`**",
+        "`held-for-release`",
+        "`graph.node_results[NODE]` gains **`awaiting`**",
+        "`[{producer, target}]`",
+        "is served **no `awaiting`**, never an empty list",
+    ] {
+        assert!(
+            text.contains(stated),
+            "docs/contract.md does not state: {stated}"
+        );
+    }
 }
 
 /// The fields schema 26 and timeline schema 14 serve are each stated in

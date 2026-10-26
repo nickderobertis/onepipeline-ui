@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
+  awaitedReleases,
   isUnhealthy,
   type NodeView,
   recordedReason,
@@ -158,6 +159,7 @@ export function NodeTimelineView({
       </header>
 
       <NodeProblemBanner node={node} nodes={nodes} />
+      <NodeAwaitingPanel node={node} />
 
       <Tabs
         className="node-tabs"
@@ -799,6 +801,57 @@ function Publication({ node }: { readonly node: NodeView }) {
         </span>
       ))}
     </>
+  );
+}
+
+/**
+ * Leads the view of a node holding finished work for a release with every release
+ * it awaits, in full, above the settlement's own detail.
+ *
+ * Not an alert and not the problem banner: nothing has gone wrong, so opening the
+ * node announces nothing. The warning tone is the one its badge and card carry —
+ * what it waits on is another repository's release, as a blocked node's is another
+ * node. Each entry is read off the served `awaiting`, never out of the detail.
+ */
+function NodeAwaitingPanel({ node }: { readonly node: NodeView }) {
+  const awaited = awaitedReleases(node);
+  if (awaited.length === 0) return null;
+  const detail = node.result?.detail?.trim() || undefined;
+  return (
+    <section
+      aria-label="Awaited releases"
+      className="node-awaiting m-5 rounded-lg border border-warning bg-warning-surface px-4 py-3 text-warning"
+    >
+      <h2 className="flex items-center gap-2 text-sm font-semibold">
+        <OctagonPause size={16} />
+        {node.status === "complete-but-held"
+          ? "Complete, and held unlanded until its releases arrive"
+          : "Complete, and held as a draft until its releases arrive"}
+      </h2>
+      <dl className="facts facts-stacked">
+        <div>
+          <dt>
+            {awaited.length === 1 ? "Awaits" : `Awaits ${awaited.length}`}
+          </dt>
+          <dd>
+            <ul className="awaited-releases">
+              {awaited.map((entry) => (
+                <li key={`${entry.producer} ${entry.target}`}>
+                  the <strong>{entry.target}</strong> release of{" "}
+                  <code>{entry.producer}</code>
+                </li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+        {detail !== undefined && (
+          <div>
+            <dt>Detail</dt>
+            <dd>{detail}</dd>
+          </div>
+        )}
+      </dl>
+    </section>
   );
 }
 

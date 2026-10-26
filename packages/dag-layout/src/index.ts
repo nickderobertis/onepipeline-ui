@@ -33,6 +33,8 @@ export const DAG_NODE_STATES = [
   "failed",
   "parked",
   "cancelled",
+  "complete-but-draft",
+  "complete-but-held",
   "unknown",
 ] as const;
 export type DagNodeState = (typeof DAG_NODE_STATES)[number];
@@ -107,6 +109,10 @@ const STATUS_STYLE: Readonly<Record<DagNodeState, StatusStyleToken>> = {
   failed: "danger",
   parked: "muted",
   cancelled: "muted",
+  // Finished, and held on a release another repository has to publish: what an
+  // operator looks at is that release, so it reads with the dependency-decided.
+  "complete-but-draft": "blocked",
+  "complete-but-held": "blocked",
   unknown: "neutral",
 };
 const compareOrdinal = (left: string, right: string): number =>

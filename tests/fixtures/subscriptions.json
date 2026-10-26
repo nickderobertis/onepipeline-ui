@@ -42,7 +42,7 @@
             "failed": 0,
             "running": 1
           },
-          "updated_at": "2026-08-07T12:00:09.000Z",
+          "updated_at": "2026-08-07T12:00:07.000Z",
           "started_at": "2026-08-07T12:00:00.000Z"
         }
       ],
@@ -51,31 +51,31 @@
         "run_id": "run-20260807-a1b2c3",
         "detail": {
           "api_version": 2,
-          "telemetry_schema_version": 26,
+          "telemetry_schema_version": 27,
           "observed_at": "2026-08-07T12:00:00Z",
           "run": {
             "run_id": "run-20260807-a1b2c3",
             "state": "parked",
             "phase": "dispatching",
-            "last_event": "gate-verdict",
-            "last_progress_at": 1786104009,
+            "last_event": "gate-started",
+            "last_progress_at": 1786104007,
             "timing": {
               "agent_seconds": 4,
               "judge_seconds": null,
               "llmlint_seconds": null,
-              "gate_seconds": 2,
+              "gate_seconds": 0,
               "publication_wait_seconds": 0,
               "lock_wait_seconds": 0,
               "setup_seconds": 1,
               "scheduling_seconds": 2,
-              "wall_seconds": 9,
+              "wall_seconds": 7,
               "agent_model_ms": null,
               "judge_model_ms": null,
               "llmlint_model_ms": null,
               "tool_ms": null,
               "idle_orchestration_ms": null,
               "unattributed_ms": 0,
-              "wall_ms": 9000,
+              "wall_ms": 7000,
               "fractions": {
                 "agent_model": null,
                 "judge_model": null,
@@ -83,8 +83,8 @@
                 "tool": null,
                 "idle_orchestration": null,
                 "lock_wait": 0.0,
-                "setup": 0.1111111111111111,
-                "scheduling": 0.2222222222222222
+                "setup": 0.14285714285714285,
+                "scheduling": 0.2857142857142857
               }
             },
             "nodes": [
@@ -130,18 +130,18 @@
             ],
             "usage": {
               "agent": {
-                "input_tokens": null,
-                "output_tokens": null,
-                "cache_read_tokens": null,
-                "cache_write_tokens": null,
-                "cost_usd": null
+                "input_tokens": 376,
+                "output_tokens": 164,
+                "cache_read_tokens": 44051,
+                "cache_write_tokens": 356,
+                "cost_usd": 31.22
               },
               "judge": {
-                "input_tokens": null,
-                "output_tokens": null,
-                "cache_read_tokens": null,
+                "input_tokens": 79341,
+                "output_tokens": 618,
+                "cache_read_tokens": 49664,
                 "cache_write_tokens": null,
-                "cost_usd": null
+                "cost_usd": 9.75
               },
               "llmlint": {
                 "input_tokens": null,
@@ -175,7 +175,7 @@
               "judge_model_ms": null,
               "llmlint_model_ms": null,
               "tool_ms": null,
-              "wall_ms": 9000
+              "wall_ms": 7000
             },
             "turns": 3,
             "lint": 0,
@@ -196,7 +196,7 @@
           "telemetry": {
             "schema_version": 2,
             "run_id": "run-20260807-a1b2c3",
-            "wall_ms": 9000,
+            "wall_ms": 7000,
             "buckets": [
               {
                 "name": "agent",
@@ -210,7 +210,7 @@
               },
               {
                 "name": "gate",
-                "ms": 2000
+                "ms": 0
               },
               {
                 "name": "publication_wait",
@@ -230,6 +230,19 @@
               }
             ],
             "usage": {
+              "agent": {
+                "input": 376,
+                "output": 164,
+                "cache_read": 44051,
+                "cache_write": 356,
+                "cost_usd": 31.22
+              },
+              "judge": {
+                "input": 79341,
+                "output": 618,
+                "cache_read": 49664,
+                "cost_usd": 9.75
+              },
               "total": {
                 "input": 159810,
                 "output": 1728,
@@ -288,7 +301,7 @@
               "contract-interface": {
                 "addressable": false,
                 "member": "worker",
-                "reason": "its last turn completed, so the member is between turns"
+                "reason": "the member is no longer running"
               }
             },
             "node_results": {
@@ -314,7 +327,7 @@
                 "review"
               ]
             },
-            "last_seq": 18
+            "last_seq": 17
           },
           "conversations": [],
           "node_details": {
@@ -323,8 +336,8 @@
                 "records": [
                   {
                     "ok": true,
-                    "output_tail": "the gate ran and passed",
-                    "artifact_id": "artifact-5c8f0a1b"
+                    "output_tail": "",
+                    "artifact_id": "report-node-scope-1786925518098-3163646"
                   }
                 ]
               },

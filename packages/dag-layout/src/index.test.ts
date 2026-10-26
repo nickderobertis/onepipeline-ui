@@ -60,6 +60,10 @@ describe("layoutDag", () => {
       // decision rather than lost — the same reading `cancelled` gets.
       parked: "muted",
       cancelled: "muted",
+      // Finished, and held on a release another repository has to publish: held
+      // work, not lost work, and not done until it lands.
+      "complete-but-draft": "blocked",
+      "complete-but-held": "blocked",
       unknown: "neutral",
     });
   });

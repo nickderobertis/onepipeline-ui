@@ -399,6 +399,15 @@ p {
   white-space: nowrap;
 }
 
+.node-awaits {
+  display: block;
+  overflow: hidden;
+  font-size: 9px;
+  color: var(--warning);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dag-node strong {
   display: block;
   overflow: hidden;
@@ -1050,6 +1059,18 @@ pre {
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--border);
+}
+
+/* One term above the next, for a list read in order: what a held node awaits, and
+   then the settlement's own sentence about it. */
+.facts.facts-stacked {
+  grid-template-columns: 1fr;
+}
+
+.awaited-releases {
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
 }
 
 .facts div {
