@@ -292,15 +292,14 @@ fn a_run_with_no_summary_is_folded_once_across_two_listings() {
 
     let folding = cost.since(&first).under(&journal_path).bytes;
     let after = cost.since(&second).under(&journal_path).bytes;
-    // The engine's own cold open, and nothing beside it. `RunView::open` reads
-    // the journal whole for the view's events and whole again to fold it into
-    // the checkpoint it writes beside the summary, and then reads back the
-    // prefix that checkpoint covers to seal it — a third read that is at most
-    // the journal again. That is the price the linked engine puts on a run it
-    // has never summarized; one more whole read would be this server folding
-    // beside it rather than reading what it cached.
-    assert!(
-        (journal * 2..=journal * 3).contains(&folding),
+    // The engine's own cold open, and nothing beside it. `RunSummary::of` folds
+    // the journal once, into the checkpoint it writes beside the summary, whose
+    // seal is over that document alone, so nothing reads the covered prefix
+    // back. That is the price the linked engine puts on a run it has never
+    // summarized; any more would be this server folding beside it rather than
+    // reading what it cached.
+    assert_eq!(
+        folding, journal,
         "the first listing read {folding} bytes of a {journal}-byte journal, which is not \
          the engine's own cold open of it"
     );

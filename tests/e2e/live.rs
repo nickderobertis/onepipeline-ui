@@ -1227,7 +1227,9 @@ fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pin
             .expect("a journal")
             .lines()
             .count();
-        held_back = live_journal::hold_back(&journal, total / 2);
+        // Past the worker's settlement, so the first record held back is the
+        // node's push.
+        held_back = live_journal::hold_back(&journal, total / 2 + 1);
     });
     let subscribed = live.subscribe(&json!({ "view": { "type": "detail", "run_id": run } }));
     let mut detail = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
@@ -1446,7 +1448,9 @@ fn a_stale_telemetry_fold_catches_up_once_the_run_goes_quiet_without_holding_bac
                 .expect("a journal")
                 .lines()
                 .count();
-            held_back = live_journal::hold_back(&journal, total / 2);
+            // Past the worker's settlement, so the first record held back is
+            // the node's push, a change the detail renders.
+            held_back = live_journal::hold_back(&journal, total / 2 + 1);
         },
         &[(onepipeline_ui::live::TELEMETRY_REFOLD_ENV, "1500")],
     );

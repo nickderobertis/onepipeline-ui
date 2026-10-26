@@ -1246,6 +1246,30 @@ pub fn write_in_project(root: &Path, run: &str, project: Option<&str>) -> PathBu
     dir
 }
 
+/// Rewrite `dir`'s journal in merge order — `(ts, stream, seq)`, the order the
+/// SDK's own reader merges on — keeping every line as it was written.
+fn merge_order_journal(dir: &Path) {
+    let journal = dir.join("events.jsonl");
+    let text = fs::read_to_string(&journal).expect("the journal");
+    let mut lines: Vec<(time::OffsetDateTime, String, u64, &str)> = text
+        .lines()
+        .map(|line| {
+            let event: Value = serde_json::from_str(line).expect("a journal envelope");
+            let at = time::OffsetDateTime::parse(
+                event["ts"].as_str().expect("a stamped envelope"),
+                &time::format_description::well_known::Rfc3339,
+            )
+            .expect("an RFC 3339 stamp");
+            let stream = event["stream"].as_str().expect("a stream").to_owned();
+            let seq = event["seq"].as_u64().expect("a sequence number");
+            (at, stream, seq, line)
+        })
+        .collect();
+    lines.sort_by(|a, b| (a.0, &a.1, a.2).cmp(&(b.0, &b.1, b.2)));
+    let ordered: String = lines.iter().map(|line| format!("{}\n", line.3)).collect();
+    fs::write(&journal, ordered).expect("the journal, in merge order");
+}
+
 /// The plan the run executed.
 fn plan() -> Value {
     json!({
@@ -2096,6 +2120,11 @@ pub fn settle_member(dir: &Path, member: &SettledMember, produced: Produced) {
     });
     let settlement: Envelope = serde_json::from_value(line.clone()).expect("the settled envelope");
     fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
+    // A settlement is stamped when the member settled, which can be before what
+    // a fixture's journal already holds, and a driver appends each record as it
+    // happens: a summary folds the journal in the order it was appended, so the
+    // record is kept where it fell rather than behind what came after it.
+    merge_order_journal(dir);
     report::retain(&paths_of(dir), &settlement);
 }
 

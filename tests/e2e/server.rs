@@ -14283,10 +14283,10 @@ fn notes_awaiting_an_answer(state: &Path) -> usize {
 
 /// A note posted through the reply route into a run driven by the pinned CLI
 /// waits on the held turn it was offered to **without stopping the run**. The
-/// envelope is acknowledged with the note queued, and the engine delivers the
-/// note off the run's single writer, so while the turn has not taken it the run
-/// goes on journalling that turn's work and its member's heartbeat, and every
-/// read goes on serving the run as live. Once the turn ends and the conversation
+/// envelope is answered at hand-off with the note `queued`, and the engine
+/// delivers the note off the run's single writer, so while the turn has not
+/// taken it the run goes on journalling that turn's work, its member's liveness
+/// goes on advancing, and every read goes on serving the run as live. Once the turn ends and the conversation
 /// takes the note, the delivery is recorded and the run settles.
 ///
 /// Nothing is stood in for but the paid model turn: the server, the adopted
@@ -14330,8 +14330,8 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
                 &harness.display().to_string(),
             ),
             ("ONEAGENTGRAPH_STATE_DIR", &state.display().to_string()),
-            // Short, so the member heartbeats every couple of seconds and the
-            // journal has something to go on recording while the note waits.
+            // Short, so the member heartbeats every couple of seconds and its
+            // liveness has somewhere to go while the note waits.
             ("ONEAGENTGRAPH_HEARTBEAT_TIMEOUT", "8"),
             (
                 "ONEPIPELINE_NODE_SCRATCH_DIR",
@@ -14414,18 +14414,38 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         notes_awaiting_an_answer(&dir) == 1
     });
     let activity = count("turn-activity");
-    let beats = count("member-heartbeat");
+    // A member's liveness is kept beside the journal, in `liveness.json`, and is
+    // read here the way every reader of the engine reads it: through the
+    // engine's own fold of the run, never by parsing the file.
+    let paths = onepipeline::views::RunPaths::under(&root, run);
+    let alive = move || {
+        onepipeline::views::RunView::open(&paths)
+            .expect("the engine reads the adopted run")
+            .state
+            .activity
+            .get(node)
+            .and_then(|activity| activity.last_heartbeat_at)
+    };
+    eventually("the member's liveness to be recorded", || alive().is_some());
+    let first_beat = alive();
 
-    // The held turn goes on working, and its member goes on heartbeating, while
-    // the note still waits on the turn to end — and all of it reaches the run's
-    // journal, which a writer waiting on the note would have held back.
+    // The held turn goes on working, and its member's liveness goes on
+    // advancing, while the note still waits on the turn to end — the work
+    // reaching the run's journal, which a writer waiting on the note would have
+    // held back.
     fs::write(fakes.join("turn.go"), "go").expect("release the turn's further work");
     eventually("the held turn's further work to reach the journal", || {
         count("turn-activity") > activity
     });
-    eventually(
-        "the member's heartbeat to keep reaching the journal",
-        || count("member-heartbeat") >= beats + 2,
+    eventually("the member's liveness to advance", || alive() > first_beat);
+    let second_beat = alive();
+    eventually("the member's liveness to go on advancing", || {
+        alive() > second_beat
+    });
+    assert_eq!(
+        count("member-heartbeat"),
+        0,
+        "this engine keeps a member's beats out of the journal"
     );
     assert_eq!(
         notes_awaiting_an_answer(&dir),
@@ -18245,6 +18265,9 @@ fn host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone() {
         .expect("the old driver starts");
     let ended_pid = ended_driver.id();
     assert!(ended_driver.wait().expect("the old driver ends").success());
+    // The stop's teardown as its record said it, written before anything reads
+    // the run: a journal is append-only, and a reader resumes from what it
+    // already folded of it rather than reading that history again.
     let set_teardown = |dir: &Path, teardown: &str| {
         let journal = dir.join("events.jsonl");
         let text = fs::read_to_string(&journal).expect("the stopped run's journal");
@@ -18258,25 +18281,31 @@ fn host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone() {
         let lines: Vec<String> = records.iter().map(ToString::to_string).collect();
         fs::write(journal, format!("{}\n", lines.join("\n"))).expect("record the teardown");
     };
-    let serving = Serving::start(|root| {
-        fixture_run::write_stopped_mid_flight(root, fixture_run::RUN_ID);
-        fixture_run::dispatching_on_this_host(
-            root,
-            fixture_run::RUN_ID,
-            fixture_run::NODE_ID,
-            worker.0,
-            &worker.started(),
-        );
-        let ended = fixture_run::write_stopped_mid_flight(root, fixture_run::STOPPED_RUN_ID);
-        fixture_run::driven_on_this_host(root, fixture_run::STOPPED_RUN_ID, ended_pid);
-        set_teardown(&ended, "signalled");
-        assert!(!ended.join("dispatches").exists());
-    });
-    let response = http::get(serving.address, "/api/v2/host");
-    assert_eq!(response.status, 200, "{}", response.body);
-    let host = response.json();
-    assert_enveloped(&host);
-    let text = host["rendered"].as_str().expect("the host rendering");
+    let host_with = |teardown: &str| {
+        let serving = Serving::start(|root| {
+            fixture_run::write_stopped_mid_flight(root, fixture_run::RUN_ID);
+            fixture_run::dispatching_on_this_host(
+                root,
+                fixture_run::RUN_ID,
+                fixture_run::NODE_ID,
+                worker.0,
+                &worker.started(),
+            );
+            let ended = fixture_run::write_stopped_mid_flight(root, fixture_run::STOPPED_RUN_ID);
+            fixture_run::driven_on_this_host(root, fixture_run::STOPPED_RUN_ID, ended_pid);
+            set_teardown(&ended, teardown);
+            assert!(!ended.join("dispatches").exists());
+        });
+        let response = http::get(serving.address, "/api/v2/host");
+        assert_eq!(response.status, 200, "{}", response.body);
+        let host = response.json();
+        assert_enveloped(&host);
+        host["rendered"]
+            .as_str()
+            .expect("the host rendering")
+            .to_owned()
+    };
+    let text = host_with("signalled");
     assert!(text.contains(fixture_run::RUN_ID), "{text}");
     assert!(text.contains(fixture_run::NODE_ID), "{text}");
     assert!(text.contains("proven gone"), "{text}");
@@ -18284,14 +18313,7 @@ fn host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone() {
     assert!(!text.contains("UNPROVEN"), "{text}");
 
     // A teardown that could not signal its workers leaves them unproven.
-    set_teardown(
-        &serving.runs_root().join(fixture_run::STOPPED_RUN_ID),
-        "identity-declined",
-    );
-    let response = http::get(serving.address, "/api/v2/host");
-    assert_eq!(response.status, 200, "{}", response.body);
-    let host = response.json();
-    let text = host["rendered"].as_str().expect("the host rendering");
+    let text = host_with("identity-declined");
     assert!(text.contains("UNPROVEN"), "{text}");
     assert!(text.contains(fixture_run::STOPPED_RUN_ID), "{text}");
 }
@@ -20123,6 +20145,120 @@ fn a_later_adoption_takeover_or_dispatch_reopens_the_execution_range() {
             "{kind}: {timeline}"
         );
     }
+}
+
+/// A member's heartbeat is served from wherever the engine that recorded the run
+/// kept it. A run recorded before liveness moved out of the journal carries its
+/// `member-heartbeat` records, and its timeline goes on listing them; the same
+/// run recorded since carries none and a `<run>/liveness.json`, and its timeline
+/// serves every other record without them. Each run's liveness is the engine's
+/// own word for it, on the run's status and on its row, and the beat kept
+/// beside the journal is one that word counts: the run whose last journalled
+/// record is days old reads as driven because its member was heard from just
+/// now, where its journalled twin reads as parked.
+#[test]
+fn a_run_with_journalled_heartbeats_and_one_with_its_liveness_beside_the_journal_both_serve_their_timeline_and_liveness(
+) {
+    let journalled = fixture_run::recorded_timeline();
+    let run = journalled["run_id"].as_str().expect("run").to_owned();
+    let beside = format!("{run}-liveness");
+    let serving = Serving::start(|root| {
+        fixture_run::write_recorded_timeline(root);
+        let mut corpus = journalled.clone();
+        corpus["run_id"] = json!(beside);
+        corpus["launch"]["run_id"] = json!(beside);
+        let records = corpus["records"].as_array_mut().expect("records");
+        let beats: Vec<Value> = records
+            .iter()
+            .filter(|record| record["kind"] == "member-heartbeat")
+            .cloned()
+            .collect();
+        records.retain(|record| record["kind"] != "member-heartbeat");
+        let dir = fixture_run::write_recorded_timeline_corpus(root, &corpus);
+        // The engine's `<run>/liveness.json`: one entry per member, keyed as the
+        // beats it replaces were labelled, stamped as a beat just now — to the
+        // millisecond, the one stamp the engine reads.
+        let now = time::OffsetDateTime::now_utc()
+            .format(time::macros::format_description!(
+                "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+            ))
+            .expect("an instant");
+        let mut members: Vec<Value> = beats
+            .iter()
+            .map(|beat| {
+                json!({
+                    "node": beat["labels"]["node"],
+                    "graph_run": beat["labels"]["run_id"],
+                    "member": beat["labels"]["member"],
+                    "last_heartbeat_at": now,
+                })
+            })
+            .collect();
+        members.dedup();
+        fs::write(
+            dir.join("liveness.json"),
+            serde_json::to_string_pretty(&json!({ "schema_version": 1, "members": members }))
+                .expect("the liveness document"),
+        )
+        .expect("the run's liveness");
+    });
+    let timeline = |id: &str| {
+        let response = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{id}/timeline?scope=run"),
+        );
+        assert_eq!(response.status, 200, "{id}: {}", response.body);
+        events_on(&response.json())
+    };
+    let kinds = |events: &[Value]| -> Vec<String> {
+        events
+            .iter()
+            .map(|event| event["kind"].as_str().expect("a kind").to_owned())
+            .collect()
+    };
+    let with_beats = timeline(&run);
+    let without_beats = timeline(&beside);
+    let heartbeat = |kind: &String| kind == "member-heartbeat";
+    assert_eq!(
+        kinds(&with_beats)
+            .iter()
+            .filter(|kind| heartbeat(kind))
+            .count(),
+        2,
+        "the journalled run's timeline lists its beats: {with_beats:?}"
+    );
+    assert!(
+        !kinds(&without_beats).iter().any(heartbeat),
+        "{without_beats:?}"
+    );
+    assert_eq!(
+        kinds(&without_beats),
+        kinds(&with_beats)
+            .into_iter()
+            .filter(|kind| !heartbeat(kind))
+            .collect::<Vec<_>>(),
+        "the run without beats serves every other record"
+    );
+
+    let status = |id: &str| {
+        let response = http::get(serving.address, &format!("/api/v2/runs/{id}/status"));
+        assert_eq!(response.status, 200, "{id}: {}", response.body);
+        response.json()["liveness"].clone()
+    };
+    let rows = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let row = |id: &str| {
+        rows["runs"]
+            .as_array()
+            .expect("runs")
+            .iter()
+            .find(|row| row["run_id"] == id)
+            .unwrap_or_else(|| panic!("no row for {id}: {rows}"))["liveness"]
+            .clone()
+    };
+    assert_eq!(status(&run), json!("PARKED"));
+    assert_eq!(row(&run), json!("PARKED"), "{rows}");
+    assert_eq!(status(&beside), json!("ACTIVE"));
+    assert_eq!(row(&beside), json!("ACTIVE"), "{rows}");
 }
 
 #[test]
