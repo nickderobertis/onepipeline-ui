@@ -1,6 +1,6 @@
 [package]
 name = "onepipeline-ui"
-version = "0.53.1"
+version = "0.54.0"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
@@ -173,11 +173,11 @@ onemessagebus = "0.9.1"
 # `scripts/semver-check.sh` refuses a release that moved this line while the
 # commits release-plz versions from announce no break.
 #
-# The engine pin also fixes the linked plan-store family. A host holds its
-# plan-store CLI, this engine and this reader to one store release, so a store
-# change it adopts — currently the cheaper plan-copy and approval calls — reaches
-# the host only once this line names the engine release that links it. The
-# test-only sibling requirements follow its lock so the reader and fixture
+# The engine pin also fixes the linked plan-store and onevcs families. A host
+# holds its engine and this reader to one linked engine, so an engine change it
+# adopts — currently onevcs 0.57.0's honouring of a host's public phrases —
+# reaches the host only once this line names the engine release that links it.
+# The test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
 onepipeline = "=0.93.0"

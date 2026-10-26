@@ -588,6 +588,17 @@ onevcs 0.56.11, oneagentgraph 0.8.0, oneharness-core 0.29.1 and onejudge 0.21.0
 as 0.91.0, and no route, payload or MSRV changes beyond the release `/healthz`
 reports. This changes the engine types carried by ApiError::from_engine and the
 other engine-typed public items.
+0.92.0 is the engine whose linked onevcs 0.57.0 honours a host's public
+phrases: an occurrence of a private term lying wholly inside a phrase the host
+lists in its onevcs home's `public-phrases.yml` is no longer a boundary hit. A host holds this
+reader and its engine to one linked engine, so it can adopt that engine only
+once this crate links it. It links onevcs 0.57.0, which the test-only `onevcs`
+requirement follows and whose event vocabulary is unchanged; onetaskgraph
+0.12.1, oneagentgraph 0.8.0, oneharness-core 0.29.1 and onejudge 0.21.0 are
+unchanged, and no route, payload or MSRV changes beyond the release `/healthz`
+reports. This changes the engine types carried by ApiError::from_engine and the
+other engine-typed public items.
+
 0.93.0 is the engine that links onetaskgraph 0.12.3, the protected fast-copy
 plan store, and the oneagentgraph 0.9.0 and onejudge 0.22.0 that keep a
 member's worker side on its own config. A host holds this reader and its engine
