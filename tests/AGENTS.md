@@ -113,6 +113,9 @@ hold nothing but their `project.json`, and these rules are theirs.
 - **`test-quick`** is a tier without instrumentation, for the cross-platform
   legs; the baseline, cost, linked-report and ci-jobs tiers have none, for the reasons the justfile's
   `test-quick` recipe gives.
+- **A journey that runs `bash` on Windows sets the child's `PATH`.** With it
+  unset, Rust looks in System32 before `PATH` and starts WSL's `bash.exe`, which
+  on a runner with no distribution exits 1 having run nothing.
 
 ## Which tier a test belongs to
 

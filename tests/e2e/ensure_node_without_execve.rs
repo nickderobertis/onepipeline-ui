@@ -53,6 +53,12 @@ fn provision_command(
         .args(args)
         .env_remove(PATH_ENV)
         .env_remove(DIST_ENV);
+    // Windows resolves a program its child's PATH was not set for in System32
+    // before PATH, where `bash` is WSL's launcher, which on a host with no
+    // distribution exits 1 having run nothing. Handing the child this process's
+    // own PATH is what makes `bash` the one on it, as `release_probe` does.
+    #[cfg(windows)]
+    command.env("PATH", std::env::var_os("PATH").expect("PATH is set"));
     if let Some(node) = node {
         command.env(PATH_ENV, node);
     }
@@ -60,6 +66,14 @@ fn provision_command(
         command.env(DIST_ENV, dist);
     }
     command
+}
+
+/// The node under `home`, spelled as the justfile exports it: just's `/` joins
+/// with a forward slash on every platform, so on Windows the path ends
+/// `\node-without-execve/bin/node`, and the script's `basename` and `dirname`
+/// find `bin` and `node` without splitting on a backslash.
+fn exported_node(home: &Path) -> PathBuf {
+    PathBuf::from(format!("{}/bin/node", home.display()))
 }
 
 fn stderr(output: &Output) -> String {
@@ -80,7 +94,7 @@ fn a_call_without_the_exported_path_is_a_usage_error() {
 #[test]
 fn a_call_that_names_no_host_or_more_than_one_is_a_usage_error() {
     let scratch = tempfile::tempdir().expect("temp dir");
-    let node = scratch.path().join("node-without-execve/bin/node");
+    let node = exported_node(&scratch.path().join("node-without-execve"));
     for args in [vec![], vec![host(), host()]] {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let output = provision_with(&args, Some(&node), None);
@@ -103,7 +117,7 @@ fn a_call_that_names_no_host_or_more_than_one_is_a_usage_error() {
 fn a_host_with_no_pinned_release_is_refused() {
     let scratch = tempfile::tempdir().expect("temp dir");
     let home = scratch.path().join("node-without-execve");
-    let output = provision_with(&["freebsd-riscv64"], Some(&home.join("bin/node")), None);
+    let output = provision_with(&["freebsd-riscv64"], Some(&exported_node(&home)), None);
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
     assert!(
         stderr(&output).contains("no pinned Node")
@@ -120,7 +134,7 @@ fn a_host_with_no_pinned_release_is_refused() {
 fn a_windows_host_provisions_nothing() {
     let scratch = tempfile::tempdir().expect("temp dir");
     let home = scratch.path().join("tools/node-without-execve");
-    let output = provision_with(&["windows-x86_64"], Some(&home.join("bin/node")), None);
+    let output = provision_with(&["windows-x86_64"], Some(&exported_node(&home)), None);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     assert!(
         !scratch.path().join("tools").exists(),
