@@ -1489,6 +1489,7 @@ fn a_disconnected_subscription_expires_after_the_grace_and_a_quiet_connected_one
 #[test]
 fn a_stale_telemetry_fold_catches_up_once_the_run_goes_quiet_without_holding_back_the_change() {
     let run = fixture_run::RUN_ID;
+    let interval = Duration::from_millis(1_500);
     let mut held_back = Vec::new();
     let live = Live::start_with(
         |root| {
@@ -1502,10 +1503,11 @@ fn a_stale_telemetry_fold_catches_up_once_the_run_goes_quiet_without_holding_bac
             // the node's push, a change the detail renders.
             held_back = live_journal::hold_back(&journal, total / 2 + 1);
         },
-        &[(onepipeline_ui::live::TELEMETRY_REFOLD_ENV, "1500")],
+        &[(
+            onepipeline_ui::live::TELEMETRY_REFOLD_ENV,
+            &interval.as_millis().to_string(),
+        )],
     );
-    // The interval the server was started with.
-    let interval = Duration::from_millis(1_500);
     // The subscription folds the run while it is being made, so the fold is
     // taken between these two instants.
     let opening = Instant::now();
