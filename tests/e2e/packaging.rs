@@ -450,6 +450,10 @@ fn read_all(pipe: Option<impl std::io::Read>) -> Vec<u8> {
     bytes
 }
 
+// llmlint: ignore-block[e2e_not_mocked] the preload deletes `process.execve` and nothing
+// else, standing in for a node release that predates it; provisioning that release for real
+// is the cost the next directive gives. The launcher, node's module resolution, the installed
+// platform package and the process the journey reads back are all real.
 // llmlint: ignore-block[tests_mirror_real_usage] a node without `process.execve` is any release
 // before 22.15 / 23.11, which the launcher's `engines` refuses but npm only warns about, and
 // running one for real means provisioning a second, end-of-life node on every CI leg for the
@@ -522,6 +526,7 @@ fn on_a_node_without_execve_the_launcher_refuses_and_starts_no_server() {
     );
 }
 // llmlint: ignore-end[tests_mirror_real_usage]
+// llmlint: ignore-end[e2e_not_mocked]
 
 /// Wait for nothing to be listening on `address` any more, failing the journey
 /// if something still is at the deadline.
