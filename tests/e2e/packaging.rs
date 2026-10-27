@@ -294,6 +294,7 @@ impl InFlight {
 /// stop reached the server as a request to shut down gracefully: the launcher is
 /// still running a moment later, the held request is still answered, and only
 /// then does the launcher exit, with the server's own `0`.
+// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] the hold adds two one-second settles to each stop journey, measured: the slowest npm journey takes 6.5 s under nextest, against 18.5 s for the slowest `nx_affected` journey this tier already carries. What these journeys read — `npm/**`, `scripts/npm-build.mjs` and the server binary through `apiServerSurface` — is already in `repoMachinery`, so an edge of their own would rerun them on nearly every change that reruns this tier.
 fn assert_stops_gracefully(
     launcher: &mut std::process::Child,
     address: std::net::SocketAddr,
