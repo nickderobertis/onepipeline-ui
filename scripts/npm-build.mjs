@@ -13,6 +13,8 @@
 //       onepipeline-api-cli-linux-arm64
 //       onepipeline-api-cli-darwin-arm64
 //       onepipeline-api-cli-win32-x64  each carries the matching prebuilt binary
+//                                      and that binary's CycloneDX SBOM, at
+//                                      sboms/onepipeline-api.cyclonedx.json
 //
 // The platform packages are UNSCOPED on purpose: a `@scope/` name needs an npm
 // organization, which a publish token cannot create.
@@ -33,7 +35,7 @@
 //
 // Usage:
 //   node scripts/npm-build.mjs platform --target <triple> --binary <path> \
-//        [--version <v>] [--out <dir>]
+//        --sbom <path> [--version <v>] [--out <dir>]
 //   node scripts/npm-build.mjs launcher [--version <v>] [--out <dir>]
 //   node scripts/npm-build.mjs ui [--bundle <dir>] [--version <v>] [--out <dir>]
 //
@@ -52,6 +54,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cycloneDxProblem, PACKAGED_SBOM } from "./sbom.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -169,6 +172,12 @@ function buildPlatform(args) {
     args.binary || die("platform: --binary <path> is required", "pass --binary the path to the built onepipeline-api for that target");
   const facts =
     TARGETS[target] || die(`platform: unknown target ${target}`, `pass one of: ${Object.keys(TARGETS).join(", ")}`);
+  const sbom =
+    args.sbom ||
+    die(
+      "platform: --sbom <path> is required",
+      "pass --sbom the CycloneDX JSON cargo-cyclonedx generated for that target's build; a platform package never ships without it"
+    );
   const version = resolveVersion(args);
   const outRoot = resolve(args.out || join(REPO_ROOT, "npm", "dist"));
 
@@ -200,6 +209,22 @@ function buildPlatform(args) {
     }
   }
 
+  // The binary's SBOM, shipped as cargo-cyclonedx wrote it: a host reads it to
+  // learn which engine release this binary links, so a document that is not one
+  // is refused here rather than published for that host to misread.
+  const sbomText = attempt(
+    `platform: cannot read the SBOM for ${pkgName} at ${sbom}`,
+    `generate it first: cargo cyclonedx --format json --all --features bundled-ui --target ${target}`,
+    () => readFileSync(resolve(sbom), "utf8")
+  );
+  const sbomProblem = cycloneDxProblem(sbomText);
+  if (sbomProblem) {
+    die(
+      `platform: the SBOM for ${pkgName} at ${sbom} ${sbomProblem}`,
+      `pass the CycloneDX JSON cargo-cyclonedx generated for ${target}, unedited`
+    );
+  }
+
   attempt(
     `cannot assemble ${pkgName} under ${outRoot}`,
     "check that --out names a writable directory with room for the binary",
@@ -208,6 +233,8 @@ function buildPlatform(args) {
       mkdirSync(binDir, { recursive: true });
       copyFileSync(srcBin, join(binDir, binName));
       if (!facts.exe) chmodSync(join(binDir, binName), 0o755);
+      mkdirSync(dirname(join(pkgDir, PACKAGED_SBOM)), { recursive: true });
+      copyFileSync(resolve(sbom), join(pkgDir, PACKAGED_SBOM));
     }
   );
 
@@ -223,7 +250,7 @@ function buildPlatform(args) {
     // launcher's optionalDependency resolution picks exactly one.
     os: [facts.platform],
     cpu: [facts.arch],
-    files: [`bin/${binName}`],
+    files: [`bin/${binName}`, PACKAGED_SBOM],
   });
 
   attempt(`cannot write the ${pkgName} README`, "check that --out is writable", () =>
@@ -322,7 +349,7 @@ function buildUi(args) {
 
 const [mode, ...rest] = process.argv.slice(2);
 if (mode === "platform") {
-  buildPlatform(parseArgs(rest, ["target", "binary", "version", "out", "expect-sha256"]));
+  buildPlatform(parseArgs(rest, ["target", "binary", "sbom", "version", "out", "expect-sha256"]));
 } else if (mode === "launcher") {
   buildLauncher(parseArgs(rest, ["version", "out"]));
 } else if (mode === "ui") {
@@ -330,6 +357,6 @@ if (mode === "platform") {
 } else {
   die(
     `unknown mode ${mode === undefined ? "(none given)" : mode}`,
-    "run `npm-build.mjs platform --target <triple> --binary <path> [--version <v>] [--out <dir>]`, `npm-build.mjs launcher [--version <v>] [--out <dir>]`, or `npm-build.mjs ui [--version <v>] [--out <dir>]`"
+    "run `npm-build.mjs platform --target <triple> --binary <path> --sbom <path> [--version <v>] [--out <dir>]`, `npm-build.mjs launcher [--version <v>] [--out <dir>]`, or `npm-build.mjs ui [--version <v>] [--out <dir>]`"
   );
 }

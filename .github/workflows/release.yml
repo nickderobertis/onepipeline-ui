@@ -19,7 +19,8 @@ name: Release
 #
 #   * build-linux, build-linux-arm64, build-macos, build-windows — each builds
 #     its platform's targets once, natively on that platform's runner, packs
-#     the archive, the wheel and the npm platform package from that one binary,
+#     the archive, the wheel and the npm platform package from that one binary
+#     (the npm package with that build's CycloneDX SBOM),
 #     installs and runs those exact files, publishes them (Release assets
 #     always; PyPI and npm when their switches are on), and then installs the
 #     version back from the Release and PyPI on its own OS and
@@ -105,9 +106,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # cargo-cyclonedx writes the SBOM each npm platform package carries.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just
+          tool: just,cargo-cyclonedx@0.5.7
       - name: Install the release's Python tools
         run: just release-python-tools
       # The view the binary embeds, built before the binary is: with the
@@ -161,9 +163,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # cargo-cyclonedx writes the SBOM each npm platform package carries.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just
+          tool: just,cargo-cyclonedx@0.5.7
       - name: Install the release's Python tools
         run: just release-python-tools
       - name: Build the browser view
@@ -206,9 +209,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # cargo-cyclonedx writes the SBOM each npm platform package carries.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just
+          tool: just,cargo-cyclonedx@0.5.7
       - name: Install the release's Python tools
         run: just release-python-tools
       - name: Build the browser view
@@ -255,9 +259,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # cargo-cyclonedx writes the SBOM each npm platform package carries.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just
+          tool: just,cargo-cyclonedx@0.5.7
       - name: Install the release's Python tools
         run: just release-python-tools
       - name: Build the browser view

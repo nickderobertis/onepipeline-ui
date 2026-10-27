@@ -7,8 +7,9 @@
 // publish of it.
 //
 // What an upload publishes is the tarball its build staged and nothing else, so
-// each job's is packed here from a manifest alone: no binary is compiled, and
-// what is under test is the publish and its report, not the package.
+// each job's is packed here from a manifest and the smallest SBOM an upload
+// takes alone: no binary is compiled, and what is under test is the publish
+// and its report, not the package.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -24,8 +25,10 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { plan } from "../../scripts/release.mjs";
+import { PACKAGED_SBOM } from "../../scripts/sbom.mjs";
 import {
   githubDouble,
+  minimalSbom,
   ROOT,
   recipe,
   recipeRunning,
@@ -67,7 +70,7 @@ function stagedPackage(job, attempt = "") {
   const artifact = plan(job).artifacts.find((a) => a.registry === "npm");
   const out = join(outs, `${job}${attempt && `-${attempt}`}`);
   const source = join(out, "source");
-  mkdirSync(source, { recursive: true });
+  mkdirSync(join(source, "sboms"), { recursive: true });
   mkdirSync(join(out, "npm-artifacts"), { recursive: true });
   writeFileSync(
     join(source, "package.json"),
@@ -76,8 +79,10 @@ function stagedPackage(job, attempt = "") {
       version: VERSION,
       description: `the ${job} platform package this journey publishes${attempt && `, as ${attempt} built it`}`,
       license: "MIT",
+      files: [PACKAGED_SBOM],
     }),
   );
+  writeFileSync(join(source, PACKAGED_SBOM), minimalSbom());
   execFileSync(
     "npm",
     ["pack", "--pack-destination", join(out, "npm-artifacts")],

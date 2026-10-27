@@ -15,11 +15,14 @@
 //                 manylinux image of the runner's own architecture on Linux)
 //                 and package the archive, the checksum, the wheel and the npm
 //                 platform package from that one binary
-//                 (scripts/release-package.py refuses different bytes).
+//                 (scripts/release-package.py refuses different bytes). The
+//                 npm package also carries the CycloneDX SBOM cargo-cyclonedx
+//                 generates for that target's build, whether PyPI is switched
+//                 on or not (scripts/sbom.mjs says where and what).
 //   test-install  install those exact files (archive, pip, npm through a local
 //                 registry) and run what each installed.
 //   upload R      publish this platform's files to one registry R (github, pypi
-//                 or npm). Each asks the registry first and uploads only what it
+//                 or npm); npm refuses a platform package that carries no SBOM. Each asks the registry first and uploads only what it
 //                 does not already serve, so a re-run finishes a partial upload.
 //                 A re-run rebuilds, and the binary is not byte-reproducible, so
 //                 what PyPI or npm already holds from an earlier attempt is kept
@@ -109,6 +112,7 @@ import {
   resolve,
 } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cycloneDxProblem, PACKAGED_SBOM } from "./sbom.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WINDOWS = process.platform === "win32";
@@ -417,14 +421,93 @@ function smoke(command, version, label) {
   );
 }
 
-// Where `publish build --out OUT` has cargo-cyclonedx write the SBOM before it is
-// moved into OUT. cargo-cyclonedx writes beside the manifest, so the checkout
-// root is the only place it can go; naming the file after OUT is what lets two
-// builds into two staging trees run at once (tests/release runs two) without
-// one moving or deleting the other's.
-export function sbomScratch(out) {
-  const id = createHash("sha256").update(resolve(out)).digest("hex");
+// Where a build into OUT has cargo-cyclonedx write the SBOM for `target` before
+// it is moved into OUT. cargo-cyclonedx writes beside the manifest, so the
+// checkout root is the only place it can go; naming the file after OUT and the
+// target is what lets two builds into two staging trees run at once
+// (tests/release runs two) without one moving or deleting the other's.
+export function sbomScratch(out, target = "all") {
+  const id = createHash("sha256")
+    .update(target === "all" ? resolve(out) : `${resolve(out)}\0${target}`)
+    .digest("hex");
   return join(REPO_ROOT, `bom-${id.slice(0, 16)}.json`);
+}
+
+// cargo-cyclonedx's SBOM of the binary's build for `target` — a triple, or
+// `all` for the one document over every target the Release carries — written
+// to `dest`.
+function generateSbom(out, target, dest) {
+  const scratchFile = sbomScratch(out, target);
+  must(
+    `generating the CycloneDX SBOM${target === "all" ? "" : ` for ${target}`}`,
+    "install cargo-cyclonedx 0.5.7 (`just release-tools`), then re-run",
+    "cargo",
+    [
+      "cyclonedx",
+      "--format",
+      "json",
+      "--all",
+      "--features",
+      "bundled-ui",
+      "--target",
+      target,
+      "--override-filename",
+      basename(scratchFile, ".json"),
+    ],
+  );
+  mkdirSync(dirname(dest), { recursive: true });
+  writeFileSync(dest, readFileSync(scratchFile));
+  rmSync(scratchFile, { force: true });
+}
+
+// Generate the SBOM a platform build packs into `target`'s npm package, and
+// return where it is staged: under OUT, beside the files the plan names rather
+// than among them, because the package carries it and no registry is sent it.
+export function stagePlatformSbom(out, target) {
+  const dest = join(out, "sboms", `${target}.cdx.json`);
+  generateSbom(out, target, dest);
+  return dest;
+}
+
+// The tar that reads every archive this release stages: Windows' own is
+// bsdtar, which also reads the .zip; Git's GNU tar does not.
+const tar = () =>
+  WINDOWS
+    ? join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe")
+    : "tar";
+
+// Refuse an npm platform package that does not carry exactly one file under
+// sboms/, at PACKAGED_SBOM, holding this binary's CycloneDX document. A host
+// adopts the binary only once that file shows which engine it links, so one
+// published without it is a release that host cannot take.
+function requirePackagedSbom(artifact, path) {
+  const refuse = (why) =>
+    new Fault(
+      `${artifact.package}: ${artifact.file} ${why}`,
+      "rebuild it with this job's build phase, which packs the target's SBOM into the package; never publish a platform package without one",
+    );
+  const listed = must(
+    `listing ${artifact.file}`,
+    "the staged npm package is unreadable; rebuild it with this job's build phase",
+    tar(),
+    ["-tzf", portable(path)],
+  )
+    .stdout.split(/\r?\n/)
+    // Files only: a tarball packed by anything but npm can list the directory.
+    .filter((name) => name.startsWith("package/sboms/") && !name.endsWith("/"));
+  if (listed.length !== 1 || listed[0] !== `package/${PACKAGED_SBOM}`)
+    throw refuse(
+      `carries ${listed.length ? listed.join(", ") : "nothing"} under sboms/, not exactly ${PACKAGED_SBOM}`,
+    );
+  const problem = cycloneDxProblem(
+    must(
+      `reading ${PACKAGED_SBOM} from ${artifact.file}`,
+      "the staged npm package is unreadable; rebuild it with this job's build phase",
+      tar(),
+      ["-xzOf", portable(path), `package/${PACKAGED_SBOM}`],
+    ).stdout,
+  );
+  if (problem) throw refuse(`carries a ${PACKAGED_SBOM} that ${problem}`);
 }
 
 // The `onepipeline-api` an npm install under `prefix` provides, as each caller
@@ -785,6 +868,7 @@ function buildPlatform(job, out) {
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   for (const target of targets) {
+    const sbom = stagePlatformSbom(out, target);
     const wheels = join(out, `build-${target}`);
     if (manylinux(target)) {
       // The manylinux image, through the one Linux wheel definition ci.yml's
@@ -846,6 +930,8 @@ function buildPlatform(job, out) {
         out,
         "--tag",
         tag,
+        "--sbom",
+        sbom,
       ],
       { capture: true },
     );
@@ -1016,6 +1102,9 @@ async function uploadPlatform(job, out, registry, dryRun) {
       }
     }
   } else {
+    // Every package is held to its SBOM before any is sent, so a refusal
+    // leaves npm without this job's packages rather than with some of them.
+    for (const a of files) requirePackagedSbom(a, stagedPath(out, a));
     for (const a of files) {
       const path = stagedPath(out, a);
       if (dryRun) {
@@ -1134,14 +1223,10 @@ async function verifyPlatform(job, out) {
           `${archive} does not match the checksum published beside it`,
           "re-upload both from one build",
         );
-      // Windows' own tar is bsdtar, which reads the .zip; Git's GNU tar does not.
-      const tar = WINDOWS
-        ? join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe")
-        : "tar";
       must(
         "extracting the archive",
         "the published archive is unreadable; re-upload it",
-        tar,
+        tar(),
         ["-xf", join(dl, archive), "-C", dl],
       );
       ownOrEarlier(
@@ -1416,29 +1501,11 @@ function buildPublish(out) {
     join(out, "crates", crate),
     readFileSync(join(target, "package", crate)),
   );
-  const sbom = sbomScratch(out);
-  must(
-    "generating the CycloneDX SBOM",
-    "install cargo-cyclonedx 0.5.7 (`just release-tools`), then re-run",
-    "cargo",
-    [
-      "cyclonedx",
-      "--format",
-      "json",
-      "--all",
-      "--features",
-      "bundled-ui",
-      "--target",
-      "all",
-      "--override-filename",
-      basename(sbom, ".json"),
-    ],
-  );
-  writeFileSync(
+  generateSbom(
+    out,
+    "all",
     join(out, "assets", `onepipeline-api-${tag}.cdx.json`),
-    readFileSync(sbom),
   );
-  rmSync(sbom, { force: true });
   requireStaged(out, artifacts);
   console.log(
     `release publish: assembled ${artifacts.map((a) => a.file).join(", ")}`,

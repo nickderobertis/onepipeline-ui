@@ -67,6 +67,9 @@ include = [
   "/npm/onepipeline-ui/package.json",
   "/npm/onepipeline-ui/README.md",
   "/scripts/npm-build.mjs",
+  # Where each per-platform package carries the binary's SBOM, and what it must
+  # hold: npm-build.mjs imports it, so its bytes decide what those packages ship.
+  "/scripts/sbom.mjs",
   # The one build of every Linux wheel: its image, the prerequisites it installs
   # there and the maturin invocation are what decide those wheels' bytes, and a
   # change to it has to be able to cut the release that publishes them.

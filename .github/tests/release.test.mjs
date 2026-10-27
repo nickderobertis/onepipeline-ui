@@ -52,6 +52,24 @@ function recipeSteps() {
 // `<n>/merge` — so every command spawned here gets an environment without the
 // runner's GITHUB_* context, plus only what the case sets.
 const scratchRoot = () => process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir();
+// The smallest SBOM release-package.py packs (scripts/sbom.mjs), for the carrier
+// contracts below, whose subject is the binary's bytes rather than the document.
+const sbomFixture = (dir) => {
+  const path = join(dir, "fixture.cdx.json");
+  writeFileSync(
+    path,
+    JSON.stringify({
+      bomFormat: "CycloneDX",
+      specVersion: "1.3",
+      metadata: {
+        component: { name: "onepipeline-ui", "bom-ref": "onepipeline-ui" },
+      },
+      components: [],
+      dependencies: [],
+    }),
+  );
+  return path;
+};
 const hermetic = (extra = {}) => ({
   ...Object.fromEntries(
     Object.entries(process.env).filter(
@@ -454,13 +472,22 @@ test("the tools the release recipes reach are pinned once for the workflows and 
       `${job} installs cargo-cyclonedx ${pin("cyclonedx-version")}: ${tools}`,
     );
   }
-  for (const job of BUILD_JOBS)
+  for (const job of BUILD_JOBS) {
     assert.ok(
       release().jobs[job].steps.some(
         (s) => s.run === "just release-python-tools",
       ),
       job,
     );
+    // Each platform build generates the SBOM its npm package carries.
+    const tools = release()
+      .jobs[job].steps.filter((s) => s.uses === "taiki-e/install-action@v2")
+      .flatMap((s) => s.with.tool.split(/[,\s]+/));
+    assert.ok(
+      tools.includes(`cargo-cyclonedx@${pin("cyclonedx-version")}`),
+      `${job} installs cargo-cyclonedx ${pin("cyclonedx-version")}: ${tools}`,
+    );
+  }
 });
 
 test("Darwin artifact contracts preserve wheel bytes and reject an architecture mismatch without executing them", () => {
@@ -498,6 +525,8 @@ with zipfile.ZipFile(sys.argv[1],'w') as z:
       scratch,
       "--tag",
       "v1.0.0",
+      "--sbom",
+      sbomFixture(scratch),
     ];
     execFileSync("python3", args, { stdio: "pipe" });
     execFileSync("python3", [
@@ -612,6 +641,8 @@ with zipfile.ZipFile(sys.argv[1],'w') as z:
       scratch,
       "--tag",
       "v1.0.0",
+      "--sbom",
+      sbomFixture(scratch),
     ];
     execFileSync("python3", args(fixture(183)), { stdio: "pipe" });
     const stem = `onepipeline-api-v1.0.0-${target}`;
@@ -674,6 +705,8 @@ with zipfile.ZipFile(sys.argv[1],'w') as z:
       scratch,
       "--tag",
       "v1.0.0",
+      "--sbom",
+      sbomFixture(scratch),
     ];
     execFileSync("python3", args(fixture(0x8664)), { stdio: "pipe" });
     const stem = `onepipeline-api-v1.0.0-${target}`;

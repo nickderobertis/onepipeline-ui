@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
-import { plan, sbomScratch } from "../../scripts/release.mjs";
+import { plan, sbomScratch, TARGETS } from "../../scripts/release.mjs";
 import {
   githubDouble,
   ROOT,
@@ -131,7 +131,9 @@ test("publish's build names the path and the re-run when the filesystem refuses 
 test("publish builds into different staging trees write their SBOMs to different files", () => {
   const registriesOut = join(ROOT, "target/release-journey/publish");
   const publicationOut = join(ROOT, "target/local-publication/whole-publish");
-  const named = [registriesOut, publicationOut].map(sbomScratch);
+  const named = [registriesOut, publicationOut].map((tree) =>
+    sbomScratch(tree),
+  );
   assert.notEqual(named[0], named[1]);
   for (const file of named) {
     assert.equal(
@@ -149,4 +151,9 @@ test("publish builds into different staging trees write their SBOMs to different
     named[0],
     "one tree however its path is spelled",
   );
+  // A platform build writes one per target into its tree, each its own file.
+  const perTarget = Object.keys(TARGETS).map((target) =>
+    sbomScratch(registriesOut, target),
+  );
+  assert.equal(new Set([...named, ...perTarget]).size, named.length + 4);
 });
