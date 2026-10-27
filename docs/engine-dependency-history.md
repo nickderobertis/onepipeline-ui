@@ -608,6 +608,16 @@ test-only exact requirements to 0.12.3, the release that engine pins; onevcs
 0.57.0 and oneharness-core 0.29.1 are unchanged, and no route, payload or MSRV
 changes beyond the release `/healthz` reports. This changes the engine types
 carried by ApiError::from_engine and the other engine-typed public items.
+0.93.1 is the engine whose linked onetaskgraph 0.12.5 carries an anchor naming
+no destination into a public projection, so a mixed public/private plan whose
+public task owns a schema-2 budget can be copied onto a board again. A host
+holds this reader and its engine to one linked engine, so it can adopt that
+store only once this crate links it. The onetaskgraph family and its test-only
+exact requirements move to 0.12.5, the release that engine pins; oneagentgraph
+0.9.0, onejudge 0.22.0, onevcs 0.57.0 and oneharness-core 0.29.1 are unchanged,
+and no route, payload or MSRV changes beyond the release `/healthz` reports.
+This changes the engine types carried by ApiError::from_engine and the other
+engine-typed public items.
 0.95.0 is the engine that holds a `local-direct` node's finished branch
 unlanded on its origin while a release it adopted early is still out: the node
 settles `complete-but-held` as `held-for-release`, and that settlement and an
@@ -617,8 +627,8 @@ engine to one linked engine, so it can adopt that engine only once this crate
 links it. Both words join the node-status vocabulary this API serves
 (telemetry schema 27), where the draft one was served `unknown` and the held one
 as still `running`, and `graph.node_results[NODE]` serves `awaiting`. The
-onetaskgraph family and its test-only exact requirements move to 0.12.5, the
-release that engine pins; onevcs 0.57.0, oneagentgraph 0.9.0, onejudge 0.22.0
+onetaskgraph family stays at 0.12.5, the release 0.93.1 moved it to and this
+engine pins; onevcs 0.57.0, oneagentgraph 0.9.0, onejudge 0.22.0
 and oneharness-core 0.29.1 are unchanged, and the MSRV is unchanged. This
 changes the engine types carried by ApiError::from_engine and the other
 engine-typed public items.

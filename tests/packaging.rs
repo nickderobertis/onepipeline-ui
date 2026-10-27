@@ -674,7 +674,7 @@ fn an_engine_moved_together_or_resolved_twice_is_refused_naming_it() {
 
     let twice = format!(
         "{lock}\n[[package]]\nname = \"onepipeline\"\nversion = \"0.79.1\"\n\
-         source = \"registry+https://github.com/rust-lang/crates.io-index\"\n"
+         source = \"{ENGINE_SOURCE}\"\n"
     );
     let mut doubled = engine_identity_disagreements(&twice, &manifest);
     doubled.sort();
