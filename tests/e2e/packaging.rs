@@ -308,6 +308,13 @@ fn the_launcher_stops_the_server_on_a_terminals_interrupt() {
     assert_the_launcher_stops_the_server(Stop::Interrupt, Node::Host);
 }
 
+// llmlint: ignore-block[tests_mirror_real_usage] a node without `process.execve` is any release
+// before 22.15 / 23.11 — Node 18 and 20, which the launcher's `engines` admits, are end of
+// life — and running one for real means provisioning a second, unmaintained node on every
+// CI leg for the one branch it selects. The preload removes exactly that capability and
+// nothing else, as `tests/packaging.rs`'s `launcher_on` doubles `process.platform`; the
+// launcher, its resolution, the binary and every signal and exit are the real ones, and the
+// journeys assert the PID is node's, so they cannot pass on the exec path by accident.
 /// The node that runs the launcher: the host's, or the host's doubled as a
 /// release older than `process.execve` (22.15 / 23.11), which the launcher's
 /// `engines` still admits and on which it supervises the binary as a child.
@@ -330,6 +337,7 @@ impl Node {
         node
     }
 }
+// llmlint: ignore-end[tests_mirror_real_usage]
 
 /// On a node without `process.execve` the stops still reach the server and the
 /// caller still sees its clean exit — and the PID is node's, which is what
