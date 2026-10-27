@@ -14110,8 +14110,46 @@ fn harness_step(index: usize, command: &str) -> [oneharness_core::domain::events
 /// leaves no turn waiting on a release that will never come.
 #[cfg(unix)]
 fn install_held_harness(fakes: &Path) -> PathBuf {
-    use oneharness_core::domain::report::RunStreamEnvelope;
     fs::create_dir_all(fakes).expect("the double's directory");
+    let documents = held_harness();
+    for (name, text) in documents["files"].as_object().expect("the double's files") {
+        fs::write(fakes.join(name), text.as_str().expect("a file's text")).expect("a file");
+    }
+    let program = fakes.join("oneharness");
+    fs::write(
+        &program,
+        documents["program"]
+            .as_str()
+            .expect("the double's program")
+            .replace(HELD_HARNESS_FAKES, &fakes.display().to_string()),
+    )
+    .expect("the double");
+    // Owner-only: the pinned CLI starts this journey's dispatch as this user.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o700))
+            .expect("the double is executable");
+    }
+    program
+}
+
+/// The placeholder [`held_harness`]'s program names its directory by, which the
+/// installer replaces with the directory it writes the double's files into.
+#[cfg(unix)]
+const HELD_HARNESS_FAKES: &str = "@FAKES@";
+
+/// The browser tier's copy of [`held_harness`], which its held-turn journey
+/// installs the way [`install_held_harness`] does.
+#[cfg(unix)]
+const HELD_HARNESS_FIXTURE: &str = "apps/dag-ui-e2e/fixtures/held-turn-harness.json";
+
+/// Everything a held turn is dispatched over: the files of
+/// [`write_two_party_node_scope_graph`]'s graph, and what
+/// [`install_held_harness`] writes — each file the double reads, by name, and
+/// its program with its directory left as [`HELD_HARNESS_FAKES`].
+#[cfg(unix)]
+fn held_harness() -> Value {
+    use oneharness_core::domain::report::RunStreamEnvelope;
     let lines = |events: &[oneharness_core::domain::events::ActionEvent]| {
         events
             .iter()
@@ -14128,46 +14166,28 @@ fn install_held_harness(fakes: &Path) -> PathBuf {
     };
     let opening = harness_step(0, "cargo build");
     let held = harness_step(2, "cargo test");
-    fs::write(fakes.join("agent-opening.ndjson"), lines(&opening)).expect("the opening");
-    fs::write(fakes.join("agent-held.ndjson"), lines(&held)).expect("the held work");
     let mut events = opening.to_vec();
-    events.extend(held);
-    fs::write(
-        fakes.join("agent-result.ndjson"),
-        format!(
-            "{}\n",
-            serde_json::to_string(&RunStreamEnvelope::Result {
-                report: harness_report("Built the change.", Some(events)),
-            })
-            .expect("the result line")
-        ),
-    )
-    .expect("the result");
-    fs::write(
-        fakes.join("supervisor.json"),
-        serde_json::to_string(&harness_report(
-            &json!({ "completion": true, "reason": "the turn did what the task asked" })
-                .to_string(),
-            None,
-        ))
-        .expect("the supervisor's report"),
-    )
-    .expect("the supervisor's answer");
-    fs::write(
-        fakes.join("verdict.json"),
-        serde_json::to_string(&harness_report(
-            &json!({ "value": true, "reason": "the turn did what the task asked" }).to_string(),
-            None,
-        ))
-        .expect("the evaluator's report"),
-    )
-    .expect("the evaluator's answer");
-    let program = fakes.join("oneharness");
-    fs::write(
-        &program,
-        format!(
-            r#"#!/bin/sh
-fakes='{fakes}'
+    events.extend(held.clone());
+    let result = format!(
+        "{}\n",
+        serde_json::to_string(&RunStreamEnvelope::Result {
+            report: harness_report("Built the change.", Some(events)),
+        })
+        .expect("the result line")
+    );
+    let supervisor = serde_json::to_string(&harness_report(
+        &json!({ "completion": true, "reason": "the turn did what the task asked" }).to_string(),
+        None,
+    ))
+    .expect("the supervisor's report");
+    let verdict = serde_json::to_string(&harness_report(
+        &json!({ "value": true, "reason": "the turn did what the task asked" }).to_string(),
+        None,
+    ))
+    .expect("the evaluator's report");
+    let program = format!(
+        r#"#!/bin/sh
+fakes='{HELD_HARNESS_FAKES}'
 hold() {{
   i=0
   while [ ! -f "$fakes/$1" ]; do
@@ -14196,18 +14216,56 @@ case " $* " in
   esac
   ;;
 esac
-"#,
-            fakes = fakes.display()
-        ),
-    )
-    .expect("the double");
-    // Owner-only: the pinned CLI starts this journey's dispatch as this user.
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&program, fs::Permissions::from_mode(0o700))
-            .expect("the double is executable");
+"#
+    );
+    // llmlint: ignore[least_privilege_grants] `mode` is a required field of a two-party
+    // member, and `bypass` is the one approval mode oneagentgraph's contract names — there is
+    // no narrower one to choose, and without the field no turn ever opens. What it grants is
+    // handed to the stand-in `oneharness` above, which runs no tool at all.
+    let node_scope = "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: onejudge\n    \
+         base_config: ./onejudge.base.yaml\n    agent:\n      \
+         oneharness_config: ./oneharness.toml\n    judge:\n      \
+         oneharness_config: ./oneharness.toml\n    mode: bypass\n";
+    json!({
+        "graph": {
+            "oneharness.toml": "run_mode = \"fallback\"\nharnesses = [\"claude-code\"]\n",
+            "onejudge.base.yaml": "system_prompt: Do the work.\nuser:\n  persona: Review it.\n  \
+                done_when: the original task is complete\n  max_turns: 12\n",
+            "node-scope.yaml": node_scope,
+        },
+        "placeholder": HELD_HARNESS_FAKES,
+        "program": program,
+        "files": {
+            "agent-opening.ndjson": lines(&opening),
+            "agent-held.ndjson": lines(&held),
+            "agent-result.ndjson": result,
+            "supervisor.json": supervisor,
+            "verdict.json": verdict,
+        },
+    })
+}
+
+/// **The browser tier holds a turn with this suite's double.** Its held-turn
+/// journey installs [`HELD_HARNESS_FIXTURE`] rather than writing an `oneharness`
+/// of its own, so the document is what the linked `oneharness_core` serializes
+/// and onejudge reads here; rewritten with `UPDATE_CONTRACT_FIXTURES` set.
+#[cfg(unix)]
+#[test]
+fn the_browser_tiers_held_turn_double_is_the_one_this_suite_holds_turns_with() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(HELD_HARNESS_FIXTURE);
+    let rendered = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&held_harness()).expect("serialize")
+    );
+    if std::env::var_os("UPDATE_CONTRACT_FIXTURES").is_some() {
+        fs::write(&path, &rendered).expect("rewrite the browser tier's double");
+        return;
     }
-    program
+    assert!(
+        fs::read_to_string(&path).unwrap_or_default() == rendered,
+        "{HELD_HARNESS_FIXTURE} is not this suite's held-turn double — re-run with \
+         UPDATE_CONTRACT_FIXTURES=1 to accept the change deliberately"
+    );
 }
 
 /// The node-scope graph a dispatch of [`fixture_run::write_awaiting_dispatch`]'s
@@ -14217,31 +14275,13 @@ esac
 /// takes is one `oneharness run` of whatever `ONEAGENTGRAPH_ONEHARNESS_BIN` names.
 #[cfg(unix)]
 fn write_two_party_node_scope_graph(dir: &Path) -> PathBuf {
-    fs::write(
-        dir.join("oneharness.toml"),
-        "run_mode = \"fallback\"\nharnesses = [\"claude-code\"]\n",
-    )
-    .expect("the harness config");
-    fs::write(
-        dir.join("onejudge.base.yaml"),
-        "system_prompt: Do the work.\nuser:\n  persona: Review it.\n  \
-         done_when: the original task is complete\n  max_turns: 12\n",
-    )
-    .expect("the onejudge base config");
-    let graph = dir.join("node-scope.yaml");
-    // llmlint: ignore[least_privilege_grants] `mode` is a required field of a two-party
-    // member, and `bypass` is the one approval mode oneagentgraph's contract names — there is
-    // no narrower one to choose, and without the field no turn ever opens. What it grants is
-    // handed to the stand-in `oneharness` above, which runs no tool at all.
-    fs::write(
-        &graph,
-        "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: onejudge\n    \
-         base_config: ./onejudge.base.yaml\n    agent:\n      \
-         oneharness_config: ./oneharness.toml\n    judge:\n      \
-         oneharness_config: ./oneharness.toml\n    mode: bypass\n",
-    )
-    .expect("the node-scope graph");
-    graph
+    for (name, text) in held_harness()["graph"]
+        .as_object()
+        .expect("the graph's files")
+    {
+        fs::write(dir.join(name), text.as_str().expect("a file's text")).expect("a graph file");
+    }
+    dir.join("node-scope.yaml")
 }
 
 /// The notes a conversation's spool holds that it has not answered yet.
@@ -14283,10 +14323,10 @@ fn notes_awaiting_an_answer(state: &Path) -> usize {
 
 /// A note posted through the reply route into a run driven by the pinned CLI
 /// waits on the held turn it was offered to **without stopping the run**. The
-/// envelope is acknowledged with the note queued, and the engine delivers the
-/// note off the run's single writer, so while the turn has not taken it the run
-/// goes on journalling that turn's work and its member's heartbeat, and every
-/// read goes on serving the run as live. Once the turn ends and the conversation
+/// envelope is answered at hand-off with the note `queued`, and the engine
+/// delivers the note off the run's single writer, so while the turn has not
+/// taken it the run goes on journalling that turn's work, its member's liveness
+/// goes on advancing, and every read goes on serving the run as live. Once the turn ends and the conversation
 /// takes the note, the delivery is recorded and the run settles.
 ///
 /// Nothing is stood in for but the paid model turn: the server, the adopted
@@ -14330,8 +14370,8 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
                 &harness.display().to_string(),
             ),
             ("ONEAGENTGRAPH_STATE_DIR", &state.display().to_string()),
-            // Short, so the member heartbeats every couple of seconds and the
-            // journal has something to go on recording while the note waits.
+            // Short, so the member heartbeats every couple of seconds and its
+            // liveness has somewhere to go while the note waits.
             ("ONEAGENTGRAPH_HEARTBEAT_TIMEOUT", "8"),
             (
                 "ONEPIPELINE_NODE_SCRATCH_DIR",
@@ -14414,18 +14454,38 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         notes_awaiting_an_answer(&dir) == 1
     });
     let activity = count("turn-activity");
-    let beats = count("member-heartbeat");
+    // A member's liveness is kept beside the journal, in `liveness.json`, and is
+    // read here the way every reader of the engine reads it: through the
+    // engine's own fold of the run, never by parsing the file.
+    let paths = onepipeline::views::RunPaths::under(&root, run);
+    let alive = move || {
+        onepipeline::views::RunView::open(&paths)
+            .expect("the engine reads the adopted run")
+            .state
+            .activity
+            .get(node)
+            .and_then(|activity| activity.last_heartbeat_at)
+    };
+    eventually("the member's liveness to be recorded", || alive().is_some());
+    let first_beat = alive();
 
-    // The held turn goes on working, and its member goes on heartbeating, while
-    // the note still waits on the turn to end — and all of it reaches the run's
-    // journal, which a writer waiting on the note would have held back.
+    // The held turn goes on working, and its member's liveness goes on
+    // advancing, while the note still waits on the turn to end — the work
+    // reaching the run's journal, which a writer waiting on the note would have
+    // held back.
     fs::write(fakes.join("turn.go"), "go").expect("release the turn's further work");
     eventually("the held turn's further work to reach the journal", || {
         count("turn-activity") > activity
     });
-    eventually(
-        "the member's heartbeat to keep reaching the journal",
-        || count("member-heartbeat") >= beats + 2,
+    eventually("the member's liveness to advance", || alive() > first_beat);
+    let second_beat = alive();
+    eventually("the member's liveness to go on advancing", || {
+        alive() > second_beat
+    });
+    assert_eq!(
+        count("member-heartbeat"),
+        0,
+        "this engine keeps a member's beats out of the journal"
     );
     assert_eq!(
         notes_awaiting_an_answer(&dir),
@@ -18245,6 +18305,9 @@ fn host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone() {
         .expect("the old driver starts");
     let ended_pid = ended_driver.id();
     assert!(ended_driver.wait().expect("the old driver ends").success());
+    // The stop's teardown as its record said it, written before anything reads
+    // the run: a journal is append-only, and a reader resumes from what it
+    // already folded of it rather than reading that history again.
     let set_teardown = |dir: &Path, teardown: &str| {
         let journal = dir.join("events.jsonl");
         let text = fs::read_to_string(&journal).expect("the stopped run's journal");
@@ -18258,25 +18321,31 @@ fn host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone() {
         let lines: Vec<String> = records.iter().map(ToString::to_string).collect();
         fs::write(journal, format!("{}\n", lines.join("\n"))).expect("record the teardown");
     };
-    let serving = Serving::start(|root| {
-        fixture_run::write_stopped_mid_flight(root, fixture_run::RUN_ID);
-        fixture_run::dispatching_on_this_host(
-            root,
-            fixture_run::RUN_ID,
-            fixture_run::NODE_ID,
-            worker.0,
-            &worker.started(),
-        );
-        let ended = fixture_run::write_stopped_mid_flight(root, fixture_run::STOPPED_RUN_ID);
-        fixture_run::driven_on_this_host(root, fixture_run::STOPPED_RUN_ID, ended_pid);
-        set_teardown(&ended, "signalled");
-        assert!(!ended.join("dispatches").exists());
-    });
-    let response = http::get(serving.address, "/api/v2/host");
-    assert_eq!(response.status, 200, "{}", response.body);
-    let host = response.json();
-    assert_enveloped(&host);
-    let text = host["rendered"].as_str().expect("the host rendering");
+    let host_with = |teardown: &str| {
+        let serving = Serving::start(|root| {
+            fixture_run::write_stopped_mid_flight(root, fixture_run::RUN_ID);
+            fixture_run::dispatching_on_this_host(
+                root,
+                fixture_run::RUN_ID,
+                fixture_run::NODE_ID,
+                worker.0,
+                &worker.started(),
+            );
+            let ended = fixture_run::write_stopped_mid_flight(root, fixture_run::STOPPED_RUN_ID);
+            fixture_run::driven_on_this_host(root, fixture_run::STOPPED_RUN_ID, ended_pid);
+            set_teardown(&ended, teardown);
+            assert!(!ended.join("dispatches").exists());
+        });
+        let response = http::get(serving.address, "/api/v2/host");
+        assert_eq!(response.status, 200, "{}", response.body);
+        let host = response.json();
+        assert_enveloped(&host);
+        host["rendered"]
+            .as_str()
+            .expect("the host rendering")
+            .to_owned()
+    };
+    let text = host_with("signalled");
     assert!(text.contains(fixture_run::RUN_ID), "{text}");
     assert!(text.contains(fixture_run::NODE_ID), "{text}");
     assert!(text.contains("proven gone"), "{text}");
@@ -18284,14 +18353,7 @@ fn host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone() {
     assert!(!text.contains("UNPROVEN"), "{text}");
 
     // A teardown that could not signal its workers leaves them unproven.
-    set_teardown(
-        &serving.runs_root().join(fixture_run::STOPPED_RUN_ID),
-        "identity-declined",
-    );
-    let response = http::get(serving.address, "/api/v2/host");
-    assert_eq!(response.status, 200, "{}", response.body);
-    let host = response.json();
-    let text = host["rendered"].as_str().expect("the host rendering");
+    let text = host_with("identity-declined");
     assert!(text.contains("UNPROVEN"), "{text}");
     assert!(text.contains(fixture_run::STOPPED_RUN_ID), "{text}");
 }
@@ -20123,6 +20185,120 @@ fn a_later_adoption_takeover_or_dispatch_reopens_the_execution_range() {
             "{kind}: {timeline}"
         );
     }
+}
+
+/// A member's heartbeat is served from wherever the engine that recorded the run
+/// kept it. A run recorded before liveness moved out of the journal carries its
+/// `member-heartbeat` records, and its timeline goes on listing them; the same
+/// run recorded since carries none and a `<run>/liveness.json`, and its timeline
+/// serves every other record without them. Each run's liveness is the engine's
+/// own word for it, on the run's status and on its row, and the beat kept
+/// beside the journal is one that word counts: the run whose last journalled
+/// record is days old reads as driven because its member was heard from just
+/// now, where its journalled twin reads as parked.
+#[test]
+fn a_run_with_journalled_heartbeats_and_one_with_its_liveness_beside_the_journal_both_serve_their_timeline_and_liveness(
+) {
+    let journalled = fixture_run::recorded_timeline();
+    let run = journalled["run_id"].as_str().expect("run").to_owned();
+    let beside = format!("{run}-liveness");
+    let serving = Serving::start(|root| {
+        fixture_run::write_recorded_timeline(root);
+        let mut corpus = journalled.clone();
+        corpus["run_id"] = json!(beside);
+        corpus["launch"]["run_id"] = json!(beside);
+        let records = corpus["records"].as_array_mut().expect("records");
+        let beats: Vec<Value> = records
+            .iter()
+            .filter(|record| record["kind"] == "member-heartbeat")
+            .cloned()
+            .collect();
+        records.retain(|record| record["kind"] != "member-heartbeat");
+        let dir = fixture_run::write_recorded_timeline_corpus(root, &corpus);
+        // The engine's `<run>/liveness.json`: one entry per member, keyed as the
+        // beats it replaces were labelled, stamped as a beat just now — to the
+        // millisecond, the one stamp the engine reads.
+        let now = time::OffsetDateTime::now_utc()
+            .format(time::macros::format_description!(
+                "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+            ))
+            .expect("an instant");
+        let mut members: Vec<Value> = beats
+            .iter()
+            .map(|beat| {
+                json!({
+                    "node": beat["labels"]["node"],
+                    "graph_run": beat["labels"]["run_id"],
+                    "member": beat["labels"]["member"],
+                    "last_heartbeat_at": now,
+                })
+            })
+            .collect();
+        members.dedup();
+        fs::write(
+            dir.join("liveness.json"),
+            serde_json::to_string_pretty(&json!({ "schema_version": 1, "members": members }))
+                .expect("the liveness document"),
+        )
+        .expect("the run's liveness");
+    });
+    let timeline = |id: &str| {
+        let response = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{id}/timeline?scope=run"),
+        );
+        assert_eq!(response.status, 200, "{id}: {}", response.body);
+        events_on(&response.json())
+    };
+    let kinds = |events: &[Value]| -> Vec<String> {
+        events
+            .iter()
+            .map(|event| event["kind"].as_str().expect("a kind").to_owned())
+            .collect()
+    };
+    let with_beats = timeline(&run);
+    let without_beats = timeline(&beside);
+    let heartbeat = |kind: &String| kind == "member-heartbeat";
+    assert_eq!(
+        kinds(&with_beats)
+            .iter()
+            .filter(|kind| heartbeat(kind))
+            .count(),
+        2,
+        "the journalled run's timeline lists its beats: {with_beats:?}"
+    );
+    assert!(
+        !kinds(&without_beats).iter().any(heartbeat),
+        "{without_beats:?}"
+    );
+    assert_eq!(
+        kinds(&without_beats),
+        kinds(&with_beats)
+            .into_iter()
+            .filter(|kind| !heartbeat(kind))
+            .collect::<Vec<_>>(),
+        "the run without beats serves every other record"
+    );
+
+    let status = |id: &str| {
+        let response = http::get(serving.address, &format!("/api/v2/runs/{id}/status"));
+        assert_eq!(response.status, 200, "{id}: {}", response.body);
+        response.json()["liveness"].clone()
+    };
+    let rows = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let row = |id: &str| {
+        rows["runs"]
+            .as_array()
+            .expect("runs")
+            .iter()
+            .find(|row| row["run_id"] == id)
+            .unwrap_or_else(|| panic!("no row for {id}: {rows}"))["liveness"]
+            .clone()
+    };
+    assert_eq!(status(&run), json!("PARKED"));
+    assert_eq!(row(&run), json!("PARKED"), "{rows}");
+    assert_eq!(status(&beside), json!("ACTIVE"));
+    assert_eq!(row(&beside), json!("ACTIVE"), "{rows}");
 }
 
 #[test]

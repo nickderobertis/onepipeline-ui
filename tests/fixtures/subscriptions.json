@@ -130,18 +130,18 @@
             ],
             "usage": {
               "agent": {
-                "input_tokens": null,
-                "output_tokens": null,
-                "cache_read_tokens": null,
-                "cache_write_tokens": null,
-                "cost_usd": null
+                "input_tokens": 376,
+                "output_tokens": 164,
+                "cache_read_tokens": 44051,
+                "cache_write_tokens": 356,
+                "cost_usd": 31.22
               },
               "judge": {
-                "input_tokens": null,
-                "output_tokens": null,
-                "cache_read_tokens": null,
+                "input_tokens": 79341,
+                "output_tokens": 618,
+                "cache_read_tokens": 49664,
                 "cache_write_tokens": null,
-                "cost_usd": null
+                "cost_usd": 9.75
               },
               "llmlint": {
                 "input_tokens": null,
@@ -230,6 +230,19 @@
               }
             ],
             "usage": {
+              "agent": {
+                "input": 376,
+                "output": 164,
+                "cache_read": 44051,
+                "cache_write": 356,
+                "cost_usd": 31.22
+              },
+              "judge": {
+                "input": 79341,
+                "output": 618,
+                "cache_read": 49664,
+                "cost_usd": 9.75
+              },
               "total": {
                 "input": 159810,
                 "output": 1728,
@@ -288,7 +301,7 @@
               "contract-interface": {
                 "addressable": false,
                 "member": "worker",
-                "reason": "its last turn completed, so the member is between turns"
+                "reason": "the member is no longer running"
               }
             },
             "node_results": {
@@ -321,6 +334,11 @@
             "contract-interface": {
               "verification": {
                 "records": [
+                  {
+                    "ok": true,
+                    "output_tail": "",
+                    "artifact_id": "report-node-scope-1786925518098-3163646"
+                  },
                   {
                     "ok": true,
                     "output_tail": "the gate ran and passed",

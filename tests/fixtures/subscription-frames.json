@@ -148,11 +148,11 @@
         ],
         "a": [
           {
-            "id": "e19",
+            "id": "e20",
             "record_id": "a-recording-host-4242.19",
             "stream": "a-recording-host-4242",
             "seq": 19,
-            "journal_order": 19,
+            "journal_order": 20,
             "dispatch_id": "run-20260807-a1b2c3.contract-interface",
             "kind": "push",
             "at": "2026-08-07T12:00:10.000Z",
@@ -185,11 +185,11 @@
         ],
         "a": [
           {
-            "id": "e19",
+            "id": "e20",
             "record_id": "a-recording-host-4242.19",
             "stream": "a-recording-host-4242",
             "seq": 19,
-            "journal_order": 19,
+            "journal_order": 20,
             "dispatch_id": "run-20260807-a1b2c3.contract-interface",
             "kind": "push",
             "at": "2026-08-07T12:00:10.000Z",

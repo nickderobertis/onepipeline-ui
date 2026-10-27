@@ -618,3 +618,17 @@ exact requirements move to 0.12.5, the release that engine pins; oneagentgraph
 and no route, payload or MSRV changes beyond the release `/healthz` reports.
 This changes the engine types carried by ApiError::from_engine and the other
 engine-typed public items.
+0.95.0 is the engine whose driver's per-pass cost no longer grows with the
+journal: a run's fold resumes from a sealed checkpoint beside the journal, a
+member's heartbeats are kept in `<run>/liveness.json` rather than journalled as
+`member-heartbeat` records, and a live note is answered at hand-off with the
+`queued` command verdict. A host holds this reader and its engine to one linked
+engine, so it can adopt that engine only once this crate links it. onemessagebus
+stays at 0.9.3, which that engine accepts; onetaskgraph 0.12.5, oneagentgraph
+0.9.0, onejudge 0.22.0, onevcs 0.57.0 and oneharness-core 0.29.1 are unchanged,
+and no route, payload or MSRV changes beyond the release `/healthz` reports. A
+run's summary now folds its journal in append order, so the fixtures write a
+member's settlement where it fell rather than behind later records, and a
+reader never re-reads a covered record, so no journey edits recorded history in
+place. This changes the engine types carried by ApiError::from_engine and the
+other engine-typed public items.
