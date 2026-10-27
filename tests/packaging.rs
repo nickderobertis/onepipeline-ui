@@ -200,16 +200,21 @@ fn stop_signals_the_server_installs() -> BTreeSet<String> {
     kinds.iter().map(|kind| posix(kind).to_owned()).collect()
 }
 
-/// The launcher forwards exactly the stops the server handles — no fewer, and
-/// no more.
+/// The Windows launcher outlives exactly the stops the server handles — no
+/// fewer, and no more.
 ///
 /// On Windows, which has no exec, the npm launcher keeps a node process in
-/// front of the binary, and a supervisor signals *that*. So the two agree about this set or the command
-/// cannot be stopped cleanly, and they are written in different languages with
-/// no compiler between them — which is how v0.3.1 shipped forwarding none of
-/// them and exiting 143. Neither too few (the stop never reaches the server) nor
-/// too many: listening for a signal replaces node's default disposition, so
-/// forwarding one the binary does not handle leaves the launcher outliving it.
+/// front of the binary, and a supervisor signals *that*. The launcher does not
+/// pass the stop on: the console delivers the interrupt to the server itself,
+/// and the launcher only listens for it so that node's default disposition does
+/// not end the launcher before the server has shut down and chosen its status.
+/// So the two agree about this set or the command cannot be stopped cleanly,
+/// and they are written in different languages with no compiler between them —
+/// which is how v0.3.1 shipped surviving none of them and exiting 143. Neither
+/// too few (the launcher dies first and reports a status the server never
+/// chose) nor too many: listening for a signal replaces node's default
+/// disposition, so listening for one the binary does not handle leaves the
+/// launcher outliving it.
 ///
 /// `tests/support/serving.rs` is held to the same set, so the journeys in
 /// `tests/e2e/` cannot cover only some of what the server promises.
@@ -222,14 +227,14 @@ fn the_launcher_and_the_journeys_carry_exactly_the_stops_the_server_handles() {
         .split_once("const STOP_SIGNALS = [")
         .expect("the launcher declares no STOP_SIGNALS");
     let (declared, _) = declared.split_once(']').expect("STOP_SIGNALS is unclosed");
-    let forwarded: BTreeSet<String> = declared
+    let listened: BTreeSet<String> = declared
         .split(',')
         .map(|name| name.trim().trim_matches('"').to_owned())
         .filter(|name| !name.is_empty())
         .collect();
     assert_eq!(
-        forwarded, installed,
-        "the npm launcher forwards a different set of stops than src/server.rs handles"
+        listened, installed,
+        "the npm launcher listens for a different set of stops than src/server.rs handles"
     );
 
     let signalled = names_after(

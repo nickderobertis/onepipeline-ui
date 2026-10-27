@@ -323,8 +323,9 @@ fn assert_stops_gracefully(
     );
 }
 
-/// The npm distribution's shutdown journey: a launcher asked to stop passes it
-/// on, and answers with the status the server chose.
+/// The npm distribution's shutdown journey on Unix: the command a supervisor
+/// started, asked to stop, shuts the server down and answers with the status
+/// the server chose.
 ///
 /// This is the whole of what `scripts/smoke-published.sh` asks a published
 /// artifact to do — serve on a kernel-chosen port, answer `/healthz`, then stop
