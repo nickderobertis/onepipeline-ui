@@ -157,8 +157,8 @@ fn served_at(launcher: &mut std::process::Child) -> std::net::SocketAddr {
     address
 }
 
-fn run_launcher(entry: &Path, args: &[&str]) -> std::process::Output {
-    Command::new("node")
+fn run_launcher(node: Node, root: &Path, entry: &Path, args: &[&str]) -> std::process::Output {
+    node.command(root)
         .arg(entry)
         .args(args)
         .output()
@@ -169,7 +169,7 @@ fn run_launcher(entry: &Path, args: &[&str]) -> std::process::Output {
 fn the_launcher_runs_the_binary_its_platform_package_carries() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
-    let output = run_launcher(&entry, &["--version"]);
+    let output = run_launcher(Node::Host, root.path(), &entry, &["--version"]);
     assert!(
         output.status.success(),
         "{}",
@@ -183,7 +183,12 @@ fn the_launcher_runs_the_binary_its_platform_package_carries() {
 fn the_launcher_propagates_the_binarys_exit_code_and_stderr() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
-    let output = run_launcher(&entry, &["serve", "--runs-root", "/no/such/runs/root"]);
+    let output = run_launcher(
+        Node::Host,
+        root.path(),
+        &entry,
+        &["serve", "--runs-root", "/no/such/runs/root"],
+    );
     // A caller scripting against the documented exit codes has to see the
     // binary's `2`, not the shim's own `1` — which is what it exits when the
     // resolution it exists to do fails.
@@ -249,16 +254,28 @@ impl Drop for Survivors {
 /// directly, which is why v0.3.1 shipped exiting 143. Where the launcher execs
 /// the binary the two are one process; the journey holds either shape.
 #[cfg(unix)]
-fn assert_the_launcher_stops_the_server(stop: Stop) {
+fn assert_the_launcher_stops_the_server(stop: Stop, node: Node) {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
     let runs = tempfile::tempdir().expect("runs root");
     let mut launcher = serve_through(
-        Command::new("node").arg(&entry).process_group(0),
+        node.command(root.path()).arg(&entry).process_group(0),
         runs.path(),
     );
     let mut survivors = Survivors::of(&launcher);
     let address = served_at(&mut launcher);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let running = executable_of(launcher.id());
+        let is_node = running
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("node"));
+        assert_eq!(
+            is_node,
+            matches!(node, Node::WithoutExecve),
+            "the launcher's PID runs {running:?}: it took the wrong path for this node"
+        );
+    }
 
     serving::ask_to_stop(&mut launcher, stop);
     let status = serving::wait_within(&mut launcher, STOP_DEADLINE);
@@ -282,13 +299,68 @@ fn assert_the_launcher_stops_the_server(stop: Stop) {
 #[cfg(unix)]
 #[test]
 fn the_launcher_stops_the_server_when_a_supervisor_asks() {
-    assert_the_launcher_stops_the_server(Stop::Terminate);
+    assert_the_launcher_stops_the_server(Stop::Terminate, Node::Host);
 }
 
 #[cfg(unix)]
 #[test]
 fn the_launcher_stops_the_server_on_a_terminals_interrupt() {
-    assert_the_launcher_stops_the_server(Stop::Interrupt);
+    assert_the_launcher_stops_the_server(Stop::Interrupt, Node::Host);
+}
+
+/// The node that runs the launcher: the host's, or the host's doubled as a
+/// release older than `process.execve` (22.15 / 23.11), which the launcher's
+/// `engines` still admits and on which it supervises the binary as a child.
+/// Only that one capability is taken away; the launcher, its resolution and
+/// the binary it starts are the real ones.
+#[derive(Clone, Copy)]
+enum Node {
+    Host,
+    WithoutExecve,
+}
+
+impl Node {
+    fn command(self, scratch: &Path) -> Command {
+        let mut node = Command::new("node");
+        if let Self::WithoutExecve = self {
+            let preload = scratch.join("without-execve.cjs");
+            fs::write(&preload, "delete process.execve;\n").expect("write preload");
+            node.arg("--require").arg(preload);
+        }
+        node
+    }
+}
+
+/// On a node without `process.execve` the stops still reach the server and the
+/// caller still sees its clean exit — and the PID is node's, which is what
+/// proves these journeys took the supervising path.
+#[cfg(unix)]
+#[test]
+fn on_a_node_without_execve_the_launcher_stops_the_server_when_a_supervisor_asks() {
+    assert_the_launcher_stops_the_server(Stop::Terminate, Node::WithoutExecve);
+}
+
+#[cfg(unix)]
+#[test]
+fn on_a_node_without_execve_the_launcher_stops_the_server_on_a_terminals_interrupt() {
+    assert_the_launcher_stops_the_server(Stop::Interrupt, Node::WithoutExecve);
+}
+
+#[test]
+fn on_a_node_without_execve_the_launcher_propagates_the_binarys_exit_code_and_stderr() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let entry = install(root.path(), true);
+    let output = run_launcher(
+        Node::WithoutExecve,
+        root.path(),
+        &entry,
+        &["serve", "--runs-root", "/no/such/runs/root"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("is not a readable directory"),
+        "the shim swallowed the binary's diagnostics"
+    );
 }
 
 /// The executable the process `pid` is running, as the kernel reports it.
@@ -520,7 +592,7 @@ fn on_windows_a_launcher_ended_by_ctrl_break_leaves_no_server_running() {
 fn a_missing_platform_package_fails_with_the_other_install_paths() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), false);
-    let output = run_launcher(&entry, &["--version"]);
+    let output = run_launcher(Node::Host, root.path(), &entry, &["--version"]);
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains(&host_package()), "{stderr}");
