@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.57.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.56.0...v0.57.0) - 2026-10-27
+
+### Added
+
+- *(deps)* [**breaking**] link the engine that holds a local-direct landing for its release, and show nodes held for one ([#521](https://github.com/nickderobertis/onepipeline-ui/pull/521))
+
 ## [0.56.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.55.0...v0.56.0) - 2026-10-27
 
 ### Fixed
