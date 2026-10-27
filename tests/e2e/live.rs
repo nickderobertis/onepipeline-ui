@@ -1364,13 +1364,30 @@ fn the_fixture_writers_receipts_are_the_engines_field_for_field() {
         );
         assert_eq!(raised.status, 200, "{}", raised.body);
     };
-    // A tab on the run, so the server holds it open and traces each refresh.
+    // A tab on the run, so the server holds it open and refreshes it too.
     let _tab = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
     let mut seen = live.refreshes().len();
     // The engine's own writer appends, then the fixture writer, then the engine.
     surface("the engine writes first");
     let engine_first = receipt();
     live.next_refresh(run, &mut seen);
+    // The linked engine's long-lived reader, opened once the engine's write and
+    // its receipt are both on disk and refreshed once the fixture writer has
+    // exited, so it reads the append whole. The server's poller is the same
+    // reader on a tick of its own, and a tick that falls between the fixture's
+    // record and its receipt is a re-read whatever the receipt says — on a
+    // loaded Windows host, where the receipt's rename waits out the server
+    // holding the old one open, it did. So the server's refresh is held to the
+    // receipts rather than to the kind of read it made.
+    let paths = onepipeline::views::RunPaths::under(
+        journal
+            .parent()
+            .and_then(Path::parent)
+            .expect("a runs root"),
+        run,
+    );
+    let mut reader = onepipeline::views::RunView::open(&paths).expect("the engine reads the run");
+    let before = reader.events.len();
     live_journal::append_lines(
         &journal,
         &[activity(
@@ -1382,7 +1399,13 @@ fn the_fixture_writers_receipts_are_the_engines_field_for_field() {
     );
     let fixture = receipt();
     let written = fs::metadata(&journal).expect("a journal").len();
-    let refresh = live.next_refresh(run, &mut seen);
+    live.next_refresh(run, &mut seen);
+    assert_eq!(
+        receipt(),
+        fixture,
+        "the server's refresh left the fixture's receipt as the fixture wrote it"
+    );
+    let refresh = reader.refresh().expect("the engine refreshes the run");
     surface("the engine writes again");
     let engine_second = receipt();
 
@@ -1414,9 +1437,12 @@ fn the_fixture_writers_receipts_are_the_engines_field_for_field() {
         json!(written),
         "the stamp is the journal after the write"
     );
-    // And the server read the fixture's append as an append of one record.
-    assert_eq!(refresh["refresh"], "appended", "{refresh}");
-    assert_eq!(refresh["records"], 1, "{refresh}");
+    // And the engine read the fixture's append as an append of one record.
+    assert_eq!(
+        refresh,
+        onepipeline::views::Refreshed::Appended { first: before }
+    );
+    assert_eq!(reader.events.len(), before + 1);
 }
 
 #[test]
