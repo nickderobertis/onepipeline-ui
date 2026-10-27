@@ -1252,6 +1252,19 @@ fn the_launcher_refuses_intel_macos_rather_than_looking_for_a_package_no_release
 /// what it prints is which package the launcher resolved and executed.
 #[cfg(unix)]
 fn launcher_resolving_on(platform: &str, arch: &str) -> std::process::Output {
+    launcher_running(
+        platform,
+        arch,
+        "#!/bin/sh\necho \"resolved {package} $*\"\n",
+        0o755,
+    )
+}
+
+/// The committed launcher over stand-in platform packages whose binary is the
+/// script `stand_in` (`{package}` naming the package it sits in) with file mode
+/// `mode`, run as if node reported `platform`/`arch` with `--version`.
+#[cfg(unix)]
+fn launcher_running(platform: &str, arch: &str, stand_in: &str, mode: u32) -> std::process::Output {
     use std::os::unix::fs::PermissionsExt;
     let scratch = tempfile::tempdir().expect("temp dir");
     let modules = scratch.path().join("node_modules");
@@ -1271,12 +1284,8 @@ fn launcher_resolving_on(platform: &str, arch: &str) -> std::process::Output {
         .expect("platform manifest");
         for name in [COMMAND.to_owned(), format!("{COMMAND}.exe")] {
             let path = bin.join(name);
-            fs::write(
-                &path,
-                format!("#!/bin/sh\necho \"resolved {package} $*\"\n"),
-            )
-            .expect("stand-in binary");
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("executable");
+            fs::write(&path, stand_in.replace("{package}", package)).expect("stand-in binary");
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).expect("file mode");
         }
     }
     let launcher = modules.join(WRAPPER).join("bin");
@@ -1335,6 +1344,55 @@ fn the_launcher_resolves_every_released_platform_arm64_linux_included() {
         !launcher.contains("arm64 Linux is no longer supported"),
         "the launcher still refuses arm64 Linux"
     );
+}
+
+/// Where the launcher execs the binary, the binary starts with the signal
+/// dispositions a shell would give it rather than node's.
+///
+/// An ignored signal stays ignored across exec, and node ignores `SIGPIPE` and
+/// `SIGXFSZ` at startup — so without the reset, a server writing to a closed
+/// pipe or past a file-size limit would carry on where run any other way it is
+/// ended. The stand-in sends itself each signal: under the default disposition
+/// that ends it, and what the caller observes is that signal.
+#[cfg(unix)]
+#[test]
+fn the_launcher_execs_the_binary_with_the_default_signal_dispositions() {
+    use std::os::unix::process::ExitStatusExt;
+    for (name, number) in [("PIPE", libc::SIGPIPE), ("XFSZ", libc::SIGXFSZ)] {
+        let run = launcher_running(
+            "linux",
+            "x64",
+            &format!("#!/bin/sh\nulimit -c 0\nkill -{name} $$\necho \"survived SIG{name}\"\n"),
+            0o755,
+        );
+        assert_eq!(
+            run.status.signal(),
+            Some(number),
+            "SIG{name} did not end the binary the launcher ran, so it inherited node's disposition: \
+             {:?}, stdout {:?}",
+            run.status,
+            String::from_utf8_lossy(&run.stdout)
+        );
+    }
+}
+
+/// A platform binary the kernel refuses to run fails the command with a
+/// diagnostic naming the launch, not a node stack trace.
+#[cfg(unix)]
+#[test]
+fn the_launcher_reports_a_binary_it_cannot_run() {
+    let run = launcher_running("linux", "x64", "#!/bin/sh\necho ran\n", 0o644);
+    assert_eq!(run.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("onepipeline-api: failed to launch the onepipeline-api binary"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("    at "),
+        "the launcher threw instead: {stderr}"
+    );
+    assert!(run.stdout.is_empty(), "the stand-in ran: {:?}", run.stdout);
 }
 
 // A repository that declares no release target releases nothing as far as the

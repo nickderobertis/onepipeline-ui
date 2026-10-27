@@ -377,7 +377,7 @@ fn assert_stops_serving(address: std::net::SocketAddr, after: &str) {
 ///
 /// Windows has no signals a parent can send: a console's processes are
 /// interrupted by the console. This process attaches to the launcher's console
-/// to raise a Ctrl-C there, ignoring it itself while attached.
+/// to raise an event there, swallowing it itself while attached.
 #[cfg(windows)]
 mod console {
     #[link(name = "kernel32")]
@@ -393,13 +393,22 @@ mod console {
 
     /// `CREATE_NEW_CONSOLE`, for `CommandExt::creation_flags`.
     pub const NEW_CONSOLE: u32 = 0x0000_0010;
-    const CTRL_C_EVENT: u32 = 0;
+    /// What a terminal's Ctrl-C raises.
+    pub const CTRL_C: u32 = 0;
+    /// What Ctrl-Break raises, and what a console supervisor sends a group it
+    /// wants ended.
+    pub const CTRL_BREAK: u32 = 1;
     const ATTACH_PARENT_PROCESS: u32 = u32::MAX;
+
+    /// Handles every console event, so this process outlives the ones it raises.
+    unsafe extern "system" fn swallow(_event: u32) -> i32 {
+        1
+    }
 
     /// Let the processes this one starts handle Ctrl-C. Whether a process
     /// ignores it is inherited, and a runner that started this suite ignoring
     /// it would hand that on to the launcher and the server, which would then
-    /// never hear the interrupt this journey is about.
+    /// never hear the interrupt these journeys are about.
     pub fn hand_on_interrupts() {
         // SAFETY: a null handler with `FALSE` changes only this process's
         // inherited ignore flag; no function pointer is registered.
@@ -408,12 +417,12 @@ mod console {
         }
     }
 
-    /// Press Ctrl-C in the console `process` is attached to.
-    pub fn interrupt(process: u32) {
-        // SAFETY: plain kernel32 calls on this process's own console state; the
-        // null handler registers no callback. Each test runs in a process of its
-        // own under nextest, so detaching from this one's console affects no
-        // other test.
+    /// Raise `event` in the console `process` is attached to.
+    pub fn raise(event: u32, process: u32) {
+        // SAFETY: kernel32 calls on this process's own console state, and
+        // `swallow` is a `'static` function that touches nothing. Each test runs
+        // in a process of its own under nextest, so detaching from this one's
+        // console affects no other test.
         unsafe {
             FreeConsole();
             assert_ne!(
@@ -421,16 +430,17 @@ mod console {
                 0,
                 "could not attach to the launcher's console"
             );
-            SetConsoleCtrlHandler(None, 1);
+            SetConsoleCtrlHandler(Some(swallow), 1);
             assert_ne!(
-                GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0),
+                GenerateConsoleCtrlEvent(event, 0),
                 0,
-                "could not raise Ctrl-C in the launcher's console"
+                "could not raise console event {event} in the launcher's console"
             );
-            // Delivered on a thread of each attached process; stay ignoring it
-            // until this one's has run.
+            // Delivered on a thread of each attached process; keep swallowing
+            // it until this one's has run.
             std::thread::sleep(std::time::Duration::from_millis(500));
             FreeConsole();
+            SetConsoleCtrlHandler(Some(swallow), 0);
             AttachConsole(ATTACH_PARENT_PROCESS);
         }
     }
@@ -438,19 +448,15 @@ mod console {
 
 /// Start the installed command in a console of its own.
 #[cfg(windows)]
-fn serve_in_own_console(
-    entry: &Path,
-    runs: &Path,
-    preload: Option<&Path>,
-) -> (std::process::Child, std::net::SocketAddr) {
+fn serve_in_own_console(entry: &Path, runs: &Path) -> (std::process::Child, std::net::SocketAddr) {
     use std::os::windows::process::CommandExt;
     console::hand_on_interrupts();
-    let mut node = Command::new("node");
-    if let Some(preload) = preload {
-        node.arg("--require").arg(preload);
-    }
-    node.arg(entry).creation_flags(console::NEW_CONSOLE);
-    let mut launcher = serve_through(&mut node, runs);
+    let mut launcher = serve_through(
+        Command::new("node")
+            .arg(entry)
+            .creation_flags(console::NEW_CONSOLE),
+        runs,
+    );
     let address = served_at(&mut launcher);
     (launcher, address)
 }
@@ -466,9 +472,9 @@ fn on_windows_an_interrupt_reaches_the_server_as_an_interrupt() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
     let runs = tempfile::tempdir().expect("runs root");
-    let (mut launcher, address) = serve_in_own_console(&entry, runs.path(), None);
+    let (mut launcher, address) = serve_in_own_console(&entry, runs.path());
 
-    console::interrupt(launcher.id());
+    console::raise(console::CTRL_C, launcher.id());
     let status = serving::wait_within(&mut launcher, STOP_DEADLINE);
     assert_eq!(
         status.code(),
@@ -487,46 +493,27 @@ fn on_windows_a_killed_launcher_leaves_no_server_running() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
     let runs = tempfile::tempdir().expect("runs root");
-    let (mut launcher, address) = serve_in_own_console(&entry, runs.path(), None);
+    let (mut launcher, address) = serve_in_own_console(&entry, runs.path());
 
     launcher.kill().expect("terminate the launcher");
     let _ = launcher.wait();
     assert_stops_serving(address, "the launcher was terminated");
 }
 
-/// A launcher that ends gracefully — node running its own exit, for a reason
-/// the server never heard — leaves no server behind either.
-///
-/// The reason is supplied by a preload that ends node when a file appears, so
-/// the server is told nothing: what stops it can only be the launcher's exit.
+/// A launcher that ends gracefully — Ctrl-Break, which a console supervisor
+/// sends a group it wants ended and which node answers by running its own exit
+/// — leaves no server behind either.
 #[cfg(windows)]
 #[test]
-fn on_windows_a_launcher_that_exits_leaves_no_server_running() {
+fn on_windows_a_launcher_ended_by_ctrl_break_leaves_no_server_running() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
     let runs = tempfile::tempdir().expect("runs root");
-    let marker = root.path().join("exit-now");
-    let preload = root.path().join("exit-on-marker.cjs");
-    fs::write(
-        &preload,
-        format!(
-            "const marker = {marker:?};\n\
-             setInterval(() => {{\n\
-               if (require('node:fs').existsSync(marker)) process.exit(0);\n\
-             }}, 50).unref();\n"
-        ),
-    )
-    .expect("write preload");
-    let (mut launcher, address) = serve_in_own_console(&entry, runs.path(), Some(&preload));
+    let (mut launcher, address) = serve_in_own_console(&entry, runs.path());
 
-    fs::write(&marker, "").expect("ask the launcher to exit");
-    let status = serving::wait_within(&mut launcher, STOP_DEADLINE);
-    assert_eq!(
-        status.code(),
-        Some(0),
-        "the launcher did not run its own exit: {status}"
-    );
-    assert_stops_serving(address, "the launcher exited");
+    console::raise(console::CTRL_BREAK, launcher.id());
+    let _ = serving::wait_within(&mut launcher, STOP_DEADLINE);
+    assert_stops_serving(address, "the launcher ended on Ctrl-Break");
 }
 
 #[test]
