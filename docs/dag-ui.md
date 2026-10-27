@@ -231,6 +231,13 @@ runs the fixture writes for them alone — the supervised run the acting session
 owns, the run another session owns, and the run nothing drives — so the live run
 every other journey reads is left as it was.
 
+A reply to a node whose turn is still open is answered at hand-off: the receipt
+names each live note under `notes`, `queued` while it waits for the turn to take
+it, and **Command outcomes** shows the envelope applied with that note's `queued`
+result. `e2e/dag-ui-held-turn.spec.ts` drives that through the composer on a
+server of its own, against a run the pinned `onepipeline` adopts and dispatches
+to the harness double `tests/e2e/server.rs` holds its own turn open with.
+
 ### Shutting down the host
 
 **Shut down the entire host** stays at the top of the run listing until navigation moves it to the Host page. It calls `POST /api/v2/shutdown` with `scope: "host"`. The dialog names every listed run and its recorded launcher, reading the listing to its end before enabling confirmation. It states that shutdown acts over owners. No watcher or acting-session report is read by the run page.

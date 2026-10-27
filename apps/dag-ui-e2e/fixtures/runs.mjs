@@ -3864,6 +3864,157 @@ export function shutdownFacts() {
   };
 }
 
+/** The one run of the held-turn corpus below. */
+export const HELD_TURN_RUN = "dag-ui-held-turn";
+/** Its one agent node, whose first turn the harness double holds open. */
+export const HELD_TURN_NODE = "resolve";
+/**
+ * The project it was launched from, in a `local-md` store of its own: an
+ * adopted driver reads a run's plan source before it dispatches anything, and
+ * one with no store to read holds its ready node queued indefinitely.
+ */
+const HELD_TURN_PROJECT = "local-md:held-turn";
+
+/**
+ * The held-turn harness double and the two-party graph it is dispatched over,
+ * as `tests/e2e/server.rs` installs them for its own held turn and pins this
+ * copy to: the `oneharness_core` documents each turn answers with, and the
+ * double's program with its directory left as `placeholder`.
+ */
+const HELD_TURN_HARNESS = JSON.parse(
+  readFileSync(new URL("./held-turn-harness.json", import.meta.url), "utf8"),
+);
+
+/** Where the held-turn corpus keeps everything that is not a run. */
+const heldTurnDir = (workspace) => join(workspace, "held-turn");
+
+/**
+ * What the read API and the driver a journey adopts the held-turn run with are
+ * both started under, as the Rust journey starts its own: the harness double in
+ * place of `oneharness`, a heartbeat short enough that the member's liveness
+ * moves while a journey watches it, and a reply wait longer than the hold, all
+ * inside the workspace rather than the host's.
+ */
+export function heldTurnEnvironment(workspace) {
+  const dir = heldTurnDir(workspace);
+  return {
+    ONEAGENTGRAPH_ONEHARNESS_BIN: join(dir, "harness-double", "oneharness"),
+    ONEAGENTGRAPH_STATE_DIR: join(dir, "oneagentgraph-state"),
+    ONEAGENTGRAPH_HEARTBEAT_TIMEOUT: "8",
+    ONEPIPELINE_NODE_SCRATCH_DIR: join(dir, "scratch"),
+    ONEPIPELINE_REPLY_TIMEOUT_SECONDS: "120",
+    ONEPIPELINE_PROJECT_DIR: dir,
+    XDG_STATE_HOME: join(dir, "xdg-state"),
+    // Nor the operator's plan-store user layer, cache or `onevcs` state: a
+    // private source declared there holds every task the driver could
+    // dispatch on asking it.
+    XDG_CONFIG_HOME: join(dir, "config"),
+    XDG_CACHE_HOME: join(dir, "cache"),
+    ONEVCS_HOME: join(workspace, "onevcs-home"),
+  };
+}
+
+/**
+ * Write the held-turn corpus under `root`: one run nothing is driving, owned by
+ * the acting session, whose one agent node an adoption dispatches over a
+ * two-party (`kind: onejudge`) member — the only kind with a conversation for a
+ * live note to wait in — whose every turn is the harness double's. The double
+ * holds the first agent turn open on `turn.go` and again on `turn.settle`, files
+ * a journey writes into {@link heldTurnFacts}'s `fakes`.
+ *
+ * Its driver is proved gone the way the adoptable run's is: recorded on this host
+ * under a pid above the kernel's maximum. A corpus of its own, because a turn
+ * held open in the main corpus would be a run every other journey reads moving.
+ */
+export function buildHeldTurnRuns(root, workspace) {
+  mkdirSync(root, { recursive: true });
+  const dir = heldTurnDir(workspace);
+  const fakes = join(dir, "harness-double");
+  mkdirSync(fakes, { recursive: true });
+  mkdirSync(join(dir, "scratch"), { recursive: true });
+  for (const [name, text] of Object.entries(HELD_TURN_HARNESS.graph))
+    writeFileSync(join(dir, name), text);
+  // The store, configured where the engine discovers a run's: the
+  // `onetaskgraph.yaml` in its working directory.
+  const [source, project] = HELD_TURN_PROJECT.split(":");
+  const store = join(dir, "plan-project-store");
+  mkdirSync(join(store, "projects"), { recursive: true });
+  writeFileSync(
+    join(dir, "onetaskgraph.yaml"),
+    `sources:\n  ${source}:\n    plugin: local-md\n    config:\n      root: ${JSON.stringify(store)}\n`,
+  );
+  writeFileSync(
+    join(store, "projects", `${project}.md`),
+    '---\ntitle: "Held turn"\n---\n\n',
+  );
+  for (const [name, text] of Object.entries(HELD_TURN_HARNESS.files))
+    writeFileSync(join(fakes, name), text);
+  writeFileSync(
+    join(fakes, "oneharness"),
+    HELD_TURN_HARNESS.program.replaceAll(HELD_TURN_HARNESS.placeholder, fakes),
+    { mode: 0o700 },
+  );
+  const run = { run_id: HELD_TURN_RUN };
+  const runPath = runDir(root, HELD_TURN_RUN);
+  mkdirSync(join(runPath, "channel"), { recursive: true });
+  mkdirSync(join(runPath, "dispatches"), { recursive: true });
+  // A persona the node-scope graph's library ships, because the engine refuses
+  // a note to a direct agent node with none, and an `## Acceptance criteria`
+  // section, because it refuses to adopt a run with a node lacking one (C6b).
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Hold a turn open" },
+    name: "held-turn",
+    concurrency: 1,
+    tasks: [
+      {
+        id: HELD_TURN_NODE,
+        persona: "engineer",
+        task: "## What\nDo the work the graph dispatches.\n\n## Acceptance criteria\n\n- The work is done.\n",
+      },
+    ],
+  };
+  writeJson(join(runPath, "plan.json"), plan);
+  const start = now() - 12 * 60 * 1000;
+  const record = launch(
+    HELD_TURN_RUN,
+    "claude-code",
+    SUPERVISOR_SESSION,
+    stamp(start),
+    0x7ffffff0,
+  );
+  delete record.graph;
+  writeJson(join(runPath, "launch.json"), {
+    ...record,
+    project: HELD_TURN_PROJECT,
+    dir,
+    node_graph: join(dir, "node-scope.yaml"),
+    host: thisHost(),
+  });
+  const journal = new Journal(runPath, streamOf(HELD_TURN_RUN), start);
+  journal.emit("pipeline", "run-started", run, {
+    plan,
+    graph: null,
+    dir,
+    heartbeat_interval: 1800,
+  });
+  journal.write();
+}
+
+/** What the held-turn corpus wrote, published beside it as `facts()` is beside the main one. */
+export function heldTurnFacts(workspace) {
+  return {
+    run: HELD_TURN_RUN,
+    node: HELD_TURN_NODE,
+    session: SUPERVISOR_SESSION,
+    // The host the run's driver is recorded on, which an adoption has to be
+    // made on to prove that driver gone.
+    host: thisHost(),
+    fakes: join(heldTurnDir(workspace), "harness-double"),
+    environment: heldTurnEnvironment(workspace),
+  };
+}
+
 /** The one run of the preserve corpus below. */
 export const PRESERVE_RUN = "dag-ui-preserve";
 /** Its node whose plan stated `publish: "preserve"`. */

@@ -16,7 +16,8 @@
  *   serve-fixture.mjs --workspace DIR --port N [--ui]
  *                     [--shutdown-corpus [--live-dispatch-pid PID]
  *                      | --preserved-corpus | --review-corpus
- *                      | --review-loop-corpus | --transcripts-corpus]
+ *                      | --review-loop-corpus | --transcripts-corpus
+ *                      | --held-turn-corpus]
  *                                                  build the fixture and serve it,
  *                                                  the browser view beside it with --ui;
  *                                                  the shutdown journeys' own runs
@@ -24,7 +25,9 @@
  *                                                  kept-branch journey's with
  *                                                  --preserved-corpus, and the
  *                                                  reworked stack's with
- *                                                  --review-loop-corpus
+ *                                                  --review-loop-corpus, and the
+ *                                                  held turn's with
+ *                                                  --held-turn-corpus
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
  *                     | --record-activity NAME --activity-detail TEXT
@@ -58,6 +61,7 @@ import { buildLoadCorpus } from "../load/corpus.mjs";
 import { FIXTURE_FACTS_NAME } from "./facts-file.ts";
 import harnessBinaries from "./harness-binaries.json" with { type: "json" };
 import {
+  buildHeldTurnRuns,
   buildPreservedRuns,
   buildProjectCentricRuns,
   buildReviewLoopRuns,
@@ -68,6 +72,8 @@ import {
   facts,
   graphRecordsFor,
   growTranscript,
+  heldTurnEnvironment,
+  heldTurnFacts,
   overridesDir,
   preservedFacts,
   projectCentricFacts,
@@ -378,6 +384,9 @@ async function serve(workspace, port, ui, corpus) {
         XDG_STATE_HOME: join(workspace, "state"),
         // Confine any library cache writes to this fixture's workspace.
         XDG_CACHE_HOME: join(workspace, "cache"),
+        // What a corpus's own runs are driven under, which the server reads
+        // beside them: the held-turn corpus's harness double and reply wait.
+        ...corpus.environment,
       },
     },
   );
@@ -403,6 +412,7 @@ function parseArgs(argv) {
     "--transcripts-corpus",
     "--review-corpus",
     "--review-loop-corpus",
+    "--held-turn-corpus",
   ]);
   const valued = new Set([
     "--workspace",
@@ -498,6 +508,19 @@ if (
   die(
     "--review-loop-corpus serves its own corpus",
     "pass --review-loop-corpus with --workspace, --port and --ui alone",
+  );
+}
+if (
+  args["held-turn-corpus"] &&
+  (asked.length > 0 ||
+    args["shutdown-corpus"] ||
+    args["preserved-corpus"] ||
+    args["review-corpus"] ||
+    args["review-loop-corpus"])
+) {
+  die(
+    "--held-turn-corpus serves its own corpus",
+    "pass --held-turn-corpus with --workspace, --port and --ui alone",
   );
 }
 if (args["shutdown-corpus"] && args["preserved-corpus"]) {
@@ -709,6 +732,12 @@ if (args.stall) {
         corpus = { build: buildPreservedRuns, facts: preservedFacts };
       } else if (args["review-loop-corpus"]) {
         corpus = { build: buildReviewLoopRuns, facts: reviewLoopFacts };
+      } else if (args["held-turn-corpus"]) {
+        corpus = {
+          build: (root) => buildHeldTurnRuns(root, workspace),
+          facts: () => heldTurnFacts(workspace),
+          environment: heldTurnEnvironment(workspace),
+        };
       } else if (args["shutdown-corpus"]) {
         const pid = args["live-dispatch-pid"];
         const livePid = pid === undefined ? undefined : Number(pid);

@@ -42,7 +42,7 @@
             "failed": 0,
             "running": 1
           },
-          "updated_at": "2026-08-07T12:00:07.000Z",
+          "updated_at": "2026-08-07T12:00:09.000Z",
           "started_at": "2026-08-07T12:00:00.000Z"
         }
       ],
@@ -57,25 +57,25 @@
             "run_id": "run-20260807-a1b2c3",
             "state": "parked",
             "phase": "dispatching",
-            "last_event": "gate-started",
-            "last_progress_at": 1786104007,
+            "last_event": "gate-verdict",
+            "last_progress_at": 1786104009,
             "timing": {
               "agent_seconds": 4,
               "judge_seconds": null,
               "llmlint_seconds": null,
-              "gate_seconds": 0,
+              "gate_seconds": 2,
               "publication_wait_seconds": 0,
               "lock_wait_seconds": 0,
               "setup_seconds": 1,
               "scheduling_seconds": 2,
-              "wall_seconds": 7,
+              "wall_seconds": 9,
               "agent_model_ms": null,
               "judge_model_ms": null,
               "llmlint_model_ms": null,
               "tool_ms": null,
               "idle_orchestration_ms": null,
               "unattributed_ms": 0,
-              "wall_ms": 7000,
+              "wall_ms": 9000,
               "fractions": {
                 "agent_model": null,
                 "judge_model": null,
@@ -83,8 +83,8 @@
                 "tool": null,
                 "idle_orchestration": null,
                 "lock_wait": 0.0,
-                "setup": 0.14285714285714285,
-                "scheduling": 0.2857142857142857
+                "setup": 0.1111111111111111,
+                "scheduling": 0.2222222222222222
               }
             },
             "nodes": [
@@ -175,7 +175,7 @@
               "judge_model_ms": null,
               "llmlint_model_ms": null,
               "tool_ms": null,
-              "wall_ms": 7000
+              "wall_ms": 9000
             },
             "turns": 3,
             "lint": 0,
@@ -196,7 +196,7 @@
           "telemetry": {
             "schema_version": 2,
             "run_id": "run-20260807-a1b2c3",
-            "wall_ms": 7000,
+            "wall_ms": 9000,
             "buckets": [
               {
                 "name": "agent",
@@ -210,7 +210,7 @@
               },
               {
                 "name": "gate",
-                "ms": 0
+                "ms": 2000
               },
               {
                 "name": "publication_wait",
@@ -327,7 +327,7 @@
                 "review"
               ]
             },
-            "last_seq": 17
+            "last_seq": 18
           },
           "conversations": [],
           "node_details": {
@@ -338,6 +338,11 @@
                     "ok": true,
                     "output_tail": "",
                     "artifact_id": "report-node-scope-1786925518098-3163646"
+                  },
+                  {
+                    "ok": true,
+                    "output_tail": "the gate ran and passed",
+                    "artifact_id": "artifact-5c8f0a1b"
                   }
                 ]
               },
