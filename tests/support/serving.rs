@@ -686,14 +686,20 @@ fn path_without_harnesses() -> std::ffi::OsString {
 ///
 /// `dir`'s own entry is left out: renaming it out of the root is the one change
 /// a journey makes to it on purpose.
+///
+/// Each entry's metadata is read from the entry itself rather than from the
+/// listing: on Windows a listing reports the timestamps NTFS keeps in the
+/// parent's index, which it brings up to date lazily, so a directory written
+/// into before the first reading can show a later time at the second though
+/// nothing touched it in between.
 pub fn tree(dir: &Path) -> std::collections::BTreeMap<std::path::PathBuf, (Vec<u8>, SystemTime)> {
     let mut found = std::collections::BTreeMap::new();
     let mut pending = vec![dir.to_path_buf()];
     while let Some(next) = pending.pop() {
         for entry in std::fs::read_dir(&next).expect("a readable directory") {
             let entry = entry.expect("a directory entry");
-            let about = entry.metadata().expect("an entry's metadata");
             let path = entry.path();
+            let about = std::fs::symlink_metadata(&path).expect("an entry's metadata");
             if about.is_dir() {
                 pending.push(path.clone());
             }
