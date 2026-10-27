@@ -1299,6 +1299,13 @@ fn launcher_running(platform: &str, arch: &str, stand_in: &str, mode: u32) -> st
         launcher.join(format!("{COMMAND}.js")),
     )
     .expect("copy the committed launcher");
+    // Beside it the manifest every install carries, which the launcher reads the
+    // Node range it names from.
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("npm/{WRAPPER}/package.json")),
+        modules.join(WRAPPER).join("package.json"),
+    )
+    .expect("copy the committed manifest");
     let preload = scratch.path().join("host.cjs");
     fs::write(
         &preload,
@@ -1388,8 +1395,12 @@ fn the_launcher_reports_a_binary_it_cannot_run() {
     let run = launcher_running("linux", "x64", "#!/bin/sh\necho ran\n", 0o644);
     assert_eq!(run.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&run.stderr);
+    let manifest: serde_json::Value =
+        serde_json::from_str(&read(&format!("npm/{WRAPPER}/package.json"))).expect("manifest");
+    let engines = manifest["engines"]["node"].as_str().expect("engines.node");
     assert!(
-        stderr.contains("onepipeline-api: failed to launch the onepipeline-api binary"),
+        stderr.contains("onepipeline-api: failed to launch the onepipeline-api binary")
+            && stderr.contains(&format!("needs Node {engines};")),
         "{stderr}"
     );
     assert!(

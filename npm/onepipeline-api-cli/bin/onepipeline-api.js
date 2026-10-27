@@ -14,8 +14,8 @@
 // caller started is the server's own, so a signal sent to it reaches the server,
 // a parent-PID check sees the server, and there is no node process left to
 // orphan anything. There is no other path on those platforms: a node without
-// `process.execve` (before 22.15, or 23.0 through 23.10 — outside this
-// package's `engines`) is refused before anything starts. Windows has no exec,
+// `process.execve` (a release this package's `engines` excludes) is refused
+// before anything starts, naming that range. Windows has no exec,
 // so there the binary runs as a child this process supervises; `supervise`
 // below says how that child is kept faithful.
 //
@@ -164,11 +164,14 @@ function become(binary, args) {
   try {
     process.execve(binary, [binary, ...args], process.env);
   } catch (error) {
+    // The supported range is this package's `engines`, read rather than
+    // restated, so the diagnostic cannot name a release the manifest refuses.
+    const { engines } = require("../package.json");
     fail(
       `failed to launch the onepipeline-api binary: ${error.message}. ` +
         "This command replaces itself with the binary through process.execve, " +
-        "which needs Node 22.15 or later (23.11 or later on Node 23); this is " +
-        `Node ${process.versions.node}. Upgrade Node. ${OTHER_INSTALLS}`
+        `which needs Node ${engines.node}; this is Node ` +
+        `${process.versions.node}. Upgrade Node. ${OTHER_INSTALLS}`
     );
   }
 }

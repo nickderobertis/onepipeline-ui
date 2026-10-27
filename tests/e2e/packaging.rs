@@ -294,7 +294,6 @@ impl InFlight {
 /// stop reached the server as a request to shut down gracefully: the launcher is
 /// still running a moment later, the held request is still answered, and only
 /// then does the launcher exit, with the server's own `0`.
-// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] the hold adds two one-second settles to each stop journey, measured: the slowest npm journey takes 6.5 s under nextest, against 18.5 s for the slowest `nx_affected` journey this tier already carries. What these journeys read — `npm/**`, `scripts/npm-build.mjs` and the server binary through `apiServerSurface` — is already in `repoMachinery`, so an edge of their own would rerun them on nearly every change that reruns this tier.
 fn assert_stops_gracefully(
     launcher: &mut std::process::Child,
     address: std::net::SocketAddr,
@@ -324,17 +323,10 @@ fn assert_stops_gracefully(
     );
 }
 
-/// The npm distribution's shutdown journey on Unix: the command a supervisor
-/// started, asked to stop, shuts the server down and answers with the status
-/// the server chose.
-///
-/// This is the whole of what `scripts/smoke-published.sh` asks a published
-/// artifact to do — serve on a kernel-chosen port, answer `/healthz`, then stop
-/// on a signal and exit `0` — run against the launcher a user actually types.
-/// It is the command a supervisor signals, so it and not the binary is what has
-/// to survive the signal: nothing here can be proven by starting the binary
-/// directly, which is why v0.3.1 shipped exiting 143. On Unix the launcher execs
-/// the binary, so the two are one process and this holds the exec'd server.
+/// The npm distribution's shutdown journey on Unix, run against the command a
+/// supervisor signals rather than the binary behind it, as
+/// `scripts/smoke-published.sh` runs it against a published artifact. The
+/// launcher execs the binary, so the PID signalled is the server's own.
 #[cfg(unix)]
 fn assert_the_launcher_stops_the_server(stop: Stop) {
     let root = tempfile::tempdir().expect("temp dir");
@@ -450,16 +442,52 @@ fn read_all(pipe: Option<impl std::io::Read>) -> Vec<u8> {
     bytes
 }
 
-// llmlint: ignore-block[e2e_not_mocked] the preload deletes `process.execve` and nothing
-// else, standing in for a node release that predates it; provisioning that release for real
-// is the cost the next directive gives. The launcher, node's module resolution, the installed
-// platform package and the process the journey reads back are all real.
-// llmlint: ignore-block[tests_mirror_real_usage] a node without `process.execve` is any release
-// before 22.15 / 23.11, which the launcher's `engines` refuses but npm only warns about, and
-// running one for real means provisioning a second, end-of-life node on every CI leg for the
-// one branch it selects. The preload removes exactly that capability and nothing else, as
-// `tests/packaging.rs`'s `launcher_on` doubles `process.platform`; the launcher, its
-// resolution and the binary it would have run are the real ones.
+/// The name the justfile exports the provisioned old node under.
+#[cfg(unix)]
+const NODE_WITHOUT_EXECVE_ENV: &str = "ONEPIPELINE_UI_NODE_WITHOUT_EXECVE";
+
+/// A real Node release that predates `process.execve`, as
+/// `scripts/ensure-node-without-execve.sh` pins and provisions it into this
+/// clone, held to having no such API.
+///
+/// Read the way `tests/support/sibling.rs` reads the sibling CLI: a value the
+/// justfile exported has to be the path the recipe writes, and that path is the
+/// one used either way, so a node from anywhere else cannot stand in for it.
+#[cfg(unix)]
+fn node_without_execve() -> PathBuf {
+    let justfile = fs::read_to_string(repo_root().join("justfile")).expect("the justfile reads");
+    assert!(
+        justfile.contains(&format!("export {NODE_WITHOUT_EXECVE_ENV} :=")),
+        "the justfile no longer exports {NODE_WITHOUT_EXECVE_ENV}; this journey reads the name \
+         the recipe exports, so one of the two has moved"
+    );
+    let provisioned = repo_root().join(".tools/node-without-execve/bin/node");
+    if let Some(named) = std::env::var_os(NODE_WITHOUT_EXECVE_ENV).filter(|value| !value.is_empty())
+    {
+        assert_eq!(
+            PathBuf::from(&named),
+            provisioned,
+            "{NODE_WITHOUT_EXECVE_ENV} names a path this clone does not provision to"
+        );
+    }
+    let probe = Command::new(&provisioned)
+        .args(["-p", "typeof process.execve"])
+        .output()
+        .unwrap_or_else(|error| {
+            panic!(
+                "no node without process.execve at {} ({error}); run the \
+                 `onepipeline-ui:ensure-node-without-execve` target",
+                provisioned.display()
+            )
+        });
+    assert_eq!(
+        String::from_utf8_lossy(&probe.stdout).trim(),
+        "undefined",
+        "the provisioned node has process.execve, so this journey cannot see the launcher refuse"
+    );
+    provisioned
+}
+
 /// On a node without `process.execve`, the command refuses before anything
 /// starts: a status of `1`, a diagnostic naming the Node it needs, and no
 /// server — never the binary as a child, the process tree this launcher exists
@@ -470,13 +498,9 @@ fn on_a_node_without_execve_the_launcher_refuses_and_starts_no_server() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
     let runs = tempfile::tempdir().expect("runs root");
-    let preload = root.path().join("without-execve.cjs");
-    fs::write(&preload, "delete process.execve;\n").expect("write preload");
     // Its own group, so a launcher that started a server after all leaves
     // nothing behind when the deadline below fails the journey.
-    let mut launcher = Command::new("node")
-        .arg("--require")
-        .arg(&preload)
+    let mut launcher = Command::new(node_without_execve())
         .arg(&entry)
         .arg("serve")
         .arg("--runs-root")
@@ -509,9 +533,17 @@ fn on_a_node_without_execve_the_launcher_refuses_and_starts_no_server() {
     };
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(1), "{stderr}");
+    let manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(repo_root().join("npm/onepipeline-api-cli/package.json"))
+            .expect("the launcher's manifest"),
+    )
+    .expect("the launcher's manifest is JSON");
+    let engines = manifest["engines"]["node"]
+        .as_str()
+        .expect("the launcher declares the Node it needs");
     assert!(
         stderr.contains("onepipeline-api: failed to launch the onepipeline-api binary")
-            && stderr.contains("needs Node 22.15 or later")
+            && stderr.contains(&format!("needs Node {engines};"))
             && stderr.contains("Upgrade Node."),
         "the refusal does not say what to do about it: {stderr}"
     );
@@ -525,8 +557,6 @@ fn on_a_node_without_execve_the_launcher_refuses_and_starts_no_server() {
         String::from_utf8_lossy(&output.stdout)
     );
 }
-// llmlint: ignore-end[tests_mirror_real_usage]
-// llmlint: ignore-end[e2e_not_mocked]
 
 /// Wait for nothing to be listening on `address` any more, failing the journey
 /// if something still is at the deadline.

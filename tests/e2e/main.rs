@@ -12,7 +12,8 @@
 //! bytes it serves; `linked_report` builds that binary with `cargo auditable`
 //! and reads back the dependency record it embedded; `packaging` assembles the real npm packages with
 //! `scripts/npm-build.mjs` and runs the real launcher under node, resolving the
-//! platform package through node's own resolution; `judged_tier` runs the
+//! platform package through node's own resolution, and refuses under the real
+//! node release `ensure_node_without_execve` provisions; `judged_tier` runs the
 //! gate's own llmlint recipe through the real Nx and the installed llmlint over
 //! a real git repository, `release_status` runs
 //! the release's demotion step over a real GitHub Release's notes,
@@ -42,6 +43,7 @@ mod ci_tier;
 mod cli;
 mod cost;
 mod ensure_baseline;
+mod ensure_node_without_execve;
 mod ensure_sibling;
 mod judged_tier;
 mod linked_report;

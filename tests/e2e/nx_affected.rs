@@ -268,12 +268,39 @@ fn a_change_to_the_repository_machinery_selects_its_tier_and_not_the_journeys() 
             selected(&tasks, "onepipeline-ui-repo-tooling"),
             "a change to {path} does not run the suites that drive it: {tasks:?}"
         );
-        for tier in ["onepipeline-ui-e2e", "onepipeline-ui-coverage"] {
+        for tier in [
+            "onepipeline-ui-e2e",
+            "onepipeline-ui-npm-launcher",
+            "onepipeline-ui-coverage",
+        ] {
             assert!(
                 !selected(&tasks, tier),
                 "a change to {path} runs {tier}, which reads nothing it changed: {tasks:?}"
             );
         }
+    }
+}
+
+/// The npm launcher's journeys run when what they install changes — the
+/// committed launcher, the script that assembles it, the pinned old node — and
+/// the server journeys, which read none of it, do not.
+#[test]
+fn a_change_to_the_npm_launcher_selects_its_journeys_and_not_the_server_journeys() {
+    for path in [
+        "npm/onepipeline-api-cli/bin/onepipeline-api.js",
+        "scripts/npm-build.mjs",
+        "scripts/ensure-node-without-execve.sh",
+    ] {
+        let workspace = Workspace::new();
+        let tasks = workspace.change(path).on_push();
+        assert!(
+            selected(&tasks, "onepipeline-ui-npm-launcher"),
+            "a change to {path} does not run the npm launcher's journeys: {tasks:?}"
+        );
+        assert!(
+            !selected(&tasks, "onepipeline-ui-e2e"),
+            "a change to {path} runs the server journeys, which read nothing it changed: {tasks:?}"
+        );
     }
 }
 
