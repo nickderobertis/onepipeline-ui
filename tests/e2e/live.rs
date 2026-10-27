@@ -1532,7 +1532,13 @@ fn a_stale_telemetry_fold_catches_up_once_the_run_goes_quiet_without_holding_bac
             writer.append_lines(&live.journal(run), &[record]);
             let refresh = live.next_refresh(run, seen);
             let read = Instant::now();
-            assert_eq!(refresh["refresh"], "appended", "{refresh}");
+            // The writer's receipt lands just after the record, and a poll
+            // between the two is answered with a re-read; either is a tick
+            // that carried a change, which is all the fold's timing turns on.
+            assert!(
+                ["appended", "reread"].contains(&refresh["refresh"].as_str().unwrap_or_default()),
+                "{refresh}"
+            );
             if refresh["telemetry_fold_ms"].is_null() {
                 return false;
             }

@@ -647,3 +647,14 @@ release changes the engine's own packaging and tests, and no record, route,
 payload, linked dependency or MSRV changes beyond the release `/healthz`
 reports. This changes the engine types carried by ApiError::from_engine and the
 other engine-typed public items.
+0.95.3 is the engine that links onetaskgraph 0.12.7, whose copy batches a
+private source's origin lookups and reuses carried dependency edges, and whose
+combined driver holds its per-pass cost flat across journal sizes; it also
+carries 0.95.2's fix counting one task update per settlement write-back. A host
+holds this reader and its engine to one linked engine and plan store, so it can
+adopt that engine only once this crate links it. The onetaskgraph family and
+its test-only exact requirements move to 0.12.7, the release that engine pins;
+oneagentgraph 0.9.0, onejudge 0.22.0, onemessagebus 0.9.3, onevcs 0.57.0 and
+oneharness-core 0.29.1 are unchanged, and no route, payload or MSRV changes
+beyond the release `/healthz` reports. This changes the engine types carried by
+ApiError::from_engine and the other engine-typed public items.
