@@ -1388,20 +1388,23 @@ fn the_launcher_execs_the_binary_with_the_default_signal_dispositions() {
 }
 
 /// A platform binary the kernel refuses to run fails the command with a
-/// diagnostic naming the launch, not a node stack trace.
+/// diagnostic naming the launch and the reinstall, not a node crash report —
+/// on every node `engines` admits, including the 22 and 24 lines, whose
+/// `process.execve` aborts the process on a refusal rather than throwing.
 #[cfg(unix)]
 #[test]
 fn the_launcher_reports_a_binary_it_cannot_run() {
     let run = launcher_running("linux", "x64", "#!/bin/sh\necho ran\n", 0o644);
-    assert_eq!(run.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&run.stderr);
-    let manifest: serde_json::Value =
-        serde_json::from_str(&read(&format!("npm/{WRAPPER}/package.json"))).expect("manifest");
-    let engines = manifest["engines"]["node"].as_str().expect("engines.node");
+    assert_eq!(run.status.code(), Some(1), "{:?}: {stderr}", run.status);
     assert!(
         stderr.contains("onepipeline-api: failed to launch the onepipeline-api binary")
-            && stderr.contains(&format!("needs Node {engines};")),
+            && stderr.contains("Reinstall onepipeline-api-cli."),
         "{stderr}"
+    );
+    assert!(
+        !stderr.contains("needs Node"),
+        "a broken install was blamed on the node running it: {stderr}"
     );
     assert!(
         !stderr.contains("    at "),

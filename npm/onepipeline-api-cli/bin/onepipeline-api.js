@@ -157,21 +157,46 @@ function become(binary, args) {
     process.on(inherited, () => {});
     process.removeAllListeners(inherited);
   }
-  // Returns only by throwing: the kernel refused to run the file, or this node
-  // has no `process.execve` to call. Either way nothing was started, and
+  // A file the kernel would refuse is reported here, before the call: node's
+  // 22 and 24 lines abort the whole process when `process.execve` fails rather
+  // than throwing, so past this point a refusal would print node's own crash
+  // report instead of saying what to do. Missing, not a file, and not
+  // executable are the refusals a broken install produces; one only the kernel
+  // can see (a binary for another architecture) still reaches the call.
+  const fs = require("node:fs");
+  try {
+    if (!fs.statSync(binary).isFile()) {
+      throw new Error(`${binary} is not a file`);
+    }
+    fs.accessSync(binary, fs.constants.X_OK);
+  } catch (error) {
+    fail(
+      `failed to launch the onepipeline-api binary: ${error.message}. ` +
+        `Reinstall onepipeline-api-cli. ${OTHER_INSTALLS}`
+    );
+  }
+  // Returns only by throwing, and on this package's supported range only on a
+  // node without `process.execve` to call, or on a release that throws for a
+  // refusal the check above could not see. Either way nothing was started, and
   // nothing will be — running the binary as a child instead is the process
   // tree this launcher exists not to build.
-  try {
-    process.execve(binary, [binary, ...args], process.env);
-  } catch (error) {
+  if (typeof process.execve !== "function") {
     // The supported range is this package's `engines`, read rather than
     // restated, so the diagnostic cannot name a release the manifest refuses.
     const { engines } = require("../package.json");
     fail(
+      "failed to launch the onepipeline-api binary: this command replaces " +
+        "itself with the binary through process.execve, which needs Node " +
+        `${engines.node}; this is Node ${process.versions.node}. Upgrade Node. ` +
+        OTHER_INSTALLS
+    );
+  }
+  try {
+    process.execve(binary, [binary, ...args], process.env);
+  } catch (error) {
+    fail(
       `failed to launch the onepipeline-api binary: ${error.message}. ` +
-        "This command replaces itself with the binary through process.execve, " +
-        `which needs Node ${engines.node}; this is Node ` +
-        `${process.versions.node}. Upgrade Node. ${OTHER_INSTALLS}`
+        `Reinstall onepipeline-api-cli. ${OTHER_INSTALLS}`
     );
   }
 }
