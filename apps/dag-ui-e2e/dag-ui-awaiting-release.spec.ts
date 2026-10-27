@@ -1,3 +1,4 @@
+import { runListSchema } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
 import { graphNodeList, graphNodes } from "./observatory-locators";
@@ -148,6 +149,43 @@ test("a held and a draft node show their own words and the releases each awaits 
     }),
   ).toBeVisible();
   await expect(list.getByText(/blocked by/)).toHaveCount(0);
+});
+
+test("the run's summary counts neither held node as in flight, lost or blocked, and the summary it is read from counts each under its own word", async ({
+  page,
+}) => {
+  const run = runs().awaiting;
+  await page.goto(`${SERVED_UI_URL}/?run=${run}&view=graph`);
+
+  // The rendered summary is the run's row in the navigation: its state, and its
+  // counts in the trimmed row's three words — done, failed and running. The landed node is the one done; the
+  // two held nodes are counted as neither running nor failed, and nothing on the
+  // row reads as blocked.
+  const row = page
+    .getByRole("navigation")
+    .getByRole("button", { name: new RegExp(run) });
+  await expect(row).toBeVisible();
+  // The state word is the driver's liveness, which this host reads for itself;
+  // the counts after it are the run's.
+  await expect(row.getByText(/ · 1 done$/)).toHaveText(/^[a-z-]+ · 1 done$/);
+  await expect(row).not.toContainText(/running|failed|blocked|unknown/);
+
+  // The run summary that row is folded from, from the same origin: each held
+  // node counted under its own word, beside the landed node and the one behind
+  // them — and none counted as blocked, running or unknown.
+  const listed = await page.request.get(
+    `${SERVED_UI_URL}/api/v2/runs?include_settled=true`,
+  );
+  expect(listed.ok()).toBe(true);
+  const summary = runListSchema
+    .parse(await listed.json())
+    .runs.find(({ run_id }) => run_id === run);
+  expect(summary?.node_counts).toEqual({
+    "complete-but-draft": 1,
+    "complete-but-held": 1,
+    done: 1,
+    pending: 1,
+  });
 });
 
 test("a held node's view names every release it awaits in full above its detail, and raises no alarm", async ({
