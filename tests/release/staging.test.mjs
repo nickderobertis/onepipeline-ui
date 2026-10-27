@@ -151,7 +151,6 @@ test("publish builds into different staging trees write their SBOMs to different
     named[0],
     "one tree however its path is spelled",
   );
-  // A platform build writes one per target into its tree, each its own file.
   const perTarget = Object.keys(TARGETS).map((target) =>
     sbomScratch(registriesOut, target),
   );

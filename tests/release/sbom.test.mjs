@@ -38,7 +38,6 @@ import {
 const VERSION = version();
 
 let out;
-// Each target's generated SBOM, by target.
 const sboms = {};
 
 before(() => {
@@ -166,6 +165,10 @@ describe("npm-build.mjs platform, packed by npm, for every release target", () =
       [
         '{"bomFormat":"CycloneDX","metadata":{"component":{"name":"other"}},"components":[],"dependencies":[]}',
         /does not describe onepipeline-ui/,
+      ],
+      [
+        '{"bomFormat":"CycloneDX","metadata":{"component":{"name":"onepipeline-ui","bom-ref":"onepipeline-ui"}},"components":{}}',
+        /has no components\[\] and dependencies\[\] arrays/,
       ],
     ]) {
       const sbom = join(out, "bad.cdx.json");

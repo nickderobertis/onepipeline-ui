@@ -490,6 +490,82 @@ test("the tools the release recipes reach are pinned once for the workflows and 
   }
 });
 
+// release-package.py holds the npm package it packed to the SBOM it was handed,
+// so a packaging script that drops or rewrites the document stops the build
+// rather than staging a package `upload npm` would have to catch. Driven from a
+// checkout whose npm-build.mjs is altered each of those two ways.
+test("release-package.py refuses a packed platform package that drops or changes the SBOM it was given", () => {
+  const scratch = mkdtempSync(join(scratchRoot(), "sbom-contract-"));
+  try {
+    const wheel = join(
+      scratch,
+      "onepipeline_api_cli-1.0.0-py3-none-macosx_11_0_arm64.whl",
+    );
+    execFileSync("python3", [
+      "-c",
+      `import struct,zipfile,sys
+with zipfile.ZipFile(sys.argv[1],'w') as z:
+ z.writestr('onepipeline_api_cli-1.0.0.data/scripts/onepipeline-api',struct.pack('<IIIIIIII',0xfeedfacf,0x0100000c,0,2,0,0,0,0))
+ z.writestr('onepipeline_api_cli-1.0.0.dist-info/METADATA','Name: onepipeline-api-cli\\nVersion: 1.0.0\\n')
+ z.writestr('onepipeline_api_cli-1.0.0.dist-info/WHEEL','Wheel-Version: 1.0\\nTag: py3-none-macosx_11_0_arm64\\n')`,
+      wheel,
+    ]);
+    const source = readFileSync("scripts/npm-build.mjs", "utf8");
+    for (const [name, from, to] of [
+      [
+        "dropped",
+        "files: [`bin/${binName}`, PACKAGED_SBOM],",
+        "files: [`bin/${binName}`],",
+      ],
+      [
+        "changed",
+        "copyFileSync(resolve(sbom), join(pkgDir, PACKAGED_SBOM));",
+        "writeFileSync(join(pkgDir, PACKAGED_SBOM), `${sbomText} `);",
+      ],
+    ]) {
+      assert.ok(source.includes(from), `npm-build.mjs still reads ${from}`);
+      const checkout = join(scratch, name);
+      mkdirSync(join(checkout, "scripts"), { recursive: true });
+      for (const file of ["README.md", "LICENSE", "CHANGELOG.md"])
+        writeFileSync(join(checkout, file), readFileSync(file));
+      for (const script of ["release-package.py", "sbom.mjs"])
+        writeFileSync(
+          join(checkout, "scripts", script),
+          readFileSync(join("scripts", script)),
+        );
+      writeFileSync(
+        join(checkout, "scripts/npm-build.mjs"),
+        source.replace(from, to),
+      );
+      const refused = spawnSync(
+        "python3",
+        [
+          "scripts/release-package.py",
+          "--target",
+          "aarch64-apple-darwin",
+          "--wheel",
+          wheel,
+          "--out",
+          join(checkout, "out"),
+          "--tag",
+          "v1.0.0",
+          "--sbom",
+          sbomFixture(scratch),
+        ],
+        { cwd: checkout, encoding: "utf8" },
+      );
+      assert.equal(refused.status, 1, `${name}: ${refused.stderr}`);
+      assert.match(
+        refused.stderr,
+        /onepipeline-api-cli-darwin-arm64-1\.0\.0\.tgz does not carry exactly the SBOM it was given at sboms\/onepipeline-api\.cyclonedx\.json/,
+      );
+      assert.match(refused.stderr, /ACTION: inspect npm-build\.mjs/);
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 test("Darwin artifact contracts preserve wheel bytes and reject an architecture mismatch without executing them", () => {
   const scratch = mkdtempSync(join(scratchRoot(), "darwin-contract-"));
   try {
