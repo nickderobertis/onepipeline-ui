@@ -15,13 +15,12 @@ use std::fs;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-#[cfg(unix)]
 use std::process::Stdio;
 
-#[cfg(unix)]
 use crate::http;
 #[cfg(unix)]
-use crate::serving::{self, Stop, STOP_DEADLINE};
+use crate::serving::Stop;
+use crate::serving::{self, STOP_DEADLINE};
 
 /// The Rust target triple for the host, as `.github/workflows/release.yml`
 /// spells it. The release matrix builds exactly these four, so a host outside
@@ -121,6 +120,43 @@ fn install(root: &Path, with_platform: bool) -> PathBuf {
     modules.join("onepipeline-api-cli/bin/onepipeline-api.js")
 }
 
+/// The binary the host's platform package carries, where [`install`] put it.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn installed_binary(root: &Path) -> PathBuf {
+    root.join("node_modules")
+        .join(host_package())
+        .join("bin")
+        .join("onepipeline-api")
+}
+
+/// Start the installed command serving an empty runs root on a kernel-chosen
+/// port, the way a host's supervisor would: `node <launcher> serve ...`, its
+/// stdout piped so [`served_at`] can read the address the server announces.
+fn serve_through(launcher: &mut Command, runs: &Path) -> std::process::Child {
+    launcher
+        .arg("serve")
+        .arg("--runs-root")
+        .arg(runs)
+        .args(["--bind", "127.0.0.1:0"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("node is on PATH")
+}
+
+/// The address the server announced, read through the launcher's stdout — so
+/// this also proves the launcher did not swallow it — and answering there.
+fn served_at(launcher: &mut std::process::Child) -> std::net::SocketAddr {
+    let address = serving::address_of(launcher);
+    assert_eq!(
+        http::get(address, "/healthz").status,
+        200,
+        "the launcher started something that does not serve"
+    );
+    address
+}
+
 fn run_launcher(entry: &Path, args: &[&str]) -> std::process::Output {
     Command::new("node")
         .arg(entry)
@@ -202,49 +238,110 @@ impl Drop for Survivors {
     }
 }
 
-/// The npm distribution's shutdown journey: a launcher asked to stop passes it
-/// on, and answers with the status the server chose.
+/// A request the server has begun and cannot finish until this journey says so:
+/// its head and half its body are sent, and the handler is left waiting on the
+/// rest.
 ///
-/// This is the whole of what `scripts/smoke-published.sh` asks a published
-/// artifact to do — serve on a kernel-chosen port, answer `/healthz`, then stop
-/// on a signal and exit `0` — run against the launcher a user actually types.
-/// It is the command a supervisor signals, so it and not the binary is what has
-/// to survive the signal: nothing here can be proven by starting the binary
-/// directly, which is why v0.3.1 shipped exiting 143.
+/// A graceful shutdown waits for in-flight requests, and a terminated process
+/// waits for nothing. So a stop that reached the server *as a stop* leaves it
+/// alive until [`InFlight::finish`] sends the rest, and then it answers; a stop
+/// that ended it outright has dropped the connection long before. That makes
+/// the difference a fact about the server rather than a race against how fast
+/// it can shut down. The request is a malformed host shutdown, which the server
+/// refuses without asking the engine to do anything.
+struct InFlight(std::net::TcpStream);
+
+const IN_FLIGHT_BODY: &[u8] = b"not-json";
+
+/// How long a held request is left before the stop and again after it: far
+/// longer than it takes the server to read a request head, or the launcher to
+/// end a child it means to end.
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(1);
+
+impl InFlight {
+    fn begin(address: std::net::SocketAddr) -> Self {
+        use std::io::Write;
+        let mut stream = std::net::TcpStream::connect(address).expect("connect to the server");
+        stream
+            .set_read_timeout(Some(STOP_DEADLINE))
+            .expect("bound the read");
+        let (sent, _) = IN_FLIGHT_BODY.split_at(IN_FLIGHT_BODY.len() / 2);
+        let head = format!(
+            "POST /api/v2/shutdown HTTP/1.1\r\nHost: {address}\r\n\
+             Content-Type: application/json\r\nContent-Length: {}\r\n\
+             Connection: close\r\n\r\n",
+            IN_FLIGHT_BODY.len()
+        );
+        stream.write_all(head.as_bytes()).expect("send the head");
+        stream.write_all(sent).expect("send half the body");
+        std::thread::sleep(SETTLE);
+        Self(stream)
+    }
+
+    /// Send the rest of the body and return the status line the server
+    /// answered with, or why there was no answer.
+    fn finish(mut self) -> std::io::Result<String> {
+        use std::io::{Read, Write};
+        let (_, rest) = IN_FLIGHT_BODY.split_at(IN_FLIGHT_BODY.len() / 2);
+        self.0.write_all(rest)?;
+        let mut answer = String::new();
+        self.0.read_to_string(&mut answer)?;
+        Ok(answer.lines().next().unwrap_or_default().to_owned())
+    }
+}
+
+/// Hold a request in flight, ask the launcher to stop with `ask`, and prove the
+/// stop reached the server as a request to shut down gracefully: the launcher is
+/// still running a moment later, the held request is still answered, and only
+/// then does the launcher exit, with the server's own `0`.
+fn assert_stops_gracefully(
+    launcher: &mut std::process::Child,
+    address: std::net::SocketAddr,
+    ask: impl FnOnce(&mut std::process::Child),
+) {
+    let held = InFlight::begin(address);
+    ask(launcher);
+    std::thread::sleep(SETTLE);
+    assert!(
+        launcher
+            .try_wait()
+            .expect("the launcher is waitable")
+            .is_none(),
+        "the launcher exited while the server still had a request in flight, so the server \
+         was ended rather than asked to stop"
+    );
+    let answer = held.finish();
+    assert!(
+        matches!(&answer, Ok(status) if status.starts_with("HTTP/1.1 422")),
+        "the server did not finish the request it held when it was asked to stop: {answer:?}"
+    );
+    let status = serving::wait_within(launcher, STOP_DEADLINE);
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "a stopped server exits 0, and the launcher must report that: {status}"
+    );
+}
+
+/// The npm distribution's shutdown journey on Unix, run against the command a
+/// supervisor signals rather than the binary behind it, as
+/// `scripts/smoke-published.sh` runs it against a published artifact. The
+/// launcher execs the binary, so the PID signalled is the server's own.
 #[cfg(unix)]
 fn assert_the_launcher_stops_the_server(stop: Stop) {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
     let runs = tempfile::tempdir().expect("runs root");
-    let mut launcher = Command::new("node")
-        .arg(&entry)
-        .arg("serve")
-        .arg("--runs-root")
-        .arg(runs.path())
-        .args(["--bind", "127.0.0.1:0"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .process_group(0)
-        .spawn()
-        .expect("node is on PATH");
+    let mut launcher = serve_through(
+        Command::new("node").arg(&entry).process_group(0),
+        runs.path(),
+    );
     let mut survivors = Survivors::of(&launcher);
+    let address = served_at(&mut launcher);
 
-    // The server's own startup line, read through the launcher's inherited
-    // stdout — so this also proves the launcher did not swallow it.
-    let address = serving::address_of(&mut launcher);
-    assert_eq!(
-        http::get(address, "/healthz").status,
-        200,
-        "the launcher started something that does not serve"
-    );
-
-    serving::ask_to_stop(&mut launcher, stop);
-    let status = serving::wait_within(&mut launcher, STOP_DEADLINE);
-    assert_eq!(
-        status.code(),
-        Some(0),
-        "a supervisor stopping the launcher must see the server's own clean exit, not a kill: {status}"
-    );
+    assert_stops_gracefully(&mut launcher, address, |launcher| {
+        serving::ask_to_stop(launcher, stop);
+    });
     // And the stop reached the *binary*, not only the shim: a launcher that
     // exits on its own and leaves the server running is a stop that did not
     // happen, however clean its status looks.
@@ -267,6 +364,357 @@ fn the_launcher_stops_the_server_when_a_supervisor_asks() {
 #[test]
 fn the_launcher_stops_the_server_on_a_terminals_interrupt() {
     assert_the_launcher_stops_the_server(Stop::Interrupt);
+}
+
+/// The executable the process `pid` is running, as the kernel reports it.
+#[cfg(target_os = "linux")]
+fn executable_of(pid: u32) -> PathBuf {
+    fs::read_link(format!("/proc/{pid}/exe")).expect("the kernel names the process's executable")
+}
+
+/// The executable the process `pid` is running, as the kernel reports it.
+#[cfg(target_os = "macos")]
+fn executable_of(pid: u32) -> PathBuf {
+    use std::os::unix::ffi::OsStringExt;
+    let mut path = vec![0_u8; usize::try_from(libc::PROC_PIDPATHINFO_MAXSIZE).expect("a size")];
+    // SAFETY: `path` is a writable buffer of exactly the length passed, and
+    // `proc_pidpath` writes at most that many bytes into it.
+    let length = unsafe {
+        libc::proc_pidpath(
+            i32::try_from(pid).expect("a pid fits in an i32"),
+            path.as_mut_ptr().cast(),
+            u32::try_from(path.len()).expect("a size"),
+        )
+    };
+    assert!(length > 0, "the kernel names no executable for pid {pid}");
+    path.truncate(usize::try_from(length).expect("a length"));
+    PathBuf::from(std::ffi::OsString::from_vec(path))
+}
+
+/// The process the installed command starts *is* the server: the PID a caller
+/// holds runs the read API binary, not node.
+///
+/// That is the whole defect a child-process launcher has. A host that records
+/// the PID it started — to stop the server later, or to check whether a process
+/// is its own child — otherwise holds node's, so its signals reach node, its
+/// parent-PID checks see node, and a node killed outright orphans the server.
+/// Checked by the executable the kernel says that PID runs, so a launcher that
+/// merely forwards signals well cannot pass.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn the_installed_command_runs_the_server_in_the_process_the_caller_started() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let entry = install(root.path(), true);
+    let runs = tempfile::tempdir().expect("runs root");
+    let mut launcher = serve_through(
+        Command::new("node").arg(&entry).process_group(0),
+        runs.path(),
+    );
+    let mut survivors = Survivors::of(&launcher);
+    let address = served_at(&mut launcher);
+
+    let running = executable_of(launcher.id());
+    let binary = installed_binary(root.path())
+        .canonicalize()
+        .expect("the platform package carries the binary");
+    assert_eq!(
+        running.canonicalize().unwrap_or(running),
+        binary,
+        "the PID the caller started is not the read API binary, so something sits between \
+         the caller and the server"
+    );
+
+    serving::ask_to_stop(&mut launcher, Stop::Terminate);
+    assert_eq!(
+        serving::wait_within(&mut launcher, STOP_DEADLINE).code(),
+        Some(0)
+    );
+    assert!(std::net::TcpStream::connect(address).is_err());
+    survivors.disarm();
+}
+
+/// Read only once the child has exited: a journey polls `try_wait` against a
+/// deadline it fails on, which `wait_with_output` would block straight past.
+#[cfg(unix)]
+fn read_all(pipe: Option<impl std::io::Read>) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut pipe.expect("the pipe was requested"), &mut bytes)
+        .expect("read the pipe");
+    bytes
+}
+
+/// The name the justfile exports the provisioned old node under.
+#[cfg(unix)]
+const NODE_WITHOUT_EXECVE_ENV: &str = "ONEPIPELINE_UI_NODE_WITHOUT_EXECVE";
+
+/// A real Node release that predates `process.execve`, as
+/// `scripts/ensure-node-without-execve.sh` pins and provisions it into this
+/// clone, held to having no such API.
+///
+/// Read the way `tests/support/sibling.rs` reads the sibling CLI: a value the
+/// justfile exported has to be the path the recipe writes, and that path is the
+/// one used either way, so a node from anywhere else cannot stand in for it.
+#[cfg(unix)]
+fn node_without_execve() -> PathBuf {
+    let justfile = fs::read_to_string(repo_root().join("justfile")).expect("the justfile reads");
+    assert!(
+        justfile.contains(&format!("export {NODE_WITHOUT_EXECVE_ENV} :=")),
+        "the justfile no longer exports {NODE_WITHOUT_EXECVE_ENV}; this journey reads the name \
+         the recipe exports, so one of the two has moved"
+    );
+    let provisioned = repo_root().join(".tools/node-without-execve/bin/node");
+    if let Some(named) = std::env::var_os(NODE_WITHOUT_EXECVE_ENV).filter(|value| !value.is_empty())
+    {
+        assert_eq!(
+            PathBuf::from(&named),
+            provisioned,
+            "{NODE_WITHOUT_EXECVE_ENV} names a path this clone does not provision to"
+        );
+    }
+    let probe = Command::new(&provisioned)
+        .args(["-p", "typeof process.execve"])
+        .output()
+        .unwrap_or_else(|error| {
+            panic!(
+                "no node without process.execve at {} ({error}); run the \
+                 `onepipeline-ui:ensure-node-without-execve` target",
+                provisioned.display()
+            )
+        });
+    assert_eq!(
+        String::from_utf8_lossy(&probe.stdout).trim(),
+        "undefined",
+        "the provisioned node has process.execve, so this journey cannot see the launcher refuse"
+    );
+    provisioned
+}
+
+/// On a node without `process.execve`, the command refuses before anything
+/// starts: a status of `1`, a diagnostic naming the Node it needs, and no
+/// server — never the binary as a child, the process tree this launcher exists
+/// not to build.
+#[cfg(unix)]
+#[test]
+fn on_a_node_without_execve_the_launcher_refuses_and_starts_no_server() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let entry = install(root.path(), true);
+    let runs = tempfile::tempdir().expect("runs root");
+    // Its own group, so a launcher that started a server after all leaves
+    // nothing behind when the deadline below fails the journey.
+    let mut launcher = Command::new(node_without_execve())
+        .arg(&entry)
+        .arg("serve")
+        .arg("--runs-root")
+        .arg(runs.path())
+        .args(["--bind", "127.0.0.1:0"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .expect("node is on PATH");
+    let mut survivors = Survivors::of(&launcher);
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = launcher.try_wait().expect("the launcher is waitable") {
+            break status;
+        }
+        assert!(
+            started.elapsed() < STOP_DEADLINE,
+            "the launcher was still running {STOP_DEADLINE:?} later, so it ran the binary \
+             rather than refusing"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    survivors.disarm();
+    let output = std::process::Output {
+        status,
+        stdout: read_all(launcher.stdout.take()),
+        stderr: read_all(launcher.stderr.take()),
+    };
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    let manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(repo_root().join("npm/onepipeline-api-cli/package.json"))
+            .expect("the launcher's manifest"),
+    )
+    .expect("the launcher's manifest is JSON");
+    let engines = manifest["engines"]["node"]
+        .as_str()
+        .expect("the launcher declares the Node it needs");
+    assert!(
+        stderr.contains("onepipeline-api: failed to launch the onepipeline-api binary")
+            && stderr.contains(&format!("needs Node {engines};"))
+            && stderr.contains("Upgrade Node."),
+        "the refusal does not say what to do about it: {stderr}"
+    );
+    assert!(
+        !stderr.contains("    at "),
+        "the launcher threw instead: {stderr}"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "a server started and announced itself: {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+/// Wait for nothing to be listening on `address` any more, failing the journey
+/// if something still is at the deadline.
+#[cfg(windows)]
+fn assert_stops_serving(address: std::net::SocketAddr, after: &str) {
+    let asked = std::time::Instant::now();
+    while std::net::TcpStream::connect(address).is_ok() {
+        assert!(
+            asked.elapsed() < STOP_DEADLINE,
+            "{after}, and the server it started is still listening on {address} {STOP_DEADLINE:?} later"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// A console of the launcher's own, so a console event sent to it reaches the
+/// launcher and the server it started and never this suite's own console.
+///
+/// Windows has no signals a parent can send: a console's processes are
+/// interrupted by the console. This process attaches to the launcher's console
+/// to raise an event there, swallowing it itself while attached.
+#[cfg(windows)]
+mod console {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn FreeConsole() -> i32;
+        fn AttachConsole(process: u32) -> i32;
+        fn SetConsoleCtrlHandler(
+            handler: Option<unsafe extern "system" fn(u32) -> i32>,
+            add: i32,
+        ) -> i32;
+        fn GenerateConsoleCtrlEvent(event: u32, group: u32) -> i32;
+    }
+
+    /// `CREATE_NEW_CONSOLE`, for `CommandExt::creation_flags`.
+    pub const NEW_CONSOLE: u32 = 0x0000_0010;
+    /// What a terminal's Ctrl-C raises.
+    pub const CTRL_C: u32 = 0;
+    /// What Ctrl-Break raises, and what a console supervisor sends a group it
+    /// wants ended.
+    pub const CTRL_BREAK: u32 = 1;
+    const ATTACH_PARENT_PROCESS: u32 = u32::MAX;
+
+    /// Handles every console event, so this process outlives the ones it raises.
+    unsafe extern "system" fn swallow(_event: u32) -> i32 {
+        1
+    }
+
+    /// Let the processes this one starts handle Ctrl-C. Whether a process
+    /// ignores it is inherited, and a runner that started this suite ignoring
+    /// it would hand that on to the launcher and the server, which would then
+    /// never hear the interrupt these journeys are about.
+    pub fn hand_on_interrupts() {
+        // SAFETY: a null handler with `FALSE` changes only this process's
+        // inherited ignore flag; no function pointer is registered.
+        unsafe {
+            SetConsoleCtrlHandler(None, 0);
+        }
+    }
+
+    /// Raise `event` in the console `process` is attached to.
+    pub fn raise(event: u32, process: u32) {
+        // SAFETY: kernel32 calls on this process's own console state, and
+        // `swallow` is a `'static` function that touches nothing. Each test runs
+        // in a process of its own under nextest, so detaching from this one's
+        // console affects no other test.
+        unsafe {
+            FreeConsole();
+            assert_ne!(
+                AttachConsole(process),
+                0,
+                "could not attach to the launcher's console"
+            );
+            SetConsoleCtrlHandler(Some(swallow), 1);
+            assert_ne!(
+                GenerateConsoleCtrlEvent(event, 0),
+                0,
+                "could not raise console event {event} in the launcher's console"
+            );
+            // Delivered on a thread of each attached process; keep swallowing
+            // it until this one's has run.
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            FreeConsole();
+            SetConsoleCtrlHandler(Some(swallow), 0);
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
+
+/// A console of its own, because a console event reaches every process
+/// attached to the console: raised in this one it would end the test runner
+/// along with the launcher and the server it is meant for.
+#[cfg(windows)]
+fn serve_in_own_console(entry: &Path, runs: &Path) -> (std::process::Child, std::net::SocketAddr) {
+    use std::os::windows::process::CommandExt;
+    console::hand_on_interrupts();
+    let mut launcher = serve_through(
+        Command::new("node")
+            .arg(entry)
+            .creation_flags(console::NEW_CONSOLE),
+        runs,
+    );
+    let address = served_at(&mut launcher);
+    (launcher, address)
+}
+
+/// Where the launcher cannot become the server, a terminal's Ctrl-C still
+/// reaches the server as a Ctrl-C, delivered to it directly by the console both
+/// are attached to rather than passed on by the launcher: it shuts down the way
+/// it does when run directly, finishing the request it holds, and the launcher
+/// exits with the server's own `0` rather than ending it with
+/// `TerminateProcess` — the only "signal" a Windows parent can send a child,
+/// and what a launcher that passed the interrupt on with `child.kill` did.
+#[cfg(windows)]
+#[test]
+fn on_windows_an_interrupt_reaches_the_server_as_an_interrupt() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let entry = install(root.path(), true);
+    let runs = tempfile::tempdir().expect("runs root");
+    let (mut launcher, address) = serve_in_own_console(&entry, runs.path());
+
+    assert_stops_gracefully(&mut launcher, address, |launcher| {
+        console::raise(console::CTRL_C, launcher.id());
+    });
+    assert_stops_serving(address, "the launcher exited on an interrupt");
+}
+
+/// A launcher ended abruptly — `TerminateProcess`, what Task Manager, a CI
+/// runner's timeout and node's own `kill()` do on Windows — leaves no server
+/// behind.
+#[cfg(windows)]
+#[test]
+fn on_windows_a_killed_launcher_leaves_no_server_running() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let entry = install(root.path(), true);
+    let runs = tempfile::tempdir().expect("runs root");
+    let (mut launcher, address) = serve_in_own_console(&entry, runs.path());
+
+    launcher.kill().expect("terminate the launcher");
+    let _ = launcher.wait();
+    assert_stops_serving(address, "the launcher was terminated");
+}
+
+/// A launcher that ends gracefully — Ctrl-Break, which a console supervisor
+/// sends a group it wants ended and which node answers by running its own exit
+/// — leaves no server behind either.
+#[cfg(windows)]
+#[test]
+fn on_windows_a_launcher_ended_by_ctrl_break_leaves_no_server_running() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let entry = install(root.path(), true);
+    let runs = tempfile::tempdir().expect("runs root");
+    let (mut launcher, address) = serve_in_own_console(&entry, runs.path());
+
+    console::raise(console::CTRL_BREAK, launcher.id());
+    let _ = serving::wait_within(&mut launcher, STOP_DEADLINE);
+    assert_stops_serving(address, "the launcher ended on Ctrl-Break");
 }
 
 #[test]

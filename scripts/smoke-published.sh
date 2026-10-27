@@ -150,8 +150,9 @@ fi
 # not the artifact's. Every other leg above — the version, `--help`, the
 # documented `2`, and serving `/healthz` — runs on every platform.
 # And TerminateProcess ends that one process alone: in front of an npm install's
-# binary stand npm's shim and node, and ending them leaves the binary serving,
-# its own file held open, so on Windows the stop takes the whole tree, by the
+# binary stand npm's shim and the node launcher, and ending only the process
+# this script started need not end the binary behind them, its own file held
+# open, so on Windows the stop takes the whole tree, by the
 # Windows process id MSYS keeps for the one this script started.
 # A stop that fails means the server is already gone, which under `set -e` would
 # end the run here with the shell's silence in place of the reason: the process

@@ -6,9 +6,9 @@
 # and differ only in which of those binaries' tests they select, which is declared
 # here once and named by profile from every recipe that runs a tier.
 #
-# The nine filters partition the default collection: `unit` is every binary but the
+# The ten filters partition the default collection: `unit` is every binary but the
 # two the other tiers draw on, and inside `e2e` the `e2e` profile is the complement
-# of the other seven. So a test added anywhere runs under exactly one tier, and one
+# of the other eight. So a test added anywhere runs under exactly one tier, and one
 # added to a new module of the `e2e` binary lands in `e2e` rather than nowhere.
 # `tests/e2e/ensure_baseline.rs` holds the module lists below to each other, and to
 # the recipes that run them.
@@ -25,7 +25,7 @@ final-status-level = "fail"
 # The journeys a user drives — the binary as a subprocess, the server on a real
 # port, the browser view it serves. `onepipeline-ui-e2e:test`.
 [profile.e2e]
-default-filter = "binary(=e2e) and not test(/^(baseline|baseline_reuse|cost|ci_jobs|ci_tier|ensure_baseline|ensure_sibling|judged_tier|linked_report|linux_wheel|nx_affected|packaging|release_probe|release_status|semver_check|workspace_install)::/)"
+default-filter = "binary(=e2e) and not test(/^(baseline|baseline_reuse|cost|ci_jobs|ci_tier|ensure_baseline|ensure_node_without_execve|ensure_sibling|judged_tier|linked_report|linux_wheel|nx_affected|packaging|release_probe|release_status|semver_check|workspace_install)::/)"
 status-level = "fail"
 final-status-level = "fail"
 
@@ -33,7 +33,18 @@ final-status-level = "fail"
 # and CI scripts and the provisioning recipes.
 # `onepipeline-ui-repo-tooling:test`.
 [profile.repo-tooling]
-default-filter = "binary(=packaging) or (binary(=e2e) and test(/^(ci_tier|ensure_baseline|ensure_sibling|linux_wheel|nx_affected|packaging|release_probe|release_status|semver_check|workspace_install)::/))"
+default-filter = "binary(=packaging) or (binary(=e2e) and test(/^(ci_tier|ensure_baseline|ensure_sibling|linux_wheel|nx_affected|release_probe|release_status|semver_check|workspace_install)::/))"
+status-level = "fail"
+final-status-level = "fail"
+
+# The committed npm launcher installed for real and run under a real node, over
+# the compiled binary: the process the caller starts, the stops it is asked to
+# honour, and a node too old to exec, beside the recipe that provisions that
+# node from its own release archive. A tier of its own, keyed on the launcher,
+# its assembly and the binary, so a change to a workflow or a release script does
+# not start servers through it. `onepipeline-ui-npm-launcher:test`.
+[profile.npm-launcher]
+default-filter = "binary(=e2e) and test(/^(ensure_node_without_execve|packaging)::/)"
 status-level = "fail"
 final-status-level = "fail"
 
