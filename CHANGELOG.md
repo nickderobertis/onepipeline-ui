@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.56.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.55.0...v0.56.0) - 2026-10-27
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine whose driver stays responsive however large its journal grows ([#522](https://github.com/nickderobertis/onepipeline-ui/pull/522))
+- *(deps)* link the engine whose plan store carries an id-only anchor into a public projection ([#516](https://github.com/nickderobertis/onepipeline-ui/pull/516))
+
 ## [0.55.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.54.0...v0.55.0) - 2026-10-26
 
 ### Fixed
