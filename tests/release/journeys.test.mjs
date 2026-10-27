@@ -27,6 +27,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { npmLauncher } from "../../scripts/release.mjs";
+import { PACKAGED_SBOM } from "../../scripts/sbom.mjs";
 import {
   fileOf,
   linuxPlan,
@@ -38,6 +39,7 @@ import {
   VERSION,
 } from "./rehearsal.mjs";
 import {
+  assertBinarySbom,
   githubDouble,
   ROOT,
   recipe,
@@ -102,11 +104,14 @@ describe("the build-linux recipe, with publication in its dry-run mode", () => {
     dir = scratch("rehearsal");
     gh = githubDouble(dir, TAG);
     const started = Date.now();
+    // With PyPI switched off, as the release runs now: what the build stages,
+    // and the SBOM its npm package carries, do not depend on the switch.
     rehearsal = recipe("linux", ["all", "--dry-run", "--out", OUT], {
       ...releaseEnv({
         gh,
         registries: { base: "http://127.0.0.1:9", npm: "http://127.0.0.1:9/" },
         home: dir,
+        extra: { PYPI_PUBLISH: "false" },
       }),
     });
     console.log(
@@ -163,16 +168,42 @@ describe("the build-linux recipe, with publication in its dry-run mode", () => {
       summary,
       /dry run — registry verification skipped, nothing was published/,
     );
+    // Every file it staged, the wheel among them; and every one but the wheel
+    // would be published, PyPI being switched off.
     for (const artifact of linuxPlan.artifacts)
-      assert.ok(
+      assert.equal(
         summary.includes(staged(artifact)),
-        `${artifact.file} would be published: ${summary}`,
+        artifact.registry !== "pypi",
+        `${artifact.file} would${artifact.registry === "pypi" ? " not" : ""} be published: ${summary}`,
       );
     assert.deepEqual(
       gh.calls(),
       [],
       "a dry run asks the GitHub Release nothing",
     );
+  });
+
+  test("its npm package carries exactly the SBOM generated for the build, which describes the crates the binary links", () => {
+    assert.equal(rehearsal.status, 0, rehearsal.output);
+    const tarball = staged(fileOf("npm"));
+    assert.deepEqual(
+      execFileSync("tar", ["-tzf", tarball], { encoding: "utf8" })
+        .split("\n")
+        .filter((name) => name.startsWith("package/sboms/")),
+      [`package/${PACKAGED_SBOM}`],
+    );
+    const read = (name) =>
+      execFileSync("tar", ["-xzOf", tarball, `package/${name}`], {
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+      });
+    assert.ok(JSON.parse(read("package.json")).files.includes(PACKAGED_SBOM));
+    const shipped = read(PACKAGED_SBOM);
+    assert.equal(
+      shipped,
+      readFileSync(join(OUT, "sboms", `${TARGET}.cdx.json`), "utf8"),
+    );
+    assertBinarySbom(assert, shipped, `${fileOf("npm").package}'s SBOM`);
   });
 
   test("every file matches v0.37.0's for its target in name, wheel tags and glibc floor", () => {

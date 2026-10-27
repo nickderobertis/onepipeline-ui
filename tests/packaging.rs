@@ -556,7 +556,7 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// comparison of the two above passes for any release both moved to together —
 /// including one whose adopted runs write their plan's home nothing. It moves
 /// with the `onepipeline` pin and [`STORE_RELEASE`], as one change.
-const ENGINE_RELEASE: &str = "0.95.0";
+const ENGINE_RELEASE: &str = "0.95.1";
 
 /// Where the lock must resolve [`ENGINE_RELEASE`] from: crates.io, which serves
 /// the release a crates.io consumer and the sibling CLI `just bootstrap`
@@ -954,6 +954,8 @@ const ARTIFACT_FILES: &[&str] = &[
     // The per-platform packages have no committed manifest: this is the only
     // source of the bytes theirs is written from.
     "scripts/npm-build.mjs",
+    // Where those packages carry the binary's SBOM, which npm-build.mjs imports.
+    "scripts/sbom.mjs",
     // The Linux wheels are compiled by this, in the image and with the
     // prerequisites and maturin invocation it names.
     "scripts/build-linux-wheel.sh",
@@ -2300,12 +2302,20 @@ fn npm_packaging_refuses_bytes_other_than_the_verified_wheel_binary() {
     let scratch = tempfile::tempdir_in(root).expect("package scratch");
     let binary = scratch.path().join("onepipeline-api");
     fs::write(&binary, b"unexpected binary bytes").expect("write changed binary");
+    let sbom = scratch.path().join("onepipeline-api.cdx.json");
+    fs::write(
+        &sbom,
+        r#"{"bomFormat":"CycloneDX","metadata":{"component":{"name":"onepipeline-ui","bom-ref":"onepipeline-ui"}},"components":[],"dependencies":[]}"#,
+    )
+    .expect("write the SBOM");
     let output = npm_build(&[
         "platform",
         "--target",
         "aarch64-apple-darwin",
         "--binary",
         binary.to_str().expect("binary path"),
+        "--sbom",
+        sbom.to_str().expect("SBOM path"),
         "--expect-sha256",
         &"0".repeat(64),
         "--out",

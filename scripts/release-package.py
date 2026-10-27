@@ -4,7 +4,9 @@
 Every release target is compiled once, by maturin, and this takes the binary out
 of that wheel and packs it, byte for byte, into the GitHub Release archive and the
 npm platform package beside the wheel itself. scripts/release.mjs's `build` phase
-runs it for each target its platform job releases.
+runs it for each target its platform job releases. The npm package also carries
+the binary's CycloneDX SBOM, which that phase generates for the target and this
+holds the packed tarball to, byte for byte.
 """
 import argparse
 import hashlib
@@ -35,7 +37,7 @@ class StagingError(ValueError):
 
 class Arguments(argparse.ArgumentParser):
     def error(self, message):
-        super().error(message + "; ACTION: pass a target from scripts/release.mjs, its built wheel, an output directory and the Cargo version tag")
+        super().error(message + "; ACTION: pass a target from scripts/release.mjs, its built wheel, an output directory, the Cargo version tag and the target's CycloneDX SBOM")
 
 
 def run(command, *args, **kwargs):
@@ -47,7 +49,11 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def stage(target: str, wheel: Path, out: Path, tag: str) -> Path:
+# Where the npm platform package carries the SBOM: scripts/sbom.mjs's PACKAGED_SBOM.
+PACKAGED_SBOM = 'sboms/onepipeline-api.cyclonedx.json'
+
+
+def stage(target: str, wheel: Path, out: Path, tag: str, sbom: Path) -> Path:
     if target not in TARGET_ARCHES:
         raise StagingError("unsupported release target", "choose a target declared in scripts/release.mjs")
     if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?", tag):
@@ -120,7 +126,7 @@ def stage(target: str, wheel: Path, out: Path, tag: str) -> Path:
         raise StagingError('archive changed binary bytes', 'inspect the archive assembly; it must copy the final wheel binary without altering bytes')
     (assets / f'{stem}.sha256').write_text(f'{sha(archive_path.read_bytes())}{separator}{archive_path.name}\n', newline='\n')
     npm_out = (out / 'npm').resolve()
-    package = run('node', 'scripts/npm-build.mjs', 'platform', '--target', target, '--binary', str(executable), '--version', version, '--expect-sha256', sha(binary), '--out', str(npm_out))
+    package = run('node', 'scripts/npm-build.mjs', 'platform', '--target', target, '--binary', str(executable), '--version', version, '--expect-sha256', sha(binary), '--sbom', str(sbom.resolve()), '--out', str(npm_out))
     npm_artifacts = (out / 'npm-artifacts').resolve()
     npm_artifacts.mkdir(exist_ok=True)
     packed_info = json.loads(run('npm', 'pack', '--json', '--pack-destination', str(npm_artifacts), cwd=package))
@@ -135,6 +141,9 @@ def stage(target: str, wheel: Path, out: Path, tag: str) -> Path:
     with tarfile.open(npm_artifacts / packed) as archive:
         if sha(archive.extractfile(f'package/bin/{name}').read()) != sha(binary):
             raise StagingError('npm changed binary bytes', 'inspect npm-build.mjs and the packed payload; use the extracted wheel binary unchanged')
+        sboms = [member.name for member in archive.getmembers() if member.isfile() and member.name.startswith('package/sboms/')]
+        if sboms != [f'package/{PACKAGED_SBOM}'] or archive.extractfile(sboms[0]).read() != sbom.read_bytes():
+            raise StagingError(f'{packed} does not carry exactly the SBOM it was given at {PACKAGED_SBOM}: {sboms}', 'inspect npm-build.mjs and the packed payload; the package must ship the generated SBOM unchanged and nothing else under sboms/')
     wheels = out / 'wheels'
     wheels.mkdir(exist_ok=True)
     shutil.copyfile(wheel, wheels / wheel.name)
@@ -149,9 +158,10 @@ if __name__ == '__main__':
     parser.add_argument('--wheel', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--tag', required=True)
+    parser.add_argument('--sbom', type=Path, required=True)
     args = parser.parse_args()
     try:
-        print(stage(args.target, args.wheel, args.out, args.tag))
+        print(stage(args.target, args.wheel, args.out, args.tag, args.sbom))
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError, zipfile.BadZipFile, struct.error, StopIteration) as error:
         print(f"release-package: {error}", file=sys.stderr)
         print(f"ACTION: {getattr(error, 'action', 'check the wheel and output paths, then rebuild the requested target with maturin --features bundled-ui from this tag')}", file=sys.stderr)

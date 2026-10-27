@@ -638,3 +638,12 @@ in append order, so the fixtures write a member's settlement where it fell
 rather than behind later records, and a reader never re-reads a covered record,
 so no journey edits recorded history in place. This changes the engine types
 carried by ApiError::from_engine and the other engine-typed public items.
+0.95.1 is the engine that ships its own CycloneDX SBOM inside each npm platform
+package, so a host installing the engine from npm can read which release of
+each crate it links without PyPI. A host holds this reader and its engine to
+one linked engine, and reads this reader's npm SBOM to prove it, so it can
+adopt that engine only once this crate links it. Its library is 0.95.0's: the
+release changes the engine's own packaging and tests, and no record, route,
+payload, linked dependency or MSRV changes beyond the release `/healthz`
+reports. This changes the engine types carried by ApiError::from_engine and the
+other engine-typed public items.

@@ -24,6 +24,7 @@
       "{workspaceRoot}/scripts/build-linux-wheel.sh",
       "{workspaceRoot}/tests/fixtures/manylinux2014_*-yum.repos.d/*",
       "{workspaceRoot}/scripts/npm-build.mjs",
+      "{workspaceRoot}/scripts/sbom.mjs",
       "{workspaceRoot}/scripts/publish-npm.sh",
       "{workspaceRoot}/scripts/retry-install.sh",
       "{workspaceRoot}/scripts/smoke-published.sh",
@@ -64,7 +65,7 @@
     },
     "test-standalone": {
       "//": "The release journeys that read none of the rehearsal’s files, beside it. Each stages into its own tree and serves its doubles on system-picked ports. Not check.test.mjs, which times waits and failed under the compiles running here.",
-      "command": "node --test --test-concurrency=1 tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/staging.test.mjs tests/release/publication.test.mjs",
+      "command": "node --test --test-concurrency=1 tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/staging.test.mjs tests/release/publication.test.mjs tests/release/sbom.test.mjs",
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
       "inputs": ["releaseMachinery"]
     },

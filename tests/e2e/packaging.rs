@@ -76,6 +76,11 @@ fn npm_build(args: &[&str]) -> PathBuf {
     PathBuf::from(String::from_utf8(output.stdout).expect("utf-8 path").trim())
 }
 
+/// The smallest SBOM `npm-build.mjs platform` packs (`scripts/sbom.mjs`), for
+/// journeys whose subject is the launcher and the binary rather than the
+/// document; `tests/release/sbom.test.mjs` holds the real one.
+const MINIMAL_SBOM: &str = r#"{"bomFormat":"CycloneDX","specVersion":"1.3","metadata":{"component":{"name":"onepipeline-ui","bom-ref":"onepipeline-ui"}},"components":[],"dependencies":[]}"#;
+
 fn copy_tree(from: &Path, to: &Path) {
     fs::create_dir_all(to).expect("create destination");
     for entry in fs::read_dir(from).expect("read source") {
@@ -98,12 +103,16 @@ fn install(root: &Path, with_platform: bool) -> PathBuf {
     copy_tree(&launcher, &modules.join("onepipeline-api-cli"));
     if with_platform {
         let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
+        let sbom = root.join("onepipeline-api.cdx.json");
+        fs::write(&sbom, MINIMAL_SBOM).expect("write the SBOM");
         let platform = npm_build(&[
             "platform",
             "--target",
             host_target(),
             "--binary",
             binary.to_str().expect("utf-8 path"),
+            "--sbom",
+            sbom.to_str().expect("utf-8 path"),
             "--out",
             staging.to_str().expect("utf-8 path"),
         ]);

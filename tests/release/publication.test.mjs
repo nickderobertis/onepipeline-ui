@@ -21,6 +21,7 @@ import { plan } from "../../scripts/release.mjs";
 import { cmdRuns, windowsHost } from "./doubles/windows-host.mjs";
 import {
   githubDouble,
+  platformSbom,
   ROOT,
   recipe,
   registryDoubles,
@@ -87,6 +88,8 @@ before(() => {
       OUT,
       "--tag",
       TAG,
+      "--sbom",
+      platformSbom(OUT, TARGET),
     ],
     { cwd: ROOT, stdio: "pipe" },
   );
@@ -451,6 +454,8 @@ with zipfile.ZipFile(source) as old, zipfile.ZipFile(target, 'w', zipfile.ZIP_DE
         EARLIER,
         "--tag",
         TAG,
+        "--sbom",
+        platformSbom(EARLIER, TARGET),
       ],
       { cwd: ROOT, stdio: "pipe" },
     );
