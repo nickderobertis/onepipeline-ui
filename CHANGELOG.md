@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.58.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.58.0...v0.58.1) - 2026-10-27
+
+### Fixed
+
+- *(npm)* make the npm-installed onepipeline-api command become the read API process instead of running it as a child ([#528](https://github.com/nickderobertis/onepipeline-ui/pull/528))
+
 ## [0.58.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.57.0...v0.58.0) - 2026-10-27
 
 ### Added
