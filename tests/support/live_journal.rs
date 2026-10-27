@@ -9,7 +9,7 @@
 #![allow(dead_code)] // Each test binary uses the part of the harness it needs.
 
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
@@ -59,19 +59,43 @@ pub fn append_many(appends: &[(&Path, &[String])]) {
 }
 
 /// A fixture writer started ahead of its append, for a journey that must
-/// append at a moment of its choosing: the writer has started by the time it is
-/// handed its lines, so the append does not wait on a starting process.
+/// append at a moment of its choosing: the writer has said it is ready — node
+/// started and the writer loaded — by the time it is handed its lines, so the
+/// append does not wait on a starting process.
 pub struct Writer(Child);
 
 impl Writer {
     pub fn start() -> Self {
-        Self(
-            node()
-                .arg("append")
-                .stdin(Stdio::piped())
-                .spawn()
-                .expect("node runs the fixture writer"),
-        )
+        Self::start_many(1).pop().expect("one writer")
+    }
+
+    /// `count` writers, started side by side so their starts overlap, each
+    /// returned once it is ready.
+    pub fn start_many(count: usize) -> Vec<Self> {
+        let started: Vec<Child> = (0..count)
+            .map(|_| {
+                node()
+                    .arg("append")
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .spawn()
+                    .expect("node runs the fixture writer")
+            })
+            .collect();
+        started
+            .into_iter()
+            .map(|mut child| {
+                let mut ready = String::new();
+                BufReader::new(child.stdout.as_mut().expect("a pipe"))
+                    .read_line(&mut ready)
+                    .expect("read the writer's readiness");
+                assert_eq!(
+                    ready, "ready\n",
+                    "the fixture writer exited or said something else before it was ready"
+                );
+                Self(child)
+            })
+            .collect()
     }
 
     /// [`append_lines`], through this writer.
@@ -98,6 +122,15 @@ impl Writer {
             self.0.wait().expect("the writer exits").success(),
             "the fixture writer refused the append"
         );
+    }
+}
+
+/// A writer never handed its lines is ended rather than left to read an empty
+/// input and refuse it.
+impl Drop for Writer {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
     }
 }
 

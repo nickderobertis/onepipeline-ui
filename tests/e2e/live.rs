@@ -1508,6 +1508,11 @@ fn a_stale_telemetry_fold_catches_up_once_the_run_goes_quiet_without_holding_bac
             &interval.as_millis().to_string(),
         )],
     );
+    // A ready writer for every record there is to append, before anything
+    // starts the fold's clock: an append after a fold landed on a change is
+    // measured from that change, so a writer started then would put node's
+    // start back into the fold's age.
+    let mut writers = live_journal::Writer::start_many(held_back.len()).into_iter();
     // The subscription folds the run while it is being made, so the fold is
     // taken between these two instants.
     let opening = Instant::now();
@@ -1540,16 +1545,19 @@ fn a_stale_telemetry_fold_catches_up_once_the_run_goes_quiet_without_holding_bac
         };
     // Let the fold age past the interval, so the change is one the refold has
     // to catch up with, and see it sent without the fold.
-    // The writer is started first, so its own start is not part of that age.
     loop {
-        let writer = live_journal::Writer::start();
+        let writer = writers.next().expect("a ready writer");
         std::thread::sleep(interval.saturating_sub(folded.end.elapsed()));
         if !change(writer, &mut folded, &mut seen) {
             break;
         }
     }
     // A change straight after is sent at once, without the fold either.
-    while change(live_journal::Writer::start(), &mut folded, &mut seen) {}
+    while change(
+        writers.next().expect("a ready writer"),
+        &mut folded,
+        &mut seen,
+    ) {}
     let _ = frame_of(&mut tab, "detail.patch");
     // Then, with nothing appended, the fold catches up within the interval
     // and the detail becomes what a fresh read serves.
