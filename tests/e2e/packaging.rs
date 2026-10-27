@@ -440,6 +440,88 @@ fn the_installed_command_runs_the_server_in_the_process_the_caller_started() {
     survivors.disarm();
 }
 
+/// Everything left in a finished child's pipe.
+#[cfg(unix)]
+fn read_all(pipe: Option<impl std::io::Read>) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut pipe.expect("the pipe was requested"), &mut bytes)
+        .expect("read the pipe");
+    bytes
+}
+
+// llmlint: ignore-block[tests_mirror_real_usage] a node without `process.execve` is any release
+// before 22.15 / 23.11, which the launcher's `engines` refuses but npm only warns about, and
+// running one for real means provisioning a second, end-of-life node on every CI leg for the
+// one branch it selects. The preload removes exactly that capability and nothing else, as
+// `tests/packaging.rs`'s `launcher_on` doubles `process.platform`; the launcher, its
+// resolution and the binary it would have run are the real ones.
+/// On a node without `process.execve`, the command refuses before anything
+/// starts: a status of `1`, a diagnostic naming the Node it needs, and no
+/// server — never the binary as a child, the process tree this launcher exists
+/// not to build.
+#[cfg(unix)]
+#[test]
+fn on_a_node_without_execve_the_launcher_refuses_and_starts_no_server() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let entry = install(root.path(), true);
+    let runs = tempfile::tempdir().expect("runs root");
+    let preload = root.path().join("without-execve.cjs");
+    fs::write(&preload, "delete process.execve;\n").expect("write preload");
+    // Its own group, so a launcher that started a server after all leaves
+    // nothing behind when the deadline below fails the journey.
+    let mut launcher = Command::new("node")
+        .arg("--require")
+        .arg(&preload)
+        .arg(&entry)
+        .arg("serve")
+        .arg("--runs-root")
+        .arg(runs.path())
+        .args(["--bind", "127.0.0.1:0"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .expect("node is on PATH");
+    let mut survivors = Survivors::of(&launcher);
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = launcher.try_wait().expect("the launcher is waitable") {
+            break status;
+        }
+        assert!(
+            started.elapsed() < STOP_DEADLINE,
+            "the launcher was still running {STOP_DEADLINE:?} later, so it ran the binary \
+             rather than refusing"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    survivors.disarm();
+    let output = std::process::Output {
+        status,
+        stdout: read_all(launcher.stdout.take()),
+        stderr: read_all(launcher.stderr.take()),
+    };
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("onepipeline-api: failed to launch the onepipeline-api binary")
+            && stderr.contains("needs Node 22.15 or later")
+            && stderr.contains("Upgrade Node."),
+        "the refusal does not say what to do about it: {stderr}"
+    );
+    assert!(
+        !stderr.contains("    at "),
+        "the launcher threw instead: {stderr}"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "a server started and announced itself: {:?}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+// llmlint: ignore-end[tests_mirror_real_usage]
+
 /// Wait for nothing to be listening on `address` any more, failing the journey
 /// if something still is at the deadline.
 #[cfg(windows)]
