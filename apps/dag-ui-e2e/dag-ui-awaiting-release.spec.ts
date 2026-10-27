@@ -1,4 +1,3 @@
-import { runListSchema } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
 import { graphNodeList, graphNodes } from "./observatory-locators";
@@ -151,16 +150,15 @@ test("a held and a draft node show their own words and the releases each awaits 
   await expect(list.getByText(/blocked by/)).toHaveCount(0);
 });
 
-test("the run's summary counts neither held node as in flight, lost or blocked, and the summary it is read from counts each under its own word", async ({
+test("the run's rendered summaries count each held node under its own word, and never as done, failed or running", async ({
   page,
 }) => {
   const run = runs().awaiting;
   await page.goto(`${SERVED_UI_URL}/?run=${run}&view=graph`);
 
-  // The rendered summary is the run's row in the navigation: its state, and its
-  // counts in the trimmed row's three words — done, failed and running. The landed node is the one done; the
-  // two held nodes are counted as neither running nor failed, and nothing on the
-  // row reads as blocked.
+  // The run's row in the navigation: its state, and the counts the contract gives
+  // a sidebar row — done, failed and running. The landed node is the one done;
+  // neither held node is counted under any of the three.
   const row = page
     .getByRole("navigation")
     .getByRole("button", { name: new RegExp(run) });
@@ -170,22 +168,19 @@ test("the run's summary counts neither held node as in flight, lost or blocked, 
   await expect(row.getByText(/ · 1 done$/)).toHaveText(/^[a-z-]+ · 1 done$/);
   await expect(row).not.toContainText(/running|failed|blocked|unknown/);
 
-  // The run summary that row is folded from, from the same origin: each held
-  // node counted under its own word, beside the landed node and the one behind
-  // them — and none counted as blocked, running or unknown.
-  const listed = await page.request.get(
-    `${SERVED_UI_URL}/api/v2/runs?include_settled=true`,
+  // The Host page's run list renders every word the run's summary counts: each
+  // held node under its own, beside the landed node and the one behind them, in
+  // the vocabulary's order.
+  await page.goto(`${SERVED_UI_URL}/?page=host`);
+  const line = page
+    .getByRole("region", { name: "Runs on the host", exact: true })
+    .getByText(new RegExp(`^${run} · `));
+  await expect(line).toHaveText(
+    new RegExp(
+      `^${run} · [a-z-]+ · 1 pending · 1 done · 1 complete-but-draft · 1 complete-but-held$`,
+    ),
   );
-  expect(listed.ok()).toBe(true);
-  const summary = runListSchema
-    .parse(await listed.json())
-    .runs.find(({ run_id }) => run_id === run);
-  expect(summary?.node_counts).toEqual({
-    "complete-but-draft": 1,
-    "complete-but-held": 1,
-    done: 1,
-    pending: 1,
-  });
+  await expect(line).not.toContainText(/running|unknown|blocked/);
 });
 
 test("a held node's view names every release it awaits in full above its detail, and raises no alarm", async ({

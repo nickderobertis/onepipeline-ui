@@ -2,6 +2,7 @@ import { Button, ScrollArea } from "@oneharness/ui";
 import type { RunList } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import type { ReactNode } from "react";
+import { nodeCountSummary } from "../../lib/run-model";
 import { StructuredFields } from "../../lib/StructuredFields";
 import { useHostReads } from "./useHostReads";
 
@@ -181,7 +182,9 @@ export function HostPage({
           )}
           {list?.runs.map((run) => (
             <p key={run.run_id}>
-              {run.run_id} · {run.state}
+              {[run.run_id, run.state, nodeCountSummary(run.node_counts)]
+                .filter(Boolean)
+                .join(" · ")}
             </p>
           ))}
         </section>
