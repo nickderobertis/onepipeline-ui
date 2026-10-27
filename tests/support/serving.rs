@@ -680,13 +680,13 @@ fn path_without_harnesses() -> std::ffi::OsString {
     .expect("a PATH")
 }
 
-/// Every entry under `dir` and what it looks like — a file's length and
-/// modification time, a directory's modification time — so a journey can say
-/// that nothing wrote into a run between two points.
+/// Every entry under `dir` and what it holds — a file's bytes and modification
+/// time, a directory's modification time (and no bytes) — so a journey can say
+/// that nothing wrote into a run between two points, byte for byte.
 ///
 /// `dir`'s own entry is left out: renaming it out of the root is the one change
 /// a journey makes to it on purpose.
-pub fn tree(dir: &Path) -> std::collections::BTreeMap<std::path::PathBuf, (u64, SystemTime)> {
+pub fn tree(dir: &Path) -> std::collections::BTreeMap<std::path::PathBuf, (Vec<u8>, SystemTime)> {
     let mut found = std::collections::BTreeMap::new();
     let mut pending = vec![dir.to_path_buf()];
     while let Some(next) = pending.pop() {
@@ -697,10 +697,14 @@ pub fn tree(dir: &Path) -> std::collections::BTreeMap<std::path::PathBuf, (u64, 
             if about.is_dir() {
                 pending.push(path.clone());
             }
-            let len = if about.is_dir() { 0 } else { about.len() };
+            let bytes = if about.is_dir() {
+                Vec::new()
+            } else {
+                std::fs::read(&path).expect("a readable file")
+            };
             found.insert(
                 path.strip_prefix(dir).expect("under dir").to_path_buf(),
-                (len, about.modified().expect("a modification time")),
+                (bytes, about.modified().expect("a modification time")),
             );
         }
     }
