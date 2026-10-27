@@ -11,7 +11,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 
 use serde_json::{Map, Value};
 
@@ -55,28 +55,50 @@ pub fn append_lines(journal: &Path, lines: &[String]) {
 /// [`append_lines`] for several journals in one invocation of the writer —
 /// each journal still in one write of its own, in the order given.
 pub fn append_many(appends: &[(&Path, &[String])]) {
-    let mut input = Map::new();
-    for (journal, lines) in appends {
-        input.insert(
-            journal.to_str().expect("a utf-8 journal path").to_owned(),
-            Value::Array(lines.iter().cloned().map(Value::String).collect()),
+    Writer::start().append_many(appends);
+}
+
+/// A fixture writer started ahead of its append, for a journey that must
+/// append at a moment of its choosing: the writer has started by the time it is
+/// handed its lines, so the append does not wait on a starting process.
+pub struct Writer(Child);
+
+impl Writer {
+    pub fn start() -> Self {
+        Self(
+            node()
+                .arg("append")
+                .stdin(Stdio::piped())
+                .spawn()
+                .expect("node runs the fixture writer"),
+        )
+    }
+
+    /// [`append_lines`], through this writer.
+    pub fn append_lines(self, journal: &Path, lines: &[String]) {
+        self.append_many(&[(journal, lines)]);
+    }
+
+    /// [`append_many`], through this writer.
+    pub fn append_many(mut self, appends: &[(&Path, &[String])]) {
+        let mut input = Map::new();
+        for (journal, lines) in appends {
+            input.insert(
+                journal.to_str().expect("a utf-8 journal path").to_owned(),
+                Value::Array(lines.iter().cloned().map(Value::String).collect()),
+            );
+        }
+        self.0
+            .stdin
+            .take()
+            .expect("a pipe")
+            .write_all(Value::Object(input).to_string().as_bytes())
+            .expect("hand the writer its lines");
+        assert!(
+            self.0.wait().expect("the writer exits").success(),
+            "the fixture writer refused the append"
         );
     }
-    let mut child = node()
-        .arg("append")
-        .stdin(Stdio::piped())
-        .spawn()
-        .expect("node runs the fixture writer");
-    child
-        .stdin
-        .take()
-        .expect("a pipe")
-        .write_all(Value::Object(input).to_string().as_bytes())
-        .expect("hand the writer its lines");
-    assert!(
-        child.wait().expect("the writer exits").success(),
-        "the fixture writer refused the append"
-    );
 }
 
 /// Split a journal written whole into the first `keep` records, which stay on

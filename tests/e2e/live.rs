@@ -1504,32 +1504,56 @@ fn a_stale_telemetry_fold_catches_up_once_the_run_goes_quiet_without_holding_bac
         },
         &[(onepipeline_ui::live::TELEMETRY_REFOLD_ENV, "1500")],
     );
+    // The interval the server was started with.
+    let interval = Duration::from_millis(1_500);
+    // The subscription folds the run while it is being made, so the fold is
+    // taken between these two instants.
+    let opening = Instant::now();
     let mut tab = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
-    // Let the fold the subscription opened with age past the interval, so the
-    // first change is the one the refold has to catch up with.
-    std::thread::sleep(Duration::from_millis(1_600));
+    let mut folded = opening..Instant::now();
+    let mut held_back = held_back.into_iter();
     let mut seen = live.refreshes().len();
-    live_journal::append_lines(&live.journal(run), &held_back[..1]);
-    let first = live.next_refresh(run, &mut seen);
-    assert_eq!(first["refresh"], "appended", "{first}");
-    assert!(
-        first["telemetry_fold_ms"].is_null(),
-        "the change waited on a fold: {first}"
-    );
-    // A second change straight after is sent at once, without the fold.
-    live_journal::append_lines(&live.journal(run), &held_back[1..2]);
-    let second = live.next_refresh(run, &mut seen);
-    assert!(
-        second["telemetry_fold_ms"].is_null(),
-        "the change waited on a fold: {second}"
-    );
+    // Append the next held-back record and say whether the refresh it caused
+    // folded. A tick that appended something folds only once the fold is two
+    // intervals behind, so a fold on one is held to the instants that bound
+    // the last fold: a runner slow enough to pass that point is told apart
+    // from a change that waited on a fold it was not yet owed.
+    let mut change =
+        |writer: live_journal::Writer, folded: &mut std::ops::Range<Instant>, seen: &mut usize| {
+            let record = held_back.next().expect("a held-back record left to append");
+            let appending = Instant::now();
+            writer.append_lines(&live.journal(run), &[record]);
+            let refresh = live.next_refresh(run, seen);
+            let read = Instant::now();
+            assert_eq!(refresh["refresh"], "appended", "{refresh}");
+            if refresh["telemetry_fold_ms"].is_null() {
+                return false;
+            }
+            assert!(
+                read - folded.start >= interval * 2,
+                "the change waited on a fold less than two intervals behind: {refresh}"
+            );
+            *folded = appending..read;
+            true
+        };
+    // Let the fold age past the interval, so the change is one the refold has
+    // to catch up with, and see it sent without the fold.
+    // The writer is started first, so its own start is not part of that age.
+    loop {
+        let writer = live_journal::Writer::start();
+        std::thread::sleep(interval.saturating_sub(folded.end.elapsed()));
+        if !change(writer, &mut folded, &mut seen) {
+            break;
+        }
+    }
+    // A change straight after is sent at once, without the fold either.
+    while change(live_journal::Writer::start(), &mut folded, &mut seen) {}
     let _ = frame_of(&mut tab, "detail.patch");
     // Then, with nothing appended, the fold catches up within the interval
     // and the detail becomes what a fresh read serves.
     let deadline = Instant::now() + PATIENCE;
     loop {
-        let refolded = live
-            .refreshes()
+        let refolded = live.refreshes()[seen..]
             .iter()
             .any(|line| !line["telemetry_fold_ms"].is_null() && line["refresh"] == "unchanged");
         if refolded {
