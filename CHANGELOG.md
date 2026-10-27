@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.58.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.57.0...v0.58.0) - 2026-10-27
+
+### Added
+
+- *(deps)* [**breaking**] link the engine that ships its SBOM on npm, and ship the read API's SBOM in every npm platform package ([#524](https://github.com/nickderobertis/onepipeline-ui/pull/524))
+
 ## [0.57.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.56.0...v0.57.0) - 2026-10-27
 
 ### Added
