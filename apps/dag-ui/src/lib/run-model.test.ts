@@ -2,8 +2,11 @@ import { parseRunDetail, parseRunList } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
 import { LIVE_RUN, runDetail, runList } from "../test/fixtures";
 import {
+  awaitedLine,
+  awaitedReleases,
   graphOf,
   graphStateWord,
+  isOwnWorkLost,
   isUnhealthy,
   launchLabel,
   nodeReason,
@@ -108,6 +111,71 @@ describe("node views", () => {
     const publish = nodeViews(bare).find(({ id }) => id === "publish");
     if (publish === undefined) throw new Error("fixture has no publish node");
     expect(nodeReason(publish)).toBe("failed, with no reason recorded");
+  });
+
+  test("reads finished work held for a release as neither lost, blocking nor unhealthy, and names what it awaits", () => {
+    const payload = runDetail(LIVE_RUN);
+    const engine = "github.com/example/engine";
+    const schemas = "github.com/example/schemas";
+    const held = parseRunDetail({
+      ...payload,
+      graph: {
+        ...payload.graph,
+        node_status: {
+          ...payload.graph.node_status,
+          followup: "complete-but-held",
+          publish: "complete-but-draft",
+        },
+        node_results: {
+          ...payload.graph.node_results,
+          followup: {
+            status: "complete-but-held",
+            outcome: "held-for-release",
+            detail: `complete, and held unlanded: awaiting the crate release of ${engine}`,
+            awaiting: [{ producer: engine, target: "crate" }],
+          },
+          publish: {
+            status: "complete-but-draft",
+            outcome: "change-draft",
+            detail:
+              "complete, and held as a draft until its pins can be released",
+            awaiting: [
+              { producer: engine, target: "crate" },
+              { producer: schemas, target: "npm" },
+            ],
+          },
+        },
+      },
+    });
+    const byId = new Map(nodeViews(held).map((view) => [view.id, view]));
+    const view = (id: string) => {
+      const found = byId.get(id);
+      if (found === undefined) throw new Error(`fixture has no ${id}`);
+      return found;
+    };
+    for (const id of ["followup", "publish"]) {
+      const node = view(id);
+      expect(isUnhealthy(node.status)).toBe(false);
+      expect(isOwnWorkLost(node.status)).toBe(false);
+      // No reason line: a reason is what a card says about work going nowhere.
+      expect(nodeReason(node)).toBeUndefined();
+    }
+    expect(awaitedLine(view("followup"))).toBe("awaits crate of engine");
+    // The first entry, and a count of the rest: the line comes from `awaiting`,
+    // since the draft's detail names no release at all.
+    expect(awaitedLine(view("publish"))).toBe("awaits crate of engine +1");
+    expect(awaitedReleases(view("publish"))).toEqual([
+      { producer: engine, target: "crate" },
+      { producer: schemas, target: "npm" },
+    ]);
+    // A node in any other status awaits nothing, whatever its result carries.
+    expect(awaitedLine(view("foundation"))).toBeUndefined();
+    expect(awaitedReleases(view("foundation"))).toEqual([]);
+    // A graph holding only finished work awaiting releases is waiting, as the
+    // engine reads one: neither settled nor failed.
+    expect(
+      graphStateWord({ a: "complete-but-held", b: "complete-but-draft" }),
+    ).toBe("waiting");
   });
 
   test("renders nothing for a detail with no projected graph", () => {

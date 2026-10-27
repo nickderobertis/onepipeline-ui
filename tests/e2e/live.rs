@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use crate::fixture_run;
 use crate::http;
 use crate::live_journal;
-use crate::serving::Serving;
+use crate::serving::{self, Serving};
 
 /// How long a journey waits for the server to act on an append before calling
 /// it stuck: the poll is 50 ms, so this is the loaded-runner margin.
@@ -1219,9 +1219,16 @@ fn frame_of(tab: &mut Tab, kind: &str) -> Value {
 fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pins() {
     let run = fixture_run::RUN_ID;
     let mut held_back = Vec::new();
+    let mut as_written = BTreeMap::new();
     let live = Live::start(|root| {
         fixture_run::write(root, run);
         fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+        // The run this journey removes is settled the way the engine's writer
+        // leaves one — its summary and checkpoint current — so no read the
+        // server makes of it folds and writes them: the journey is then its
+        // only writer, and it has finished before the server starts.
+        fixture_run::summarize(root, fixture_run::OTHER_RUN_ID);
+        as_written = serving::tree(&root.join(fixture_run::OTHER_RUN_ID));
         let journal = root.join(run).join("events.jsonl");
         let total = fs::read_to_string(&journal)
             .expect("a journal")
@@ -1263,10 +1270,27 @@ fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pin
     );
     assert_eq!(raised.status, 200, "{}", raised.body);
     let channel_patch = frame_of(&mut channel, "channel.patch");
-    // A run taken out of the root is removed from every sidebar.
-    fs::remove_dir_all(live.serving.run_dir(fixture_run::OTHER_RUN_ID))
-        .expect("remove the other run");
+    // A run taken out of the root is removed from every sidebar. Nothing has
+    // written into it since the journey did — the sidebar has read it, and
+    // read it without writing — so nothing is left to race its removal, and
+    // after one rename nothing can reach it: the server's poll reports it gone,
+    // never makes it again, and the moved copy is still byte for byte what
+    // the journey wrote when it is deleted.
+    let other = live.serving.run_dir(fixture_run::OTHER_RUN_ID);
+    assert_eq!(
+        serving::tree(&other),
+        as_written,
+        "the server wrote into a run it only read"
+    );
+    let taken_out = live.serving.take_out(fixture_run::OTHER_RUN_ID);
     let removed = frame_of(&mut sidebar, "run.removed");
+    assert!(!other.exists(), "the server made the removed run again");
+    assert_eq!(
+        serving::tree(&taken_out),
+        as_written,
+        "something wrote into the run after it left the root"
+    );
+    fs::remove_dir_all(&taken_out).expect("remove the other run");
     // A cursor the subscription never issued is answered with one reset.
     let (epoch, _) = sidebar.applied.split_once(':').expect("epoch:seq");
     let epoch = epoch.to_owned();
@@ -1340,13 +1364,30 @@ fn the_fixture_writers_receipts_are_the_engines_field_for_field() {
         );
         assert_eq!(raised.status, 200, "{}", raised.body);
     };
-    // A tab on the run, so the server holds it open and traces each refresh.
+    // A tab on the run, so the server holds it open and refreshes it too.
     let _tab = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
     let mut seen = live.refreshes().len();
     // The engine's own writer appends, then the fixture writer, then the engine.
     surface("the engine writes first");
     let engine_first = receipt();
     live.next_refresh(run, &mut seen);
+    // The linked engine's long-lived reader, opened once the engine's write and
+    // its receipt are both on disk and refreshed once the fixture writer has
+    // exited, so it reads the append whole. The server's poller is the same
+    // reader on a tick of its own, and a tick that falls between the fixture's
+    // record and its receipt is a re-read whatever the receipt says — on a
+    // loaded Windows host, where the receipt's rename waits out the server
+    // holding the old one open, it did. So the server's refresh is held to the
+    // receipts rather than to the kind of read it made.
+    let paths = onepipeline::views::RunPaths::under(
+        journal
+            .parent()
+            .and_then(Path::parent)
+            .expect("a runs root"),
+        run,
+    );
+    let mut reader = onepipeline::views::RunView::open(&paths).expect("the engine reads the run");
+    let before = reader.events.len();
     live_journal::append_lines(
         &journal,
         &[activity(
@@ -1358,7 +1399,13 @@ fn the_fixture_writers_receipts_are_the_engines_field_for_field() {
     );
     let fixture = receipt();
     let written = fs::metadata(&journal).expect("a journal").len();
-    let refresh = live.next_refresh(run, &mut seen);
+    live.next_refresh(run, &mut seen);
+    assert_eq!(
+        receipt(),
+        fixture,
+        "the server's refresh left the fixture's receipt as the fixture wrote it"
+    );
+    let refresh = reader.refresh().expect("the engine refreshes the run");
     surface("the engine writes again");
     let engine_second = receipt();
 
@@ -1390,9 +1437,12 @@ fn the_fixture_writers_receipts_are_the_engines_field_for_field() {
         json!(written),
         "the stamp is the journal after the write"
     );
-    // And the server read the fixture's append as an append of one record.
-    assert_eq!(refresh["refresh"], "appended", "{refresh}");
-    assert_eq!(refresh["records"], 1, "{refresh}");
+    // And the engine read the fixture's append as an append of one record.
+    assert_eq!(
+        refresh,
+        onepipeline::views::Refreshed::Appended { first: before }
+    );
+    assert_eq!(reader.events.len(), before + 1);
 }
 
 #[test]

@@ -171,7 +171,17 @@ pub const API_VERSION: u32 = 2;
 /// served whole rather than as its tail. Every other field 25 served is served
 /// with the same meaning; the version moves because a client written against 25
 /// shows a cut prompt as the whole of one and has never seen `description`.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 26;
+///
+/// **Schema 27 is finished work held for a release.** The node-status vocabulary
+/// gains the engine's `complete-but-draft` — a node whose change request is held
+/// as a draft, served `unknown` before — and `complete-but-held`, a node whose
+/// finished branch is kept unlanded on its origin, each served as itself in every
+/// view of a node and in `node_states`. A node's result gains `awaiting`, the
+/// `[{producer, target}]` releases its settlement still awaits, absent where the
+/// record carried none. Every other field 26 served is served with the same
+/// meaning; the version moves because a client written against 26 switches on a
+/// vocabulary that holds neither word.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 27;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///

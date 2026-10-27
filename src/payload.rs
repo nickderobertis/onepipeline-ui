@@ -990,7 +990,7 @@ fn launcher_word(launcher: &str) -> &'static str {
 /// Closed because a client switches on it exhaustively: a word outside this set
 /// has no rendering, and the run's recorded result can hold any word at all.
 // llmlint: ignore-block[invalid_states_unrepresentable] the same filter, over a field the run's own result can hold any word at all in: `status_word` maps what the run wrote onto exactly this set, and `node_counts` still reports the raw word, which an enum would have destroyed.
-const NODE_STATUSES: [&str; 12] = [
+const NODE_STATUSES: [&str; 14] = [
     "pending",
     "ready",
     "running",
@@ -1002,6 +1002,11 @@ const NODE_STATUSES: [&str; 12] = [
     "failed",
     "parked",
     "cancelled",
+    // Finished work waiting on a release before it may land: held as a draft
+    // change request, or held unlanded on its origin where its publication opens
+    // none. The engine's words since 0.95.0, served as themselves.
+    "complete-but-draft",
+    "complete-but-held",
     "unknown",
 ];
 // llmlint: ignore-end[invalid_states_unrepresentable]
@@ -1026,7 +1031,14 @@ fn status_word(status: &str) -> &str {
 fn is_recorded_state(status: &str) -> bool {
     matches!(
         status,
-        "running" | "done" | "failed" | "waiting" | "parked" | "cancelled"
+        "running"
+            | "done"
+            | "failed"
+            | "waiting"
+            | "parked"
+            | "cancelled"
+            | "complete-but-draft"
+            | "complete-but-held"
     )
 }
 
@@ -2530,6 +2542,9 @@ fn node_result(
                     item.insert((*field).to_owned(), value.clone());
                 }
             }
+            if let Some(awaiting) = settled_awaiting(&settled) {
+                item.insert("awaiting".into(), awaiting);
+            }
         }
         if let Some(outcome) = view.whole.state.outcomes.get(&node.id) {
             item.insert("outcome".into(), json!(outcome));
@@ -2619,6 +2634,29 @@ fn node_result(
         }
     }
     Some((node.id.clone(), Value::Object(item)))
+}
+
+/// The releases a settlement says its node still awaits, as the engine's
+/// `node-settled` record lists them: `[{producer, target}]`, one per release, in
+/// its order.
+///
+/// Read off the record rather than out of its `detail`, which is a sentence for a
+/// person and names at most the first. An entry without both a producer and a
+/// target names no release and is not served as one; a record with no readable
+/// entry is served **no `awaiting` at all**, never an empty list that would read
+/// as a node waiting on nothing.
+fn settled_awaiting(settled: &Map<String, Value>) -> Option<Value> {
+    let entries: Vec<Value> = settled
+        .get("awaiting")?
+        .as_array()?
+        .iter()
+        .filter_map(|entry| {
+            let producer = non_empty(entry.get("producer").and_then(Value::as_str))?;
+            let target = non_empty(entry.get("target").and_then(Value::as_str))?;
+            Some(json!({ "producer": producer, "target": target }))
+        })
+        .collect();
+    (!entries.is_empty()).then_some(Value::Array(entries))
 }
 
 fn kind_word_of_step(step: &onepipeline::plan::Step) -> &'static str {
@@ -8065,7 +8103,16 @@ pub fn status(run: &RunId, status: &onepipeline::verbs::RunStatus, rendered: Str
         "run_id": run,
         "liveness": status.view.liveness().as_str(),
         "unread_surfaces": { "count": count, "oldest_seconds": oldest_seconds },
-        "node_status": status.view.state.statuses(),
+        // Each node's word as the engine writes and renders it. Not the status's
+        // own serialization, which lowercases a variant's name and so spells
+        // `complete-but-held` as `completeheld`: a word no other view serves.
+        "node_status": status
+            .view
+            .state
+            .statuses()
+            .into_iter()
+            .map(|(node, status)| (node, status.as_str()))
+            .collect::<BTreeMap<_, _>>(),
         "summary": status.view.summary(),
         "rendered": rendered,
     })

@@ -47,7 +47,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(26), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(27), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -4126,16 +4126,25 @@ fn a_run_directory_the_contract_cannot_name_is_never_announced_on_the_stream() {
 
 #[test]
 fn a_run_that_leaves_the_root_is_reported_removed() {
-    let serving = two_runs();
+    // Settled, so the server's reads of it write nothing (see `Serving::take_out`).
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+        fixture_run::summarize(root, fixture_run::OTHER_RUN_ID);
+    });
     let mut stream = http::stream(serving.address, "/api/v2/events", None);
     assert_eq!(stream.next_frame().expect("a snapshot").event, "snapshot");
 
-    std::fs::remove_dir_all(serving.run_dir(fixture_run::OTHER_RUN_ID))
-        .expect("the run leaves the root");
+    let taken_out = serving.take_out(fixture_run::OTHER_RUN_ID);
 
     let removed = stream.next_frame().expect("the removal is noticed");
     assert_eq!(removed.event, "run.removed");
     assert_eq!(removed.json()["run_id"], json!(fixture_run::OTHER_RUN_ID));
+    assert!(
+        !serving.run_dir(fixture_run::OTHER_RUN_ID).exists(),
+        "the server made the removed run again"
+    );
+    std::fs::remove_dir_all(&taken_out).expect("the moved run is deleted");
 }
 
 #[test]
@@ -6267,6 +6276,159 @@ fn a_node_its_plan_kept_is_served_done_with_its_branch_and_head_and_never_landed
     assert!(!kept_line.contains("landed on its base"), "{kept_line}");
     let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status")).json();
     assert_eq!(status["node_status"][keep], json!("done"), "{status}");
+}
+
+#[test]
+fn finished_work_held_for_a_release_is_served_in_its_own_word_with_what_it_awaits() {
+    let run = fixture_run::AWAITING_RELEASE_RUN_ID;
+    let held = fixture_run::HELD_UNLANDED_NODE_ID;
+    let draft = fixture_run::HELD_DRAFT_NODE_ID;
+    let released = fixture_run::RELEASED_NODE_ID;
+    let serving = Serving::start(|root| {
+        fixture_run::write_awaiting_release(root, run);
+    });
+
+    // The run-summary row counts each under its own word, beside the run's other
+    // nodes, so neither reads as one still running or one the vocabulary lacks.
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let row = listed["runs"]
+        .as_array()
+        .expect("runs")
+        .iter()
+        .find(|row| row["run_id"] == json!(run))
+        .unwrap_or_else(|| panic!("no row for {run}: {listed}"));
+    let counts = &row["node_counts"];
+    assert_eq!(counts["complete-but-held"], json!(1), "{counts}");
+    assert_eq!(counts["complete-but-draft"], json!(1), "{counts}");
+    assert_eq!(counts["done"], json!(1), "{counts}");
+    for absent in ["running", "unknown"] {
+        assert!(counts.get(absent).is_none(), "{absent}: {counts}");
+    }
+
+    let body = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    let graph = &body["graph"];
+    for (node, word) in [(held, "complete-but-held"), (draft, "complete-but-draft")] {
+        assert_eq!(graph["node_status"][node], json!(word), "{graph}");
+        assert_eq!(graph["node_states"][node], json!(word), "{graph}");
+        assert_eq!(
+            graph["node_results"][node]["status"],
+            json!(word),
+            "{graph}"
+        );
+        assert_eq!(
+            graph["node_results"][node]["completed"],
+            json!(false),
+            "finished but not landed is not done: {graph}"
+        );
+        // Nothing to redirect: a held node has no turn in flight.
+        assert!(graph["node_control"].get(node).is_none(), "{graph}");
+    }
+    // The node behind them has not started: neither held node is settled.
+    assert_ne!(
+        graph["node_status"][fixture_run::BEHIND_HELD_NODE_ID],
+        json!("running"),
+        "{graph}"
+    );
+
+    // Each node's awaited releases, entry for entry as its record listed them.
+    let held_result = &graph["node_results"][held];
+    assert_eq!(
+        held_result["outcome"],
+        json!("held-for-release"),
+        "{held_result}"
+    );
+    assert_eq!(
+        held_result["awaiting"],
+        json!([{ "producer": fixture_run::AWAITED_PRODUCER, "target": "crate" }]),
+        "{held_result}"
+    );
+    let detail = held_result["detail"]
+        .as_str()
+        .expect("the settlement's sentence");
+    assert!(detail.starts_with("complete, and held unlanded: awaiting the crate release of"));
+    assert!(detail.contains(fixture_run::HELD_UNLANDED_HEAD), "{detail}");
+    let draft_result = &graph["node_results"][draft];
+    assert_eq!(
+        draft_result["outcome"],
+        json!("change-draft"),
+        "{draft_result}"
+    );
+    assert_eq!(
+        draft_result["awaiting"],
+        json!([
+            { "producer": fixture_run::AWAITED_PRODUCER, "target": "crate" },
+            { "producer": fixture_run::AWAITED_SECOND_PRODUCER, "target": "npm" },
+        ]),
+        "{draft_result}"
+    );
+    // Its sentence names no release, so the entries above came off the record.
+    assert!(
+        !draft_result["detail"]
+            .as_str()
+            .expect("a detail")
+            .contains("github.com"),
+        "{draft_result}"
+    );
+    // A node whose record carries none is served none — absent, never an empty list.
+    let released_result = &graph["node_results"][released];
+    assert_eq!(
+        released_result["status"],
+        json!("done"),
+        "{released_result}"
+    );
+    assert!(
+        released_result.get("awaiting").is_none(),
+        "{released_result}"
+    );
+
+    // The run's per-node telemetry rows carry the same words as the graph.
+    let rows = body["run"]["nodes"].as_array().expect("node rows");
+    for (node, word) in [(held, "complete-but-held"), (draft, "complete-but-draft")] {
+        let row = rows
+            .iter()
+            .find(|row| row["node"] == json!(node))
+            .unwrap_or_else(|| panic!("no row for {node}: {rows:?}"));
+        assert_eq!(row["status"], json!(word), "{row}");
+    }
+
+    // The status read serves the same words.
+    let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status")).json();
+    assert_eq!(
+        status["node_status"][held],
+        json!("complete-but-held"),
+        "{status}"
+    );
+    assert_eq!(
+        status["node_status"][draft],
+        json!("complete-but-draft"),
+        "{status}"
+    );
+}
+
+#[test]
+fn an_awaiting_list_a_producer_wrote_badly_serves_only_the_releases_it_names() {
+    let run = fixture_run::MALFORMED_AWAITING_RUN_ID;
+    let serving = Serving::start(|root| {
+        fixture_run::write_malformed_awaiting(root, run);
+    });
+    let body = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    let results = &body["graph"]["node_results"];
+    // The one entry naming both a producer and a target, and none of the rest:
+    // a blank or missing field, or an entry that is not an object, names no release.
+    assert_eq!(
+        results[fixture_run::MIXED_AWAITING_NODE_ID]["awaiting"],
+        json!([{ "producer": fixture_run::AWAITED_PRODUCER, "target": "crate" }]),
+        "{results}"
+    );
+    // Nothing readable, or no list at all, is served no `awaiting` — never an
+    // empty list, which would read as a node waiting on nothing.
+    for node in [
+        fixture_run::UNREADABLE_AWAITING_NODE_ID,
+        fixture_run::LISTLESS_AWAITING_NODE_ID,
+    ] {
+        assert!(results[node].is_object(), "{node}: {results}");
+        assert!(results[node].get("awaiting").is_none(), "{node}: {results}");
+    }
 }
 
 /// The events of one kind a node's timeline lists, across its spans, oldest first.

@@ -1,5 +1,6 @@
 import { DAG_NODE_STATES } from "@onepipeline-ui/dag-layout";
 import type {
+  AwaitedRelease,
   Failure,
   GraphResultItem,
   GraphState,
@@ -191,8 +192,43 @@ export function nodeReason(node: NodeView): string | undefined {
   if (node.blockers.length > 0 && REASON_IS_A_BLOCKER.has(node.status)) {
     return `blocked by ${node.blockers.join(", ")}`;
   }
-  if (!OWN_WORK_LOST.has(node.status)) return undefined;
+  if (!isOwnWorkLost(node.status)) return undefined;
   return recordedReason(node) ?? `${node.status}, with no reason recorded`;
+}
+
+/**
+ * Statuses for a node that finished its work and waits on a release before it may
+ * land: its change request held as a draft, or its branch held unlanded on its
+ * origin. Neither is lost work nor a blocker: nothing has gone wrong, and what it
+ * waits on is another repository's release, which `awaiting` names.
+ */
+const AWAITS_RELEASE: ReadonlySet<NodeStatus> = new Set<NodeStatus>([
+  "complete-but-draft",
+  "complete-but-held",
+]);
+
+/**
+ * The releases a node holding finished work still awaits, in the order its
+ * settlement listed them — read off the served `awaiting` and never out of the
+ * detail sentence. Empty for every node not in one of those two statuses.
+ */
+export function awaitedReleases(node: NodeView): readonly AwaitedRelease[] {
+  if (!AWAITS_RELEASE.has(node.status)) return [];
+  return node.result?.awaiting ?? [];
+}
+
+/**
+ * The one short line a held node's card carries: the first release it awaits, by
+ * its target and the producer's last path segment, and `+N` for the rest —
+ * `awaits crate of engine +1`. Short enough to show whole on a 200-pixel card; the
+ * node view names every entry in full. `undefined` for a node awaiting nothing.
+ */
+export function awaitedLine(node: NodeView): string | undefined {
+  const [first, ...rest] = awaitedReleases(node);
+  if (first === undefined) return undefined;
+  const producer = first.producer.split("/").filter(Boolean).at(-1);
+  const more = rest.length > 0 ? ` +${rest.length}` : "";
+  return `awaits ${first.target} of ${producer ?? first.producer}${more}`;
 }
 
 /**
@@ -260,11 +296,14 @@ export function nodeCountSummary(
     .join(" · ");
 }
 
+/** Whether a node's own work ran, or was cut short, without finishing. */
+export function isOwnWorkLost(status: NodeStatus): boolean {
+  return OWN_WORK_LOST.has(status);
+}
+
 /** Whether a node's status is one an operator has to act on, banner and all. */
 export function isUnhealthy(status: NodeStatus): boolean {
-  return (
-    OWN_WORK_LOST.has(status) || status === "blocked" || status === "skipped"
-  );
+  return isOwnWorkLost(status) || status === "blocked" || status === "skipped";
 }
 
 export function readString(

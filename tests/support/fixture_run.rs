@@ -5782,6 +5782,271 @@ pub fn write_kept_by_plan(root: &Path, run: &str) -> PathBuf {
     dir
 }
 
+/// The run id of the awaiting-release fixture below.
+pub const AWAITING_RELEASE_RUN_ID: &str = "run-20261026-a3e1c7";
+/// That run's node whose finished branch is held unlanded on its origin.
+pub const HELD_UNLANDED_NODE_ID: &str = "adopt";
+/// That run's node whose change request is held as a draft.
+pub const HELD_DRAFT_NODE_ID: &str = "pin";
+/// That run's node that landed, and so awaits nothing.
+pub const RELEASED_NODE_ID: &str = "engine";
+/// That run's node behind both held ones.
+pub const BEHIND_HELD_NODE_ID: &str = "rollout";
+/// The producer both held nodes await a release of, as its normalized origin.
+pub const AWAITED_PRODUCER: &str = "github.com/example/engine";
+/// The second producer the draft node awaits a release of.
+pub const AWAITED_SECOND_PRODUCER: &str = "github.com/example/schemas";
+/// The commit the held-unlanded node's branch was kept at.
+pub const HELD_UNLANDED_HEAD: &str = "9c41e07d2b5a8f36e1d0c4b7a29f58e3d6c1b0a4";
+
+/// A run with finished work waiting on releases, as `onepipeline` 0.95 writes it.
+///
+/// `adopt` publishes `local-direct`, so its finished branch opens no change
+/// request: it is kept on its origin and settles `complete-but-held` as
+/// `held-for-release`, with the engine's own sentence naming the one release it
+/// awaits. `pin` opened a change request that is held as a draft and settles
+/// `complete-but-draft` as `change-draft`, awaiting two releases from two
+/// producers — and its `detail` names neither, so a reader that served the wait
+/// out of the prose rather than the record's `awaiting` would serve nothing.
+/// `engine` landed and carries no `awaiting`, and `rollout`, behind both held
+/// nodes, has not started, because neither held node is settled.
+pub fn write_awaiting_release(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "launcher": "claude-code",
+            "session": SESSION,
+            "pid": 4254,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = json!({
+        "schema_version": 2,
+        "name": "awaiting-release",
+        "concurrency": 3,
+        "tasks": [
+            { "id": RELEASED_NODE_ID, "persona": "worker", "task": "## What\nShip the engine." },
+            {
+                "id": HELD_UNLANDED_NODE_ID,
+                "persona": "worker",
+                "deps": [RELEASED_NODE_ID],
+                "task": "## What\nAdopt the engine.",
+            },
+            {
+                "id": HELD_DRAFT_NODE_ID,
+                "persona": "worker",
+                "deps": [RELEASED_NODE_ID],
+                "task": "## What\nPin the engine.",
+            },
+            {
+                "id": BEHIND_HELD_NODE_ID,
+                "persona": "worker",
+                "deps": [HELD_UNLANDED_NODE_ID, HELD_DRAFT_NODE_ID],
+                "task": "## What\nRoll it out.",
+            },
+        ],
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    let at = |node: &str| json!({ "run_id": run, "node": node });
+    let dispatched = |node: &str| json!({ "run_id": run, "node": node, "persona": "worker" });
+    let mut journal = Journal::new("a-recording-host-4254");
+    journal
+        .emit(
+            START,
+            "pipeline",
+            "run-started",
+            json!({ "run_id": run }),
+            run_started(plan),
+        )
+        .emit(
+            "2026-08-07T12:00:01.000Z",
+            "pipeline",
+            "node-dispatched",
+            dispatched(RELEASED_NODE_ID),
+            json!({ "attempt": 1 }),
+        )
+        .emit(
+            "2026-08-07T12:00:10.000Z",
+            "pipeline",
+            "node-settled",
+            at(RELEASED_NODE_ID),
+            json!({
+                "status": "done",
+                "outcome": "merged",
+                "branch": "feature/engine",
+                "change_url": "https://example.invalid/changes/21",
+                "landing": "landed",
+            }),
+        );
+    for node in [HELD_UNLANDED_NODE_ID, HELD_DRAFT_NODE_ID] {
+        journal.emit(
+            "2026-08-07T12:00:11.000Z",
+            "pipeline",
+            "node-dispatched",
+            dispatched(node),
+            json!({ "attempt": 1 }),
+        );
+    }
+    journal
+        // Field for field what the engine's lifecycle settles a held-unlanded
+        // node with, its sentence composed as `release::held_detail` composes it.
+        .emit(
+            "2026-08-07T12:00:40.000Z",
+            "pipeline",
+            "node-settled",
+            at(HELD_UNLANDED_NODE_ID),
+            json!({
+                "status": "complete-but-held",
+                "outcome": "held-for-release",
+                "branch": "feature/adopt",
+                "head": HELD_UNLANDED_HEAD,
+                "remote": "pushed",
+                "landing": "unlanded",
+                "detail": format!(
+                    "complete, and held unlanded: awaiting the crate release of \
+                     {AWAITED_PRODUCER}, kept on feature/adopt at {HELD_UNLANDED_HEAD} \
+                     (pushed); it lands when that release arrives"
+                ),
+                "awaiting": [{ "producer": AWAITED_PRODUCER, "target": "crate" }],
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:45.000Z",
+            "pipeline",
+            "node-settled",
+            at(HELD_DRAFT_NODE_ID),
+            json!({
+                "status": "complete-but-draft",
+                "outcome": "change-draft",
+                "branch": "feature/pin",
+                "change_url": "https://example.invalid/changes/22",
+                "detail": "complete, and held as a draft until its pins can be released",
+                "awaiting": [
+                    { "producer": AWAITED_PRODUCER, "target": "crate" },
+                    { "producer": AWAITED_SECOND_PRODUCER, "target": "npm" },
+                ],
+            }),
+        );
+    fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    declare_graph(root, &journal.stream, &["worker"]);
+    dir
+}
+
+/// The run id of the malformed-awaiting fixture below.
+pub const MALFORMED_AWAITING_RUN_ID: &str = "run-20261026-b7d2f4";
+/// That run's node whose `awaiting` mixes one readable entry among unreadable ones.
+pub const MIXED_AWAITING_NODE_ID: &str = "mixed";
+/// That run's node whose `awaiting` holds no readable entry at all.
+pub const UNREADABLE_AWAITING_NODE_ID: &str = "unreadable";
+/// That run's node whose `awaiting` is not a list.
+pub const LISTLESS_AWAITING_NODE_ID: &str = "listless";
+
+/// A run whose held settlements a producer wrote badly: `awaiting` entries missing
+/// a producer or a target, blank, or not objects at all, and one `awaiting` that is
+/// not a list. Each is marked [`departing_by_design`], because the journey is about
+/// what a reader serves of a record no engine should write.
+pub fn write_malformed_awaiting(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "launcher": "claude-code",
+            "session": SESSION,
+            "pid": 4255,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let nodes = [
+        MIXED_AWAITING_NODE_ID,
+        UNREADABLE_AWAITING_NODE_ID,
+        LISTLESS_AWAITING_NODE_ID,
+    ];
+    let plan = json!({
+        "schema_version": 2,
+        "name": "malformed-awaiting",
+        "concurrency": 3,
+        "tasks": nodes
+            .iter()
+            .map(|node| json!({ "id": node, "persona": "worker", "task": "## What\nHold it." }))
+            .collect::<Vec<_>>(),
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    let held = |awaiting: Value| {
+        departing_by_design(
+            "node-settled",
+            json!({
+                "status": "complete-but-held",
+                "outcome": "held-for-release",
+                "branch": "feature/held",
+                "awaiting": awaiting,
+            }),
+        )
+    };
+    let mut journal = Journal::new("a-recording-host-4255");
+    journal.emit(
+        START,
+        "pipeline",
+        "run-started",
+        json!({ "run_id": run }),
+        run_started(plan),
+    );
+    for node in nodes {
+        journal.emit(
+            "2026-08-07T12:00:01.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": node, "persona": "worker" }),
+            json!({ "attempt": 1 }),
+        );
+    }
+    journal
+        .emit(
+            "2026-08-07T12:00:10.000Z",
+            "pipeline",
+            "node-settled",
+            json!({ "run_id": run, "node": MIXED_AWAITING_NODE_ID }),
+            held(json!([
+                { "producer": "", "target": "crate" },
+                { "target": "npm" },
+                "github.com/example/engine",
+                { "producer": AWAITED_PRODUCER, "target": "crate" },
+                { "producer": AWAITED_SECOND_PRODUCER, "target": "   " },
+            ])),
+        )
+        .emit(
+            "2026-08-07T12:00:11.000Z",
+            "pipeline",
+            "node-settled",
+            json!({ "run_id": run, "node": UNREADABLE_AWAITING_NODE_ID }),
+            held(json!([{ "producer": AWAITED_PRODUCER }, 7])),
+        )
+        .emit(
+            "2026-08-07T12:00:12.000Z",
+            "pipeline",
+            "node-settled",
+            json!({ "run_id": run, "node": LISTLESS_AWAITING_NODE_ID }),
+            held(json!({ "producer": AWAITED_PRODUCER, "target": "crate" })),
+        );
+    fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    declare_graph(root, &journal.stream, &["worker"]);
+    dir
+}
+
 /// The run id of the review-draft fixture below.
 pub const REVIEW_DRAFT_RUN_ID: &str = "run-20260807-5d4c3b";
 /// That run's node whose green change was kept a draft for its user's review.

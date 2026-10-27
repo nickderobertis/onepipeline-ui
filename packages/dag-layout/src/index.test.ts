@@ -60,8 +60,43 @@ describe("layoutDag", () => {
       // decision rather than lost — the same reading `cancelled` gets.
       parked: "muted",
       cancelled: "muted",
+      // Finished, and held on a release another repository has to publish: held
+      // work, not lost work, and not done until it lands.
+      "complete-but-draft": "blocked",
+      "complete-but-held": "blocked",
       unknown: "neutral",
     });
+  });
+
+  test("grows a card by the lines it carries and moves the cards below it down", () => {
+    const nodes = (lines?: number): DagNode[] => [
+      { id: "a", label: "A", kind: "agent", state: "done" },
+      {
+        id: "b",
+        label: "B",
+        kind: "agent",
+        state: "complete-but-held",
+        ...(lines === undefined ? {} : { lines }),
+      },
+      { id: "c", label: "C", kind: "agent", state: "complete-but-draft" },
+    ];
+    const edges = [
+      { id: "a-b", source: "a", target: "b" },
+      { id: "a-c", source: "a", target: "c" },
+    ];
+    const plain = layoutDag({ nodes: nodes(), edges });
+    const grown = layoutDag({ nodes: nodes(1), edges });
+    const at = (layout: typeof plain, id: string) =>
+      layout.nodes.find((node) => node.id === id);
+    expect(at(plain, "b")?.height).toBe(72);
+    expect(at(grown, "b")?.height).toBe(92);
+    // The card beneath it in the same column keeps its own gap below the taller one.
+    expect((at(grown, "c")?.y ?? 0) - (at(plain, "c")?.y ?? 0)).toBe(20);
+    // Its edge still meets it at its middle.
+    const edge = grown.edges.find(({ id }) => id === "a-b");
+    expect(edge?.points.at(-1)?.y).toBe((at(grown, "b")?.y ?? 0) + 46);
+    // A column of standard cards sits where it always did.
+    expect(at(grown, "a")).toEqual(at(plain, "a"));
   });
 
   test("rejects cycles at the package boundary", () => {

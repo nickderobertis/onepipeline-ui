@@ -15,6 +15,7 @@ const fixtureSchema = z.object({
     live: z.string().min(1),
     history: z.string().min(1),
     outcomes: z.string().min(1),
+    awaiting: z.string().min(1),
     legacy: z.string().min(1),
     sibling: z.string().min(1),
     unattributed: z.string().min(1),
@@ -29,6 +30,16 @@ const fixtureSchema = z.object({
     supervised: z.string().min(1),
     elsewhere: z.string().min(1),
     adoptable: z.string().min(1),
+  }),
+  /**
+   * The awaiting run's two held nodes and the producers whose releases they
+   * await.
+   */
+  awaiting: z.object({
+    held: z.string().min(1),
+    draft: z.string().min(1),
+    producer: z.string().min(1),
+    second_producer: z.string().min(1),
   }),
   /** The session the served API acts as, which owns the supervised runs. */
   supervisor_session: z.string().min(1),

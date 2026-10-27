@@ -72,6 +72,19 @@ const JUDGED_REPORT = `${JSON.stringify(
 )}\n`;
 /** A settled run holding the outcomes only a recorded result carries. */
 export const OUTCOMES_RUN = "dag-ui-outcomes";
+/**
+ * A run holding finished work for releases, as `onepipeline` 0.95 settles it: one
+ * node held unlanded on its origin, one held as a draft change request.
+ */
+export const AWAITING_RUN = "dag-ui-awaiting";
+/** That run's node whose finished branch is held unlanded: `complete-but-held`. */
+export const HELD_NODE = "adopt";
+/** That run's node whose change request is held as a draft: `complete-but-draft`. */
+export const DRAFT_NODE = "pin";
+/** The producer both held nodes await a release of, as its normalized origin. */
+export const AWAITED_PRODUCER = "github.com/example/engine";
+/** The second producer the draft node awaits, so its card counts one more. */
+export const AWAITED_SECOND_PRODUCER = "github.com/example/schemas";
 /** A run whose result was recorded with no authoritative journal behind it. */
 export const LEGACY_RUN = "dag-ui-legacy";
 /** A second run of the *same* launching session as {@link LIVE_RUN}. */
@@ -668,6 +681,7 @@ function projectOf(runId) {
       return OBSERVATORY_PROJECT;
     case HISTORY_RUN:
     case OUTCOMES_RUN:
+    case AWAITING_RUN:
     case LEGACY_RUN:
       return ARCHIVE_PROJECT;
     // The adoptable run names no project: a driver writes a run's settlement
@@ -2375,6 +2389,123 @@ function writeOutcomesRun(root) {
 }
 
 /**
+ * Finished work held for releases, in the `node-settled` records the engine writes.
+ *
+ * `engine` landed. `adopt` publishes `local-direct`, so its finished branch opens no
+ * change request: it is kept on its origin and settles `complete-but-held` as
+ * `held-for-release`, under the engine's own sentence naming the one release it
+ * awaits. `pin` opened a change request held as a draft, settling
+ * `complete-but-draft` as `change-draft` and awaiting two releases from two
+ * producers — and its `detail` names neither, so whatever the view says it waits on
+ * can only have come from the record's `awaiting`. `rollout`, behind both, has not
+ * started: neither held node is settled.
+ */
+function writeAwaitingRun(root) {
+  const run = { run_id: AWAITING_RUN };
+  const dir = runDir(root, AWAITING_RUN);
+  const task = (verb) =>
+    `## What\n${verb} the engine.\n\n## Acceptance criteria\nThe engine is adopted`;
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Adopt the new engine" },
+    name: "adopt-engine",
+    concurrency: 3,
+    tasks: [
+      { id: "engine", persona: "worker", task: task("Ship") },
+      {
+        id: HELD_NODE,
+        persona: "worker",
+        task: task("Adopt"),
+        deps: ["engine"],
+      },
+      {
+        id: DRAFT_NODE,
+        persona: "worker",
+        task: task("Pin"),
+        deps: ["engine"],
+      },
+      {
+        id: "rollout",
+        persona: "worker",
+        task: task("Roll out"),
+        deps: [HELD_NODE, DRAFT_NODE],
+      },
+    ],
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  writeJson(
+    join(dir, "launch.json"),
+    launch(AWAITING_RUN, "claude-code", CLAUDE_SESSION, stamp(HISTORIC), 4246),
+  );
+  const journal = new Journal(dir, streamOf(AWAITING_RUN), HISTORIC);
+  declareGraph(root, journal.stream, HOST_MEMBERS);
+  journal.emit("pipeline", "run-started", run, { plan });
+  journal
+    .advance(1)
+    .emit(
+      "pipeline",
+      "node-dispatched",
+      { ...run, node: "engine", persona: "worker" },
+      { attempt: 1 },
+    );
+  journal.advance(30).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: "engine" },
+    {
+      status: "done",
+      outcome: "merged",
+      branch: "feature/engine",
+      change_url: "https://example.invalid/changes/21",
+      landing: "landed",
+    },
+  );
+  for (const node of [HELD_NODE, DRAFT_NODE]) {
+    journal
+      .advance(1)
+      .emit(
+        "pipeline",
+        "node-dispatched",
+        { ...run, node, persona: "worker" },
+        { attempt: 1 },
+      );
+  }
+  const head = "9c41e07d2b5a8f36e1d0c4b7a29f58e3d6c1b0a4";
+  journal.advance(40).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: HELD_NODE },
+    {
+      status: "complete-but-held",
+      outcome: "held-for-release",
+      branch: "feature/adopt",
+      head,
+      remote: "pushed",
+      landing: "unlanded",
+      detail: `complete, and held unlanded: awaiting the crate release of ${AWAITED_PRODUCER}, kept on feature/adopt at ${head} (pushed); it lands when that release arrives`,
+      awaiting: [{ producer: AWAITED_PRODUCER, target: "crate" }],
+    },
+  );
+  journal.advance(5).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: DRAFT_NODE },
+    {
+      status: "complete-but-draft",
+      outcome: "change-draft",
+      branch: "feature/pin",
+      change_url: "https://example.invalid/changes/22",
+      detail: "complete, and held as a draft until its pins can be released",
+      awaiting: [
+        { producer: AWAITED_PRODUCER, target: "crate" },
+        { producer: AWAITED_SECOND_PRODUCER, target: "npm" },
+      ],
+    },
+  );
+  journal.write();
+}
+
+/**
  * A recorded result with no authoritative journal behind it at all.
  *
  * This is what a run predating the journal looks like on an operator's machine,
@@ -3179,6 +3310,7 @@ export function buildRuns(
   writeHistoryRun(root);
   writeChannelRun(root);
   writeOutcomesRun(root);
+  writeAwaitingRun(root);
   writeLegacyRun(root);
   writeSiblingRun(root);
   writeNamedRun(root);
@@ -3192,6 +3324,7 @@ export function facts(workspace) {
       live: LIVE_RUN,
       history: HISTORY_RUN,
       outcomes: OUTCOMES_RUN,
+      awaiting: AWAITING_RUN,
       legacy: LEGACY_RUN,
       sibling: SIBLING_RUN,
       unattributed: UNATTRIBUTED_RUN,
@@ -3201,6 +3334,17 @@ export function facts(workspace) {
       supervised: SUPERVISED_RUN,
       elsewhere: ELSEWHERE_RUN,
       adoptable: ADOPTABLE_RUN,
+    },
+    /**
+     * The awaiting run's two held nodes, and the producers whose releases they
+     * await: `held` one release of `producer`, `draft` that and one of
+     * `second_producer`.
+     */
+    awaiting: {
+      held: HELD_NODE,
+      draft: DRAFT_NODE,
+      producer: AWAITED_PRODUCER,
+      second_producer: AWAITED_SECOND_PRODUCER,
     },
     /** The session the served API acts as, which owns the supervised runs. */
     supervisor_session: SUPERVISOR_SESSION,

@@ -649,6 +649,43 @@ describe("boundary failures", () => {
         plan: { ...graph.plan, goal: { id: "ship-it" } },
       }).success,
     ).toBe(false);
+    // Finished work held for a release, in both of the engine's words, and the
+    // releases each awaits beside the settlement's own detail.
+    const held = graphStateSchema.parse({
+      ...graph,
+      node_states: { build: "complete-but-held" },
+      node_status: { build: "complete-but-held" },
+      node_results: {
+        build: {
+          status: "complete-but-held",
+          outcome: "held-for-release",
+          awaiting: [
+            { producer: "github.com/example/engine", target: "crate" },
+          ],
+        },
+      },
+    });
+    expect(held.node_status.build).toBe("complete-but-held");
+    expect(held.node_results.build?.awaiting).toEqual([
+      { producer: "github.com/example/engine", target: "crate" },
+    ]);
+    expect(
+      graphStateSchema.parse({
+        ...graph,
+        node_states: { build: "complete-but-draft" },
+        node_status: { build: "complete-but-draft" },
+      }).node_status.build,
+    ).toBe("complete-but-draft");
+    // An entry naming no producer is no release, and an empty list is a wait on
+    // nothing: the server serves neither, so neither parses.
+    for (const awaiting of [[{ target: "crate" }], []]) {
+      expect(
+        graphStateSchema.safeParse({
+          ...graph,
+          node_results: { build: { awaiting } },
+        }).success,
+      ).toBe(false);
+    }
     // A status the vocabulary does not hold is refused at the parse rather than
     // reaching a renderer that has no meaning for it.
     expect(

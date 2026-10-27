@@ -102,6 +102,10 @@ const DEPENDENCY_DECIDED: StateTone = "warning";
 const NODE_TONE: Readonly<Record<DagNodeState, StateTone | undefined>> = {
   blocked: DEPENDENCY_DECIDED,
   cancelled: LOST,
+  // Finished, and held on a release another repository has to publish: what an
+  // operator looks at is that release, as with a dependency, so it warns.
+  "complete-but-draft": DEPENDENCY_DECIDED,
+  "complete-but-held": DEPENDENCY_DECIDED,
   done: SETTLED,
   failed: LOST,
   "not-completed": LOST,
