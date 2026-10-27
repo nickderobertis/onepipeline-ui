@@ -150,7 +150,7 @@ fn a_path_that_is_not_a_node_binary_is_a_usage_error() {
     let output = provision(Some(&scratch.path().join("node")), None);
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
     assert!(
-        stderr(&output).contains("must name <dir>/bin/node"),
+        stderr(&output).contains("must name <dir>/node-without-execve/bin/node"),
         "{}",
         stderr(&output)
     );
@@ -158,6 +158,33 @@ fn a_path_that_is_not_a_node_binary_is_a_usage_error() {
         std::fs::read_dir(scratch.path()).expect("scratch").count(),
         0,
         "a refused call wrote something"
+    );
+}
+
+/// The install directory is replaced whole, so a node under any other
+/// directory — `/usr/bin/node` names `/usr` — is refused before anything is
+/// fetched or removed.
+#[test]
+fn a_node_outside_its_own_install_directory_is_a_usage_error() {
+    let scratch = tempfile::tempdir().expect("temp dir");
+    let usr = scratch.path().join("usr");
+    std::fs::create_dir_all(usr.join("bin")).expect("a usr directory");
+    std::fs::write(usr.join("keep"), "someone else's").expect("a file to keep");
+    let output = provision(Some(&exported_node(&usr)), None);
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("must name <dir>/node-without-execve/bin/node"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(usr.join("keep")).expect("the file is kept"),
+        "someone else's"
+    );
+    assert_eq!(
+        std::fs::read_dir(scratch.path()).expect("scratch").count(),
+        1,
+        "a refused call wrote beside the directory it named"
     );
 }
 

@@ -52,8 +52,11 @@ if [ $# -ne 1 ] || [ -z "$host" ] || [ -z "$node_bin" ]; then
   echo "ACTION: run 'just _ensure-node-without-execve', which passes both" >&2
   exit 2
 fi
-if [ "$(basename -- "$(dirname -- "$node_bin")")" != "bin" ] || [ "$(basename -- "$node_bin")" != "node" ]; then
-  echo "ensure-node-without-execve: ONEPIPELINE_UI_NODE_WITHOUT_EXECVE must name <dir>/bin/node, not $node_bin" >&2
+# The install directory is replaced whole, so it must be one only this script
+# writes: a path such as /usr/bin/node would otherwise name /usr.
+if [ "$(basename -- "$(dirname -- "$node_bin")")" != "bin" ] || [ "$(basename -- "$node_bin")" != "node" ] ||
+  [ "$(basename -- "$(dirname -- "$(dirname -- "$node_bin")")")" != "node-without-execve" ]; then
+  echo "ensure-node-without-execve: ONEPIPELINE_UI_NODE_WITHOUT_EXECVE must name <dir>/node-without-execve/bin/node, not $node_bin" >&2
   echo "ACTION: run 'just _ensure-node-without-execve', which exports the path this script installs to" >&2
   exit 2
 fi
