@@ -26,6 +26,7 @@ import {
   renameSync,
   statSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
@@ -197,7 +198,10 @@ const appendsSchema = z.record(
  *     node journal.ts receipt JOURNAL…
  *
  * `append` takes one JSON object on standard input naming each journal and the
- * lines to append to it, in order, each journal in one write; `receipt` leaves
+ * lines to append to it, in order, each journal in one write. It first prints
+ * `ready` on a line of standard output, once node has loaded this module and
+ * all it imports, so a caller can start it ahead of the moment it appends and
+ * know the append will not wait on node starting. `receipt` leaves
  * a fresh receipt for journals written whole. The script is recognised as run
  * by comparing URLs, because a Windows path prefixed with `file://` is not how
  * `import.meta.url` spells it, and a command that never ran exits `0`.
@@ -216,6 +220,8 @@ if (
   if (verb === "receipt" && journals.length > 0) {
     for (const journal of journals) receiptFor(journal);
   } else if (verb === "append" && journals.length === 0) {
+    // Written synchronously: on a pipe, node's own stdout is not, everywhere.
+    writeSync(1, "ready\n");
     let input: unknown;
     try {
       input = JSON.parse(readFileSync(0, "utf8"));

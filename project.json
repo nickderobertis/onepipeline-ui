@@ -12,6 +12,10 @@
       "command": "just _ensure-sibling",
       "cache": false
     },
+    "ensure-node-without-execve": {
+      "command": "just _ensure-node-without-execve",
+      "cache": false
+    },
     "ensure-baseline": {
       "//": "After the browser tiers’ server: both build in target’s build directory, which cargo locks per build, and the browser tiers wait on the server (docs/linux-cold-cache-timing.md).",
       "command": "just _ensure-baseline",

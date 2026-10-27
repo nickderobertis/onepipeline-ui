@@ -82,7 +82,7 @@ hold nothing but their `project.json`, and these rules are theirs.
 
 - **A new module of the e2e binary lands in `e2e`** unless its name joins
   another profile's list — the `e2e` filter is the complement of the other
-  seven, so nothing runs nowhere. A new `tests/*.rs` binary lands in `unit`.
+  eight, so nothing runs nowhere. A new `tests/*.rs` binary lands in `unit`.
   `tests/e2e/ensure_baseline.rs` holds the profiles to one partition and every
   tier project to the profile it names.
 - **A tier is reached only through its inputs.** No tier has a project-graph
@@ -93,8 +93,8 @@ hold nothing but their `project.json`, and these rules are theirs.
   `tests/e2e/ensure_baseline.rs` fails until it does. A file a journey only
   needs to *exist* is left out — `ui::` packages the crate, which lists the
   wrapper scripts, but their contents cannot change what it asserts.
-- **The coverage floor is one report over three tiers.** The instrumented
-  tiers (`unit`, `e2e`, `repo-tooling`) leave profiles named for themselves
+- **The coverage floor is one report over four tiers.** The instrumented
+  tiers (`unit`, `e2e`, `repo-tooling`, `npm-launcher`) leave profiles named for themselves
   under `target/llvm-cov-target` — declared as their Nx `outputs`, so a tier
   replayed from the cache restores what the report merges — and
   `onepipeline-ui-coverage:coverage` merges them and holds the union to 95%,
@@ -103,9 +103,19 @@ hold nothing but their `project.json`, and these rules are theirs.
   would run every instrumented tier on each of them. Its inputs are the crate's sources
   and the suite's own files, so a change that cannot move coverage does not
   re-measure it.
+- **The npm launcher tier runs a real old node.** Its refusal journey runs the
+  launcher under Node 22.14.0, the last release before `process.execve`, which
+  `scripts/ensure-node-without-execve.sh` provisions into `.tools/` behind
+  `onepipeline-ui:ensure-node-without-execve`, held to the release's published
+  digest and kept as that archive. Never delete the API from the host's node to
+  stand in for it, and never re-pin a digest an archive failed: a mismatch is a
+  fact about what served it. Windows provisions nothing — it has no exec to refuse.
 - **`test-quick`** is a tier without instrumentation, for the cross-platform
   legs; the baseline, cost, linked-report and ci-jobs tiers have none, for the reasons the justfile's
   `test-quick` recipe gives.
+- **A journey that runs `bash` on Windows sets the child's `PATH`.** With it
+  unset, Rust looks in System32 before `PATH` and starts WSL's `bash.exe`, which
+  on a runner with no distribution exits 1 having run nothing.
 
 ## Which tier a test belongs to
 

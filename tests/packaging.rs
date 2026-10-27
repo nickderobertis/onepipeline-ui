@@ -200,16 +200,21 @@ fn stop_signals_the_server_installs() -> BTreeSet<String> {
     kinds.iter().map(|kind| posix(kind).to_owned()).collect()
 }
 
-/// The launcher forwards exactly the stops the server handles — no fewer, and
-/// no more.
+/// The Windows launcher outlives exactly the stops the server handles — no
+/// fewer, and no more.
 ///
-/// The npm distribution puts a node process in front of the binary, and a
-/// supervisor signals *that*. So the two agree about this set or the command
-/// cannot be stopped cleanly, and they are written in different languages with
-/// no compiler between them — which is how v0.3.1 shipped forwarding none of
-/// them and exiting 143. Neither too few (the stop never reaches the server) nor
-/// too many: listening for a signal replaces node's default disposition, so
-/// forwarding one the binary does not handle leaves the launcher outliving it.
+/// On Windows, which has no exec, the npm launcher keeps a node process in
+/// front of the binary, and a supervisor signals *that*. The launcher does not
+/// pass the stop on: the console delivers the interrupt to the server itself,
+/// and the launcher only listens for it so that node's default disposition does
+/// not end the launcher before the server has shut down and chosen its status.
+/// So the two agree about this set or the command cannot be stopped cleanly,
+/// and they are written in different languages with no compiler between them —
+/// which is how v0.3.1 shipped surviving none of them and exiting 143. Neither
+/// too few (the launcher dies first and reports a status the server never
+/// chose) nor too many: listening for a signal replaces node's default
+/// disposition, so listening for one the binary does not handle leaves the
+/// launcher outliving it.
 ///
 /// `tests/support/serving.rs` is held to the same set, so the journeys in
 /// `tests/e2e/` cannot cover only some of what the server promises.
@@ -222,14 +227,14 @@ fn the_launcher_and_the_journeys_carry_exactly_the_stops_the_server_handles() {
         .split_once("const STOP_SIGNALS = [")
         .expect("the launcher declares no STOP_SIGNALS");
     let (declared, _) = declared.split_once(']').expect("STOP_SIGNALS is unclosed");
-    let forwarded: BTreeSet<String> = declared
+    let listened: BTreeSet<String> = declared
         .split(',')
         .map(|name| name.trim().trim_matches('"').to_owned())
         .filter(|name| !name.is_empty())
         .collect();
     assert_eq!(
-        forwarded, installed,
-        "the npm launcher forwards a different set of stops than src/server.rs handles"
+        listened, installed,
+        "the npm launcher listens for a different set of stops than src/server.rs handles"
     );
 
     let signalled = names_after(
@@ -1251,7 +1256,32 @@ fn the_launcher_refuses_intel_macos_rather_than_looking_for_a_package_no_release
 /// what it prints is which package the launcher resolved and executed.
 #[cfg(unix)]
 fn launcher_resolving_on(platform: &str, arch: &str) -> std::process::Output {
+    launcher_running(
+        platform,
+        arch,
+        "#!/bin/sh\necho \"resolved {package} $*\"\n",
+        0o755,
+    )
+}
+
+/// The committed launcher over stand-in platform packages whose binary is the
+/// script `stand_in` (`{package}` naming the package it sits in) with file mode
+/// `mode`, run as if node reported `platform`/`arch` with `--version`.
+#[cfg(unix)]
+fn launcher_running(platform: &str, arch: &str, stand_in: &str, mode: u32) -> std::process::Output {
     use std::os::unix::fs::PermissionsExt;
+    launcher_over(platform, arch, |path, package| {
+        fs::write(path, stand_in.replace("{package}", package)).expect("stand-in binary");
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("file mode");
+    })
+}
+
+/// The committed launcher over stand-in platform packages whose binary path
+/// `place` fills however a broken install might (or leaves empty), given the
+/// path and the package it sits in, run as if node reported `platform`/`arch`
+/// with `--version`.
+#[cfg(unix)]
+fn launcher_over(platform: &str, arch: &str, place: impl Fn(&Path, &str)) -> std::process::Output {
     let scratch = tempfile::tempdir().expect("temp dir");
     let modules = scratch.path().join("node_modules");
     let manifest: serde_json::Value =
@@ -1269,13 +1299,7 @@ fn launcher_resolving_on(platform: &str, arch: &str) -> std::process::Output {
         )
         .expect("platform manifest");
         for name in [COMMAND.to_owned(), format!("{COMMAND}.exe")] {
-            let path = bin.join(name);
-            fs::write(
-                &path,
-                format!("#!/bin/sh\necho \"resolved {package} $*\"\n"),
-            )
-            .expect("stand-in binary");
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("executable");
+            place(&bin.join(name), package);
         }
     }
     let launcher = modules.join(WRAPPER).join("bin");
@@ -1285,6 +1309,13 @@ fn launcher_resolving_on(platform: &str, arch: &str) -> std::process::Output {
         launcher.join(format!("{COMMAND}.js")),
     )
     .expect("copy the committed launcher");
+    // Beside it the manifest every install carries, which the launcher reads the
+    // Node range it names from.
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("npm/{WRAPPER}/package.json")),
+        modules.join(WRAPPER).join("package.json"),
+    )
+    .expect("copy the committed manifest");
     let preload = scratch.path().join("host.cjs");
     fs::write(
         &preload,
@@ -1334,6 +1365,139 @@ fn the_launcher_resolves_every_released_platform_arm64_linux_included() {
         !launcher.contains("arm64 Linux is no longer supported"),
         "the launcher still refuses arm64 Linux"
     );
+}
+
+/// Where the launcher execs the binary, the binary starts with the signal
+/// dispositions a shell would give it rather than node's.
+///
+/// An ignored signal stays ignored across exec, and node ignores `SIGPIPE` and
+/// `SIGXFSZ` at startup — so without the reset, a server writing to a closed
+/// pipe or past a file-size limit would carry on where run any other way it is
+/// ended. The stand-in sends itself each signal: under the default disposition
+/// that ends it, and what the caller observes is that signal.
+#[cfg(unix)]
+#[test]
+fn the_launcher_execs_the_binary_with_the_default_signal_dispositions() {
+    use std::os::unix::process::ExitStatusExt;
+    for (name, number) in [("PIPE", libc::SIGPIPE), ("XFSZ", libc::SIGXFSZ)] {
+        let run = launcher_running(
+            "linux",
+            "x64",
+            &format!("#!/bin/sh\nulimit -c 0\nkill -{name} $$\necho \"survived SIG{name}\"\n"),
+            0o755,
+        );
+        assert_eq!(
+            run.status.signal(),
+            Some(number),
+            "SIG{name} did not end the binary the launcher ran, so it inherited node's disposition: \
+             {:?}, stdout {:?}",
+            run.status,
+            String::from_utf8_lossy(&run.stdout)
+        );
+    }
+}
+
+/// A platform binary the kernel refuses to run fails the command with a
+/// diagnostic naming the launch and the reinstall, not a node crash report —
+/// on every node `engines` admits, including the 22 and 24 lines, whose
+/// `process.execve` aborts the process on a refusal rather than throwing.
+#[cfg(unix)]
+#[test]
+fn the_launcher_reports_a_binary_it_cannot_run() {
+    let run = launcher_running("linux", "x64", "#!/bin/sh\necho ran\n", 0o644);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert_eq!(run.status.code(), Some(1), "{:?}: {stderr}", run.status);
+    assert!(
+        stderr.contains("onepipeline-api: failed to launch the onepipeline-api binary")
+            && stderr.contains("Reinstall onepipeline-api-cli."),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("needs Node"),
+        "a broken install was blamed on the node running it: {stderr}"
+    );
+    assert!(
+        !stderr.contains("    at "),
+        "the launcher threw instead: {stderr}"
+    );
+    assert!(run.stdout.is_empty(), "the stand-in ran: {:?}", run.stdout);
+}
+
+/// A platform package whose binary is missing, or is a directory, fails the
+/// command with the same diagnostic: the install is broken, whatever node runs
+/// it, and nothing is started.
+#[cfg(unix)]
+#[test]
+fn the_launcher_reports_a_platform_binary_that_is_missing_or_not_a_file() {
+    for (shape, run) in [
+        ("missing", launcher_over("linux", "x64", |_, _| {})),
+        (
+            "a directory",
+            launcher_over("linux", "x64", |path, _| {
+                fs::create_dir(path).expect("a directory where the binary goes");
+            }),
+        ),
+    ] {
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert_eq!(
+            run.status.code(),
+            Some(1),
+            "{shape}: {:?}: {stderr}",
+            run.status
+        );
+        assert!(
+            stderr.contains("onepipeline-api: failed to launch the onepipeline-api binary")
+                && stderr.contains("Reinstall onepipeline-api-cli.")
+                && !stderr.contains("needs Node"),
+            "{shape}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("    at "),
+            "{shape}: the launcher threw instead: {stderr}"
+        );
+    }
+}
+
+/// An executable file the kernel still refuses (`ENOEXEC`: no format it
+/// recognises, as a truncated download or a binary for another architecture
+/// is) reaches `process.execve` itself. A node that throws for that gets the
+/// launcher's diagnostic; one that aborts instead — the 22 and 24 lines — ends
+/// with node's own report naming the errno. On either, nothing runs.
+#[cfg(unix)]
+#[test]
+fn the_launcher_reports_a_binary_only_the_kernel_refuses() {
+    use std::os::unix::fs::PermissionsExt;
+    let throws = std::process::Command::new("node")
+        .args([
+            "-e",
+            "try { process.execve('/') } catch { process.exit(3) }",
+        ])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("node is on PATH")
+        .code()
+        == Some(3);
+    let run = launcher_over("linux", "x64", |path, _| {
+        fs::write(path, "not a program\n").expect("stand-in binary");
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).expect("file mode");
+    });
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(run.stdout.is_empty(), "something ran: {:?}", run.stdout);
+    assert!(stderr.contains("ENOEXEC"), "{:?}: {stderr}", run.status);
+    if throws {
+        assert_eq!(run.status.code(), Some(1), "{:?}: {stderr}", run.status);
+        assert!(
+            stderr.contains("onepipeline-api: failed to launch the onepipeline-api binary")
+                && stderr.contains("Reinstall onepipeline-api-cli.")
+                && !stderr.contains("needs Node"),
+            "{stderr}"
+        );
+    } else {
+        assert!(
+            !run.status.success(),
+            "a refused exec reported success: {stderr}"
+        );
+    }
 }
 
 // A repository that declares no release target releases nothing as far as the

@@ -55,6 +55,12 @@ export ONEPIPELINE_UI_ONEPIPELINE_BIN := justfile_directory() / ".tools/bin/onep
 # installed, so nothing on PATH can be it.
 export ONEPIPELINE_UI_BASELINE_BIN := justfile_directory() / ".tools/bin/onepipeline-api-baseline" + sibling-exe
 
+# A real Node release without `process.execve`, which the npm launcher journeys
+# run the launcher under to see it refuse (`tests/e2e/packaging.rs`). Clone-local
+# for the sibling's reason: a node on PATH is whatever release the host has, and
+# the journey is about one that predates the API.
+export ONEPIPELINE_UI_NODE_WITHOUT_EXECVE := justfile_directory() / ".tools/node-without-execve/bin/node"
+
 # The release tools, pinned once: release-plz.yml installs release-plz at its
 # RELEASE_PLZ_VERSION and release.yml cargo-cyclonedx, which
 # `.github/tests/release.test.mjs` holds to these; the Python ones are installed
@@ -92,6 +98,7 @@ _crate-bootstrap:
     @just _ensure-tool cargo-llvm-cov
     @just _ensure-tool cargo-auditable
     @just _ensure-sibling
+    @just _ensure-node-without-execve
     @cargo fetch --locked --quiet
 
 # The sibling CLI, at the exact version the lock pins its library to. Unlike the
@@ -108,6 +115,14 @@ _crate-bootstrap:
 # never fetched. `scripts/ensure-sibling.sh` holds the order and its refusals.
 _ensure-sibling:
     @bash scripts/ensure-sibling.sh "{{onepipeline-version}}" "{{onepipeline-source}}"
+
+# The pinned node release that predates `process.execve`, for the npm launcher
+# tier, which reaches this through the `onepipeline-ui:ensure-node-without-execve`
+# Nx target. Fetched as that release's own archive, held to its published digest,
+# and refused rather than installed when it is not that release.
+# `scripts/ensure-node-without-execve.sh` holds the pin and its refusals.
+_ensure-node-without-execve:
+    @bash scripts/ensure-node-without-execve.sh "{{os()}}-{{arch()}}"
 
 # The base commit's own server, for the journeys that compare what this build
 # serves against what it served. Behind its own Nx target rather than inside the
@@ -402,7 +417,7 @@ _release-venv:
            && echo "{{python-pins}}" > .tools/release-venv/pins; } \
       || { echo "cannot install {{python-pins}} into .tools/release-venv from .tools/release-wheels — delete .tools/release-wheels/pins and re-run to fetch them again" >&2; exit 1; }
 
-# Every project's own test target — the crate's unit, e2e and repo-tooling tiers,
+# Every project's own test target — the crate's unit, e2e, repo-tooling and npm-launcher tiers,
 # the frontend's components, and the browser journeys — and the coverage floor
 # measured over the crate's tiers together. `test-baseline` and `test-cost` are
 # the two tiers outside this, each for what it needs that nothing else does.
@@ -450,9 +465,9 @@ _crate-format:
 _crate-lint:
     @cargo clippy --all-targets --locked --quiet -- -D warnings
 
-# The crate's suite runs as nine Nx projects, one per tier, each selecting its
+# The crate's suite runs as ten Nx projects, one per tier, each selecting its
 # tests through the nextest profile of the same name in `.config/nextest.toml`,
-# which is where the nine filters are written and partition the suite. Three
+# which is where the ten filters are written and partition the suite. Four
 # tiers are instrumented and run here; the baseline comparison, the cost
 # journeys, the linked-report journeys, the judged tier's journeys and the CI
 # jobs' recipes run through `_tier-test` below, for what each needs that the rest
@@ -478,7 +493,7 @@ _tier-test-covered profile:
       || { echo "the $1 tier failed — the failing tests are listed above" >&2; exit 1; }
 
 # 95% line coverage is the gate; lower it only with a documented reason in
-# AGENTS.md. Measured over the union of the three instrumented tiers, which is the
+# AGENTS.md. Measured over the union of the four instrumented tiers, which is the
 # suite less the baseline and cost tiers — the same lines the floor was measured
 # over when one target ran all three. `onepipeline-ui-coverage:coverage` depends
 # on each tier's `test`, so a tier with nothing new to say replays its profiles
@@ -522,11 +537,11 @@ test-quick:
     @bash scripts/nx.sh run-many -t test-quick
 
 # Drives the compiled binary and the committed npm launcher — never a stub. The
-# whole e2e binary, which six tiers share between them (`.config/nextest.toml`):
+# whole e2e binary, which nine tiers share between them (`.config/nextest.toml`):
 # that split is about what each change pays for and what the gate provisions for
 # which tier, and reaching for the journeys themselves should not have to know it.
 # The whole `e2e` test binary in one run, every tier's share of it together.
-test-e2e: _ensure-baseline
+test-e2e: _ensure-baseline _ensure-node-without-execve
     @cargo nextest run --locked -E 'binary(e2e)' --status-level fail
 
 # Run the CLI, e.g. `just run serve --runs-root ./runs`.
