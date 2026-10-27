@@ -514,12 +514,15 @@ with zipfile.ZipFile(sys.argv[1],'w') as z:
     for (const [name, from, to] of [
       [
         "dropped",
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal excerpt of npm-build.mjs's source, searched for and replaced there, not a template to evaluate here.
         "files: [`bin/${binName}`, PACKAGED_SBOM],",
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal excerpt of npm-build.mjs's source, searched for and replaced there, not a template to evaluate here.
         "files: [`bin/${binName}`],",
       ],
       [
         "changed",
         "copyFileSync(resolve(sbom), join(pkgDir, PACKAGED_SBOM));",
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal excerpt of npm-build.mjs's source, searched for and replaced there, not a template to evaluate here.
         "writeFileSync(join(pkgDir, PACKAGED_SBOM), `${sbomText} `);",
       ],
     ]) {
