@@ -111,7 +111,8 @@ const STOP_SIGNALS = ["SIGTERM", "SIGINT"];
 
 // Windows: run the binary as a child and make it indistinguishable from running
 // it directly — its stdio is this process's, an interrupt reaches it as the same
-// interrupt, it cannot outlive this process, and this process exits with its
+// interrupt (the console delivers it to the child directly; this process passes
+// nothing on), it cannot outlive this process, and this process exits with its
 // status.
 function supervise(binary, args) {
   // Not detached: libuv puts every attached child in a job object that closes

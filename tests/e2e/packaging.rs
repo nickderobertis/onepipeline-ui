@@ -665,11 +665,12 @@ fn serve_in_own_console(entry: &Path, runs: &Path) -> (std::process::Child, std:
 }
 
 /// Where the launcher cannot become the server, a terminal's Ctrl-C still
-/// reaches the server as a Ctrl-C: it shuts down the way it does when run
-/// directly, finishing the request it holds, and the launcher exits with the
-/// server's own `0` rather than ending it with `TerminateProcess` — the only
-/// "signal" a Windows parent can send a child, and what a launcher that passed
-/// the interrupt on with `child.kill` did.
+/// reaches the server as a Ctrl-C, delivered to it directly by the console both
+/// are attached to rather than passed on by the launcher: it shuts down the way
+/// it does when run directly, finishing the request it holds, and the launcher
+/// exits with the server's own `0` rather than ending it with
+/// `TerminateProcess` — the only "signal" a Windows parent can send a child,
+/// and what a launcher that passed the interrupt on with `child.kill` did.
 #[cfg(windows)]
 #[test]
 fn on_windows_an_interrupt_reaches_the_server_as_an_interrupt() {
