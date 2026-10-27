@@ -203,8 +203,9 @@ fn stop_signals_the_server_installs() -> BTreeSet<String> {
 /// The launcher forwards exactly the stops the server handles — no fewer, and
 /// no more.
 ///
-/// The npm distribution puts a node process in front of the binary, and a
-/// supervisor signals *that*. So the two agree about this set or the command
+/// Where the npm launcher cannot exec the binary — Windows, or a node without
+/// `process.execve` — it keeps a node process in front of it, and a supervisor
+/// signals *that*. So the two agree about this set or the command
 /// cannot be stopped cleanly, and they are written in different languages with
 /// no compiler between them — which is how v0.3.1 shipped forwarding none of
 /// them and exiting 143. Neither too few (the stop never reaches the server) nor

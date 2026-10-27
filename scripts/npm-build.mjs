@@ -7,7 +7,7 @@
 // and every other "carry the native binary" npm tool:
 //
 //   onepipeline-api-cli                launcher package (npm/onepipeline-api-cli, committed)
-//     bin/onepipeline-api.js            resolves + execs the platform binary
+//     bin/onepipeline-api.js            resolves + execs the platform binary (a child on Windows)
 //     optionalDependencies:            one per release target in scripts/release.mjs
 //       onepipeline-api-cli-linux-x64
 //       onepipeline-api-cli-linux-arm64

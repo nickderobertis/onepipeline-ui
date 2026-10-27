@@ -7,8 +7,15 @@
 // compile, no download at install time. The platform-specific binary ships
 // inside a per-platform package (`onepipeline-api-cli-<platform>-<arch>`)
 // declared in this package's `optionalDependencies`; npm installs only the one
-// whose `os`/`cpu` match the host, and this shim resolves it and execs it with
+// whose `os`/`cpu` match the host, and this shim resolves it and runs it with
 // the caller's argv.
+//
+// On Linux and macOS it *becomes* the binary (`process.execve`): the PID the
+// caller started is the server's own, so a signal sent to it reaches the server,
+// a parent-PID check sees the server, and there is no node process left to
+// orphan anything. Windows has no exec, so there — and under a node too old to
+// have `process.execve` — the binary runs as a child this process supervises;
+// `supervise` below says how that child is kept faithful.
 //
 // This file is committed source; the version and the optionalDependency
 // versions are stamped from Cargo.toml at publish time by scripts/npm-build.mjs,
@@ -89,17 +96,17 @@ function binaryPath() {
   }
 }
 
-// The signals that mean "stop", and the reason this launcher is asynchronous.
+// The signals that mean "stop", for when the binary runs as a child.
 //
 // A supervisor — systemd, Docker, a CI job, the smoke test in
 // scripts/smoke-published.sh — stops this command by signalling the process it
-// started, which is *this* one and not the binary behind it. Under a synchronous
-// spawn node has no chance to react: the default disposition kills the launcher
-// where it stands, so the caller sees 128+15 instead of the server's own `0`,
-// and the binary is left running with nothing waiting on it. So the child is
-// spawned asynchronously and each of these is passed on to it, which is what
-// lets the server run the graceful shutdown it already has and lets its exit
-// status be the one the caller observes.
+// started. Where this launcher has exec'd that process *is* the binary and none
+// of this applies. Where it supervises a child instead, node's default
+// disposition would kill the launcher where it stands, so the caller would see
+// 128+15 instead of the server's own `0` and the binary would be left running
+// with nothing waiting on it. So each of these is caught and passed on to the
+// child, which lets the server run the graceful shutdown it already has and
+// lets its exit status be the one the caller observes.
 //
 // Exactly the two the server installs handlers for (`StopSignal` in
 // src/server.rs). Listening for a signal replaces node's default disposition, so
@@ -107,31 +114,69 @@ function binaryPath() {
 // launcher that outlives its terminal.
 const STOP_SIGNALS = ["SIGTERM", "SIGINT"];
 
-const child = spawn(binaryPath(), process.argv.slice(2), { stdio: "inherit" });
+// Run the binary as a child and make it indistinguishable from running it
+// directly: its stdio is this process's, a stop reaches it as the same stop,
+// and this process exits with its status.
+function supervise(binary, args) {
+  // Not detached: on Windows libuv puts every attached child in a job object
+  // that closes with this process, so a launcher that is ended — even by
+  // `TerminateProcess` — takes the server with it rather than orphaning it.
+  const child = spawn(binary, args, { stdio: "inherit" });
 
-child.on("error", (error) => {
-  fail(`failed to launch the onepipeline-api binary: ${error.message}`);
-});
+  child.on("error", (error) => {
+    fail(`failed to launch the onepipeline-api binary: ${error.message}`);
+  });
 
-for (const signal of STOP_SIGNALS) {
-  // Passed to the child alone. A terminal's Ctrl-C already reached the whole
-  // foreground group, and the server treats the repeat as the same request to
-  // stop that it is already answering.
-  process.on(signal, () => child.kill(signal));
+  for (const signal of STOP_SIGNALS) {
+    process.on(signal, () => {
+      // On Windows the only interrupt is the console's Ctrl-C, which Windows
+      // already delivered to every process attached to the console, the
+      // server included — and `child.kill` there is `TerminateProcess`, which
+      // would cut short the very shutdown the interrupt started. So it is
+      // caught only to keep this process alive until the server has finished.
+      // Elsewhere the signal reached this process alone (or, from a terminal,
+      // the whole foreground group, where the server treats the repeat as the
+      // same request to stop it is already answering), so it is passed on.
+      if (process.platform !== "win32") {
+        child.kill(signal);
+      }
+    });
+  }
+
+  child.on("exit", (status, signal) => {
+    // Re-raise a terminating signal so callers observe the true cause;
+    // otherwise propagate the child's exit code verbatim — a caller scripting
+    // against the documented exit codes depends on seeing them. The listeners
+    // go first: re-raising into one of them would be this process signalling
+    // itself in a loop instead of dying of what killed the binary.
+    for (const stop of STOP_SIGNALS) {
+      process.removeAllListeners(stop);
+    }
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+    process.exit(status === null ? 1 : status);
+  });
 }
 
-child.on("exit", (status, signal) => {
-  // Re-raise a terminating signal so callers observe the true cause; otherwise
-  // propagate the child's exit code verbatim — a caller scripting against the
-  // documented exit codes depends on seeing them. The listeners go first:
-  // re-raising into one of them would be this process signalling itself in a
-  // loop instead of dying of what killed the binary.
-  for (const stop of STOP_SIGNALS) {
-    process.removeAllListeners(stop);
+const binary = binaryPath();
+const args = process.argv.slice(2);
+
+if (process.platform !== "win32" && typeof process.execve === "function") {
+  // An ignored signal stays ignored across exec, and node ignores these two at
+  // startup. Listening and then not listening hands each back to the default
+  // disposition, so the binary starts with the signals a shell would give it.
+  for (const inherited of ["SIGPIPE", "SIGXFSZ"]) {
+    process.on(inherited, () => {});
+    process.removeAllListeners(inherited);
   }
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
+  // Replaces this process image; it returns only by throwing, when the kernel
+  // refused to run the file.
+  try {
+    process.execve(binary, [binary, ...args], process.env);
+  } catch (error) {
+    fail(`failed to launch the onepipeline-api binary: ${error.message}`);
   }
-  process.exit(status === null ? 1 : status);
-});
+}
+supervise(binary, args);

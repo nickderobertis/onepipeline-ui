@@ -15,13 +15,12 @@ use std::fs;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-#[cfg(unix)]
 use std::process::Stdio;
 
-#[cfg(unix)]
 use crate::http;
 #[cfg(unix)]
-use crate::serving::{self, Stop, STOP_DEADLINE};
+use crate::serving::Stop;
+use crate::serving::{self, STOP_DEADLINE};
 
 /// The Rust target triple for the host, as `.github/workflows/release.yml`
 /// spells it. The release matrix builds exactly these four, so a host outside
@@ -121,6 +120,43 @@ fn install(root: &Path, with_platform: bool) -> PathBuf {
     modules.join("onepipeline-api-cli/bin/onepipeline-api.js")
 }
 
+/// The binary the host's platform package carries, where [`install`] put it.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn installed_binary(root: &Path) -> PathBuf {
+    root.join("node_modules")
+        .join(host_package())
+        .join("bin")
+        .join("onepipeline-api")
+}
+
+/// Start the installed command serving an empty runs root on a kernel-chosen
+/// port, the way a host's supervisor would: `node <launcher> serve ...`, its
+/// stdout piped so [`served_at`] can read the address the server announces.
+fn serve_through(launcher: &mut Command, runs: &Path) -> std::process::Child {
+    launcher
+        .arg("serve")
+        .arg("--runs-root")
+        .arg(runs)
+        .args(["--bind", "127.0.0.1:0"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("node is on PATH")
+}
+
+/// The address the server announced, read through the launcher's stdout — so
+/// this also proves the launcher did not swallow it — and answering there.
+fn served_at(launcher: &mut std::process::Child) -> std::net::SocketAddr {
+    let address = serving::address_of(launcher);
+    assert_eq!(
+        http::get(address, "/healthz").status,
+        200,
+        "the launcher started something that does not serve"
+    );
+    address
+}
+
 fn run_launcher(entry: &Path, args: &[&str]) -> std::process::Output {
     Command::new("node")
         .arg(entry)
@@ -210,33 +246,19 @@ impl Drop for Survivors {
 /// on a signal and exit `0` — run against the launcher a user actually types.
 /// It is the command a supervisor signals, so it and not the binary is what has
 /// to survive the signal: nothing here can be proven by starting the binary
-/// directly, which is why v0.3.1 shipped exiting 143.
+/// directly, which is why v0.3.1 shipped exiting 143. Where the launcher execs
+/// the binary the two are one process; the journey holds either shape.
 #[cfg(unix)]
 fn assert_the_launcher_stops_the_server(stop: Stop) {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
     let runs = tempfile::tempdir().expect("runs root");
-    let mut launcher = Command::new("node")
-        .arg(&entry)
-        .arg("serve")
-        .arg("--runs-root")
-        .arg(runs.path())
-        .args(["--bind", "127.0.0.1:0"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .process_group(0)
-        .spawn()
-        .expect("node is on PATH");
-    let mut survivors = Survivors::of(&launcher);
-
-    // The server's own startup line, read through the launcher's inherited
-    // stdout — so this also proves the launcher did not swallow it.
-    let address = serving::address_of(&mut launcher);
-    assert_eq!(
-        http::get(address, "/healthz").status,
-        200,
-        "the launcher started something that does not serve"
+    let mut launcher = serve_through(
+        Command::new("node").arg(&entry).process_group(0),
+        runs.path(),
     );
+    let mut survivors = Survivors::of(&launcher);
+    let address = served_at(&mut launcher);
 
     serving::ask_to_stop(&mut launcher, stop);
     let status = serving::wait_within(&mut launcher, STOP_DEADLINE);
@@ -267,6 +289,244 @@ fn the_launcher_stops_the_server_when_a_supervisor_asks() {
 #[test]
 fn the_launcher_stops_the_server_on_a_terminals_interrupt() {
     assert_the_launcher_stops_the_server(Stop::Interrupt);
+}
+
+/// The executable the process `pid` is running, as the kernel reports it.
+#[cfg(target_os = "linux")]
+fn executable_of(pid: u32) -> PathBuf {
+    fs::read_link(format!("/proc/{pid}/exe")).expect("the kernel names the process's executable")
+}
+
+/// The executable the process `pid` is running, as the kernel reports it.
+#[cfg(target_os = "macos")]
+fn executable_of(pid: u32) -> PathBuf {
+    use std::os::unix::ffi::OsStringExt;
+    let mut path = vec![0_u8; usize::try_from(libc::PROC_PIDPATHINFO_MAXSIZE).expect("a size")];
+    // SAFETY: `path` is a writable buffer of exactly the length passed, and
+    // `proc_pidpath` writes at most that many bytes into it.
+    let length = unsafe {
+        libc::proc_pidpath(
+            i32::try_from(pid).expect("a pid fits in an i32"),
+            path.as_mut_ptr().cast(),
+            u32::try_from(path.len()).expect("a size"),
+        )
+    };
+    assert!(length > 0, "the kernel names no executable for pid {pid}");
+    path.truncate(usize::try_from(length).expect("a length"));
+    PathBuf::from(std::ffi::OsString::from_vec(path))
+}
+
+/// The process the installed command starts *is* the server: the PID a caller
+/// holds runs the read API binary, not node.
+///
+/// That is the whole defect a child-process launcher has. A host that records
+/// the PID it started — to stop the server later, or to check whether a process
+/// is its own child — otherwise holds node's, so its signals reach node, its
+/// parent-PID checks see node, and a node killed outright orphans the server.
+/// Checked by the executable the kernel says that PID runs, so a launcher that
+/// merely forwards signals well cannot pass.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn the_installed_command_runs_the_server_in_the_process_the_caller_started() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let entry = install(root.path(), true);
+    let runs = tempfile::tempdir().expect("runs root");
+    let mut launcher = serve_through(
+        Command::new("node").arg(&entry).process_group(0),
+        runs.path(),
+    );
+    let mut survivors = Survivors::of(&launcher);
+    let address = served_at(&mut launcher);
+
+    let running = executable_of(launcher.id());
+    let binary = installed_binary(root.path())
+        .canonicalize()
+        .expect("the platform package carries the binary");
+    assert_eq!(
+        running.canonicalize().unwrap_or(running),
+        binary,
+        "the PID the caller started is not the read API binary, so something sits between \
+         the caller and the server"
+    );
+
+    serving::ask_to_stop(&mut launcher, Stop::Terminate);
+    assert_eq!(
+        serving::wait_within(&mut launcher, STOP_DEADLINE).code(),
+        Some(0)
+    );
+    assert!(std::net::TcpStream::connect(address).is_err());
+    survivors.disarm();
+}
+
+/// Wait for nothing to be listening on `address` any more, failing the journey
+/// if something still is at the deadline.
+#[cfg(windows)]
+fn assert_stops_serving(address: std::net::SocketAddr, after: &str) {
+    let asked = std::time::Instant::now();
+    while std::net::TcpStream::connect(address).is_ok() {
+        assert!(
+            asked.elapsed() < STOP_DEADLINE,
+            "{after}, and the server it started is still listening on {address} {STOP_DEADLINE:?} later"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// A console of the launcher's own, so a console event sent to it reaches the
+/// launcher and the server it started and never this suite's own console.
+///
+/// Windows has no signals a parent can send: a console's processes are
+/// interrupted by the console. This process attaches to the launcher's console
+/// to raise a Ctrl-C there, ignoring it itself while attached.
+#[cfg(windows)]
+mod console {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn FreeConsole() -> i32;
+        fn AttachConsole(process: u32) -> i32;
+        fn SetConsoleCtrlHandler(
+            handler: Option<unsafe extern "system" fn(u32) -> i32>,
+            add: i32,
+        ) -> i32;
+        fn GenerateConsoleCtrlEvent(event: u32, group: u32) -> i32;
+    }
+
+    /// `CREATE_NEW_CONSOLE`, for `CommandExt::creation_flags`.
+    pub const NEW_CONSOLE: u32 = 0x0000_0010;
+    const CTRL_C_EVENT: u32 = 0;
+    const ATTACH_PARENT_PROCESS: u32 = u32::MAX;
+
+    /// Let the processes this one starts handle Ctrl-C. Whether a process
+    /// ignores it is inherited, and a runner that started this suite ignoring
+    /// it would hand that on to the launcher and the server, which would then
+    /// never hear the interrupt this journey is about.
+    pub fn hand_on_interrupts() {
+        // SAFETY: a null handler with `FALSE` changes only this process's
+        // inherited ignore flag; no function pointer is registered.
+        unsafe {
+            SetConsoleCtrlHandler(None, 0);
+        }
+    }
+
+    /// Press Ctrl-C in the console `process` is attached to.
+    pub fn interrupt(process: u32) {
+        // SAFETY: plain kernel32 calls on this process's own console state; the
+        // null handler registers no callback. Each test runs in a process of its
+        // own under nextest, so detaching from this one's console affects no
+        // other test.
+        unsafe {
+            FreeConsole();
+            assert_ne!(
+                AttachConsole(process),
+                0,
+                "could not attach to the launcher's console"
+            );
+            SetConsoleCtrlHandler(None, 1);
+            assert_ne!(
+                GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0),
+                0,
+                "could not raise Ctrl-C in the launcher's console"
+            );
+            // Delivered on a thread of each attached process; stay ignoring it
+            // until this one's has run.
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            FreeConsole();
+            AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
+
+/// Start the installed command in a console of its own.
+#[cfg(windows)]
+fn serve_in_own_console(
+    entry: &Path,
+    runs: &Path,
+    preload: Option<&Path>,
+) -> (std::process::Child, std::net::SocketAddr) {
+    use std::os::windows::process::CommandExt;
+    console::hand_on_interrupts();
+    let mut node = Command::new("node");
+    if let Some(preload) = preload {
+        node.arg("--require").arg(preload);
+    }
+    node.arg(entry).creation_flags(console::NEW_CONSOLE);
+    let mut launcher = serve_through(&mut node, runs);
+    let address = served_at(&mut launcher);
+    (launcher, address)
+}
+
+/// Where the launcher cannot become the server, a terminal's Ctrl-C still
+/// reaches the server as a Ctrl-C: it shuts down the way it does when run
+/// directly, and the launcher exits with the server's own `0` rather than
+/// ending it with `TerminateProcess` — the only "signal" a Windows parent can
+/// send a child.
+#[cfg(windows)]
+#[test]
+fn on_windows_an_interrupt_reaches_the_server_as_an_interrupt() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let entry = install(root.path(), true);
+    let runs = tempfile::tempdir().expect("runs root");
+    let (mut launcher, address) = serve_in_own_console(&entry, runs.path(), None);
+
+    console::interrupt(launcher.id());
+    let status = serving::wait_within(&mut launcher, STOP_DEADLINE);
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "an interrupted server shuts down cleanly and exits 0, and the launcher must report that: {status}"
+    );
+    assert_stops_serving(address, "the launcher exited on an interrupt");
+}
+
+/// A launcher ended abruptly — `TerminateProcess`, what Task Manager, a CI
+/// runner's timeout and node's own `kill()` do on Windows — leaves no server
+/// behind.
+#[cfg(windows)]
+#[test]
+fn on_windows_a_killed_launcher_leaves_no_server_running() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let entry = install(root.path(), true);
+    let runs = tempfile::tempdir().expect("runs root");
+    let (mut launcher, address) = serve_in_own_console(&entry, runs.path(), None);
+
+    launcher.kill().expect("terminate the launcher");
+    let _ = launcher.wait();
+    assert_stops_serving(address, "the launcher was terminated");
+}
+
+/// A launcher that ends gracefully — node running its own exit, for a reason
+/// the server never heard — leaves no server behind either.
+///
+/// The reason is supplied by a preload that ends node when a file appears, so
+/// the server is told nothing: what stops it can only be the launcher's exit.
+#[cfg(windows)]
+#[test]
+fn on_windows_a_launcher_that_exits_leaves_no_server_running() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let entry = install(root.path(), true);
+    let runs = tempfile::tempdir().expect("runs root");
+    let marker = root.path().join("exit-now");
+    let preload = root.path().join("exit-on-marker.cjs");
+    fs::write(
+        &preload,
+        format!(
+            "const marker = {marker:?};\n\
+             setInterval(() => {{\n\
+               if (require('node:fs').existsSync(marker)) process.exit(0);\n\
+             }}, 50).unref();\n"
+        ),
+    )
+    .expect("write preload");
+    let (mut launcher, address) = serve_in_own_console(&entry, runs.path(), Some(&preload));
+
+    fs::write(&marker, "").expect("ask the launcher to exit");
+    let status = serving::wait_within(&mut launcher, STOP_DEADLINE);
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "the launcher did not run its own exit: {status}"
+    );
+    assert_stops_serving(address, "the launcher exited");
 }
 
 #[test]
