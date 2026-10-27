@@ -1270,6 +1270,18 @@ fn launcher_resolving_on(platform: &str, arch: &str) -> std::process::Output {
 #[cfg(unix)]
 fn launcher_running(platform: &str, arch: &str, stand_in: &str, mode: u32) -> std::process::Output {
     use std::os::unix::fs::PermissionsExt;
+    launcher_over(platform, arch, |path, package| {
+        fs::write(path, stand_in.replace("{package}", package)).expect("stand-in binary");
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("file mode");
+    })
+}
+
+/// The committed launcher over stand-in platform packages whose binary path
+/// `place` fills however a broken install might (or leaves empty), given the
+/// path and the package it sits in, run as if node reported `platform`/`arch`
+/// with `--version`.
+#[cfg(unix)]
+fn launcher_over(platform: &str, arch: &str, place: impl Fn(&Path, &str)) -> std::process::Output {
     let scratch = tempfile::tempdir().expect("temp dir");
     let modules = scratch.path().join("node_modules");
     let manifest: serde_json::Value =
@@ -1287,9 +1299,7 @@ fn launcher_running(platform: &str, arch: &str, stand_in: &str, mode: u32) -> st
         )
         .expect("platform manifest");
         for name in [COMMAND.to_owned(), format!("{COMMAND}.exe")] {
-            let path = bin.join(name);
-            fs::write(&path, stand_in.replace("{package}", package)).expect("stand-in binary");
-            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).expect("file mode");
+            place(&bin.join(name), package);
         }
     }
     let launcher = modules.join(WRAPPER).join("bin");
@@ -1411,6 +1421,83 @@ fn the_launcher_reports_a_binary_it_cannot_run() {
         "the launcher threw instead: {stderr}"
     );
     assert!(run.stdout.is_empty(), "the stand-in ran: {:?}", run.stdout);
+}
+
+/// A platform package whose binary is missing, or is a directory, fails the
+/// command with the same diagnostic: the install is broken, whatever node runs
+/// it, and nothing is started.
+#[cfg(unix)]
+#[test]
+fn the_launcher_reports_a_platform_binary_that_is_missing_or_not_a_file() {
+    for (shape, run) in [
+        ("missing", launcher_over("linux", "x64", |_, _| {})),
+        (
+            "a directory",
+            launcher_over("linux", "x64", |path, _| {
+                fs::create_dir(path).expect("a directory where the binary goes");
+            }),
+        ),
+    ] {
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert_eq!(
+            run.status.code(),
+            Some(1),
+            "{shape}: {:?}: {stderr}",
+            run.status
+        );
+        assert!(
+            stderr.contains("onepipeline-api: failed to launch the onepipeline-api binary")
+                && stderr.contains("Reinstall onepipeline-api-cli.")
+                && !stderr.contains("needs Node"),
+            "{shape}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("    at "),
+            "{shape}: the launcher threw instead: {stderr}"
+        );
+    }
+}
+
+/// An executable file the kernel still refuses (`ENOEXEC`: no format it
+/// recognises, as a truncated download or a binary for another architecture
+/// is) reaches `process.execve` itself. A node that throws for that gets the
+/// launcher's diagnostic; one that aborts instead — the 22 and 24 lines — ends
+/// with node's own report naming the errno. On either, nothing runs.
+#[cfg(unix)]
+#[test]
+fn the_launcher_reports_a_binary_only_the_kernel_refuses() {
+    use std::os::unix::fs::PermissionsExt;
+    let throws = std::process::Command::new("node")
+        .args([
+            "-e",
+            "try { process.execve('/') } catch { process.exit(3) }",
+        ])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("node is on PATH")
+        .code()
+        == Some(3);
+    let run = launcher_over("linux", "x64", |path, _| {
+        fs::write(path, "not a program\n").expect("stand-in binary");
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).expect("file mode");
+    });
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(run.stdout.is_empty(), "something ran: {:?}", run.stdout);
+    assert!(stderr.contains("ENOEXEC"), "{:?}: {stderr}", run.status);
+    if throws {
+        assert_eq!(run.status.code(), Some(1), "{:?}: {stderr}", run.status);
+        assert!(
+            stderr.contains("onepipeline-api: failed to launch the onepipeline-api binary")
+                && stderr.contains("Reinstall onepipeline-api-cli.")
+                && !stderr.contains("needs Node"),
+            "{stderr}"
+        );
+    } else {
+        assert!(
+            !run.status.success(),
+            "a refused exec reported success: {stderr}"
+        );
+    }
 }
 
 // A repository that declares no release target releases nothing as far as the
