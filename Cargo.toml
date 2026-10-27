@@ -175,10 +175,8 @@ onemessagebus = "0.9.1"
 #
 # The engine pin also fixes the linked plan-store, onevcs, oneagentgraph and
 # onejudge families. A host holds its engine and this reader to one linked
-# engine, so an engine change it adopts — currently 0.95.0 holding a
-# `local-direct` node's finished branch unlanded, `complete-but-held`, until the
-# release it awaits — reaches the host only once this line names the engine
-# release that links it.
+# engine, so an engine change it adopts reaches the host only once this line
+# names the engine release that links it.
 # The test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.

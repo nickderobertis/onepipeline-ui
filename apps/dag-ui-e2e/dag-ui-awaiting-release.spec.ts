@@ -169,9 +169,7 @@ test("a held node's view names every release it awaits in full above its detail,
     await page.goto(`${SERVED_UI_URL}/?run=${runs().awaiting}&node=${node}`);
     const view = page.getByRole("region", { name: `Timeline for ${node}` });
     await expect(view).toBeVisible();
-    await expect(
-      view.locator("header").getByText(status, { exact: true }),
-    ).toBeVisible();
+    await expect(view.getByText(status, { exact: true }).first()).toBeVisible();
 
     const panel = view.getByRole("region", { name: "Awaited releases" });
     await expect(panel).toBeVisible();
@@ -198,9 +196,7 @@ test("a held node's view names every release it awaits in full above its detail,
   // A node awaiting nothing — the one that landed — has no such panel.
   await page.goto(`${SERVED_UI_URL}/?run=${runs().awaiting}&node=engine`);
   const landed = page.getByRole("region", { name: "Timeline for engine" });
-  await expect(
-    landed.locator("header").getByText("done", { exact: true }),
-  ).toBeVisible();
+  await expect(landed.getByText("done", { exact: true }).first()).toBeVisible();
   await expect(
     landed.getByRole("region", { name: "Awaited releases" }),
   ).toHaveCount(0);

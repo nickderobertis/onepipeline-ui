@@ -47,7 +47,6 @@ export function DagGraph({
     }
     return found;
   }, [nodeViews]);
-  // What each node holding finished work waits on, keyed as the reasons are.
   const awaits = useMemo(
     () => new Map(nodeViews.map((node) => [node.id, awaitedLine(node)])),
     [nodeViews],

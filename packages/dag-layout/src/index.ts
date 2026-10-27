@@ -92,7 +92,6 @@ const COLUMN_GAP = 80;
 const ROW_GAP = 32;
 /** What one extra line of text beneath a card's status word adds to its height. */
 const LINE_HEIGHT = 20;
-/** A node's card height: the standard card, and a line's height per line it carries. */
 const heightOf = (node: DagNode): number =>
   NODE_HEIGHT + Math.max(0, Math.floor(node.lines ?? 0)) * LINE_HEIGHT;
 const NODE_STATES: ReadonlySet<string> = new Set(DAG_NODE_STATES);

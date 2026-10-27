@@ -407,7 +407,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(within(panel).getByRole("listitem")).toHaveTextContent(
       "the crate release of github.com/example/engine",
     );
-    // No empty Detail term under it, and no alarm over it.
     expect(within(panel).queryByText("Detail")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
   });
