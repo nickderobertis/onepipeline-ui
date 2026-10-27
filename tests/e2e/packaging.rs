@@ -433,7 +433,8 @@ fn the_installed_command_runs_the_server_in_the_process_the_caller_started() {
     survivors.disarm();
 }
 
-/// Everything left in a finished child's pipe.
+/// Read only once the child has exited: a journey polls `try_wait` against a
+/// deadline it fails on, which `wait_with_output` would block straight past.
 #[cfg(unix)]
 fn read_all(pipe: Option<impl std::io::Read>) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -646,7 +647,9 @@ mod console {
     }
 }
 
-/// Start the installed command in a console of its own.
+/// A console of its own, because a console event reaches every process
+/// attached to the console: raised in this one it would end the test runner
+/// along with the launcher and the server it is meant for.
 #[cfg(windows)]
 fn serve_in_own_console(entry: &Path, runs: &Path) -> (std::process::Child, std::net::SocketAddr) {
     use std::os::windows::process::CommandExt;

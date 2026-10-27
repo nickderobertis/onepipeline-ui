@@ -34,7 +34,9 @@ fn provision(node: Option<&Path>, dist: Option<&Path>) -> Output {
     provision_with(&[&host()], node, dist.map(Path::as_os_str))
 }
 
-/// The same, with `args` as the script's arguments and `dist` as any value.
+/// The mirror is a string rather than a path so a journey can hand the script
+/// a URL — an `http://` one it must refuse, or one served from this process —
+/// and `args` can be any arity the script must refuse.
 fn provision_with(args: &[&str], node: Option<&Path>, dist: Option<&std::ffi::OsStr>) -> Output {
     provision_command(args, node, dist)
         .output()
