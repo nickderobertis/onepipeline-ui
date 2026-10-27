@@ -4126,16 +4126,25 @@ fn a_run_directory_the_contract_cannot_name_is_never_announced_on_the_stream() {
 
 #[test]
 fn a_run_that_leaves_the_root_is_reported_removed() {
-    let serving = two_runs();
+    // Settled, so the server's reads of it write nothing (see `Serving::take_out`).
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+        fixture_run::summarize(root, fixture_run::OTHER_RUN_ID);
+    });
     let mut stream = http::stream(serving.address, "/api/v2/events", None);
     assert_eq!(stream.next_frame().expect("a snapshot").event, "snapshot");
 
-    std::fs::remove_dir_all(serving.run_dir(fixture_run::OTHER_RUN_ID))
-        .expect("the run leaves the root");
+    let taken_out = serving.take_out(fixture_run::OTHER_RUN_ID);
 
     let removed = stream.next_frame().expect("the removal is noticed");
     assert_eq!(removed.event, "run.removed");
     assert_eq!(removed.json()["run_id"], json!(fixture_run::OTHER_RUN_ID));
+    assert!(
+        !serving.run_dir(fixture_run::OTHER_RUN_ID).exists(),
+        "the server made the removed run again"
+    );
+    std::fs::remove_dir_all(&taken_out).expect("the moved run is deleted");
 }
 
 #[test]

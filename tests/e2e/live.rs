@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use crate::fixture_run;
 use crate::http;
 use crate::live_journal;
-use crate::serving::Serving;
+use crate::serving::{self, Serving};
 
 /// How long a journey waits for the server to act on an append before calling
 /// it stuck: the poll is 50 ms, so this is the loaded-runner margin.
@@ -1219,9 +1219,16 @@ fn frame_of(tab: &mut Tab, kind: &str) -> Value {
 fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pins() {
     let run = fixture_run::RUN_ID;
     let mut held_back = Vec::new();
+    let mut as_written = BTreeMap::new();
     let live = Live::start(|root| {
         fixture_run::write(root, run);
         fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+        // The run this journey removes is settled the way the engine's writer
+        // leaves one — its summary and checkpoint current — so no read the
+        // server makes of it folds and writes them: the journey is then its
+        // only writer, and it has finished before the server starts.
+        fixture_run::summarize(root, fixture_run::OTHER_RUN_ID);
+        as_written = serving::tree(&root.join(fixture_run::OTHER_RUN_ID));
         let journal = root.join(run).join("events.jsonl");
         let total = fs::read_to_string(&journal)
             .expect("a journal")
@@ -1261,10 +1268,27 @@ fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pin
     );
     assert_eq!(raised.status, 200, "{}", raised.body);
     let channel_patch = frame_of(&mut channel, "channel.patch");
-    // A run taken out of the root is removed from every sidebar.
-    fs::remove_dir_all(live.serving.run_dir(fixture_run::OTHER_RUN_ID))
-        .expect("remove the other run");
+    // A run taken out of the root is removed from every sidebar. Nothing has
+    // written into it since the journey did — the sidebar has read it, and
+    // read it without writing — so nothing is left to race its removal, and
+    // after one rename nothing can reach it: the server's poll reports it gone,
+    // never makes it again, and the moved copy is still byte for byte what
+    // the journey wrote when it is deleted.
+    let other = live.serving.run_dir(fixture_run::OTHER_RUN_ID);
+    assert_eq!(
+        serving::tree(&other),
+        as_written,
+        "the server wrote into a run it only read"
+    );
+    let taken_out = live.serving.take_out(fixture_run::OTHER_RUN_ID);
     let removed = frame_of(&mut sidebar, "run.removed");
+    assert!(!other.exists(), "the server made the removed run again");
+    assert_eq!(
+        serving::tree(&taken_out),
+        as_written,
+        "something wrote into the run after it left the root"
+    );
+    fs::remove_dir_all(&taken_out).expect("remove the other run");
     // A cursor the subscription never issued is answered with one reset.
     let (epoch, _) = sidebar.applied.split_once(':').expect("epoch:seq");
     let epoch = epoch.to_owned();

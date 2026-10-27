@@ -12,7 +12,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use tempfile::TempDir;
 
@@ -467,6 +467,23 @@ impl Serving {
         self.workspace.path().join(fixture_run::RUNS_DIR)
     }
 
+    /// Take `run` out of the root in one rename, beside the root, and return
+    /// where it went.
+    ///
+    /// One step rather than a recursive delete in place, because a delete is many
+    /// steps and the server reads the run between them: a run whose summary is
+    /// gone and whose journal is not is one the engine folds again, and its read
+    /// writes `summary.json` and `checkpoint.json` back — test-macos reported
+    /// `DirectoryNotEmpty` from exactly that. Once renamed, no path the server
+    /// reads reaches the directory, so whatever deletes it afterwards has no
+    /// writer to race. The caller still owes the run being settled first (see
+    /// [`fixture_run::summarize`]), so that no read is mid-fold at the rename.
+    pub fn take_out(&self, run: &str) -> std::path::PathBuf {
+        let taken = self.workspace.path().join(format!("{run}.taken-out"));
+        std::fs::rename(self.run_dir(run), &taken).expect("the run leaves the root");
+        taken
+    }
+
     /// Ask the server to stop the given way, and return the status it exited
     /// with — or fail the journey if it has not exited [`STOP_DEADLINE`] later.
     ///
@@ -661,4 +678,31 @@ fn path_without_harnesses() -> std::ffi::OsString {
             .filter(|dir| !bins.iter().any(|bin| dir.join(bin).exists())),
     )
     .expect("a PATH")
+}
+
+/// Every entry under `dir` and what it looks like — a file's length and
+/// modification time, a directory's modification time — so a journey can say
+/// that nothing wrote into a run between two points.
+///
+/// `dir`'s own entry is left out: renaming it out of the root is the one change
+/// a journey makes to it on purpose.
+pub fn tree(dir: &Path) -> std::collections::BTreeMap<std::path::PathBuf, (u64, SystemTime)> {
+    let mut found = std::collections::BTreeMap::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(next) = pending.pop() {
+        for entry in std::fs::read_dir(&next).expect("a readable directory") {
+            let entry = entry.expect("a directory entry");
+            let about = entry.metadata().expect("an entry's metadata");
+            let path = entry.path();
+            if about.is_dir() {
+                pending.push(path.clone());
+            }
+            let len = if about.is_dir() { 0 } else { about.len() };
+            found.insert(
+                path.strip_prefix(dir).expect("under dir").to_path_buf(),
+                (len, about.modified().expect("a modification time")),
+            );
+        }
+    }
+    found
 }
