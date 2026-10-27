@@ -13,9 +13,11 @@
 // On Linux and macOS it *becomes* the binary (`process.execve`): the PID the
 // caller started is the server's own, so a signal sent to it reaches the server,
 // a parent-PID check sees the server, and there is no node process left to
-// orphan anything. Windows has no exec, so there — and under a node too old to
-// have `process.execve` — the binary runs as a child this process supervises;
-// `supervise` below says how that child is kept faithful.
+// orphan anything. There is no other path on those platforms: a node without
+// `process.execve` (before 22.15, or 23.0 through 23.10 — outside this
+// package's `engines`) is refused before anything starts. Windows has no exec,
+// so there the binary runs as a child this process supervises; `supervise`
+// below says how that child is kept faithful.
 //
 // This file is committed source; the version and the optionalDependency
 // versions are stamped from Cargo.toml at publish time by scripts/npm-build.mjs,
@@ -96,31 +98,25 @@ function binaryPath() {
   }
 }
 
-// The signals that mean "stop", for when the binary runs as a child.
+// The signals that mean "stop", for the Windows launcher, which runs the binary
+// as a child rather than becoming it.
 //
-// A supervisor — systemd, Docker, a CI job, the smoke test in
-// scripts/smoke-published.sh — stops this command by signalling the process it
-// started. Where this launcher has exec'd that process *is* the binary and none
-// of this applies. Where it supervises a child instead, node's default
-// disposition would kill the launcher where it stands, so the caller would see
-// 128+15 instead of the server's own `0` and the binary would be left running
-// with nothing waiting on it. So each of these is caught and passed on to the
-// child, which lets the server run the graceful shutdown it already has and
-// lets its exit status be the one the caller observes.
-//
-// Exactly the two the server installs handlers for (`StopSignal` in
-// src/server.rs). Listening for a signal replaces node's default disposition, so
-// forwarding one the binary does not handle would trade a clean kill for a
-// launcher that outlives its terminal.
+// Listening for one replaces node's default disposition, which would end the
+// launcher where it stands and report a status the server never chose. Exactly
+// the two the server installs handlers for (`StopSignal` in src/server.rs);
+// listening for one the binary does not handle would trade a clean end for a
+// launcher that outlives its terminal. On Windows node only ever raises
+// `SIGINT`, for the console's Ctrl-C.
 const STOP_SIGNALS = ["SIGTERM", "SIGINT"];
 
-// Run the binary as a child and make it indistinguishable from running it
-// directly: its stdio is this process's, a stop reaches it as the same stop,
-// and this process exits with its status.
+// Windows: run the binary as a child and make it indistinguishable from running
+// it directly — its stdio is this process's, an interrupt reaches it as the same
+// interrupt, it cannot outlive this process, and this process exits with its
+// status.
 function supervise(binary, args) {
-  // Not detached: on Windows libuv puts every attached child in a job object
-  // that closes with this process, so a launcher that is ended — even by
-  // `TerminateProcess` — takes the server with it rather than orphaning it.
+  // Not detached: libuv puts every attached child in a job object that closes
+  // with this process, so a launcher that is ended — even by `TerminateProcess`
+  // — takes the server with it rather than orphaning it.
   const child = spawn(binary, args, { stdio: "inherit" });
 
   child.on("error", (error) => {
@@ -128,27 +124,18 @@ function supervise(binary, args) {
   });
 
   for (const signal of STOP_SIGNALS) {
-    process.on(signal, () => {
-      // On Windows the only interrupt is the console's Ctrl-C, which Windows
-      // already delivered to every process attached to the console, the
-      // server included — and `child.kill` there is `TerminateProcess`, which
-      // would cut short the very shutdown the interrupt started. So it is
-      // caught only to keep this process alive until the server has finished.
-      // Elsewhere the signal reached this process alone (or, from a terminal,
-      // the whole foreground group, where the server treats the repeat as the
-      // same request to stop it is already answering), so it is passed on.
-      if (process.platform !== "win32") {
-        child.kill(signal);
-      }
-    });
+    // Caught, never passed on. The console already delivered the Ctrl-C to
+    // every process attached to it, the server included, and `child.kill` on
+    // Windows is `TerminateProcess`, which would cut short the very shutdown
+    // the interrupt started. This process only has to outlive it and report
+    // how it ended.
+    process.on(signal, () => {});
   }
 
   child.on("exit", (status, signal) => {
-    // Re-raise a terminating signal so callers observe the true cause;
-    // otherwise propagate the child's exit code verbatim — a caller scripting
-    // against the documented exit codes depends on seeing them. The listeners
-    // go first: re-raising into one of them would be this process signalling
-    // itself in a loop instead of dying of what killed the binary.
+    // Propagate the child's exit code verbatim — a caller scripting against the
+    // documented exit codes depends on seeing them — or re-raise what ended it.
+    // The listeners go first: re-raising into one of them would swallow it.
     for (const stop of STOP_SIGNALS) {
       process.removeAllListeners(stop);
     }
@@ -160,10 +147,9 @@ function supervise(binary, args) {
   });
 }
 
-const binary = binaryPath();
-const args = process.argv.slice(2);
-
-if (process.platform !== "win32" && typeof process.execve === "function") {
+// Linux and macOS: replace this process with the binary, or fail before
+// anything has started.
+function become(binary, args) {
   // An ignored signal stays ignored across exec, and node ignores these two at
   // startup. Listening and then not listening hands each back to the default
   // disposition, so the binary starts with the signals a shell would give it.
@@ -171,12 +157,26 @@ if (process.platform !== "win32" && typeof process.execve === "function") {
     process.on(inherited, () => {});
     process.removeAllListeners(inherited);
   }
-  // Replaces this process image; it returns only by throwing, when the kernel
-  // refused to run the file.
+  // Returns only by throwing: the kernel refused to run the file, or this node
+  // has no `process.execve` to call. Either way nothing was started, and
+  // nothing will be — running the binary as a child instead is the process
+  // tree this launcher exists not to build.
   try {
     process.execve(binary, [binary, ...args], process.env);
   } catch (error) {
-    fail(`failed to launch the onepipeline-api binary: ${error.message}`);
+    fail(
+      `failed to launch the onepipeline-api binary: ${error.message}. ` +
+        "This command replaces itself with the binary through process.execve, " +
+        "which needs Node 22.15 or later (23.11 or later on Node 23); this is " +
+        `Node ${process.versions.node}. Upgrade Node. ${OTHER_INSTALLS}`
+    );
   }
 }
-supervise(binary, args);
+
+const binary = binaryPath();
+const args = process.argv.slice(2);
+if (process.platform === "win32") {
+  supervise(binary, args);
+} else {
+  become(binary, args);
+}

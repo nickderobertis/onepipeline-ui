@@ -157,8 +157,8 @@ fn served_at(launcher: &mut std::process::Child) -> std::net::SocketAddr {
     address
 }
 
-fn run_launcher(node: Node, root: &Path, entry: &Path, args: &[&str]) -> std::process::Output {
-    node.command(root)
+fn run_launcher(entry: &Path, args: &[&str]) -> std::process::Output {
+    Command::new("node")
         .arg(entry)
         .args(args)
         .output()
@@ -169,7 +169,7 @@ fn run_launcher(node: Node, root: &Path, entry: &Path, args: &[&str]) -> std::pr
 fn the_launcher_runs_the_binary_its_platform_package_carries() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
-    let output = run_launcher(Node::Host, root.path(), &entry, &["--version"]);
+    let output = run_launcher(&entry, &["--version"]);
     assert!(
         output.status.success(),
         "{}",
@@ -183,12 +183,7 @@ fn the_launcher_runs_the_binary_its_platform_package_carries() {
 fn the_launcher_propagates_the_binarys_exit_code_and_stderr() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
-    let output = run_launcher(
-        Node::Host,
-        root.path(),
-        &entry,
-        &["serve", "--runs-root", "/no/such/runs/root"],
-    );
+    let output = run_launcher(&entry, &["serve", "--runs-root", "/no/such/runs/root"]);
     // A caller scripting against the documented exit codes has to see the
     // binary's `2`, not the shim's own `1` — which is what it exits when the
     // resolution it exists to do fails.
@@ -243,6 +238,91 @@ impl Drop for Survivors {
     }
 }
 
+/// A request the server has begun and cannot finish until this journey says so:
+/// its head and half its body are sent, and the handler is left waiting on the
+/// rest.
+///
+/// A graceful shutdown waits for in-flight requests, and a terminated process
+/// waits for nothing. So a stop that reached the server *as a stop* leaves it
+/// alive until [`InFlight::finish`] sends the rest, and then it answers; a stop
+/// that ended it outright has dropped the connection long before. That makes
+/// the difference a fact about the server rather than a race against how fast
+/// it can shut down. The request is a malformed host shutdown, which the server
+/// refuses without asking the engine to do anything.
+struct InFlight(std::net::TcpStream);
+
+const IN_FLIGHT_BODY: &[u8] = b"not-json";
+
+/// How long a held request is left before the stop and again after it: far
+/// longer than it takes the server to read a request head, or the launcher to
+/// end a child it means to end.
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(1);
+
+impl InFlight {
+    fn begin(address: std::net::SocketAddr) -> Self {
+        use std::io::Write;
+        let mut stream = std::net::TcpStream::connect(address).expect("connect to the server");
+        stream
+            .set_read_timeout(Some(STOP_DEADLINE))
+            .expect("bound the read");
+        let (sent, _) = IN_FLIGHT_BODY.split_at(IN_FLIGHT_BODY.len() / 2);
+        let head = format!(
+            "POST /api/v2/shutdown HTTP/1.1\r\nHost: {address}\r\n\
+             Content-Type: application/json\r\nContent-Length: {}\r\n\
+             Connection: close\r\n\r\n",
+            IN_FLIGHT_BODY.len()
+        );
+        stream.write_all(head.as_bytes()).expect("send the head");
+        stream.write_all(sent).expect("send half the body");
+        std::thread::sleep(SETTLE);
+        Self(stream)
+    }
+
+    /// Send the rest of the body and return the status line the server
+    /// answered with, or why there was no answer.
+    fn finish(mut self) -> std::io::Result<String> {
+        use std::io::{Read, Write};
+        let (_, rest) = IN_FLIGHT_BODY.split_at(IN_FLIGHT_BODY.len() / 2);
+        self.0.write_all(rest)?;
+        let mut answer = String::new();
+        self.0.read_to_string(&mut answer)?;
+        Ok(answer.lines().next().unwrap_or_default().to_owned())
+    }
+}
+
+/// Hold a request in flight, ask the launcher to stop with `ask`, and prove the
+/// stop reached the server as a request to shut down gracefully: the launcher is
+/// still running a moment later, the held request is still answered, and only
+/// then does the launcher exit, with the server's own `0`.
+fn assert_stops_gracefully(
+    launcher: &mut std::process::Child,
+    address: std::net::SocketAddr,
+    ask: impl FnOnce(&mut std::process::Child),
+) {
+    let held = InFlight::begin(address);
+    ask(launcher);
+    std::thread::sleep(SETTLE);
+    assert!(
+        launcher
+            .try_wait()
+            .expect("the launcher is waitable")
+            .is_none(),
+        "the launcher exited while the server still had a request in flight, so the server \
+         was ended rather than asked to stop"
+    );
+    let answer = held.finish();
+    assert!(
+        matches!(&answer, Ok(status) if status.starts_with("HTTP/1.1 422")),
+        "the server did not finish the request it held when it was asked to stop: {answer:?}"
+    );
+    let status = serving::wait_within(launcher, STOP_DEADLINE);
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "a stopped server exits 0, and the launcher must report that: {status}"
+    );
+}
+
 /// The npm distribution's shutdown journey: a launcher asked to stop passes it
 /// on, and answers with the status the server chose.
 ///
@@ -251,39 +331,23 @@ impl Drop for Survivors {
 /// on a signal and exit `0` — run against the launcher a user actually types.
 /// It is the command a supervisor signals, so it and not the binary is what has
 /// to survive the signal: nothing here can be proven by starting the binary
-/// directly, which is why v0.3.1 shipped exiting 143. Where the launcher execs
-/// the binary the two are one process; the journey holds either shape.
+/// directly, which is why v0.3.1 shipped exiting 143. On Unix the launcher execs
+/// the binary, so the two are one process and this holds the exec'd server.
 #[cfg(unix)]
-fn assert_the_launcher_stops_the_server(stop: Stop, node: Node) {
+fn assert_the_launcher_stops_the_server(stop: Stop) {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), true);
     let runs = tempfile::tempdir().expect("runs root");
     let mut launcher = serve_through(
-        node.command(root.path()).arg(&entry).process_group(0),
+        Command::new("node").arg(&entry).process_group(0),
         runs.path(),
     );
     let mut survivors = Survivors::of(&launcher);
     let address = served_at(&mut launcher);
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    {
-        let running = executable_of(launcher.id());
-        let is_node = running
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().starts_with("node"));
-        assert_eq!(
-            is_node,
-            matches!(node, Node::WithoutExecve),
-            "the launcher's PID runs {running:?}: it took the wrong path for this node"
-        );
-    }
 
-    serving::ask_to_stop(&mut launcher, stop);
-    let status = serving::wait_within(&mut launcher, STOP_DEADLINE);
-    assert_eq!(
-        status.code(),
-        Some(0),
-        "a supervisor stopping the launcher must see the server's own clean exit, not a kill: {status}"
-    );
+    assert_stops_gracefully(&mut launcher, address, |launcher| {
+        serving::ask_to_stop(launcher, stop);
+    });
     // And the stop reached the *binary*, not only the shim: a launcher that
     // exits on its own and leaves the server running is a stop that did not
     // happen, however clean its status looks.
@@ -299,76 +363,13 @@ fn assert_the_launcher_stops_the_server(stop: Stop, node: Node) {
 #[cfg(unix)]
 #[test]
 fn the_launcher_stops_the_server_when_a_supervisor_asks() {
-    assert_the_launcher_stops_the_server(Stop::Terminate, Node::Host);
+    assert_the_launcher_stops_the_server(Stop::Terminate);
 }
 
 #[cfg(unix)]
 #[test]
 fn the_launcher_stops_the_server_on_a_terminals_interrupt() {
-    assert_the_launcher_stops_the_server(Stop::Interrupt, Node::Host);
-}
-
-// llmlint: ignore-block[tests_mirror_real_usage] a node without `process.execve` is any release
-// before 22.15 / 23.11 — Node 18 and 20, which the launcher's `engines` admits, are end of
-// life — and running one for real means provisioning a second, unmaintained node on every
-// CI leg for the one branch it selects. The preload removes exactly that capability and
-// nothing else, as `tests/packaging.rs`'s `launcher_on` doubles `process.platform`; the
-// launcher, its resolution, the binary and every signal and exit are the real ones, and the
-// journeys assert the PID is node's, so they cannot pass on the exec path by accident.
-/// The node that runs the launcher: the host's, or the host's doubled as a
-/// release older than `process.execve` (22.15 / 23.11), which the launcher's
-/// `engines` still admits and on which it supervises the binary as a child.
-/// Only that one capability is taken away; the launcher, its resolution and
-/// the binary it starts are the real ones.
-#[derive(Clone, Copy)]
-enum Node {
-    Host,
-    WithoutExecve,
-}
-
-impl Node {
-    fn command(self, scratch: &Path) -> Command {
-        let mut node = Command::new("node");
-        if let Self::WithoutExecve = self {
-            let preload = scratch.join("without-execve.cjs");
-            fs::write(&preload, "delete process.execve;\n").expect("write preload");
-            node.arg("--require").arg(preload);
-        }
-        node
-    }
-}
-// llmlint: ignore-end[tests_mirror_real_usage]
-
-/// On a node without `process.execve` the stops still reach the server and the
-/// caller still sees its clean exit — and the PID is node's, which is what
-/// proves these journeys took the supervising path.
-#[cfg(unix)]
-#[test]
-fn on_a_node_without_execve_the_launcher_stops_the_server_when_a_supervisor_asks() {
-    assert_the_launcher_stops_the_server(Stop::Terminate, Node::WithoutExecve);
-}
-
-#[cfg(unix)]
-#[test]
-fn on_a_node_without_execve_the_launcher_stops_the_server_on_a_terminals_interrupt() {
-    assert_the_launcher_stops_the_server(Stop::Interrupt, Node::WithoutExecve);
-}
-
-#[test]
-fn on_a_node_without_execve_the_launcher_propagates_the_binarys_exit_code_and_stderr() {
-    let root = tempfile::tempdir().expect("temp dir");
-    let entry = install(root.path(), true);
-    let output = run_launcher(
-        Node::WithoutExecve,
-        root.path(),
-        &entry,
-        &["serve", "--runs-root", "/no/such/runs/root"],
-    );
-    assert_eq!(output.status.code(), Some(2));
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("is not a readable directory"),
-        "the shim swallowed the binary's diagnostics"
-    );
+    assert_the_launcher_stops_the_server(Stop::Interrupt);
 }
 
 /// The executable the process `pid` is running, as the kernel reports it.
@@ -543,9 +544,10 @@ fn serve_in_own_console(entry: &Path, runs: &Path) -> (std::process::Child, std:
 
 /// Where the launcher cannot become the server, a terminal's Ctrl-C still
 /// reaches the server as a Ctrl-C: it shuts down the way it does when run
-/// directly, and the launcher exits with the server's own `0` rather than
-/// ending it with `TerminateProcess` — the only "signal" a Windows parent can
-/// send a child.
+/// directly, finishing the request it holds, and the launcher exits with the
+/// server's own `0` rather than ending it with `TerminateProcess` — the only
+/// "signal" a Windows parent can send a child, and what a launcher that passed
+/// the interrupt on with `child.kill` did.
 #[cfg(windows)]
 #[test]
 fn on_windows_an_interrupt_reaches_the_server_as_an_interrupt() {
@@ -554,13 +556,9 @@ fn on_windows_an_interrupt_reaches_the_server_as_an_interrupt() {
     let runs = tempfile::tempdir().expect("runs root");
     let (mut launcher, address) = serve_in_own_console(&entry, runs.path());
 
-    console::raise(console::CTRL_C, launcher.id());
-    let status = serving::wait_within(&mut launcher, STOP_DEADLINE);
-    assert_eq!(
-        status.code(),
-        Some(0),
-        "an interrupted server shuts down cleanly and exits 0, and the launcher must report that: {status}"
-    );
+    assert_stops_gracefully(&mut launcher, address, |launcher| {
+        console::raise(console::CTRL_C, launcher.id());
+    });
     assert_stops_serving(address, "the launcher exited on an interrupt");
 }
 
@@ -600,7 +598,7 @@ fn on_windows_a_launcher_ended_by_ctrl_break_leaves_no_server_running() {
 fn a_missing_platform_package_fails_with_the_other_install_paths() {
     let root = tempfile::tempdir().expect("temp dir");
     let entry = install(root.path(), false);
-    let output = run_launcher(Node::Host, root.path(), &entry, &["--version"]);
+    let output = run_launcher(&entry, &["--version"]);
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains(&host_package()), "{stderr}");
