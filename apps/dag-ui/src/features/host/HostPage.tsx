@@ -4,6 +4,7 @@ import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import type { ReactNode } from "react";
 import { nodeCountSummary } from "../../lib/run-model";
 import { StructuredFields } from "../../lib/StructuredFields";
+import { HumanActionsMock } from "./HumanActionsMock";
 import { useHostReads } from "./useHostReads";
 
 /**
@@ -43,6 +44,7 @@ export function HostPage({
             </>
           )}
         </h2>
+        {new URLSearchParams(location.search).get("mock") === "actions" && <HumanActionsMock />}
         <Button onClick={refresh}>Refresh host</Button>
         {(host.error || unwatched.error) && (
           <p role="alert">{host.error?.message ?? unwatched.error?.message}</p>
