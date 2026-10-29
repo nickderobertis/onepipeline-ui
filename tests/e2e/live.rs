@@ -2087,7 +2087,8 @@ fn a_stream_asked_for_gzip_sends_each_frame_encoded_as_it_happens() {
         );
         // The record's patch decodes from what has arrived, with no frame
         // after it: the encoder flushed it rather than holding it for the
-        // next. Its run's sidebar row may come first.
+        // next. Its run's sidebar row or a progress-time-only patch may come
+        // first; neither carries the appended record.
         let deadline = Instant::now() + PATIENCE;
         let frame = loop {
             let frame = stream
@@ -2095,7 +2096,10 @@ fn a_stream_asked_for_gzip_sends_each_frame_encoded_as_it_happens() {
                 .unwrap_or_else(|| panic!("record {marker}'s patch was held back"));
             decoded += frame.id.len() + frame.event.len() + frame.data.len();
             if frame.event == "detail.patch" {
-                break frame;
+                if frame.data.contains(&format!("encoded {marker}")) {
+                    break frame;
+                }
+                continue;
             }
             assert_eq!(frame.event, "run.changed");
         };
