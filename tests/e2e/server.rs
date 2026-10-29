@@ -296,6 +296,59 @@ fn encoded(project: &str) -> String {
 }
 
 #[test]
+fn a_private_linear_home_with_a_public_destination_task_is_readable() {
+    let serving = Serving::start(|root| {
+        let run = root.join("linear-private-projections");
+        fs::create_dir_all(&run).expect("the recorded run directory");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/private-linear-home");
+        let home = fs::read_to_string(fixture.join("linear-home.md")).expect("the Linear home");
+        assert!(home.contains("onetaskgraph.public_projections"), "{home}");
+        assert!(
+            home.contains(r#""onetaskgraph.classification":"private""#),
+            "{home}"
+        );
+        assert!(home.contains(r#""projection":"views:"#), "{home}");
+        let view = fs::read_to_string(fixture.join("public-view.md")).expect("the public view");
+        assert!(view.contains("examples"), "{view}");
+        for file in [
+            "launch.json",
+            "plan.json",
+            "events.jsonl",
+            "writeback-landed.json",
+            "writeback-projections.jsonl",
+        ] {
+            fs::copy(fixture.join(file), run.join(file)).expect("copy the engine's record");
+        }
+    });
+    let run = "linear-private-projections";
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true");
+    assert_eq!(listed.status, 200, "{}", listed.body);
+    assert!(
+        listed.json()["runs"]
+            .as_array()
+            .expect("runs")
+            .iter()
+            .any(|row| row["run_id"] == run),
+        "{}",
+        listed.body
+    );
+    for suffix in ["", "/timeline?scope=run", "/results"] {
+        let response = http::get(serving.address, &format!("/api/v2/runs/{run}{suffix}"));
+        assert_eq!(response.status, 200, "{}", response.body);
+        assert_enveloped(&response.json());
+    }
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    assert_eq!(
+        detail["graph"]["node_status"]["examples"],
+        json!("parked"),
+        "{detail}"
+    );
+    let missing = http::get(serving.address, "/api/v2/runs/no-such-linear-run");
+    assert_eq!(missing.status, 404, "{}", missing.body);
+}
+
+#[test]
 fn a_run_launched_from_a_plan_store_project_is_served_by_every_route() {
     // The shape every run this host launches now has, and the one an eleven-minor
     // behind engine dropped on sight: its `LaunchRecord` was

@@ -658,3 +658,7 @@ oneagentgraph 0.9.0, onejudge 0.22.0, onemessagebus 0.9.3, onevcs 0.57.0 and
 oneharness-core 0.29.1 are unchanged, and no route, payload or MSRV changes
 beyond the release `/healthz` reports. This changes the engine types carried by
 ApiError::from_engine and the other engine-typed public items.
+0.95.5 is the engine that links onetaskgraph 0.12.9, preserving the public task
+projection map when Linear rewrites a private plan home's content, and carries
+the engine's npm launcher fix. The test-only store requirements move with it.
+The lock also advances pulldown-cmark to 0.13.5 to clear RUSTSEC-2026-0414.
