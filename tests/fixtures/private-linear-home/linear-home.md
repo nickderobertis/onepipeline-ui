@@ -1,0 +1,5 @@
+## Plan
+
+* Keep this home private.
+
+<!-- onetaskgraph.metadata `{"onepipeline.concurrency":1,"onepipeline.driver":{"run":"linear-private-projections","host":"U-17UN402ICR95C","session":"session-linear-private-projections","pid":1723588,"claimed_at":"2026-10-29T09:08:47.771Z","lease":{"interval_seconds":3600,"cancel_grace_seconds":300}},"onepipeline.goal":{"text":"Deliver the plan"},"onepipeline.schema_version":3,"onetaskgraph.classification":"private","onetaskgraph.copied_destination_version":"sha256:baa376f84e9664755bf911bc105f5fc93bd7e12121189ba4f428a4dba59c7c2b","onetaskgraph.copied_version":"sha256:6f70863a0bbbf52b52937e6297ad1544d507a2999fb1957523ac21d054c0fb97","onetaskgraph.public_projections":{"schema_version":1,"tasks":[{"task":"tracker:issue-2","projection":"views:pt-cd4d928262ced273"}],"projects":[{"source":"views","allocation":"3d7a490a0debec595f1e9af7b82bbc36","project":"pw-3c911a7ea6dbacf6"}]}}` -->

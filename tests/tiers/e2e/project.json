@@ -32,6 +32,7 @@
       "testTiers",
       "sharedGlobals",
       "{workspaceRoot}/tests/fixtures/healthz.json",
+      "{workspaceRoot}/tests/fixtures/private-linear-home/**",
       "{workspaceRoot}/tests/e2e/main.rs",
       "{workspaceRoot}/tests/e2e/cli.rs",
       "{workspaceRoot}/tests/e2e/live.rs",

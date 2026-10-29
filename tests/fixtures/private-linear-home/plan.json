@@ -1,0 +1,22 @@
+{
+  "schema_version": 3,
+  "goal": {
+    "text": "Deliver the plan"
+  },
+  "name": "linear-private-projections",
+  "concurrency": 1,
+  "tasks": [
+    {
+      "id": "anchor",
+      "task": "## What\nDo anchor.\n\n## Why\nSo the run can settle.\n\n## Acceptance criteria\n\n* anchor is done.",
+      "persona": "engineer",
+      "title": "chore: anchor",
+      "task_record": {
+        "id": "issue-1",
+        "key": "TEAM-1",
+        "title": "chore: anchor"
+      },
+      "classification": "private"
+    }
+  ]
+}

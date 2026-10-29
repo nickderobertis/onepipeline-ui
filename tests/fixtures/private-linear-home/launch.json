@@ -1,0 +1,18 @@
+{
+  "run_id": "linear-private-projections",
+  "project": "tracker:project-1",
+  "dir": "/tmp/op-973995-0/launch-directory",
+  "node_graph": "/tmp/ui-engine-fixture-source/graphs/node-scope.yaml",
+  "launcher": "e2e",
+  "session": "session-linear-private-projections",
+  "pid": 1723588,
+  "host": "U-17UN402ICR95C",
+  "started": "linux-proc-stat:97222983",
+  "started_at": "2026-10-29T09:08:47.464Z",
+  "heartbeat_interval": 1800,
+  "writeback_item_budget": 12,
+  "adoptions": 0,
+  "branch_template": "{% if task.key %}{{ task.key }}{% else %}{{ plan.name }}{% endif %}/{{ node.id }}",
+  "oneharness_sessions": "/tmp/op-973995-0/runs/linear-private-projections/oneharness-sessions.jsonl",
+  "public_id": "linear-private-projections"
+}
