@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.59.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.59.0...v0.59.1) - 2026-10-29
+
+### Fixed
+
+- *(deps)* link the engine carrying the plan store and launcher fixes ([#541](https://github.com/nickderobertis/onepipeline-ui/pull/541))
+
 ## [0.59.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.58.1...v0.59.0) - 2026-10-27
 
 ### Performance
