@@ -178,12 +178,12 @@ onemessagebus = "0.9.1"
 #
 # The engine pin also fixes the linked plan-store, onevcs, oneagentgraph and
 # onejudge families. A host holds its engine and this reader to one linked
-# engine, so an engine change it adopts reaches the host only once this line
-# names the engine release that links it.
+# engine, so adopting organization/privacy routing requires this reader to
+# link the engine release that writes those routed records.
 # The test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.95.3"
+onepipeline = "=0.95.5"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -247,9 +247,10 @@ predicates = "3"
 # call into `Engine::create_task`, so a journey makes that call rather than
 # provisioning a second CLI. Exact, and the release the engine pins this family
 # to, because the family is lock-step and a caret would admit a release the
-# engine cannot share: the lock then resolves the one copy it links.
-onetaskgraph-core = "=0.12.7"
-onetaskgraph-plugin-api = "=0.12.7"
+# engine cannot share: the organization/privacy routing fixtures and the
+# reader must resolve the same store types.
+onetaskgraph-core = "=0.12.9"
+onetaskgraph-plugin-api = "=0.12.9"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # engine-driven journey over a panel-judged member reads the provider block it was

@@ -658,3 +658,13 @@ oneagentgraph 0.9.0, onejudge 0.22.0, onemessagebus 0.9.3, onevcs 0.57.0 and
 oneharness-core 0.29.1 are unchanged, and no route, payload or MSRV changes
 beyond the release `/healthz` reports. This changes the engine types carried by
 ApiError::from_engine and the other engine-typed public items.
+0.95.5 links onetaskgraph 0.12.9, whose store routes by organization and privacy
+classification together and retains a private Linear home's public projections.
+A host holds this reader and its dispatching engine to one linked engine and
+store, so it can adopt that routing only once this crate links it. The
+onetaskgraph family and its test-only exact requirements move to 0.12.9, the
+release that engine pins. The intervening 0.95.4 changes the engine's npm
+launcher to become the engine process; this read API calls the SDK directly.
+No route or payload changes are required beyond the release `/healthz`
+reports. This changes the engine and store types carried by this crate's
+public engine-typed items.
