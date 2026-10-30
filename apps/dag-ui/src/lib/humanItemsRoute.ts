@@ -4,25 +4,19 @@ import { useCallback, useSyncExternalStore } from "react";
  * The action-items page lives at its own path, `/human-items`, beside the app's
  * root, rather than in the query every run view shares: it is a separate view
  * with its own navigation entry, and an address naming it opens it whatever
- * else the query says. Read relative to wherever the app is served, so a bundle
- * served under a prefix keeps its pages under that prefix.
+ * else the query says. The bundle is served at the root — its assets are
+ * root-absolute — so the page's path is too.
  */
-// A whole final path segment, optionally with its trailing slash: `/x-human-items`
-// is not this page, and its root is not `/x-`.
-const SEGMENT = /(?<=\/)human-items\/?$/u;
+export const HUMAN_ITEMS_PATH = "/human-items";
 
+/** Whether `pathname` is the page's: the whole path, with or without its slash. */
 export function isHumanItemsPath(pathname: string): boolean {
-  return SEGMENT.test(pathname);
+  return pathname === HUMAN_ITEMS_PATH || pathname === `${HUMAN_ITEMS_PATH}/`;
 }
 
-/** The app's root path: the address every run view is read at. */
+/** The path every run view is read at, from wherever the app is. */
 export function appRootPath(pathname: string): string {
-  return pathname.replace(SEGMENT, "");
-}
-
-function humanItemsPath(pathname: string): string {
-  const root = appRootPath(pathname);
-  return `${root.endsWith("/") ? root : `${root}/`}human-items`;
+  return isHumanItemsPath(pathname) ? "/" : pathname;
 }
 
 function subscribe(onChange: () => void): () => void {
@@ -38,11 +32,7 @@ export function useHumanItemsRoute(): {
 } {
   const pathname = useSyncExternalStore(subscribe, currentPath, currentPath);
   const open = useCallback(() => {
-    window.history.pushState(
-      null,
-      "",
-      humanItemsPath(window.location.pathname),
-    );
+    window.history.pushState(null, "", HUMAN_ITEMS_PATH);
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, []);
   return { active: isHumanItemsPath(pathname), open };

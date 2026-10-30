@@ -166,20 +166,27 @@ async function open(page: Page, served: FixtureServer): Promise<Locator> {
 
 /**
  * Follow `link` and read where the new tab asked to go: the request it made,
- * observed rather than answered, so nothing stands in for the tracker.
+ * observed rather than answered, so nothing stands in for the tracker — and
+ * made with the browser offline, so it never leaves this host for GitHub or
+ * Linear. The page's own reads are done by then, and it is put back online.
  */
 async function followed(
   context: BrowserContext,
   link: () => Promise<void>,
   url: string,
 ): Promise<void> {
-  const [tab, request] = await Promise.all([
-    context.waitForEvent("page"),
-    context.waitForEvent("request", (sent) => sent.url() === url),
-    link(),
-  ]);
-  expect(request.url()).toBe(url);
-  await tab.close();
+  await context.setOffline(true);
+  try {
+    const [tab, request] = await Promise.all([
+      context.waitForEvent("page"),
+      context.waitForEvent("request", (sent) => sent.url() === url),
+      link(),
+    ]);
+    expect(request.url()).toBe(url);
+    await tab.close();
+  } finally {
+    await context.setOffline(false);
+  }
 }
 
 function card(page: Page, title: string): Locator {
@@ -614,6 +621,7 @@ test("every filter narrows the list on its own, on the wire's vocabulary", async
 
 test("Tab moves straight between answer boxes, Enter answers in place, Shift+Enter is a new line", async ({
   page,
+  context,
 }) => {
   const served = await serveBundle("representative.json");
   await open(page, served);
@@ -630,18 +638,8 @@ test("Tab moves straight between answer boxes, Enter answers in place, Shift+Ent
     await expect(answerBox(page, title)).toBeFocused();
   }
 
-  // Enter on an empty box, or while a composition is still being typed, sends
-  // nothing.
+  // Enter on an empty box sends nothing.
   await page.keyboard.press("Enter");
-  await answerBox(page, LAST_QUESTION).evaluate((element) =>
-    element.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-      }),
-    ),
-  );
   // Shift+Enter writes a new line and sends nothing; the box grows with it.
   const resting = await answerBox(page, LAST_QUESTION).evaluate(heights);
   await page.keyboard.type("Keep it");
@@ -677,6 +675,29 @@ test("Tab moves straight between answer boxes, Enter answers in place, Shift+Ent
   // The other draft is still there, unsent.
   await expect(answerBox(page, LAST_QUESTION)).toHaveValue(
     "Keep it\nfor one more release\nthen drop it",
+  );
+
+  // An input method's composition, through the browser's own input layer:
+  // Enter while the words are still being composed sends nothing, and Enter
+  // once they are committed sends the answer.
+  const composing = "Should retries reuse the warm cache?";
+  await answerBox(page, composing).click();
+  await page.keyboard.type("Reuse it ");
+  const ime = await context.newCDPSession(page);
+  await ime.send("Input.imeSetComposition", {
+    text: "にほん",
+    selectionStart: 3,
+    selectionEnd: 3,
+  });
+  await page.keyboard.press("Enter");
+  await expect(card(page, composing).getByRole("status")).toHaveCount(0);
+  expect(sent).toHaveLength(1);
+  await ime.send("Input.insertText", { text: "にほん" });
+  await page.keyboard.press("Enter");
+  await expect(outcome(page)).toHaveText(`${composing}: Answered`);
+  expect(sent).toHaveLength(2);
+  expect(stored(served, "question-cache").resolution?.text).toContain(
+    "Reuse it にほん",
   );
 });
 
@@ -749,6 +770,24 @@ test("card actions are a focus group of their own after the answer boxes, operab
     await page.keyboard.press("ArrowRight");
     await expect(page.getByRole(role, { name })).toBeFocused();
   }
+  // Left and Up walk back, Right and Down forward again.
+  await page.keyboard.press("ArrowLeft");
+  await expect(
+    page.getByRole("button", {
+      name: "Details: Review the action-items design",
+    }),
+  ).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(
+    page.getByRole("link", { name: "Open Linear issue ONE-412" }),
+  ).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowRight");
+  await expect(
+    page.getByRole("button", {
+      name: "Complete: Review the action-items design",
+    }),
+  ).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(outcome(page)).toHaveText(
     "Review the action-items design: Completed",
