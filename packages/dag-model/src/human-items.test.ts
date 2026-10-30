@@ -82,6 +82,9 @@ function shape(node: unknown, defs: Schema): unknown {
         required: (Array.isArray(node.required) ? node.required : [])
           .map(String)
           .sort(),
+        // Closed or open: whether a field the record does not declare is
+        // refused, which both sides have to agree on.
+        closed: node.additionalProperties === false,
       };
     }
     case "array":

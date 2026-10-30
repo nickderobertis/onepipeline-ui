@@ -27,23 +27,29 @@ export const HUMAN_ITEM_PATHS = {
 } as const;
 
 const nullableString = z.string().nullable();
+// Every record is closed, as the engine's `deny_unknown_fields` closes it: a
+// field this release does not declare is a refusal, never silently dropped.
 /** Prose the engine refuses blank: at least one character that is not space. */
 const prose = z.string().regex(/\S/u);
 
-const owner = z.object({
+const owner = z.strictObject({
   session: z.string(),
   run: nullableString,
   plan: nullableString,
 });
 
 const block = z.discriminatedUnion("scope", [
-  z.object({ scope: z.literal("nothing") }),
-  z.object({ scope: z.literal("work"), run: z.string(), node: z.string() }),
-  z.object({ scope: z.literal("plan"), plan: z.string() }),
-  z.object({ scope: z.literal("host") }),
+  z.strictObject({ scope: z.literal("nothing") }),
+  z.strictObject({
+    scope: z.literal("work"),
+    run: z.string(),
+    node: z.string(),
+  }),
+  z.strictObject({ scope: z.literal("plan"), plan: z.string() }),
+  z.strictObject({ scope: z.literal("host") }),
 ]);
 
-const resolution = z.object({
+const resolution = z.strictObject({
   actor: z.string(),
   on_behalf_of: nullableString,
   text: nullableString,
@@ -84,7 +90,7 @@ function lifecycleProblem(item: {
 }
 
 export const humanItemSchema: z.ZodType<HumanItem> = z
-  .object({
+  .strictObject({
     schema_version: z.literal(1),
     id: z.string().min(1),
     dedup_key: z.string(),
@@ -94,10 +100,12 @@ export const humanItemSchema: z.ZodType<HumanItem> = z
     priority: z.enum(HUMAN_ITEM_PRIORITIES),
     owner,
     block,
-    approval: z.object({ board_copy: z.string(), key: z.string() }).nullable(),
+    approval: z
+      .strictObject({ board_copy: z.string(), key: z.string() })
+      .nullable(),
     state: z.enum(["open", "answered", "completed", "dismissed"]),
     resolution: resolution.nullable(),
-    tracker: z.object({ task: z.string(), url: z.url() }).nullable(),
+    tracker: z.strictObject({ task: z.string(), url: z.url() }).nullable(),
     created_at: z.string(),
     updated_at: z.string(),
   })
@@ -107,15 +115,19 @@ export const humanItemSchema: z.ZodType<HumanItem> = z
       context.addIssue({ code: "custom", message: problem });
   });
 
-const node = z.object({ run: z.string(), node: z.string(), title: z.string() });
+const node = z.strictObject({
+  run: z.string(),
+  node: z.string(),
+  title: z.string(),
+});
 
-const blockedPlan = z.object({
+const blockedPlan = z.strictObject({
   plan: z.string(),
   count: z.number().int().nonnegative(),
   preview: z.array(node).max(3),
 });
 
-const blocked = z.object({
+const blocked = z.strictObject({
   total: z.number().int().nonnegative(),
   plans: z.array(blockedPlan),
 });
@@ -147,7 +159,7 @@ function impactProblem(
 }
 
 export const humanItemViewSchema: z.ZodType<HumanItemView> = z
-  .object({ item: humanItemSchema, blocked })
+  .strictObject({ item: humanItemSchema, blocked })
   .superRefine(({ item, blocked: impact }, context) => {
     const problem = impactProblem(item, impact);
     if (problem !== undefined)
@@ -183,7 +195,7 @@ function nodesProblem(detail: {
 }
 
 export const humanItemDetailSchema: z.ZodType<HumanItemDetail> = z
-  .object({ item: humanItemSchema, blocked, nodes: z.array(node) })
+  .strictObject({ item: humanItemSchema, blocked, nodes: z.array(node) })
   .superRefine((detail, context) => {
     const problem =
       impactProblem(detail.item, detail.blocked) ?? nodesProblem(detail);
@@ -191,12 +203,13 @@ export const humanItemDetailSchema: z.ZodType<HumanItemDetail> = z
       context.addIssue({ code: "custom", message: problem });
   });
 
-export const humanItemReceiptSchema: z.ZodType<HumanItemReceipt> = z.object({
-  item: humanItemViewSchema,
-  event_id: z.string(),
-});
+export const humanItemReceiptSchema: z.ZodType<HumanItemReceipt> =
+  z.strictObject({
+    item: humanItemViewSchema,
+    event_id: z.string(),
+  });
 
-export const humanItemListSchema = z.object({
+export const humanItemListSchema = z.strictObject({
   items: z.array(humanItemViewSchema),
 });
 
