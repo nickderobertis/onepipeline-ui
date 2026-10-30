@@ -132,6 +132,18 @@ impl Serving {
         Self::spawn_as(workspace, &[], false, None, None, arguments)
     }
 
+    /// The same, acting as `session`, with `arguments` after the ones every
+    /// server here is started with.
+    pub fn start_as_with_args(
+        build: impl FnOnce(&Path),
+        session: &str,
+        arguments: &[&str],
+    ) -> Self {
+        let (workspace, runs) = fixture_run::workspace();
+        build(&runs);
+        Self::spawn_as(workspace, &[], false, None, Some(session), arguments)
+    }
+
     /// The same, served by `binary` rather than the one this suite was built
     /// beside — a build of this crate from another tree, such as one that never
     /// had the browser view to embed.

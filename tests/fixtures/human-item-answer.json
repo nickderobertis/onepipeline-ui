@@ -1,0 +1,39 @@
+{
+  "item": {
+    "item": {
+      "schema_version": 1,
+      "id": "question-canary",
+      "dedup_key": "dedup-question-canary",
+      "kind": "question",
+      "title": "Which region should the canary run in?",
+      "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+      "priority": "high",
+      "owner": {
+        "session": "claude-code-supervising-session",
+        "run": "run-a",
+        "plan": "plan-a"
+      },
+      "block": {
+        "scope": "work",
+        "run": "run-a",
+        "node": "deploy"
+      },
+      "approval": null,
+      "state": "answered",
+      "resolution": {
+        "actor": "claude-code-supervising-session",
+        "on_behalf_of": null,
+        "text": "eu-west",
+        "reason": null
+      },
+      "tracker": null,
+      "created_at": "2026-10-29T09:05:00Z",
+      "updated_at": "sample-resolved"
+    },
+    "blocked": {
+      "total": 0,
+      "plans": []
+    }
+  },
+  "event_id": "sample-question-canary-answered"
+}

@@ -49,6 +49,7 @@ pub mod contract;
 mod encoding;
 pub mod error;
 pub mod filter;
+pub mod human_items;
 pub mod live;
 pub mod liveness;
 pub mod patch;

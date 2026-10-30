@@ -72,6 +72,15 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     // server served them (`tests/e2e/live.rs`).
     (routes::SUBSCRIPTIONS, "subscriptions.json"),
     (routes::SUBSCRIPTION, "subscription-frames.json"),
+    // The human-item routes serve the engine's own records unenveloped; their
+    // goldens are written by `tests/e2e/human_items.rs` from the real server,
+    // and reconciled with the engine's types below.
+    (routes::HUMAN_ITEMS, "human-items.json"),
+    (routes::HUMAN_ITEMS, "human-items-raise.json"),
+    (routes::HUMAN_ITEM, "human-item.json"),
+    (routes::HUMAN_ITEM_ANSWER, "human-item-answer.json"),
+    (routes::HUMAN_ITEM_COMPLETE, "human-item-complete.json"),
+    (routes::HUMAN_ITEM_DISMISS, "human-item-dismiss.json"),
 ];
 
 /// The store the served process would build over a workspace's runs root: the
@@ -1133,8 +1142,12 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
             routes::SUBSCRIPTION,
         ]
         .contains(&route)
+            || route.starts_with(routes::HUMAN_ITEMS)
         {
-            continue; // Not enveloped, and enveloped one level down, and a list of frames.
+            // Not enveloped, and enveloped one level down, and a list of frames;
+            // the human-item routes serve the engine's own records, which
+            // `every_human_item_fixture_is_the_engines_record` reconciles.
+            continue;
         }
         let raw = read_fixture(fixture);
         let envelope: Envelope<Value> =
@@ -4133,4 +4146,114 @@ fn the_contract_states_every_field_the_transcript_reading_serves() {
             "docs/contract.md does not state: {stated}"
         );
     }
+}
+
+/// Where the engine's exported human-item schemas are checked in: beside the
+/// browser model whose types `packages/dag-model/scripts/human-items-types.mjs`
+/// generates from them.
+fn human_items_schema_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/human-items.schema.json")
+}
+
+/// **The checked-in human-item schema is the linked engine's.** The browser's
+/// response types are generated from that file, so a moved engine whose
+/// records changed fails here — and the generated types fail their own drift
+/// test in `packages/dag-model` until regenerated — rather than the browser
+/// quietly reading an old shape. `UPDATE_CONTRACT_FIXTURES=1` rewrites it.
+#[test]
+fn the_checked_in_human_item_schema_is_the_linked_engines() {
+    let exported = canonical(&onepipeline::human_items::schemas());
+    let path = human_items_schema_path();
+    if std::env::var_os(UPDATE).is_some() {
+        fs::write(&path, &exported).expect("write the schema");
+    }
+    assert_eq!(
+        fs::read_to_string(&path).unwrap_or_default(),
+        exported,
+        "{} is not what the linked engine's human_items::schemas() exports; rerun with \
+         {UPDATE}=1, then regenerate the browser's types",
+        path.display()
+    );
+}
+
+/// **Every human-item golden is a record the engine accepts.** Each route's
+/// fixture decodes as the engine's own type for that route — whose decoders
+/// validate state, resolution, counts and previews — and the sample bundles
+/// the journeys serve decode as the engine's `HumanItemSample`.
+#[test]
+fn every_human_item_fixture_is_the_engines_record() {
+    use onepipeline::human_items::{HumanItemDetail, HumanItemReceipt, HumanItemSample};
+    use onepipeline_ui::human_items::HumanItemList;
+
+    let read =
+        |name: &str| fs::read_to_string(fixture_dir().join(name)).expect("the fixture reads");
+    let list: HumanItemList =
+        serde_json::from_str(&read("human-items.json")).expect("the list is the engine's views");
+    assert!(!list.items.is_empty(), "the list golden pins some items");
+    serde_json::from_str::<HumanItemDetail>(&read("human-item.json"))
+        .expect("the detail is the engine's HumanItemDetail");
+    for receipt in [
+        "human-items-raise.json",
+        "human-item-answer.json",
+        "human-item-complete.json",
+        "human-item-dismiss.json",
+    ] {
+        serde_json::from_str::<HumanItemReceipt>(&read(receipt))
+            .unwrap_or_else(|err| panic!("{receipt} is not the engine's receipt: {err}"));
+    }
+    for bundle in [
+        "human-items/representative.json",
+        "human-items/long-body.json",
+    ] {
+        serde_json::from_str::<HumanItemSample>(&read(bundle))
+            .unwrap_or_else(|err| panic!("{bundle} is not an engine sample bundle: {err}"));
+    }
+    // The schema's own vocabulary agrees: no owner-ended state, and the four
+    // priorities with their display labels.
+    let schema = onepipeline::human_items::schemas();
+    assert!(!schema.to_string().contains("owner_ended"));
+    assert_eq!(
+        schema["priority_labels"],
+        json!({"high": "High", "low": "Low", "medium": "Medium", "urgent": "Critical"})
+    );
+}
+
+/// The sample flag and a configuration file construct one bundle the same
+/// way: a file the engine refuses is refused by both, and a path is what both
+/// write back.
+#[test]
+fn a_human_item_sample_is_read_the_same_from_the_flag_and_a_config_file() {
+    let bundle = fixture_dir().join("human-items/representative.json");
+    let workspace = tempfile::tempdir().expect("temp dir");
+    let cli = Cli::try_parse_from([
+        "onepipeline-api",
+        "serve",
+        "--runs-root",
+        workspace.path().to_str().expect("utf-8"),
+        "--human-items-sample",
+        bundle.to_str().expect("utf-8"),
+    ])
+    .expect("the flag parses");
+    let Command::Serve(args) = cli.command;
+    let config: ServeArgs = serde_json::from_value(json!({
+        "runs_root": workspace.path(),
+        "human_items_sample": bundle,
+    }))
+    .expect("the config parses");
+    assert_eq!(args.human_items_sample, config.human_items_sample);
+    assert_eq!(
+        serde_json::to_value(&config).expect("serialize")["human_items_sample"],
+        json!(bundle)
+    );
+    assert!(args
+        .human_items()
+        .expect("an empty root serves it")
+        .is_some());
+
+    let refused = serde_json::from_value::<ServeArgs>(json!({
+        "runs_root": workspace.path(),
+        "human_items_sample": workspace.path().join("missing.json"),
+    }))
+    .expect_err("a missing bundle is refused");
+    assert!(refused.to_string().contains("missing.json"), "{refused}");
 }

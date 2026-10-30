@@ -1,0 +1,32 @@
+{
+  "item": {
+    "item": {
+      "schema_version": 1,
+      "id": "sample-10",
+      "dedup_key": "nightly",
+      "kind": "question",
+      "title": "Should the nightly job run on weekends?",
+      "body": "The nightly job finds nothing new on weekends. Skipping it saves two hours of runner time each week.",
+      "priority": "low",
+      "owner": {
+        "session": "claude-code-supervising-session",
+        "run": null,
+        "plan": null
+      },
+      "block": {
+        "scope": "nothing"
+      },
+      "approval": null,
+      "state": "open",
+      "resolution": null,
+      "tracker": null,
+      "created_at": "sample",
+      "updated_at": "sample"
+    },
+    "blocked": {
+      "total": 0,
+      "plans": []
+    }
+  },
+  "event_id": "sample-sample-10-raised"
+}

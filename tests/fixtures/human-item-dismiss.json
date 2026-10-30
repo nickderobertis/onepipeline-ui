@@ -1,0 +1,40 @@
+{
+  "item": {
+    "item": {
+      "schema_version": 1,
+      "id": "task-build",
+      "dedup_key": "dedup-task-build",
+      "kind": "task",
+      "title": "Restore the build service",
+      "body": "The shared build service stopped answering. Restart it on the build host and confirm one cached build finishes.",
+      "priority": "urgent",
+      "owner": {
+        "session": "claude-code-supervising-session",
+        "run": null,
+        "plan": null
+      },
+      "block": {
+        "scope": "host"
+      },
+      "approval": null,
+      "state": "dismissed",
+      "resolution": {
+        "actor": "claude-code-supervising-session",
+        "on_behalf_of": null,
+        "text": null,
+        "reason": null
+      },
+      "tracker": {
+        "task": "nickderobertis/onepipeline#1301",
+        "url": "https://github.com/nickderobertis/onepipeline/issues/1301"
+      },
+      "created_at": "2026-10-29T09:00:00Z",
+      "updated_at": "sample-resolved"
+    },
+    "blocked": {
+      "total": 0,
+      "plans": []
+    }
+  },
+  "event_id": "sample-task-build-dismissed"
+}
