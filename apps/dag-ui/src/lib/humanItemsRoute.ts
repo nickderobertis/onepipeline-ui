@@ -7,7 +7,9 @@ import { useCallback, useSyncExternalStore } from "react";
  * else the query says. Read relative to wherever the app is served, so a bundle
  * served under a prefix keeps its pages under that prefix.
  */
-const SEGMENT = /human-items\/?$/u;
+// A whole final path segment, optionally with its trailing slash: `/x-human-items`
+// is not this page, and its root is not `/x-`.
+const SEGMENT = /(?<=\/)human-items\/?$/u;
 
 export function isHumanItemsPath(pathname: string): boolean {
   return SEGMENT.test(pathname);
@@ -15,7 +17,7 @@ export function isHumanItemsPath(pathname: string): boolean {
 
 /** The app's root path: the address every run view is read at. */
 export function appRootPath(pathname: string): string {
-  return pathname.replace(SEGMENT, "") || "/";
+  return pathname.replace(SEGMENT, "");
 }
 
 function humanItemsPath(pathname: string): string {

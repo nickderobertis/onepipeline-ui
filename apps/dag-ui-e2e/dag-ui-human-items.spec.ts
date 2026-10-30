@@ -1,5 +1,6 @@
 import { readFileSync, renameSync } from "node:fs";
 import {
+  type BrowserContext,
   expect,
   type Locator,
   type Page,
@@ -16,10 +17,10 @@ import { type FixtureServer, startFixtureServer } from "./fixture-server";
  * Each journey starts a server of its own over a fresh copy of a bundle in
  * `tests/fixtures/human-items/`, because every write lands in that copy. What
  * answers is the item-contract release's `HumanItemSample` — nothing here or in
- * the app stands in for the engine. A request is only ever held or dropped on
- * its way (a delayed receipt, a refused connection), which is a network
- * condition rather than a double. These prove the UI/API contract over the
- * sample adapter, not the engine's runtime lifecycle.
+ * the app stands in for the engine. A connection failure is the server really
+ * stopping; the one request held on its way is a delayed receipt, released
+ * untouched. These prove the UI/API contract over the sample adapter, not the
+ * engine's runtime lifecycle.
  */
 
 const factsSchema = z.object({ sample: z.string().min(1) });
@@ -29,6 +30,8 @@ const bundleSchema = z.object({
     z.object({
       item: z.object({
         id: z.string(),
+        title: z.string(),
+        body: z.string(),
         state: z.string(),
         resolution: z
           .object({
@@ -49,6 +52,12 @@ const bundleSchema = z.object({
       }),
     )
     .optional(),
+});
+
+const listSchema = z.object({
+  items: z.array(
+    z.object({ item: z.object({ title: z.string(), priority: z.string() }) }),
+  ),
 });
 
 /** The visible open items of `representative.json`, in the engine's order. */
@@ -110,6 +119,7 @@ const DECLARED = [
 const QUESTIONS = DECLARED.filter(({ kind }) => kind === "Question").map(
   ({ title }) => title,
 );
+const LAST_QUESTION = "Keep the legacy export format?";
 
 let server: FixtureServer | undefined;
 
@@ -139,19 +149,37 @@ function stored(served: FixtureServer, id: string) {
   return found.item;
 }
 
+/** The body the bundle holds for the item titled `title`. */
+function bodyOf(served: FixtureServer, title: string): string {
+  const found = bundleOf(served).items.find(({ item }) => item.title === title);
+  if (found === undefined) throw new Error(`no item titled ${title}`);
+  return found.item.body;
+}
+
 /** The page, opened at its own address on the server's origin. */
 async function open(page: Page, served: FixtureServer): Promise<Locator> {
-  // Tracker links leave for GitHub and Linear: answered here, so a journey
-  // that follows one never reaches the network.
-  await page
-    .context()
-    .route(/^https:\/\/(github\.com|linear\.app)\//u, (route) =>
-      route.fulfill({ contentType: "text/plain", body: "tracker" }),
-    );
   await page.goto(`${served.origin}/human-items`);
   const list = page.getByRole("list", { name: "Action items" });
   await expect(list.getByRole("listitem").first()).toBeVisible();
   return list;
+}
+
+/**
+ * Follow `link` and read where the new tab asked to go: the request it made,
+ * observed rather than answered, so nothing stands in for the tracker.
+ */
+async function followed(
+  context: BrowserContext,
+  link: () => Promise<void>,
+  url: string,
+): Promise<void> {
+  const [tab, request] = await Promise.all([
+    context.waitForEvent("page"),
+    context.waitForEvent("request", (sent) => sent.url() === url),
+    link(),
+  ]);
+  expect(request.url()).toBe(url);
+  await tab.close();
 }
 
 function card(page: Page, title: string): Locator {
@@ -163,11 +191,15 @@ function answerBox(page: Page, title: string): Locator {
 }
 
 function outcome(page: Page): Locator {
-  return page.locator(".human-items-outcome");
+  return page.getByRole("status", { name: "Last outcome" });
 }
 
 function detailPane(page: Page): Locator {
   return page.getByRole("complementary", { name: "Action item detail" });
+}
+
+function listRegion(page: Page): Locator {
+  return page.getByRole("region", { name: "Action item list" });
 }
 
 async function titles(list: Locator): Promise<string[]> {
@@ -185,6 +217,21 @@ function writes(page: Page): Request[] {
       seen.push(request);
   });
   return seen;
+}
+
+/** A rendered element's height and its one-line resting height. */
+function heights(element: HTMLElement) {
+  const style = getComputedStyle(element);
+  const line = Number.parseFloat(style.lineHeight);
+  const chrome =
+    Number.parseFloat(style.paddingTop) +
+    Number.parseFloat(style.paddingBottom) +
+    Number.parseFloat(style.borderTopWidth) +
+    Number.parseFloat(style.borderBottomWidth);
+  return {
+    height: element.getBoundingClientRect().height,
+    oneLine: line + chrome,
+  };
 }
 
 test("opens Action items from its own navigation entry and leaves the Host page as it was", async ({
@@ -216,10 +263,43 @@ test("opens Action items from its own navigation entry and leaves the Host page 
   for (const { title } of DECLARED)
     await expect(page.getByText(title)).toHaveCount(0);
 
-  // And the address opens the page directly, back where it was.
+  // The address opens the page directly, back where it was — with a trailing
+  // slash too — and a path that merely ends in the word is not the page.
   await page.goBack();
   await expect(page).toHaveURL(`${served.origin}/human-items`);
   await expect(list.getByRole("listitem")).toHaveCount(DECLARED.length);
+  await page.goto(`${served.origin}/human-items/`);
+  await expect(list.getByRole("listitem")).toHaveCount(DECLARED.length);
+  await page.goto(`${served.origin}/not-human-items`);
+  await expect(
+    page.getByRole("heading", { name: "No DAG runs found" }),
+  ).toBeVisible();
+  await expect(page.getByRole("list", { name: "Action items" })).toHaveCount(0);
+});
+
+test("the sidebar's kinds stay on Action items and a run selected from it leaves for the run", async ({
+  page,
+}) => {
+  // A host's live root with runs and run kinds, served without a sample.
+  server = await startFixtureServer("human-items-kinds", [
+    "--project-centric-corpus",
+  ]);
+  await page.goto(`${server.origin}/human-items`);
+  const nav = page.getByRole("navigation", { name: "Projects" });
+  const kinds = nav.getByRole("group", { name: "Run kinds", exact: true });
+  await kinds.getByRole("checkbox", { name: "spikes" }).uncheck();
+  await expect(page).toHaveURL(`${server.origin}/human-items?hide-kind=spikes`);
+  await expect(
+    page.getByRole("heading", { name: "Action items" }),
+  ).toBeVisible();
+  await nav
+    .getByRole("button", { name: /^Open / })
+    .first()
+    .click();
+  await expect(page).not.toHaveURL(/human-items/u);
+  await expect(page.getByRole("heading", { name: "Action items" })).toHaveCount(
+    0,
+  );
 });
 
 test("lists every open item of the session in the engine's order, as compact full-width cards", async ({
@@ -229,37 +309,37 @@ test("lists every open item of the session in the engine's order, as compact ful
   const list = await open(page, served);
   expect(await titles(list)).toEqual(DECLARED.map(({ title }) => title));
 
-  const wire = (await (
-    await page.request.get(`${served.origin}/api/human-items`)
-  ).json()) as { items: { item: { title: string; priority: string } }[] };
+  const wire = listSchema.parse(
+    await (await page.request.get(`${served.origin}/api/human-items`)).json(),
+  );
   for (const [index, expected] of DECLARED.entries()) {
     const shown = card(page, expected.title);
-    await expect(shown.locator(".human-item-priority")).toHaveText(
-      expected.priority,
+    await expect(
+      shown.getByText(expected.priority, { exact: true }),
+    ).toBeVisible();
+    await expect(shown.getByText(expected.kind, { exact: true })).toBeVisible();
+    await expect(
+      shown.getByText(expected.source, { exact: true }),
+    ).toBeVisible();
+    await expect(shown.getByText(/^blocks /u)).toHaveCount(
+      expected.blocks === undefined ? 0 : 1,
     );
-    await expect(shown.locator(".human-item-kind")).toHaveText(expected.kind);
-    await expect(shown.locator(".human-item-meta")).toContainText(
-      expected.source,
-    );
-    if (expected.blocks === undefined)
-      await expect(shown.locator(".human-item-blocks")).toHaveCount(0);
-    else
-      await expect(shown.locator(".human-item-blocks")).toHaveText(
-        expected.blocks,
-      );
+    if (expected.blocks !== undefined)
+      await expect(
+        shown.getByText(expected.blocks, { exact: true }),
+      ).toBeVisible();
+    await expect(
+      shown.getByText(bodyOf(served, expected.title), { exact: true }),
+    ).toBeVisible();
     // Critical is a label: the record says urgent.
-    expect(wire.items[index]?.item).toMatchObject({
+    expect(wire.items[index]?.item).toEqual({
       title: expected.title,
       priority: expected.wire,
     });
-    await expect(shown).toHaveAttribute(
-      "data-blocking",
-      String(expected.blocks !== undefined),
-    );
   }
   // Every task has its tracker link on the card; no question has one.
   const tasks = DECLARED.filter(({ kind }) => kind === "Task");
-  await expect(list.locator(".human-item-tracker")).toHaveCount(tasks.length);
+  await expect(list.getByRole("link")).toHaveCount(tasks.length);
   for (const task of tasks)
     if ("tracker" in task)
       await expect(
@@ -269,7 +349,7 @@ test("lists every open item of the session in the engine's order, as compact ful
   // The session's own items only: another session's item is not shown.
   await expect(page.getByText("Rotate the deploy credentials")).toHaveCount(0);
   // No P-labels, no owner-ended anything, no scope, no approval control.
-  const text = await page.locator("main").innerText();
+  const text = await page.getByRole("main").innerText();
   expect(text).not.toMatch(/\bP[0-3]\b/u);
   expect(text.toLowerCase()).not.toContain("owner-ended");
   expect(text.toLowerCase()).not.toContain("owner ended");
@@ -280,27 +360,25 @@ test("lists every open item of the session in the engine's order, as compact ful
     0,
   );
   const filters = page.getByRole("group", { name: "Filter action items" });
-  expect(await filters.locator("label").allTextContents()).toEqual([
-    "Kind",
-    "Blocking",
-    "Priority",
-    "State",
-    "Source",
-  ]);
-  await expect(filters.getByLabel("Priority").locator("option")).toHaveText([
+  await expect(filters.getByRole("combobox")).toHaveCount(5);
+  for (const name of ["Kind", "Blocking", "Priority", "State", "Source"])
+    await expect(
+      filters.getByRole("combobox", { name, exact: true }),
+    ).toBeVisible();
+  await expect(filters.getByLabel("Priority").getByRole("option")).toHaveText([
     "Any priority",
     "Critical",
     "High",
     "Medium",
     "Low",
   ]);
-  await expect(filters.getByLabel("State").locator("option")).toHaveText([
+  await expect(filters.getByLabel("State").getByRole("option")).toHaveText([
     "Open",
     "Answered",
     "Completed",
     "Dismissed",
   ]);
-  await expect(filters.getByLabel("Blocking").locator("option")).toHaveText([
+  await expect(filters.getByLabel("Blocking").getByRole("option")).toHaveText([
     "Any",
     "Yes",
     "No",
@@ -309,22 +387,16 @@ test("lists every open item of the session in the engine's order, as compact ful
 
 test("a tracker link opens its issue without selecting the card", async ({
   page,
+  context,
 }) => {
   const served = await serveBundle("representative.json");
   await open(page, served);
   const link = card(page, "Review the action-items design").getByRole("link", {
     name: "Open Linear issue ONE-412",
   });
-  await expect(link).toHaveAttribute(
-    "href",
-    "https://linear.app/onepipeline/issue/ONE-412",
-  );
-  const [issue] = await Promise.all([
-    page.context().waitForEvent("page"),
-    link.click(),
-  ]);
-  expect(issue.url()).toBe("https://linear.app/onepipeline/issue/ONE-412");
-  await issue.close();
+  const url = "https://linear.app/onepipeline/issue/ONE-412";
+  await expect(link).toHaveAttribute("href", url);
+  await followed(context, () => link.click(), url);
   await expect(detailPane(page)).toHaveCount(0);
   await expect(card(page, "Review the action-items design")).toHaveAttribute(
     "data-selected",
@@ -337,7 +409,7 @@ test("at 1440×900 six complete cards and all their controls fit the list unscro
 }) => {
   const served = await serveBundle("representative.json");
   const list = await open(page, served);
-  const region = page.getByRole("region", { name: "Action item list" });
+  const region = listRegion(page);
   const box = await region.boundingBox();
   if (box === null) throw new Error("the list has no box");
   const cards = list.getByRole("article");
@@ -348,47 +420,40 @@ test("at 1440×900 six complete cards and all their controls fit the list unscro
   }));
   expect(unscrolled).toEqual({ top: 0, fits: true });
   // Three tasks and three open questions, every body 80–160 characters.
-  await expect(list.locator(".human-item-kind")).toHaveText(
-    DECLARED.map(({ kind }) => kind),
-  );
+  for (const kind of ["Task", "Question"])
+    await expect(list.getByText(kind, { exact: true })).toHaveCount(3);
   await expect(list.getByRole("textbox")).toHaveCount(3);
-  for (const shown of await cards.all()) {
+  for (const { title } of DECLARED) {
+    const shown = card(page, title);
     const cardBox = await shown.boundingBox();
     if (cardBox === null) throw new Error("a card has no box");
     expect(cardBox.y).toBeGreaterThanOrEqual(box.y);
     expect(cardBox.y + cardBox.height).toBeLessThanOrEqual(box.y + box.height);
     // Full width: the card spans the list rather than a column of it.
     expect(cardBox.width).toBeGreaterThan(box.width * 0.9);
-    const body = shown.locator(".human-item-body");
-    const length = (await body.innerText()).length;
-    expect(length).toBeGreaterThanOrEqual(80);
-    expect(length).toBeLessThanOrEqual(160);
+    const text = bodyOf(served, title);
+    expect(text.length).toBeGreaterThanOrEqual(80);
+    expect(text.length).toBeLessThanOrEqual(160);
     // Complete: nothing of the body is clipped.
+    const body = shown.getByText(text, { exact: true });
+    await expect(body).toBeInViewport({ ratio: 1 });
     expect(
       await body.evaluate(
         (element) => element.scrollHeight <= element.clientHeight,
       ),
     ).toBe(true);
-    for (const control of await shown.locator("button, a, textarea").all())
-      await expect(control).toBeInViewport({ ratio: 1 });
+    for (const role of ["button", "link", "textbox"] as const)
+      for (const control of await shown.getByRole(role).all())
+        await expect(control).toBeInViewport({ ratio: 1 });
   }
   // Each answer box rests one line tall.
   for (const title of QUESTIONS) {
-    const rest = await answerBox(page, title).evaluate((element) => {
-      const style = getComputedStyle(element);
-      const line = Number.parseFloat(style.lineHeight);
-      const chrome =
-        Number.parseFloat(style.paddingTop) +
-        Number.parseFloat(style.paddingBottom) +
-        Number.parseFloat(style.borderTopWidth) +
-        Number.parseFloat(style.borderBottomWidth);
-      return { height: element.getBoundingClientRect().height, line, chrome };
-    });
-    expect(rest.height).toBeLessThanOrEqual(rest.line + rest.chrome + 1);
+    const rest = await answerBox(page, title).evaluate(heights);
+    expect(rest.height).toBeLessThanOrEqual(rest.oneLine + 1);
   }
 
   await card(page, "Review the action-items design")
-    .locator(".human-item-meta")
+    .getByText("Source: plan plan-a / run run-a", { exact: true })
     .click();
   const detail = detailPane(page);
   await expect(detail).toBeVisible();
@@ -400,6 +465,11 @@ test("at 1440×900 six complete cards and all their controls fit the list unscro
   expect(detailBox.x).toBeGreaterThanOrEqual(narrowed.x + narrowed.width - 1);
   expect(narrowed.width).toBeLessThan(box.width);
   await expect(cards.first()).toBeInViewport();
+
+  // Closing the detail gives the list its whole width back.
+  await detail.getByRole("button", { name: "Close detail" }).click();
+  await expect(detail).toHaveCount(0);
+  expect((await region.boundingBox())?.width).toBe(box.width);
 });
 
 test("the detail enumerates every blocked step, and an open host item is blocking in list and detail", async ({
@@ -428,14 +498,18 @@ test("the detail enumerates every blocked step, and an open host item is blockin
   ]);
 
   const host = card(page, "Restore the build service");
-  await expect(host).toHaveAttribute("data-blocking", "true");
+  await expect(
+    host.getByText("blocks all work on this host", { exact: true }),
+  ).toBeVisible();
   await host
     .getByRole("button", { name: "Details: Restore the build service" })
     .click();
-  await expect(detailPane(page)).toContainText("blocks all work on this host");
-  await expect(detailPane(page).locator(".human-item-priority")).toHaveText(
-    "Critical",
-  );
+  await expect(
+    detailPane(page).getByText("blocks all work on this host", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    detailPane(page).getByText("Critical", { exact: true }),
+  ).toBeVisible();
 });
 
 test("every filter narrows the list on its own, on the wire's vocabulary", async ({
@@ -478,10 +552,7 @@ test("every filter narrows the list on its own, on the wire's vocabulary", async
       "Restore the build service",
       "Should retries reuse the warm cache?",
     ]);
-  await expect(list.locator(".human-item-priority")).toHaveText([
-    "Critical",
-    "Critical",
-  ]);
+  await expect(list.getByText("Critical", { exact: true })).toHaveCount(2);
   await reset("Priority", "");
 
   await choose("State", "answered", "?state=answered");
@@ -492,6 +563,13 @@ test("every filter narrows the list on its own, on the wire's vocabulary", async
   await expect
     .poll(() => titles(list))
     .toEqual(["Re-run the flaky screenshot job"]);
+  // A state nothing is in is an empty list, said so.
+  await choose("State", "completed", "?state=completed");
+  await expect(
+    listRegion(page).getByRole("status").filter({
+      hasText: "No action items match these filters.",
+    }),
+  ).toBeVisible();
   await choose("State", "open", "");
 
   await choose("Source", "host", "?host=true");
@@ -552,14 +630,30 @@ test("Tab moves straight between answer boxes, Enter answers in place, Shift+Ent
     await expect(answerBox(page, title)).toBeFocused();
   }
 
-  // Shift+Enter writes a new line and sends nothing.
-  const last = QUESTIONS[QUESTIONS.length - 1] ?? "";
+  // Enter on an empty box, or while a composition is still being typed, sends
+  // nothing.
+  await page.keyboard.press("Enter");
+  await answerBox(page, LAST_QUESTION).evaluate((element) =>
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+      }),
+    ),
+  );
+  // Shift+Enter writes a new line and sends nothing; the box grows with it.
+  const resting = await answerBox(page, LAST_QUESTION).evaluate(heights);
   await page.keyboard.type("Keep it");
   await page.keyboard.press("Shift+Enter");
   await page.keyboard.type("for one more release");
-  await expect(answerBox(page, last)).toHaveValue(
-    "Keep it\nfor one more release",
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("then drop it");
+  await expect(answerBox(page, LAST_QUESTION)).toHaveValue(
+    "Keep it\nfor one more release\nthen drop it",
   );
+  const grown = await answerBox(page, LAST_QUESTION).evaluate(heights);
+  expect(grown.height).toBeGreaterThan(resting.height + resting.oneLine);
   expect(sent).toHaveLength(0);
 
   // Enter answers the focused question, without opening detail.
@@ -581,42 +675,40 @@ test("Tab moves straight between answer boxes, Enter answers in place, Shift+Ent
     },
   });
   // The other draft is still there, unsent.
-  await expect(answerBox(page, last)).toHaveValue(
-    "Keep it\nfor one more release",
+  await expect(answerBox(page, LAST_QUESTION)).toHaveValue(
+    "Keep it\nfor one more release\nthen drop it",
   );
 });
 
 test("card actions are a focus group of their own after the answer boxes, operable by keyboard", async ({
   page,
+  context,
 }) => {
   const served = await serveBundle("representative.json");
   await open(page, served);
-  await answerBox(page, QUESTIONS[QUESTIONS.length - 1] ?? "").focus();
+  await answerBox(page, LAST_QUESTION).focus();
   // After the last answer box, Tab enters the group at the first card action.
   await page.keyboard.press("Tab");
   const tracker = card(page, "Restore the build service").getByRole("link", {
     name: "Open GitHub issue nickderobertis/onepipeline#1301",
   });
   await expect(tracker).toBeFocused();
-  // Arrow keys move through the actions; Enter follows a link.
-  const [issue] = await Promise.all([
-    page.context().waitForEvent("page"),
-    page.keyboard.press("Enter"),
-  ]);
-  expect(issue.url()).toBe(
+  // Enter follows a link; arrow keys move through the actions.
+  await followed(
+    context,
+    () => page.keyboard.press("Enter"),
     "https://github.com/nickderobertis/onepipeline/issues/1301",
   );
-  await issue.close();
+  await tracker.focus();
   await page.keyboard.press("ArrowRight");
   await expect(
     page.getByRole("button", { name: "Details: Restore the build service" }),
   ).toBeFocused();
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowRight");
-  const dismiss = page.getByRole("button", {
-    name: "Dismiss: Restore the build service",
-  });
-  await expect(dismiss).toBeFocused();
+  await expect(
+    page.getByRole("button", { name: "Dismiss: Restore the build service" }),
+  ).toBeFocused();
   // Dismiss, with no reason, from the keyboard alone.
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog", {
@@ -636,7 +728,7 @@ test("card actions are a focus group of their own after the answer boxes, operab
   // Complete, from the keyboard. The group now opens on the first card left —
   // a question, whose actions are Details and Dismiss — and the arrows walk on
   // into the next card's; End and Home reach the ends of the group.
-  await answerBox(page, QUESTIONS[QUESTIONS.length - 1] ?? "").focus();
+  await answerBox(page, LAST_QUESTION).focus();
   await page.keyboard.press("Tab");
   await expect(
     page.getByRole("button", {
@@ -645,21 +737,17 @@ test("card actions are a focus group of their own after the answer boxes, operab
   ).toBeFocused();
   await page.keyboard.press("End");
   await expect(
-    page.getByRole("button", {
-      name: "Dismiss: Keep the legacy export format?",
-    }),
+    page.getByRole("button", { name: `Dismiss: ${LAST_QUESTION}` }),
   ).toBeFocused();
   await page.keyboard.press("Home");
-  for (const name of [
-    "Dismiss: Which region should the canary run in?",
-    "Open Linear issue ONE-412",
-    "Details: Review the action-items design",
-    "Complete: Review the action-items design",
-  ]) {
+  for (const [role, name] of [
+    ["button", "Dismiss: Which region should the canary run in?"],
+    ["link", "Open Linear issue ONE-412"],
+    ["button", "Details: Review the action-items design"],
+    ["button", "Complete: Review the action-items design"],
+  ] as const) {
     await page.keyboard.press("ArrowRight");
-    await expect(
-      page.getByRole(name.startsWith("Open") ? "link" : "button", { name }),
-    ).toBeFocused();
+    await expect(page.getByRole(role, { name })).toBeFocused();
   }
   await page.keyboard.press("Enter");
   await expect(outcome(page)).toHaveText(
@@ -768,6 +856,65 @@ test("a dismissal sends a reason only when one is written", async ({
   await expect(card(page, "Restore the build service")).toBeVisible();
 });
 
+test("the detail pane answers, completes, dismisses and follows the tracker as the card does", async ({
+  page,
+  context,
+}) => {
+  const served = await serveBundle("representative.json");
+  await open(page, served);
+  const pane = detailPane(page);
+
+  await page
+    .getByRole("button", {
+      name: "Details: Should retries reuse the warm cache?",
+    })
+    .click();
+  const answer = pane.getByRole("textbox", {
+    name: "Answer in detail: Should retries reuse the warm cache?",
+  });
+  await answer.fill("Reuse it, and check the artifact digest");
+  await answer.press("Enter");
+  await expect(outcome(page)).toHaveText(
+    "Should retries reuse the warm cache?: Answered",
+  );
+  // The pane stays on the item, now answered.
+  await expect(pane.getByText("Question · Answered")).toBeVisible();
+  expect(stored(served, "question-cache").resolution?.text).toBe(
+    "Reuse it, and check the artifact digest",
+  );
+
+  await page
+    .getByRole("button", { name: "Details: Review the action-items design" })
+    .click();
+  await followed(
+    context,
+    () => pane.getByRole("link", { name: "Open Linear issue ONE-412" }).click(),
+    "https://linear.app/onepipeline/issue/ONE-412",
+  );
+  await pane.getByRole("button", { name: "Complete" }).click();
+  await expect(outcome(page)).toHaveText(
+    "Review the action-items design: Completed",
+  );
+  await expect(pane.getByText("Task · Completed")).toBeVisible();
+  await expect(pane.getByRole("button", { name: "Complete" })).toHaveCount(0);
+
+  await page
+    .getByRole("button", { name: "Details: Review the dashboard layout" })
+    .click();
+  await pane.getByRole("button", { name: "Dismiss" }).click();
+  const dialog = page.getByRole("dialog", {
+    name: "Dismiss Review the dashboard layout",
+  });
+  await dialog.getByLabel("Reason (optional)").fill("superseded");
+  await dialog.getByRole("button", { name: "Dismiss item" }).click();
+  await expect(outcome(page)).toHaveText(
+    "Review the dashboard layout: Dismissed",
+  );
+  expect(stored(served, "task-dashboard").resolution?.reason).toBe(
+    "superseded",
+  );
+});
+
 test("a pending receipt keeps the item open, repeats send nothing, and a failure keeps the draft", async ({
   page,
 }) => {
@@ -802,22 +949,24 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
 
   // The server cannot read its bundle: the write fails, the list keeps what
   // it last read, and the draft stays for a retry that then succeeds.
-  const other = "Keep the legacy export format?";
   const { sample } = factsSchema.parse(served.facts);
   renameSync(sample, `${sample}.away`);
-  await answerBox(page, other).fill("Keep it one more release");
-  await answerBox(page, other).press("Enter");
-  await expect(card(page, other).getByRole("alert")).toContainText(
+  await answerBox(page, LAST_QUESTION).fill("Keep it one more release");
+  await answerBox(page, LAST_QUESTION).press("Enter");
+  await expect(card(page, LAST_QUESTION).getByRole("alert")).toContainText(
     "engine failure",
   );
-  await expect(answerBox(page, other)).toHaveValue("Keep it one more release");
-  await expect(card(page, other)).toBeVisible();
+  await expect(answerBox(page, LAST_QUESTION)).toHaveValue(
+    "Keep it one more release",
+  );
+  await expect(card(page, LAST_QUESTION)).toBeVisible();
   renameSync(`${sample}.away`, sample);
-  await answerBox(page, other).press("Enter");
-  await expect(outcome(page)).toHaveText(`${other}: Answered`);
+  await answerBox(page, LAST_QUESTION).press("Enter");
+  await expect(outcome(page)).toHaveText(`${LAST_QUESTION}: Answered`);
 
-  // A dropped connection is a failure too, and keeps the draft.
-  await page.route("**/api/human-items/*/complete", (route) => route.abort());
+  // The server stops answering at all: the write's connection fails, the item
+  // and its card stay, and once the server is back the same action succeeds.
+  await served.stopServing();
   await page
     .getByRole("button", { name: "Complete: Restore the build service" })
     .click();
@@ -825,6 +974,67 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
     card(page, "Restore the build service").getByRole("alert"),
   ).toHaveText("Telemetry request failed");
   await expect(card(page, "Restore the build service")).toBeVisible();
+  await served.serveRebuilt();
+  await page
+    .getByRole("button", { name: "Complete: Restore the build service" })
+    .click();
+  await expect(outcome(page)).toHaveText(
+    "Restore the build service: Completed",
+  );
+});
+
+test("a detail that cannot be read says why, and another item's opens once the server can read again", async ({
+  page,
+}) => {
+  const served = await serveBundle("representative.json");
+  await open(page, served);
+  const { sample } = factsSchema.parse(served.facts);
+  renameSync(sample, `${sample}.away`);
+  await page
+    .getByRole("button", { name: "Details: Review the dashboard layout" })
+    .click();
+  const pane = detailPane(page);
+  await expect(pane.getByRole("alert")).toContainText("engine failure");
+  // What the list already read of the item is still shown beside the refusal.
+  await expect(
+    pane.getByRole("heading", { name: "Review the dashboard layout" }),
+  ).toBeVisible();
+  renameSync(`${sample}.away`, sample);
+  await page
+    .getByRole("button", { name: "Details: Review the action-items design" })
+    .click();
+  await expect(
+    pane.getByRole("region", { name: "Blocked steps" }).getByRole("listitem"),
+  ).toHaveCount(7);
+  await expect(pane.getByRole("alert")).toHaveCount(0);
+});
+
+test("the list says it is reading until the first read lands", async ({
+  page,
+}) => {
+  const served = await serveBundle("representative.json");
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/human-items", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.goto(`${served.origin}/human-items`);
+  await expect(
+    listRegion(page)
+      .getByRole("status")
+      .filter({ hasText: "Reading action items…" }),
+  ).toBeVisible();
+  await expect(page.getByRole("article")).toHaveCount(0);
+  release();
+  await expect(page.getByRole("article")).toHaveCount(DECLARED.length);
+  await expect(
+    listRegion(page)
+      .getByRole("status")
+      .filter({ hasText: "Reading action items…" }),
+  ).toHaveCount(0);
 });
 
 test("an item whose body is longer than four lines shows four on its card and all of it in a pane that scrolls on its own", async ({
@@ -832,8 +1042,10 @@ test("an item whose body is longer than four lines shows four on its card and al
 }) => {
   const served = await serveBundle("long-body.json");
   const list = await open(page, served);
-  const long = card(page, "Work through the release review follow-ups");
-  const body = long.locator(".human-item-body");
+  const longTitle = "Work through the release review follow-ups";
+  const longText = bodyOf(served, longTitle);
+  const long = card(page, longTitle);
+  const body = long.getByText(longText, { exact: true });
   const clamp = await body.evaluate((element) => {
     const style = getComputedStyle(element);
     return {
@@ -841,7 +1053,6 @@ test("an item whose body is longer than four lines shows four on its card and al
       height: element.clientHeight,
       overflows: element.scrollHeight > element.clientHeight,
       clamp: style.getPropertyValue("-webkit-line-clamp"),
-      text: element.textContent ?? "",
     };
   });
   // Exactly four rendered lines, more beneath them, and the clamp that ends
@@ -850,7 +1061,7 @@ test("an item whose body is longer than four lines shows four on its card and al
   expect(Math.round(clamp.height / clamp.line)).toBe(4);
   expect(clamp.overflows).toBe(true);
   expect(
-    clamp.text.endsWith("The final words are: ship the reviewed release."),
+    longText.endsWith("The final words are: ship the reviewed release."),
   ).toBe(true);
   // Short bodies show whole, unclipped.
   for (const title of [
@@ -858,7 +1069,9 @@ test("an item whose body is longer than four lines shows four on its card and al
     "Which region should the canary run in?",
     "Keep the legacy export format?",
   ]) {
-    const short = card(page, title).locator(".human-item-body");
+    const short = card(page, title).getByText(bodyOf(served, title), {
+      exact: true,
+    });
     expect(
       await short.evaluate((element) => ({
         clipped: element.scrollHeight > element.clientHeight,
@@ -876,8 +1089,8 @@ test("an item whose body is longer than four lines shows four on its card and al
     .evaluateAll((cards) =>
       cards.map((element) => element.getBoundingClientRect().toJSON()),
     );
-  const short = card(page, "Restore the build service");
-  const shortHeight = (await short.boundingBox())?.height ?? 0;
+  const shortHeight =
+    (await card(page, "Restore the build service").boundingBox())?.height ?? 0;
   const longHeight = (await long.boundingBox())?.height ?? 0;
   expect(Math.abs(longHeight - shortHeight - 3 * clamp.line)).toBeLessThan(2);
   for (const [index, box] of boxes.entries())
@@ -886,24 +1099,20 @@ test("an item whose body is longer than four lines shows four on its card and al
         Math.abs(box.top - (boxes[index - 1]?.bottom ?? 0) - 6),
       ).toBeLessThan(1);
 
-  await long
-    .getByRole("button", {
-      name: "Details: Work through the release review follow-ups",
-    })
-    .click();
+  await long.getByRole("button", { name: `Details: ${longTitle}` }).click();
   const pane = detailPane(page);
   const full = pane.getByRole("region", { name: "Full body" });
-  await expect(full).toContainText(
-    "The final words are: ship the reviewed release.",
-  );
-  const listRegion = page.getByRole("region", { name: "Action item list" });
-  const before = {
-    list: await listRegion.evaluate((element) => element.scrollTop),
-    cards: await list
+  await expect(full).toHaveText(longText);
+  const region = listRegion(page);
+  const positions = () =>
+    list
       .getByRole("article")
       .evaluateAll((cards) =>
         cards.map((element) => element.getBoundingClientRect().top),
-      ),
+      );
+  const before = {
+    list: await region.evaluate((element) => element.scrollTop),
+    cards: await positions(),
     heading: (await pane.getByRole("heading", { level: 2 }).boundingBox())?.y,
   };
   expect(
@@ -911,9 +1120,17 @@ test("an item whose body is longer than four lines shows four on its card and al
       (element) => element.scrollHeight > element.clientHeight,
     ),
   ).toBe(true);
-  await full.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-  });
+  // A reader scrolls the body from the keyboard: focus it, press End.
+  await full.focus();
+  await page.keyboard.press("End");
+  await expect
+    .poll(() =>
+      full.evaluate(
+        (element) =>
+          element.scrollTop + element.clientHeight >= element.scrollHeight - 1,
+      ),
+    )
+    .toBe(true);
   // The final words are in view inside the pane, and nothing else moved.
   const shown = await full.evaluate((element) => {
     const text = element.firstChild;
@@ -928,16 +1145,10 @@ test("an item whose body is longer than four lines shows four on its card and al
     return word.top >= box.top && word.bottom <= box.bottom + 1;
   });
   expect(shown).toBe(true);
-  expect(await listRegion.evaluate((element) => element.scrollTop)).toBe(
+  expect(await region.evaluate((element) => element.scrollTop)).toBe(
     before.list,
   );
-  expect(
-    await list
-      .getByRole("article")
-      .evaluateAll((cards) =>
-        cards.map((element) => element.getBoundingClientRect().top),
-      ),
-  ).toEqual(before.cards);
+  expect(await positions()).toEqual(before.cards);
   expect((await pane.getByRole("heading", { level: 2 }).boundingBox())?.y).toBe(
     before.heading,
   );
@@ -949,8 +1160,7 @@ test("a live host's server serves no fixture items to the page", async ({
   // The shared corpus's server: a runs root with runs, started without a
   // sample, as every live host is.
   await page.goto("/human-items");
-  const region = page.getByRole("region", { name: "Action item list" });
-  await expect(region.getByRole("alert")).toHaveText(
+  await expect(listRegion(page).getByRole("alert")).toHaveText(
     "human-items unavailable against live state",
   );
   await expect(page.getByRole("article")).toHaveCount(0);

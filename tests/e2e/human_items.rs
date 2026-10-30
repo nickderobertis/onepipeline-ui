@@ -1069,3 +1069,145 @@ fn an_unreadable_bundle_is_an_engine_failure_that_names_no_path() {
         DECLARED_ORDER
     );
 }
+
+/// A bundle changed under the server into one the engine refuses is the
+/// engine's failure on every route until it is one the engine accepts again —
+/// the server never serves from a bundle it last read whole.
+#[test]
+fn a_bundle_corrupted_while_served_is_refused_until_it_is_whole_again() {
+    let (_dir, served) = sample("representative.json");
+    let server = serve(&served, Some(OWNER));
+    let whole = std::fs::read(&served).expect("the bundle reads");
+    std::fs::write(
+        &served,
+        br#"{"schema_version":1,"items":[{}],"approval_keys":{}}"#,
+    )
+    .expect("corrupt the bundle");
+    for response in [
+        http::get(server.address, "/api/human-items"),
+        http::get(server.address, "/api/human-items/task-build"),
+        http::post(server.address, "/api/human-items/task-build/dismiss", ""),
+    ] {
+        assert!(
+            error(&response, 500, "engine_error").contains("not one the engine accepts"),
+            "{}",
+            response.body
+        );
+    }
+    std::fs::write(&served, &whole).expect("restore the bundle");
+    assert_eq!(
+        ids(&items(&http::get(server.address, "/api/human-items"))),
+        DECLARED_ORDER
+    );
+}
+
+/// Writes made at once are made one after another: each reads the bundle the
+/// last one wrote, so none is lost to another's write-back.
+#[test]
+fn writes_made_at_once_each_land() {
+    let (_dir, served) = sample("representative.json");
+    let server = serve(&served, Some(OWNER));
+    let address = server.address;
+    let writes: Vec<(&str, &str)> = vec![
+        (
+            "/api/human-items/question-canary/answer",
+            r#"{"text":"eu-west"}"#,
+        ),
+        (
+            "/api/human-items/question-cache/answer",
+            r#"{"text":"reuse it"}"#,
+        ),
+        (
+            "/api/human-items/question-export/dismiss",
+            r#"{"reason":"kept"}"#,
+        ),
+        ("/api/human-items/task-build/complete", "{}"),
+        ("/api/human-items/task-design/complete", "{}"),
+        ("/api/human-items/task-dashboard/dismiss", ""),
+    ];
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(writes.len()));
+    let handles: Vec<_> = writes
+        .into_iter()
+        .map(|(path, body)| {
+            let barrier = std::sync::Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                http::post(address, path, body)
+            })
+        })
+        .collect();
+    for handle in handles {
+        let response = handle.join().expect("the write's thread");
+        assert_eq!(response.status, 200, "{}", response.body);
+    }
+    let resolved: Vec<(String, String)> = serde_json::to_value(bundle(&served)).expect("serialize")
+        ["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|detail| {
+            (
+                detail["item"]["id"].as_str().expect("an id").to_owned(),
+                detail["item"]["state"]
+                    .as_str()
+                    .expect("a state")
+                    .to_owned(),
+            )
+        })
+        .filter(|(id, _)| DECLARED_ORDER.contains(&id.as_str()))
+        .collect();
+    assert_eq!(
+        resolved,
+        [
+            ("task-build", "completed"),
+            ("question-canary", "answered"),
+            ("task-design", "completed"),
+            ("task-dashboard", "dismissed"),
+            ("question-cache", "answered"),
+            ("question-export", "dismissed"),
+        ]
+        .map(|(id, state)| (id.to_owned(), state.to_owned()))
+    );
+    assert_eq!(
+        items(&http::get(address, "/api/human-items")),
+        Vec::<Value>::new()
+    );
+}
+
+/// A write whose bundle cannot be written back is the engine's failure, leaves
+/// the bundle exactly as it was, and is made once the bundle can be written.
+#[test]
+fn a_write_that_cannot_be_written_back_changes_nothing_and_can_be_made_again() {
+    let (dir, served) = sample("representative.json");
+    let server = serve(&served, Some(OWNER));
+    let before = std::fs::read(&served).expect("the bundle reads");
+    // The sibling the write-back stages through, taken by a directory.
+    let staging = dir.path().join("representative.json.writing");
+    std::fs::create_dir(&staging).expect("block the staging file");
+    let refused = http::post(server.address, "/api/human-items/task-build/dismiss", "");
+    let said = error(&refused, 500, "engine_error");
+    assert!(said.contains("was not written"), "{said}");
+    assert!(
+        !said.contains(dir.path().to_str().expect("utf-8")),
+        "{said}"
+    );
+    assert_eq!(std::fs::read(&served).expect("the bundle reads"), before);
+    assert!(ids(&items(&http::get(server.address, "/api/human-items")))
+        .contains(&"task-build".to_owned()));
+
+    std::fs::remove_dir(&staging).expect("unblock the staging file");
+    let made = http::post(server.address, "/api/human-items/task-build/dismiss", "");
+    assert_eq!(made.status, 200, "{}", made.body);
+    assert_eq!(stored_state(&served, "task-build"), "dismissed");
+}
+
+fn stored_state(path: &Path, id: &str) -> String {
+    serde_json::to_value(bundle(path)).expect("serialize")["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|detail| detail["item"]["id"] == id)
+        .and_then(|detail| detail["item"]["state"].as_str())
+        .expect("the item's state")
+        .to_owned()
+}

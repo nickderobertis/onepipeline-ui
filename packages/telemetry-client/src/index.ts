@@ -474,6 +474,7 @@ export class TelemetryClient {
     );
   }
 
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] this repository keeps every read-API record's parser in `@onepipeline-ui/dag-model` and every route call in `@onepipeline-ui/telemetry-client` — the runs, channel, host, agents and subscription records live here the same way, and `docs/dag-ui.md` holds the app to declaring no schema or API path of its own — and the plan names these two packages as the ones this change touches. A human-item package of its own would be the only API domain split out of that layout.
   /**
    * The host-wide action items the server's session owns, in the engine's order.
    *
@@ -533,6 +534,7 @@ export class TelemetryClient {
       json("POST", reason?.trim() ? { reason } : {}),
     );
   }
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 
   /** Shut down the entire host and read its report, including incomplete teardown. */
   async shutdown(

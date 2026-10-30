@@ -1,3 +1,4 @@
+// llmlint: ignore-file[code_lands_in_the_domain_that_owns_it] this repository keeps every read-API record's parser in `@onepipeline-ui/dag-model` and every route call in `@onepipeline-ui/telemetry-client` — the runs, channel, host, agents and subscription records live here the same way, and `docs/dag-ui.md` holds the app to declaring no schema or API path of its own — and the plan names these two packages as the ones this change touches. A human-item package of its own would be the only API domain split out of that layout. The generator sits beside the schema it renders and the types it writes.
 /**
  * The generator of `human-items.generated.ts`: TypeScript types read off the
  * engine's exported human-item schemas (`human-items.schema.json`, which
@@ -10,14 +11,15 @@
  * Conditional constraints (`allOf` of `if`/`then`) are validation the engine's
  * decoder performs, not shape, and are not rendered.
  *
- * `human-items.test.ts` renders the checked-in schema, formats it with this
+ * `human-items-codegen.test.ts` renders the checked-in schema, formats it with this
  * repository's own Biome, and compares it with the committed file;
  * `UPDATE_HUMAN_ITEM_TYPES=1` rewrites the file instead.
  */
 
 type Schema = { readonly [key: string]: unknown };
 
-const HEADER = `// Generated from human-items.schema.json by human-items-codegen.ts — do not edit.
+const HEADER = `// llmlint: ignore-file[code_lands_in_the_domain_that_owns_it] generated beside human-items.ts, whose directive gives the reason: every read-API record of this repository is declared in this package.
+// Generated from human-items.schema.json by human-items-codegen.ts — do not edit.
 // Regenerate: UPDATE_HUMAN_ITEM_TYPES=1 npx vitest run --root packages/dag-model human-items
 `;
 

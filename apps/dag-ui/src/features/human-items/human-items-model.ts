@@ -35,10 +35,12 @@ const STATE_LABELS: { readonly [S in HumanItem["state"]]: string } = {
   dismissed: "Dismissed",
 };
 
-export const STATE_OPTIONS = Object.entries(STATE_LABELS) as [
-  HumanItem["state"],
-  string,
-][];
+const STATES = ["open", "answered", "completed", "dismissed"] as const;
+
+export const STATE_OPTIONS = STATES.map((state) => ({
+  state,
+  label: STATE_LABELS[state],
+}));
 
 export function stateLabel(item: HumanItem): string {
   return STATE_LABELS[item.state];
@@ -131,13 +133,30 @@ export function trackerProvider(url: string): TrackerProvider {
   return "tracker";
 }
 
+/**
+ * `value` if it is one of `allowed`, else `undefined`: how a `<select>`'s string
+ * becomes one of the choices it was rendered from without asserting its type.
+ */
+export function oneOf<T extends string>(
+  allowed: readonly T[],
+  value: string,
+): T | undefined {
+  return allowed.find((choice) => choice === value);
+}
+
+export const KIND_CHOICES = ["", "task", "question"] as const;
+export const BLOCKING_CHOICES = ["", "yes", "no"] as const;
+export const PRIORITY_CHOICES = ["", ...HUMAN_ITEM_PRIORITIES] as const;
+export const STATE_CHOICES = STATES;
+export const SOURCE_CHOICES = ["", "session", "run", "plan", "host"] as const;
+
 /** The page's selectors, as a reader sets them. Scope is deliberately absent. */
 export interface FilterChoice {
-  readonly kind: "" | HumanItem["kind"];
-  readonly blocking: "" | "yes" | "no";
-  readonly priority: "" | HumanItem["priority"];
-  readonly state: HumanItem["state"];
-  readonly source: "" | "session" | "run" | "plan" | "host";
+  readonly kind: (typeof KIND_CHOICES)[number];
+  readonly blocking: (typeof BLOCKING_CHOICES)[number];
+  readonly priority: (typeof PRIORITY_CHOICES)[number];
+  readonly state: (typeof STATE_CHOICES)[number];
+  readonly source: (typeof SOURCE_CHOICES)[number];
   readonly sourceId: string;
 }
 

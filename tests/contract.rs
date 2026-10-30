@@ -4149,7 +4149,7 @@ fn the_contract_states_every_field_the_transcript_reading_serves() {
 }
 
 /// Where the engine's exported human-item schemas are checked in: beside the
-/// browser model whose types `packages/dag-model/scripts/human-items-types.mjs`
+/// browser model whose types `packages/dag-model/src/human-items-codegen.ts`
 /// generates from them.
 fn human_items_schema_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/human-items.schema.json")

@@ -18,15 +18,21 @@ import {
   useState,
 } from "react";
 import {
+  BLOCKING_CHOICES,
   blockedGroups,
   blockedPhrases,
   blockedSummary,
   type FilterChoice,
   isBlocking,
+  KIND_CHOICES,
   kindLabel,
   NO_FILTER,
+  oneOf,
+  PRIORITY_CHOICES,
   PRIORITY_OPTIONS,
   priorityLabel,
+  SOURCE_CHOICES,
+  STATE_CHOICES,
   STATE_OPTIONS,
   sourceWords,
   stateLabel,
@@ -82,6 +88,7 @@ export function HumanItemsPage({
       <Filters choice={choice} onChange={setChoice} />
       {items.outcome && (
         <p
+          aria-label="Last outcome"
           className="human-items-outcome"
           data-failed={items.outcome.failed}
           role="status"
@@ -200,7 +207,7 @@ function Filters({
       <select
         id={`${id}-kind`}
         onChange={(event) =>
-          set("kind", event.target.value as FilterChoice["kind"])
+          set("kind", oneOf(KIND_CHOICES, event.target.value) ?? "")
         }
         value={choice.kind}
       >
@@ -212,7 +219,7 @@ function Filters({
       <select
         id={`${id}-blocking`}
         onChange={(event) =>
-          set("blocking", event.target.value as FilterChoice["blocking"])
+          set("blocking", oneOf(BLOCKING_CHOICES, event.target.value) ?? "")
         }
         value={choice.blocking}
       >
@@ -224,7 +231,7 @@ function Filters({
       <select
         id={`${id}-priority`}
         onChange={(event) =>
-          set("priority", event.target.value as FilterChoice["priority"])
+          set("priority", oneOf(PRIORITY_CHOICES, event.target.value) ?? "")
         }
         value={choice.priority}
       >
@@ -239,11 +246,11 @@ function Filters({
       <select
         id={`${id}-state`}
         onChange={(event) =>
-          set("state", event.target.value as FilterChoice["state"])
+          set("state", oneOf(STATE_CHOICES, event.target.value) ?? "open")
         }
         value={choice.state}
       >
-        {STATE_OPTIONS.map(([state, label]) => (
+        {STATE_OPTIONS.map(({ state, label }) => (
           <option key={state} value={state}>
             {label}
           </option>
@@ -253,7 +260,7 @@ function Filters({
       <select
         id={`${id}-source`}
         onChange={(event) =>
-          set("source", event.target.value as FilterChoice["source"])
+          set("source", oneOf(SOURCE_CHOICES, event.target.value) ?? "")
         }
         value={choice.source}
       >

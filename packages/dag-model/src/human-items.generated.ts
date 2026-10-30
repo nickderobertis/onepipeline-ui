@@ -1,3 +1,4 @@
+// llmlint: ignore-file[code_lands_in_the_domain_that_owns_it] generated beside human-items.ts, whose directive gives the reason: every read-API record of this repository is declared in this package.
 // Generated from human-items.schema.json by human-items-codegen.ts — do not edit.
 // Regenerate: UPDATE_HUMAN_ITEM_TYPES=1 npx vitest run --root packages/dag-model human-items
 
