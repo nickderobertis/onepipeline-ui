@@ -25,6 +25,18 @@ import { type FixtureServer, startFixtureServer } from "./fixture-server";
 
 const factsSchema = z.object({ sample: z.string().min(1) });
 
+/** The part of a bundle a hand-over rewrites; every other field is kept as read. */
+const ownedBundleSchema = z.looseObject({
+  items: z.array(
+    z.looseObject({
+      item: z.looseObject({
+        id: z.string(),
+        owner: z.looseObject({ session: z.string() }),
+      }),
+    }),
+  ),
+});
+
 const bundleSchema = z.object({
   items: z.array(
     z.object({
@@ -1083,7 +1095,7 @@ test("a write to an item that became another session's is refused, hides it and 
 
   /** Hand the item `id` to another session in the bundle the server reads. */
   function handOver(id: string): string {
-    const bundle = JSON.parse(original);
+    const bundle = ownedBundleSchema.parse(JSON.parse(original));
     for (const { item } of bundle.items) {
       if (item.id === id) item.owner.session = "other-session";
     }
