@@ -662,3 +662,13 @@ ApiError::from_engine and the other engine-typed public items.
 projection map when Linear rewrites a private plan home's content, and carries
 the engine's npm launcher fix. The test-only store requirements move with it.
 The lock also advances pulldown-cmark to 0.13.5 to clear RUSTSEC-2026-0414.
+0.96.0 is the engine that publishes the human-item contract: the
+`onepipeline::human_items` domain, its exported schemas, the explicit
+sample-backed adapter (`HumanItemSample`) and the `onepipeline human-items
+--sample` CLI. This crate serves that contract under `/api/human-items`, in
+sample mode only, beside the existing supervisory routes. The onetaskgraph
+family and its test-only exact requirements move to 0.12.11 and onevcs to
+0.57.4, the releases that engine requires; oneagentgraph 0.9.0, onejudge
+0.22.0 and oneharness-core 0.29.1 are unchanged, and the MSRV is unchanged.
+This changes the engine types carried by ApiError::from_engine and the other
+engine-typed public items.
