@@ -219,16 +219,9 @@ libc = "0.2"
 # major `onepipeline` resolves, so the gate reads the same declaration the
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
-# dependency above, which the crate now links in its own right. 0.52.0 is the
-# release engine 0.75.0 requires (^0.52.0), so the lock moves both to it and
-# keeps one copy. 0.52.1 is the release engine 0.78.0 resolves (^0.52.0), and
-# declares the stacking, review and landing kinds that engine relays. 0.56.3 is
-# the release engine 0.79.0 resolves (^0.56.2), and declares
-# `publication-resumed`, which `payload::vcs` copies; engine 0.79.1 resolves the
-# same release (^0.56.3), as do 0.82.0, 0.84.0, 0.84.1 and 0.85.0. 0.56.9 is the
-# release engine 0.89.0 resolves (^0.56.9), which relays each check's times.
-# 0.56.11 is the release engine 0.90.0 resolves (^0.56.11), and 0.57.4 the one
-# the linked engine resolves (^0.57.4).
+# dependency above, which the crate now links in its own right. 0.57.4 is the
+# release the linked engine resolves (^0.57.4); earlier moves are recorded in
+# docs/engine-dependency-history.md.
 onevcs = "=0.57.4"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`

@@ -375,12 +375,16 @@ resolves. This changes the engine types carried by ApiError::from_engine and
 the other engine-typed public items.
 0.75.0 and the siblings it links read YAML through serde-saphyr, so no libyaml
 translation is left in this graph or in the engine CLI's driver. The engine
-dispatches nothing until it has read its project's claim off the store.
+dispatches nothing until it has read its project's claim off the store. It
+requires onevcs ^0.52.0, so the test-only `onevcs` requirement moves to 0.52.0
+and the lock keeps one copy.
 0.78.0 is the engine whose harness core launches Codex with plugins off; a
 host holds this reader to the engine it pins, so it adopts that only once this
 moves. Its reply grammar gains `decline` and its agent scopes `review-reply`,
 which the browser's gated copies follow, and its reconciler refuses by kind
 as `Error::Rejected`, which `ApiError::from_engine` serves as `422 refused`.
+It resolves onevcs 0.52.1, which declares the stacking, review and landing
+kinds it relays.
 It also stacks, reworks, continues and readjusts drafts from review, so a
 CLI-driven run's driver does what the CLI's does, and those records
 render here rather than being refused. It links onetaskgraph 0.7.3, whose
