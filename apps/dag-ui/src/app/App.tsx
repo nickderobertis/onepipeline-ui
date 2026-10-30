@@ -33,6 +33,7 @@ import { useRunControl } from "../features/control/useRunControl";
 import { DagGraph } from "../features/graph/DagGraph";
 import { HostPage } from "../features/host/HostPage";
 import { useHostListing } from "../features/host/useHostListing";
+import { HumanItemsPage } from "../features/human-items/HumanItemsPage";
 import { RunNavigation } from "../features/navigation/RunNavigation";
 import { useDagTelemetry } from "../features/runs/useDagTelemetry";
 import {
@@ -43,6 +44,7 @@ import { ShutdownStatus } from "../features/shutdown/ShutdownStatus";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
 import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
+import { useHumanItemsRoute } from "../lib/humanItemsRoute";
 import { RecordDisclosure } from "../lib/RecordDisclosure";
 import {
   currentOverrides,
@@ -95,6 +97,10 @@ export function App({
   readonly client?: TelemetryClient;
 }) {
   const selection = useUrlSelection();
+  // The action-items page is a view of the host's attention rather than of a
+  // run, so while it is open nothing picks a run and the sidebar alone is read.
+  const humanItems = useHumanItemsRoute();
+  const runless = selection.host || humanItems.active;
   // The reading the viewer asked for, as the filter profile the server names it
   // by. Every payload this app shows is read under it, so the graph, the
   // timeline and the pushed changes can never be three different slices of one
@@ -114,8 +120,8 @@ export function App({
     filter,
     // An address naming no run opens the newest one served, except on the Host
     // page, which picks none itself; a run the address already names stays read.
-    selectFirst: !selection.host,
-    host: selection.host,
+    selectFirst: !runless,
+    host: runless,
   });
   const rows = telemetry.rows;
   const selectedRunId = telemetry.runId;
@@ -141,7 +147,7 @@ export function App({
   const graph = detail === undefined ? undefined : graphOf(detail);
   const selectedNode = nodes.find(({ id }) => id === selection.nodeId);
   useEffect(() => {
-    if (selection.host || !rows) return;
+    if (runless || !rows) return;
     const groups = sidebarGroups(rows);
     const currentGroup = groups.find((group) =>
       group.rows.some((row) => row.id === selection.runId),
@@ -160,7 +166,7 @@ export function App({
       visible[0]
     )
       selection.selectRun(visible[0].id);
-  }, [rows, selection]);
+  }, [rows, selection, runless]);
 
   useEffect(() => {
     if (selectedRunId && selection.runId && selection.runId !== selectedRunId) {
@@ -190,26 +196,33 @@ export function App({
           selectedRunId={selectedRunId}
           onSelect={selection.selectRun}
           onHost={selection.selectHost}
+          hostCurrent={selection.host && !humanItems.active}
+          onActionItems={humanItems.open}
+          actionItemsCurrent={humanItems.active}
           hiddenKinds={selection.hiddenKinds}
           onKindsChange={selection.selectKinds}
         />
         <main className="workspace">
           <section
-            aria-label={selectedRunId ? "Run header" : "Workspace header"}
-            className={`topbar${selectedRunId ? " run-topbar" : ""}`}
+            aria-label={
+              selectedRunId && !runless ? "Run header" : "Workspace header"
+            }
+            className={`topbar${selectedRunId && !runless ? " run-topbar" : ""}`}
           >
             <div className="topbar-title">
               <div>
                 <p className="eyebrow">Execution telemetry</p>
                 <h2>
-                  {selection.host
-                    ? "Host"
-                    : (selectedRunId ?? "No DAG selected")}
+                  {humanItems.active
+                    ? "Action items"
+                    : selection.host
+                      ? "Host"
+                      : (selectedRunId ?? "No DAG selected")}
                 </h2>
               </div>
             </div>
             <div className="topbar-actions">
-              {!selection.host && selectedRunId !== undefined && (
+              {!runless && selectedRunId !== undefined && (
                 <RunActions
                   control={control}
                   runId={selectedRunId}
@@ -231,7 +244,7 @@ export function App({
                   </>
                 )}
               </span>
-              {lastActivity !== undefined && (
+              {!runless && lastActivity !== undefined && (
                 <button
                   className="last-activity connection"
                   type="button"
@@ -257,7 +270,7 @@ export function App({
               </Button>
             </div>
           </section>
-          {!selection.host && detail && (
+          {!runless && detail && (
             <RecordDisclosure
               label="Run details"
               className="run-header-details"
@@ -333,7 +346,9 @@ export function App({
             rows={hostList?.runs ?? []}
             state={hostShutdowns.host.state}
           />
-          {selection.host ? (
+          {humanItems.active ? (
+            <HumanItemsPage client={client} />
+          ) : selection.host ? (
             <HostPage
               client={client}
               listError={hostListError}

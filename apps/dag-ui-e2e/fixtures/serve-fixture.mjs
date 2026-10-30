@@ -17,7 +17,8 @@
  *                     [--shutdown-corpus [--live-dispatch-pid PID]
  *                      | --preserved-corpus | --review-corpus
  *                      | --review-loop-corpus | --transcripts-corpus
- *                      | --held-turn-corpus]
+ *                      | --held-turn-corpus
+ *                      | --human-items-sample NAME]
  *                                                  build the fixture and serve it,
  *                                                  the browser view beside it with --ui;
  *                                                  the shutdown journeys' own runs
@@ -27,7 +28,12 @@
  *                                                  reworked stack's with
  *                                                  --review-loop-corpus, and the
  *                                                  held turn's with
- *                                                  --held-turn-corpus
+ *                                                  --held-turn-corpus; the
+ *                                                  action-items journeys' with
+ *                                                  --human-items-sample, a
+ *                                                  bundle of
+ *                                                  tests/fixtures/human-items
+ *                                                  served over an empty root
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
  *                     | --record-activity NAME --activity-detail TEXT
@@ -362,6 +368,9 @@ async function serve(workspace, port, ui, corpus) {
       // The binary `dag-ui:build-api-server` compiled after `dag-ui:build`, so
       // the view it embeds is the bundle every other origin here previews.
       ...(ui ? ["--ui"] : []),
+      // What a corpus asks the server for beside its runs: the action-items
+      // journeys' engine sample bundle.
+      ...(corpus.serverArguments ?? []),
     ],
     {
       stdio: ["ignore", "inherit", "inherit"],
@@ -427,6 +436,7 @@ function parseArgs(argv) {
     "--words-text",
     "--refuse-port",
     "--live-dispatch-pid",
+    "--human-items-sample",
   ]);
   const out = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -737,6 +747,30 @@ if (args.stall) {
           build: (root) => buildHeldTurnRuns(root, workspace),
           facts: () => heldTurnFacts(workspace),
           environment: heldTurnEnvironment(workspace),
+        };
+      } else if (args["human-items-sample"] !== undefined) {
+        // The engine's own sample adapter, served over an empty runs root —
+        // the only root the server serves a sample over — from a fresh copy of
+        // one checked-in bundle, so a journey's writes never reach the fixture
+        // and never outlive the workspace.
+        const name = args["human-items-sample"];
+        if (basename(name) !== name || !name.endsWith(".json")) {
+          die(
+            `'${name}' is not a bundle name`,
+            "pass --human-items-sample the file name of a bundle in tests/fixtures/human-items",
+          );
+        }
+        const sample = join(workspace, name);
+        corpus = {
+          build: (root) => {
+            mkdirSync(root, { recursive: true });
+            copyFileSync(
+              join(REPO_ROOT, "tests", "fixtures", "human-items", name),
+              sample,
+            );
+          },
+          facts: () => ({ sample }),
+          serverArguments: ["--human-items-sample", sample],
         };
       } else if (args["shutdown-corpus"]) {
         const pid = args["live-dispatch-pid"];
