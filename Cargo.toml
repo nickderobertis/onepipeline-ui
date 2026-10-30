@@ -219,9 +219,9 @@ libc = "0.2"
 # major `onepipeline` resolves, so the gate reads the same declaration the
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
-# dependency above, which the crate now links in its own right. 0.57.4 is the
-# release the linked engine resolves (^0.57.4); earlier moves are recorded in
-# docs/engine-dependency-history.md.
+# dependency above, which the crate now links in its own right. Exact, at the
+# release the linked engine's lock resolves (0.96.0 requires ^0.57.4); earlier
+# moves are in docs/engine-dependency-history.md.
 onevcs = "=0.57.4"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
