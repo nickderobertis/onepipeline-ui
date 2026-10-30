@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "project": "board:plan",
+  "project_metadata": {
+    "onepipeline.concurrency": 1,
+    "onepipeline.driver": {
+      "run": "github-private-home",
+      "host": "shulgin",
+      "session": "session-github-private-home",
+      "pid": 3649722,
+      "claimed_at": "2026-10-30T04:22:14.802Z",
+      "lease": {
+        "interval_seconds": 300,
+        "cancel_grace_seconds": 300
+      }
+    },
+    "onepipeline.goal": {
+      "text": "Deliver the plan"
+    },
+    "onepipeline.schema_version": 3
+  },
+  "items": {
+    "anchor": {
+      "destination": "board:anchor",
+      "title": "chore: anchor",
+      "content_sha256": "752e456c7adcb965fd9b3d6f707d6e08f6b537b59da54a6b0708054e861b2069",
+      "status": "in progress",
+      "metadata": {
+        "onepipeline.id": "anchor",
+        "onepipeline.node": "anchor",
+        "onepipeline.persona": "engineer"
+      },
+      "delivers": [],
+      "depends_on": []
+    },
+    "examples": {
+      "destination": "board:I_3",
+      "title": "examples",
+      "content_sha256": "7ba31b4380dd33c1881dca00932ec7c60ef71858ea28beb9a3cf3334a68fdb68",
+      "status": "parked",
+      "metadata": {
+        "onepipeline.id": "examples",
+        "onepipeline.node": "examples",
+        "onepipeline.parked": true,
+        "onepipeline.persona": "engineer"
+      },
+      "delivers": [],
+      "depends_on": []
+    }
+  }
+}

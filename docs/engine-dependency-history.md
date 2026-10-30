@@ -662,3 +662,11 @@ ApiError::from_engine and the other engine-typed public items.
 projection map when Linear rewrites a private plan home's content, and carries
 the engine's npm launcher fix. The test-only store requirements move with it.
 The lock also advances pulldown-cmark to 0.13.5 to clear RUSTSEC-2026-0414.
+0.96.0 is the engine that links the plan store, so a GitHub Projects board
+declared private can home a mixed plan whose public-repository tasks reach a
+public board only as neutral projections. It links onetaskgraph 0.12.11, which
+the test-only store requirements move to, and resolves onevcs ^0.57.4, so the
+test-only `onevcs` pin moves to 0.57.4. oneagentgraph 0.9.0, onejudge 0.22.0 and
+oneharness-core 0.29.1 are unchanged, and no route, payload or MSRV changes
+beyond the release `/healthz` reports. This changes the engine types carried by
+ApiError::from_engine and the other engine-typed public items.
