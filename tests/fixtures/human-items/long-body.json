@@ -1,0 +1,277 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "task-short-1",
+        "dedup_key": "dedup-task-short-1",
+        "kind": "task",
+        "title": "Restore the build service",
+        "body": "The shared build service stopped answering. Restart it on the build host and confirm one cached build finishes.",
+        "priority": "urgent",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": null,
+          "plan": null
+        },
+        "block": {
+          "scope": "host"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": {
+          "task": "nickderobertis/onepipeline#1301",
+          "url": "https://github.com/nickderobertis/onepipeline/issues/1301"
+        },
+        "created_at": "2026-10-29T09:00:00Z",
+        "updated_at": "2026-10-29T09:00:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "long-task",
+        "dedup_key": "dedup-long-task",
+        "kind": "task",
+        "title": "Work through the release review follow-ups",
+        "body": "This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. This task gathers every follow-up the release review left open so that nothing is lost between sessions. The final words are: ship the reviewed release.",
+        "priority": "high",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": "run-a",
+          "plan": "plan-a"
+        },
+        "block": {
+          "scope": "plan",
+          "plan": "plan-a"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": {
+          "task": "ONE-500",
+          "url": "https://linear.app/onepipeline/issue/ONE-500"
+        },
+        "created_at": "2026-10-29T09:05:00Z",
+        "updated_at": "2026-10-29T09:05:00Z"
+      },
+      "blocked": {
+        "total": 2,
+        "plans": [
+          {
+            "plan": "plan-a",
+            "count": 2,
+            "preview": [
+              {
+                "run": "run-a",
+                "node": "build",
+                "title": "Build the release binaries"
+              },
+              {
+                "run": "run-a",
+                "node": "test",
+                "title": "Run the release journeys"
+              }
+            ]
+          }
+        ]
+      },
+      "nodes": [
+        {
+          "run": "run-a",
+          "node": "build",
+          "title": "Build the release binaries"
+        },
+        {
+          "run": "run-a",
+          "node": "test",
+          "title": "Run the release journeys"
+        }
+      ]
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "question-short-1",
+        "dedup_key": "dedup-question-short-1",
+        "kind": "question",
+        "title": "Which region should the canary run in?",
+        "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+        "priority": "medium",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": null,
+          "plan": null
+        },
+        "block": {
+          "scope": "nothing"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-10-29T09:10:00Z",
+        "updated_at": "2026-10-29T09:10:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "question-short-2",
+        "dedup_key": "dedup-question-short-2",
+        "kind": "question",
+        "title": "Keep the legacy export format?",
+        "body": "Two teams still read the legacy CSV export. Dropping it simplifies the writer; keeping it costs one more test suite.",
+        "priority": "low",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": "run-b",
+          "plan": "plan-b"
+        },
+        "block": {
+          "scope": "nothing"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-10-29T09:15:00Z",
+        "updated_at": "2026-10-29T09:15:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "question-plan-only",
+        "dedup_key": "dedup-question-plan-only",
+        "kind": "question",
+        "title": "Which plan owns the shared fixtures?",
+        "body": "The fixtures moved out of every run. Say which plan keeps them so its owner reviews changes to them.",
+        "priority": "low",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": null,
+          "plan": "plan-c"
+        },
+        "block": {
+          "scope": "nothing"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-10-29T09:20:00Z",
+        "updated_at": "2026-10-29T09:20:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "task-run-only",
+        "dedup_key": "dedup-task-run-only",
+        "kind": "task",
+        "title": "File the flaky-runner report",
+        "body": "Collect the three runner timeouts from this run and file them with the infrastructure tracker today.",
+        "priority": "low",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": "run-d",
+          "plan": null
+        },
+        "block": {
+          "scope": "nothing"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": {
+          "task": "INFRA-77",
+          "url": "https://tracker.example.com/issues/INFRA-77"
+        },
+        "created_at": "2026-10-29T09:25:00Z",
+        "updated_at": "2026-10-29T09:25:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "task-one-step",
+        "dedup_key": "dedup-task-one-step",
+        "kind": "task",
+        "title": "Pick the release branch's base",
+        "body": "The release branch can rebase onto main or onto last week's tag. Pick one so the rebase step can run.",
+        "priority": "low",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": "run-e",
+          "plan": "plan-e"
+        },
+        "block": {
+          "scope": "work",
+          "run": "run-e",
+          "node": "rebase"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": {
+          "task": "nickderobertis/onepipeline#1305",
+          "url": "https://github.com/nickderobertis/onepipeline/issues/1305"
+        },
+        "created_at": "2026-10-29T09:30:00Z",
+        "updated_at": "2026-10-29T09:30:00Z"
+      },
+      "blocked": {
+        "total": 1,
+        "plans": [
+          {
+            "plan": "plan-e",
+            "count": 1,
+            "preview": [
+              {
+                "run": "run-e",
+                "node": "rebase",
+                "title": "Rebase the release branch"
+              }
+            ]
+          }
+        ]
+      },
+      "nodes": [
+        {
+          "run": "run-e",
+          "node": "rebase",
+          "title": "Rebase the release branch"
+        }
+      ]
+    }
+  ],
+  "approval_keys": {}
+}

@@ -15,6 +15,7 @@ use std::str::FromStr;
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
+use crate::human_items::HumanItemsSample;
 use crate::ui::{UiDist, View};
 
 /// Exit status when a command parsed but this process could not carry it out.
@@ -115,6 +116,18 @@ pub struct ServeArgs {
     #[arg(long, value_name = "DIR", requires = "ui")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui_dist: Option<UiDist>,
+
+    /// Serve `/api/human-items` over this engine sample bundle. Test-only.
+    ///
+    /// The engine release this links ships human items' contract and its
+    /// explicit sample adapter, and no live adapter yet. Without this flag
+    /// every human-item route answers the engine's `unavailable` refusal; with
+    /// it, they query and write this bundle exactly as `onepipeline
+    /// human-items --sample FILE` does. Refused over a runs root that holds
+    /// anything, because a live host never serves sample data.
+    #[arg(long, value_name = "FILE")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub human_items_sample: Option<HumanItemsSample>,
 }
 
 /// The variable the launching session is read from when `--session` names
@@ -168,6 +181,22 @@ impl ServeArgs {
     /// names one — see [`View::resolve`].
     pub fn view(&self) -> Result<Option<View>, String> {
         View::resolve(self.ui, self.ui_dist.as_ref(), crate::ui::EMBEDDED)
+    }
+
+    /// The sample bundle the human-item routes serve, or `None` on a live host.
+    ///
+    /// Resolved before the port is taken, like the view.
+    ///
+    /// # Errors
+    ///
+    /// When a sample was asked for over a runs root that holds runs — see
+    /// [`HumanItemsSample::serving_over`]. A usage error: the configuration
+    /// asked a live host to serve fixture items.
+    pub fn human_items(&self) -> Result<Option<&HumanItemsSample>, String> {
+        self.human_items_sample
+            .as_ref()
+            .map(|sample| sample.serving_over(&self.runs_root))
+            .transpose()
     }
 }
 

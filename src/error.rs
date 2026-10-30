@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use thiserror::Error;
 
 use crate::contract::{
-    ArtifactId, ConversationId, ErrorBody, ErrorEnvelope, NodeId, ProjectId, RunId,
+    ArtifactId, ConversationId, ErrorBody, ErrorEnvelope, HumanItemId, NodeId, ProjectId, RunId,
 };
 
 /// A failure of a read route.
@@ -52,6 +52,27 @@ pub enum ApiError {
     /// The project identifier in the path is not a usable one.
     #[error("invalid project id: {0}")]
     InvalidProjectId(String),
+    /// The human-item identifier in the path is not a usable one.
+    #[error("invalid human-item id: {0}")]
+    InvalidHumanItemId(String),
+    /// The human-item routes have no adapter on this server: the engine's own
+    /// `unavailable` refusal, which a live host answers until its runtime
+    /// integration ships. Never fixture items in its place.
+    #[error("{0}")]
+    HumanItemsUnavailable(String),
+    /// No human item this session may read carries that identifier.
+    #[error("no human item {0}")]
+    HumanItemNotFound(HumanItemId),
+    /// The human item belongs to another session: its content is not served
+    /// and no write to it is made. The owner is not named, because naming it
+    /// would be serving the content this refusal withholds.
+    #[error("{0}")]
+    HumanItemNotOwner(String),
+    /// The engine refused the transition, in its own words: an item already
+    /// resolved, an action that does not match the item's kind, a duplicate
+    /// dedup key, or a design review whose document changed since it was raised.
+    #[error("{0}")]
+    HumanItemConflict(String),
     /// A subscription request the contract cannot read: a malformed view, an
     /// id or a cursor that does not parse, or members it does not name. `400`,
     /// not `422`: there is no baseline to guess at from a malformed cursor.
@@ -205,6 +226,11 @@ impl ApiError {
             Self::InvalidArtifactId(_) => "invalid_artifact_id",
             Self::InvalidDispatchId(_) => "invalid_dispatch_id",
             Self::InvalidProjectId(_) => "invalid_project_id",
+            Self::InvalidHumanItemId(_) => "invalid_human_item_id",
+            Self::HumanItemsUnavailable(_) => "human_items_unavailable",
+            Self::HumanItemNotFound(_) => "human_item_not_found",
+            Self::HumanItemNotOwner(_) => "human_item_not_owner",
+            Self::HumanItemConflict(_) => "human_item_conflict",
             Self::InvalidCorrelation(_) => "invalid_correlation",
             Self::InvalidSubscription(_) => "invalid_subscription",
             Self::NodeNotFound(_) => "node_not_found",
@@ -241,6 +267,7 @@ impl ApiError {
             | Self::InvalidArtifactId(_)
             | Self::InvalidDispatchId(_)
             | Self::InvalidProjectId(_)
+            | Self::InvalidHumanItemId(_)
             | Self::InvalidCorrelation(_)
             | Self::Refused(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::RemovedRoute(_)
@@ -250,12 +277,16 @@ impl ApiError {
             | Self::NodeNotFound(_)
             | Self::ConversationNotFound(_)
             | Self::ArtifactNotFound(_)
-            | Self::UnknownFilterProfile(_) => StatusCode::NOT_FOUND,
+            | Self::UnknownFilterProfile(_)
+            | Self::HumanItemNotFound(_) => StatusCode::NOT_FOUND,
+            Self::HumanItemNotOwner(_) => StatusCode::FORBIDDEN,
+            Self::HumanItemsUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::ProjectionFailed(_)
             | Self::NotOwner { .. }
             | Self::NothingDriving(_)
             | Self::Locked(_)
-            | Self::NotStopped(_) => StatusCode::CONFLICT,
+            | Self::NotStopped(_)
+            | Self::HumanItemConflict(_) => StatusCode::CONFLICT,
             Self::Read(_) | Self::Engine(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

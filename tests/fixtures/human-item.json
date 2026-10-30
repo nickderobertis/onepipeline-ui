@@ -1,0 +1,112 @@
+{
+  "item": {
+    "schema_version": 1,
+    "id": "task-design",
+    "dedup_key": "dedup-task-design",
+    "kind": "task",
+    "title": "Review the action-items design",
+    "body": "Read the action-items design document and complete this task once its layout and keyboard flow look right to you.",
+    "priority": "high",
+    "owner": {
+      "session": "claude-code-supervising-session",
+      "run": "run-a",
+      "plan": "plan-a"
+    },
+    "block": {
+      "scope": "work",
+      "run": "run-a",
+      "node": "design"
+    },
+    "approval": {
+      "board_copy": "docs/design/action-items.md",
+      "key": "sha256:5d1c0a"
+    },
+    "state": "open",
+    "resolution": null,
+    "tracker": {
+      "task": "ONE-412",
+      "url": "https://linear.app/onepipeline/issue/ONE-412"
+    },
+    "created_at": "2026-10-29T09:10:00Z",
+    "updated_at": "2026-10-29T09:10:00Z"
+  },
+  "blocked": {
+    "total": 7,
+    "plans": [
+      {
+        "plan": "plan-a",
+        "count": 5,
+        "preview": [
+          {
+            "run": "run-a",
+            "node": "build",
+            "title": "Build the release binaries"
+          },
+          {
+            "run": "run-a",
+            "node": "test",
+            "title": "Run the release journeys"
+          },
+          {
+            "run": "run-a",
+            "node": "lint",
+            "title": "Lint the changed files"
+          }
+        ]
+      },
+      {
+        "plan": "plan-b",
+        "count": 2,
+        "preview": [
+          {
+            "run": "run-b",
+            "node": "docs",
+            "title": "Rewrite the operator guide"
+          },
+          {
+            "run": "run-b",
+            "node": "screens",
+            "title": "Photograph every surface"
+          }
+        ]
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "run": "run-a",
+      "node": "build",
+      "title": "Build the release binaries"
+    },
+    {
+      "run": "run-a",
+      "node": "test",
+      "title": "Run the release journeys"
+    },
+    {
+      "run": "run-a",
+      "node": "lint",
+      "title": "Lint the changed files"
+    },
+    {
+      "run": "run-a",
+      "node": "package",
+      "title": "Package the wheels"
+    },
+    {
+      "run": "run-a",
+      "node": "publish",
+      "title": "Publish to the registries"
+    },
+    {
+      "run": "run-b",
+      "node": "docs",
+      "title": "Rewrite the operator guide"
+    },
+    {
+      "run": "run-b",
+      "node": "screens",
+      "title": "Photograph every surface"
+    }
+  ]
+}

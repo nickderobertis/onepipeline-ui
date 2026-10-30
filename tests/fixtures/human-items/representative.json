@@ -1,0 +1,417 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "task-build",
+        "dedup_key": "dedup-task-build",
+        "kind": "task",
+        "title": "Restore the build service",
+        "body": "The shared build service stopped answering. Restart it on the build host and confirm one cached build finishes.",
+        "priority": "urgent",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": null,
+          "plan": null
+        },
+        "block": {
+          "scope": "host"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": {
+          "task": "nickderobertis/onepipeline#1301",
+          "url": "https://github.com/nickderobertis/onepipeline/issues/1301"
+        },
+        "created_at": "2026-10-29T09:00:00Z",
+        "updated_at": "2026-10-29T09:00:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "question-canary",
+        "dedup_key": "dedup-question-canary",
+        "kind": "question",
+        "title": "Which region should the canary run in?",
+        "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+        "priority": "high",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": "run-a",
+          "plan": "plan-a"
+        },
+        "block": {
+          "scope": "work",
+          "run": "run-a",
+          "node": "deploy"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-10-29T09:05:00Z",
+        "updated_at": "2026-10-29T09:05:00Z"
+      },
+      "blocked": {
+        "total": 2,
+        "plans": [
+          {
+            "plan": "plan-a",
+            "count": 2,
+            "preview": [
+              {
+                "run": "run-a",
+                "node": "deploy",
+                "title": "Deploy the canary"
+              },
+              {
+                "run": "run-a",
+                "node": "verify",
+                "title": "Verify the canary"
+              }
+            ]
+          }
+        ]
+      },
+      "nodes": [
+        {
+          "run": "run-a",
+          "node": "deploy",
+          "title": "Deploy the canary"
+        },
+        {
+          "run": "run-a",
+          "node": "verify",
+          "title": "Verify the canary"
+        }
+      ]
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "task-design",
+        "dedup_key": "dedup-task-design",
+        "kind": "task",
+        "title": "Review the action-items design",
+        "body": "Read the action-items design document and complete this task once its layout and keyboard flow look right to you.",
+        "priority": "high",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": "run-a",
+          "plan": "plan-a"
+        },
+        "block": {
+          "scope": "work",
+          "run": "run-a",
+          "node": "design"
+        },
+        "approval": {
+          "board_copy": "docs/design/action-items.md",
+          "key": "sha256:5d1c0a"
+        },
+        "state": "open",
+        "resolution": null,
+        "tracker": {
+          "task": "ONE-412",
+          "url": "https://linear.app/onepipeline/issue/ONE-412"
+        },
+        "created_at": "2026-10-29T09:10:00Z",
+        "updated_at": "2026-10-29T09:10:00Z"
+      },
+      "blocked": {
+        "total": 7,
+        "plans": [
+          {
+            "plan": "plan-a",
+            "count": 5,
+            "preview": [
+              {
+                "run": "run-a",
+                "node": "build",
+                "title": "Build the release binaries"
+              },
+              {
+                "run": "run-a",
+                "node": "test",
+                "title": "Run the release journeys"
+              },
+              {
+                "run": "run-a",
+                "node": "lint",
+                "title": "Lint the changed files"
+              }
+            ]
+          },
+          {
+            "plan": "plan-b",
+            "count": 2,
+            "preview": [
+              {
+                "run": "run-b",
+                "node": "docs",
+                "title": "Rewrite the operator guide"
+              },
+              {
+                "run": "run-b",
+                "node": "screens",
+                "title": "Photograph every surface"
+              }
+            ]
+          }
+        ]
+      },
+      "nodes": [
+        {
+          "run": "run-a",
+          "node": "build",
+          "title": "Build the release binaries"
+        },
+        {
+          "run": "run-a",
+          "node": "test",
+          "title": "Run the release journeys"
+        },
+        {
+          "run": "run-a",
+          "node": "lint",
+          "title": "Lint the changed files"
+        },
+        {
+          "run": "run-a",
+          "node": "package",
+          "title": "Package the wheels"
+        },
+        {
+          "run": "run-a",
+          "node": "publish",
+          "title": "Publish to the registries"
+        },
+        {
+          "run": "run-b",
+          "node": "docs",
+          "title": "Rewrite the operator guide"
+        },
+        {
+          "run": "run-b",
+          "node": "screens",
+          "title": "Photograph every surface"
+        }
+      ]
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "task-dashboard",
+        "dedup_key": "dedup-task-dashboard",
+        "kind": "task",
+        "title": "Review the dashboard layout",
+        "body": "Read the dashboard design document and complete this task when the column widths and empty states read clearly.",
+        "priority": "medium",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": "run-b",
+          "plan": "plan-b"
+        },
+        "block": {
+          "scope": "plan",
+          "plan": "plan-b"
+        },
+        "approval": {
+          "board_copy": "docs/design/dashboard.md",
+          "key": "sha256:91aa07"
+        },
+        "state": "open",
+        "resolution": null,
+        "tracker": {
+          "task": "nickderobertis/onepipeline#1302",
+          "url": "https://github.com/nickderobertis/onepipeline/issues/1302"
+        },
+        "created_at": "2026-10-29T09:15:00Z",
+        "updated_at": "2026-10-29T09:15:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "question-cache",
+        "dedup_key": "dedup-question-cache",
+        "kind": "question",
+        "title": "Should retries reuse the warm cache?",
+        "body": "Retries currently start cold and take eight minutes. Reusing the warm cache is faster but can hide a stale artifact.",
+        "priority": "urgent",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": null,
+          "plan": null
+        },
+        "block": {
+          "scope": "nothing"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-10-29T09:20:00Z",
+        "updated_at": "2026-10-29T09:20:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "question-export",
+        "dedup_key": "dedup-question-export",
+        "kind": "question",
+        "title": "Keep the legacy export format?",
+        "body": "Two teams still read the legacy CSV export. Dropping it simplifies the writer; keeping it costs one more test suite.",
+        "priority": "low",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": "run-b",
+          "plan": "plan-b"
+        },
+        "block": {
+          "scope": "nothing"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-10-29T09:25:00Z",
+        "updated_at": "2026-10-29T09:25:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "task-other",
+        "dedup_key": "dedup-task-other",
+        "kind": "task",
+        "title": "Rotate the deploy credentials",
+        "body": "Rotate the expiring deploy credentials before Friday and record the new expiry date on the release checklist page.",
+        "priority": "urgent",
+        "owner": {
+          "session": "other-session",
+          "run": "run-c",
+          "plan": "plan-c"
+        },
+        "block": {
+          "scope": "host"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": {
+          "task": "nickderobertis/onepipeline#1303",
+          "url": "https://github.com/nickderobertis/onepipeline/issues/1303"
+        },
+        "created_at": "2026-10-29T08:00:00Z",
+        "updated_at": "2026-10-29T08:00:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "question-answered",
+        "dedup_key": "dedup-question-answered",
+        "kind": "question",
+        "title": "Which changelog section holds the fix?",
+        "body": "The fix touches both the reader and the launcher. Say which changelog section the release notes should list it under.",
+        "priority": "medium",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": "run-a",
+          "plan": "plan-a"
+        },
+        "block": {
+          "scope": "nothing"
+        },
+        "approval": null,
+        "state": "answered",
+        "resolution": {
+          "actor": "claude-code-supervising-session",
+          "on_behalf_of": null,
+          "text": "Fixes, under the reader.",
+          "reason": null
+        },
+        "tracker": null,
+        "created_at": "2026-10-29T08:30:00Z",
+        "updated_at": "2026-10-29T08:30:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "task-dismissed",
+        "dedup_key": "dedup-task-dismissed",
+        "kind": "task",
+        "title": "Re-run the flaky screenshot job",
+        "body": "The screenshot job failed once on a timeout. Re-run it and close this task if the second attempt passes cleanly.",
+        "priority": "low",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": "run-b",
+          "plan": "plan-b"
+        },
+        "block": {
+          "scope": "nothing"
+        },
+        "approval": null,
+        "state": "dismissed",
+        "resolution": {
+          "actor": "claude-code-supervising-session",
+          "on_behalf_of": null,
+          "text": null,
+          "reason": "the second attempt passed"
+        },
+        "tracker": {
+          "task": "nickderobertis/onepipeline#1304",
+          "url": "https://github.com/nickderobertis/onepipeline/issues/1304"
+        },
+        "created_at": "2026-10-29T08:35:00Z",
+        "updated_at": "2026-10-29T08:35:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    }
+  ],
+  "approval_keys": {
+    "docs/design/action-items.md": "sha256:5d1c0a",
+    "docs/design/dashboard.md": "sha256:c4e2f9"
+  }
+}

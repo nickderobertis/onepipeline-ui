@@ -269,6 +269,11 @@ fn every_route_over(run: &str, conversation: &str, artifact: &str) -> Vec<(&'sta
         // each verb, over runs built for what each one does; this is every
         // route a reader opens.
         .filter(|route| route.method == routes::Method::Get)
+        // The human-item routes serve no run's records: they are host-wide,
+        // served only over an engine sample bundle and the engine's
+        // `unavailable` over a runs root like this one, and
+        // `tests/e2e/human_items.rs` drives every one of them.
+        .filter(|route| !route.path.starts_with(routes::HUMAN_ITEMS))
         .map(|route| route.path)
         .map(|template| {
             let path = template

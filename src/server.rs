@@ -38,12 +38,14 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::api::RunApi;
 use crate::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId, EventsQuery,
+    HumanItemAnswerRequest, HumanItemCompleteRequest, HumanItemDismissRequest, HumanItemId,
     NextQuery, NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunsPage, RunsQuery,
     ShutdownRequest, StopRequest, SubscribeRequest, SubscriptionId, SurfaceRequest, TimelineQuery,
     TimelineScope, TranscriptQuery,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
+use crate::human_items::{Act, HumanItemList};
 use crate::live::Hub;
 use crate::store::{RunStore, HEARTBEAT_INTERVAL};
 use crate::ui::View;
@@ -116,6 +118,11 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::PROJECT_AGENTS, get(project_agents))
         .route(routes::SUBSCRIPTIONS, post(subscribe))
         .route(routes::SUBSCRIPTION, delete(unsubscribe))
+        .route(routes::HUMAN_ITEMS, get(human_items).post(raise_human_item))
+        .route(routes::HUMAN_ITEM, get(human_item))
+        .route(routes::HUMAN_ITEM_ANSWER, post(answer_human_item))
+        .route(routes::HUMAN_ITEM_COMPLETE, post(complete_human_item))
+        .route(routes::HUMAN_ITEM_DISMISS, post(dismiss_human_item))
         .fallback(fallback)
         .with_state(Serving {
             hub: Hub::new(store.clone(), Arc::clone(&stopping)),
@@ -303,6 +310,20 @@ where
         // The worker panicked. The panic itself can name a path or a record, so
         // it reaches the process's own stderr and the client gets the contract's
         // opaque read failure.
+        Err(_) => ApiError::Read("unexpected read failure".to_owned()).into_response(),
+    }
+}
+
+/// [`answer`] for the routes that serve the engine's own record unenveloped:
+/// the human-item routes, whose bodies are the engine's exported schemas.
+async fn answer_record<F, T>(work: F) -> Response
+where
+    F: FnOnce() -> Result<T, ApiError> + Send + 'static,
+    T: serde::Serialize + Send + 'static,
+{
+    match tokio::task::spawn_blocking(work).await {
+        Ok(Ok(record)) => Json(record).into_response(),
+        Ok(Err(error)) => error.into_response(),
         Err(_) => ApiError::Read("unexpected read failure".to_owned()).into_response(),
     }
 }
@@ -875,4 +896,104 @@ async fn project_agents(State(serving): Store, Path(project): Path<String>) -> R
         Err(error) => return error.into_response(),
     };
     answer(move || serving.store.project_agents(&project)).await
+}
+
+/// The item a human-item route is about, validated.
+fn human_item_id(id: &str) -> Result<HumanItemId, ApiError> {
+    HumanItemId::try_from(id)
+}
+
+/// `GET /api/human-items`: the engine's own `HumanItemFilter`, decoded from the
+/// query by its own declaration, so a selector this route accepted and the
+/// CLI's `list` did not — or the reverse — cannot exist.
+async fn human_items(State(serving): Store, uri: Uri) -> Response {
+    let filter = match Query::<onepipeline::human_items::HumanItemFilter>::try_from_uri(&uri) {
+        Ok(Query(filter)) => filter,
+        Err(rejection) => {
+            return ApiError::InvalidRequest(rejection.body_text()).into_response();
+        }
+    };
+    answer_record(move || {
+        let (items, session) = serving.store.human_items();
+        items
+            .list(session, &filter)
+            .map(|items| HumanItemList { items })
+    })
+    .await
+}
+
+async fn human_item(State(serving): Store, Path(id): Path<String>) -> Response {
+    let id = match human_item_id(&id) {
+        Ok(id) => id,
+        Err(error) => return error.into_response(),
+    };
+    answer_record(move || {
+        let (items, session) = serving.store.human_items();
+        items.detail(session, &id)
+    })
+    .await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`. What this handler enforces server-side is that session's authority, the ownership rule `stop` keeps: `HumanItems::raise` refuses an item whose owner is any other session, and the body is decoded by the engine's own `HumanItemInput` before anything is written.
+async fn raise_human_item(State(serving): Store, raw: String) -> Response {
+    let input: onepipeline::human_items::HumanItemInput =
+        match body("the engine's HumanItemInput", &raw) {
+            Ok(input) => input,
+            Err(error) => return error.into_response(),
+        };
+    answer_record(move || {
+        let (items, session) = serving.store.human_items();
+        items.raise(session, input)
+    })
+    .await
+}
+
+/// One write to item `id`, as the acting session.
+async fn act_on_human_item(serving: Serving, id: &str, act: Result<Act, ApiError>) -> Response {
+    let (id, act) = match human_item_id(id).and_then(|id| act.map(|act| (id, act))) {
+        Ok(pair) => pair,
+        Err(error) => return error.into_response(),
+    };
+    answer_record(move || {
+        let (items, session) = serving.store.human_items();
+        items.act(session, &id, act)
+    })
+    .await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`. What this handler enforces server-side is that session's authority, the ownership rule `stop` keeps: `HumanItems::act` refuses an item another session owns before the engine is asked, and the actor is that session rather than anything the body says.
+async fn answer_human_item(State(serving): Store, Path(id): Path<String>, raw: String) -> Response {
+    let act =
+        body::<HumanItemAnswerRequest>("{text}", &raw).map(|request| Act::Answer(request.text));
+    act_on_human_item(serving, &id, act).await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`. What this handler enforces server-side is that session's authority, the ownership rule `stop` keeps: `HumanItems::act` refuses an item another session owns before the engine is asked, and the actor is that session rather than anything the body says.
+async fn complete_human_item(
+    State(serving): Store,
+    Path(id): Path<String>,
+    raw: String,
+) -> Response {
+    // An empty body is the `{}` this route takes, as a bare `stop` is.
+    let act = if raw.trim().is_empty() {
+        Ok(Act::Complete)
+    } else {
+        body::<HumanItemCompleteRequest>("{}", &raw).map(|_| Act::Complete)
+    };
+    act_on_human_item(serving, &id, act).await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`. What this handler enforces server-side is that session's authority, the ownership rule `stop` keeps: `HumanItems::act` refuses an item another session owns before the engine is asked, and the actor is that session rather than anything the body says.
+async fn dismiss_human_item(
+    State(serving): Store,
+    Path(id): Path<String>,
+    raw: String,
+) -> Response {
+    let act = if raw.trim().is_empty() {
+        Ok(Act::Dismiss(None))
+    } else {
+        body::<HumanItemDismissRequest>("{reason?}", &raw)
+            .map(|request| Act::Dismiss(request.reason))
+    };
+    act_on_human_item(serving, &id, act).await
 }

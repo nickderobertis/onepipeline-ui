@@ -20,6 +20,9 @@ export function RunNavigation({
   selectedRunId,
   onSelect,
   onHost,
+  hostCurrent = false,
+  onActionItems,
+  actionItemsCurrent = false,
   hiddenKinds,
   onKindsChange,
 }: {
@@ -28,6 +31,11 @@ export function RunNavigation({
   readonly selectedRunId?: string;
   readonly onSelect: (runId: string) => void;
   readonly onHost: () => void;
+  /** Whether the Host page is the one on screen. */
+  readonly hostCurrent?: boolean;
+  /** Open the action-items page, a view of its own beside the Host page. */
+  readonly onActionItems?: () => void;
+  readonly actionItemsCurrent?: boolean;
   readonly hiddenKinds: readonly string[];
   readonly onKindsChange: (kinds: readonly string[]) => void;
 }) {
@@ -46,9 +54,22 @@ export function RunNavigation({
             </div>
           </div>
           <Separator className="my-[22px]" />
-          <Button onClick={onHost} variant="ghost">
+          <Button
+            aria-current={hostCurrent ? "page" : undefined}
+            onClick={onHost}
+            variant="ghost"
+          >
             Host
           </Button>
+          {onActionItems && (
+            <Button
+              aria-current={actionItemsCurrent ? "page" : undefined}
+              onClick={onActionItems}
+              variant="ghost"
+            >
+              Action items
+            </Button>
+          )}
           {kinds.length > 0 && (
             <fieldset className="kind-filter">
               <legend>Run kinds</legend>

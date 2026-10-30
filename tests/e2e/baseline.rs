@@ -241,6 +241,15 @@ fn asked(run: &str) -> Vec<(&'static str, String)> {
             routes::PROJECT_AGENTS,
             routes::PROJECT_AGENTS.replace("{project}", fixture_run::PLAN_PROJECT),
         ),
+        // The human-item routes, asked so this covers every route a reader
+        // opens. Over a runs root they answer the engine's `unavailable`, which
+        // the comparison — holding only what a base commit answered `200` —
+        // skips, as it skips them against a base commit from before them.
+        (routes::HUMAN_ITEMS, routes::HUMAN_ITEMS.to_owned()),
+        (
+            routes::HUMAN_ITEM,
+            routes::HUMAN_ITEM.replace("{id}", "task-build"),
+        ),
     ]
 }
 

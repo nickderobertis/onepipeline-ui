@@ -12,6 +12,14 @@ import {
   type DagConversation,
   dagConversationSchema,
   type HostShutdownScope,
+  HUMAN_ITEM_PATHS,
+  type HumanItemDetail,
+  type HumanItemFilter,
+  type HumanItemList,
+  type HumanItemReceipt,
+  humanItemDetailSchema,
+  humanItemListSchema,
+  humanItemReceiptSchema,
   type ProjectAgents,
   type ProjectDetail,
   type ProjectList,
@@ -465,6 +473,68 @@ export class TelemetryClient {
       json("POST", { force }),
     );
   }
+
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] this repository keeps every read-API record's parser in `@onepipeline-ui/dag-model` and every route call in `@onepipeline-ui/telemetry-client` — the runs, channel, host, agents and subscription records live here the same way, and `docs/dag-ui.md` holds the app to declaring no schema or API path of its own — and the plan names these two packages as the ones this change touches. A human-item package of its own would be the only API domain split out of that layout.
+  /**
+   * The host-wide action items the server's session owns, in the engine's order.
+   *
+   * Every selector is the engine's `HumanItemFilter` on the wire's vocabulary —
+   * `priority` is `urgent`, never the label Critical — and an omitted one is not
+   * sent, so an omitted `state` is the engine's default of open items.
+   */
+  async listHumanItems(filter: HumanItemFilter = {}): Promise<HumanItemList> {
+    const url = this.#url(HUMAN_ITEM_PATHS.list);
+    for (const [name, value] of Object.entries(filter))
+      if (value !== undefined && value !== null)
+        url.searchParams.set(name, String(value));
+    return this.#request(url, humanItemListSchema.parse);
+  }
+
+  /** One action item and every step it blocks. */
+  async getHumanItem(id: string): Promise<HumanItemDetail> {
+    requireOpaqueId(id, "human-item ID");
+    return this.#request(
+      this.#url(HUMAN_ITEM_PATHS.item(id)),
+      humanItemDetailSchema.parse,
+    );
+  }
+
+  /** Answer an open question; the engine's receipt, or its refusal. */
+  async answerHumanItem(id: string, text: string): Promise<HumanItemReceipt> {
+    requireOpaqueId(id, "human-item ID");
+    return this.#request(
+      this.#url(HUMAN_ITEM_PATHS.answer(id)),
+      humanItemReceiptSchema.parse,
+      json("POST", { text }),
+    );
+  }
+
+  /**
+   * Complete an open task. A design review completes the same way: the engine
+   * uses the approval reference the task stored when it was raised.
+   */
+  async completeHumanItem(id: string): Promise<HumanItemReceipt> {
+    requireOpaqueId(id, "human-item ID");
+    return this.#request(
+      this.#url(HUMAN_ITEM_PATHS.complete(id)),
+      humanItemReceiptSchema.parse,
+      json("POST", {}),
+    );
+  }
+
+  /** Dismiss an open item; a blank or omitted reason is none. */
+  async dismissHumanItem(
+    id: string,
+    reason?: string,
+  ): Promise<HumanItemReceipt> {
+    requireOpaqueId(id, "human-item ID");
+    return this.#request(
+      this.#url(HUMAN_ITEM_PATHS.dismiss(id)),
+      humanItemReceiptSchema.parse,
+      json("POST", reason?.trim() ? { reason } : {}),
+    );
+  }
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 
   /** Shut down the entire host and read its report, including incomplete teardown. */
   async shutdown(

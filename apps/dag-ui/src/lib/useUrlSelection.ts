@@ -1,5 +1,6 @@
 import { API_V2_FILTER_PROFILES, isProjectId } from "@onepipeline-ui/dag-model";
 import { useCallback, useSyncExternalStore } from "react";
+import { appRootPath } from "./humanItemsRoute";
 
 /**
  * The whole drill-down, held in the query string: which run, which node, which view,
@@ -211,12 +212,21 @@ export function useUrlSelection(): UrlSelection {
       ? "overall"
       : "graph";
 
-  const update = useCallback((change: (next: URLSearchParams) => void) => {
-    const next = new URLSearchParams(window.location.search);
-    change(next);
-    window.history.pushState(null, "", `${window.location.pathname}?${next}`);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  }, []);
+  // Every selection is of a run view or the Host page, so making one from the
+  // action-items page leaves it for the app's root; the kinds shown are a
+  // preference of the sidebar, which that page has too, so they stay put.
+  const update = useCallback(
+    (change: (next: URLSearchParams) => void, stay = false) => {
+      const next = new URLSearchParams(window.location.search);
+      change(next);
+      const path = stay
+        ? window.location.pathname
+        : appRootPath(window.location.pathname);
+      window.history.pushState(null, "", `${path}?${next}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    },
+    [],
+  );
 
   return {
     list,
@@ -230,7 +240,7 @@ export function useUrlSelection(): UrlSelection {
       update((next) => {
         next.delete("hide-kind");
         for (const kind of kinds) next.append("hide-kind", kind);
-      }),
+      }, true),
     projectKey,
     runId,
     nodeId,

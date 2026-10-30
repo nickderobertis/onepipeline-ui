@@ -392,6 +392,17 @@ pub mod routes {
     pub const SUBSCRIPTIONS: &str = "/api/v2/subscriptions";
     /// Retire a subscription: its reads and its stream end.
     pub const SUBSCRIPTION: &str = "/api/v2/subscriptions/{subscription}";
+    /// The host-wide human-item list (`GET`), and raising one (`POST`):
+    /// `HumanItemSample::query` and `apply(Raise)`.
+    pub const HUMAN_ITEMS: &str = "/api/human-items";
+    /// One human item and every step it blocks.
+    pub const HUMAN_ITEM: &str = "/api/human-items/{id}";
+    /// Answer an open question: `apply(Answer)`.
+    pub const HUMAN_ITEM_ANSWER: &str = "/api/human-items/{id}/answer";
+    /// Complete an open task, design reviews included: `apply(Complete)`.
+    pub const HUMAN_ITEM_COMPLETE: &str = "/api/human-items/{id}/complete";
+    /// Dismiss an open item, with an optional reason: `apply(Dismiss)`.
+    pub const HUMAN_ITEM_DISMISS: &str = "/api/human-items/{id}/dismiss";
 
     /// The HTTP method a route answers.
     ///
@@ -453,7 +464,7 @@ pub mod routes {
     }
 
     /// How many routes the contract defines.
-    pub const COUNT: usize = 29;
+    pub const COUNT: usize = 35;
 
     /// Every route above with its method, in the order `docs/contract.md`
     /// lists them.
@@ -487,6 +498,12 @@ pub mod routes {
         get(PROJECT_AGENTS),
         post(SUBSCRIPTIONS),
         delete(SUBSCRIPTION),
+        get(HUMAN_ITEMS),
+        post(HUMAN_ITEMS),
+        get(HUMAN_ITEM),
+        post(HUMAN_ITEM_ANSWER),
+        post(HUMAN_ITEM_COMPLETE),
+        post(HUMAN_ITEM_DISMISS),
     ];
 
     /// Every route's path, in the same order — read off [`TABLE`] rather than
@@ -819,6 +836,34 @@ pub struct StopRequest {
     /// Stop a run another session owns, naming the owner. Omitted, `false`.
     #[serde(default)]
     pub force: bool,
+}
+
+/// The body of `POST /api/human-items/{id}/answer`.
+///
+/// The answer alone: the actor is the acting session, never the body's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HumanItemAnswerRequest {
+    /// The answer. Blank once trimmed is the engine's refusal.
+    // llmlint: ignore[invalid_states_unrepresentable] the engine's `HumanItemAction::Answer` declares its text a `String` and its own decoder and `apply` refuse a blank one in their own words; a type here that refused first would restate the engine's rule in this crate's words.
+    pub text: String,
+}
+
+/// The body of `POST /api/human-items/{id}/complete`: nothing.
+///
+/// Completion takes no approval, board copy or key — a design review completes
+/// with the reference the item stored when it was raised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HumanItemCompleteRequest {}
+
+/// The body of `POST /api/human-items/{id}/dismiss`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HumanItemDismissRequest {
+    /// Why. Absent, `null` or blank is no reason, as the engine reads it.
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 /// Which runs `POST /api/v2/shutdown` acts on.
@@ -1321,6 +1366,7 @@ identifier!(
 );
 identifier!(ArtifactId, "artifact identifier", InvalidArtifactId);
 identifier!(DispatchId, "dispatch identifier", InvalidDispatchId);
+identifier!(HumanItemId, "human-item identifier", InvalidHumanItemId);
 
 /// The wire's closed reference vocabulary: what the record a reference sits on
 /// points at.

@@ -11,7 +11,8 @@
       "inputs": [
         "default",
         "apiServerSurface",
-        "{workspaceRoot}/tests/fixtures/history/**"
+        "{workspaceRoot}/tests/fixtures/history/**",
+        "{workspaceRoot}/tests/fixtures/human-items/**"
       ],
       "dependsOn": [
         {

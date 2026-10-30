@@ -2904,3 +2904,5 @@ export const parseRunDetail = (value: unknown): RunDetail =>
   runDetailSchema.parse(value);
 export const parseRunTimeline = (value: unknown): RunTimeline =>
   runTimelineSchema.parse(value);
+// llmlint: ignore[code_lands_in_the_domain_that_owns_it] this repository keeps every read-API record's parser in `@onepipeline-ui/dag-model` — the runs, channel, host, agents and subscription records are exported from this same barrel — and `docs/dag-ui.md` holds the app to declaring no schema or API path of its own; the plan names this package as one this change touches.
+export * from "./human-items.js";

@@ -2214,3 +2214,304 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   max-height: 40vh;
   overflow: auto;
 }
+
+/*
+ * The action-items page. Dense rows occupy the full width until a selection opens
+ * the detail pane beside them; the list and the pane each scroll on their own, so
+ * reading a long body never moves the list. At 1440×900 the unselected list shows
+ * six complete cards — three tasks and three open questions with 80–160 character
+ * bodies — with every control in view (docs/human-items.md states the target).
+ */
+.human-items-page {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.human-items-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0;
+  padding: 8px 20px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.human-items-filters label {
+  color: var(--muted-foreground);
+}
+
+.human-items-filters :where(select, input) {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  font-size: 12px;
+}
+
+.human-items-outcome {
+  margin: 0;
+  padding: 4px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.human-items-outcome[data-failed="true"],
+.human-item-status[data-failed="true"] {
+  color: var(--destructive);
+}
+
+.human-items-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.human-items-page[data-detail-open="true"] .human-items-body {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 42%);
+}
+
+.human-items-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 20px 12px;
+}
+
+.human-items-list > ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.human-item-card {
+  display: grid;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  cursor: pointer;
+}
+
+.human-item-card[data-selected="true"] {
+  border-color: var(--primary);
+  box-shadow: inset 2px 0 var(--primary);
+}
+
+.human-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+/* A title takes the row's room and wraps rather than clipping when the detail
+   pane narrows the list; the actions then wrap below it. */
+.human-item-title {
+  flex: 1 1 16ch;
+  min-width: 0;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.human-item-priority,
+.human-item-kind {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.human-item-priority[data-priority="urgent"] {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+
+.human-item-priority[data-priority="high"] {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.human-item-kind {
+  color: var(--muted-foreground);
+}
+
+.human-item-actions {
+  margin-left: auto;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.human-item-action,
+.human-item-tracker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.human-item-tracker {
+  color: var(--primary);
+}
+
+.human-item-meta {
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* At most four lines of a body on a card, ending in an ellipsis when there is more;
+   the detail pane carries the whole of it. */
+.human-item-body {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 17px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow-wrap: anywhere;
+}
+
+/* An answer box rests one line tall and grows with what is written. */
+.human-item-answer {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 26px;
+  max-height: 136px;
+  margin-top: 2px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 18px;
+  resize: none;
+  field-sizing: content;
+}
+
+.human-item-answer[aria-busy="true"] {
+  opacity: 0.7;
+}
+
+.human-item-status {
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.card-actions-entry {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.card-actions-entry:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  margin-top: 8px;
+  clip-path: none;
+}
+
+.human-item-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px 20px;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+}
+
+.human-item-detail-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 2px 8px;
+}
+
+.human-item-detail-head h2 {
+  grid-column: 1;
+  margin: 0;
+  font-size: 16px;
+}
+
+.human-item-detail-head .human-item-meta {
+  grid-column: 1;
+}
+
+.human-item-detail-head button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.human-item-detail .human-item-meta {
+  white-space: normal;
+}
+
+.human-item-steps {
+  flex: none;
+  max-height: 30%;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.human-item-steps h3 {
+  margin: 4px 0 2px;
+  font-size: 12px;
+}
+
+.human-item-steps ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+/* The whole body, scrolling within the pane when it is taller than the room left. */
+.human-item-detail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 19px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.human-item-detail-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
