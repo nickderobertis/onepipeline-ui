@@ -673,6 +673,15 @@ lock resolves, and the lock moves onemessagebus to 0.9.4 with it; no route,
 payload or MSRV changes beyond the release `/healthz` reports. This changes the
 engine types carried by ApiError::from_engine and the other engine-typed public
 items.
+0.96.1 is the engine that links onejudge 0.22.1, which never reports a turn the
+observer graph's own shutdown cancelled as lost, and oneagentgraph 0.9.1, whose
+stop ends a graph only after its members have seen it. A host holds this reader
+and its engine to one linked engine, so it can adopt that fix only once this
+crate links it. The lock moves both libraries to the releases that engine's lock
+resolves; onevcs, the plan store, onemessagebus and oneharness-core are
+unchanged, and no route, payload or MSRV changes beyond the release `/healthz`
+reports. This changes the engine types carried by ApiError::from_engine and the
+other engine-typed public items.
 
 The test-only `onevcs` requirement, which the `EventKind` drift gate in
 `tests/contract.rs` reads, has followed the release each linked engine resolves:
@@ -681,4 +690,4 @@ declares the stacking, review and landing kinds that engine relays; 0.56.3 for
 0.79.0 (^0.56.2), which declares `publication-resumed`, which `payload::vcs`
 copies, and for 0.79.1, 0.82.0, 0.84.0, 0.84.1 and 0.85.0; 0.56.9 for 0.89.0,
 which relays each check's times; 0.56.11 for 0.90.0; 0.57.0 for 0.95.5; and
-0.57.4 for 0.96.0 (^0.57.4).
+0.57.4 for 0.96.0 (^0.57.4) and 0.96.1.
