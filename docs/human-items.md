@@ -64,8 +64,9 @@ mock or harness.
 Tab moves from one open question's answer box **straight to the next**; nothing else
 on a card is in that sequence. After the last answer box, Tab enters the
 **card-action group** — every card's tracker link, Details, Complete and Dismiss — at
-its first action. Arrow keys move through the group, Home and End reach its ends, and
-Enter or Space operates the focused action. The detail pane's body is a focusable
+its first action. Arrow keys move through the group, holding at either end, and Home
+and End reach its ends; Enter follows a focused tracker link, and Enter or Space
+presses a focused button, as links and buttons natively do. The detail pane's body is a focusable
 region, so a keyboard can scroll it.
 
 ## Density target

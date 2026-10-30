@@ -127,6 +127,69 @@
         "plans": []
       },
       "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "question-plan-only",
+        "dedup_key": "dedup-question-plan-only",
+        "kind": "question",
+        "title": "Which plan owns the shared fixtures?",
+        "body": "The fixtures moved out of every run. Say which plan keeps them so its owner reviews changes to them.",
+        "priority": "low",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": null,
+          "plan": "plan-c"
+        },
+        "block": {
+          "scope": "nothing"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-10-29T09:20:00Z",
+        "updated_at": "2026-10-29T09:20:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "task-run-only",
+        "dedup_key": "dedup-task-run-only",
+        "kind": "task",
+        "title": "File the flaky-runner report",
+        "body": "Collect the three runner timeouts from this run and file them with the infrastructure tracker today.",
+        "priority": "low",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": "run-d",
+          "plan": null
+        },
+        "block": {
+          "scope": "nothing"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": {
+          "task": "INFRA-77",
+          "url": "https://tracker.example.com/issues/INFRA-77"
+        },
+        "created_at": "2026-10-29T09:25:00Z",
+        "updated_at": "2026-10-29T09:25:00Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "nodes": []
     }
   ],
   "approval_keys": {}

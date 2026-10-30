@@ -57,7 +57,8 @@ type Write = (view: HumanItemView, change: HumanItemWrite) => void;
  * Keyboard: Tab moves from one open question's answer box straight to the next,
  * and nothing else on a card is in that sequence. After the last answer box
  * comes the card-action group — tracker links, Details, Complete and Dismiss —
- * which the arrow keys move through; Enter and Space operate the one focused.
+ * which the arrow keys move through; Enter follows a focused link, and Enter
+ * or Space presses a focused button.
  */
 export function HumanItemsPage({
   client,

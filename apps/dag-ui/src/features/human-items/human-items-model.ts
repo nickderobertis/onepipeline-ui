@@ -126,10 +126,11 @@ export function blockedGroups(detail: HumanItemDetail): {
 
 export type TrackerProvider = "GitHub" | "Linear" | "tracker";
 
+/** Which tracker an issue is on, by its address; any other host is a tracker. */
 export function trackerProvider(url: string): TrackerProvider {
   const host = URL.canParse(url) ? new URL(url).hostname : "";
-  if (host === "github.com" || host.endsWith(".github.com")) return "GitHub";
-  if (host === "linear.app" || host.endsWith(".linear.app")) return "Linear";
+  if (host === "github.com") return "GitHub";
+  if (host === "linear.app") return "Linear";
   return "tracker";
 }
 

@@ -31,8 +31,16 @@ export function useHumanItemsRoute(): {
   readonly open: () => void;
 } {
   const pathname = useSyncExternalStore(subscribe, currentPath, currentPath);
+  // The page carries the sidebar's run-kind preference, which it shows too;
+  // what a run view had selected stays behind with that view.
   const open = useCallback(() => {
-    window.history.pushState(null, "", HUMAN_ITEMS_PATH);
+    const kept = new URLSearchParams();
+    for (const kind of new URLSearchParams(window.location.search).getAll(
+      "hide-kind",
+    ))
+      kept.append("hide-kind", kind);
+    const query = kept.size > 0 ? `?${kept}` : "";
+    window.history.pushState(null, "", `${HUMAN_ITEMS_PATH}${query}`);
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, []);
   return { active: isHumanItemsPath(pathname), open };

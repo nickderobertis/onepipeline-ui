@@ -291,11 +291,22 @@ test("the sidebar's kinds stay on Action items and a run selected from it leaves
   server = await startFixtureServer("human-items-kinds", [
     "--project-centric-corpus",
   ]);
-  await page.goto(`${server.origin}/human-items`);
+  await page.goto(`${server.origin}/?page=host`);
   const nav = page.getByRole("navigation", { name: "Projects" });
   const kinds = nav.getByRole("group", { name: "Run kinds", exact: true });
+  // A kind hidden before the page opens is still hidden on it.
+  await kinds.getByRole("checkbox", { name: "planning" }).uncheck();
+  await nav.getByRole("button", { name: "Action items" }).click();
+  await expect(page).toHaveURL(
+    `${server.origin}/human-items?hide-kind=planning`,
+  );
+  await expect(
+    kinds.getByRole("checkbox", { name: "planning" }),
+  ).not.toBeChecked();
   await kinds.getByRole("checkbox", { name: "spikes" }).uncheck();
-  await expect(page).toHaveURL(`${server.origin}/human-items?hide-kind=spikes`);
+  await expect(page).toHaveURL(
+    `${server.origin}/human-items?hide-kind=planning&hide-kind=spikes`,
+  );
   await expect(
     page.getByRole("heading", { name: "Action items" }),
   ).toBeVisible();
@@ -1230,6 +1241,30 @@ test("an item whose body is longer than four lines shows four on its card and al
   expect((await pane.getByRole("heading", { level: 2 }).boundingBox())?.y).toBe(
     before.heading,
   );
+});
+
+test("an item raised in a plan alone or a run alone names it as its source, and a tracker of another host is a tracker", async ({
+  page,
+  context,
+}) => {
+  const served = await serveBundle("long-body.json");
+  await open(page, served);
+  await expect(
+    card(page, "Which plan owns the shared fixtures?").getByText(
+      "Source: plan plan-c",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  const runOnly = card(page, "File the flaky-runner report");
+  await expect(
+    runOnly.getByText("Source: run run-d", { exact: true }),
+  ).toBeVisible();
+  const url = "https://tracker.example.com/issues/INFRA-77";
+  const link = runOnly.getByRole("link", {
+    name: "Open tracker issue INFRA-77",
+  });
+  await expect(link).toHaveAttribute("href", url);
+  await followed(context, () => link.click(), url);
 });
 
 test("a live host's server serves no fixture items to the page", async ({
