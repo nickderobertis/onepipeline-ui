@@ -530,6 +530,15 @@ function DetailPane({
   if (shown === undefined)
     return (
       <aside aria-label="Action item detail" className="human-item-detail">
+        <Button
+          aria-label="Close detail"
+          onClick={onClose}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          <X size={14} />
+        </Button>
         {error ? <p role="alert">{error}</p> : <p role="status">Reading…</p>}
       </aside>
     );

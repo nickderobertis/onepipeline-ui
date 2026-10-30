@@ -213,6 +213,15 @@ function outcome(page: Page): Locator {
   return page.getByRole("status", { name: "Last outcome" });
 }
 
+/** The bundle `original` with the item `id` handed to another session. */
+function handedOver(original: string, id: string): string {
+  const bundle = ownedBundleSchema.parse(JSON.parse(original));
+  for (const { item } of bundle.items) {
+    if (item.id === id) item.owner.session = "other-session";
+  }
+  return JSON.stringify(bundle);
+}
+
 function detailPane(page: Page): Locator {
   return page.getByRole("complementary", { name: "Action item detail" });
 }
@@ -1095,11 +1104,7 @@ test("a write to an item that became another session's is refused, hides it and 
 
   /** Hand the item `id` to another session in the bundle the server reads. */
   function handOver(id: string): string {
-    const bundle = ownedBundleSchema.parse(JSON.parse(original));
-    for (const { item } of bundle.items) {
-      if (item.id === id) item.owner.session = "other-session";
-    }
-    const handed = JSON.stringify(bundle);
+    const handed = handedOver(original, id);
     writeFileSync(sample, handed);
     return handed;
   }
@@ -1173,6 +1178,65 @@ test("a detail that cannot be read says why, and another item's opens once the s
     pane.getByRole("region", { name: "Blocked steps" }).getByRole("listitem"),
   ).toHaveCount(7);
   await expect(pane.getByRole("alert")).toHaveCount(0);
+});
+
+test("an open detail whose reread fails drops what it read, and shows it again once it can be read", async ({
+  page,
+}) => {
+  const served = await serveBundle("representative.json");
+  await open(page, served);
+  const { sample } = factsSchema.parse(served.facts);
+  const original = readFileSync(sample, "utf8");
+  const design = "Review the action-items design";
+  const refresh = () => page.getByRole("button", { name: "Refresh" }).click();
+  const pane = detailPane(page);
+  const steps = pane
+    .getByRole("region", { name: "Blocked steps" })
+    .getByRole("listitem");
+  await page.getByRole("button", { name: `Details: ${design}` }).click();
+  await expect(steps).toHaveCount(7);
+
+  // The server cannot read its bundle: the reread fails, the steps only the
+  // detail served go with it, and the pane keeps what the list last read
+  // beside the refusal.
+  renameSync(sample, `${sample}.away`);
+  await refresh();
+  await expect(pane.getByRole("alert")).toContainText("engine failure");
+  await expect(steps).toHaveCount(0);
+  await expect(pane.getByRole("heading", { name: design })).toBeVisible();
+  renameSync(`${sample}.away`, sample);
+  await refresh();
+  await expect(steps).toHaveCount(7);
+  await expect(pane.getByRole("alert")).toHaveCount(0);
+
+  // The item becomes another session's: the reread is refused, and nothing of
+  // its content or its actions stays on screen — only why, and a way out.
+  writeFileSync(sample, handedOver(original, "task-design"));
+  await refresh();
+  await expect(card(page, design)).toHaveCount(0);
+  await expect(pane.getByRole("alert")).toContainText(
+    "belongs to another session",
+  );
+  await expect(pane.getByRole("heading", { name: design })).toHaveCount(0);
+  await expect(steps).toHaveCount(0);
+  await expect(pane.getByRole("button", { name: /^Complete/ })).toHaveCount(0);
+  await expect(pane.getByRole("button", { name: /^Dismiss/ })).toHaveCount(0);
+
+  // Handed back, the same pane reads it again in full.
+  writeFileSync(sample, original);
+  await refresh();
+  await expect(pane.getByRole("heading", { name: design })).toBeVisible();
+  await expect(steps).toHaveCount(7);
+  await expect(pane.getByRole("alert")).toHaveCount(0);
+
+  // Refused again, the pane's own Close dismisses it.
+  writeFileSync(sample, handedOver(original, "task-design"));
+  await refresh();
+  await expect(pane.getByRole("alert")).toContainText(
+    "belongs to another session",
+  );
+  await pane.getByRole("button", { name: "Close detail" }).click();
+  await expect(pane).toHaveCount(0);
 });
 
 test("the list says it is reading until the first read lands", async ({

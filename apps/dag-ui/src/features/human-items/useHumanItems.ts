@@ -97,7 +97,11 @@ export function useHumanItems(
         setDetailError(undefined);
       },
       (error: unknown) => {
-        if (current) setDetailError(message(error));
+        if (!current) return;
+        // A reread that fails drops what an earlier read served: the item may
+        // now be another session's, so its content is no longer this one's.
+        setDetail(undefined);
+        setDetailError(message(error));
       },
     );
     return () => {
