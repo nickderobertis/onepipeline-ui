@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.62.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.61.0...v0.62.0) - 2026-10-30
+
+### Added
+
+- [**breaking**] add a separate human action items view ([#547](https://github.com/nickderobertis/onepipeline-ui/pull/547))
+
 ## [0.61.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.60.0...v0.61.0) - 2026-10-30
 
 ### Fixed
