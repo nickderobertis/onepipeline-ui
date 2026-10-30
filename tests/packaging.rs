@@ -561,7 +561,7 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// comparison of the two above passes for any release both moved to together —
 /// including one whose adopted runs write their plan's home nothing. It moves
 /// with the `onepipeline` pin and [`STORE_RELEASE`], as one change.
-const ENGINE_RELEASE: &str = "0.95.5";
+const ENGINE_RELEASE: &str = "0.96.0";
 
 /// Where the lock must resolve [`ENGINE_RELEASE`] from: crates.io, which serves
 /// the release a crates.io consumer and the sibling CLI `just bootstrap`
@@ -728,7 +728,7 @@ fn the_same_engine_release_from_another_source_is_refused_naming_it() {
 /// a comparison of the two and still link a store whose closure handling nothing
 /// here was proven against. It moves with the `onepipeline` pin, as one change, to
 /// the store release that engine links.
-const STORE_RELEASE: &str = "0.12.9";
+const STORE_RELEASE: &str = "0.12.11";
 
 /// The members of the plan-store family the shipped binary cannot be without:
 /// the store itself, the plugin boundary, and the GitHub plugin a board is read

@@ -662,3 +662,19 @@ ApiError::from_engine and the other engine-typed public items.
 projection map when Linear rewrites a private plan home's content, and carries
 the engine's npm launcher fix. The test-only store requirements move with it.
 The lock also advances pulldown-cmark to 0.13.5 to clear RUSTSEC-2026-0414.
+0.96.0 is the engine that links onevcs 0.57.4, whose boundary fix a host can
+adopt only once this reader links the same engine, and onetaskgraph 0.12.11.
+The test-only onevcs and store requirements move to the releases that engine's
+lock resolves, and the lock moves onemessagebus to 0.9.4 with it; no route,
+payload or MSRV changes beyond the release `/healthz` reports. This changes the
+engine types carried by ApiError::from_engine and the other engine-typed public
+items.
+
+The test-only `onevcs` requirement, which the `EventKind` drift gate in
+`tests/contract.rs` reads, has followed the release each linked engine resolves:
+0.52.0 for engine 0.75.0 (^0.52.0), keeping one copy; 0.52.1 for 0.78.0, which
+declares the stacking, review and landing kinds that engine relays; 0.56.3 for
+0.79.0 (^0.56.2), which declares `publication-resumed`, which `payload::vcs`
+copies, and for 0.79.1, 0.82.0, 0.84.0, 0.84.1 and 0.85.0; 0.56.9 for 0.89.0,
+which relays each check's times; 0.56.11 for 0.90.0; 0.57.0 for 0.95.5; and
+0.57.4 for 0.96.0 (^0.57.4).
