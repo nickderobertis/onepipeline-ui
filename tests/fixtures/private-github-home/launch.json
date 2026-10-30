@@ -1,18 +1,18 @@
 {
   "run_id": "github-private-home",
   "project": "board:plan",
-  "dir": "/tmp/op-3440007-0/launch-directory",
+  "dir": "/tmp/op-1790023-0/launch-directory",
   "node_graph": "/home/whoop/ai-orchestrator/runs/A-private-GitHub-Projects-plan-home-holds-a-plan-s-public-repository-tasks/scratch/1214929-0/op/graphs/node-scope.yaml",
   "launcher": "e2e",
   "session": "session-github-private-home",
-  "pid": 3649722,
+  "pid": 1793586,
   "host": "shulgin",
-  "started": "linux-proc-stat:135428091",
-  "started_at": "2026-10-30T04:22:14.171Z",
+  "started": "linux-proc-stat:135718494",
+  "started_at": "2026-10-30T05:10:39.626Z",
   "heartbeat_interval": 1800,
   "writeback_item_budget": 12,
   "adoptions": 0,
   "branch_template": "{% if task.key %}{{ task.key }}{% else %}{{ plan.name }}{% endif %}/{{ node.id }}",
-  "oneharness_sessions": "/tmp/op-3440007-0/runs/github-private-home/oneharness-sessions.jsonl",
+  "oneharness_sessions": "/tmp/op-1790023-0/runs/github-private-home/oneharness-sessions.jsonl",
   "public_id": "github-private-home"
 }

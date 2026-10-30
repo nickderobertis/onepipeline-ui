@@ -7,8 +7,8 @@
       "run": "github-private-home",
       "host": "shulgin",
       "session": "session-github-private-home",
-      "pid": 3649722,
-      "claimed_at": "2026-10-30T04:22:14.802Z",
+      "pid": 1793586,
+      "claimed_at": "2026-10-30T05:10:40.161Z",
       "lease": {
         "interval_seconds": 300,
         "cancel_grace_seconds": 300
@@ -24,11 +24,22 @@
       "destination": "board:anchor",
       "title": "chore: anchor",
       "content_sha256": "752e456c7adcb965fd9b3d6f707d6e08f6b537b59da54a6b0708054e861b2069",
-      "status": "in progress",
+      "status": "done",
       "metadata": {
         "onepipeline.id": "anchor",
+        "onepipeline.landing": "landed",
+        "onepipeline.landing_commit": "b2c56b0d0ede1d82d92edf6dcebe899aeb0da358",
         "onepipeline.node": "anchor",
-        "onepipeline.persona": "engineer"
+        "onepipeline.persona": "engineer",
+        "onepipeline.projected_status": "done",
+        "onepipeline.settlement": {
+          "status": "done",
+          "outcome": "merged",
+          "branch": "2/anchor",
+          "head": "2dffe5bb77550ad18652e5ea03e4c3188c7646a3",
+          "landing": "landed",
+          "base": "main"
+        }
       },
       "delivers": [],
       "depends_on": []

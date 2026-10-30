@@ -342,16 +342,57 @@ fn a_private_github_home_with_a_public_destination_task_is_readable() {
         .cloned()
         .unwrap_or_else(|| panic!("the run is not listed: {}", listed.body));
     assert_eq!(row["project"], "board:plan", "{row}");
-    for suffix in ["", "/timeline?scope=run", "/results"] {
-        let response = http::get(serving.address, &format!("/api/v2/runs/{run}{suffix}"));
-        assert_eq!(response.status, 200, "{}", response.body);
-        assert_enveloped(&response.json());
-    }
-    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}"));
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    let detail = detail.json();
+    assert_enveloped(&detail);
     assert_eq!(
         detail["graph"]["node_status"],
-        json!({"anchor": "running", "examples": "parked"}),
+        json!({"anchor": "done", "examples": "parked"}),
         "{detail}"
+    );
+    // The anchor's settlement as the engine recorded it: merged on the private
+    // repository's base, the parked public task settling nothing.
+    assert_eq!(
+        detail["graph"]["node_results"],
+        json!({"anchor": {
+            "kind": "agent",
+            "status": "done",
+            "completed": true,
+            "outcome": "merged",
+            "branch": "2/anchor",
+        }}),
+        "{detail}"
+    );
+    let results = http::get(serving.address, &format!("/api/v2/runs/{run}/results"));
+    assert_eq!(results.status, 200, "{}", results.body);
+    let results = results.json();
+    assert_enveloped(&results);
+    let rendered = results["rendered"].as_str().expect("the rendered results");
+    assert!(
+        rendered.contains("done (merged) — landed on its base"),
+        "{rendered}"
+    );
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    );
+    assert_eq!(timeline.status, 200, "{}", timeline.body);
+    let timeline = timeline.json();
+    assert_enveloped(&timeline);
+    let settled: Vec<Value> = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter(|event| event["kind"] == "node-settled")
+        .collect();
+    assert_eq!(settled.len(), 1, "{timeline}");
+    assert_eq!(settled[0]["node_id"], "anchor", "{timeline}");
+    assert_eq!(
+        settled[0]["fields"],
+        json!({"Status": "done", "Outcome": "merged"}),
+        "{timeline}"
     );
     let missing = http::get(serving.address, "/api/v2/runs/no-such-github-run");
     assert_eq!(missing.status, 404, "{}", missing.body);
