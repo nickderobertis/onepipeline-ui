@@ -223,6 +223,9 @@ impl HumanItems {
         session: Option<&SessionId>,
         input: HumanItemInput,
     ) -> Result<HumanItemReceipt, ApiError> {
+        // A host serving no sample refuses a raise as it refuses every other
+        // human-item route, before any ownership is judged.
+        self.adapter()?;
         if !owns(session, &input.owner.session) {
             return Err(ApiError::HumanItemNotOwner(
                 "a human item is raised only as its owner: owner.session must be the session \

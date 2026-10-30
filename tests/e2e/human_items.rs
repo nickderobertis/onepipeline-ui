@@ -729,27 +729,46 @@ fn a_dismissal_records_its_reason_only_when_one_is_given() {
     );
 }
 
-/// Raising takes the engine's `HumanItemInput`, as the owning session only;
-/// a duplicate dedup key is the engine's conflict and an input its decoder
-/// refuses is the error contract.
+/// A question raised as `session`, the body `POST /api/human-items` takes.
+fn raise_input(session: &str, dedup: &str, priority: &str) -> String {
+    json!({
+        "schema_version": 1,
+        "dedup_key": dedup,
+        "kind": "question",
+        "title": "Should the nightly job run on weekends?",
+        "body": "The nightly job finds nothing new on weekends. Skipping it saves two hours of runner time each week.",
+        "priority": priority,
+        "owner": {"session": session, "run": null, "plan": null},
+        "block": {"scope": "nothing"},
+        "approval": null,
+    })
+    .to_string()
+}
+
+/// Raising takes the engine's `HumanItemInput`, as the owning session only (an
+/// unattributed server owns nothing); a duplicate dedup key is the engine's
+/// conflict and an input its decoder refuses is the error contract.
 #[test]
 fn raising_an_item_is_the_owners_and_answers_the_engines_receipt() {
     let (_dir, served) = sample("representative.json");
+    let before = std::fs::read(&served).expect("the bundle reads");
+
+    // An unattributed server owns nothing, so it raises nothing either.
+    let nobody = serve(&served, None);
+    error(
+        &http::post(
+            nobody.address,
+            "/api/human-items",
+            &raise_input(OWNER, "nightly", "low"),
+        ),
+        403,
+        "human_item_not_owner",
+    );
+    drop(nobody);
+    assert_eq!(std::fs::read(&served).expect("the bundle reads"), before);
+
     let server = serve(&served, Some(OWNER));
-    let input = |session: &str, dedup: &str, priority: &str| {
-        json!({
-            "schema_version": 1,
-            "dedup_key": dedup,
-            "kind": "question",
-            "title": "Should the nightly job run on weekends?",
-            "body": "The nightly job finds nothing new on weekends. Skipping it saves two hours of runner time each week.",
-            "priority": priority,
-            "owner": {"session": session, "run": null, "plan": null},
-            "block": {"scope": "nothing"},
-            "approval": null,
-        })
-        .to_string()
-    };
+    let input = raise_input;
 
     let response = http::post(
         server.address,
@@ -922,6 +941,18 @@ fn a_live_host_serves_no_sample_and_refuses_one() {
             live.address,
             "/api/human-items/question-canary/answer",
             r#"{"text":"x"}"#,
+        ),
+        // A raise is refused for want of the sample before any ownership is
+        // judged, whoever the body names as its owner.
+        http::post(
+            live.address,
+            "/api/human-items",
+            &raise_input(OWNER, "nightly", "low"),
+        ),
+        http::post(
+            live.address,
+            "/api/human-items",
+            &raise_input(OTHER, "foreign", "low"),
         ),
     ] {
         assert_eq!(
