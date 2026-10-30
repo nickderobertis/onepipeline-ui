@@ -41,11 +41,7 @@
       }
     },
     "additionalProperties": false,
-    "required": [
-      "schema_version",
-      "items",
-      "approval_keys"
-    ],
+    "required": ["schema_version", "items", "approval_keys"],
     "$defs": {
       "HumanItemDetail": {
         "description": "An item and its complete affected-node list.",
@@ -68,11 +64,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "item",
-          "blocked",
-          "nodes"
-        ]
+        "required": ["item", "blocked", "nodes"]
       },
       "HumanItem": {
         "description": "A stable host-unique human item at schema version one.",
@@ -112,12 +104,7 @@
           "priority": {
             "description": "Priority.",
             "type": "string",
-            "enum": [
-              "urgent",
-              "high",
-              "medium",
-              "low"
-            ]
+            "enum": ["urgent", "high", "medium", "low"]
           },
           "owner": {
             "description": "Owner.",
@@ -226,22 +213,14 @@
             "then": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "open",
-                    "completed",
-                    "dismissed"
-                  ]
+                  "enum": ["open", "completed", "dismissed"]
                 }
               }
             },
             "else": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "open",
-                    "answered",
-                    "dismissed"
-                  ]
+                  "enum": ["open", "answered", "dismissed"]
                 },
                 "approval": {
                   "type": "null"
@@ -270,9 +249,7 @@
                       "type": "null"
                     }
                   },
-                  "required": [
-                    "text"
-                  ]
+                  "required": ["text"]
                 }
               }
             }
@@ -281,10 +258,7 @@
             "if": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "completed",
-                    "dismissed"
-                  ]
+                  "enum": ["completed", "dismissed"]
                 }
               }
             },
@@ -347,25 +321,15 @@
           },
           "run": {
             "description": "Run.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "plan": {
             "description": "Plan.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "session",
-          "run",
-          "plan"
-        ]
+        "required": ["session", "run", "plan"]
       },
       "HumanItemBlock": {
         "description": "The scope held by an open item; never a presentation filter.",
@@ -379,9 +343,7 @@
                 "const": "nothing"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           },
           {
@@ -402,11 +364,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "run",
-              "node"
-            ]
+            "required": ["scope", "run", "node"]
           },
           {
             "description": "Holds a whole plan.",
@@ -422,10 +380,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "plan"
-            ]
+            "required": ["scope", "plan"]
           },
           {
             "description": "Holds all work on the host.",
@@ -436,9 +391,7 @@
                 "const": "host"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           }
         ]
@@ -457,10 +410,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "board_copy",
-          "key"
-        ]
+        "required": ["board_copy", "key"]
       },
       "HumanItemState": {
         "description": "The human item state.",
@@ -497,33 +447,19 @@
           },
           "on_behalf_of": {
             "description": "On behalf of.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "text": {
             "description": "Text.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "reason": {
             "description": "Reason.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "actor",
-          "on_behalf_of",
-          "text",
-          "reason"
-        ]
+        "required": ["actor", "on_behalf_of", "text", "reason"]
       },
       "HumanItemTracker": {
         "description": "An associated tracker task.",
@@ -539,10 +475,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "task",
-          "url"
-        ]
+        "required": ["task", "url"]
       },
       "HumanItemBlocked": {
         "description": "Affected node counts grouped by plan.",
@@ -563,10 +496,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "total",
-          "plans"
-        ]
+        "required": ["total", "plans"]
       },
       "HumanItemBlockedPlan": {
         "description": "A plan affected by an item; preview contains its first three nodes.",
@@ -592,11 +522,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "plan",
-          "count",
-          "preview"
-        ]
+        "required": ["plan", "count", "preview"]
       },
       "HumanItemNode": {
         "description": "An affected step.",
@@ -616,11 +542,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "run",
-          "node",
-          "title"
-        ]
+        "required": ["run", "node", "title"]
       },
       "HumanItemSampleApproval": {
         "description": "An approval written by the fixture authority, never a live design approval.",
@@ -636,18 +558,11 @@
           },
           "on_behalf_of": {
             "description": "User represented by the actor, if any.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "approval",
-          "actor",
-          "on_behalf_of"
-        ]
+        "required": ["approval", "actor", "on_behalf_of"]
       }
     }
   },
@@ -665,9 +580,7 @@
             "const": "unavailable"
           }
         },
-        "required": [
-          "kind"
-        ],
+        "required": ["kind"],
         "additionalProperties": false
       },
       {
@@ -684,10 +597,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "kind",
-          "reason"
-        ]
+        "required": ["kind", "reason"]
       }
     ]
   },
@@ -731,12 +641,7 @@
       "priority": {
         "description": "Priority.",
         "type": "string",
-        "enum": [
-          "urgent",
-          "high",
-          "medium",
-          "low"
-        ]
+        "enum": ["urgent", "high", "medium", "low"]
       },
       "owner": {
         "description": "Owner.",
@@ -845,22 +750,14 @@
         "then": {
           "properties": {
             "state": {
-              "enum": [
-                "open",
-                "completed",
-                "dismissed"
-              ]
+              "enum": ["open", "completed", "dismissed"]
             }
           }
         },
         "else": {
           "properties": {
             "state": {
-              "enum": [
-                "open",
-                "answered",
-                "dismissed"
-              ]
+              "enum": ["open", "answered", "dismissed"]
             },
             "approval": {
               "type": "null"
@@ -889,9 +786,7 @@
                   "type": "null"
                 }
               },
-              "required": [
-                "text"
-              ]
+              "required": ["text"]
             }
           }
         }
@@ -900,10 +795,7 @@
         "if": {
           "properties": {
             "state": {
-              "enum": [
-                "completed",
-                "dismissed"
-              ]
+              "enum": ["completed", "dismissed"]
             }
           }
         },
@@ -966,25 +858,15 @@
           },
           "run": {
             "description": "Run.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "plan": {
             "description": "Plan.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "session",
-          "run",
-          "plan"
-        ]
+        "required": ["session", "run", "plan"]
       },
       "HumanItemBlock": {
         "description": "The scope held by an open item; never a presentation filter.",
@@ -998,9 +880,7 @@
                 "const": "nothing"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           },
           {
@@ -1021,11 +901,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "run",
-              "node"
-            ]
+            "required": ["scope", "run", "node"]
           },
           {
             "description": "Holds a whole plan.",
@@ -1041,10 +917,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "plan"
-            ]
+            "required": ["scope", "plan"]
           },
           {
             "description": "Holds all work on the host.",
@@ -1055,9 +928,7 @@
                 "const": "host"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           }
         ]
@@ -1076,10 +947,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "board_copy",
-          "key"
-        ]
+        "required": ["board_copy", "key"]
       },
       "HumanItemState": {
         "description": "The human item state.",
@@ -1116,33 +984,19 @@
           },
           "on_behalf_of": {
             "description": "On behalf of.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "text": {
             "description": "Text.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "reason": {
             "description": "Reason.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "actor",
-          "on_behalf_of",
-          "text",
-          "reason"
-        ]
+        "required": ["actor", "on_behalf_of", "text", "reason"]
       },
       "HumanItemTracker": {
         "description": "An associated tracker task.",
@@ -1158,10 +1012,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "task",
-          "url"
-        ]
+        "required": ["task", "url"]
       }
     }
   },
@@ -1201,12 +1052,7 @@
       "priority": {
         "description": "Priority.",
         "type": "string",
-        "enum": [
-          "urgent",
-          "high",
-          "medium",
-          "low"
-        ]
+        "enum": ["urgent", "high", "medium", "low"]
       },
       "owner": {
         "description": "Owner.",
@@ -1284,25 +1130,15 @@
           },
           "run": {
             "description": "Run.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "plan": {
             "description": "Plan.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "session",
-          "run",
-          "plan"
-        ]
+        "required": ["session", "run", "plan"]
       },
       "HumanItemBlock": {
         "description": "The scope held by an open item; never a presentation filter.",
@@ -1316,9 +1152,7 @@
                 "const": "nothing"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           },
           {
@@ -1339,11 +1173,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "run",
-              "node"
-            ]
+            "required": ["scope", "run", "node"]
           },
           {
             "description": "Holds a whole plan.",
@@ -1359,10 +1189,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "plan"
-            ]
+            "required": ["scope", "plan"]
           },
           {
             "description": "Holds all work on the host.",
@@ -1373,9 +1200,7 @@
                 "const": "host"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           }
         ]
@@ -1394,10 +1219,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "board_copy",
-          "key"
-        ]
+        "required": ["board_copy", "key"]
       }
     }
   },
@@ -1440,12 +1262,7 @@
           "priority": {
             "description": "Priority.",
             "type": "string",
-            "enum": [
-              "urgent",
-              "high",
-              "medium",
-              "low"
-            ]
+            "enum": ["urgent", "high", "medium", "low"]
           },
           "owner": {
             "description": "Owner.",
@@ -1523,10 +1340,7 @@
           },
           "on_behalf_of": {
             "description": "On behalf of.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "action": {
             "type": "string",
@@ -1534,13 +1348,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "action",
-          "id",
-          "text",
-          "actor",
-          "on_behalf_of"
-        ]
+        "required": ["action", "id", "text", "actor", "on_behalf_of"]
       },
       {
         "description": "Complete an open item.",
@@ -1556,10 +1364,7 @@
           },
           "on_behalf_of": {
             "description": "On behalf of.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "action": {
             "type": "string",
@@ -1567,12 +1372,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "action",
-          "id",
-          "actor",
-          "on_behalf_of"
-        ]
+        "required": ["action", "id", "actor", "on_behalf_of"]
       },
       {
         "description": "Dismiss an open item.",
@@ -1584,10 +1384,7 @@
           },
           "reason": {
             "description": "Reason.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "actor": {
             "description": "Actor.",
@@ -1595,10 +1392,7 @@
           },
           "on_behalf_of": {
             "description": "On behalf of.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "action": {
             "type": "string",
@@ -1606,12 +1400,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "action",
-          "id",
-          "actor",
-          "on_behalf_of"
-        ]
+        "required": ["action", "id", "actor", "on_behalf_of"]
       }
     ],
     "$defs": {
@@ -1640,25 +1429,15 @@
           },
           "run": {
             "description": "Run.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "plan": {
             "description": "Plan.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "session",
-          "run",
-          "plan"
-        ]
+        "required": ["session", "run", "plan"]
       },
       "HumanItemBlock": {
         "description": "The scope held by an open item; never a presentation filter.",
@@ -1672,9 +1451,7 @@
                 "const": "nothing"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           },
           {
@@ -1695,11 +1472,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "run",
-              "node"
-            ]
+            "required": ["scope", "run", "node"]
           },
           {
             "description": "Holds a whole plan.",
@@ -1715,10 +1488,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "plan"
-            ]
+            "required": ["scope", "plan"]
           },
           {
             "description": "Holds all work on the host.",
@@ -1729,9 +1499,7 @@
                 "const": "host"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           }
         ]
@@ -1750,10 +1518,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "board_copy",
-          "key"
-        ]
+        "required": ["board_copy", "key"]
       }
     }
   },
@@ -1776,24 +1541,12 @@
       },
       "blocking": {
         "description": "Blocking.",
-        "type": [
-          "boolean",
-          "null"
-        ]
+        "type": ["boolean", "null"]
       },
       "priority": {
         "description": "Priority.",
-        "type": [
-          "string",
-          "null"
-        ],
-        "enum": [
-          null,
-          "urgent",
-          "high",
-          "medium",
-          "low"
-        ]
+        "type": ["string", "null"],
+        "enum": [null, "urgent", "high", "medium", "low"]
       },
       "state": {
         "description": "State.",
@@ -1808,31 +1561,19 @@
       },
       "session": {
         "description": "Session.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": ["string", "null"]
       },
       "run": {
         "description": "Run.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": ["string", "null"]
       },
       "plan": {
         "description": "Plan.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": ["string", "null"]
       },
       "host": {
         "description": "Host.",
-        "type": [
-          "boolean",
-          "null"
-        ]
+        "type": ["boolean", "null"]
       }
     },
     "additionalProperties": false,
@@ -1895,10 +1636,7 @@
       }
     },
     "additionalProperties": false,
-    "required": [
-      "item",
-      "blocked"
-    ],
+    "required": ["item", "blocked"],
     "$defs": {
       "HumanItem": {
         "description": "A stable host-unique human item at schema version one.",
@@ -1938,12 +1676,7 @@
           "priority": {
             "description": "Priority.",
             "type": "string",
-            "enum": [
-              "urgent",
-              "high",
-              "medium",
-              "low"
-            ]
+            "enum": ["urgent", "high", "medium", "low"]
           },
           "owner": {
             "description": "Owner.",
@@ -2052,22 +1785,14 @@
             "then": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "open",
-                    "completed",
-                    "dismissed"
-                  ]
+                  "enum": ["open", "completed", "dismissed"]
                 }
               }
             },
             "else": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "open",
-                    "answered",
-                    "dismissed"
-                  ]
+                  "enum": ["open", "answered", "dismissed"]
                 },
                 "approval": {
                   "type": "null"
@@ -2096,9 +1821,7 @@
                       "type": "null"
                     }
                   },
-                  "required": [
-                    "text"
-                  ]
+                  "required": ["text"]
                 }
               }
             }
@@ -2107,10 +1830,7 @@
             "if": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "completed",
-                    "dismissed"
-                  ]
+                  "enum": ["completed", "dismissed"]
                 }
               }
             },
@@ -2173,25 +1893,15 @@
           },
           "run": {
             "description": "Run.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "plan": {
             "description": "Plan.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "session",
-          "run",
-          "plan"
-        ]
+        "required": ["session", "run", "plan"]
       },
       "HumanItemBlock": {
         "description": "The scope held by an open item; never a presentation filter.",
@@ -2205,9 +1915,7 @@
                 "const": "nothing"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           },
           {
@@ -2228,11 +1936,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "run",
-              "node"
-            ]
+            "required": ["scope", "run", "node"]
           },
           {
             "description": "Holds a whole plan.",
@@ -2248,10 +1952,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "plan"
-            ]
+            "required": ["scope", "plan"]
           },
           {
             "description": "Holds all work on the host.",
@@ -2262,9 +1963,7 @@
                 "const": "host"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           }
         ]
@@ -2283,10 +1982,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "board_copy",
-          "key"
-        ]
+        "required": ["board_copy", "key"]
       },
       "HumanItemState": {
         "description": "The human item state.",
@@ -2323,33 +2019,19 @@
           },
           "on_behalf_of": {
             "description": "On behalf of.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "text": {
             "description": "Text.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "reason": {
             "description": "Reason.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "actor",
-          "on_behalf_of",
-          "text",
-          "reason"
-        ]
+        "required": ["actor", "on_behalf_of", "text", "reason"]
       },
       "HumanItemTracker": {
         "description": "An associated tracker task.",
@@ -2365,10 +2047,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "task",
-          "url"
-        ]
+        "required": ["task", "url"]
       },
       "HumanItemBlocked": {
         "description": "Affected node counts grouped by plan.",
@@ -2389,10 +2068,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "total",
-          "plans"
-        ]
+        "required": ["total", "plans"]
       },
       "HumanItemBlockedPlan": {
         "description": "A plan affected by an item; preview contains its first three nodes.",
@@ -2418,11 +2094,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "plan",
-          "count",
-          "preview"
-        ]
+        "required": ["plan", "count", "preview"]
       },
       "HumanItemNode": {
         "description": "An affected step.",
@@ -2442,11 +2114,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "run",
-          "node",
-          "title"
-        ]
+        "required": ["run", "node", "title"]
       }
     }
   },
@@ -2473,11 +2141,7 @@
       }
     },
     "additionalProperties": false,
-    "required": [
-      "item",
-      "blocked",
-      "nodes"
-    ],
+    "required": ["item", "blocked", "nodes"],
     "$defs": {
       "HumanItem": {
         "description": "A stable host-unique human item at schema version one.",
@@ -2517,12 +2181,7 @@
           "priority": {
             "description": "Priority.",
             "type": "string",
-            "enum": [
-              "urgent",
-              "high",
-              "medium",
-              "low"
-            ]
+            "enum": ["urgent", "high", "medium", "low"]
           },
           "owner": {
             "description": "Owner.",
@@ -2631,22 +2290,14 @@
             "then": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "open",
-                    "completed",
-                    "dismissed"
-                  ]
+                  "enum": ["open", "completed", "dismissed"]
                 }
               }
             },
             "else": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "open",
-                    "answered",
-                    "dismissed"
-                  ]
+                  "enum": ["open", "answered", "dismissed"]
                 },
                 "approval": {
                   "type": "null"
@@ -2675,9 +2326,7 @@
                       "type": "null"
                     }
                   },
-                  "required": [
-                    "text"
-                  ]
+                  "required": ["text"]
                 }
               }
             }
@@ -2686,10 +2335,7 @@
             "if": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "completed",
-                    "dismissed"
-                  ]
+                  "enum": ["completed", "dismissed"]
                 }
               }
             },
@@ -2752,25 +2398,15 @@
           },
           "run": {
             "description": "Run.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "plan": {
             "description": "Plan.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "session",
-          "run",
-          "plan"
-        ]
+        "required": ["session", "run", "plan"]
       },
       "HumanItemBlock": {
         "description": "The scope held by an open item; never a presentation filter.",
@@ -2784,9 +2420,7 @@
                 "const": "nothing"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           },
           {
@@ -2807,11 +2441,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "run",
-              "node"
-            ]
+            "required": ["scope", "run", "node"]
           },
           {
             "description": "Holds a whole plan.",
@@ -2827,10 +2457,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "plan"
-            ]
+            "required": ["scope", "plan"]
           },
           {
             "description": "Holds all work on the host.",
@@ -2841,9 +2468,7 @@
                 "const": "host"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           }
         ]
@@ -2862,10 +2487,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "board_copy",
-          "key"
-        ]
+        "required": ["board_copy", "key"]
       },
       "HumanItemState": {
         "description": "The human item state.",
@@ -2902,33 +2524,19 @@
           },
           "on_behalf_of": {
             "description": "On behalf of.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "text": {
             "description": "Text.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "reason": {
             "description": "Reason.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "actor",
-          "on_behalf_of",
-          "text",
-          "reason"
-        ]
+        "required": ["actor", "on_behalf_of", "text", "reason"]
       },
       "HumanItemTracker": {
         "description": "An associated tracker task.",
@@ -2944,10 +2552,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "task",
-          "url"
-        ]
+        "required": ["task", "url"]
       },
       "HumanItemBlocked": {
         "description": "Affected node counts grouped by plan.",
@@ -2968,10 +2573,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "total",
-          "plans"
-        ]
+        "required": ["total", "plans"]
       },
       "HumanItemBlockedPlan": {
         "description": "A plan affected by an item; preview contains its first three nodes.",
@@ -2997,11 +2599,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "plan",
-          "count",
-          "preview"
-        ]
+        "required": ["plan", "count", "preview"]
       },
       "HumanItemNode": {
         "description": "An affected step.",
@@ -3021,11 +2619,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "run",
-          "node",
-          "title"
-        ]
+        "required": ["run", "node", "title"]
       }
     }
   },
@@ -3045,10 +2639,7 @@
       }
     },
     "additionalProperties": false,
-    "required": [
-      "item",
-      "event_id"
-    ],
+    "required": ["item", "event_id"],
     "$defs": {
       "HumanItemView": {
         "description": "An item and its derived impact.",
@@ -3064,10 +2655,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "item",
-          "blocked"
-        ]
+        "required": ["item", "blocked"]
       },
       "HumanItem": {
         "description": "A stable host-unique human item at schema version one.",
@@ -3107,12 +2695,7 @@
           "priority": {
             "description": "Priority.",
             "type": "string",
-            "enum": [
-              "urgent",
-              "high",
-              "medium",
-              "low"
-            ]
+            "enum": ["urgent", "high", "medium", "low"]
           },
           "owner": {
             "description": "Owner.",
@@ -3221,22 +2804,14 @@
             "then": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "open",
-                    "completed",
-                    "dismissed"
-                  ]
+                  "enum": ["open", "completed", "dismissed"]
                 }
               }
             },
             "else": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "open",
-                    "answered",
-                    "dismissed"
-                  ]
+                  "enum": ["open", "answered", "dismissed"]
                 },
                 "approval": {
                   "type": "null"
@@ -3265,9 +2840,7 @@
                       "type": "null"
                     }
                   },
-                  "required": [
-                    "text"
-                  ]
+                  "required": ["text"]
                 }
               }
             }
@@ -3276,10 +2849,7 @@
             "if": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "completed",
-                    "dismissed"
-                  ]
+                  "enum": ["completed", "dismissed"]
                 }
               }
             },
@@ -3342,25 +2912,15 @@
           },
           "run": {
             "description": "Run.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "plan": {
             "description": "Plan.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "session",
-          "run",
-          "plan"
-        ]
+        "required": ["session", "run", "plan"]
       },
       "HumanItemBlock": {
         "description": "The scope held by an open item; never a presentation filter.",
@@ -3374,9 +2934,7 @@
                 "const": "nothing"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           },
           {
@@ -3397,11 +2955,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "run",
-              "node"
-            ]
+            "required": ["scope", "run", "node"]
           },
           {
             "description": "Holds a whole plan.",
@@ -3417,10 +2971,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "plan"
-            ]
+            "required": ["scope", "plan"]
           },
           {
             "description": "Holds all work on the host.",
@@ -3431,9 +2982,7 @@
                 "const": "host"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           }
         ]
@@ -3452,10 +3001,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "board_copy",
-          "key"
-        ]
+        "required": ["board_copy", "key"]
       },
       "HumanItemState": {
         "description": "The human item state.",
@@ -3492,33 +3038,19 @@
           },
           "on_behalf_of": {
             "description": "On behalf of.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "text": {
             "description": "Text.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "reason": {
             "description": "Reason.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "actor",
-          "on_behalf_of",
-          "text",
-          "reason"
-        ]
+        "required": ["actor", "on_behalf_of", "text", "reason"]
       },
       "HumanItemTracker": {
         "description": "An associated tracker task.",
@@ -3534,10 +3066,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "task",
-          "url"
-        ]
+        "required": ["task", "url"]
       },
       "HumanItemBlocked": {
         "description": "Affected node counts grouped by plan.",
@@ -3558,10 +3087,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "total",
-          "plans"
-        ]
+        "required": ["total", "plans"]
       },
       "HumanItemBlockedPlan": {
         "description": "A plan affected by an item; preview contains its first three nodes.",
@@ -3587,11 +3113,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "plan",
-          "count",
-          "preview"
-        ]
+        "required": ["plan", "count", "preview"]
       },
       "HumanItemNode": {
         "description": "An affected step.",
@@ -3611,11 +3133,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "run",
-          "node",
-          "title"
-        ]
+        "required": ["run", "node", "title"]
       }
     }
   },
@@ -3632,12 +3150,7 @@
       "priority": {
         "description": "Priority.",
         "type": "string",
-        "enum": [
-          "urgent",
-          "high",
-          "medium",
-          "low"
-        ]
+        "enum": ["urgent", "high", "medium", "low"]
       },
       "title": {
         "description": "Title.",
@@ -3653,12 +3166,7 @@
       }
     },
     "additionalProperties": false,
-    "required": [
-      "kind",
-      "priority",
-      "title",
-      "body"
-    ],
+    "required": ["kind", "priority", "title", "body"],
     "$defs": {
       "HumanItemKind": {
         "description": "The human item kind.",
@@ -3855,25 +3363,15 @@
           },
           "run": {
             "description": "Run.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "plan": {
             "description": "Plan.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "session",
-          "run",
-          "plan"
-        ]
+        "required": ["session", "run", "plan"]
       },
       "HumanItemEventAction": {
         "description": "The closed action ids transported in human-item event payloads.",
@@ -3943,12 +3441,7 @@
           "priority": {
             "description": "Priority.",
             "type": "string",
-            "enum": [
-              "urgent",
-              "high",
-              "medium",
-              "low"
-            ]
+            "enum": ["urgent", "high", "medium", "low"]
           },
           "owner": {
             "description": "Owner.",
@@ -4057,22 +3550,14 @@
             "then": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "open",
-                    "completed",
-                    "dismissed"
-                  ]
+                  "enum": ["open", "completed", "dismissed"]
                 }
               }
             },
             "else": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "open",
-                    "answered",
-                    "dismissed"
-                  ]
+                  "enum": ["open", "answered", "dismissed"]
                 },
                 "approval": {
                   "type": "null"
@@ -4101,9 +3586,7 @@
                       "type": "null"
                     }
                   },
-                  "required": [
-                    "text"
-                  ]
+                  "required": ["text"]
                 }
               }
             }
@@ -4112,10 +3595,7 @@
             "if": {
               "properties": {
                 "state": {
-                  "enum": [
-                    "completed",
-                    "dismissed"
-                  ]
+                  "enum": ["completed", "dismissed"]
                 }
               }
             },
@@ -4180,9 +3660,7 @@
                 "const": "nothing"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           },
           {
@@ -4203,11 +3681,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "run",
-              "node"
-            ]
+            "required": ["scope", "run", "node"]
           },
           {
             "description": "Holds a whole plan.",
@@ -4223,10 +3697,7 @@
               }
             },
             "additionalProperties": false,
-            "required": [
-              "scope",
-              "plan"
-            ]
+            "required": ["scope", "plan"]
           },
           {
             "description": "Holds all work on the host.",
@@ -4237,9 +3708,7 @@
                 "const": "host"
               }
             },
-            "required": [
-              "scope"
-            ],
+            "required": ["scope"],
             "additionalProperties": false
           }
         ]
@@ -4258,10 +3727,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "board_copy",
-          "key"
-        ]
+        "required": ["board_copy", "key"]
       },
       "HumanItemState": {
         "description": "The human item state.",
@@ -4298,33 +3764,19 @@
           },
           "on_behalf_of": {
             "description": "On behalf of.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "text": {
             "description": "Text.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           },
           "reason": {
             "description": "Reason.",
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"]
           }
         },
         "additionalProperties": false,
-        "required": [
-          "actor",
-          "on_behalf_of",
-          "text",
-          "reason"
-        ]
+        "required": ["actor", "on_behalf_of", "text", "reason"]
       },
       "HumanItemTracker": {
         "description": "An associated tracker task.",
@@ -4340,10 +3792,7 @@
           }
         },
         "additionalProperties": false,
-        "required": [
-          "task",
-          "url"
-        ]
+        "required": ["task", "url"]
       }
     }
   }
