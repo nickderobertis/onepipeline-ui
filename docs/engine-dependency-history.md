@@ -664,6 +664,10 @@ the engine's npm launcher fix. The test-only store requirements move with it.
 The lock also advances pulldown-cmark to 0.13.5 to clear RUSTSEC-2026-0414.
 0.96.0 is the engine that links onevcs 0.57.4, whose boundary fix a host can
 adopt only once this reader links the same engine, and onetaskgraph 0.12.11.
+It also links the plan store, so a GitHub Projects board declared private can
+home a mixed plan whose public-repository tasks reach a public board only as
+neutral projections; oneagentgraph 0.9.0, onejudge 0.22.0 and oneharness-core
+0.29.1 are unchanged.
 The test-only onevcs and store requirements move to the releases that engine's
 lock resolves, and the lock moves onemessagebus to 0.9.4 with it; no route,
 payload or MSRV changes beyond the release `/healthz` reports. This changes the
