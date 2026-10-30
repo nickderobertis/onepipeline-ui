@@ -1,4 +1,4 @@
-import { readFileSync, renameSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import {
   type BrowserContext,
   expect,
@@ -1070,6 +1070,71 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
   await expect(outcome(page)).toHaveText(
     "Restore the build service: Completed",
   );
+});
+
+test("a write to an item that became another session's is refused, hides it and changes nothing, and lands once it is handed back", async ({
+  page,
+}) => {
+  const served = await serveBundle("representative.json");
+  await open(page, served);
+  const sent = writes(page);
+  const { sample } = factsSchema.parse(served.facts);
+  const original = readFileSync(sample, "utf8");
+
+  /** Hand the item `id` to another session in the bundle the server reads. */
+  function handOver(id: string): string {
+    const bundle = JSON.parse(original);
+    for (const { item } of bundle.items) {
+      if (item.id === id) item.owner.session = "other-session";
+    }
+    const handed = JSON.stringify(bundle);
+    writeFileSync(sample, handed);
+    return handed;
+  }
+
+  // After the page read it, each item becomes another session's: the server's
+  // authority refuses the acting session's one write in the engine's words,
+  // the list's next read no longer shows its content, and nothing is written.
+  const question = "Should retries reuse the warm cache?";
+  const task = "Restore the build service";
+  for (const [id, title, act] of [
+    [
+      "question-cache",
+      question,
+      async () => {
+        await answerBox(page, question).fill("Reuse it");
+        await answerBox(page, question).press("Enter");
+      },
+    ],
+    [
+      "task-build",
+      task,
+      () => page.getByRole("button", { name: `Complete: ${task}` }).click(),
+    ],
+  ] as const) {
+    const handed = handOver(id);
+    const before = sent.length;
+    await act();
+    await expect(outcome(page)).toHaveText(
+      `${title}: human item ${id} belongs to another session; its content and its actions are that session's`,
+    );
+    await expect(card(page, title)).toHaveCount(0);
+    expect(sent).toHaveLength(before + 1);
+    const response = await sent[before]?.response();
+    if (!response) throw new Error(`the write to ${id} had no response`);
+    expect(response.status()).toBe(403);
+    expect((await response.json()).error.code).toBe("human_item_not_owner");
+    expect(readFileSync(sample, "utf8")).toBe(handed);
+    writeFileSync(sample, original);
+    await page.getByRole("button", { name: "Refresh" }).click();
+    await expect(card(page, title)).toBeVisible();
+  }
+
+  // Handed back, the refused answer's draft is still there and lands as written.
+  await expect(answerBox(page, question)).toHaveValue("Reuse it");
+  await answerBox(page, question).press("Enter");
+  await expect(outcome(page)).toHaveText(`${question}: Answered`);
+  expect(stored(served, "question-cache").resolution?.text).toBe("Reuse it");
 });
 
 test("a detail that cannot be read says why, and another item's opens once the server can read again", async ({

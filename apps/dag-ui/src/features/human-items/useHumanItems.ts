@@ -49,6 +49,7 @@ export function useHumanItems(
   client: TelemetryClient,
   filter: HumanItemFilter,
   selectedId: string | undefined,
+  refresh: number,
 ) {
   const [items, setItems] = useState<readonly HumanItemView[]>();
   const [listError, setListError] = useState<string>();
@@ -63,7 +64,7 @@ export function useHumanItems(
   const inFlight = useRef(new Set<string>());
   const filterKey = JSON.stringify(filter);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `filterKey` is the filter's value, so a filter rebuilt each render with the same selectors is not a new read; `generation` is the re-read a settled write asks for.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `filterKey` is the filter's value, so a filter rebuilt each render with the same selectors is not a new read; `generation` is the re-read a settled write asks for, and `refresh` the one the header's Refresh asks for.
   useEffect(() => {
     let current = true;
     client.listHumanItems(filter).then(
@@ -79,9 +80,9 @@ export function useHumanItems(
     return () => {
       current = false;
     };
-  }, [client, filterKey, generation]);
+  }, [client, filterKey, generation, refresh]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `generation` re-reads the open detail once a write settles.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `generation` re-reads the open detail once a write settles, and `refresh` on the header's Refresh.
   useEffect(() => {
     if (selectedId === undefined) {
       setDetail(undefined);
@@ -102,7 +103,7 @@ export function useHumanItems(
     return () => {
       current = false;
     };
-  }, [client, selectedId, generation]);
+  }, [client, selectedId, generation, refresh]);
 
   const write = useCallback(
     (view: HumanItemView, change: HumanItemWrite) => {

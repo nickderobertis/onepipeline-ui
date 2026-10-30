@@ -347,7 +347,7 @@ export function App({
             state={hostShutdowns.host.state}
           />
           {humanItems.active ? (
-            <HumanItemsPage client={client} />
+            <HumanItemsPage client={client} refresh={hostRefresh} />
           ) : selection.host ? (
             <HostPage
               client={client}

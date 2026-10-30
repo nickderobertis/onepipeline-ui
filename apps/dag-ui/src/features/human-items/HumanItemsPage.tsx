@@ -62,14 +62,17 @@ type Write = (view: HumanItemView, change: HumanItemWrite) => void;
  */
 export function HumanItemsPage({
   client,
+  refresh,
 }: {
   readonly client: TelemetryClient;
+  /** Counts the header's Refresh presses; each one reads the list again. */
+  readonly refresh: number;
 }) {
   const [choice, setChoice] = useState<FilterChoice>(NO_FILTER);
   const [selectedId, setSelectedId] = useState<string>();
   const [dismissing, setDismissing] = useState<HumanItemView>();
   const filter = useMemo(() => toFilter(choice), [choice]);
-  const items = useHumanItems(client, filter, selectedId);
+  const items = useHumanItems(client, filter, selectedId, refresh);
   const listRef = useRef<HTMLUListElement>(null);
   const selected =
     items.items?.find(({ item }) => item.id === selectedId) ??
