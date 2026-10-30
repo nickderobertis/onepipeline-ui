@@ -1267,6 +1267,110 @@ test("an item raised in a plan alone or a run alone names it as its source, and 
   await followed(context, () => link.click(), url);
 });
 
+test("a hold of one step says so, and a plan hold lists the steps it reaches", async ({
+  page,
+}) => {
+  const served = await serveBundle("long-body.json");
+  await open(page, served);
+  const one = card(page, "Pick the release branch's base");
+  await expect(
+    one.getByText("blocks 1 step in plan-e: rebase", { exact: true }),
+  ).toBeVisible();
+  await one
+    .getByRole("button", { name: "Details: Pick the release branch's base" })
+    .click();
+  const steps = detailPane(page).getByRole("region", { name: "Blocked steps" });
+  await expect(
+    steps.getByRole("heading", { name: "blocks 1 step in plan-e" }),
+  ).toBeVisible();
+  await expect(steps.getByRole("listitem")).toHaveText([
+    "run-e / rebase: Rebase the release branch",
+  ]);
+
+  const plan = card(page, "Work through the release review follow-ups");
+  await expect(
+    plan.getByText("blocks all of plan-a", { exact: true }),
+  ).toBeVisible();
+  await plan
+    .getByRole("button", {
+      name: "Details: Work through the release review follow-ups",
+    })
+    .click();
+  await expect(
+    steps.getByRole("heading", { name: "blocks all of plan-a" }),
+  ).toBeVisible();
+  await expect(steps.getByRole("listitem")).toHaveText([
+    "run-a / build: Build the release binaries",
+    "run-a / test: Run the release journeys",
+  ]);
+});
+
+test("a read overtaken by a newer one never replaces what the newer one showed", async ({
+  page,
+}) => {
+  const served = await serveBundle("representative.json");
+  const list = await open(page, served);
+  const filters = page.getByRole("group", { name: "Filter action items" });
+
+  // The list: the read for tasks is held while the read for questions lands;
+  // when the tasks' answer finally arrives it is dropped.
+  let releaseTasks: () => void = () => {};
+  const tasksHeld = new Promise<void>((resolve) => {
+    releaseTasks = resolve;
+  });
+  await page.route("**/api/human-items?kind=task", async (route) => {
+    await tasksHeld;
+    await route.continue();
+  });
+  const tasksAsked = page.waitForRequest((request) =>
+    request.url().endsWith("/api/human-items?kind=task"),
+  );
+  await filters.getByLabel("Kind", { exact: true }).selectOption("task");
+  await tasksAsked;
+  await filters.getByLabel("Kind", { exact: true }).selectOption("question");
+  await expect.poll(() => titles(list)).toEqual(QUESTIONS);
+  const tasksAnswered = page.waitForResponse((response) =>
+    response.url().endsWith("/api/human-items?kind=task"),
+  );
+  releaseTasks();
+  await tasksAnswered;
+  await expect(list.getByRole("article")).toHaveCount(QUESTIONS.length);
+  expect(await titles(list)).toEqual(QUESTIONS);
+  await page.unroute("**/api/human-items?kind=task");
+
+  // The detail: the first item's read is held while the second item opens;
+  // the first's late answer does not take the pane back.
+  let releaseFirst: () => void = () => {};
+  const firstHeld = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  await page.route("**/api/human-items/question-canary", async (route) => {
+    await firstHeld;
+    await route.continue();
+  });
+  await page
+    .getByRole("button", {
+      name: "Details: Which region should the canary run in?",
+    })
+    .click();
+  await page.getByRole("button", { name: `Details: ${LAST_QUESTION}` }).click();
+  const pane = detailPane(page);
+  await expect(pane.getByRole("heading", { level: 2 })).toHaveText(
+    LAST_QUESTION,
+  );
+  const firstAnswered = page.waitForResponse((response) =>
+    response.url().endsWith("/api/human-items/question-canary"),
+  );
+  releaseFirst();
+  await firstAnswered;
+  await expect(pane.getByRole("heading", { level: 2 })).toHaveText(
+    LAST_QUESTION,
+  );
+  await expect(pane.getByRole("region", { name: "Blocked steps" })).toHaveCount(
+    0,
+  );
+});
+
 test("a live host's server serves no fixture items to the page", async ({
   page,
 }) => {

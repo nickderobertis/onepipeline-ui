@@ -63,10 +63,38 @@
         "updated_at": "2026-10-29T09:05:00Z"
       },
       "blocked": {
-        "total": 0,
-        "plans": []
+        "total": 2,
+        "plans": [
+          {
+            "plan": "plan-a",
+            "count": 2,
+            "preview": [
+              {
+                "run": "run-a",
+                "node": "build",
+                "title": "Build the release binaries"
+              },
+              {
+                "run": "run-a",
+                "node": "test",
+                "title": "Run the release journeys"
+              }
+            ]
+          }
+        ]
       },
-      "nodes": []
+      "nodes": [
+        {
+          "run": "run-a",
+          "node": "build",
+          "title": "Build the release binaries"
+        },
+        {
+          "run": "run-a",
+          "node": "test",
+          "title": "Run the release journeys"
+        }
+      ]
     },
     {
       "item": {
@@ -190,6 +218,59 @@
         "plans": []
       },
       "nodes": []
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "task-one-step",
+        "dedup_key": "dedup-task-one-step",
+        "kind": "task",
+        "title": "Pick the release branch's base",
+        "body": "The release branch can rebase onto main or onto last week's tag. Pick one so the rebase step can run.",
+        "priority": "low",
+        "owner": {
+          "session": "claude-code-supervising-session",
+          "run": "run-e",
+          "plan": "plan-e"
+        },
+        "block": {
+          "scope": "work",
+          "run": "run-e",
+          "node": "rebase"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": {
+          "task": "nickderobertis/onepipeline#1305",
+          "url": "https://github.com/nickderobertis/onepipeline/issues/1305"
+        },
+        "created_at": "2026-10-29T09:30:00Z",
+        "updated_at": "2026-10-29T09:30:00Z"
+      },
+      "blocked": {
+        "total": 1,
+        "plans": [
+          {
+            "plan": "plan-e",
+            "count": 1,
+            "preview": [
+              {
+                "run": "run-e",
+                "node": "rebase",
+                "title": "Rebase the release branch"
+              }
+            ]
+          }
+        ]
+      },
+      "nodes": [
+        {
+          "run": "run-e",
+          "node": "rebase",
+          "title": "Rebase the release branch"
+        }
+      ]
     }
   ],
   "approval_keys": {}
