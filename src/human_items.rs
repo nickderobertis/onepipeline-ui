@@ -120,6 +120,22 @@ pub struct HumanItemList {
     pub items: Vec<HumanItemView>,
 }
 
+/// The bundle at `path`, as a route reads it: a failure is the engine's, and
+/// names no path — every message the error contract serves is safe to show.
+fn served(path: &Path) -> Result<HumanItemSample, ApiError> {
+    let bytes = fs::read(path).map_err(|err| {
+        ApiError::Engine(format!(
+            "the human-item sample bundle could not be read: {}",
+            err.kind()
+        ))
+    })?;
+    serde_json::from_slice(&bytes).map_err(|err| {
+        ApiError::Engine(format!(
+            "the human-item sample bundle is not one the engine accepts: {err}"
+        ))
+    })
+}
+
 /// What the human-item routes read and act on.
 ///
 /// Cloned with the store that holds it; every clone shares the one lock, so
@@ -231,7 +247,7 @@ impl HumanItems {
             .lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut bundle = read(&sample.path).map_err(ApiError::Engine)?;
+        let mut bundle = served(&sample.path)?;
         readable(&bundle, session, id)?;
         let actor = session
             .map(SessionId::as_str)
@@ -266,7 +282,7 @@ impl HumanItems {
             .lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut bundle = read(&sample.path).map_err(ApiError::Engine)?;
+        let mut bundle = served(&sample.path)?;
         apply_to(&sample.path, &mut bundle, action)
     }
 
@@ -279,7 +295,7 @@ impl HumanItems {
             .lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        read_bundle(&read(&sample.path).map_err(ApiError::Engine)?)
+        read_bundle(&served(&sample.path)?)
     }
 
     fn adapter(&self) -> Result<&Sample, ApiError> {

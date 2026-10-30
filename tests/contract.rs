@@ -4162,16 +4162,21 @@ fn human_items_schema_path() -> PathBuf {
 /// quietly reading an old shape. `UPDATE_CONTRACT_FIXTURES=1` rewrites it.
 #[test]
 fn the_checked_in_human_item_schema_is_the_linked_engines() {
-    let exported = canonical(&onepipeline::human_items::schemas());
+    let exported = onepipeline::human_items::schemas();
     let path = human_items_schema_path();
     if std::env::var_os(UPDATE).is_some() {
-        fs::write(&path, &exported).expect("write the schema");
+        fs::write(&path, canonical(&exported)).expect("write the schema");
     }
+    // Compared as JSON rather than as bytes: the file is formatted by the
+    // workspace's Biome, which owns how every JSON file under `packages/` is laid
+    // out, so after an update it is `just format` that settles its bytes.
+    let checked_in: Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap_or_default()).unwrap_or(Value::Null);
     assert_eq!(
-        fs::read_to_string(&path).unwrap_or_default(),
+        checked_in,
         exported,
         "{} is not what the linked engine's human_items::schemas() exports; rerun with \
-         {UPDATE}=1, then regenerate the browser's types",
+         {UPDATE}=1, then `just format` and regenerate the browser's types",
         path.display()
     );
 }

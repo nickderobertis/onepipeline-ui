@@ -1043,3 +1043,29 @@ fn every_human_item_route_serves_the_payload_its_golden_pins() {
         );
     }
 }
+
+/// A bundle the server can no longer read is the engine's failure — `500
+/// engine_error` — naming no path, and the routes answer again once it is back.
+#[test]
+fn an_unreadable_bundle_is_an_engine_failure_that_names_no_path() {
+    let (dir, served) = sample("representative.json");
+    let server = serve(&served, Some(OWNER));
+    let away = dir.path().join("away.json");
+    std::fs::rename(&served, &away).expect("move the bundle away");
+    for response in [
+        http::get(server.address, "/api/human-items"),
+        http::post(server.address, "/api/human-items/task-build/dismiss", ""),
+    ] {
+        let said = error(&response, 500, "engine_error");
+        assert!(said.contains("could not be read"), "{said}");
+        assert!(
+            !said.contains(dir.path().to_str().expect("utf-8")),
+            "{said}"
+        );
+    }
+    std::fs::rename(&away, &served).expect("put the bundle back");
+    assert_eq!(
+        ids(&items(&http::get(server.address, "/api/human-items"))),
+        DECLARED_ORDER
+    );
+}
