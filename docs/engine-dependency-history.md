@@ -687,6 +687,14 @@ unchanged, and no route, payload or MSRV changes beyond the release `/healthz`
 reports. It is also the item-contract release whose `human_items` schemas and
 sample adapter `/api/human-items` serves. This changes the engine types carried
 by ApiError::from_engine and the other engine-typed public items.
+0.96.2 is the engine that links onetaskgraph 0.12.12, whose Linear store
+re-copies an unchanged plan without writing to Linear. A host holds this reader
+and its engine to one linked engine and one plan store, so it can adopt that
+store only once this crate links it. The plan-store family and its test-only
+exact requirements move to 0.12.12; onevcs, oneagentgraph, onejudge,
+onemessagebus and oneharness-core are unchanged, and no route, payload or MSRV
+changes beyond the release `/healthz` reports. This changes the engine types
+carried by ApiError::from_engine and the other engine-typed public items.
 
 The test-only `onevcs` requirement, which the `EventKind` drift gate in
 `tests/contract.rs` reads, has followed the release each linked engine resolves:
@@ -695,4 +703,4 @@ declares the stacking, review and landing kinds that engine relays; 0.56.3 for
 0.79.0 (^0.56.2), which declares `publication-resumed`, which `payload::vcs`
 copies, and for 0.79.1, 0.82.0, 0.84.0, 0.84.1 and 0.85.0; 0.56.9 for 0.89.0,
 which relays each check's times; 0.56.11 for 0.90.0; 0.57.0 for 0.95.5; and
-0.57.4 for 0.96.0 (^0.57.4) and 0.96.1.
+0.57.4 for 0.96.0 (^0.57.4), 0.96.1 and 0.96.2.
