@@ -1,0 +1,12 @@
+{
+  "id": "I_7",
+  "repository": "owner/library",
+  "number": 2,
+  "title": "examples",
+  "body": "## What\nDo examples.\n\n## Why\nSo the run can settle.\n\n## Acceptance criteria\n- examples is done.\n\n<!-- onetaskgraph.metadata\n{\"onetaskgraph.item_kind\":\"task\"}\n-->",
+  "state": "OPEN",
+  "stateReason": null,
+  "parent": "I_5",
+  "subIssues": [],
+  "blockedBy": []
+}

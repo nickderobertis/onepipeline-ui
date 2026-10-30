@@ -666,14 +666,27 @@ The lock also advances pulldown-cmark to 0.13.5 to clear RUSTSEC-2026-0414.
 `onepipeline::human_items` domain, its exported schemas, the explicit
 sample-backed adapter (`HumanItemSample`) and the `onepipeline human-items
 --sample` CLI — and links onevcs 0.57.4, whose boundary fix a host can adopt
-only once this reader links the same engine, and onetaskgraph 0.12.11. This
-crate serves that contract under `/api/human-items`, in sample mode only,
-beside the existing supervisory routes. The test-only onevcs and store
-requirements move to the releases that engine's lock resolves, and the lock
-moves onemessagebus to 0.9.4 with it; oneagentgraph 0.9.0, onejudge 0.22.0 and
-oneharness-core 0.29.1 are unchanged, and the MSRV is unchanged. This changes
-the engine types carried by ApiError::from_engine and the other engine-typed
-public items.
+only once this reader links the same engine, and onetaskgraph 0.12.11. It also
+links the plan store, so a GitHub Projects board declared private can home a
+mixed plan whose public-repository tasks reach a public board only as neutral
+projections. This crate serves the human-item contract under
+`/api/human-items`, in sample mode only, beside the existing supervisory
+routes. The test-only onevcs and store requirements move to the releases that
+engine's lock resolves, and the lock moves onemessagebus to 0.9.4 with it;
+oneagentgraph 0.9.0, onejudge 0.22.0 and oneharness-core 0.29.1 are unchanged,
+and no other route, payload or MSRV changes beyond the release `/healthz`
+reports. This changes the engine types carried by ApiError::from_engine and the
+other engine-typed public items.
+0.96.1 is the engine that links onejudge 0.22.1, which never reports a turn the
+observer graph's own shutdown cancelled as lost, and oneagentgraph 0.9.1, whose
+stop ends a graph only after its members have seen it. A host holds this reader
+and its engine to one linked engine, so it can adopt that fix only once this
+crate links it. The lock moves both libraries to the releases that engine's lock
+resolves; onevcs, the plan store, onemessagebus and oneharness-core are
+unchanged, and no route, payload or MSRV changes beyond the release `/healthz`
+reports. It is also the item-contract release whose `human_items` schemas and
+sample adapter `/api/human-items` serves. This changes the engine types carried
+by ApiError::from_engine and the other engine-typed public items.
 
 The test-only `onevcs` requirement, which the `EventKind` drift gate in
 `tests/contract.rs` reads, has followed the release each linked engine resolves:
@@ -682,4 +695,4 @@ declares the stacking, review and landing kinds that engine relays; 0.56.3 for
 0.79.0 (^0.56.2), which declares `publication-resumed`, which `payload::vcs`
 copies, and for 0.79.1, 0.82.0, 0.84.0, 0.84.1 and 0.85.0; 0.56.9 for 0.89.0,
 which relays each check's times; 0.56.11 for 0.90.0; 0.57.0 for 0.95.5; and
-0.57.4 for 0.96.0 (^0.57.4).
+0.57.4 for 0.96.0 (^0.57.4) and 0.96.1.

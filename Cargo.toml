@@ -1,10 +1,10 @@
 [package]
 name = "onepipeline-ui"
-version = "0.59.1"
+version = "0.61.0"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
-# below — 0.56.0 declares 1.97 — and `clippy.toml` mirrors it so clippy
+# below — 0.96.0 declares 1.97 — and `clippy.toml` mirrors it so clippy
 # suggests nothing newer.
 rust-version = "1.97"
 description = "Read API and browser view for onepipeline runs — the HTTP contract an axum server wrapping the onepipeline SDK serves."
@@ -183,7 +183,7 @@ onemessagebus = "0.9.1"
 # The test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.96.0"
+onepipeline = "=0.96.1"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -220,7 +220,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right. Exact, at the
-# release the linked engine's lock resolves (0.96.0 requires ^0.57.4); earlier
+# release the linked engine's lock resolves (0.96.1 requires ^0.57.4); earlier
 # moves are in docs/engine-dependency-history.md.
 onevcs = "=0.57.4"
 # The same library the crate links above, with the schema bundle it publishes

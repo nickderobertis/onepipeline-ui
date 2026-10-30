@@ -301,6 +301,109 @@ fn encoded(project: &str) -> String {
 }
 
 #[test]
+fn a_private_github_home_with_a_public_destination_task_is_readable() {
+    let serving = Serving::start(|root| {
+        let run = root.join("github-private-home");
+        fs::create_dir_all(&run).expect("the recorded run directory");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/private-github-home");
+        let home = fs::read_to_string(fixture.join("github-home.md")).expect("the GitHub home");
+        assert!(
+            home.contains(r#""onetaskgraph.classification":"private""#),
+            "{home}"
+        );
+        assert!(
+            home.contains(r#""tasks":[{"task":"board:I_3","projection":"site:I_7"}]"#),
+            "{home}"
+        );
+        let projected: Value = serde_json::from_str(
+            &fs::read_to_string(fixture.join("public-projection.json"))
+                .expect("the public projection"),
+        )
+        .expect("the public projection is JSON");
+        assert_eq!(projected["repository"], "owner/library", "{projected}");
+        assert!(
+            !projected.to_string().contains("onepipeline."),
+            "{projected}"
+        );
+        for file in [
+            "launch.json",
+            "plan.json",
+            "events.jsonl",
+            "writeback-landed.json",
+            "writeback-projections.jsonl",
+        ] {
+            fs::copy(fixture.join(file), run.join(file)).expect("copy the engine's record");
+        }
+    });
+    let run = "github-private-home";
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true");
+    assert_eq!(listed.status, 200, "{}", listed.body);
+    let row = listed.json()["runs"]
+        .as_array()
+        .expect("runs")
+        .iter()
+        .find(|row| row["run_id"] == run)
+        .cloned()
+        .unwrap_or_else(|| panic!("the run is not listed: {}", listed.body));
+    assert_eq!(row["project"], "board:plan", "{row}");
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}"));
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    let detail = detail.json();
+    assert_enveloped(&detail);
+    assert_eq!(
+        detail["graph"]["node_status"],
+        json!({"anchor": "done", "examples": "parked"}),
+        "{detail}"
+    );
+    // The anchor's settlement as the engine recorded it: merged on the private
+    // repository's base, the parked public task settling nothing.
+    assert_eq!(
+        detail["graph"]["node_results"],
+        json!({"anchor": {
+            "kind": "agent",
+            "status": "done",
+            "completed": true,
+            "outcome": "merged",
+            "branch": "2/anchor",
+        }}),
+        "{detail}"
+    );
+    let results = http::get(serving.address, &format!("/api/v2/runs/{run}/results"));
+    assert_eq!(results.status, 200, "{}", results.body);
+    let results = results.json();
+    assert_enveloped(&results);
+    let rendered = results["rendered"].as_str().expect("the rendered results");
+    assert!(
+        rendered.contains("done (merged) — landed on its base"),
+        "{rendered}"
+    );
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    );
+    assert_eq!(timeline.status, 200, "{}", timeline.body);
+    let timeline = timeline.json();
+    assert_enveloped(&timeline);
+    let settled: Vec<Value> = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter(|event| event["kind"] == "node-settled")
+        .collect();
+    assert_eq!(settled.len(), 1, "{timeline}");
+    assert_eq!(settled[0]["node_id"], "anchor", "{timeline}");
+    assert_eq!(
+        settled[0]["fields"],
+        json!({"Status": "done", "Outcome": "merged"}),
+        "{timeline}"
+    );
+    let missing = http::get(serving.address, "/api/v2/runs/no-such-github-run");
+    assert_eq!(missing.status, 404, "{}", missing.body);
+}
+
+#[test]
 fn a_private_linear_home_with_a_public_destination_task_is_readable() {
     let serving = Serving::start(|root| {
         let run = root.join("linear-private-projections");
