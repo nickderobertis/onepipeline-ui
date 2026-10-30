@@ -1594,9 +1594,9 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "oneagentgraph"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7db515a67382ea487127d94d519d912f0ef3e22c2011ec1e1243426d9659170a"
+checksum = "22a84d2b435f00db085cc68caf12f9bf99c685f5bfe4a40629585601317b6b03"
 dependencies = [
  "clap",
  "libc",
@@ -1637,9 +1637,9 @@ dependencies = [
 
 [[package]]
 name = "onejudge"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15745c3de19c092b82bcdc691675eae1bdfa7375e2b2583597037e51e9f4373c"
+checksum = "04fa448faccc8b6f088e5b954d9c6e2581f3a9faef24cfa613673d09fe85af94"
 dependencies = [
  "clap",
  "oneharness-core",
@@ -1676,9 +1676,9 @@ dependencies = [
 
 [[package]]
 name = "onepipeline"
-version = "0.96.0"
+version = "0.96.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "651fe3631e54d739d7e281eebf1c39bdac66040e7d79128533bc24b4f7817afe"
+checksum = "7068c5ddeb17be2ed580323d3976613c6ccc576cd2bdf2817a69812f08278958"
 dependencies = [
  "async-trait",
  "clap",
@@ -2440,7 +2440,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
 dependencies = [
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.23.1",
  "encoding_rs_io",
  "granit-parser",
  "nohash-hasher",
@@ -2692,7 +2692,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.59.0",
