@@ -760,7 +760,20 @@ test("card actions are a focus group of their own after the answer boxes, operab
   await expect(
     page.getByRole("button", { name: `Dismiss: ${LAST_QUESTION}` }),
   ).toBeFocused();
+  // At either end of the group the arrows hold focus there.
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowDown");
+  await expect(
+    page.getByRole("button", { name: `Dismiss: ${LAST_QUESTION}` }),
+  ).toBeFocused();
   await page.keyboard.press("Home");
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowUp");
+  await expect(
+    page.getByRole("button", {
+      name: "Details: Which region should the canary run in?",
+    }),
+  ).toBeFocused();
   for (const [role, name] of [
     ["button", "Dismiss: Which region should the canary run in?"],
     ["link", "Open Linear issue ONE-412"],
@@ -985,6 +998,32 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
   await expect(card(page, title)).toHaveCount(0);
   expect(sent).toHaveLength(1);
   await page.unroute("**/api/human-items/*/answer");
+
+  // A task's Complete and Dismiss are held to one write the same way: while
+  // its receipt is out, further clicks send nothing.
+  let releaseTask: () => void = () => {};
+  const heldTask = new Promise<void>((resolve) => {
+    releaseTask = resolve;
+  });
+  await page.route("**/api/human-items/task-design/complete", async (route) => {
+    await heldTask;
+    await route.continue();
+  });
+  const design = "Review the action-items design";
+  await page.getByRole("button", { name: `Complete: ${design}` }).click();
+  await expect(card(page, design).getByRole("status")).toHaveText("Sending…");
+  await page.getByRole("button", { name: `Complete: ${design}` }).click();
+  await page.getByRole("button", { name: `Dismiss: ${design}` }).click();
+  await page
+    .getByRole("dialog", { name: `Dismiss ${design}` })
+    .getByRole("button", { name: "Dismiss item" })
+    .click();
+  expect(sent).toHaveLength(2);
+  releaseTask();
+  await expect(outcome(page)).toHaveText(`${design}: Completed`);
+  expect(sent).toHaveLength(2);
+  expect(stored(served, "task-design").state).toBe("completed");
+  await page.unroute("**/api/human-items/task-design/complete");
 
   // The server cannot read its bundle: the write fails, the list keeps what
   // it last read, and the draft stays for a retry that then succeeds.

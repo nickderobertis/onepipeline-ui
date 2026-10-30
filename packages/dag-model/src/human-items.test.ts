@@ -16,8 +16,9 @@ import {
  * `tests/contract.rs` holds to the linked engine. A field added, dropped or
  * made optional, an enum alternative missing or added, or a nullability that
  * differs fails here naming where. The engine's cross-field rules (lifecycle,
- * impact counts) are not JSON Schema shape on either side; the tests below
- * prove the parsers refuse what the engine's decoder refuses.
+ * impact counts) are not JSON Schema shape on either side; they are held by a
+ * verdict corpus both sides judge — the engine in `tests/contract.rs`, the
+ * parsers below.
  */
 
 type Schema = { readonly [key: string]: unknown };
@@ -118,98 +119,39 @@ describe("the browser's human-item parsers", () => {
     expect(parserShape(parser)).toEqual(engineShape(name));
   });
 
-  const served = (name: string): unknown =>
-    JSON.parse(
-      readFileSync(
-        join(import.meta.dirname, "../../../tests/fixtures", name),
-        "utf8",
+  const corpus = z
+    .object({
+      cases: z.array(
+        z.object({
+          name: z.string(),
+          type: z.enum(["HumanItemDetail", "HumanItemView"]),
+          accept: z.boolean(),
+          record: z.unknown(),
+        }),
+      ),
+    })
+    .parse(
+      JSON.parse(
+        readFileSync(
+          join(
+            import.meta.dirname,
+            "../../../tests/fixtures/human-items/verdicts.json",
+          ),
+          "utf8",
+        ),
       ),
     );
-  const detail = humanItemDetailSchema.parse(served("human-item.json"));
-  const receipt = humanItemReceiptSchema.parse(
-    served("human-item-answer.json"),
-  );
+  const parsers = {
+    HumanItemDetail: humanItemDetailSchema,
+    HumanItemView: humanItemViewSchema,
+  } as const;
 
-  it.each<[string, (record: typeof detail) => unknown]>([
-    [
-      "a schema version other than 1",
-      (d) => ({ ...d, item: { ...d.item, schema_version: 2 } }),
-    ],
-    ["a blank body", (d) => ({ ...d, item: { ...d.item, body: "  " } })],
-    [
-      "an open item with a resolution",
-      (d) => ({
-        ...d,
-        item: {
-          ...d.item,
-          resolution: {
-            actor: "a",
-            on_behalf_of: null,
-            text: null,
-            reason: null,
-          },
-        },
-      }),
-    ],
-    [
-      "a total the plans do not sum to",
-      (d) => ({ ...d, blocked: { ...d.blocked, total: 6 } }),
-    ],
-    [
-      "a preview that is not the first three steps",
-      (d) => ({
-        ...d,
-        blocked: {
-          ...d.blocked,
-          plans: d.blocked.plans.map((plan, index) =>
-            index === 0 ? { ...plan, preview: plan.preview.slice(0, 2) } : plan,
-          ),
-        },
-      }),
-    ],
-    [
-      "steps that are not the total",
-      (d) => ({ ...d, nodes: d.nodes.slice(1) }),
-    ],
-    [
-      "a step listed twice",
-      (d) => ({ ...d, nodes: [...d.nodes.slice(0, -1), d.nodes[0]] }),
-    ],
-  ])("refuse %s, as the engine's decoder does", (_, mutate) => {
-    expect(humanItemDetailSchema.safeParse(mutate(detail)).success).toBe(false);
-  });
-
-  it("refuse a resolution that does not match the item's kind and state", () => {
-    const answered = receipt.item;
-    for (const item of [
-      { ...answered.item, kind: "task" },
-      { ...answered.item, resolution: null },
-      {
-        ...answered.item,
-        resolution: { ...answered.item.resolution, text: null },
-      },
-      { ...answered.item, approval: { board_copy: "doc", key: "k" } },
-      {
-        ...answered.item,
-        state: "completed",
-        kind: "task",
-        resolution: { ...answered.item.resolution, text: "done" },
-      },
-    ])
-      expect(
-        humanItemViewSchema.safeParse({ ...answered, item }).success,
-        JSON.stringify(item),
-      ).toBe(false);
-    expect(humanItemViewSchema.safeParse(answered).success).toBe(true);
-  });
-
-  it("refuse a non-blocking item that reports blocked work", () => {
-    const resolved = receipt.item;
-    expect(
-      humanItemViewSchema.safeParse({
-        ...resolved,
-        blocked: detail.blocked,
-      }).success,
-    ).toBe(false);
+  // The corpus `tests/contract.rs` holds the engine's decoders to: every
+  // record judged here as the engine judges it, which is the drift gate on the
+  // cross-field rules no JSON Schema states.
+  it.each(corpus.cases)("judge $name as the engine does", (verdict) => {
+    expect(parsers[verdict.type].safeParse(verdict.record).success).toBe(
+      verdict.accept,
+    );
   });
 });

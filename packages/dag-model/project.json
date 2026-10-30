@@ -14,7 +14,11 @@
     },
     "test": {
       "command": "npx vitest run --root packages/dag-model",
-      "inputs": ["default", "servedGoldens"]
+      "inputs": [
+        "default",
+        "servedGoldens",
+        "{workspaceRoot}/tests/fixtures/human-items/verdicts.json"
+      ]
     },
     "typecheck": {
       "command": "node node_modules/typescript/bin/tsc -p packages/dag-model/tsconfig.json --noEmit"

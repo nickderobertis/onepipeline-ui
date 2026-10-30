@@ -4262,3 +4262,40 @@ fn a_human_item_sample_is_read_the_same_from_the_flag_and_a_config_file() {
     .expect_err("a missing bundle is refused");
     assert!(refused.to_string().contains("missing.json"), "{refused}");
 }
+
+/// **The engine judges every record of the shared verdict corpus as the
+/// corpus says.** `tests/fixtures/human-items/verdicts.json` is the one list of
+/// records the browser's parsers are also held to
+/// (`packages/dag-model/src/human-items.test.ts`), so a rule the engine's
+/// decoder gains or drops fails here first, and the corpus moving with it
+/// fails the browser's half until its parsers judge the same.
+#[test]
+fn the_engine_judges_every_human_item_verdict_as_the_corpus_says() {
+    use onepipeline::human_items::{HumanItemDetail, HumanItemView};
+
+    let corpus: Value = serde_json::from_str(
+        &fs::read_to_string(fixture_dir().join("human-items/verdicts.json"))
+            .expect("the corpus reads"),
+    )
+    .expect("the corpus parses");
+    let cases = corpus["cases"].as_array().expect("cases");
+    assert!(
+        cases.len() > 20,
+        "the corpus judges {} records",
+        cases.len()
+    );
+    for case in cases {
+        let record = case["record"].clone();
+        let accepted = match case["type"].as_str() {
+            Some("HumanItemDetail") => serde_json::from_value::<HumanItemDetail>(record).is_ok(),
+            Some("HumanItemView") => serde_json::from_value::<HumanItemView>(record).is_ok(),
+            other => panic!("a verdict of an unknown type {other:?}"),
+        };
+        assert_eq!(
+            accepted,
+            case["accept"].as_bool().expect("a verdict"),
+            "the engine judges {} otherwise",
+            case["name"]
+        );
+    }
+}
