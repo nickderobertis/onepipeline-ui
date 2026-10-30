@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.61.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.60.0...v0.61.0) - 2026-10-30
+
+### Fixed
+
+- *(deps)* link the engine whose observer keeps a stopped turn from reading as lost ([#549](https://github.com/nickderobertis/onepipeline-ui/pull/549))
+- *(deps)* [**breaking**] link the engine whose store lets a private GitHub home hold public tasks ([#546](https://github.com/nickderobertis/onepipeline-ui/pull/546))
+
 ## [0.60.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.59.1...v0.60.0) - 2026-10-30
 
 ### Fixed
