@@ -1211,3 +1211,86 @@ fn stored_state(path: &Path, id: &str) -> String {
         .expect("the item's state")
         .to_owned()
 }
+
+/// Over HTTP every write is the user's own: each route records the acting
+/// session as the actor and nobody as `on_behalf_of`, in its receipt and in the
+/// bundle, and a body that tries to name either is refused before the engine
+/// is asked. A manager completing on a user's behalf after chat approval is the
+/// CLI/runtime path's, which this server has no way to vouch for.
+#[test]
+fn every_write_is_the_acting_sessions_own_and_no_body_can_name_another() {
+    let (_dir, served) = sample("representative.json");
+    let server = serve(&served, Some(OWNER));
+    let before = std::fs::read(&served).expect("the bundle reads");
+    for (path, body) in [
+        (
+            "/api/human-items/question-canary/answer",
+            r#"{"text":"eu-west","on_behalf_of":"the-user"}"#,
+        ),
+        (
+            "/api/human-items/question-canary/answer",
+            r#"{"text":"eu-west","actor":"the-user"}"#,
+        ),
+        (
+            "/api/human-items/task-design/complete",
+            r#"{"on_behalf_of":"the-user"}"#,
+        ),
+        (
+            "/api/human-items/task-design/complete",
+            r#"{"actor":"a-manager"}"#,
+        ),
+        (
+            "/api/human-items/task-build/dismiss",
+            r#"{"on_behalf_of":"the-user"}"#,
+        ),
+        (
+            "/api/human-items/task-build/dismiss",
+            r#"{"reason":null,"actor":"a-manager"}"#,
+        ),
+    ] {
+        error(
+            &http::post(server.address, path, body),
+            422,
+            "invalid_request",
+        );
+    }
+    assert_eq!(std::fs::read(&served).expect("the bundle reads"), before);
+
+    for (id, path, body) in [
+        (
+            "question-canary",
+            "/api/human-items/question-canary/answer",
+            r#"{"text":"eu-west"}"#,
+        ),
+        ("task-design", "/api/human-items/task-design/complete", "{}"),
+        ("task-build", "/api/human-items/task-build/dismiss", ""),
+    ] {
+        let response = http::post(server.address, path, body);
+        assert_eq!(response.status, 200, "{path}: {}", response.body);
+        let resolution = &response.json()["item"]["item"]["resolution"];
+        assert_eq!(resolution["actor"], OWNER, "{path}");
+        assert_eq!(resolution["on_behalf_of"], Value::Null, "{path}");
+        let written = serde_json::to_value(bundle(&served)).expect("serialize");
+        let stored = written["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .find(|detail| detail["item"]["id"] == id)
+            .expect("the item is in the bundle");
+        assert_eq!(
+            stored["item"]["resolution"]["on_behalf_of"],
+            Value::Null,
+            "{id}"
+        );
+    }
+    // The design review's approval is recorded as the acting session's too.
+    let written = serde_json::to_value(bundle(&served)).expect("serialize");
+    assert_eq!(
+        written["approvals"],
+        json!([{
+            "approval": {"board_copy": "docs/design/action-items.md", "key": "sha256:5d1c0a"},
+            "actor": OWNER,
+            "on_behalf_of": null,
+        }])
+    );
+}

@@ -54,6 +54,11 @@ mock or harness.
   document", and the engine dismisses the obsolete task and raises one replacement
   for the new version; the page shows the refusal and the replacement.
 - **Dismiss** asks for an optional reason in a dialog; an empty reason sends none.
+- **Every write is the reader's own.** The engine records the server's acting session
+  as the actor and nobody as `on_behalf_of`; the page sends neither. A manager
+  completing a task on a user's behalf, after that user approved in the manager's
+  chat, does so through the CLI and engine runtime, which record `on_behalf_of` —
+  never through this page or its routes.
 - **A write in flight keeps its item open**, marked as sending, and repeated Enter or
   clicks send nothing more. A refused or failed write leaves the item and the draft
   where they were, with the reason on the card. Every outcome is also announced at

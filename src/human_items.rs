@@ -249,6 +249,12 @@ impl HumanItems {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut bundle = served(&sample.path)?;
         readable(&bundle, session, id)?;
+        // Over HTTP a write is the user's own action through this server, so
+        // the actor is the acting session and nobody is acted for: there is no
+        // `on_behalf_of` in any body and no flag that sets one. A manager
+        // completing on a user's behalf after that user approved in the
+        // manager's chat is the CLI/runtime path's, where the manager running
+        // the command supplies it (`docs/contract.md`, "Human items").
         let actor = session
             .map(SessionId::as_str)
             .unwrap_or_default()
