@@ -936,6 +936,7 @@ fn a_live_host_serves_no_sample_and_refuses_one() {
     for response in [
         http::get(live.address, "/api/human-items"),
         http::get(live.address, "/api/human-items/task-build"),
+        http::post(live.address, "/api/human-items/task-build/complete", "{}"),
         http::post(live.address, "/api/human-items/task-build/dismiss", ""),
         http::post(
             live.address,

@@ -339,6 +339,32 @@ test("the sidebar's kinds stay on Action items and a run selected from it leaves
   await expect(page.getByRole("heading", { name: "Action items" })).toHaveCount(
     0,
   );
+  const run = new URL(page.url()).searchParams.get("run");
+  if (run === null) throw new Error(`no run selected at ${page.url()}`);
+  await expect(page.getByRole("region", { name: "Run header" })).toBeVisible();
+
+  // The path names the page whatever the query selects: a host page, that run
+  // and one of its nodes are all set aside, and none of the run's controls show.
+  await page.goto(
+    `${server.origin}/human-items?page=host&run=${encodeURIComponent(run)}&node=dashboard`,
+  );
+  await expect(
+    page.getByRole("heading", { name: "Action items" }),
+  ).toBeVisible();
+  await expect(
+    nav.getByRole("button", { name: "Action items" }),
+  ).toHaveAttribute("aria-current", "page");
+  await expect(
+    nav.getByRole("button", { name: "Host", exact: true }),
+  ).not.toHaveAttribute("aria-current", "page");
+  await expect(
+    page.getByRole("region", { name: "Host", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Run header" })).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Workspace header" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Stop/u })).toHaveCount(0);
 });
 
 test("lists every open item of the session in the engine's order, as compact full-width cards", async ({
