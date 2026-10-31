@@ -134,9 +134,7 @@ function die(message, action) {
  * directory `dag-ui:build-api-server` builds into and no other build names, or
  * `CARGO_TARGET_DIR` when the caller names another root of the same layout.
  *
- * Not `target/` itself: every debug build in an Nx run writes `target/debug`,
- * and on cold CI runs this fixture found no binary there (what removed it was
- * not identified).
+ * Not `target/` itself: every debug build in an Nx run writes `target/debug`.
  * `CARGO_TARGET_DIR` is how a journey points a fixture at a retained copy or an
  * unbuilt tree, resolved from the repository root as cargo would. Validated
  * rather than trusted, like every other input here: this value chooses the path
