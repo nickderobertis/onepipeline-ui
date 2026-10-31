@@ -86,7 +86,7 @@ impl World {
     fn configured(enabled: bool) -> Self {
         let (dir, root) = fixture_run::workspace();
         let base = dir.path().to_path_buf();
-        // llmlint: ignore[e2e_not_mocked] the tracker is the one boundary this task permits doubling ("doubling only external tracker boundaries"), and the planner ruled the tracker links be proven through this loopback rather than through GitHub: it answers only the requests onetaskgraph's github-projects source sends, and the engine, the CLI, the server, runs, journal and watch delivery under test are all the real ones.
+        // llmlint: ignore[e2e_not_mocked] GitHub is the external tracker these journeys may double; the loopback answers only the requests the github-projects source sends, and everything of onepipeline under test is real.
         let board = GitHubBoard::start(&base);
         let config = base.join("config");
         std::fs::create_dir_all(config.join("onepipeline")).expect("config dir");
@@ -1795,8 +1795,9 @@ fn a_host_that_has_not_enabled_human_items_is_refused_on_every_route() {
 }
 
 /// The configuration is read for every request, so a host that turns human
-/// items off under a running server is refused from its next request on, and
-/// one that turns them back on is served again — the same journal, untouched.
+/// items off under a running server is refused from its next request on, one
+/// whose configuration cannot be read is refused naming it, and one that turns
+/// them back on is served again — the same journal, untouched.
 #[test]
 fn a_configuration_changed_under_a_running_server_is_the_one_its_next_request_acts_under() {
     let world = World::new();
@@ -1834,6 +1835,15 @@ fn a_configuration_changed_under_a_running_server_is_the_one_its_next_request_ac
         503,
         "human_items_unavailable",
     );
+    // A configuration the engine cannot read is refused in its own words,
+    // naming the file, until it is corrected.
+    std::fs::write(&path, "human_items: [not, a, mapping]\n").expect("break the configuration");
+    let refused = error(
+        &http::get(server.address, "/api/human-items"),
+        409,
+        "human_item_conflict",
+    );
+    assert!(refused.contains("config.yaml"), "{refused}");
     std::fs::write(&path, &enabled).expect("enable human items again");
     assert_eq!(
         ids(&items(&http::get(server.address, "/api/human-items"))),

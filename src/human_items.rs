@@ -179,20 +179,14 @@ fn readable(
     session: Option<&SessionId>,
     id: &HumanItemId,
 ) -> Result<HumanItemDetail, ApiError> {
-    let detail = match engine.show(id.as_str()) {
-        Ok(detail) => detail,
-        // The engine answers an id it holds no item for with the same
-        // `Conflict` a store it cannot read is answered with, so which one this
-        // is is asked of the journal itself: an id no item in any state carries
-        // is the error contract's `404`, never a conflict.
-        Err(refused) => {
-            return Err(if held(engine, id)? {
-                refusal(refused)
-            } else {
-                ApiError::HumanItemNotFound(id.clone())
-            });
-        }
-    };
+    // The engine answers an id it holds no item for with the same `Conflict`
+    // a store it cannot read is answered with, so whether the id is held is
+    // asked of the journal first: an id no item in any state carries is the
+    // error contract's `404`, never a conflict.
+    if !held(engine, id)? {
+        return Err(ApiError::HumanItemNotFound(id.clone()));
+    }
+    let detail = engine.show(id.as_str()).map_err(refusal)?;
     if !owns(session, &detail.item.owner.session) {
         return Err(ApiError::HumanItemNotOwner(format!(
             "human item {} belongs to another session; its content and its actions are that \
@@ -204,15 +198,13 @@ fn readable(
 }
 
 /// Whether any item, in any state and of any owner, carries `id`.
+///
+/// Every state is the engine's own declaration of them — the vocabulary its
+/// CLI's `--state` parses — so a state the engine gains is searched too.
 fn held(engine: &Engine, id: &HumanItemId) -> Result<bool, ApiError> {
-    for state in [
-        HumanItemState::Open,
-        HumanItemState::Answered,
-        HumanItemState::Completed,
-        HumanItemState::Dismissed,
-    ] {
+    for state in <HumanItemState as clap::ValueEnum>::value_variants() {
         let filter = HumanItemFilter {
-            state: Some(state),
+            state: Some(*state),
             ..HumanItemFilter::default()
         };
         if engine
