@@ -393,7 +393,7 @@ pub mod routes {
     /// Retire a subscription: its reads and its stream end.
     pub const SUBSCRIPTION: &str = "/api/v2/subscriptions/{subscription}";
     /// The host-wide human-item list (`GET`), and raising one (`POST`):
-    /// `HumanItemSample::query` and `apply(Raise)`.
+    /// the engine store's `query` and `apply(Raise)`.
     pub const HUMAN_ITEMS: &str = "/api/human-items";
     /// One human item and every step it blocks.
     pub const HUMAN_ITEM: &str = "/api/human-items/{id}";

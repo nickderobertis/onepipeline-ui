@@ -45,19 +45,6 @@ fn serve(args: &ServeArgs) -> ExitCode {
             return ExitCode::from(EXIT_SOFTWARE);
         }
     };
-    // A sample over a live root is refused before anything is served, so a
-    // host's operator can never be shown fixture items beside real runs.
-    let human_items = match args.human_items() {
-        Ok(sample) => sample,
-        Err(message) => {
-            eprintln!(
-                "onepipeline-api: {message}\n\
-                 ACTION: drop --human-items-sample to serve this runs root, or serve the sample \
-                 over an empty --runs-root."
-            );
-            return ExitCode::from(2);
-        }
-    };
     // Exported before threads start: the SDK's listing reads channels under
     // ONEPIPELINE_RUNS_DIR, and its advice reads the acting session. Those reads
     // must agree with the root and session the server was given.
@@ -85,11 +72,8 @@ fn serve(args: &ServeArgs) -> ExitCode {
             return ExitCode::from(EXIT_SOFTWARE);
         }
     };
-    let mut store = RunStore::new_polling_every(&args.runs_root, args.poll_interval_ms)
+    let store = RunStore::new_polling_every(&args.runs_root, args.poll_interval_ms)
         .acting_as(session.as_ref());
-    if let Some(sample) = human_items {
-        store = store.serving_human_items(sample);
-    }
     let listener = match runtime.block_on(server::bind(args.bind)) {
         Ok(listener) => listener,
         Err(message) => {
@@ -119,13 +103,6 @@ fn serve(args: &ServeArgs) -> ExitCode {
             view.describe()
         ),
         None => args.runs_root.as_path().display().to_string(),
-    };
-    let what = match human_items {
-        Some(sample) => format!(
-            "{what} and the human-item sample {}",
-            sample.as_path().display()
-        ),
-        None => what,
     };
     match listener.local_addr() {
         Ok(address) => println!("onepipeline-api: serving {what} on http://{address}"),

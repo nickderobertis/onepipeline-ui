@@ -2,11 +2,11 @@
   "item": {
     "item": {
       "schema_version": 1,
-      "id": "sample-10",
+      "id": "hi-2a3b62b53ddb9f167b63",
       "dedup_key": "nightly",
       "kind": "question",
-      "title": "Should the nightly job run on weekends?",
-      "body": "The nightly job finds nothing new on weekends. Skipping it saves two hours of runner time each week.",
+      "title": "Should nightly go ahead?",
+      "body": "What nightly needs from a person, and nothing more.",
       "priority": "low",
       "owner": {
         "session": "claude-code-supervising-session",
@@ -20,13 +20,13 @@
       "state": "open",
       "resolution": null,
       "tracker": null,
-      "created_at": "sample",
-      "updated_at": "sample"
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-01T00:00:00.000Z"
     },
     "blocked": {
       "total": 0,
       "plans": []
     }
   },
-  "event_id": "sample-sample-10-raised"
+  "event_id": "human-items:4"
 }

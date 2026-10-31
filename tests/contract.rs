@@ -4183,11 +4183,10 @@ fn the_checked_in_human_item_schema_is_the_linked_engines() {
 
 /// **Every human-item golden is a record the engine accepts.** Each route's
 /// fixture decodes as the engine's own type for that route — whose decoders
-/// validate state, resolution, counts and previews — and the sample bundles
-/// the journeys serve decode as the engine's `HumanItemSample`.
+/// validate state, resolution, counts and previews.
 #[test]
 fn every_human_item_fixture_is_the_engines_record() {
-    use onepipeline::human_items::{HumanItemDetail, HumanItemReceipt, HumanItemSample};
+    use onepipeline::human_items::{HumanItemDetail, HumanItemReceipt};
     use onepipeline_ui::human_items::HumanItemList;
 
     let read =
@@ -4206,13 +4205,6 @@ fn every_human_item_fixture_is_the_engines_record() {
         serde_json::from_str::<HumanItemReceipt>(&read(receipt))
             .unwrap_or_else(|err| panic!("{receipt} is not the engine's receipt: {err}"));
     }
-    for bundle in [
-        "human-items/representative.json",
-        "human-items/long-body.json",
-    ] {
-        serde_json::from_str::<HumanItemSample>(&read(bundle))
-            .unwrap_or_else(|err| panic!("{bundle} is not an engine sample bundle: {err}"));
-    }
     // The schema's own vocabulary agrees: no owner-ended state, and the four
     // priorities with their display labels.
     let schema = onepipeline::human_items::schemas();
@@ -4221,46 +4213,6 @@ fn every_human_item_fixture_is_the_engines_record() {
         schema["priority_labels"],
         json!({"high": "High", "low": "Low", "medium": "Medium", "urgent": "Critical"})
     );
-}
-
-/// The sample flag and a configuration file construct one bundle the same
-/// way: a file the engine refuses is refused by both, and a path is what both
-/// write back.
-#[test]
-fn a_human_item_sample_is_read_the_same_from_the_flag_and_a_config_file() {
-    let bundle = fixture_dir().join("human-items/representative.json");
-    let workspace = tempfile::tempdir().expect("temp dir");
-    let cli = Cli::try_parse_from([
-        "onepipeline-api",
-        "serve",
-        "--runs-root",
-        workspace.path().to_str().expect("utf-8"),
-        "--human-items-sample",
-        bundle.to_str().expect("utf-8"),
-    ])
-    .expect("the flag parses");
-    let Command::Serve(args) = cli.command;
-    let config: ServeArgs = serde_json::from_value(json!({
-        "runs_root": workspace.path(),
-        "human_items_sample": bundle,
-    }))
-    .expect("the config parses");
-    assert_eq!(args.human_items_sample, config.human_items_sample);
-    assert_eq!(
-        serde_json::to_value(&config).expect("serialize")["human_items_sample"],
-        json!(bundle)
-    );
-    assert!(args
-        .human_items()
-        .expect("an empty root serves it")
-        .is_some());
-
-    let refused = serde_json::from_value::<ServeArgs>(json!({
-        "runs_root": workspace.path(),
-        "human_items_sample": workspace.path().join("missing.json"),
-    }))
-    .expect_err("a missing bundle is refused");
-    assert!(refused.to_string().contains("missing.json"), "{refused}");
 }
 
 /// **The engine judges every record of the shared verdict corpus as the

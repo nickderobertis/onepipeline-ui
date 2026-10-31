@@ -1,72 +1,50 @@
 {
   "item": {
     "schema_version": 1,
-    "id": "task-design",
-    "dedup_key": "dedup-task-design",
+    "id": "hi-04b2c252033d8e5d80f2",
+    "dedup_key": "run:golden#gate",
     "kind": "task",
-    "title": "Review the action-items design",
-    "body": "Read the action-items design document and complete this task once its layout and keyboard flow look right to you.",
+    "title": "Approve the release",
+    "body": "Do gate.",
     "priority": "high",
     "owner": {
       "session": "claude-code-supervising-session",
-      "run": "run-a",
-      "plan": "plan-a"
+      "run": "golden",
+      "plan": "local:golden"
     },
     "block": {
       "scope": "work",
-      "run": "run-a",
-      "node": "design"
+      "run": "golden",
+      "node": "gate"
     },
-    "approval": {
-      "board_copy": "docs/design/action-items.md",
-      "key": "sha256:5d1c0a"
-    },
+    "approval": null,
     "state": "open",
     "resolution": null,
-    "tracker": {
-      "task": "ONE-412",
-      "url": "https://linear.app/onepipeline/issue/ONE-412"
-    },
-    "created_at": "2026-10-29T09:10:00Z",
-    "updated_at": "2026-10-29T09:10:00Z"
+    "tracker": null,
+    "created_at": "2026-01-01T00:00:00.000Z",
+    "updated_at": "2026-01-01T00:00:00.000Z"
   },
   "blocked": {
-    "total": 7,
+    "total": 4,
     "plans": [
       {
-        "plan": "plan-a",
-        "count": 5,
+        "plan": "local:golden",
+        "count": 4,
         "preview": [
           {
-            "run": "run-a",
+            "run": "golden",
             "node": "build",
-            "title": "Build the release binaries"
+            "title": "Build the release"
           },
           {
-            "run": "run-a",
+            "run": "golden",
             "node": "test",
-            "title": "Run the release journeys"
+            "title": "Test the release"
           },
           {
-            "run": "run-a",
+            "run": "golden",
             "node": "lint",
-            "title": "Lint the changed files"
-          }
-        ]
-      },
-      {
-        "plan": "plan-b",
-        "count": 2,
-        "preview": [
-          {
-            "run": "run-b",
-            "node": "docs",
-            "title": "Rewrite the operator guide"
-          },
-          {
-            "run": "run-b",
-            "node": "screens",
-            "title": "Photograph every surface"
+            "title": "Lint the release"
           }
         ]
       }
@@ -74,39 +52,24 @@
   },
   "nodes": [
     {
-      "run": "run-a",
+      "run": "golden",
       "node": "build",
-      "title": "Build the release binaries"
+      "title": "Build the release"
     },
     {
-      "run": "run-a",
+      "run": "golden",
       "node": "test",
-      "title": "Run the release journeys"
+      "title": "Test the release"
     },
     {
-      "run": "run-a",
+      "run": "golden",
       "node": "lint",
-      "title": "Lint the changed files"
+      "title": "Lint the release"
     },
     {
-      "run": "run-a",
-      "node": "package",
-      "title": "Package the wheels"
-    },
-    {
-      "run": "run-a",
-      "node": "publish",
-      "title": "Publish to the registries"
-    },
-    {
-      "run": "run-b",
+      "run": "golden",
       "node": "docs",
-      "title": "Rewrite the operator guide"
-    },
-    {
-      "run": "run-b",
-      "node": "screens",
-      "title": "Photograph every surface"
+      "title": "Document the release"
     }
   ]
 }

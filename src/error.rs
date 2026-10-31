@@ -55,9 +55,9 @@ pub enum ApiError {
     /// The human-item identifier in the path is not a usable one.
     #[error("invalid human-item id: {0}")]
     InvalidHumanItemId(String),
-    /// The human-item routes have no adapter on this server: the engine's own
-    /// `unavailable` refusal, which a live host answers until its runtime
-    /// integration ships. Never fixture items in its place.
+    /// Human items are not enabled on this host: the engine's own
+    /// `unavailable` refusal, answered when the effective `human_items`
+    /// configuration does not enable them. Never fixture items in its place.
     #[error("{0}")]
     HumanItemsUnavailable(String),
     /// No human item this session may read carries that identifier.
