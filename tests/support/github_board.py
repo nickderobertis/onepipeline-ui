@@ -79,6 +79,9 @@ def described(content, metadata):
 STATES = {"OPEN": [None], "CLOSED": ["COMPLETED", "NOT_PLANNED", "DUPLICATE"]}
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SEEDED = {"number", "title", "content", "metadata", "status", "state", "reason", "parent"}
+# What a seeded issue may say beside those: the issues it is blocked by, which GitHub
+# serves as its `blockedBy` relationships.
+OPTIONAL = {"blocked_by"}
 
 
 def default_seed():
@@ -110,7 +113,9 @@ def checked(seed):
             or not isinstance(seed["issues"], dict) or not seed["issues"]):
         parser.error("a seed names a repository, its Status options and its issues")
     for name, held in seed["issues"].items():
-        if (not isinstance(held, dict) or set(held) != SEEDED
+        if (not isinstance(held, dict) or not SEEDED <= set(held) <= SEEDED | OPTIONAL
+                or not all(isinstance(blocker, str) and blocker in seed["issues"]
+                           and blocker != name for blocker in held.get("blocked_by", []))
                 or not isinstance(held["number"], int) or isinstance(held["number"], bool)
                 or held["number"] < 1
                 or not all(isinstance(held[key], str) for key in ["title", "content"])
@@ -152,7 +157,8 @@ for name, held in seed["issues"].items():
     state["issues"][name] = {"body": described(held["content"], held["metadata"]),
                              "status": held["status"], "state": held["state"],
                              "reason": held["reason"], "title": held["title"],
-                             "number": held["number"], "parent": held["parent"]}
+                             "number": held["number"], "parent": held["parent"],
+                             "blocked_by": list(held.get("blocked_by", []))}
 
 
 def children(name):
@@ -185,10 +191,21 @@ def issue(name, membership_of=None):
              "url": held.get("url"), "parent": None if held["parent"] is None else {"id": held["parent"]},
              "subIssuesSummary": {"total": len(children(name))},
              "labels": connection([]), "projectItems": connection([membership]),
-             "blockedBy": connection([]), "blocking": connection([])}
+             "blockedBy": connection([related(blocker)
+                                      for blocker in held.get("blocked_by", [])]),
+             "blocking": connection([related(other) for other, by in state["issues"].items()
+                                     if name in by.get("blocked_by", [])])}
     if children(name):
         value["subIssues"] = connection([issue(child) for child in children(name)])
     return value
+
+
+def related(name):
+    """An issue as a relationship names it: the `Related` fields a source reads."""
+    held = state["issues"][name]
+    return {"__typename": "Issue", "id": name, "title": held["title"], "body": held["body"],
+            "parent": None if held["parent"] is None else {"id": held["parent"]},
+            "subIssuesSummary": {"total": len(children(name))}}
 
 
 def by_reference(membership, status):
@@ -393,7 +410,13 @@ class Handler(BaseHTTPRequestHandler):
         if "second:updateProjectV2ItemFieldValue(" in query:
             return {"data": batched_fields(query, variables)}
         if "updateProjectV2ItemFieldValue(" in query:
-            return {"data": {"updateProjectV2ItemFieldValue": write_field(variables.get("input"))}}
+            written = write_field(variables.get("input"))
+            if "content{" in query:
+                # The card's issue, read back in the same request: what a source
+                # settling a projected task checks it settled.
+                name = variables["input"]["itemId"].removeprefix("ITEM-")
+                written["projectV2Item"]["content"] = {**issue(name), "comments": connection([])}
+            return {"data": {"updateProjectV2ItemFieldValue": written}}
         if "clearProjectV2ItemFieldValue(" in query:
             return {"data": {"clearProjectV2ItemFieldValue": write_field(variables.get("input"), True)}}
         if "node(id:" in query:

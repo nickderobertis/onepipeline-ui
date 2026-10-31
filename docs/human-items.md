@@ -86,13 +86,20 @@ holds the page to it with bounding-box assertions.
 
 ## What this is proven against
 
-The page and the routes are proven against the engine's **explicit sample adapter**:
-`onepipeline-api serve --human-items-sample FILE`, a test-only configuration the
-server refuses over a runs root that holds anything. A live host serves no sample —
-every route answers the engine's `unavailable`, and the page says so. The journeys
-prove the UI/API contract; the engine runtime's scheduling, persistence, bus delivery
-and run-lifecycle resolution (auto-dismissal when a run ends, delivery to a manager's
-next watch) are not claimed here, and are proven where that runtime is adopted.
+The page and the routes are proven against the engine's **live runtime**, the release
+this crate links. `apps/dag-ui-e2e/fixtures/human-items-world.mjs` builds each journey's
+host: plans of `kind: human` steps on a loopback GitHub board, runs launched by the
+provisioned `onepipeline` CLI's own `start`, items raised by that CLI as the sessions that
+own them — a design review through a configured phase and approval authority — and every
+task projected onto the board. `onepipeline-api serve` then reads and writes the one
+journal the engine keeps, and the journeys check what the page did against that journal
+through `onepipeline human-items show`/`list`, and against what the owning session's
+`human-items watch` was told. Only the tracker (the board) and the approval authority — the
+two things a host reaches beyond the engine — are stood in for. `tests/e2e/human_items.rs`
+holds the routes and the CLI to the same runtime: ten sessions' queue, every action
+through each surface, blocked-step derivation, a run's end retiring its holds, an open host
+item holding dispatch, and the refusals. A host whose configuration does not enable human
+items is answered the engine's `unavailable`, and the page says so.
 
 The CLI's `list` and `report` are unchanged and print every body in full; only the
 browser card truncates.

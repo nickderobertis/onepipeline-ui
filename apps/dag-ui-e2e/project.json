@@ -12,7 +12,7 @@
         "default",
         "apiServerSurface",
         "{workspaceRoot}/tests/fixtures/history/**",
-        "{workspaceRoot}/tests/fixtures/human-items/**"
+        "{workspaceRoot}/tests/support/github_board.py"
       ],
       "dependsOn": [
         {
