@@ -12,7 +12,8 @@
         "default",
         "apiServerSurface",
         "{workspaceRoot}/tests/fixtures/history/**",
-        "{workspaceRoot}/tests/support/github_board.py"
+        "{workspaceRoot}/tests/support/github_board.py",
+        "{workspaceRoot}/tests/support/approval_authority.py"
       ],
       "dependsOn": [
         {

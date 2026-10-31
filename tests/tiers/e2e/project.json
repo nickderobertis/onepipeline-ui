@@ -54,7 +54,8 @@
       "{workspaceRoot}/tests/support/serving.rs",
       "{workspaceRoot}/tests/support/sibling.rs",
       "{workspaceRoot}/tests/support/github_board.rs",
-      "{workspaceRoot}/tests/support/github_board.py"
+      "{workspaceRoot}/tests/support/github_board.py",
+      "{workspaceRoot}/tests/support/approval_authority.py"
     ]
   }
 }

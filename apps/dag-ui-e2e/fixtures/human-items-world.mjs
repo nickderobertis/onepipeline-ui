@@ -73,18 +73,13 @@ const BUILT = "human-items-world.json";
 /** The file naming the session the next server acts as. */
 export const ACTING = "acting-session";
 
-const APPROVAL_AUTHORITY = `import json, sys
-request = json.load(sys.stdin)
-current = json.load(open(sys.argv[1])).get(request["board_copy"])
-if current is None:
-    sys.exit(3)
-if current == request["key"]:
-    with open(sys.argv[2], "a") as log:
-        log.write(json.dumps({"board_copy": request["board_copy"], "key": current,
-                              "actor": request["actor"],
-                              "on_behalf_of": request["on_behalf_of"]}) + "\\n")
-print(json.dumps({"board_copy": request["board_copy"], "key": current}))
-`;
+/** The approval authority a design review completes through (its header says how). */
+const APPROVAL_AUTHORITY = join(
+  REPO_ROOT,
+  "tests",
+  "support",
+  "approval_authority.py",
+);
 
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -113,7 +108,6 @@ function paths(workspace) {
     seed: join(workspace, "github-board-seed.json"),
     keys: join(workspace, "design-keys.json"),
     approvals: join(workspace, "approvals.ndjson"),
-    adapter: join(workspace, "approve-design.py"),
     graph: join(workspace, "node-scope.yaml"),
     state: join(workspace, "state"),
   };
@@ -185,7 +179,7 @@ function writeConfiguration(workspace, endpoint) {
       "  task_source: board",
       "  approval_adapters:",
       "    approve-design:",
-      `      command: ["python3", ${JSON.stringify(at.adapter)}, ${JSON.stringify(at.keys)}, ${JSON.stringify(at.approvals)}]`,
+      `      command: ["python3", ${JSON.stringify(APPROVAL_AUTHORITY)}, ${JSON.stringify(at.keys)}, ${JSON.stringify(at.approvals)}]`,
       "  hooks:",
       "    - phase: design-review",
       "      kind: task",
@@ -660,7 +654,6 @@ export function humanItemsWorld(workspace, name) {
         world = kept.world;
         return;
       }
-      writeFileSync(at.adapter, APPROVAL_AUTHORITY);
       writeFileSync(at.keys, "{}");
       writeFileSync(
         at.graph,

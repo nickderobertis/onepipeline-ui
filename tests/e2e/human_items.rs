@@ -94,8 +94,7 @@ impl World {
         std::fs::create_dir_all(base.join("intents")).expect("intents dir");
         std::fs::create_dir_all(base.join("work")).expect("work dir");
         std::fs::write(base.join("design-keys.json"), "{}").expect("keys");
-        let adapter = base.join("approve-design.py");
-        std::fs::write(&adapter, APPROVAL_AUTHORITY).expect("the approval authority");
+        let adapter = Path::new(env!("CARGO_MANIFEST_DIR")).join(APPROVAL_AUTHORITY);
         std::fs::write(
             config.join("onepipeline/config.yaml"),
             format!(
@@ -450,22 +449,90 @@ impl World {
     }
 }
 
-/// The approval authority a design review completes through: it keeps the
-/// current version of each document (`argv[1]`) and, when asked to approve the
-/// version it holds, appends the approval record (`argv[2]`) and answers that
-/// version; asked about another, it records nothing and answers the current one.
-const APPROVAL_AUTHORITY: &str = r#"import json, sys
-request = json.load(sys.stdin)
-current = json.load(open(sys.argv[1])).get(request["board_copy"])
-if current is None:
-    sys.exit(3)
-if current == request["key"]:
-    with open(sys.argv[2], "a") as log:
-        log.write(json.dumps({"board_copy": request["board_copy"], "key": current,
-                              "actor": request["actor"],
-                              "on_behalf_of": request["on_behalf_of"]}) + "\n")
-print(json.dumps({"board_copy": request["board_copy"], "key": current}))
-"#;
+/// The approval authority a design review completes through, configured as a
+/// host configures its own command: it keeps the current version of each
+/// document and appends every approval it records (its header says how).
+const APPROVAL_AUTHORITY: &str = "tests/support/approval_authority.py";
+
+/// The approval authority run as the engine runs it, `request` on stdin.
+fn authorize(versions: &Path, log: &Path, request: &str) -> Output {
+    use std::io::Write;
+    let mut child = Command::new("python3")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join(APPROVAL_AUTHORITY))
+        .args([versions, log])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the approval authority starts");
+    child
+        .stdin
+        .take()
+        .expect("its stdin")
+        .write_all(request.as_bytes())
+        .expect("send the request");
+    child
+        .wait_with_output()
+        .expect("the approval authority ends")
+}
+
+/// The authority the journeys configure records only what the engine's request
+/// shape can mean: a request or versions file of any other shape is refused
+/// before anything is recorded, and a well-formed one is recorded once.
+#[test]
+fn the_configured_approval_authority_refuses_input_of_any_other_shape() {
+    let dir = TempDir::new().expect("authority workspace");
+    let versions = dir.path().join("versions.json");
+    let log = dir.path().join("approvals.ndjson");
+    std::fs::write(&versions, r#"{"docs/a.md": "v1"}"#).expect("versions");
+    let good = json!({"board_copy": "docs/a.md", "key": "v1", "actor": "s", "on_behalf_of": null});
+    for refused in [
+        "not json".to_owned(),
+        json!(["docs/a.md"]).to_string(),
+        json!({"board_copy": "docs/a.md", "key": "v1", "actor": "s"}).to_string(),
+        json!({"board_copy": "docs/a.md", "key": "v1", "actor": "s", "on_behalf_of": null, "x": 1})
+            .to_string(),
+        json!({"board_copy": "docs/a.md", "key": 1, "actor": "s", "on_behalf_of": null})
+            .to_string(),
+        json!({"board_copy": "docs/a.md", "key": "v1", "actor": "", "on_behalf_of": null})
+            .to_string(),
+        json!({"board_copy": "docs/a.md", "key": "v1", "actor": "s", "on_behalf_of": 7})
+            .to_string(),
+    ] {
+        let output = authorize(&versions, &log, &refused);
+        assert_eq!(output.status.code(), Some(2), "{refused}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).starts_with("approval_authority: "),
+            "{refused}"
+        );
+        assert!(!log.exists(), "{refused}: nothing is recorded");
+    }
+    std::fs::write(&versions, r#"{"docs/a.md": ["v1"]}"#).expect("versions");
+    let output = authorize(&versions, &log, &good.to_string());
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a version that is not a string"
+    );
+    assert!(!log.exists());
+    std::fs::write(&versions, r#"{"docs/a.md": "v1"}"#).expect("versions");
+    let output = authorize(&versions, &log, &good.to_string());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).expect("its answer"),
+        json!({"board_copy": "docs/a.md", "key": "v1"})
+    );
+    let recorded = std::fs::read_to_string(&log).expect("the record");
+    assert_eq!(recorded.lines().count(), 1);
+    assert_eq!(
+        serde_json::from_str::<Value>(recorded.trim()).expect("a record"),
+        good
+    );
+}
 
 fn slug(text: &str) -> String {
     text.chars()
