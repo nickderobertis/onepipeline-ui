@@ -9,18 +9,20 @@
 // precisely so as not to rewrite (apps/dag-ui/AGENTS.md), and these journeys are the
 // only thing that would catch what such a pass moved.
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   API_V2_PATHS,
   parseRunList,
@@ -36,6 +38,7 @@ import {
   test,
 } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
+import { SERVED_FROM_NAME } from "./fixtures/facts-file";
 import {
   graphNodeList,
   graphNodes,
@@ -4258,6 +4261,28 @@ function retainedApiBinary(): string {
     throw new Error("the main fixture retained no read API binary");
   return binary;
 }
+
+/**
+ * Where the main fixture took its server from: the artifact directory
+ * `dag-ui:build-api-server` builds into and no other build names, rather than
+ * `target/debug`, which every debug build in the same Nx run writes and a cold
+ * run's concurrent install left without a binary as this tier started.
+ */
+test("the main fixture serves the binary its own build step staged", () => {
+  const staged = resolve(import.meta.dirname, "../../target/dag-ui-api/debug");
+  const servedFrom = readFileSync(
+    join(FIXTURE_WORKSPACE, SERVED_FROM_NAME),
+    "utf8",
+  ).trim();
+  expect(dirname(servedFrom)).toBe(staged);
+  expect(["onepipeline-api", "onepipeline-api.exe"]).toContain(
+    basename(servedFrom),
+  );
+  // And it is that build's bytes the fixture is serving, not a stale copy.
+  const digest = (path: string) =>
+    createHash("sha256").update(readFileSync(path)).digest("hex");
+  expect(digest(retainedApiBinary())).toBe(digest(servedFrom));
+});
 
 /** Hold `port` on loopback for the duration of a case, so the fixture cannot take it. */
 function holdPort(port: number): Promise<() => void> {

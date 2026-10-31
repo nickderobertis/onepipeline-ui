@@ -135,6 +135,19 @@ _ensure-node-without-execve:
 _ensure-baseline:
     @bash scripts/ensure-baseline-api.sh
 
+# `dag-ui:build-api-server`: the read API the browser tier serves through. Its
+# units go to this clone's build directory, `target` (cargo's `build.build-dir`),
+# shared with every other debug build here; its binary to `target/dag-ui-api`, an
+# artifact directory no other build names, which is where `serve-fixture.mjs`
+# looks. `target/debug` is every debug build's, and on cold Linux runs the main
+# fixture found no binary there while `install-smoke` and the coverage tiers were
+# still compiling beside it (CI runs 40098290784, 41002361394, 41177320930) —
+# the move `fixture-server.ts` already steps around for the fixtures after it.
+# Build the read API into the browser tier's own artifact directory.
+_dag-ui-api-server:
+    @cargo build --locked --quiet --bin onepipeline-api --target-dir target/dag-ui-api \
+      --config 'build.build-dir="target"'
+
 # These are test runners, not rules: their version cannot change the gate's
 # verdict, so both here and CI take the latest rather than keeping two pins that
 # drift apart.

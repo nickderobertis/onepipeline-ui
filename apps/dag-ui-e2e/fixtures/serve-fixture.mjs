@@ -64,7 +64,11 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildLoadCorpus } from "../load/corpus.mjs";
-import { FIXTURE_FACTS_NAME, SERVING_PID_NAME } from "./facts-file.ts";
+import {
+  FIXTURE_FACTS_NAME,
+  SERVED_FROM_NAME,
+  SERVING_PID_NAME,
+} from "./facts-file.ts";
 import harnessBinaries from "./harness-binaries.json" with { type: "json" };
 import { humanItemsWorld } from "./human-items-world.mjs";
 import {
@@ -126,11 +130,14 @@ function die(message, action) {
 }
 
 /**
- * The directory `dag-ui:build-api-server` built into: `CARGO_TARGET_DIR` when
- * cargo was told one, and the default `target/` otherwise.
+ * The target root this fixture serves from: `target/dag-ui-api`, the artifact
+ * directory `dag-ui:build-api-server` builds into and no other build names, or
+ * `CARGO_TARGET_DIR` when the caller names another root of the same layout.
  *
- * Honoured because that build step is a cargo invocation from the repository
- * root, so a relative one resolves the way cargo itself resolves it. Validated
+ * Not `target/` itself: every debug build in an Nx run writes `target/debug`,
+ * and a cold run's concurrent install left this fixture no binary there.
+ * `CARGO_TARGET_DIR` is how a journey points a fixture at a retained copy or an
+ * unbuilt tree, resolved from the repository root as cargo would. Validated
  * rather than trusted, like every other input here: this value chooses the path
  * this script spawns, and one that is set but empty is a mistyped export rather
  * than a directory — resolved, it would name the repository root and be reported
@@ -139,7 +146,7 @@ function die(message, action) {
 function targetRoot() {
   const configured = process.env.CARGO_TARGET_DIR;
   if (configured === undefined) {
-    return join(REPO_ROOT, "target");
+    return join(REPO_ROOT, "target", "dag-ui-api");
   }
   if (configured.trim() === "") {
     die(
@@ -324,7 +331,11 @@ async function serve(workspace, port, ui, corpus) {
   // Who to stop, and wait for, before the workspace is removed: Playwright stops
   // its web servers only after the global teardown has run.
   writeFileSync(join(workspace, SERVING_PID_NAME), `${process.pid}\n`);
-  const binary = privateBinary(serverBinary(), workspace);
+  const source = serverBinary();
+  // Which build this server came from, for the journey that holds it to the one
+  // `dag-ui:build-api-server` made.
+  writeFileSync(join(workspace, SERVED_FROM_NAME), `${source}\n`);
+  const binary = privateBinary(source, workspace);
   // The fixture server uses the explicit session below; a dispatch host's wake
   // promise and session belong to its own runs.
   const fixtureEnvironment = { ...process.env };
