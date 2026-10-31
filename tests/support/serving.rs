@@ -219,6 +219,26 @@ impl Serving {
         )
     }
 
+    /// [`start_in_as_with_env_removing`](Self::start_in_as_with_env_removing)'s
+    /// unattributed counterpart: a server that acts as nobody.
+    pub fn start_in_with_env_removing(
+        workspace: TempDir,
+        environment: &[(&str, &str)],
+        removed: &[String],
+    ) -> Self {
+        let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
+        Self::spawn_from(
+            &binary,
+            workspace,
+            environment,
+            removed,
+            false,
+            None,
+            None,
+            &[],
+        )
+    }
+
     /// The same, reading the server's own log rather than letting it through to
     /// the terminal.
     ///

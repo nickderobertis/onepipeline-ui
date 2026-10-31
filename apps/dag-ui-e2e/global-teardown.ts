@@ -1,5 +1,44 @@
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { SERVING_PID_NAME } from "./fixtures/facts-file";
 import { FIXTURE_WORKSPACE } from "./playwright.config";
+
+/**
+ * Signal 0 delivers nothing: it asks only whether `pid` can be signalled, which
+ * for the server this run started is whether it is still running.
+ */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stop the shared fixture server this run started — the pid it recorded in its own
+ * workspace — and wait until it has exited. Playwright stops its web servers only
+ * after this teardown, and that server writes a run's `summary.json` whenever it
+ * reads the run, so a workspace removed under it can have a file land in a directory
+ * the removal just emptied.
+ */
+async function stopServing(): Promise<void> {
+  let pid: number;
+  try {
+    pid = Number(
+      readFileSync(join(FIXTURE_WORKSPACE, SERVING_PID_NAME), "utf8").trim(),
+    );
+  } catch {
+    return;
+  }
+  if (!Number.isInteger(pid) || pid < 1 || !alive(pid)) return;
+  process.kill(pid, "SIGTERM");
+  // Until it has exited: it stops on this signal, and one that did not would
+  // hold this teardown in plain sight rather than have its workspace removed
+  // while it still writes there.
+  while (alive(pid)) await new Promise((resolve) => setTimeout(resolve, 50));
+}
 
 /**
  * Remove the fixture directory this run made for itself, and say which one.
@@ -9,7 +48,8 @@ import { FIXTURE_WORKSPACE } from "./playwright.config";
  * line names the directory because a run that ends badly enough to skip this is a run
  * whose leftovers someone has to recognise.
  */
-export default function removeAndReportFixtureWorkspace(): void {
+export default async function removeAndReportFixtureWorkspace(): Promise<void> {
+  await stopServing();
   rmSync(FIXTURE_WORKSPACE, { recursive: true, force: true });
   process.stdout.write(
     `dag-ui e2e: removed fixture workspace ${FIXTURE_WORKSPACE}\n`,

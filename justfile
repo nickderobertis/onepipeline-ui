@@ -135,6 +135,18 @@ _ensure-node-without-execve:
 _ensure-baseline:
     @bash scripts/ensure-baseline-api.sh
 
+# Its units go to this clone's build directory, `target` (cargo's
+# `build.build-dir`), shared with every other debug build; its binary to
+# `target/dag-ui-api`, which no other build names, rather than `target/debug`,
+# which every debug build writes.
+# Build the read API the browser tier serves through (`dag-ui:build-api-server`).
+# llmlint: ignore-block[diagnostics_error_or_absent] `_crate-lint` denies all compiler warnings over this same binary target with `clippy --all-targets -- -D warnings` whenever the crate is affected. RUSTFLAGS here would fingerprint every unit this build shares with the test tiers under a second flag set and rebuild the shared graph; the build adds no source or feature clippy did not check.
+_dag-ui-api-server:
+    @cargo build --locked --quiet --bin onepipeline-api --target-dir target/dag-ui-api \
+      --config 'build.build-dir="target"'
+
+# llmlint: ignore-end[diagnostics_error_or_absent]
+
 # These are test runners, not rules: their version cannot change the gate's
 # verdict, so both here and CI take the latest rather than keeping two pins that
 # drift apart.

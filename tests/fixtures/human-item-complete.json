@@ -2,26 +2,23 @@
   "item": {
     "item": {
       "schema_version": 1,
-      "id": "task-design",
-      "dedup_key": "dedup-task-design",
+      "id": "hi-04b2c252033d8e5d80f2",
+      "dedup_key": "run:golden#gate",
       "kind": "task",
-      "title": "Review the action-items design",
-      "body": "Read the action-items design document and complete this task once its layout and keyboard flow look right to you.",
+      "title": "Approve the release",
+      "body": "Do gate.",
       "priority": "high",
       "owner": {
         "session": "claude-code-supervising-session",
-        "run": "run-a",
-        "plan": "plan-a"
+        "run": "golden",
+        "plan": "local:golden"
       },
       "block": {
         "scope": "work",
-        "run": "run-a",
-        "node": "design"
+        "run": "golden",
+        "node": "gate"
       },
-      "approval": {
-        "board_copy": "docs/design/action-items.md",
-        "key": "sha256:5d1c0a"
-      },
+      "approval": null,
       "state": "completed",
       "resolution": {
         "actor": "claude-code-supervising-session",
@@ -29,17 +26,14 @@
         "text": null,
         "reason": null
       },
-      "tracker": {
-        "task": "ONE-412",
-        "url": "https://linear.app/onepipeline/issue/ONE-412"
-      },
-      "created_at": "2026-10-29T09:10:00Z",
-      "updated_at": "sample-resolved"
+      "tracker": null,
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-01T00:00:00.000Z"
     },
     "blocked": {
       "total": 0,
       "plans": []
     }
   },
-  "event_id": "sample-task-design-completed"
+  "event_id": "human-items:6"
 }

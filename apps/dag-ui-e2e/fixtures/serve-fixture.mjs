@@ -18,7 +18,7 @@
  *                      | --preserved-corpus | --review-corpus
  *                      | --review-loop-corpus | --transcripts-corpus
  *                      | --held-turn-corpus
- *                      | --human-items-sample NAME]
+ *                      | --human-items-world NAME]
  *                                                  build the fixture and serve it,
  *                                                  the browser view beside it with --ui;
  *                                                  the shutdown journeys' own runs
@@ -30,10 +30,10 @@
  *                                                  held turn's with
  *                                                  --held-turn-corpus; the
  *                                                  action-items journeys' with
- *                                                  --human-items-sample, a
- *                                                  bundle of
- *                                                  tests/fixtures/human-items
- *                                                  served over an empty root
+ *                                                  --human-items-world, a host
+ *                                                  whose items and runs the
+ *                                                  engine itself raised
+ *                                                  (`human-items-world.mjs`)
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
  *                     | --record-activity NAME --activity-detail TEXT
@@ -64,8 +64,13 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildLoadCorpus } from "../load/corpus.mjs";
-import { FIXTURE_FACTS_NAME } from "./facts-file.ts";
+import {
+  FIXTURE_FACTS_NAME,
+  SERVED_FROM_NAME,
+  SERVING_PID_NAME,
+} from "./facts-file.ts";
 import harnessBinaries from "./harness-binaries.json" with { type: "json" };
+import { humanItemsWorld } from "./human-items-world.mjs";
 import {
   buildHeldTurnRuns,
   buildPreservedRuns,
@@ -125,11 +130,13 @@ function die(message, action) {
 }
 
 /**
- * The directory `dag-ui:build-api-server` built into: `CARGO_TARGET_DIR` when
- * cargo was told one, and the default `target/` otherwise.
+ * The target root this fixture serves from: `target/dag-ui-api`, the artifact
+ * directory `dag-ui:build-api-server` builds into and no other build names, or
+ * `CARGO_TARGET_DIR` when the caller names another root of the same layout.
  *
- * Honoured because that build step is a cargo invocation from the repository
- * root, so a relative one resolves the way cargo itself resolves it. Validated
+ * Not `target/` itself: every debug build in an Nx run writes `target/debug`.
+ * `CARGO_TARGET_DIR` is how a journey points a fixture at a retained copy or an
+ * unbuilt tree, resolved from the repository root as cargo would. Validated
  * rather than trusted, like every other input here: this value chooses the path
  * this script spawns, and one that is set but empty is a mistyped export rather
  * than a directory — resolved, it would name the repository root and be reported
@@ -138,7 +145,7 @@ function die(message, action) {
 function targetRoot() {
   const configured = process.env.CARGO_TARGET_DIR;
   if (configured === undefined) {
-    return join(REPO_ROOT, "target");
+    return join(REPO_ROOT, "target", "dag-ui-api");
   }
   if (configured.trim() === "") {
     die(
@@ -300,7 +307,10 @@ function bound(server, port, purpose) {
  * is what they publish about themselves beside it.
  */
 async function serve(workspace, port, ui, corpus) {
-  rmSync(workspace, { recursive: true, force: true });
+  // A persistent corpus is served again as it was left, so a journey can stop
+  // its server and start another over the same state.
+  if (corpus.persistent !== true)
+    rmSync(workspace, { recursive: true, force: true });
   mkdirSync(workspace, { recursive: true });
   const runsRoot = join(workspace, "runs");
   corpus.build(runsRoot);
@@ -317,7 +327,14 @@ async function serve(workspace, port, ui, corpus) {
     `${JSON.stringify(corpus.facts(), null, 2)}\n`,
   );
 
-  const binary = privateBinary(serverBinary(), workspace);
+  // Who to stop, and wait for, before the workspace is removed: Playwright stops
+  // its web servers only after the global teardown has run.
+  writeFileSync(join(workspace, SERVING_PID_NAME), `${process.pid}\n`);
+  const source = serverBinary();
+  // Which build this server came from, for the journey that holds it to the one
+  // `dag-ui:build-api-server` made.
+  writeFileSync(join(workspace, SERVED_FROM_NAME), `${source}\n`);
+  const binary = privateBinary(source, workspace);
   // The fixture server uses the explicit session below; a dispatch host's wake
   // promise and session belong to its own runs.
   const fixtureEnvironment = { ...process.env };
@@ -326,6 +343,8 @@ async function serve(workspace, port, ui, corpus) {
   // Keep node available even when it shares a directory with a host's adapters.
   const utilityBin = join(workspace, "utility-bin");
   mkdirSync(utilityBin, { recursive: true });
+  // A persistent corpus's workspace already holds the link its last start made.
+  rmSync(join(utilityBin, "node"), { force: true });
   symlinkSync(process.execPath, join(utilityBin, "node"));
   fixtureEnvironment.PATH = [
     utilityBin,
@@ -347,6 +366,14 @@ async function serve(workspace, port, ui, corpus) {
   delete fixtureEnvironment.GITHUB_TOKEN;
   delete fixtureEnvironment.ONEPIPELINE_WAKE_BUDGET;
   delete fixtureEnvironment.ONEPIPELINE_LAUNCHER_SESSION;
+  // Nor the operator's own configuration: their `human_items` and plan-store
+  // settings are their host's, and a corpus that wants some names its own.
+  delete fixtureEnvironment.ONEPIPELINE_CONFIG;
+  fixtureEnvironment.XDG_CONFIG_HOME = join(workspace, "config");
+  // What a corpus's own world must not inherit from this caller: the action-
+  // items world's plan-store sources and host configuration are its own.
+  for (const name of corpus.removeEnvironment ?? [])
+    delete fixtureEnvironment[name];
   const server = spawn(
     binary,
     [
@@ -364,16 +391,16 @@ async function serve(workspace, port, ui, corpus) {
       // other run is refused naming its owner — and the unwatched report is
       // about exactly those runs.
       "--session",
-      SUPERVISOR_SESSION,
+      corpus.session?.() ?? SUPERVISOR_SESSION,
       // The binary `dag-ui:build-api-server` compiled after `dag-ui:build`, so
       // the view it embeds is the bundle every other origin here previews.
       ...(ui ? ["--ui"] : []),
-      // What a corpus asks the server for beside its runs: the action-items
-      // journeys' engine sample bundle.
-      ...(corpus.serverArguments ?? []),
     ],
     {
       stdio: ["ignore", "inherit", "inherit"],
+      // The checkout a corpus's server works in, when it names one: where the
+      // action-items world's plan store is configured.
+      ...(corpus.cwd === undefined ? {} : { cwd: corpus.cwd }),
       // Where `runs.mjs` kept the graph records the server reads a run's declared
       // members from: the same variable the engine and `oneagentgraph` read,
       // pointed at this workspace's rather than at the operator's own. The host
@@ -403,7 +430,12 @@ async function serve(workspace, port, ui, corpus) {
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
   return new Promise((resolveExit) => {
-    server.on("exit", (code) => resolveExit(code ?? 0));
+    server.on("exit", async (code) => {
+      // What the corpus started beside the server ends before this does, so
+      // whoever removes the workspace after this exits removes it whole.
+      await corpus.cleanup?.();
+      resolveExit(code ?? 0);
+    });
   });
 }
 
@@ -436,7 +468,7 @@ function parseArgs(argv) {
     "--words-text",
     "--refuse-port",
     "--live-dispatch-pid",
-    "--human-items-sample",
+    "--human-items-world",
   ]);
   const out = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -748,30 +780,11 @@ if (args.stall) {
           facts: () => heldTurnFacts(workspace),
           environment: heldTurnEnvironment(workspace),
         };
-      } else if (args["human-items-sample"] !== undefined) {
-        // The engine's own sample adapter, served over an empty runs root —
-        // the only root the server serves a sample over — from a fresh copy of
-        // one checked-in bundle, so a journey's writes never reach the fixture
-        // and never outlive the workspace.
-        const name = args["human-items-sample"];
-        if (basename(name) !== name || !name.endsWith(".json")) {
-          die(
-            `'${name}' is not a bundle name`,
-            "pass --human-items-sample the file name of a bundle in tests/fixtures/human-items",
-          );
-        }
-        const sample = join(workspace, name);
-        corpus = {
-          build: (root) => {
-            mkdirSync(root, { recursive: true });
-            copyFileSync(
-              join(REPO_ROOT, "tests", "fixtures", "human-items", name),
-              sample,
-            );
-          },
-          facts: () => ({ sample }),
-          serverArguments: ["--human-items-sample", sample],
-        };
+      } else if (args["human-items-world"] !== undefined) {
+        // A host whose human items the engine itself raised and keeps: runs
+        // launched and items raised by the provisioned CLI, served over the
+        // journal they wrote. Built once; a later start serves the same world.
+        corpus = humanItemsWorld(workspace, args["human-items-world"]);
       } else if (args["shutdown-corpus"]) {
         const pid = args["live-dispatch-pid"];
         const livePid = pid === undefined ? undefined : Number(pid);

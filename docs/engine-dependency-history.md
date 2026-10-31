@@ -695,6 +695,16 @@ exact requirements move to 0.12.12; onevcs, oneagentgraph, onejudge,
 onemessagebus and oneharness-core are unchanged, and no route, payload or MSRV
 changes beyond the release `/healthz` reports. This changes the engine types
 carried by ApiError::from_engine and the other engine-typed public items.
+0.97.0 is the item-runtime release: it ships the live human-item store
+(`onepipeline::human_items::HumanItems`) — the host journal, blocked-step
+derivation over real runs, task projection, owning-watch delivery, approval
+authorities and run-end retirement — that `/api/human-items` now serves in place
+of the sample adapter, whose `--human-items-sample` flag is removed. It links
+onetaskgraph 0.12.13, so the plan-store family and its test-only exact
+requirements move to 0.12.13; onevcs, oneagentgraph, onejudge, onemessagebus and
+oneharness-core are unchanged, the human-item schemas are unchanged, and no MSRV
+changes. This changes the engine types carried by ApiError::from_engine and the
+other engine-typed public items.
 
 The test-only `onevcs` requirement, which the `EventKind` drift gate in
 `tests/contract.rs` reads, has followed the release each linked engine resolves:
@@ -703,4 +713,4 @@ declares the stacking, review and landing kinds that engine relays; 0.56.3 for
 0.79.0 (^0.56.2), which declares `publication-resumed`, which `payload::vcs`
 copies, and for 0.79.1, 0.82.0, 0.84.0, 0.84.1 and 0.85.0; 0.56.9 for 0.89.0,
 which relays each check's times; 0.56.11 for 0.90.0; 0.57.0 for 0.95.5; and
-0.57.4 for 0.96.0 (^0.57.4), 0.96.1 and 0.96.2.
+0.57.4 for 0.96.0 (^0.57.4), 0.96.1, 0.96.2 and 0.97.0.

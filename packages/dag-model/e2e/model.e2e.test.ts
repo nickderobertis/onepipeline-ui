@@ -1250,23 +1250,21 @@ test("a patch the contract does not allow is refused rather than guessed at", ()
 
 test("the human-item goldens the server serves parse as the engine's records", async () => {
   // `tests/e2e/human_items.rs` writes these from the real server over the
-  // engine's sample adapter, and `tests/contract.rs` decodes each with the
+  // engine's live runtime, and `tests/contract.rs` decodes each with the
   // engine's own types; parsing them here holds the browser's half to the same
   // bytes.
   const list = humanItemListSchema.parse(await served("human-items.json"));
   expect(list.items.map(({ item }) => item.priority)).toEqual([
     "urgent",
     "high",
-    "high",
     "medium",
-    "urgent",
-    "low",
   ]);
   expect(
     list.items.map(({ item }) => HUMAN_ITEM_PRIORITY_LABELS[item.priority]),
-  ).toEqual(["Critical", "High", "High", "Medium", "Critical", "Low"]);
+  ).toEqual(["Critical", "High", "Medium"]);
   const detail = humanItemDetailSchema.parse(await served("human-item.json"));
   expect(detail.nodes).toHaveLength(detail.blocked.total);
+  // A receipt names the journal event the engine wrote, never a sample.
   for (const name of [
     "human-items-raise.json",
     "human-item-answer.json",
@@ -1274,7 +1272,7 @@ test("the human-item goldens the server serves parse as the engine's records", a
     "human-item-dismiss.json",
   ])
     expect(humanItemReceiptSchema.parse(await served(name)).event_id).toMatch(
-      /^sample-/,
+      /^human-items:\d+$/u,
     );
   // A refusal is the error contract, never a record.
   const refusal: unknown = await served("error.json");

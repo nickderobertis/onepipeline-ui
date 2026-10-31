@@ -50,6 +50,28 @@ def field():
             "options": [{"id": name, "name": name} for name in options]}
 
 
+# The board's Priority field, which a source with a `priority_mapping` writes a task's
+# priority to; its options are the board's own names for the four priorities.
+priorities = ["Urgent", "High", "Medium", "Low"]
+
+
+def priority_field():
+    return {"__typename": "ProjectV2SingleSelectField", "id": "PRIORITY", "name": "Priority",
+            "options": [{"id": name, "name": name} for name in priorities]}
+
+
+# The source-owned text field a projected task's origin is written to.
+ORIGIN = "onetaskgraph.origin"
+
+
+def origin_field():
+    return {"__typename": "ProjectV2Field", "id": "ORIGIN", "name": ORIGIN, "dataType": "TEXT"}
+
+
+def board_fields():
+    return [field(), priority_field(), origin_field()]
+
+
 def described(content, metadata):
     return content + "\n\n<!-- onetaskgraph.metadata\n" + json.dumps(metadata) + "\n-->"
 
@@ -57,6 +79,9 @@ def described(content, metadata):
 STATES = {"OPEN": [None], "CLOSED": ["COMPLETED", "NOT_PLANNED", "DUPLICATE"]}
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SEEDED = {"number", "title", "content", "metadata", "status", "state", "reason", "parent"}
+# What a seeded issue may say beside those: the issues it is blocked by, which GitHub
+# serves as its `blockedBy` relationships.
+OPTIONAL = {"blocked_by"}
 
 
 def default_seed():
@@ -88,7 +113,10 @@ def checked(seed):
             or not isinstance(seed["issues"], dict) or not seed["issues"]):
         parser.error("a seed names a repository, its Status options and its issues")
     for name, held in seed["issues"].items():
-        if (not isinstance(held, dict) or set(held) != SEEDED
+        if (not isinstance(held, dict) or not SEEDED <= set(held) <= SEEDED | OPTIONAL
+                or not isinstance(held.get("blocked_by", []), list)
+                or not all(isinstance(blocker, str) and blocker in seed["issues"]
+                           and blocker != name for blocker in held.get("blocked_by", []))
                 or not isinstance(held["number"], int) or isinstance(held["number"], bool)
                 or held["number"] < 1
                 or not all(isinstance(held[key], str) for key in ["title", "content"])
@@ -130,7 +158,8 @@ for name, held in seed["issues"].items():
     state["issues"][name] = {"body": described(held["content"], held["metadata"]),
                              "status": held["status"], "state": held["state"],
                              "reason": held["reason"], "title": held["title"],
-                             "number": held["number"], "parent": held["parent"]}
+                             "number": held["number"], "parent": held["parent"],
+                             "blocked_by": list(held.get("blocked_by", []))}
 
 
 def children(name):
@@ -142,31 +171,50 @@ def issue(name, membership_of=None):
     `Status`, as a board read's `fieldValues` or, by `membership_of`, as a read by reference
     asks for it."""
     held = state["issues"][name]
-    values = [{"name": held["status"], "optionId": held["status"], "field": field()}]
+    values = ([] if held["status"] is None else
+              [{"name": held["status"], "optionId": held["status"], "field": field()}])
+    if held.get("priority") is not None:
+        values.append({"name": held["priority"], "optionId": held["priority"],
+                       "field": priority_field()})
+    if held.get("origin") is not None:
+        values.append({"text": held["origin"],
+                       "field": {"id": "ORIGIN", "name": ORIGIN}})
     membership = {"id": "ITEM-" + name, "project": {"id": "BOARD", "number": 1},
                   "fieldValues": connection(values), "updatedAt": "2026-01-01T00:00:00Z"}
     if membership_of is not None:
-        membership = membership_of(membership, values[0])
+        membership = membership_of(membership, values[0] if values else None)
     value = {"__typename": "Issue", "id": name, "title": held["title"],
              "body": held["body"], "state": held["state"], "stateReason": held["reason"],
              "number": held["number"],
              "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z",
              "repository": {"nameWithOwner": state["repository"]},
              "commentCount": {"totalCount": 0}, "relationshipEvents": {"totalCount": 0},
-             "url": None, "parent": None if held["parent"] is None else {"id": held["parent"]},
+             "url": held.get("url"), "parent": None if held["parent"] is None else {"id": held["parent"]},
              "subIssuesSummary": {"total": len(children(name))},
              "labels": connection([]), "projectItems": connection([membership]),
-             "blockedBy": connection([]), "blocking": connection([])}
+             "blockedBy": connection([related(blocker)
+                                      for blocker in held.get("blocked_by", [])]),
+             "blocking": connection([related(other) for other, by in state["issues"].items()
+                                     if name in by.get("blocked_by", [])])}
     if children(name):
         value["subIssues"] = connection([issue(child) for child in children(name)])
     return value
+
+
+def related(name):
+    """An issue as a relationship names it: the `Related` fields a source reads."""
+    held = state["issues"][name]
+    return {"__typename": "Issue", "id": name, "title": held["title"], "body": held["body"],
+            "parent": None if held["parent"] is None else {"id": held["parent"]},
+            "subIssuesSummary": {"total": len(children(name))}}
 
 
 def by_reference(membership, status):
     """A membership as a read by reference selects it: its `Status` by name, no other field."""
     return {"id": membership["id"], "updatedAt": membership["updatedAt"],
             "project": membership["project"],
-            "status": {"name": status["name"], "field": status["field"]}}
+            "status": None if status is None else {"name": status["name"],
+                                                   "field": status["field"]}}
 
 
 def issues_by_reference(variables):
@@ -206,14 +254,69 @@ def write_field(supplied, clear=False):
             or supplied["itemId"] not in ["ITEM-" + name for name in state["issues"]]):
         raise ValueError("invalid field mutation input")
     held = state["issues"][supplied["itemId"].removeprefix("ITEM-")]
-    if (supplied["fieldId"] == "STATUS" and not clear
-            and isinstance(supplied["value"], dict)
-            and set(supplied["value"]) == {"singleSelectOptionId"}
-            and supplied["value"]["singleSelectOptionId"] in options):
-        held["status"] = supplied["value"]["singleSelectOptionId"]
+    selected = (None if clear or not isinstance(supplied["value"], dict)
+                or set(supplied["value"]) != {"singleSelectOptionId"}
+                else supplied["value"]["singleSelectOptionId"])
+    if supplied["fieldId"] == "STATUS" and selected in options:
+        held["status"] = selected
+    elif supplied["fieldId"] == "PRIORITY" and (clear or selected in priorities):
+        held["priority"] = selected
+    elif supplied["fieldId"] == "ORIGIN" and clear:
+        held["origin"] = None
+    elif (supplied["fieldId"] == "ORIGIN" and isinstance(supplied["value"], dict)
+          and set(supplied["value"]) == {"text"} and isinstance(supplied["value"]["text"], str)):
+        held["origin"] = supplied["value"]["text"]
     else:
-        raise ValueError("invalid Status mutation input")
+        raise ValueError("invalid field mutation input")
     return {"projectV2Item": {"id": supplied["itemId"]}}
+
+
+# The aliases of the one mutation a source writes a projected card's fields in: each
+# update or clear is made only when its `@include` flag is set, in the order written.
+BATCHED = [("updateProjectV2ItemFieldValue", "input", "writeFirst", False),
+           ("second", "second", "writeSecond", False), ("third", "third", "writeThird", False),
+           ("fourth", "fourth", "writeFourth", False), ("fifth", "fifth", "writeFifth", False),
+           ("sixth", "sixth", "writeSixth", False), ("cleared", "clear", "writeClear", True),
+           ("clearedSecond", "clearSecond", "writeClearSecond", True),
+           ("clearedThird", "clearThird", "writeClearThird", True)]
+
+
+def batched_fields(query, variables):
+    data = {}
+    for alias, name, flag, clear in BATCHED:
+        if ("$" + flag) not in query or not isinstance(variables.get(flag), bool):
+            raise ValueError("the batched field update names no %s flag" % flag)
+        if variables[flag]:
+            data[alias] = write_field(variables.get(name), clear)
+    return data
+
+
+def create_issue(supplied):
+    """`createIssue`: a new open issue in the board's one repository, numbered after every
+    issue it holds, linked under its parent when one is named, and GitHub's own URL for it."""
+    if (not isinstance(supplied, dict) or supplied.get("repositoryId") != "REPOSITORY"
+            or not isinstance(supplied.get("title"), str) or not supplied["title"].strip()
+            or not isinstance(supplied.get("body", ""), str)
+            or set(supplied) - {"repositoryId", "title", "body", "parentIssueId"}
+            or supplied.get("parentIssueId") not in [None, *state["issues"]]):
+        raise ValueError("invalid createIssue input")
+    number = max([held["number"] for held in state["issues"].values()], default=0) + 1
+    name = "I_%d" % number
+    state["issues"][name] = {"body": supplied.get("body", ""), "status": None, "state": "OPEN",
+                             "reason": None, "title": supplied["title"], "number": number,
+                             "parent": supplied.get("parentIssueId"), "member": False,
+                             "url": "https://github.com/%s/issues/%d" % (state["repository"],
+                                                                         number)}
+    return name
+
+
+def add_item(supplied):
+    """`addProjectV2ItemById`: the issue put on the board, once."""
+    if (not isinstance(supplied, dict) or set(supplied) != {"projectId", "contentId"}
+            or supplied["projectId"] != "BOARD" or supplied["contentId"] not in state["issues"]):
+        raise ValueError("invalid addProjectV2ItemById input")
+    state["issues"][supplied["contentId"]]["member"] = True
+    return {"item": {"id": "ITEM-" + supplied["contentId"]}}
 
 
 def save():
@@ -291,10 +394,37 @@ class Handler(BaseHTTPRequestHandler):
                 held["state"] = movement["value"]
                 held["reason"] = movement.get("stateReason")
             return {"data": {"updateIssue": {"issue": issue(supplied["id"])}}}
+        if "createIssue(" in query:
+            return {"data": {"createIssue": {"issue": issue(create_issue(variables.get("input")))}}}
+        if "addSubIssue(" in query:
+            supplied = variables.get("input")
+            if (not isinstance(supplied, dict) or set(supplied) != {"issueId", "subIssueId"}
+                    or supplied["issueId"] not in state["issues"]
+                    or supplied["subIssueId"] not in state["issues"]
+                    or supplied["issueId"] == supplied["subIssueId"]):
+                raise ValueError("invalid addSubIssue input")
+            # GitHub refuses a sub-issue that would become its own ancestor, and a
+            # hierarchy with a cycle would never finish expanding in issue().
+            ancestor = state["issues"][supplied["issueId"]]["parent"]
+            while ancestor is not None:
+                if ancestor == supplied["subIssueId"]:
+                    raise ValueError("addSubIssue would make an issue its own ancestor")
+                ancestor = state["issues"][ancestor]["parent"]
+            state["issues"][supplied["subIssueId"]]["parent"] = supplied["issueId"]
+            return {"data": {"addSubIssue": {"issue": {"id": supplied["issueId"]},
+                                             "subIssue": {"id": supplied["subIssueId"]}}}}
+        if "addProjectV2ItemById(" in query:
+            return {"data": {"addProjectV2ItemById": add_item(variables.get("input"))}}
         if "second:updateProjectV2ItemFieldValue(" in query:
-            raise ValueError("the batched field update is not served here")
+            return {"data": batched_fields(query, variables)}
         if "updateProjectV2ItemFieldValue(" in query:
-            return {"data": {"updateProjectV2ItemFieldValue": write_field(variables.get("input"))}}
+            written = write_field(variables.get("input"))
+            if "content{" in query:
+                # The card's issue, read back in the same request: what a source
+                # settling a projected task checks it settled.
+                name = variables["input"]["itemId"].removeprefix("ITEM-")
+                written["projectV2Item"]["content"] = {**issue(name), "comments": connection([])}
+            return {"data": {"updateProjectV2ItemFieldValue": written}}
         if "clearProjectV2ItemFieldValue(" in query:
             return {"data": {"clearProjectV2ItemFieldValue": write_field(variables.get("input"), True)}}
         if "node(id:" in query:
@@ -303,13 +433,20 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("unknown issue id")
             return {"data": {"node": issue(name)}}
         if "repositoryOwner(" in query:
-            board = {"id": "BOARD", "title": "Board", "fields": connection([field()]),
+            board = {"id": "BOARD", "title": "Board",
+                     "fields": connection(board_fields()),
                      "items": connection([{"id": "ITEM-" + name, "updatedAt": "2026-01-01T00:00:00Z",
                                             "content": issue(name),
                                             "fieldValues": issue(name)["projectItems"]["nodes"][0]["fieldValues"]}
                                            for name in state["issues"]])}
             alias = "boardFields" if "boardFields:" in query else "owner"
-            return {"data": {alias: {"projectV2": board}}}
+            data = {alias: {"projectV2": board}}
+            if "repository(owner:$repositoryOwner" in query:
+                # The repository a task is created in, asked beside the board's fields.
+                held = "%s/%s" % (variables.get("repositoryOwner"), variables.get("repositoryName"))
+                data["repository"] = ({"id": "REPOSITORY", "nameWithOwner": state["repository"]}
+                                      if held == state["repository"] else None)
+            return {"data": data}
         return {"errors": [{"message": "unsupported loopback operation: " + query}]}
 
 # llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]

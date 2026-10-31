@@ -20,7 +20,7 @@
       "outputs": ["{projectRoot}/dist"]
     },
     "build-api-server": {
-      "command": "cargo build --locked --quiet --bin onepipeline-api",
+      "command": "just _dag-ui-api-server",
       "cache": false,
       "dependsOn": ["build"]
     },

@@ -61,7 +61,7 @@ use crate::contract::{
 };
 use crate::error::ApiError;
 use crate::filter::{EventFilter, FilterSpec, LaunchProfiles};
-use crate::human_items::{HumanItems, HumanItemsSample};
+use crate::human_items::HumanItems;
 use crate::payload::{self, AgentsScope, DeclaredMembers, Scope, Signature};
 use crate::telemetry::{self, RunTelemetry};
 
@@ -146,8 +146,9 @@ pub struct RunStore {
     poll: Duration,
     conversation_poll: Duration,
     aggregated: Aggregated,
-    /// What the human-item routes read and act on: nothing, on a live host, and
-    /// otherwise the explicit sample bundle the server was started over.
+    /// What the human-item routes read and act on: the engine's journal beneath
+    /// this runs root, under the configuration of the directory the server was
+    /// started in.
     human_items: HumanItems,
 }
 
@@ -187,20 +188,10 @@ impl RunStore {
             poll,
             conversation_poll: poll * CONVERSATION_POLLS_PER_RUN_POLL,
             aggregated: Arc::new(Mutex::new(HashMap::new())),
-            human_items: HumanItems::default(),
+            // The directory a `onepipeline human-items` command would read its
+            // configuration from, had it been run where this server was.
+            human_items: HumanItems::live(root.as_path(), std::env::current_dir()),
         }
-    }
-
-    /// The same store, serving the human-item routes over `sample`.
-    ///
-    /// Without this a store answers every one of them with the engine's
-    /// `unavailable` refusal, which is what a live host serves until the
-    /// engine's runtime integration ships. The caller decides whether a sample
-    /// may be served at all — [`HumanItemsSample::serving_over`] is that ruling.
-    #[must_use]
-    pub fn serving_human_items(mut self, sample: &HumanItemsSample) -> Self {
-        self.human_items = HumanItems::sample(sample);
-        self
     }
 
     /// The human-item routes' adapter, and the session every one of them acts

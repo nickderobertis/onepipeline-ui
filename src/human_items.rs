@@ -1,115 +1,32 @@
-//! The human-item routes: the engine's `onepipeline::human_items` contract,
-//! served over the one adapter that release ships — its explicit sample bundle.
+//! The human-item routes: the engine's `onepipeline::human_items` runtime,
+//! served over the host's own journal.
 //!
 //! Nothing here is a second implementation of the lifecycle. Every query is
-//! `HumanItemSample::query` and every write is `HumanItemSample::apply`, the
-//! same calls `onepipeline human-items --sample FILE` makes, over the same file:
-//! the bundle is read before every request and written back after every write
-//! that changed it, exactly as the CLI does, so the two read one store. What
-//! this module owns is what the engine's adapter does not: the acting session
-//! as the actor of every write, and the ownership rule `stop` keeps — an item's
-//! content and its writes belong to the session that raised it.
+//! the engine's `HumanItems::query` or `show` and every write its `apply` — the
+//! calls `onepipeline human-items` makes — over the journal the engine keeps
+//! beneath the runs root (`onepipeline::human_items::JOURNAL_PATH`), under the
+//! effective configuration the engine loads for the directory this server was
+//! started in. Persistence, ordering, blocked-step derivation, bus delivery to
+//! the owning session's watch, approval authorities and a run's end retiring
+//! its holds are all the engine's. What this module owns is what the engine's
+//! store does not: the acting session as the actor of every write, and the
+//! ownership rule `stop` keeps — an item's content and its writes belong to
+//! the session that raised it.
 //!
-//! A live host serves no sample. Without `--human-items-sample` every route
-//! answers the engine's own `unavailable` refusal, and the flag is refused
-//! over a runs root that holds anything ([`HumanItemsSample::serving_over`]),
-//! so fixture items can never appear beside real runs.
+//! A host whose effective configuration does not enable human items is served
+//! the engine's own `unavailable` refusal on every route.
 
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::sync::{Arc, Mutex};
 
 use onepipeline::human_items::{
-    HumanItemAction, HumanItemBlocked, HumanItemDetail, HumanItemFilter, HumanItemInput,
-    HumanItemReceipt, HumanItemRefusal, HumanItemSample, HumanItemView,
+    HumanItemAction, HumanItemDetail, HumanItemFilter, HumanItemInput, HumanItemReceipt,
+    HumanItemRefusal, HumanItemState, HumanItemView, HumanItems as Engine,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{RunsRoot, SessionId};
+use crate::cli::SessionId;
 use crate::contract::HumanItemId;
 use crate::error::ApiError;
-
-/// A human-item sample bundle this process has read and the engine accepted.
-///
-/// Constructed only by reading the file and decoding it as the engine's
-/// `HumanItemSample`, whose decoder validates every record, count and preview —
-/// so a bundle the CLI would refuse is a usage error at the command line rather
-/// than a server that fails its first request. The flag and a configuration
-/// file construct it the same way.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "PathBuf", into = "PathBuf")]
-pub struct HumanItemsSample(PathBuf);
-
-impl HumanItemsSample {
-    /// The bundle's path.
-    #[must_use]
-    pub fn as_path(&self) -> &Path {
-        &self.0
-    }
-
-    /// This sample, if it may be served beside `root`.
-    ///
-    /// A sample is test-only configuration, and a runs root that holds anything
-    /// is a host's live store: serving fixture items beside real runs would put
-    /// invented work in front of an operator as if it were theirs. So the
-    /// sample is served only over an empty root.
-    ///
-    /// # Errors
-    ///
-    /// When `root` holds any entry, or can no longer be read.
-    pub fn serving_over(&self, root: &RunsRoot) -> Result<&Self, String> {
-        let mut entries = fs::read_dir(root.as_path()).map_err(|err| {
-            format!(
-                "{} is not a readable directory: {}",
-                root.as_path().display(),
-                err.kind()
-            )
-        })?;
-        if entries.next().is_some() {
-            return Err(format!(
-                "--human-items-sample serves fixture items and is refused over {}, which holds \
-                 runs: a live host never serves sample data",
-                root.as_path().display()
-            ));
-        }
-        Ok(self)
-    }
-}
-
-impl TryFrom<PathBuf> for HumanItemsSample {
-    type Error = String;
-
-    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        read(&path)?;
-        Ok(Self(path))
-    }
-}
-
-impl FromStr for HumanItemsSample {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::try_from(PathBuf::from(value))
-    }
-}
-
-impl From<HumanItemsSample> for PathBuf {
-    fn from(value: HumanItemsSample) -> Self {
-        value.0
-    }
-}
-
-/// The bundle at `path`, as the engine decodes it.
-fn read(path: &Path) -> Result<HumanItemSample, String> {
-    let bytes = fs::read(path).map_err(|err| format!("{}: {}", path.display(), err.kind()))?;
-    serde_json::from_slice(&bytes).map_err(|err| {
-        format!(
-            "{} is not a human-item sample bundle: {err}",
-            path.display()
-        )
-    })
-}
 
 /// The body of `GET /api/human-items`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,35 +37,21 @@ pub struct HumanItemList {
     pub items: Vec<HumanItemView>,
 }
 
-/// The bundle at `path`, as a route reads it: a failure is the engine's, and
-/// names no path — every message the error contract serves is safe to show.
-fn served(path: &Path) -> Result<HumanItemSample, ApiError> {
-    let bytes = fs::read(path).map_err(|err| {
-        ApiError::Engine(format!(
-            "the human-item sample bundle could not be read: {}",
-            err.kind()
-        ))
-    })?;
-    serde_json::from_slice(&bytes).map_err(|err| {
-        ApiError::Engine(format!(
-            "the human-item sample bundle is not one the engine accepts: {err}"
-        ))
-    })
-}
-
-/// What the human-item routes read and act on.
+/// What the human-item routes read and act on: the engine's store under one
+/// runs root, configured from one directory.
 ///
-/// Cloned with the store that holds it; every clone shares the one lock, so
-/// two writes never interleave their read and write-back of the bundle.
-#[derive(Debug, Clone, Default)]
+/// The store is opened for every request rather than once, so a configuration
+/// enabled, disabled or edited while the server runs is the one the next
+/// request acts under — exactly as each `onepipeline human-items` invocation
+/// reads it afresh. The engine serializes writers under its journal's own
+/// append lock, so this server and any CLI writing the same journal never
+/// interleave.
+#[derive(Debug, Clone)]
 pub(crate) struct HumanItems {
-    sample: Option<Arc<Sample>>,
-}
-
-#[derive(Debug)]
-struct Sample {
-    path: PathBuf,
-    lock: Mutex<()>,
+    root: PathBuf,
+    /// Where the human-items configuration is read from, or why the directory
+    /// the server was started in could not be named.
+    dir: Result<PathBuf, String>,
 }
 
 /// A write to one item, as its route's body carried it. The actor is never in
@@ -164,14 +67,26 @@ pub(crate) enum Act {
 }
 
 impl HumanItems {
-    /// The routes over `sample`.
-    pub(crate) fn sample(sample: &HumanItemsSample) -> Self {
+    /// The routes over the journal beneath `root`, configured from `dir`, or
+    /// refused with its error when there is no such directory to read.
+    pub(crate) fn live(root: &Path, dir: std::io::Result<PathBuf>) -> Self {
         Self {
-            sample: Some(Arc::new(Sample {
-                path: sample.as_path().to_path_buf(),
-                lock: Mutex::new(()),
-            })),
+            root: root.to_path_buf(),
+            dir: dir.map_err(|err| err.to_string()),
         }
+    }
+
+    fn engine(&self) -> Result<Engine, ApiError> {
+        // No fallback: an empty path would read some other directory's
+        // configuration and serve its items as this host's.
+        let dir = self.dir.as_deref().map_err(|reason| {
+            ApiError::HumanItemsUnavailable(format!(
+                "the directory this server was started in cannot be read ({reason}), \
+                 so neither can the human-items configuration in it; restart the \
+                 server from a directory that exists"
+            ))
+        })?;
+        Engine::open(&self.root, dir).map_err(refusal)
     }
 
     /// Every item `session` may read that `filter` selects, in the engine's order.
@@ -180,13 +95,13 @@ impl HumanItems {
         session: Option<&SessionId>,
         filter: &HumanItemFilter,
     ) -> Result<Vec<HumanItemView>, ApiError> {
-        self.with(|bundle| {
-            Ok(bundle
-                .query(filter)
-                .into_iter()
-                .filter(|view| owns(session, &view.item.owner.session))
-                .collect())
-        })
+        Ok(self
+            .engine()?
+            .query(filter)
+            .map_err(refusal)?
+            .into_iter()
+            .filter(|view| owns(session, &view.item.owner.session))
+            .collect())
     }
 
     /// One item and every step it blocks, as `human-items show --json` serves it.
@@ -195,26 +110,7 @@ impl HumanItems {
         session: Option<&SessionId>,
         id: &HumanItemId,
     ) -> Result<HumanItemDetail, ApiError> {
-        self.with(|bundle| {
-            let stored = readable(bundle, session, id)?;
-            let blocking = stored.item.is_blocking();
-            Ok(HumanItemDetail {
-                item: stored.item.clone(),
-                blocked: if blocking {
-                    stored.blocked.clone()
-                } else {
-                    HumanItemBlocked {
-                        total: 0,
-                        plans: vec![],
-                    }
-                },
-                nodes: if blocking {
-                    stored.nodes.clone()
-                } else {
-                    vec![]
-                },
-            })
-        })
+        readable(&self.engine()?, session, id)
     }
 
     /// Raise an item owned by `session`.
@@ -223,9 +119,9 @@ impl HumanItems {
         session: Option<&SessionId>,
         input: HumanItemInput,
     ) -> Result<HumanItemReceipt, ApiError> {
-        // A host serving no sample refuses a raise as it refuses every other
-        // human-item route, before any ownership is judged.
-        self.adapter()?;
+        // A host with human items disabled refuses a raise as it refuses every
+        // other human-item route, before any ownership is judged.
+        let engine = self.engine()?;
         if !owns(session, &input.owner.session) {
             return Err(ApiError::HumanItemNotOwner(
                 "a human item is raised only as its owner: owner.session must be the session \
@@ -233,25 +129,22 @@ impl HumanItems {
                     .to_owned(),
             ));
         }
-        self.apply(HumanItemAction::Raise(input))
+        engine.apply(HumanItemAction::Raise(input)).map_err(refusal)
     }
 
     /// Make `act` on item `id` as `session`.
+    ///
+    /// Ownership is judged on the journal's state before the write; the owner
+    /// of an item never changes, so the engine's own serialized write cannot
+    /// land on an item whose owner differs from the one judged.
     pub(crate) fn act(
         &self,
         session: Option<&SessionId>,
         id: &HumanItemId,
         act: Act,
     ) -> Result<HumanItemReceipt, ApiError> {
-        // The ownership read and the write share one hold of the lock, so the
-        // item judged is the item written.
-        let sample = self.adapter()?;
-        let _held = sample
-            .lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut bundle = served(&sample.path)?;
-        readable(&bundle, session, id)?;
+        let engine = self.engine()?;
+        readable(&engine, session, id)?;
         // Over HTTP a write is the user's own action through this server, so
         // the actor is the acting session and nobody is acted for: there is no
         // `on_behalf_of` in any body and no flag that sets one. A manager
@@ -282,35 +175,7 @@ impl HumanItems {
                 on_behalf_of: None,
             },
         };
-        apply_to(&sample.path, &mut bundle, action)
-    }
-
-    fn apply(&self, action: HumanItemAction) -> Result<HumanItemReceipt, ApiError> {
-        let sample = self.adapter()?;
-        let _held = sample
-            .lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut bundle = served(&sample.path)?;
-        apply_to(&sample.path, &mut bundle, action)
-    }
-
-    fn with<T>(
-        &self,
-        read_bundle: impl FnOnce(&HumanItemSample) -> Result<T, ApiError>,
-    ) -> Result<T, ApiError> {
-        let sample = self.adapter()?;
-        let _held = sample
-            .lock
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        read_bundle(&served(&sample.path)?)
-    }
-
-    fn adapter(&self) -> Result<&Sample, ApiError> {
-        self.sample
-            .as_deref()
-            .ok_or_else(|| refusal(HumanItemRefusal::Unavailable))
+        engine.apply(action).map_err(refusal)
     }
 }
 
@@ -320,57 +185,50 @@ fn owns(session: Option<&SessionId>, owner: &str) -> bool {
     session.is_some_and(|session| session.as_str() == owner)
 }
 
-/// Item `id`, if `session` may read it.
-fn readable<'a>(
-    bundle: &'a HumanItemSample,
+/// Item `id` and every step it blocks, if `session` may read it.
+fn readable(
+    engine: &Engine,
     session: Option<&SessionId>,
     id: &HumanItemId,
-) -> Result<&'a HumanItemDetail, ApiError> {
-    let stored = bundle
-        .items
-        .iter()
-        .find(|detail| detail.item.id == id.as_str())
-        .ok_or_else(|| ApiError::HumanItemNotFound(id.clone()))?;
-    if !owns(session, &stored.item.owner.session) {
+) -> Result<HumanItemDetail, ApiError> {
+    // The engine answers an id it holds no item for with the same `Conflict`
+    // a store it cannot read is answered with, so whether the id is held is
+    // asked of the journal first: an id no item in any state carries is the
+    // error contract's `404`, never a conflict.
+    if !held(engine, id)? {
+        return Err(ApiError::HumanItemNotFound(id.clone()));
+    }
+    let detail = engine.show(id.as_str()).map_err(refusal)?;
+    if !owns(session, &detail.item.owner.session) {
         return Err(ApiError::HumanItemNotOwner(format!(
             "human item {} belongs to another session; its content and its actions are that \
              session's",
             id.as_str()
         )));
     }
-    Ok(stored)
+    Ok(detail)
 }
 
-/// `action` applied to `bundle`, written back to `path` whenever it changed the
-/// bundle — a refusal included, because a design review whose document changed
-/// refuses *and* dismisses the obsolete task and raises its replacement, which
-/// the CLI keeps too.
-fn apply_to(
-    path: &Path,
-    bundle: &mut HumanItemSample,
-    action: HumanItemAction,
-) -> Result<HumanItemReceipt, ApiError> {
-    let before = bundle.clone();
-    let outcome = bundle.apply(action);
-    if *bundle != before {
-        write(path, bundle)?;
+/// Whether any item, in any state and of any owner, carries `id`.
+///
+/// Every state is the engine's own declaration of them — the vocabulary its
+/// CLI's `--state` parses — so a state the engine gains is searched too.
+fn held(engine: &Engine, id: &HumanItemId) -> Result<bool, ApiError> {
+    for state in <HumanItemState as clap::ValueEnum>::value_variants() {
+        let filter = HumanItemFilter {
+            state: Some(*state),
+            ..HumanItemFilter::default()
+        };
+        if engine
+            .query(&filter)
+            .map_err(refusal)?
+            .iter()
+            .any(|view| view.item.id == id.as_str())
+        {
+            return Ok(true);
+        }
     }
-    outcome.map_err(refusal)
-}
-
-/// Write `bundle` over `path` whole, through a sibling file renamed into place,
-/// so a reader never meets half of it.
-fn write(path: &Path, bundle: &HumanItemSample) -> Result<(), ApiError> {
-    let bytes =
-        serde_json::to_vec_pretty(bundle).map_err(|err| ApiError::Engine(err.to_string()))?;
-    let mut staged = path.as_os_str().to_owned();
-    staged.push(".writing");
-    let staged = PathBuf::from(staged);
-    fs::write(&staged, bytes)
-        .and_then(|()| fs::rename(&staged, path))
-        .map_err(|err| {
-            ApiError::Engine(format!("the sample bundle was not written: {}", err.kind()))
-        })
+    Ok(false)
 }
 
 /// The engine's typed refusal, as the error contract serves it.
