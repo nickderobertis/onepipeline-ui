@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { SERVING_PID_NAME } from "./fixtures/facts-file";
 import { FIXTURE_WORKSPACE } from "./playwright.config";
 
-/** Whether the process `pid` is still alive. */
+/**
+ * Signal 0 delivers nothing: it asks only whether `pid` can be signalled, which
+ * for the server this run started is whether it is still running.
+ */
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
