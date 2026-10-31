@@ -633,7 +633,8 @@ const WORLDS = {
  * workspace, served again over the same journal by every later start of it.
  */
 export function humanItemsWorld(workspace, name) {
-  const kind = WORLDS[name];
+  // An own key only: `constructor` or `__proto__` would otherwise read as a world.
+  const kind = Object.hasOwn(WORLDS, name) ? WORLDS[name] : undefined;
   if (kind === undefined)
     throw new Error(
       `'${name}' is not a human-items world; name one of ${Object.keys(WORLDS).join(", ")}`,

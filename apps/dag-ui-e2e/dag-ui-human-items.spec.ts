@@ -1,5 +1,13 @@
-import { execFileSync } from "node:child_process";
-import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BrowserContext,
@@ -1796,4 +1804,35 @@ test("a host that has not enabled human items says so on the page", async ({
     "human-items unavailable against live state",
   );
   await expect(page.getByRole("article")).toHaveCount(0);
+});
+
+test("a world name the fixture does not define is refused before anything is built", () => {
+  // A name every object answers for — inherited, not one of the worlds — is a
+  // usage error like any other, and leaves the workspace as it found it.
+  for (const name of ["constructor", "__proto__", "toString", "nowhere"]) {
+    const workspace = mkdtempSync(join(tmpdir(), "dag-ui-e2e-world-"));
+    try {
+      const refused = spawnSync(
+        process.execPath,
+        [
+          join(import.meta.dirname, "fixtures/serve-fixture.mjs"),
+          "--workspace",
+          workspace,
+          // A valid port this never binds: the name is refused first.
+          "--port",
+          "1",
+          "--human-items-world",
+          name,
+        ],
+        { encoding: "utf8", timeout: 30_000 },
+      );
+      expect(refused.status, `${name}: ${refused.stderr}`).toBe(2);
+      expect(refused.stderr).toContain(
+        `serve-fixture: '${name}' is not a human-items world; name one of sessions, queue, long`,
+      );
+      expect(existsSync(join(workspace, "runs")), name).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  }
 });

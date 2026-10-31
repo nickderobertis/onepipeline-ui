@@ -249,3 +249,66 @@ fn the_numeric_loopback_board_serves_even_when_hostname_lookup_is_unavailable() 
         "invalid board token"
     );
 }
+
+/// `query` with `variables`, as the remote plugin sends it: authorized, to the
+/// board's one route. The status and the answer.
+fn graphql(board: &GitHubBoard, query: &str, variables: &Value) -> (u16, Value) {
+    use std::io::Write;
+    let address = board.url.strip_prefix("http://").expect("HTTP URL");
+    let body = serde_json::json!({"query": query, "variables": variables}).to_string();
+    let mut stream = std::net::TcpStream::connect(address).expect("reach the board");
+    write!(
+        stream,
+        "POST /graphql HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\nAuthorization: Bearer \
+         {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        board.token,
+        body.len()
+    )
+    .expect("send the request");
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).expect("read the answer");
+    let (head, answer) = raw.split_once("\r\n\r\n").expect("an HTTP answer");
+    let status = head
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .expect("a status line");
+    (status, serde_json::from_str(answer).expect("a JSON answer"))
+}
+
+#[test]
+fn the_board_refuses_a_sub_issue_that_would_become_its_own_ancestor() {
+    let dir = tempfile::tempdir().expect("board workspace");
+    let board = GitHubBoard::start(dir.path());
+    let before = board.state();
+    assert_eq!(before["issues"]["approve"]["parent"], "plan");
+    // The plan beneath its own approval: a cycle GitHub refuses, and one that
+    // would never finish expanding were it held.
+    let (status, answer) = graphql(
+        &board,
+        "mutation($input: AddSubIssueInput!) { addSubIssue(input: $input) { issue { id } } }",
+        &serde_json::json!({"input": {"issueId": "approve", "subIssueId": "plan"}}),
+    );
+    assert_eq!(status, 400, "{answer}");
+    assert_eq!(
+        answer["errors"][0]["message"],
+        "addSubIssue would make an issue its own ancestor"
+    );
+    assert_eq!(board.state()["issues"], before["issues"], "nothing moved");
+    // An issue a sub-issue of itself is refused as it always was.
+    let (status, _) = graphql(
+        &board,
+        "mutation($input: AddSubIssueInput!) { addSubIssue(input: $input) { issue { id } } }",
+        &serde_json::json!({"input": {"issueId": "plan", "subIssueId": "plan"}}),
+    );
+    assert_eq!(status, 400);
+    // And a parent that makes no cycle is held: the plan stays the root.
+    let (status, answer) = graphql(
+        &board,
+        "mutation($input: AddSubIssueInput!) { addSubIssue(input: $input) { issue { id } } }",
+        &serde_json::json!({"input": {"issueId": "plan", "subIssueId": "approve"}}),
+    );
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["data"]["addSubIssue"]["subIssue"]["id"], "approve");
+    assert_eq!(board.state()["issues"]["approve"]["parent"], "plan");
+}

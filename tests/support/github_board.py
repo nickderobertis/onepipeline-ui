@@ -403,6 +403,13 @@ class Handler(BaseHTTPRequestHandler):
                     or supplied["subIssueId"] not in state["issues"]
                     or supplied["issueId"] == supplied["subIssueId"]):
                 raise ValueError("invalid addSubIssue input")
+            # GitHub refuses a sub-issue that would become its own ancestor, and a
+            # hierarchy with a cycle would never finish expanding in issue().
+            ancestor = state["issues"][supplied["issueId"]]["parent"]
+            while ancestor is not None:
+                if ancestor == supplied["subIssueId"]:
+                    raise ValueError("addSubIssue would make an issue its own ancestor")
+                ancestor = state["issues"][ancestor]["parent"]
             state["issues"][supplied["subIssueId"]]["parent"] = supplied["issueId"]
             return {"data": {"addSubIssue": {"issue": {"id": supplied["issueId"]},
                                              "subIssue": {"id": supplied["subIssueId"]}}}}
