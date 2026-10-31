@@ -20,7 +20,9 @@
       "outputs": ["{projectRoot}/dist"]
     },
     "build-api-server": {
-      "command": "just _dag-ui-api-server",
+      "//": "Runs cargo directly, not through a just recipe: the visual-docs capture runs this target in a container with no just. The binary goes to target/dag-ui-api, which no other build names, and its units go to this clone's shared build directory, target (CARGO_BUILD_BUILD_DIR, set through env so no shell has to quote TOML). No RUSTFLAGS here: they would fingerprint the units this build shares with the test tiers under a second flag set, and _crate-lint already denies warnings over this binary target.",
+      "command": "cargo build --locked --quiet --bin onepipeline-api --target-dir target/dag-ui-api",
+      "options": { "env": { "CARGO_BUILD_BUILD_DIR": "target" } },
       "cache": false,
       "dependsOn": ["build"]
     },
