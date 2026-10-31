@@ -86,6 +86,7 @@ impl World {
     fn configured(enabled: bool) -> Self {
         let (dir, root) = fixture_run::workspace();
         let base = dir.path().to_path_buf();
+        // llmlint: ignore[e2e_not_mocked] the tracker is the one boundary this task permits doubling ("doubling only external tracker boundaries"), and the planner ruled the tracker links be proven through this loopback rather than through GitHub: it answers only the requests onetaskgraph's github-projects source sends, and the engine, the CLI, the server, runs, journal and watch delivery under test are all the real ones.
         let board = GitHubBoard::start(&base);
         let config = base.join("config");
         std::fs::create_dir_all(config.join("onepipeline")).expect("config dir");
@@ -905,8 +906,10 @@ fn every_filter_selects_what_the_cli_selects() {
 /// Answer, complete, and dismiss with and without a reason, each made through
 /// the route: one durable write each, as the acting session with nobody acted
 /// for, the engine's receipt, the journal's state, and a resolution delivered
-/// to the owning session's watch alone. A repeat is the engine's conflict and
-/// writes nothing; an action of the wrong kind is refused and changes nothing.
+/// to the owning session's watch alone. Submitted again, an action answers the
+/// same receipt and writes nothing, while any other resolution of the resolved
+/// item is the engine's conflict; an action of the wrong kind is refused and
+/// changes nothing.
 #[test]
 fn every_action_through_the_route_resolves_once_and_reaches_only_its_owners_watch() {
     let world = World::new();
@@ -1791,6 +1794,58 @@ fn a_host_that_has_not_enabled_human_items_is_refused_on_every_route() {
     assert!(!world.cli(None, &["human-items", "list"]).status.success());
 }
 
+/// The configuration is read for every request, so a host that turns human
+/// items off under a running server is refused from its next request on, and
+/// one that turns them back on is served again — the same journal, untouched.
+#[test]
+fn a_configuration_changed_under_a_running_server_is_the_one_its_next_request_acts_under() {
+    let world = World::new();
+    let owner = "manager-reconfigured";
+    let id = world.raise(
+        owner,
+        &input(
+            owner,
+            "kept",
+            "question",
+            "low",
+            json!({"scope": "nothing"}),
+        ),
+    );
+    let server = world.serve(Some(owner));
+    assert_eq!(
+        ids(&items(&http::get(server.address, "/api/human-items"))),
+        std::slice::from_ref(&id)
+    );
+    let path = world.base().join("config/onepipeline/config.yaml");
+    let enabled = std::fs::read_to_string(&path).expect("the configuration");
+    std::fs::write(&path, enabled.replace("enabled: true", "enabled: false"))
+        .expect("disable human items");
+    error(
+        &http::get(server.address, "/api/human-items"),
+        503,
+        "human_items_unavailable",
+    );
+    error(
+        &http::post(
+            server.address,
+            &format!("/api/human-items/{id}/answer"),
+            r#"{"text":"x"}"#,
+        ),
+        503,
+        "human_items_unavailable",
+    );
+    std::fs::write(&path, &enabled).expect("enable human items again");
+    assert_eq!(
+        ids(&items(&http::get(server.address, "/api/human-items"))),
+        std::slice::from_ref(&id)
+    );
+    assert_eq!(
+        world.stored(&id)["state"],
+        "open",
+        "the refused answer wrote nothing"
+    );
+}
+
 /// What each human-item route served from the live engine, held to the
 /// goldens `tests/contract.rs` maps to the route table and reconciles with the
 /// engine's own types. Timestamps are the clock's and are pinned before the
@@ -1889,7 +1944,7 @@ fn every_human_item_route_serves_the_payload_its_golden_pins() {
     }
 }
 
-/// Every timestamp and tracker reference the clock or the board chose, pinned.
+/// Every timestamp the clock chose, pinned.
 fn pin_clock(value: &mut Value) {
     match value {
         Value::Object(map) => {

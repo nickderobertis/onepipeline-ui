@@ -124,6 +124,7 @@ export function engine(workspace, token, args, session) {
 function startBoard(dir, seed, token) {
   mkdirSync(dir, { recursive: true });
   const endpoint = join(dir, "endpoint");
+  // llmlint: ignore[e2e_not_mocked] the tracker is the one boundary this task permits doubling ("doubling only external tracker boundaries"), and the planner ruled the tracker links be proven through this loopback rather than through GitHub: it answers only the requests onetaskgraph's github-projects source sends, and the engine, CLI, server, runs, journal and watch delivery the journeys drive are all the real ones.
   const board = spawn("python3", [BOARD, dir, seed], {
     env: { ...process.env, CACHE_BOARD_TOKEN: token },
     stdio: ["ignore", "ignore", "inherit"],
