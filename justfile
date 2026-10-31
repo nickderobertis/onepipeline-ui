@@ -135,18 +135,17 @@ _ensure-node-without-execve:
 _ensure-baseline:
     @bash scripts/ensure-baseline-api.sh
 
-# `dag-ui:build-api-server`: the read API the browser tier serves through. Its
-# units go to this clone's build directory, `target` (cargo's `build.build-dir`),
-# shared with every other debug build here; its binary to `target/dag-ui-api`, an
-# artifact directory no other build names, which is where `serve-fixture.mjs`
-# looks. `target/debug` is every debug build's, and on cold Linux runs the main
-# fixture found no binary there while `install-smoke` and the coverage tiers were
-# still compiling beside it (CI runs 40098290784, 41002361394, 41177320930) —
-# the move `fixture-server.ts` already steps around for the fixtures after it.
-# Build the read API into the browser tier's own artifact directory.
+# Its units go to this clone's build directory, `target` (cargo's
+# `build.build-dir`), shared with every other debug build; its binary to
+# `target/dag-ui-api`, which no other build names, so a build beside it in the
+# same Nx run cannot leave `serve-fixture.mjs` without one, as `target/debug` can.
+# Build the read API the browser tier serves through (`dag-ui:build-api-server`).
+# llmlint: ignore-block[diagnostics_error_or_absent] `_crate-lint` denies all compiler warnings over this same binary target with `clippy --all-targets -- -D warnings` whenever the crate is affected. RUSTFLAGS here would fingerprint every unit this build shares with the test tiers under a second flag set and rebuild the shared graph; the build adds no source or feature clippy did not check.
 _dag-ui-api-server:
     @cargo build --locked --quiet --bin onepipeline-api --target-dir target/dag-ui-api \
       --config 'build.build-dir="target"'
+
+# llmlint: ignore-end[diagnostics_error_or_absent]
 
 # These are test runners, not rules: their version cannot change the gate's
 # verdict, so both here and CI take the latest rather than keeping two pins that

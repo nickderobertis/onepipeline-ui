@@ -190,10 +190,7 @@ impl RunStore {
             aggregated: Arc::new(Mutex::new(HashMap::new())),
             // The directory a `onepipeline human-items` command would read its
             // configuration from, had it been run where this server was.
-            human_items: HumanItems::live(
-                root.as_path(),
-                &std::env::current_dir().unwrap_or_default(),
-            ),
+            human_items: HumanItems::live(root.as_path(), std::env::current_dir()),
         }
     }
 

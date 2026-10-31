@@ -1923,6 +1923,58 @@ fn a_configuration_changed_under_a_running_server_is_the_one_its_next_request_ac
     );
 }
 
+/// A server whose working directory was removed before it started has no
+/// directory to read the human-items configuration from. Every human-item route
+/// says so rather than reading some other directory's configuration in its
+/// place, and what the server serves beside them still answers.
+#[test]
+fn a_server_started_in_a_removed_directory_refuses_human_items_naming_why() {
+    let (workspace, runs) = fixture_run::workspace();
+    let gone = workspace.path().join("gone");
+    std::fs::create_dir(&gone).expect("a directory to start in");
+    let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
+    // The shell enters the directory, removes it, and execs the server there,
+    // which is the only way a process starts with a working directory that no
+    // longer exists.
+    let mut child = Command::new("sh")
+        .args([
+            "-c",
+            r#"cd "$1" && rmdir "$1" && exec "$2" serve --runs-root "$3" --bind 127.0.0.1:0"#,
+            "sh",
+        ])
+        .arg(&gone)
+        .arg(&binary)
+        .arg(&runs)
+        .env_remove(onepipeline_ui::cli::SESSION_ENV)
+        .env("XDG_CONFIG_HOME", workspace.path().join("config"))
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("sh runs");
+    let address = crate::serving::address_of(&mut child);
+    assert!(!gone.exists(), "the server's directory is gone");
+    let refused = error(
+        &http::get(address, "/api/human-items"),
+        503,
+        "human_items_unavailable",
+    );
+    assert!(
+        refused.contains("the directory this server was started in cannot be read"),
+        "{refused}"
+    );
+    error(
+        &http::post(
+            address,
+            "/api/human-items/hi-0000000000000000000a/answer",
+            r#"{"text":"x"}"#,
+        ),
+        503,
+        "human_items_unavailable",
+    );
+    assert_eq!(http::get(address, "/healthz").status, 200);
+    child.kill().expect("stop the server");
+    child.wait().expect("reap the server");
+}
+
 /// What each human-item route served from the live engine, held to the
 /// goldens `tests/contract.rs` maps to the route table and reconciles with the
 /// engine's own types. Timestamps are the clock's and are pinned before the

@@ -49,7 +49,9 @@ pub struct HumanItemList {
 #[derive(Debug, Clone)]
 pub(crate) struct HumanItems {
     root: PathBuf,
-    dir: PathBuf,
+    /// Where the human-items configuration is read from, or why the directory
+    /// the server was started in could not be named.
+    dir: Result<PathBuf, String>,
 }
 
 /// A write to one item, as its route's body carried it. The actor is never in
@@ -65,16 +67,26 @@ pub(crate) enum Act {
 }
 
 impl HumanItems {
-    /// The routes over the journal beneath `root`, configured from `dir`.
-    pub(crate) fn live(root: &Path, dir: &Path) -> Self {
+    /// The routes over the journal beneath `root`, configured from `dir`, or
+    /// refused with its error when there is no such directory to read.
+    pub(crate) fn live(root: &Path, dir: std::io::Result<PathBuf>) -> Self {
         Self {
             root: root.to_path_buf(),
-            dir: dir.to_path_buf(),
+            dir: dir.map_err(|err| err.to_string()),
         }
     }
 
     fn engine(&self) -> Result<Engine, ApiError> {
-        Engine::open(&self.root, &self.dir).map_err(refusal)
+        // No fallback: an empty path would read some other directory's
+        // configuration and serve its items as this host's.
+        let dir = self.dir.as_deref().map_err(|reason| {
+            ApiError::HumanItemsUnavailable(format!(
+                "the directory this server was started in cannot be read ({reason}), \
+                 so neither can the human-items configuration in it; restart the \
+                 server from a directory that exists"
+            ))
+        })?;
+        Engine::open(&self.root, dir).map_err(refusal)
     }
 
     /// Every item `session` may read that `filter` selects, in the engine's order.
