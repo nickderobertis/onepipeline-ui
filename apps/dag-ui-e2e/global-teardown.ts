@@ -31,9 +31,10 @@ async function stopServing(): Promise<void> {
   }
   if (!Number.isInteger(pid) || pid < 1 || !alive(pid)) return;
   process.kill(pid, "SIGTERM");
-  const deadline = Date.now() + 30_000;
-  while (alive(pid) && Date.now() < deadline)
-    await new Promise((resolve) => setTimeout(resolve, 50));
+  // Until it has exited: it stops on this signal, and one that did not would
+  // hold this teardown in plain sight rather than have its workspace removed
+  // while it still writes there.
+  while (alive(pid)) await new Promise((resolve) => setTimeout(resolve, 50));
 }
 
 /**

@@ -29,6 +29,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import { graphRecordsFor, SUPERVISOR_SESSION } from "./runs.mjs";
 import { thisHost } from "./this-host.mjs";
 
@@ -40,6 +41,29 @@ const ENGINE = join(
   process.platform === "win32" ? "onepipeline.exe" : "onepipeline",
 );
 const BOARD = join(REPO_ROOT, "tests", "support", "github_board.py");
+/** What `start` settles with, as far as a world reads it. */
+const settlementSchema = z.looseObject({ run_id: z.string().min(1) });
+/** The engine's mutation receipt, as far as a world reads it. */
+const receiptSchema = z.looseObject({
+  item: z.looseObject({ item: z.looseObject({ id: z.string().min(1) }) }),
+});
+/** `human-items list --json`, as far as a world reads it. */
+const listedSchema = z.array(
+  z.looseObject({
+    item: z.looseObject({ id: z.string().min(1), dedup_key: z.string() }),
+  }),
+);
+/** What a built world keeps beside itself to be served again. */
+const builtSchema = z.object({
+  token: z.string().min(1),
+  world: z.object({
+    ids: z.record(z.string(), z.string()),
+    runs: z.record(z.string(), z.string()),
+    plans: z.record(z.string(), z.string()),
+    sessions: z.array(z.string()).optional(),
+  }),
+});
+
 /** The login a manager session acts on behalf of. */
 export const USER = "operator";
 /** The session whose items the journeys never see. */
@@ -288,7 +312,7 @@ function start(workspace, token, plan) {
     .reverse()
     .find((line) => line.startsWith("{"));
   if (last === undefined) throw new Error(`start printed ${printed}`);
-  return JSON.parse(last).run_id;
+  return settlementSchema.parse(JSON.parse(last)).run_id;
 }
 
 function raise(workspace, token, session, input) {
@@ -297,12 +321,14 @@ function raise(workspace, token, session, input) {
     path,
     JSON.stringify({ schema_version: 1, approval: null, ...input }),
   );
-  const receipt = JSON.parse(
-    engine(
-      workspace,
-      token,
-      ["human-items", "raise", "--input", path],
-      session,
+  const receipt = receiptSchema.parse(
+    JSON.parse(
+      engine(
+        workspace,
+        token,
+        ["human-items", "raise", "--input", path],
+        session,
+      ),
     ),
   );
   return receipt.item.item.id;
@@ -324,15 +350,37 @@ function raiseDesign(
       approval: { board_copy: copy, key },
     }),
   );
-  const receipt = JSON.parse(
-    engine(
-      workspace,
-      token,
-      ["human-items", "raise", "--phase", "design-review", "--context", path],
-      owner.session,
+  const receipt = receiptSchema.parse(
+    JSON.parse(
+      engine(
+        workspace,
+        token,
+        ["human-items", "raise", "--phase", "design-review", "--context", path],
+        owner.session,
+      ),
     ),
   );
   return receipt.item.item.id;
+}
+
+/** The id of the item the engine raised for `run`'s human step `node`. */
+function stepItem(workspace, token, run, node) {
+  const found = listedSchema
+    .parse(
+      JSON.parse(
+        engine(workspace, token, [
+          "human-items",
+          "list",
+          "--json",
+          "--run",
+          run,
+        ]),
+      ),
+    )
+    .find(({ item }) => item.dedup_key === `run:${run}#${node}`);
+  if (found === undefined)
+    throw new Error(`the engine raised no item for ${run}'s step ${node}`);
+  return found.item.id;
 }
 
 function owner(run = null, plan = null, session = SUPERVISOR_SESSION) {
@@ -366,9 +414,7 @@ function buildQueue(workspace, token) {
   const planA = "board:plan-a";
   const runA = start(workspace, token, planA);
   const ids = {};
-  ids.region = JSON.parse(
-    engine(workspace, token, ["human-items", "list", "--json", "--run", runA]),
-  ).find(({ item }) => item.dedup_key === `run:${runA}#region`).item.id;
+  ids.region = stepItem(workspace, token, runA, "region");
   ids.build = raise(workspace, token, SUPERVISOR_SESSION, {
     dedup_key: "build-service",
     kind: "task",
@@ -542,9 +588,7 @@ function buildLong(workspace, token) {
     owner: owner(runA, planA),
     block: { scope: "work", run: runA, node: "rebase" },
   });
-  ids.prepare = JSON.parse(
-    engine(workspace, token, ["human-items", "list", "--json", "--run", runA]),
-  ).find(({ item }) => item.dedup_key === `run:${runA}#prepare`).item.id;
+  ids.prepare = stepItem(workspace, token, runA, "prepare");
   return { ids, runs: { a: runA }, plans: { a: planA } };
 }
 
@@ -596,14 +640,14 @@ export function humanItemsWorld(workspace, name) {
     );
   const at = paths(workspace);
   const built = join(workspace, BUILT);
-  const token =
-    existsSync(built) === true
-      ? JSON.parse(readFileSync(built, "utf8")).token
-      : `token-${process.pid}-${Date.now()}`;
+  const kept = existsSync(built)
+    ? builtSchema.parse(JSON.parse(readFileSync(built, "utf8")))
+    : undefined;
+  const token = kept?.token ?? `token-${process.pid}-${Date.now()}`;
   let board;
   let world;
   return {
-    persistent: existsSync(built),
+    persistent: kept !== undefined,
     build: () => {
       for (const dir of [at.runs, at.intents, at.work, at.state])
         mkdirSync(dir, { recursive: true });
@@ -611,8 +655,8 @@ export function humanItemsWorld(workspace, name) {
       const started = startBoard(at.board, at.seed, token);
       board = started.board;
       writeConfiguration(workspace, started.url);
-      if (existsSync(built)) {
-        world = JSON.parse(readFileSync(built, "utf8")).world;
+      if (kept !== undefined) {
+        world = kept.world;
         return;
       }
       writeFileSync(at.adapter, APPROVAL_AUTHORITY);
