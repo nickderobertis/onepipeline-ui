@@ -135,7 +135,8 @@ function die(message, action) {
  * `CARGO_TARGET_DIR` when the caller names another root of the same layout.
  *
  * Not `target/` itself: every debug build in an Nx run writes `target/debug`,
- * and a cold run's concurrent install left this fixture no binary there.
+ * and on cold CI runs this fixture found no binary there (what removed it was
+ * not identified).
  * `CARGO_TARGET_DIR` is how a journey points a fixture at a retained copy or an
  * unbuilt tree, resolved from the repository root as cargo would. Validated
  * rather than trusted, like every other input here: this value chooses the path

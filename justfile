@@ -137,8 +137,9 @@ _ensure-baseline:
 
 # Its units go to this clone's build directory, `target` (cargo's
 # `build.build-dir`), shared with every other debug build; its binary to
-# `target/dag-ui-api`, which no other build names, so a build beside it in the
-# same Nx run cannot leave `serve-fixture.mjs` without one, as `target/debug` can.
+# `target/dag-ui-api`, which no other build names. On cold CI runs
+# `serve-fixture.mjs` found no binary in `target/debug`, which every debug build
+# writes; what removed it was not identified.
 # Build the read API the browser tier serves through (`dag-ui:build-api-server`).
 # llmlint: ignore-block[diagnostics_error_or_absent] `_crate-lint` denies all compiler warnings over this same binary target with `clippy --all-targets -- -D warnings` whenever the crate is affected. RUSTFLAGS here would fingerprint every unit this build shares with the test tiers under a second flag set and rebuild the shared graph; the build adds no source or feature clippy did not check.
 _dag-ui-api-server:

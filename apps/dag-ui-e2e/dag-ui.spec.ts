@@ -4265,8 +4265,9 @@ function retainedApiBinary(): string {
 /**
  * Where the main fixture took its server from: the artifact directory
  * `dag-ui:build-api-server` builds into and no other build names, rather than
- * `target/debug`, which every debug build in the same Nx run writes and a cold
- * run's concurrent install left without a binary as this tier started.
+ * `target/debug`, which every debug build in the same Nx run writes and where
+ * a cold CI run's main fixture found no binary as this tier started (what
+ * removed it was not identified).
  */
 test("the main fixture serves the binary its own build step staged", () => {
   const staged = resolve(import.meta.dirname, "../../target/dag-ui-api/debug");
