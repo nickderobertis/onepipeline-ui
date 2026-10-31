@@ -64,7 +64,7 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildLoadCorpus } from "../load/corpus.mjs";
-import { FIXTURE_FACTS_NAME } from "./facts-file.ts";
+import { FIXTURE_FACTS_NAME, SERVING_PID_NAME } from "./facts-file.ts";
 import harnessBinaries from "./harness-binaries.json" with { type: "json" };
 import { humanItemsWorld } from "./human-items-world.mjs";
 import {
@@ -321,6 +321,9 @@ async function serve(workspace, port, ui, corpus) {
     `${JSON.stringify(corpus.facts(), null, 2)}\n`,
   );
 
+  // Who to stop, and wait for, before the workspace is removed: Playwright stops
+  // its web servers only after the global teardown has run.
+  writeFileSync(join(workspace, SERVING_PID_NAME), `${process.pid}\n`);
   const binary = privateBinary(serverBinary(), workspace);
   // The fixture server uses the explicit session below; a dispatch host's wake
   // promise and session belong to its own runs.
@@ -417,8 +420,10 @@ async function serve(workspace, port, ui, corpus) {
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
   return new Promise((resolveExit) => {
-    server.on("exit", (code) => {
-      corpus.cleanup?.();
+    server.on("exit", async (code) => {
+      // What the corpus started beside the server ends before this does, so
+      // whoever removes the workspace after this exits removes it whole.
+      await corpus.cleanup?.();
       resolveExit(code ?? 0);
     });
   });

@@ -114,6 +114,7 @@ def checked(seed):
         parser.error("a seed names a repository, its Status options and its issues")
     for name, held in seed["issues"].items():
         if (not isinstance(held, dict) or not SEEDED <= set(held) <= SEEDED | OPTIONAL
+                or not isinstance(held.get("blocked_by", []), list)
                 or not all(isinstance(blocker, str) and blocker in seed["issues"]
                            and blocker != name for blocker in held.get("blocked_by", []))
                 or not isinstance(held["number"], int) or isinstance(held["number"], bool)

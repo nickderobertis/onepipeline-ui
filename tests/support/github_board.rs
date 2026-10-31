@@ -168,6 +168,28 @@ fn the_board_refuses_a_seed_github_could_not_answer_before_listening() {
             "metadata": {}, "status": "Todo", "state": "OPEN", "reason": null,
             "parent": {"id": "plan"}}),
         ),
+        // Blocked by something that is no list of the seed's other issues: a
+        // bare name, a mapping, an issue the seed does not hold, and itself.
+        seed(
+            serde_json::json!({"number": 7, "title": "issue 7", "content": "",
+            "metadata": {}, "status": "Todo", "state": "OPEN", "reason": null,
+            "parent": null, "blocked_by": "seven"}),
+        ),
+        serde_json::json!({"repository": "owner/service", "options": ["Todo"],
+            "issues": {"seven": issue("OPEN", None),
+                "eight": {"number": 8, "title": "issue 8", "content": "", "metadata": {},
+                    "status": "Todo", "state": "OPEN", "reason": null, "parent": null,
+                    "blocked_by": {"seven": true}}}}),
+        seed(
+            serde_json::json!({"number": 7, "title": "issue 7", "content": "",
+            "metadata": {}, "status": "Todo", "state": "OPEN", "reason": null,
+            "parent": null, "blocked_by": ["elsewhere"]}),
+        ),
+        seed(
+            serde_json::json!({"number": 7, "title": "issue 7", "content": "",
+            "metadata": {}, "status": "Todo", "state": "OPEN", "reason": null,
+            "parent": null, "blocked_by": ["seven"]}),
+        ),
         // A seed that is not JSON at all.
         Value::String("{not json".to_owned()),
     ] {

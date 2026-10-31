@@ -20,7 +20,13 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { graphRecordsFor, SUPERVISOR_SESSION } from "./runs.mjs";
@@ -124,11 +130,16 @@ export function engine(workspace, token, args, session) {
 function startBoard(dir, seed, token) {
   mkdirSync(dir, { recursive: true });
   const endpoint = join(dir, "endpoint");
+  // A world served again still holds the endpoint its last board published,
+  // which names a port nothing listens on any more: wait for this board's own.
+  rmSync(endpoint, { force: true });
   // llmlint: ignore[e2e_not_mocked] GitHub is the external tracker these journeys may double; the loopback answers only the requests the github-projects source sends, and everything of onepipeline under test is real.
   const board = spawn("python3", [BOARD, dir, seed], {
     env: { ...process.env, CACHE_BOARD_TOKEN: token },
     stdio: ["ignore", "ignore", "inherit"],
   });
+  // However this process ends, the board it started ends with it.
+  process.on("exit", () => board.kill("SIGKILL"));
   const deadline = Date.now() + 10_000;
   while (!existsSync(endpoint)) {
     if (board.exitCode !== null) throw new Error("the loopback board exited");
@@ -632,6 +643,18 @@ export function humanItemsWorld(workspace, name) {
     cwd: at.work,
     environment: worldEnvironment(workspace, token),
     removeEnvironment: foreignVariables(),
-    cleanup: () => board?.kill("SIGTERM"),
+    // Answers once the board has exited, so nothing of it writes into the
+    // workspace after its server is gone.
+    cleanup: () =>
+      new Promise((resolveExit) => {
+        if (
+          board === undefined ||
+          board.exitCode !== null ||
+          board.signalCode !== null
+        )
+          return resolveExit();
+        board.once("exit", () => resolveExit());
+        board.kill("SIGTERM");
+      }),
   };
 }
