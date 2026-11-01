@@ -7,9 +7,11 @@
 #   release-tail   the last step of release.yml's `publish`, reporting only:
 #                  `onebudgetspec check budgets.yaml --label release-tail`, after
 #                  the Release is settled. The seven GitHub figures, taken by
-#                  scripts/actions-budget-figures.sh (copied verbatim from
-#                  dero-skills' create-repo) through onevcs's read-only host
-#                  queries.
+#                  scripts/actions-budget-figures.sh (copied byte for byte
+#                  from dero-skills' create-repo at d12c819, version 10, so its
+#                  header is the source's own) through onevcs's read-only host
+#                  queries. The CD figures leave out `CI cache`, the main-push
+#                  cache warmer, which delivers nothing to a release.
 #   host-variable  `just gate` on a development machine, as a warning: the
 #                  recipe records its own start and end, then checks this label.
 #
