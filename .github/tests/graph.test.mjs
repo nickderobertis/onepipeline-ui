@@ -295,14 +295,15 @@ test("Mac PR job contains the original cross and installed-binary proofs", () =>
     .join("\n");
   assert.match(commands, /just ci-test-macos/);
   // The recipe is `scripts/ci-job.sh test-macos`: `check-cross`'s tiers and the
-  // documented install, which `_crate-install-smoke` runs and smoke-tests.
+  // documented install, which `_crate-install-build` builds and
+  // `_crate-install-smoke` smoke-tests.
   const job = readFileSync("scripts/ci-job.sh", "utf8");
   assert.match(
     job,
     /test-macos\) targets="format-check,lint,test-quick,install-smoke" ;;/,
   );
   const justfile = readFileSync("justfile", "utf8");
-  const install = justfile.slice(justfile.indexOf("_crate-install-smoke:"));
+  const install = justfile.slice(justfile.indexOf("_crate-install-build:"));
   assert.match(install, /cargo install --path \. --locked/);
   assert.match(install, /scripts\/smoke-published.sh/);
 });

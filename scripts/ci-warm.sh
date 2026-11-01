@@ -11,13 +11,15 @@
 # compile it leaves out is one each pull request pays for in full.
 #
 # Each line names its source — the justfile recipe, the Nx target or the test
-# that makes that compile — and `--plan` prints them, source then command, one
-# per line, without compiling anything. `.github/tests/ci-warm.test.mjs` reads
-# that plan against every task the four jobs reach through the real Nx graph and
-# fails when a compile is missing here, differs from its source, or is here with
-# no source at all. The one change a line makes to its source is to stop before
-# running: `--no-run` for nextest, a filter matching no test for the instrumented
-# tiers.
+# that makes that compile — and runs that source itself wherever the source only
+# compiles. Where it would also run tests, the line is the source's cargo command
+# stopped before running: `--no-run` for nextest, a filter matching no test for
+# the instrumented tiers; and a compile a test makes inside a journey is spelled
+# as that test spells it. `--plan` prints the lines, source then command, one per
+# line, without compiling anything, and `.github/tests/ci-warm.test.mjs` reads
+# that plan against every task the four jobs reach through the real Nx graph:
+# a compile missing here, differing from its source, or here with no source
+# fails it.
 #
 #   linux    `lint` and `test-linux`: clippy (the crate's and the build-cache
 #            test's), the MSRV check and the docs with warnings denied; the test
@@ -34,14 +36,16 @@
 # Usage:
 #   ci-warm.sh linux|windows|macos [--plan]
 #
-# Exit 0: everything compiled (or, with --plan, was listed). Non-zero: a compile
-# failed — main does not build, which is what this job exists to catch now that
-# no push to main runs the tests — or the call was refused (2).
+# Quiet when every compile succeeds; a compile that fails is named after its own
+# output. Exit 0: everything compiled (or, with --plan, was listed). Non-zero: a
+# compile failed — main does not build, which is what this job exists to catch
+# now that no push to main runs the tests — or the call was refused (2).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || {
   echo "ci-warm: cannot enter the repository root $ROOT" >&2
+  echo "ACTION: run this from a checkout whose directories are readable" >&2
   exit 1
 }
 
@@ -76,48 +80,30 @@ compile() {
     printf '\n'
     return
   fi
-  echo "ci-warm: $source: $*"
-  env "$@"
+  env "$@" || {
+    echo "ci-warm: the compile $source makes failed (its output is above): $*" >&2
+    echo "ACTION: fix the build error above; '$*' reproduces it" >&2
+    exit 1
+  }
 }
 
-msrv="$(sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml)"
-[ -n "$msrv" ] || {
-  echo "ci-warm: Cargo.toml declares no rust-version" >&2
-  exit 1
-}
-# `_crate-install-smoke`'s build directory: the shared `target` on Linux, one of
-# its own elsewhere (the justfile says why).
-install_build_dir="target/install-smoke/build"
-[ "$os" != linux ] || install_build_dir="target"
-
-compile "just _crate-lint" \
-  cargo clippy --all-targets --locked --quiet -- -D warnings
-compile "nx dag-ui-build-cache:lint" \
-  cargo clippy --locked --quiet --test build-cache -- -D warnings
+compile "just _crate-lint" just _crate-lint
+compile "nx dag-ui-build-cache:lint" bash scripts/nx.sh run dag-ui-build-cache:lint --skip-nx-cache
 # Every tier's test binaries, uninstrumented: `--no-run` compiles every binary
 # the default collection reaches, the union of the tiers' filters, so this one
 # line is `_tier-test`'s every profile and the build-cache test's.
-compile "just _tier-test" \
-  cargo nextest run --locked --no-run
-compile "just _crate-install-smoke" \
-  cargo install --path . --locked --debug --quiet --root target/install-smoke \
-  --target-dir target/install-smoke/target --config "build.build-dir=\"$install_build_dir\""
+compile "just _tier-test" cargo nextest run --locked --no-run
+compile "just _crate-install-build" just _crate-install-build
 
 if [ "$os" = linux ]; then
-  compile "just _crate-msrv" \
-    RUSTFLAGS="-D warnings" cargo +"$msrv" check --locked --all-targets --quiet
-  compile "just _crate-doc" \
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked --quiet
+  compile "just _crate-msrv" just _crate-msrv
+  compile "just _crate-doc" just _crate-doc
   compile "just _tier-test-covered" \
     cargo llvm-cov nextest --locked --no-report -E 'none()' --no-tests=pass
-  compile "nx dag-ui:build-api-server" \
-    cargo build --locked --quiet --bin onepipeline-api --target-dir target/dag-ui-api
+  compile "nx dag-ui:build-api-server" bash scripts/nx.sh run dag-ui:build-api-server --skip-nx-cache
   compile "test tests/e2e/linked_report.rs" \
     cargo auditable build --offline --locked --bin onepipeline-api --config 'build.build-dir="target"' --target-dir target/auditable
   # The wheel smoke builds into target/wheel-smoke and the release rehearsal into
   # its own --out; cargo's target directory is `target/wheel-<target>` for both.
-  compile "just _crate-wheel-smoke" \
-    just wheel-linux x86_64-unknown-linux-gnu target/wheel-smoke
+  compile "just _crate-wheel-smoke" just wheel-linux x86_64-unknown-linux-gnu target/wheel-smoke
 fi
-
-[ -n "$plan" ] || echo "ci-warm: $os: ok"

@@ -65,6 +65,12 @@ if (process.env.GH_REPLAY_LOG)
   appendFileSync(process.env.GH_REPLAY_LOG, `${JSON.stringify({ request })}\n`);
 
 const errorStatus = process.env.GH_REPLAY_STATUS;
+if (errorStatus && !/^[45]\d\d$/.test(errorStatus)) {
+  err(
+    `gh-replay: GH_REPLAY_STATUS must be an HTTP error status (400-599), got: ${errorStatus}\n`,
+  );
+  process.exit(2);
+}
 if (errorStatus) {
   out(
     `HTTP/2.0 ${errorStatus} Error\r\nContent-Type: application/json; charset=utf-8\r\n\r\n` +

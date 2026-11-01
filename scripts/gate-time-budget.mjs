@@ -39,6 +39,9 @@ if (
   typeof invocation !== "string" ||
   !Number.isSafeInteger(started_at_ms) ||
   !Number.isSafeInteger(ended_at_ms) ||
+  // A Date holds at most 8.64e15 ms either side of the epoch.
+  Math.abs(started_at_ms) > 8.64e15 ||
+  Math.abs(ended_at_ms) > 8.64e15 ||
   ended_at_ms < started_at_ms
 )
   fail(`${path} is not a gate record scripts/gate-time.sh wrote`);

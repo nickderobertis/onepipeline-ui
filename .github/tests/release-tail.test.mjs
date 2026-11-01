@@ -59,8 +59,6 @@ const allWorkflows = () =>
       parse(readFileSync(join(ROOT, ".github/workflows", file), "utf8")),
     ]);
 
-// --- The step, as release.yml declares it ---------------------------------
-
 export function tailStepProblems(document, workflows = []) {
   const problems = [];
   const publish = document?.jobs?.publish;
@@ -203,8 +201,6 @@ test("a tail step moved, read, softened or installed at another onevcs is refuse
   );
 });
 
-// --- The recordings, read independently of the script ---------------------
-
 function recordings() {
   return readdirSync(FIXTURES)
     .filter((file) => file.endsWith(".json"))
@@ -322,8 +318,6 @@ export function expectedFigures(release, now, runner) {
     "onepipeline-ui-release-cycle-time": Math.max(...cycle),
   };
 }
-
-// --- Running the step ------------------------------------------------------
 
 const scratch = mkdtempSync(
   join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(), "release-tail-"),

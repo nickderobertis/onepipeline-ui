@@ -1,24 +1,19 @@
-//! Which tier of the gate a CI build owes: `scripts/ci-tier.sh`, and the ci.yml
-//! wiring that obeys its answer.
+//! Which tier of the gate a CI build owes: `scripts/ci-tier.sh`, and what
+//! `test-linux`'s recipe plans on its answer.
 //!
 //! Releases here batch through release-plz's release pull request, so the broader
 //! tier — one full `just check` over every project — runs on that pull request
 //! and every other build runs the affected tier. The script is the one place a
 //! build is told which side it is on; these journeys run it with the event a
 //! release pull request, an ordinary pull request and a push to `main` each set,
-//! and read the workflow for the job that acts on what it said: `test-linux`,
-//! which sweeps every project on the broader tier. A sweep wired to nothing
-//! would look fine from inside a single run.
-//!
-//! The suppressions review comment is held here too: a step of `lint` that
-//! comments and decides nothing.
+//! and plan the sweep its answer selects. `.github/tests/ci-shape.test.mjs` runs
+//! the workflow's own tier step and resolves the recipe step it feeds, so a sweep
+//! wired to nothing fails there.
 #![cfg(unix)]
 
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
-
-use crate::workflow::job_block;
 
 /// The branch release-plz opens its release pull request from: its default
 /// prefix and a timestamp.
@@ -167,120 +162,55 @@ fn release_plz_names_its_branch_the_way_the_script_expects() {
     );
 }
 
+/// The sweep, as `test-linux`'s recipe plans it on the tier the script answers
+/// for a release pull request: `scripts/ci-job.sh --plan` reads Nx's own task
+/// graph and runs none of it. Every project's `check` is in it, which is the
+/// whole gate over every project. How ci.yml hands the answer to the recipe is
+/// resolved from the workflow itself by `.github/tests/ci-shape.test.mjs`.
 #[test]
-fn the_sweep_runs_on_what_the_script_answers_inside_test_linux() {
-    let job = job_block("ci.yml", "test-linux");
-    let tier = job
-        .find("run: echo \"tier=$(bash scripts/ci-tier.sh)\" >> \"$GITHUB_OUTPUT\"")
-        .unwrap_or_else(|| panic!("test-linux does not ask the script for its tier:\n{job}"));
-    let sweep = job
-        .find("run: just ci-test-linux --tier \"${{ steps.tier.outputs.tier }}\"")
-        .unwrap_or_else(|| {
-            panic!("test-linux does not run its recipe on the script's answer:\n{job}")
-        });
+fn the_release_pull_request_tier_plans_every_projects_check() {
+    let tier = answer(&[
+        ("GITHUB_EVENT_NAME", "pull_request"),
+        ("GITHUB_HEAD_REF", RELEASE_PR_BRANCH),
+    ]);
+    let output = Command::new("bash")
+        .args(["scripts/ci-job.sh", "test-linux", "--tier", &tier, "--plan"])
+        .current_dir(repo_root())
+        .output()
+        .expect("bash is on PATH");
     assert!(
-        tier < sweep,
-        "test-linux runs its recipe before asking its tier"
+        output.status.success(),
+        "ci-job.sh could not plan the sweep:\n{}",
+        stderr(&output)
     );
-    // The broader tier is the sweep: `just check`'s tiers over every project.
-    let script = fs::read_to_string(repo_root().join("scripts/ci-job.sh")).expect("ci-job.sh");
-    assert!(
-        script.contains("bash scripts/nx.sh run-many -t \"$targets\""),
-        "the broader tier no longer runs every project"
-    );
-    // The four jobs are the whole of ci.yml: no separate sweep, and no verdict
-    // job ruling on others for branch protection to read.
-    let workflow =
-        fs::read_to_string(repo_root().join(".github/workflows/ci.yml")).expect("ci.yml reads");
-    let jobs: Vec<&str> = workflow
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let planned: Vec<&str> = stdout
         .lines()
-        .skip_while(|line| *line != "jobs:")
-        .skip(1)
-        .filter_map(|line| line.strip_prefix("  "))
-        .filter(|inner| !inner.starts_with([' ', '#']) && inner.ends_with(':'))
-        .map(|inner| inner.trim_end_matches(':'))
+        .find_map(|line| line.split_once(" task(s): ").map(|(_, tasks)| tasks))
+        .expect("ci-job.sh names the tasks it planned")
+        .split_whitespace()
         .collect();
-    assert_eq!(jobs, ["lint", "test-linux", "test-windows", "test-macos"]);
-}
-
-#[test]
-fn no_push_re_runs_the_pull_request_checks() {
-    let workflow =
-        fs::read_to_string(repo_root().join(".github/workflows/ci.yml")).expect("ci.yml reads");
-    let triggers: Vec<&str> = workflow
-        .lines()
-        .skip_while(|line| *line != "on:")
-        .skip(1)
-        .take_while(|line| line.starts_with(' ') || line.is_empty() || line.starts_with('#'))
-        .filter(|line| {
-            line.starts_with("  ")
-                && !line.starts_with("   ")
-                && !line.trim_start().starts_with('#')
-        })
-        .map(str::trim)
-        .collect();
-    assert_eq!(
-        triggers,
-        ["pull_request:"],
-        "ci.yml runs on more than pull requests: the warmer, not a push re-run, catches a merge that breaks main"
-    );
-    assert!(
-        workflow.contains("cancel-in-progress: true"),
-        "a pull request's superseded run is not cancelled"
-    );
-}
-
-#[test]
-fn the_suppressions_comment_is_a_step_of_lint_and_gates_nothing() {
-    let lint = job_block("ci.yml", "lint");
-    let step = lint
-        .split("\n      - ")
-        .find(|step| step.contains("uses: nickderobertis/notignored@v0"))
-        .unwrap_or_else(|| panic!("lint does not run notignored:\n{lint}"));
-    assert!(
-        step.contains(
-            "if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !cancelled()"
-        ),
-        "the suppressions comment does not skip a fork's pull request, whose token cannot comment:\n{step}"
-    );
-    assert!(
-        lint.contains("pull-requests: write") && lint.contains("fetch-depth: 0"),
-        "lint cannot write the comment or diff against the base branch:\n{lint}"
-    );
-    assert!(
-        !repo_root()
-            .join(".github/workflows/notignored.yml")
-            .exists(),
-        "notignored.yml is back, running a second job on every pull request"
-    );
-}
-
-#[test]
-fn lifting_a_draft_does_not_rerun_the_required_checks() {
-    // A draft's runs report on its head commit, and lifting it changes no
-    // commit, so those runs are the ones the merge path reads. Triggering on
-    // `ready_for_review` would only run every required check a second time.
-    // visual-docs.yml runs on a pull request only once it closes, to delete its
-    // preview; ci.yml carries every check a pull request owes.
-    for file in ["ci.yml"] {
-        let workflow = fs::read_to_string(repo_root().join(".github/workflows").join(file))
-            .expect("workflow reads");
-        let types = workflow
-            .lines()
-            .skip_while(|line| *line != "  pull_request:")
-            .skip(1)
-            .take_while(|line| line.starts_with("    "))
-            .find_map(|line| line.trim().strip_prefix("types: "))
-            .unwrap_or_else(|| panic!("{file} names no pull_request types"));
-        for kind in ["opened", "synchronize", "reopened"] {
-            assert!(
-                types.contains(kind),
-                "{file} no longer runs on a pull request's `{kind}` (types: {types})"
-            );
-        }
+    let listed = Command::new("bash")
+        .args([
+            "scripts/nx.sh",
+            "show",
+            "projects",
+            "--with-target",
+            "check",
+            "--json",
+        ])
+        .current_dir(repo_root())
+        .output()
+        .expect("bash is on PATH");
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    let projects: Vec<String> =
+        serde_json::from_slice(&listed.stdout).expect("Nx lists the projects as JSON");
+    assert!(!projects.is_empty(), "no project declares a check");
+    for project in &projects {
+        let task = format!("{project}:check");
         assert!(
-            !types.contains("ready_for_review"),
-            "{file} re-runs when a draft is lifted, repeating its draft's runs (types: {types})"
+            planned.contains(&task.as_str()),
+            "the release pull request's sweep does not run {task}: {planned:?}"
         );
     }
 }

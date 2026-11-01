@@ -264,12 +264,16 @@ ci-warm-macos:
 # next tier's `cargo test --no-run` re-links `target/debug/onepipeline-api.exe`
 # while the e2e tier is executing it, which Windows refuses ("Access is denied",
 # CI run 40115634774). There the install builds in a directory of its own.
-# Install this revision the documented way and smoke-test the installed binary.
 # llmlint: ignore-block[diagnostics_error_or_absent] `_crate-lint` denies all compiler warnings over this same dev build with `clippy --all-targets -- -D warnings` in every CI selection that runs this install. RUSTFLAGS here would rebuild its shared units under another flag set; the install adds no source or feature clippy did not check.
-_crate-install-smoke:
+# Build the documented install into target/install-smoke, smoke-testing nothing.
+_crate-install-build:
     @{{packaging-priority}} cargo install --path . --locked --debug --quiet --root target/install-smoke \
       --target-dir target/install-smoke/target \
       --config 'build.build-dir="{{ if os() == "linux" { "target" } else { "target/install-smoke/build" } }}"'
+
+# Install this revision the documented way and smoke-test the installed binary.
+_crate-install-smoke:
+    @just _crate-install-build
     @bin="$(cd target/install-smoke/bin && pwd)" \
       || { echo "cargo install wrote no target/install-smoke/bin: $(ls target/install-smoke 2>&1)" >&2; exit 1; }; \
       PATH="$bin:$PATH" bash scripts/smoke-published.sh --command "$bin/onepipeline-api" \

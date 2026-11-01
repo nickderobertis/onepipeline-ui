@@ -15,11 +15,25 @@
 // workflows to the ones this repository's CI/CD shape names, with release-plz.yml
 // unchanged.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
-import { resolveWorkflow, triggered } from "../workflow-graph.mjs";
+import {
+  evaluate,
+  interpolate,
+  resolveWorkflow,
+  triggered,
+} from "../workflow-graph.mjs";
 
 const load = () =>
   readdirSync(".github/workflows")
@@ -241,4 +255,76 @@ test("another workflow or job on a pull request or the release commit, or a lost
       problems.some((p) => expected.test(p)),
       `${expected}: ${problems}`,
     );
+});
+
+test("lifting a draft starts nothing: its runs already report on its head commit", () => {
+  assert.deepEqual(started(load(), pr("ready_for_review")), []);
+});
+
+// The suppressions comment, a step of `lint`, as its own condition decides: on
+// a same-repository pull request and never a fork's, whose token cannot comment.
+test("the suppressions comment runs on a same-repository pull request and skips a fork's", () => {
+  const lint = load().find((w) => w.file === "ci.yml").document.jobs.lint;
+  const step = lint.steps.find((s) =>
+    (s.uses ?? "").startsWith("nickderobertis/notignored@"),
+  );
+  assert.ok(step, "lint does not run notignored");
+  const runs = (repository) =>
+    evaluate(step.if, {
+      github: {
+        event_name: "pull_request",
+        repository: "nickderobertis/onepipeline-ui",
+        event: { pull_request: { head: { repo: { full_name: repository } } } },
+      },
+    }).value;
+  assert.equal(runs("nickderobertis/onepipeline-ui"), true);
+  assert.equal(runs("fork/onepipeline-ui"), false);
+  assert.equal(lint.permissions["pull-requests"], "write");
+});
+
+// test-linux's tier step, run as Actions runs it, and the recipe step it feeds,
+// resolved with that step's real output.
+test("test-linux runs its recipe on the tier its own step asks scripts/ci-tier.sh for", () => {
+  const steps = load().find((w) => w.file === "ci.yml").document.jobs[
+    "test-linux"
+  ].steps;
+  const tierStep = steps.findIndex((s) => s.id === "tier");
+  const recipe = steps.findIndex((s) =>
+    /^just ci-test-linux\b/.test(s.run ?? ""),
+  );
+  assert.ok(
+    tierStep >= 0 && recipe > tierStep,
+    "test-linux asks its tier after running its recipe",
+  );
+  const dir = mkdtempSync(join(tmpdir(), "ci-tier-"));
+  try {
+    for (const [headRef, tier] of [
+      ["release-plz-2026-11-01T03-00-00Z", "broader"],
+      ["feature", "affected"],
+    ]) {
+      const output = join(dir, `output-${tier}`);
+      writeFileSync(output, "");
+      execFileSync("bash", ["-eo", "pipefail", "-c", steps[tierStep].run], {
+        env: {
+          ...process.env,
+          GITHUB_EVENT_NAME: "pull_request",
+          GITHUB_HEAD_REF: headRef,
+          GITHUB_OUTPUT: output,
+        },
+      });
+      const outputs = Object.fromEntries(
+        readFileSync(output, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => line.split("=")),
+      );
+      assert.equal(outputs.tier, tier);
+      assert.equal(
+        interpolate(steps[recipe].run, { steps: { tier: { outputs } } }).trim(),
+        `just ci-test-linux --tier "${tier}"`,
+      );
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

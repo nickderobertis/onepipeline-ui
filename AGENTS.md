@@ -151,9 +151,8 @@ the producer: on every push to `main` one build-only job per OS
 and saves it under the key they restore, with the sibling CLI and the base
 server. Its compile list is held to the tasks the four jobs reach in the real Nx
 graph (`.github/tests/ci-warm.test.mjs`), so a recipe whose cargo arguments or
-target directory change must change its warm line too. Its macOS job skips the
-commit merging release-plz's pull request, which is why the macOS
-runs-per-change budget (`.github/budgets.yaml`) is 3.
+target directory change must change its warm line too. Its macOS job is the one
+Mac run a merge adds, which the macOS runs-per-change budget accounts for.
 
 **`.tools/` holds a second clone-local binary, and it is the server this branch
 forked from.** `tests/e2e/baseline.rs` asks whether every field the base commit
@@ -230,22 +229,18 @@ fans one uniformly-named target across all of them.
   file installed and run before it publishes, and read back from its registry
   after.
 - **Eight budgets hold CI, CD and the local gate to their lines** (root
-  `budgets.yaml`, read from telemetry, never measured fresh). Seven are labelled
-  `release-tail` and are reported by `publish`'s last step, after the Release is
-  settled: each CI job's and each of the six CD jobs' longest time (1800 s), a
-  change's checks plus merge to release (5400 s), the jobs a pull request's last
-  commit runs (4) and a release's CD runs (6), and the GitHub reads the tail
-  makes for the release (6) and per pull request (2). An over figure turns that
-  step red with its breakdown and nothing reads its result — it never blocks,
-  demotes or reverts a release. They read GitHub only through `onevcs host` at
-  the release `publish` installs, via `scripts/actions-budget-figures.sh`, a copy
-  of dero-skills' create-repo source edited only there; the CD figures leave out
-  `CI cache`, which delivers nothing. `onepipeline-ui-gate-time` (1800 s,
-  `host-variable`) is `just gate`'s wall clock: the recipe runs its whole body
-  inside `scripts/gate-time.sh`, which records the run and checks that label —
-  over is a warning, an unmeasurable budget fails the gate. At pull-request time
-  `timeout-minutes` is what fails a job that runs over. Any other check of the
-  root file excludes both labels.
+  `budgets.yaml`, read from telemetry). The seven `release-tail` ones —
+  `onepipeline-ui-ci-check-time`, `-cd-job-time`, `-release-cycle-time`,
+  `-ci-job-count`, `-cd-job-count`, `-release-read-requests` and
+  `-pr-read-requests` — are reported by `publish`'s last step and read by
+  nothing, so an overrun turns that step red and never blocks, demotes or reverts
+  a release. `onepipeline-ui-gate-time` (`host-variable`) is checked by `just
+  gate` itself, whose whole body runs inside `scripts/gate-time.sh`: over is a
+  warning, an unmeasurable budget fails the gate. At pull-request time a job's
+  `timeout-minutes` is the line; any other check of the root file excludes both
+  labels. The figures reach GitHub only through `onevcs host`, via
+  `scripts/actions-budget-figures.sh`, a copy of dero-skills' create-repo source
+  that is edited only there.
 - **Each release job's work is one recipe, and two rules hold the release
   together** (`scripts/release.mjs` says what each phase does): every target is
   compiled **once**, and the archive, wheel and npm package are packed from that

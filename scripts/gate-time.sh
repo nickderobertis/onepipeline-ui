@@ -36,7 +36,7 @@ budgets="${ONEPIPELINE_UI_GATE_TIME_BUDGETS:-$ROOT/budgets.yaml}"
 check_budget() {
   local budget_status=0 output over
   output="$(cd "$(dirname "$budgets")" && ONEPIPELINE_UI_GATE_TIME_RECORD="$record" \
-    "$ROOT/node_modules/.bin/onebudgetspec" check "$(basename "$budgets")" --label host-variable 2>&1)" || budget_status=$?
+    "$ROOT/node_modules/.bin/onebudgetspec" check "$(basename "$budgets")" --label host-variable)" || budget_status=$?
   printf '%s\n' "$output"
   case "$budget_status" in
     0) ;;

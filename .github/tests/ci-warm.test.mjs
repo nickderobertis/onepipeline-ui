@@ -188,8 +188,6 @@ test("a warm key no pull-request job restores, or a pull-request job saving, is 
   }
 });
 
-// --- What each job compiles, from the real sources ------------------------
-
 // Shell words, enough for the justfile's and the plan's command lines: quotes
 // group and are removed, and nothing is expanded.
 export function words(line) {
@@ -327,13 +325,13 @@ const just = (args) =>
 // this host, Linux. The install's build directory is the one expression that
 // differs by OS, so for the others it is read off the recipe's own text.
 function installBuildDir(os) {
-  const text = just(["--show", "_crate-install-smoke"]);
+  const text = just(["--show", "_crate-install-build"]);
   const match = text.match(
     /build\.build-dir="\{\{ if os\(\) == "linux" \{ "([^"]+)" \} else \{ "([^"]+)" \} \}\}"/,
   );
   assert.ok(
     match,
-    "_crate-install-smoke no longer chooses its build directory by OS",
+    "_crate-install-build no longer chooses its build directory by OS",
   );
   return os === "linux" ? match[1] : match[2];
 }
@@ -372,7 +370,7 @@ function compilesIn(text, os, source, seen = new Set()) {
     }
     let signature = compileSignature(tokens);
     if (!signature) continue;
-    if (os !== "linux" && source === "just _crate-install-smoke")
+    if (os !== "linux" && source === "just _crate-install-build")
       signature = signature.replace(
         `build.build-dir="${installBuildDir("linux")}"`,
         `build.build-dir="${installBuildDir(os)}"`,
@@ -460,7 +458,8 @@ export function jobCompiles(job, os) {
   return found;
 }
 
-// The warmer's plan, as its script prints it.
+// The warmer's plan, as its script prints it, each line with the compiles it
+// makes: a recipe or an Nx target the line runs is read the way a job's task is.
 export function warmPlan(os) {
   return execFileSync("bash", ["scripts/ci-warm.sh", os, "--plan"], {
     encoding: "utf8",
@@ -469,7 +468,26 @@ export function warmPlan(os) {
     .split("\n")
     .map((line) => {
       const [source, command] = line.split("\t");
-      return { source, command, signature: compileSignature(words(command)) };
+      const tokens = words(command);
+      let signatures;
+      if (tokens[0] === "just" && tokens[1] !== "wheel-linux")
+        signatures = recipeCompiles(tokens[1], tokens.slice(2), os).map(
+          (c) => c.signature,
+        );
+      else if (
+        tokens[0] === "bash" &&
+        tokens[1] === "scripts/nx.sh" &&
+        tokens[2] === "run"
+      ) {
+        const [name, target] = tokens[3].split(":");
+        const options = project(name).targets?.[target]?.options ?? {};
+        signatures = compilesIn(
+          String(options.command ?? ""),
+          os,
+          `nx ${tokens[3]}`,
+        ).map((c) => c.signature);
+      } else signatures = [compileSignature(tokens)].filter(Boolean);
+      return { source, command, signatures };
     });
 }
 
@@ -495,7 +513,7 @@ export function warmDriftProblems(plans, compilesByJob) {
   const seen = new Set();
   for (const [os, { jobs }] of Object.entries(WARMED)) {
     const plan = plans[os];
-    const warm = new Set(plan.map((line) => line.signature));
+    const warm = new Set(plan.flatMap((line) => line.signatures));
     const needed = new Set();
     for (const job of jobs)
       for (const compile of compilesByJob[job]) {
@@ -506,7 +524,7 @@ export function warmDriftProblems(plans, compilesByJob) {
           );
       }
     for (const line of plan) {
-      if (line.signature === null) {
+      if (line.signatures.length === 0) {
         problems.push(
           `ci-warm.sh ${os} runs '${line.command}', which compiles nothing`,
         );
@@ -516,10 +534,11 @@ export function warmDriftProblems(plans, compilesByJob) {
         problems.push(...inTestProblems(line));
         continue;
       }
-      if (!needed.has(line.signature))
-        problems.push(
-          `ci-warm.sh ${os} compiles '${line.signature}' (${line.source}), which no ${jobs.join(" or ")} task compiles`,
-        );
+      for (const signature of line.signatures)
+        if (!needed.has(signature))
+          problems.push(
+            `ci-warm.sh ${os} compiles '${signature}' (${line.source}), which no ${jobs.join(" or ")} task compiles`,
+          );
     }
   }
   return problems.filter((p) => !seen.has(p) && seen.add(p));
@@ -562,14 +581,16 @@ test("a compile the warmer drops, changes or invents is refused", () => {
         ? {
             ...line,
             command: line.command.replace(from, to),
-            signature: line.signature.replace(from, to),
+            signatures: line.signatures.map((signature) =>
+              signature.replace(from, to),
+            ),
           }
         : line,
     ),
   });
   const cases = [
     [
-      without("windows", "just _crate-install-smoke"),
+      without("windows", "just _crate-install-build"),
       /^test-windows compiles 'cargo install --path \. .*target\/install-smoke\/build.*which ci-warm\.sh windows does not$/,
     ],
     [

@@ -652,6 +652,7 @@ fn every_leg_running_the_gate_checks_out_the_history_it_resolves() {
             .into_owned();
         let text = fs::read_to_string(&workflow)
             .unwrap_or_else(|error| panic!("{}: {error}", workflow.display()));
+        // llmlint: ignore-block[tests_mirror_real_usage] what this guards is a hosted runner's checkout depth, which no local run can exercise: a workflow's `fetch-depth` takes effect only on GitHub's runner, so the workflow file is the one thing offline that says what that runner will check out, and the journeys reading the base commit are what fail there for want of it.
         for (job, block) in jobs_in(&text) {
             // `just check`, or one of ci.yml's four jobs' recipes, which run its
             // tiers (scripts/ci-job.sh).
@@ -670,6 +671,7 @@ fn every_leg_running_the_gate_checks_out_the_history_it_resolves() {
                  the base commit fails there for want of history"
             );
         }
+        // llmlint: ignore-end[tests_mirror_real_usage]
     }
     assert!(
         legs > 0,
