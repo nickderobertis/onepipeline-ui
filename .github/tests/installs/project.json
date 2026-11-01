@@ -1,0 +1,44 @@
+{
+  "name": "github-workflows-installs",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:tooling", "type:test", "lang:javascript"],
+  "//": "The workflow journeys that install from a registry \u2014 the judged-lint toolchain from PyPI through scripts/setup-llmlint.sh, and publish's onevcs from npm \u2014 as a project of their own, so a change to the rest of the workflow policy does not pay for the installs. Its inputs name what the journeys read, which is what makes it affected.",
+  "targets": {
+    "test": {
+      "command": "node --test .github/tests/installs/*.test.mjs",
+      "dependsOn": [
+        {
+          "projects": ["github-workflows"],
+          "target": "bootstrap"
+        }
+      ],
+      "inputs": [
+        "{projectRoot}/**/*",
+        "{workspaceRoot}/.github/fixtures/release-tail/**/*",
+        "{workspaceRoot}/.github/fixtures/judge/**/*",
+        "{workspaceRoot}/.github/workflows/release.yml",
+        "{workspaceRoot}/.github/package.json",
+        "{workspaceRoot}/budgets.yaml",
+        "{workspaceRoot}/scripts/actions-budget-figures.sh",
+        "{workspaceRoot}/scripts/workspace-install.sh",
+        "{workspaceRoot}/scripts/setup-llmlint.sh",
+        "{workspaceRoot}/scripts/nx.sh",
+        "{workspaceRoot}/oneharness.toml",
+        "{workspaceRoot}/llmlint.yml",
+        "{workspaceRoot}/justfile",
+        "{workspaceRoot}/nx.json",
+        "{workspaceRoot}/project.json",
+        "{workspaceRoot}/judged-diff/project.json",
+        "{workspaceRoot}/package.json",
+        "{workspaceRoot}/bun.lock",
+        "{workspaceRoot}/.gitignore"
+      ],
+      "cache": false
+    },
+    "check": {
+      "executor": "nx:noop",
+      "dependsOn": ["test"]
+    }
+  }
+}

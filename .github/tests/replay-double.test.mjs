@@ -234,3 +234,17 @@ test("a response that is not what gh prints is refused by name, by reconcile and
   assert.equal(status.status, 2);
   assert.match(status.stderr, /must be an HTTP error status/);
 });
+
+test("reconcile refuses a directory with no recording rather than passing it", () => {
+  const empty = join(scratch, "empty-release");
+  mkdirSync(empty);
+  const run = spawnSync("node", [RECONCILE, empty], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: ghServing(RECORDINGS).path },
+  });
+  assert.equal(run.status, 1);
+  assert.match(
+    run.stderr,
+    /no recording under .*empty-release, so nothing was reconciled/,
+  );
+});

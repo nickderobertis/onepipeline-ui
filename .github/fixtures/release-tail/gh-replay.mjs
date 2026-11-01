@@ -130,10 +130,13 @@ if (!fixtures || !existsSync(fixtures)) {
 }
 const sidecar = readdirSync(fixtures)
   .filter((file) => file.endsWith(".json"))
-  .map((file) => ({
-    file,
-    ...JSON.parse(readFileSync(join(fixtures, file), "utf8")),
-  }))
+  .map((file) => {
+    const entry = JSON.parse(readFileSync(join(fixtures, file), "utf8"));
+    if (typeof entry?.path !== "string")
+      throw new Error(`gh-replay: the sidecar ${file} names no API path`);
+    // The recording is the sidecar's own neighbour, whatever the sidecar says.
+    return { ...entry, file };
+  })
   .find((entry) => entry.path === request);
 if (!sidecar) {
   out(

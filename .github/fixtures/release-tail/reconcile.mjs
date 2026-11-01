@@ -76,11 +76,13 @@ const dirs = process.argv[2]
       .map((name) => join(here, name))
       .filter((path) => statSync(path).isDirectory());
 let differs = 0;
+let checked = 0;
 for (const dir of dirs)
   for (const file of readdirSync(dir).filter((name) =>
     name.endsWith(".json"),
   )) {
     const sidecar = JSON.parse(readFileSync(join(dir, file), "utf8"));
+    checked += 1;
     // A recording or an answer that is not what gh prints is a difference,
     // named, rather than a crash that leaves the others unchecked.
     try {
@@ -157,6 +159,15 @@ for (const dir of dirs)
     }
   }
 
+if (checked === 0) {
+  console.error(
+    `reconcile: no recording under ${dirs.join(", ")}, so nothing was reconciled`,
+  );
+  console.error(
+    "ACTION: name a release directory holding <name>.http recordings and their .json sidecars",
+  );
+  process.exit(1);
+}
 if (differs) {
   console.error(`reconcile: ${differs} difference(s)`);
   console.error(

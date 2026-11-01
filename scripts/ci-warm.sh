@@ -21,15 +21,6 @@
 # a compile missing here, differing from its source, or here with no source
 # fails it.
 #
-#   linux    `lint` and `test-linux`: clippy (the crate's and the build-cache
-#            test's), the MSRV check and the docs with warnings denied; the test
-#            binaries plain and instrumented for coverage; the browser view's
-#            API server; the documented install; the `cargo auditable` build the
-#            linked-report journeys make; and the release's x86_64 Linux wheel,
-#            which the wheel smoke and the release rehearsal both build.
-#   windows  `test-windows`: clippy, the plain test binaries and the install.
-#   macos    `test-macos`: clippy, the plain test binaries and the install.
-#
 # Needs what `just bootstrap` provisions, the browser view `just build` writes
 # (the binary embeds it), and on Linux the MSRV toolchain and Docker.
 #

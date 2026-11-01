@@ -26,7 +26,6 @@ const load = () =>
       ]),
   );
 
-// Which warm job keeps which pull-request jobs warm, by OS.
 const WARMED = {
   linux: { warm: "warm-linux", jobs: ["lint", "test-linux"] },
   windows: { warm: "warm-windows", jobs: ["test-windows"] },
