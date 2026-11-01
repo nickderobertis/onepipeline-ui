@@ -69,13 +69,15 @@ jobs:
       - name: What the provisioned binaries are built from
         id: pins
         run: |
-          echo "onepipeline=$(just --evaluate onepipeline-version)" >> "$GITHUB_OUTPUT"
+          echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
           echo "base=$(git merge-base HEAD origin/main)" >> "$GITHUB_OUTPUT"
       - name: Restore the sibling CLI
         id: sibling
         uses: actions/cache/restore@v4
         with:
-          path: .tools/bin/onepipeline
+          path: |
+            .tools/bin/onepipeline
+            .tools/bin/onepipeline.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Restore the base commit's server
         id: baseline
@@ -91,7 +93,9 @@ jobs:
         if: steps.sibling.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: .tools/bin/onepipeline
+          path: |
+            .tools/bin/onepipeline
+            .tools/bin/onepipeline.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Build the base commit's server
         if: steps.baseline.outputs.cache-hit != 'true'
@@ -131,12 +135,14 @@ jobs:
           tool: just,nextest,cargo-llvm-cov,cargo-auditable
       - name: What the provisioned sibling is built from
         id: pins
-        run: echo "onepipeline=$(just --evaluate onepipeline-version)" >> "$GITHUB_OUTPUT"
+        run: echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
       - name: Restore the sibling CLI
         id: sibling
         uses: actions/cache/restore@v4
         with:
-          path: .tools/bin/onepipeline.exe
+          path: |
+            .tools/bin/onepipeline.exe
+            .tools/bin/onepipeline.exe.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Bootstrap
         run: just bootstrap
@@ -144,7 +150,9 @@ jobs:
         if: steps.sibling.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: .tools/bin/onepipeline.exe
+          path: |
+            .tools/bin/onepipeline.exe
+            .tools/bin/onepipeline.exe.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Build the browser view the binary embeds
         run: just build
@@ -177,12 +185,14 @@ jobs:
           tool: just,nextest,cargo-llvm-cov,cargo-auditable
       - name: What the provisioned sibling is built from
         id: pins
-        run: echo "onepipeline=$(just --evaluate onepipeline-version)" >> "$GITHUB_OUTPUT"
+        run: echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
       - name: Restore the sibling CLI
         id: sibling
         uses: actions/cache/restore@v4
         with:
-          path: .tools/bin/onepipeline
+          path: |
+            .tools/bin/onepipeline
+            .tools/bin/onepipeline.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Bootstrap
         run: just bootstrap
@@ -190,7 +200,9 @@ jobs:
         if: steps.sibling.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: .tools/bin/onepipeline
+          path: |
+            .tools/bin/onepipeline
+            .tools/bin/onepipeline.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Build the browser view the binary embeds
         run: just build

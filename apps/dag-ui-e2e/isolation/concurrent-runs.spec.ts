@@ -110,11 +110,13 @@ test("a run that fails still gives its fixture directory back", async () => {
   // one, and red is exactly when a run is repeated.
   const failed = await runTier("--timeout", "1");
 
-  expect(failed.ok).toBe(false);
+  // The run's own output rides every assertion: a run that never reached its
+  // teardown says why only there.
+  expect(failed.ok, failed.output).toBe(false);
   const [directory, ...extra] = workspacesOf(failed);
-  expect(extra).toEqual([]);
-  expect(directory).toBeDefined();
-  expect(existsSync(String(directory))).toBe(false);
+  expect(extra, failed.output).toEqual([]);
+  expect(directory, failed.output).toBeDefined();
+  expect(existsSync(String(directory)), failed.output).toBe(false);
   rmSync(join(TIER_DIR, "test-results", basename(String(directory))), {
     recursive: true,
     force: true,

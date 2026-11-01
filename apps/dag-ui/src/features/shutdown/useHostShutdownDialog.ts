@@ -2,46 +2,12 @@ import type {
   HostShutdownScope,
   RunList,
   RunSummary,
-  Unwatched,
 } from "@onepipeline-ui/dag-model";
-import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { useEffect, useRef, useState } from "react";
-import { type Read, useRead } from "../../lib/useRead";
-import {
-  type ActingSession,
-  runsInScope,
-  type ScopedRun,
-} from "./shutdown-model";
+import { runsInScope, type ScopedRun } from "./shutdown-model";
 
-/**
- * The acting session as a dialog needs it, or why it cannot be had yet.
- *
- * Read off the unwatched report, which is the acting session's by definition;
- * a report carrying no key is an unattributed server, which owns nothing.
- */
-export function actingOf(read: Read<Unwatched>): {
-  readonly acting?: ActingSession;
-  readonly blocked?: string;
-} {
-  if (read.value !== undefined)
-    return { acting: read.value.session_key ?? null };
-  if (read.error !== undefined)
-    return {
-      blocked: `Which session this server acts as could not be read (${read.error.message}), so the runs this acts on cannot be named. Nothing can be sent until they can.`,
-    };
-  return { blocked: "Reading which session this server acts as…" };
-}
-
-/**
- * Which of the listing's two dialogs is open, and what it names.
- *
- * Each opening reads the acting session afresh off the unwatched report and
- * reads the listing to its end, so the runs a dialog names are every run the
- * engine is about to act on, told apart by whose they are. `runs` is absent,
- * and `blocked` says why, until both are read.
- */
+/** Name every host run from the whole listing before enabling confirmation. */
 export function useHostShutdownDialog(
-  client: TelemetryClient,
   list: RunList | undefined,
   loadMore: () => Promise<void>,
   loadingMore: boolean,
@@ -54,34 +20,23 @@ export function useHostShutdownDialog(
   readonly unreadable: number;
 } {
   const [open, setOpen] = useState<HostShutdownScope>();
-  //: Counted so every opening reads the acting session afresh.
-  const [openings, setOpenings] = useState(0);
-  const unwatched = useRead(
-    open === undefined ? undefined : `acting-${openings}`,
-    () => client.unwatched(),
-    0,
-  );
   const whole = useWholeListing(
     open !== undefined,
     list,
     loadMore,
     loadingMore,
   );
-  const { acting, blocked } = actingOf(unwatched);
   const runs =
-    acting === undefined || whole.rows === undefined || open === undefined
+    whole.rows === undefined || open === undefined
       ? undefined
-      : runsInScope(open, whole.rows, acting);
-  const opener = (scope: HostShutdownScope) => () => {
-    setOpenings((count) => count + 1);
-    setOpen(scope);
-  };
+      : runsInScope(whole.rows);
+  const opener = (scope: HostShutdownScope) => () => setOpen(scope);
   return {
     open,
     setOpen,
     opener,
     runs,
-    blocked: blocked ?? whole.blocked,
+    blocked: whole.blocked,
     unreadable: list?.unreadable?.length ?? 0,
   };
 }

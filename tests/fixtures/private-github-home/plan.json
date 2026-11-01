@@ -1,0 +1,23 @@
+{
+  "schema_version": 3,
+  "goal": {
+    "text": "Deliver the plan"
+  },
+  "name": "github-private-home",
+  "concurrency": 1,
+  "tasks": [
+    {
+      "id": "anchor",
+      "task": "## What\nDo anchor.\n\n## Why\nSo the run can settle.\n\n## Acceptance criteria\n- anchor is done.",
+      "persona": "engineer",
+      "repo": "github.com/owner/service",
+      "title": "chore: anchor",
+      "task_record": {
+        "id": "anchor",
+        "key": "2",
+        "title": "chore: anchor"
+      },
+      "classification": "private"
+    }
+  ]
+}

@@ -1,9 +1,16 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import {
+  API_V2_PATHS,
+  renderedRootSchema,
+  runDetailSchema,
+} from "@onepipeline-ui/dag-model";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CAPTURE_INSTANT_MS } from "./capture-clock";
+import { delayGraphMeasurements } from "./delayed-graph-measurements";
 import { fixture, runs } from "./fixture-facts";
+import recorded from "./fixtures/timeline-recorded.json" with { type: "json" };
 import { graphNodes, metrics, timelineLane } from "./observatory-locators";
 import { VIEWPORTS, type Viewport } from "./viewports";
 
@@ -220,11 +227,101 @@ async function settleReads(page: Page): Promise<void> {
   );
 }
 
+/**
+ * The host the Host page is photographed as, in place of the one capturing it.
+ *
+ * Everything else on that page is the fixture's own, but a host reading is the
+ * machine's: its name, the fixture workspace's absolute paths, the disk's free and
+ * total bytes, and dispatch ages read off the server's wall clock — the recorded
+ * runs' ages grow by a day a day, and crossing a power of ten widened the age column
+ * and moved the whole table. A mask over those values still has the value's width,
+ * so each is replaced instead, with a realistic value that is the same on every host
+ * and every day. The real reading still reaches the page through the real server;
+ * only those fields of it are rewritten, and the Host journeys in
+ * `dag-ui-shutdown.spec.ts` keep asserting the real, unrewritten diagnostics.
+ */
+const CAPTURE_HOST = {
+  name: "build-host-01",
+  workspace: "/home/operator/.onepipeline",
+  freeBytes: 412_316_860_416,
+  totalBytes: 1_000_204_886_016,
+} as const;
+
+/** A dispatch's age in the capture: distinct per row, minutes to hours old. */
+const captureAge = (row: number): number => 94_000 + row * 1_337_000;
+
+/**
+ * Serve the Host page the real host reading with {@link CAPTURE_HOST}'s values in
+ * place of this machine's, refusing a reading in which any of the machine's own
+ * workspace path or host name survives the rewrite.
+ */
+// llmlint: ignore-block[e2e_not_mocked,tests_mirror_real_usage] the user chose fixed host values for this capture, for the reason `CAPTURE_HOST` states; the request still reaches the real server, only the machine's own fields are rewritten, and the Host journeys in `dag-ui-shutdown.spec.ts` assert the real reading.
+async function fixHostReading(page: Page): Promise<void> {
+  await page.route(`**${API_V2_PATHS.host}`, async (route) => {
+    const response = await route.fetch();
+    const served = renderedRootSchema.parse(await response.json());
+    const reading = served.reading;
+    if (reading === undefined)
+      throw new Error("the host read carried no reading");
+    const workspace = reading.root.replace(/[\\/]runs$/, "");
+    const rewritten = renderedRootSchema.parse(
+      JSON.parse(
+        JSON.stringify(served).replaceAll(workspace, CAPTURE_HOST.workspace),
+      ),
+    );
+    const fixed = {
+      ...rewritten,
+      reading: {
+        ...rewritten.reading,
+        host: CAPTURE_HOST.name,
+        free_space: rewritten.reading?.free_space.map((space) => ({
+          ...space,
+          free_bytes: CAPTURE_HOST.freeBytes,
+          total_bytes: CAPTURE_HOST.totalBytes,
+        })),
+        dispatches: rewritten.reading?.dispatches.map((dispatch, row) => ({
+          ...dispatch,
+          age_ms: captureAge(row),
+        })),
+      },
+    };
+    const body = JSON.stringify(fixed);
+    if (body.includes(workspace) || body.includes(`"${reading.host}"`))
+      throw new Error("the capture's host reading still names this machine");
+    await route.fulfill({ response, json: fixed });
+  });
+}
+// llmlint: ignore-end[e2e_not_mocked,tests_mirror_real_usage]
+
 /** One photographed surface: how to reach it, and how to know it has finished loading. */
 interface Surface {
   readonly name: string;
   readonly title: string;
   readonly open: (page: Page) => Promise<void>;
+  /**
+   * Where the pointer rests for the shot, for a surface that is about what the
+   * pointer shows; every other surface is shot with it parked off the page.
+   */
+  readonly point?: (page: Page) => Promise<void>;
+}
+
+/**
+ * Rest the pointer at the middle of a timeline's plot, so its crosshair reads the
+ * time and the elapsed time there. The middle of the plot is a fixed place at
+ * each viewport, so the shot is the same on every run of one build.
+ */
+async function pointAtPlot(page: Page, timeline: Locator): Promise<void> {
+  await timeline.scrollIntoViewIfNeeded();
+  const plot = timeline.getByLabel(
+    "Timeline plot. Scroll to zoom or drag to select a range.",
+  );
+  const box = await plot.boundingBox();
+  if (box === null) throw new Error("the plot is drawn nowhere");
+  await page.mouse.move(
+    Math.round(box.x + box.width / 2),
+    Math.round(box.y + box.height / 2),
+  );
+  await expect(timeline.getByLabel("Timeline crosshair")).toBeVisible();
 }
 
 const SURFACES: readonly Surface[] = [
@@ -288,12 +385,33 @@ const SURFACES: readonly Surface[] = [
     name: "04-graph",
     title: "Graph view",
     open: async (page) => {
+      await delayGraphMeasurements(page);
       await page.goto(`/?run=${runs().live}&view=graph`);
       await settleReads(page);
       await expect(graphNodes(page, "running")).toHaveAccessibleName(
         "dashboard: running",
       );
       await expect(graphNodes(page, "failed").first()).toBeVisible();
+      // A quiet page can still be missing dependencies. Ask for every in-run
+      // edge in the served plan by name so a graph with cards but no edges can
+      // never become an accepted capture.
+      const response = await page.request.get(
+        `/api/v2/runs/${runs().live}?include_conversations=false`,
+      );
+      expect(response.ok()).toBe(true);
+      const tasks =
+        runDetailSchema.parse(await response.json()).graph?.plan.tasks ?? [];
+      const drawn = new Set(tasks.map(({ id }) => id));
+      const edges = tasks.flatMap((task) =>
+        (task.deps ?? [])
+          .filter((dependency) => drawn.has(dependency))
+          .map((dependency) => `Edge from ${dependency} to ${task.id}`),
+      );
+      expect(edges.length).toBeGreaterThan(0);
+      for (const name of edges)
+        await expect(
+          page.getByRole("group", { name, exact: true }),
+        ).toBeAttached();
     },
   },
   {
@@ -308,7 +426,7 @@ const SURFACES: readonly Surface[] = [
       await expect(
         page
           .getByRole("region", { name: "Node timeline" })
-          .getByRole("button", { name: /engineer-dashboard/ }),
+          .getByRole("button", { name: /^worker \(engineer-dashboard\)/ }),
       ).toBeVisible();
       await expect(
         page
@@ -405,40 +523,58 @@ const SURFACES: readonly Surface[] = [
   },
   {
     name: "11-project-list",
-    title: "The projects the app opens on",
+    title: "Projects and their runs in one sidebar",
     open: async (page) => {
-      await page.goto("/");
+      await page.goto(`/?run=${runs().live}`);
       await settleReads(page);
-      const cards = page.getByRole("list", { name: "Projects" });
-      await expect(cards.getByRole("listitem").first()).toBeVisible();
-      // Photographed with every group's card drawn, the `(no project)` one
-      // among them.
-      await expect(cards).toContainText("(no project)");
+      await expect(
+        page
+          .getByRole("navigation", { name: "Projects" })
+          .getByText("Other runs", { exact: true })
+          .first(),
+      ).toBeVisible();
     },
   },
   {
-    name: "12-project-page",
-    title: "A project's page: its runs, newest activity first",
+    name: "12-host",
+    title: "Host resources, unwatched runs and host shutdown",
     open: async (page) => {
-      await page.goto(
-        `/?project=${encodeURIComponent(fixture().projects.observatory)}`,
-      );
+      await fixHostReading(page);
+      await page.goto("/?page=host");
+      await settleReads(page);
       await expect(
-        page
-          .getByRole("list", { name: /^Runs of / })
-          .getByRole("button", { name: `Open ${runs().live}` }),
+        page.getByRole("status", { name: "Host name", exact: true }),
+      ).toHaveText(CAPTURE_HOST.name);
+      await expect(
+        page.getByRole("region", { name: "Free space" }),
       ).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: /^Unwatched runs: [0-9]+$/ }),
+      ).toBeVisible();
+    },
+  },
+  {
+    name: "21-remote",
+    title: "Remote: publication, release and each check's evidence",
+    open: async (page) => {
+      await page.goto(`/?run=${runs().live}&node=remote-open`);
+      await settleReads(page);
+      await page.getByRole("tab", { name: "Remote", exact: true }).click();
+      await expect(
+        page.getByRole("table", { name: "Remote checks" }),
+      ).toBeVisible();
+      await settleReads(page);
     },
   },
   {
     name: "13-channel",
     title: "The channel: the queue, the composer and the surface form",
     open: async (page) => {
-      await page.goto(`/?run=${runs().supervised}&view=channel`);
+      await page.goto(`/?run=${runs().history}&view=channel`);
       await settleReads(page);
       await expect(
         page.getByRole("region", { name: "Channel queue" }),
-      ).toContainText("Replies");
+      ).toContainText("Other replies");
       await expect(page.getByRole("region", { name: "Reply" })).toBeVisible();
     },
   },
@@ -468,6 +604,203 @@ const SURFACES: readonly Surface[] = [
       await expect(
         list.getByRole("button", { name: "Move override 2 up" }),
       ).toBeEnabled();
+    },
+  },
+  {
+    name: "15-recorded-node-collapsed",
+    title: "Recorded worker and change request drafter, collapsed",
+    open: async (page) => {
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page
+        .getByRole("region", { name: "Change request drafter", exact: true })
+        .waitFor();
+      await expect(
+        page.getByRole("region", { name: "Dispatch 1", exact: true }),
+      ).toContainText("gate-run");
+      await expect(
+        page.getByRole("region", {
+          name: "Change request drafter",
+          exact: true,
+        }),
+      ).toContainText("pr-author");
+      await page
+        .getByRole("region", { name: "Change request drafter", exact: true })
+        .scrollIntoViewIfNeeded();
+    },
+  },
+  {
+    name: "16-recorded-node-expanded",
+    title: "Recorded worker and change request drafter, expanded",
+    open: async (page) => {
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page
+        .getByRole("region", { name: "Change request drafter", exact: true })
+        .waitFor();
+      await expect(
+        page.getByRole("region", { name: "Dispatch 1", exact: true }),
+      ).toContainText("gate-run");
+      await expect(
+        page.getByRole("region", {
+          name: "Change request drafter",
+          exact: true,
+        }),
+      ).toContainText("pr-author");
+      await page
+        .getByRole("region", { name: "Node timeline", exact: true })
+        .getByRole("button", { name: "Expand timeline" })
+        .click();
+      await page
+        .getByRole("region", { name: "Change request drafter", exact: true })
+        .scrollIntoViewIfNeeded();
+    },
+  },
+  {
+    name: "17-recorded-gate-run",
+    title: "Recorded gate-run fields",
+    open: async (page) => {
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page
+        .getByRole("region", { name: "Dispatch 1", exact: true })
+        .getByRole("button", { name: "Open gate-run", exact: true })
+        .first()
+        .click();
+      await page
+        .getByRole("region", { name: "Timeline item detail" })
+        .waitFor();
+      await expect(
+        page
+          .getByRole("region", { name: "Timeline item detail" })
+          .getByText("Gate", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("region", { name: "Timeline item detail" }),
+      ).not.toContainText("Still running");
+    },
+  },
+  {
+    name: "18-recorded-session-closed",
+    title: "Recorded session-closed fields",
+    open: async (page) => {
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page
+        .getByRole("region", { name: "Dispatch 1", exact: true })
+        .getByRole("button", { name: "Open session-closed", exact: true })
+        .first()
+        .click();
+      await page
+        .getByRole("region", { name: "Timeline item detail" })
+        .waitFor();
+      await expect(
+        page
+          .getByRole("region", { name: "Timeline item detail" })
+          .getByText("Branch", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("region", { name: "Timeline item detail" }),
+      ).not.toContainText("Still running");
+    },
+  },
+  {
+    name: "19-recorded-node-dispatched",
+    title: "Recorded node-dispatched fields",
+    open: async (page) => {
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page
+        .getByRole("region", { name: "Dispatch 1", exact: true })
+        .getByRole("button", { name: "Open node-dispatched", exact: true })
+        .first()
+        .click();
+      await page
+        .getByRole("region", { name: "Timeline item detail" })
+        .waitFor();
+      await expect(
+        page
+          .getByRole("region", { name: "Timeline item detail" })
+          .getByText("Attempt", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("region", { name: "Timeline item detail" }),
+      ).not.toContainText("Still running");
+    },
+  },
+  {
+    name: "20-recorded-overall",
+    title: "Recorded settled execution and the late completion marker",
+    open: async (page) => {
+      await page.goto(`/?run=${recorded.run_id}&view=overall`);
+      await page
+        .getByRole("region", { name: "Records after execution" })
+        .waitFor();
+      await page
+        .getByRole("region", { name: "Records after execution" })
+        .scrollIntoViewIfNeeded();
+      await expect(
+        page
+          .getByRole("region", { name: "Records after execution" })
+          .getByRole("button", { name: /completion-requested/ }),
+      ).toBeVisible();
+    },
+  },
+  {
+    name: "22-node-timeline-crosshair",
+    title: "Node timeline: axis markers and the crosshair under the pointer",
+    open: async (page) => {
+      await page.goto(`/?run=${runs().live}&node=dashboard`);
+      await settleReads(page);
+      await expect(
+        page
+          .getByRole("region", { name: "Node timeline" })
+          .getByLabel(
+            "Timeline plot. Scroll to zoom or drag to select a range.",
+          ),
+      ).toBeVisible();
+    },
+    point: (page) =>
+      pointAtPlot(page, page.getByRole("region", { name: "Node timeline" })),
+  },
+  {
+    name: "23-overall-timeline-crosshair",
+    title: "Overall timeline: axis markers and the crosshair under the pointer",
+    open: async (page) => {
+      await page.goto(`/?run=${runs().live}&view=overall`);
+      await settleReads(page);
+      await expect(
+        page
+          .getByRole("region", { name: "Graph timeline" })
+          .getByLabel(
+            "Timeline plot. Scroll to zoom or drag to select a range.",
+          ),
+      ).toBeVisible();
+    },
+    point: (page) =>
+      pointAtPlot(page, page.getByRole("region", { name: "Graph timeline" })),
+  },
+  {
+    name: "24-held-graph",
+    title: "Graph view: finished work held for releases",
+    open: async (page) => {
+      await delayGraphMeasurements(page);
+      await page.goto(`/?run=${runs().awaiting}&view=graph`);
+      await settleReads(page);
+      await expect(
+        graphNodes(page, "complete-but-held").getByText(/^awaits /),
+      ).toBeVisible();
+      await expect(
+        graphNodes(page, "complete-but-draft").getByText(/^awaits /),
+      ).toBeVisible();
+    },
+  },
+  {
+    name: "25-held-node",
+    title: "Node view: a draft node naming every release it awaits",
+    open: async (page) => {
+      await page.goto(
+        `/?run=${runs().awaiting}&node=${fixture().awaiting.draft}`,
+      );
+      await settleReads(page);
+      await expect(
+        page.getByRole("region", { name: "Awaited releases" }),
+      ).toBeVisible();
     },
   },
 ];
@@ -503,6 +836,7 @@ for (const size of VIEWPORTS) {
       test(`captures ${surface.title}`, async ({ page }) => {
         await surface.open(page);
         await parkPointer(page);
+        await surface.point?.(page);
         await settleReads(page);
         await settleMotion(page);
         await settleReads(page);

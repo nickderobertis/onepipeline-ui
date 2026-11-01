@@ -16,7 +16,9 @@
  *   serve-fixture.mjs --workspace DIR --port N [--ui]
  *                     [--shutdown-corpus [--live-dispatch-pid PID]
  *                      | --preserved-corpus | --review-corpus
- *                      | --review-loop-corpus]
+ *                      | --review-loop-corpus | --transcripts-corpus
+ *                      | --held-turn-corpus
+ *                      | --human-items-world NAME]
  *                                                  build the fixture and serve it,
  *                                                  the browser view beside it with --ui;
  *                                                  the shutdown journeys' own runs
@@ -24,7 +26,14 @@
  *                                                  kept-branch journey's with
  *                                                  --preserved-corpus, and the
  *                                                  reworked stack's with
- *                                                  --review-loop-corpus
+ *                                                  --review-loop-corpus, and the
+ *                                                  held turn's with
+ *                                                  --held-turn-corpus; the
+ *                                                  action-items journeys' with
+ *                                                  --human-items-world, a host
+ *                                                  whose items and runs the
+ *                                                  engine itself raised
+ *                                                  (`human-items-world.mjs`)
  *   serve-fixture.mjs --workspace DIR --settle-dashboard | --remove-run ID
  *                     | --remove-page-runs | --grow-worker-session N
  *                     | --record-activity NAME --activity-detail TEXT
@@ -33,7 +42,7 @@
  *   serve-fixture.mjs --stall --port N [--refuse-port N]
  */
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   constants,
   copyFileSync,
@@ -54,19 +63,31 @@ import {
   resolve,
 } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FIXTURE_FACTS_NAME } from "./facts-file.ts";
-import harnessBinaries from "./harness-binaries.json" with { type: "json" };
+import { buildLoadCorpus } from "../load/corpus.mjs";
 import {
+  FIXTURE_FACTS_NAME,
+  SERVED_FROM_NAME,
+  SERVING_PID_NAME,
+} from "./facts-file.ts";
+import harnessBinaries from "./harness-binaries.json" with { type: "json" };
+import { humanItemsWorld } from "./human-items-world.mjs";
+import {
+  buildHeldTurnRuns,
   buildPreservedRuns,
+  buildProjectCentricRuns,
   buildReviewLoopRuns,
   buildRuns,
   buildShutdownRuns,
+  buildTranscriptRuns,
   churnLive,
   facts,
   graphRecordsFor,
   growTranscript,
+  heldTurnEnvironment,
+  heldTurnFacts,
   overridesDir,
   preservedFacts,
+  projectCentricFacts,
   recordActivity,
   recordWords,
   removePageRuns,
@@ -75,6 +96,7 @@ import {
   SUPERVISOR_SESSION,
   settleDashboard,
   shutdownFacts,
+  transcriptFacts,
 } from "./runs.mjs";
 import { thisHost } from "./this-host.mjs";
 
@@ -108,11 +130,13 @@ function die(message, action) {
 }
 
 /**
- * The directory `dag-ui:build-api-server` built into: `CARGO_TARGET_DIR` when
- * cargo was told one, and the default `target/` otherwise.
+ * The target root this fixture serves from: `target/dag-ui-api`, the artifact
+ * directory `dag-ui:build-api-server` builds into and no other build names, or
+ * `CARGO_TARGET_DIR` when the caller names another root of the same layout.
  *
- * Honoured because that build step is a cargo invocation from the repository
- * root, so a relative one resolves the way cargo itself resolves it. Validated
+ * Not `target/` itself: every debug build in an Nx run writes `target/debug`.
+ * `CARGO_TARGET_DIR` is how a journey points a fixture at a retained copy or an
+ * unbuilt tree, resolved from the repository root as cargo would. Validated
  * rather than trusted, like every other input here: this value chooses the path
  * this script spawns, and one that is set but empty is a mistyped export rather
  * than a directory — resolved, it would name the repository root and be reported
@@ -121,7 +145,7 @@ function die(message, action) {
 function targetRoot() {
   const configured = process.env.CARGO_TARGET_DIR;
   if (configured === undefined) {
-    return join(REPO_ROOT, "target");
+    return join(REPO_ROOT, "target", "dag-ui-api");
   }
   if (configured.trim() === "") {
     die(
@@ -166,13 +190,8 @@ function serverBinary() {
 /**
  * The server binary under a name in `workspace` that nothing but this tier writes.
  *
- * The adopt route retains *this executable* as the run's driver, and finds it by the
- * path it was started from. `target/debug/onepipeline-api` is cargo's to rewrite, and
- * every cargo task `just check` runs beside this tier does: a test build of the crate
- * links that name to an artifact of its own, and a dev build links it back. The
- * server keeps running the image it started from, but its path now names
- * `onepipeline-api (deleted)`, so every adoption from then on is refused with
- * `cannot retain a driver: No such file or directory`.
+ * Keep the fixture server's executable independent of cargo's output path,
+ * which concurrent build and test targets can replace while the server runs.
  *
  * A copy rather than a hard link, though a link would be free: a link cannot cross
  * filesystems, and a checkout whose temporary directory is on another one — this
@@ -180,7 +199,9 @@ function serverBinary() {
  * the filesystem can share the blocks gets one rather than a copy.
  */
 function privateBinary(binary, workspace) {
-  const directory = join(workspace, "bin");
+  // Keep Cargo's debug layout so later fixture servers can use this retained
+  // copy as their target root instead of revisiting Cargo's mutable output.
+  const directory = join(workspace, "debug");
   mkdirSync(directory, { recursive: true });
   const staged = join(directory, basename(binary));
   copyFileSync(binary, staged, constants.COPYFILE_FICLONE);
@@ -286,7 +307,10 @@ function bound(server, port, purpose) {
  * is what they publish about themselves beside it.
  */
 async function serve(workspace, port, ui, corpus) {
-  rmSync(workspace, { recursive: true, force: true });
+  // A persistent corpus is served again as it was left, so a journey can stop
+  // its server and start another over the same state.
+  if (corpus.persistent !== true)
+    rmSync(workspace, { recursive: true, force: true });
   mkdirSync(workspace, { recursive: true });
   const runsRoot = join(workspace, "runs");
   corpus.build(runsRoot);
@@ -303,15 +327,24 @@ async function serve(workspace, port, ui, corpus) {
     `${JSON.stringify(corpus.facts(), null, 2)}\n`,
   );
 
-  const binary = privateBinary(serverBinary(), workspace);
-  // These journeys ask for unbudgeted watches under the explicit --session
-  // below; a dispatch host's wake promise and session belong to its own runs.
+  // Who to stop, and wait for, before the workspace is removed: Playwright stops
+  // its web servers only after the global teardown has run.
+  writeFileSync(join(workspace, SERVING_PID_NAME), `${process.pid}\n`);
+  const source = serverBinary();
+  // Which build this server came from, for the journey that holds it to the one
+  // `dag-ui:build-api-server` made.
+  writeFileSync(join(workspace, SERVED_FROM_NAME), `${source}\n`);
+  const binary = privateBinary(source, workspace);
+  // The fixture server uses the explicit session below; a dispatch host's wake
+  // promise and session belong to its own runs.
   const fixtureEnvironment = { ...process.env };
   // Match tests/support/serving.rs: omit every PATH directory containing a
   // registered harness. tests/contract.rs holds this corpus to the linked SDK.
   // Keep node available even when it shares a directory with a host's adapters.
   const utilityBin = join(workspace, "utility-bin");
   mkdirSync(utilityBin, { recursive: true });
+  // A persistent corpus's workspace already holds the link its last start made.
+  rmSync(join(utilityBin, "node"), { force: true });
   symlinkSync(process.execPath, join(utilityBin, "node"));
   fixtureEnvironment.PATH = [
     utilityBin,
@@ -322,7 +355,7 @@ async function serve(workspace, port, ui, corpus) {
       ),
   ].join(delimiter);
   // User configuration can name a provider by absolute path too. Give this
-  // server its own empty user config; explicit adopted-dispatch configs remain
+  // server its own empty user config; explicit engine-dispatch configs remain
   // the fixture's real subprocess doubles.
   const providerConfig = join(workspace, "provider-config.toml");
   writeFileSync(providerConfig, "");
@@ -333,6 +366,14 @@ async function serve(workspace, port, ui, corpus) {
   delete fixtureEnvironment.GITHUB_TOKEN;
   delete fixtureEnvironment.ONEPIPELINE_WAKE_BUDGET;
   delete fixtureEnvironment.ONEPIPELINE_LAUNCHER_SESSION;
+  // Nor the operator's own configuration: their `human_items` and plan-store
+  // settings are their host's, and a corpus that wants some names its own.
+  delete fixtureEnvironment.ONEPIPELINE_CONFIG;
+  fixtureEnvironment.XDG_CONFIG_HOME = join(workspace, "config");
+  // What a corpus's own world must not inherit from this caller: the action-
+  // items world's plan-store sources and host configuration are its own.
+  for (const name of corpus.removeEnvironment ?? [])
+    delete fixtureEnvironment[name];
   const server = spawn(
     binary,
     [
@@ -350,13 +391,16 @@ async function serve(workspace, port, ui, corpus) {
       // other run is refused naming its owner — and the unwatched report is
       // about exactly those runs.
       "--session",
-      SUPERVISOR_SESSION,
+      corpus.session?.() ?? SUPERVISOR_SESSION,
       // The binary `dag-ui:build-api-server` compiled after `dag-ui:build`, so
       // the view it embeds is the bundle every other origin here previews.
       ...(ui ? ["--ui"] : []),
     ],
     {
       stdio: ["ignore", "inherit", "inherit"],
+      // The checkout a corpus's server works in, when it names one: where the
+      // action-items world's plan store is configured.
+      ...(corpus.cwd === undefined ? {} : { cwd: corpus.cwd }),
       // Where `runs.mjs` kept the graph records the server reads a run's declared
       // members from: the same variable the engine and `oneagentgraph` read,
       // pointed at this workspace's rather than at the operator's own. The host
@@ -366,18 +410,19 @@ async function serve(workspace, port, ui, corpus) {
         ...fixtureEnvironment,
         ONEAGENTGRAPH_STATE_DIR: graphRecordsFor(runsRoot),
         HOSTNAME: thisHost(),
-        ONEVCS_HOME: onevcsHome,
-        // Where a dispatch the adopted driver starts runs, and where its harness
+        ONEVCS_HOME: corpus.unresolvedWorkspaces ? "" : onevcsHome,
+        // Where a fixture engine dispatch runs, and where its harness
         // turn records itself: named inside the workspace, because the defaults
         // are this server's working directory — the app's checkout — and the
         // operator's own oneharness history, behind a lock every turn on the
         // host shares.
         ONEPIPELINE_PROJECT_DIR: overridesDir(workspace),
         XDG_STATE_HOME: join(workspace, "state"),
-        // Where the server keeps the name it retains each adopted driver from —
-        // its running image, linked or copied — rather than the operator's own
-        // cache, which nothing would ever clear of a copy this tier made.
+        // Confine any library cache writes to this fixture's workspace.
         XDG_CACHE_HOME: join(workspace, "cache"),
+        // What a corpus's own runs are driven under, which the server reads
+        // beside them: the held-turn corpus's harness double and reply wait.
+        ...corpus.environment,
       },
     },
   );
@@ -385,7 +430,12 @@ async function serve(workspace, port, ui, corpus) {
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
   return new Promise((resolveExit) => {
-    server.on("exit", (code) => resolveExit(code ?? 0));
+    server.on("exit", async (code) => {
+      // What the corpus started beside the server ends before this does, so
+      // whoever removes the workspace after this exits removes it whole.
+      await corpus.cleanup?.();
+      resolveExit(code ?? 0);
+    });
   });
 }
 
@@ -396,9 +446,14 @@ function parseArgs(argv) {
     "--stall",
     "--ui",
     "--shutdown-corpus",
+    "--unresolved-workspaces",
     "--preserved-corpus",
+    "--project-centric-corpus",
+    "--live-updates-corpus",
+    "--transcripts-corpus",
     "--review-corpus",
     "--review-loop-corpus",
+    "--held-turn-corpus",
   ]);
   const valued = new Set([
     "--workspace",
@@ -413,6 +468,7 @@ function parseArgs(argv) {
     "--words-text",
     "--refuse-port",
     "--live-dispatch-pid",
+    "--human-items-world",
   ]);
   const out = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -494,6 +550,19 @@ if (
   die(
     "--review-loop-corpus serves its own corpus",
     "pass --review-loop-corpus with --workspace, --port and --ui alone",
+  );
+}
+if (
+  args["held-turn-corpus"] &&
+  (asked.length > 0 ||
+    args["shutdown-corpus"] ||
+    args["preserved-corpus"] ||
+    args["review-corpus"] ||
+    args["review-loop-corpus"])
+) {
+  die(
+    "--held-turn-corpus serves its own corpus",
+    "pass --held-turn-corpus with --workspace, --port and --ui alone",
   );
 }
 if (args["shutdown-corpus"] && args["preserved-corpus"]) {
@@ -651,13 +720,71 @@ if (args.stall) {
     } else {
       let corpus = {
         build: (runsRoot) =>
-          buildRuns(runsRoot, workspace, args["review-corpus"] === true),
+          buildRuns(
+            runsRoot,
+            workspace,
+            args["review-corpus"] === true,
+            `http://127.0.0.1:${port}`,
+          ),
         facts: () => facts(workspace),
       };
-      if (args["preserved-corpus"]) {
+      if (args["project-centric-corpus"]) {
+        corpus = {
+          build: (root) => {
+            buildProjectCentricRuns(root);
+            const engine = join(
+              REPO_ROOT,
+              ".tools",
+              "bin",
+              process.platform === "win32" ? "onepipeline.exe" : "onepipeline",
+            );
+            execFileSync(
+              engine,
+              [
+                "label",
+                "project-before-labels",
+                "--label",
+                "kind=spike-brief",
+                "--group",
+                "local-md:overlay-project",
+              ],
+              {
+                env: { ...process.env, ONEPIPELINE_RUNS_DIR: root },
+                stdio: "pipe",
+              },
+            );
+          },
+          facts: projectCentricFacts,
+        };
+      } else if (args["transcripts-corpus"]) {
+        // Turns read whole from their transcripts: a history store beside the
+        // runs root, built from sessions recorded on a real host.
+        corpus = { build: buildTranscriptRuns, facts: transcriptFacts };
+      } else if (args["live-updates-corpus"]) {
+        // The load corpus's shapes at the journeys' size: a live run, other
+        // live runs, stopped and settled runs, as `load/corpus.mjs` writes them.
+        let written;
+        corpus = {
+          build: (root) => {
+            written = buildLoadCorpus(root, "journey");
+          },
+          facts: () => written,
+        };
+      } else if (args["preserved-corpus"]) {
         corpus = { build: buildPreservedRuns, facts: preservedFacts };
       } else if (args["review-loop-corpus"]) {
         corpus = { build: buildReviewLoopRuns, facts: reviewLoopFacts };
+      } else if (args["held-turn-corpus"]) {
+        corpus = {
+          build: (root) => buildHeldTurnRuns(root, workspace),
+          facts: () => heldTurnFacts(workspace),
+          environment: heldTurnEnvironment(workspace),
+        };
+      } else if (args["human-items-world"] !== undefined) {
+        // A host whose human items the engine itself raised and keeps: runs
+        // launched and items raised by the provisioned CLI, served over the
+        // journal they wrote. Built once; a later start serves the same world.
+        corpus = humanItemsWorld(workspace, args["human-items-world"]);
       } else if (args["shutdown-corpus"]) {
         const pid = args["live-dispatch-pid"];
         const livePid = pid === undefined ? undefined : Number(pid);
@@ -675,6 +802,7 @@ if (args.stall) {
           facts: shutdownFacts,
         };
       }
+      corpus.unresolvedWorkspaces = args["unresolved-workspaces"] === true;
       process.exit(await serve(workspace, port, args.ui === true, corpus));
     }
   } catch (refused) {

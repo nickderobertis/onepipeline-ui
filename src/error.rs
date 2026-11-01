@@ -8,7 +8,9 @@
 use axum::http::StatusCode;
 use thiserror::Error;
 
-use crate::contract::{ArtifactId, ConversationId, ErrorBody, ErrorEnvelope, ProjectId, RunId};
+use crate::contract::{
+    ArtifactId, ConversationId, ErrorBody, ErrorEnvelope, HumanItemId, NodeId, ProjectId, RunId,
+};
 
 /// A failure of a read route.
 ///
@@ -23,6 +25,12 @@ pub enum ApiError {
     /// way must not meet a framework's own 404 body when it mistypes a path.
     #[error("no such route")]
     NoSuchRoute,
+    /// A browser supervision route removed from this release.
+    #[error("route {0} was removed from API 2 at schema 22; serving binary release {version}", version = env!("CARGO_PKG_VERSION"))]
+    RemovedRoute(String),
+    /// Shutdown is restricted to the host.
+    #[error("shutdown scope must be host, got {0}")]
+    RemovedShutdownScope(String),
     /// A query parameter is not one this route accepts.
     #[error("invalid request: {0}")]
     InvalidRequest(String),
@@ -44,6 +52,35 @@ pub enum ApiError {
     /// The project identifier in the path is not a usable one.
     #[error("invalid project id: {0}")]
     InvalidProjectId(String),
+    /// The human-item identifier in the path is not a usable one.
+    #[error("invalid human-item id: {0}")]
+    InvalidHumanItemId(String),
+    /// Human items are not enabled on this host: the engine's own
+    /// `unavailable` refusal, answered when the effective `human_items`
+    /// configuration does not enable them. Never fixture items in its place.
+    #[error("{0}")]
+    HumanItemsUnavailable(String),
+    /// No human item this session may read carries that identifier.
+    #[error("no human item {0}")]
+    HumanItemNotFound(HumanItemId),
+    /// The human item belongs to another session: its content is not served
+    /// and no write to it is made. The owner is not named, because naming it
+    /// would be serving the content this refusal withholds.
+    #[error("{0}")]
+    HumanItemNotOwner(String),
+    /// The engine refused the transition, in its own words: an item already
+    /// resolved, an action that does not match the item's kind, a duplicate
+    /// dedup key, or a design review whose document changed since it was raised.
+    #[error("{0}")]
+    HumanItemConflict(String),
+    /// A subscription request the contract cannot read: a malformed view, an
+    /// id or a cursor that does not parse, or members it does not name. `400`,
+    /// not `422`: there is no baseline to guess at from a malformed cursor.
+    #[error("invalid subscription: {0}")]
+    InvalidSubscription(String),
+    /// A node scope naming a node the run's graph does not carry.
+    #[error("no node {0} in this run")]
+    NodeNotFound(NodeId),
     /// `?correlation=` is not a token the bus's own parser accepts.
     #[error("invalid correlation: {0}")]
     InvalidCorrelation(String),
@@ -115,9 +152,10 @@ impl ApiError {
     /// are the engine's own on every arm: a refusal restated is a second thing
     /// to keep true, and the text is what a manager acts on.
     ///
-    /// Its signature takes the engine's own [`onepipeline::Error`], so this
-    /// crate's public surface follows `onepipeline`'s: a consumer calling it
-    /// has to hand it a value of the very type this crate links. That is why
+    /// [`ApiError::from_engine`] takes the engine's own [`onepipeline::Error`],
+    /// so this crate's public surface follows the linked `onepipeline` release:
+    /// a consumer calling it has to hand it a value of the very type this crate
+    /// links and recompile when that type's release changes. That is why
     /// `Cargo.toml` pins the engine with an exact `onepipeline = "=…"`
     /// requirement — it is what holds the two surfaces together — and why
     /// moving that requirement across a `0.x` minor release is a breaking
@@ -179,6 +217,8 @@ impl ApiError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::NoSuchRoute => "no_such_route",
+            Self::RemovedRoute(_) => "removed_route",
+            Self::RemovedShutdownScope(_) => "removed_shutdown_scope",
             Self::InvalidRequest(_) => "invalid_request",
             Self::InvalidRunId(_) => "invalid_run_id",
             Self::InvalidNodeId(_) => "invalid_node_id",
@@ -186,7 +226,14 @@ impl ApiError {
             Self::InvalidArtifactId(_) => "invalid_artifact_id",
             Self::InvalidDispatchId(_) => "invalid_dispatch_id",
             Self::InvalidProjectId(_) => "invalid_project_id",
+            Self::InvalidHumanItemId(_) => "invalid_human_item_id",
+            Self::HumanItemsUnavailable(_) => "human_items_unavailable",
+            Self::HumanItemNotFound(_) => "human_item_not_found",
+            Self::HumanItemNotOwner(_) => "human_item_not_owner",
+            Self::HumanItemConflict(_) => "human_item_conflict",
             Self::InvalidCorrelation(_) => "invalid_correlation",
+            Self::InvalidSubscription(_) => "invalid_subscription",
+            Self::NodeNotFound(_) => "node_not_found",
             Self::ProjectNotFound(_) => "project_not_found",
             Self::Refused(_) => "refused",
             Self::NotOwner { .. } => "not_owner",
@@ -212,6 +259,7 @@ impl ApiError {
     #[must_use]
     pub fn status(&self) -> StatusCode {
         match self {
+            Self::RemovedShutdownScope(_) | Self::InvalidSubscription(_) => StatusCode::BAD_REQUEST,
             Self::InvalidRequest(_)
             | Self::InvalidRunId(_)
             | Self::InvalidNodeId(_)
@@ -219,19 +267,26 @@ impl ApiError {
             | Self::InvalidArtifactId(_)
             | Self::InvalidDispatchId(_)
             | Self::InvalidProjectId(_)
+            | Self::InvalidHumanItemId(_)
             | Self::InvalidCorrelation(_)
             | Self::Refused(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            Self::NoSuchRoute
+            Self::RemovedRoute(_)
+            | Self::NoSuchRoute
             | Self::RunNotFound(_)
             | Self::ProjectNotFound(_)
+            | Self::NodeNotFound(_)
             | Self::ConversationNotFound(_)
             | Self::ArtifactNotFound(_)
-            | Self::UnknownFilterProfile(_) => StatusCode::NOT_FOUND,
+            | Self::UnknownFilterProfile(_)
+            | Self::HumanItemNotFound(_) => StatusCode::NOT_FOUND,
+            Self::HumanItemNotOwner(_) => StatusCode::FORBIDDEN,
+            Self::HumanItemsUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::ProjectionFailed(_)
             | Self::NotOwner { .. }
             | Self::NothingDriving(_)
             | Self::Locked(_)
-            | Self::NotStopped(_) => StatusCode::CONFLICT,
+            | Self::NotStopped(_)
+            | Self::HumanItemConflict(_) => StatusCode::CONFLICT,
             Self::Read(_) | Self::Engine(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

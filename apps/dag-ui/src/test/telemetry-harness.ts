@@ -1,6 +1,14 @@
-import { API_V2_PATHS, API_V2_QUERY } from "@onepipeline-ui/dag-model";
+import {
+  API_V2_PATHS,
+  API_V2_QUERY,
+  projectListSchema,
+  type SidebarRow,
+  type SubscriptionView,
+  subscriptionViewSchema,
+} from "@onepipeline-ui/dag-model";
 import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { vi } from "vitest";
+import { z } from "zod";
 import {
   channelQueue,
   HISTORY_RUN,
@@ -56,7 +64,18 @@ export interface TelemetryHarness {
   readonly client: TelemetryClient;
   readonly sources: FakeEventSource[];
   readonly fetch: ReturnType<typeof vi.fn>;
+  /**
+   * Push one frame of `type` onto the newest subscription's open stream, with
+   * the id after the last one it was sent and that one as its base — what a
+   * conforming server sends next.
+   */
+  readonly push: (type: string, members: Record<string, unknown>) => void;
+  /** The views the page has subscribed to, in order. */
+  readonly views: SubscriptionView[];
 }
+
+/** The epoch every subscription this harness answers is issued under. */
+export const HARNESS_EPOCH = "0198a5b3-2c4d-4e60-8f01-00000000e90c";
 
 type Responder = (url: URL, init?: RequestInit) => Response | Promise<Response>;
 
@@ -284,14 +303,143 @@ export function defaultResponder(url: URL): Response {
   );
 }
 
+/**
+ * A sidebar row as the server trims one: the fields the sidebar renders, read
+ * off the grouped listing's row for the same run.
+ */
+export function sidebarRowOf(run: {
+  run_id: string;
+  state: string;
+  project?: string | null;
+  project_name?: string | null;
+  labels?: Record<string, string> | null;
+  node_counts?: Record<string, number>;
+  last_progress_at?: number | null;
+  launch?: { started_at?: string } | null;
+}): SidebarRow {
+  const counts = run.node_counts ?? {};
+  const count = (word: string) => counts[word] ?? 0;
+  return {
+    id: run.run_id,
+    name: run.run_id,
+    group:
+      run.project === undefined || run.project === null
+        ? null
+        : { project: run.project, name: run.project_name ?? run.project },
+    kind: run.labels?.kind ?? null,
+    state: run.state,
+    nodes: {
+      total: Object.values(counts).reduce((sum, value) => sum + value, 0),
+      done: count("done"),
+      failed: count("failed"),
+      running: count("running"),
+    },
+    updated_at: new Date((run.last_progress_at ?? 0) * 1000).toISOString(),
+    ...(run.launch?.started_at === undefined
+      ? {}
+      : { started_at: run.launch.started_at }),
+  };
+}
+
+/**
+ * `POST /api/v2/subscriptions`, answered by composing what the same responder
+ * serves on the read routes: the sidebar from the grouped listing, and the
+ * visible view from the detail, timeline and channel reads it names — so a test
+ * that answers one of those differently is answered differently here too, and a
+ * read it refuses refuses the subscription.
+ */
+async function subscriptionResponder(
+  responder: Responder,
+  body: unknown,
+  next: () => number,
+  views: SubscriptionView[],
+): Promise<Response> {
+  const parsed = z
+    .object({ view: subscriptionViewSchema })
+    .transform(({ view }) => view)
+    .safeParse(body);
+  if (!parsed.success)
+    return Response.json(
+      { error: { code: "invalid_subscription", message: "a malformed view" } },
+      { status: 400 },
+    );
+  const view = parsed.data;
+  views.push(view);
+  const read = async (
+    path: string,
+    query: Record<string, string | undefined> = {},
+  ) => {
+    const url = new URL(path, window.location.origin);
+    for (const [key, value] of Object.entries(query))
+      if (value !== undefined) url.searchParams.set(key, value);
+    return responder(url);
+  };
+  const projects = await read(API_V2_PATHS.projects);
+  if (!projects.ok) return projects;
+  const sidebar = projectListSchema
+    .parse(await projects.json())
+    .projects.flatMap((group) => group.runs.map(sidebarRowOf));
+  const filter = "filter" in view && view.filter ? { filter: view.filter } : {};
+  let visible: Record<string, unknown> = { type: "sidebar" };
+  if (view.type !== "sidebar") {
+    const detail = await read(API_V2_PATHS.run(view.run_id), {
+      [API_V2_QUERY.includeConversations]: "false",
+      ...(view.type === "channel" ? {} : filter),
+    });
+    if (!detail.ok) return detail;
+    visible = { ...view, detail: await detail.json() };
+    delete visible.filter;
+    if (view.type === "timeline") {
+      const timeline = await read(API_V2_PATHS.timeline(view.run_id), {
+        [API_V2_QUERY.scope]: view.scope,
+        ...(view.scope === "node" ? { [API_V2_QUERY.node]: view.node } : {}),
+        ...filter,
+      });
+      if (!timeline.ok) return timeline;
+      visible.timeline = await timeline.json();
+    }
+    if (view.type === "channel") {
+      const channel = await read(API_V2_PATHS.channel(view.run_id));
+      if (!channel.ok) return channel;
+      visible.channel = await channel.json();
+    }
+  }
+  const subscription = `${HARNESS_EPOCH.slice(0, 24)}${String(next()).padStart(12, "0")}`;
+  return Response.json(
+    {
+      subscription,
+      view,
+      initial: {
+        type: "snapshot",
+        snapshot: { id: `${HARNESS_EPOCH}:${next()}`, sidebar, visible },
+      },
+    },
+    { status: 201 },
+  );
+}
+
 /** A real `TelemetryClient` wired to a doubled network and event stream. */
 export function telemetryHarness(
   responder: Responder = defaultResponder,
 ): TelemetryHarness {
   const sources: FakeEventSource[] = [];
+  const views: SubscriptionView[] = [];
+  let sequence = 0;
+  const next = () => ++sequence;
   const fetchDouble = vi.fn(
-    async (input: URL | RequestInfo, init?: RequestInit) =>
-      responder(new URL(String(input), window.location.origin), init),
+    async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = new URL(String(input), window.location.origin);
+      if (url.pathname === API_V2_PATHS.subscriptions)
+        return subscriptionResponder(
+          responder,
+          JSON.parse(String(init?.body ?? "{}")),
+          next,
+          views,
+        );
+      if (url.pathname.startsWith(`${API_V2_PATHS.subscriptions}/`))
+        return new Response(null, { status: 204 });
+      return responder(url, init);
+    },
   );
   const client = new TelemetryClient(window.location.origin, {
     // `typeof fetch` carries overloads and a `preconnect` property that no
@@ -307,5 +455,17 @@ export function telemetryHarness(
       return source as unknown as EventSource;
     },
   });
-  return { client, sources, fetch: fetchDouble };
+  /** The last frame each stream was sent, which the next names as its base. */
+  const bases = new Map<FakeEventSource, string>();
+  const push = (type: string, members: Record<string, unknown>) => {
+    const source = sources.at(-1);
+    if (source === undefined) throw new Error("no stream is open to push to");
+    const url = new URL(source.url, window.location.origin);
+    const subscription = url.searchParams.get(API_V2_QUERY.subscription);
+    const base = bases.get(source) ?? url.searchParams.get(API_V2_QUERY.after);
+    const id = `${HARNESS_EPOCH}:${next()}`;
+    bases.set(source, id);
+    source.emit(type, { id, base, subscription, type, ...members }, id);
+  };
+  return { client, sources, fetch: fetchDouble, push, views };
 }

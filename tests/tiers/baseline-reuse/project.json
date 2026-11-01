@@ -1,0 +1,41 @@
+{
+  "name": "onepipeline-ui-baseline-reuse",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:tooling", "type:test", "lang:rust"],
+  "namedInputs": {
+    "baselineProvisioning": [
+      "{projectRoot}/**/*",
+      "testTiers",
+      "sharedGlobals",
+      "{workspaceRoot}/scripts/ensure-baseline-api.sh",
+      "{workspaceRoot}/tests/e2e/main.rs",
+      "{workspaceRoot}/tests/e2e/baseline_reuse.rs"
+    ]
+  },
+  "targets": {
+    "test": {
+      "command": "just _tier-test baseline-reuse",
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
+      "inputs": ["baselineProvisioning"]
+    },
+    "test-quick": {
+      "command": "just _tier-test baseline-reuse",
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
+      "inputs": ["baselineProvisioning"]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  }
+}

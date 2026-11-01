@@ -28,8 +28,9 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
+  awaitedReleases,
   isUnhealthy,
   type NodeView,
   recordedReason,
@@ -42,6 +43,8 @@ import {
   NODE_TAB_LABELS,
   type NodeTab,
 } from "../../lib/useUrlSelection";
+import { boundedZoom, TIMELINE_TIME_MARKS } from "./axis";
+import { CheckRuntime } from "./CheckRuntime";
 import { ControlBadge } from "./ControlBadge";
 import { EventCategoryIcon } from "./event-category";
 import { NodeRelease } from "./release";
@@ -74,6 +77,7 @@ export function NodeTimelineView({
   client,
   runId,
   node,
+  nodes,
   timeline,
   timelineError,
   selectedItemId,
@@ -81,17 +85,12 @@ export function NodeTimelineView({
   onBack,
   selectedTab,
   onSelectTab,
-  agents,
 }: {
   readonly client: TelemetryClient;
   readonly runId: string;
   readonly node: NodeView;
-  /**
-   * The node's Agents tab, composed by the app: the sessions this node's
-   * dispatches wrote, which is another feature's reading of the run and is
-   * handed in rather than reached for.
-   */
-  readonly agents?: ReactNode;
+  /** Every node of the run, so a blocker can be named with the status it holds. */
+  readonly nodes: readonly NodeView[];
   readonly timeline?: RunTimeline;
   readonly timelineError?: Error;
   readonly selectedItemId?: string;
@@ -159,7 +158,8 @@ export function NodeTimelineView({
         </div>
       </header>
 
-      <NodeProblemBanner node={node} />
+      <NodeProblemBanner node={node} nodes={nodes} />
+      <NodeAwaitingPanel node={node} />
 
       <Tabs
         className="node-tabs"
@@ -178,6 +178,13 @@ export function NodeTimelineView({
         <TabsContent className="node-tab-panel" value="task">
           <pre>{taskProse(node.task)}</pre>
           <dl className="facts">
+            {/* The settlement's own word — `merged`, `published`, `shipped` —
+                which the status badge does not carry: `done` is the same for a
+                change that merged and one still open. */}
+            <div>
+              <dt>Settled as</dt>
+              <dd>{formatValue(node.result?.outcome)}</dd>
+            </div>
             <div>
               <dt>Outcome</dt>
               <dd>{formatValue(node.result?.detail)}</dd>
@@ -210,16 +217,43 @@ export function NodeTimelineView({
           <dl className="facts">
             <div>
               <dt>Dependencies</dt>
-              <dd>{node.task.deps?.join(", ") || "None"}</dd>
+              <dd>
+                {(node.task.deps ?? [])
+                  .map((dep) => {
+                    const status = nodes.find(
+                      (other) => other.id === dep,
+                    )?.status;
+                    return status === undefined ? dep : `${dep} (${status})`;
+                  })
+                  .join(", ") || "None"}
+              </dd>
+            </div>
+            <div>
+              <dt>Unblocks</dt>
+              <dd>{node.dependents.join(", ") || "None"}</dd>
             </div>
           </dl>
         </TabsContent>
-        <TabsContent className="node-tab-panel" value="pr">
+        <TabsContent className="node-tab-panel" value="remote">
           <dl className="facts">
             <div>
               <dt>Publication</dt>
               <dd>
                 <Publication node={node} />
+              </dd>
+            </div>
+            <div>
+              <dt>Branch</dt>
+              <dd>{node.detail?.publication?.branch ?? "Not recorded"}</dd>
+            </div>
+            <div>
+              <dt>Merge</dt>
+              <dd>
+                {node.detail?.publication
+                  ? node.detail.publication.merged
+                    ? "Merged"
+                    : "Not merged"
+                  : "Not recorded"}
               </dd>
             </div>
             {/* Beside the change request rather than under a tab of its own: the
@@ -233,11 +267,7 @@ export function NodeTimelineView({
                 <NodeRelease node={node} />
               </dd>
             </div>
-          </dl>
-        </TabsContent>
-        <TabsContent className="node-tab-panel" value="checks">
-          <dl className="facts">
-            <div>
+            <div className="remote-check-facts">
               <dt>Verification coverage</dt>
               <dd>
                 Hook:{" "}
@@ -249,33 +279,61 @@ export function NodeTimelineView({
                   "none configured"}
               </dd>
             </div>
-            <div>
+            <div className="remote-check-facts">
               <dt>Observed checks</dt>
               <dd>
-                {(node.detail?.verification.checks ?? []).length === 0
-                  ? "No checks observed"
-                  : node.detail?.verification.checks?.map((check, index) => (
-                      <span key={check.name}>
-                        {index > 0 && " · "}
-                        {check.url ? (
-                          <a href={check.url} rel="noreferrer" target="_blank">
-                            {check.name}: {check.state}
-                          </a>
-                        ) : (
-                          `${check.name}: ${check.state}`
-                        )}
-                      </span>
-                    ))}
+                {(node.detail?.verification.checks ?? []).length === 0 ? (
+                  "No checks observed"
+                ) : (
+                  <table aria-label="Remote checks" className="remote-checks">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Conclusion</th>
+                        <th>Runtime</th>
+                        <th>Required</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {node.detail?.verification.checks?.map((check) => (
+                        <tr key={check.name}>
+                          <th scope="row">
+                            {check.url ? (
+                              <a
+                                href={check.url}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                {check.name}
+                              </a>
+                            ) : (
+                              check.name
+                            )}
+                          </th>
+                          <td>{check.status ?? "Not recorded"}</td>
+                          <td>{check.conclusion ?? "—"}</td>
+                          <td>
+                            <CheckRuntime
+                              {...(check.started_at === undefined
+                                ? {}
+                                : { startedAt: check.started_at })}
+                              {...(check.completed_at === undefined
+                                ? {}
+                                : { completedAt: check.completed_at })}
+                            />
+                          </td>
+                          <td>{check.required ? "Required" : "Optional"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </dd>
             </div>
           </dl>
         </TabsContent>
-        {/* The sessions this node's dispatches wrote, every one whatever the
-            repository's agent structure, each opening to its transcript. Mounted
-            only while the tab is open, so it is read like the run's own reads. */}
-        <TabsContent className="node-tab-panel" value="agents">
-          {selectedTab === "agents" && agents}
-        </TabsContent>
+
         <TabsContent className="node-timeline-panel" value="timeline">
           {/* llmlint: ignore[changed_behavior_has_e2e] the detail and the timeline are
           read from the same strict journal, so no served run fails one and not the
@@ -371,6 +429,9 @@ function NodeExecution({
   );
   const sync = useTimelineScrollSync(entries);
   const [expanded, setExpanded] = useState(false);
+  // Held here rather than inside the plot so every zoom is bounded: the plot's
+  // own zoom would narrow past the last labelled second.
+  const [zoom, setZoom] = useState<readonly [number, number]>();
   const compactItems = useMemo(
     () => compactTimelineItems(projection.items, projection.lanes),
     [projection.items, projection.lanes],
@@ -390,8 +451,23 @@ function NodeExecution({
   // window; pinning it to the nearest edge keeps the cursor on screen instead of
   // dropping it and leaving the reader with no mark at all.
   const plotted = useMemo(
-    () => timeRange(projection.items),
-    [projection.items],
+    () =>
+      timeRange([
+        ...projection.items,
+        ...projection.markers.map(({ at }) => ({ start: at })),
+      ]),
+    [projection.items, projection.markers],
+  );
+  // The window of exactly what the plot is drawing, which is what it shows when
+  // nobody has zoomed it. Always handed to the plot, so every zoom passes through
+  // `boundedZoom` and none is held inside the plot where it could not be.
+  const shown = useMemo(
+    () =>
+      timeRange([
+        ...(expanded ? projection.items : compactItems),
+        ...compactMarkers.map(({ at }) => ({ start: at })),
+      ]),
+    [expanded, projection.items, compactItems, compactMarkers],
   );
   const cursor =
     sync.cursor === undefined
@@ -405,9 +481,13 @@ function NodeExecution({
     onSelectItem(id);
     sync.scrollTo(id);
   };
+  // The hook returns a new object on each render, including a cursor update
+  // from scrolling. Only a changed selection should scroll again; depending on
+  // that object makes the selected stamp race the scroll-derived reading cursor.
+  const { scrollTo } = sync;
   useEffect(() => {
-    if (selectedItemId !== undefined) sync.scrollTo(selectedItemId);
-  }, [selectedItemId, sync]);
+    if (selectedItemId !== undefined) scrollTo(selectedItemId);
+  }, [selectedItemId, scrollTo]);
   return (
     <div className="node-execution" data-expanded={expanded}>
       <section
@@ -416,6 +496,7 @@ function NodeExecution({
         data-testid="node-timeline"
       >
         <Timeline
+          {...TIMELINE_TIME_MARKS}
           axis={{ origin: plotted[0] }}
           cursor={cursor}
           expanded={expanded}
@@ -428,7 +509,17 @@ function NodeExecution({
           lanes={projection.lanes}
           markers={compactMarkers}
           onExpandedChange={setExpanded}
+          onRangeChange={(next) =>
+            // A reset asks for the whole window back; a live run's window keeps
+            // growing, so it is followed rather than pinned.
+            setZoom(
+              next[0] <= shown[0] && next[1] >= shown[1]
+                ? undefined
+                : boundedZoom(next),
+            )
+          }
           onSelect={(entry) => select(entry.id)}
+          range={zoom ?? shown}
           selectedId={selectedItemId}
         />
       </section>
@@ -594,6 +685,7 @@ function TranscriptItem({
       aria-label={row.displayLabel}
       className="transcript-item"
       data-dispatch-group={row.dispatch?.label}
+      data-journal-seq={row.rowKind === "event" ? row.event.seq : undefined}
       data-selected={selected}
       ref={(element) => register(row.id, element)}
     >
@@ -712,8 +804,67 @@ function Publication({ node }: { readonly node: NodeView }) {
   );
 }
 
+/**
+ * Leads the view of a node holding finished work for a release with every release
+ * it awaits, in full, above the settlement's own detail.
+ *
+ * Not an alert and not the problem banner: nothing has gone wrong, so opening the
+ * node announces nothing. The warning tone is the one its badge and card carry —
+ * what it waits on is another repository's release, as a blocked node's is another
+ * node. Each entry is read off the served `awaiting`, never out of the detail.
+ */
+function NodeAwaitingPanel({ node }: { readonly node: NodeView }) {
+  const awaited = awaitedReleases(node);
+  if (awaited.length === 0) return null;
+  // llmlint: ignore-block[changed_behavior_has_e2e] the engine composes a detail sentence for every `complete-but-held` and `complete-but-draft` settlement (`release::held_detail`, `release::drafted_detail`), so a held node with none is a malformed record no browser fixture in the engine's shape can carry; App.test.tsx drives this omission through the real model and telemetry client, and the browser journey drives the detail row the engine always writes.
+  const detail = node.result?.detail?.trim() || undefined;
+  return (
+    <section
+      aria-label="Awaited releases"
+      className="node-awaiting m-5 rounded-lg border border-warning bg-warning-surface px-4 py-3 text-warning"
+    >
+      <h2 className="flex items-center gap-2 text-sm font-semibold">
+        <OctagonPause size={16} />
+        {node.status === "complete-but-held"
+          ? "Complete, and held unlanded until its releases arrive"
+          : "Complete, and held as a draft until its releases arrive"}
+      </h2>
+      <dl className="facts facts-stacked">
+        <div>
+          <dt>
+            {awaited.length === 1 ? "Awaits" : `Awaits ${awaited.length}`}
+          </dt>
+          <dd>
+            <ul className="awaited-releases">
+              {awaited.map((entry) => (
+                <li key={`${entry.producer} ${entry.target}`}>
+                  the <strong>{entry.target}</strong> release of{" "}
+                  <code>{entry.producer}</code>
+                </li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+        {detail !== undefined && (
+          <div>
+            <dt>Detail</dt>
+            <dd>{detail}</dd>
+          </div>
+        )}
+        {/* llmlint: ignore-end[changed_behavior_has_e2e] */}
+      </dl>
+    </section>
+  );
+}
+
 /** Leads an unhealthy node's detail view with its server-recorded reason. */
-function NodeProblemBanner({ node }: { readonly node: NodeView }) {
+function NodeProblemBanner({
+  node,
+  nodes,
+}: {
+  readonly node: NodeView;
+  readonly nodes: readonly NodeView[];
+}) {
   if (!isUnhealthy(node.status)) return null;
   // Not one condition: `blocked` moves when a person acts and `skipped` never will.
   // They share a banner because neither is this node's own failure — the heading
@@ -754,9 +905,24 @@ function NodeProblemBanner({ node }: { readonly node: NodeView }) {
               <dt>{node.status === "skipped" ? "Unmet" : "Blocked by"}</dt>
               <dd>
                 {node.blockers.length > 0
-                  ? node.blockers.join(", ")
+                  ? node.blockers
+                      .map((blocker) => {
+                        const status = nodes.find(
+                          (other) => other.id === blocker,
+                        )?.status;
+                        return status === undefined
+                          ? blocker
+                          : `${blocker} (${status})`;
+                      })
+                      .join(", ")
                   : "Nothing recorded; the run has not written what holds it."}
               </dd>
+            </div>
+          )}
+          {node.status === "skipped" && (
+            <div>
+              <dt>Attempts</dt>
+              <dd>Never attempted</dd>
             </div>
           )}
           {!dependencyDecided && (

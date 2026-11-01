@@ -12,7 +12,8 @@
 //! bytes it serves; `linked_report` builds that binary with `cargo auditable`
 //! and reads back the dependency record it embedded; `packaging` assembles the real npm packages with
 //! `scripts/npm-build.mjs` and runs the real launcher under node, resolving the
-//! platform package through node's own resolution; `judged_tier` runs the
+//! platform package through node's own resolution, and refuses under the real
+//! node release `ensure_node_without_execve` provisions; `judged_tier` runs the
 //! gate's own llmlint recipe through the real Nx and the installed llmlint over
 //! a real git repository, `release_status` runs
 //! the release's demotion step over a real GitHub Release's notes,
@@ -36,14 +37,18 @@
 //! directive that permits it and the reason it is the narrowest cut available.
 
 mod baseline;
+mod baseline_reuse;
 mod ci_jobs;
 mod ci_tier;
 mod cli;
 mod cost;
 mod ensure_baseline;
+mod ensure_node_without_execve;
 mod ensure_sibling;
+mod human_items;
 mod judged_tier;
 mod linked_report;
+mod live;
 // llmlint: ignore-block[e2e_not_mocked] the real `docker run` is a manylinux
 // image compiling the whole release binary, minutes per target, which ci.yml's
 // `wheel` legs run for real — then install and smoke-test — on every pull request
@@ -64,6 +69,7 @@ mod release_probe;
 mod release_status;
 mod semver_check;
 mod server;
+mod transcripts;
 mod ui;
 mod workspace_install;
 
@@ -77,6 +83,8 @@ mod harness_history;
 mod http;
 #[path = "../support/journal_schema.rs"]
 mod journal_schema;
+#[path = "../support/live_journal.rs"]
+mod live_journal;
 #[path = "../support/release_declaration.rs"]
 mod release_declaration;
 #[path = "../support/scratch_repo.rs"]

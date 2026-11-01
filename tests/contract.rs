@@ -24,10 +24,9 @@ use onepipeline_ui::cli::{Cli, Command, ServeArgs, SessionId, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, DispatchId, Envelope, ErrorEnvelope,
     EventFrame, EventsQuery, Health, HealthStatus, NextQuery, NodeId, PageLimit, ProjectId,
-    ReferenceKind, Release, RunId, RunQuery, RunShutdownRequest, RunsPage, RunsQuery,
-    ShutdownRequest, ShutdownScope, SseEvent, StopRequest, SurfaceRequest, TimelineQuery,
-    TimelineScope, TranscriptQuery, WatchQuery, API_VERSION, RUNS_PAGE_LIMIT,
-    TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
+    ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery, ShutdownRequest, ShutdownScope,
+    SseEvent, StopRequest, SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery,
+    API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -55,10 +54,7 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUN_CHANNEL_SURFACE, "run-channel-surface.json"),
     (routes::RUN_ATTEST, "run-attest.json"),
     (routes::RUN_STOP, "run-stop.json"),
-    (routes::RUN_ADOPT, "run-adopt.json"),
-    (routes::RUN_SHUTDOWN, "run-shutdown.json"),
     (routes::SHUTDOWN, "shutdown.json"),
-    (routes::RUN_WATCH, "run-watch.json"),
     (routes::UNWATCHED, "unwatched.json"),
     (routes::HOST, "host.json"),
     (routes::RUN_STATUS, "run-status.json"),
@@ -70,16 +66,22 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUN_AGENTS, "run-agents.json"),
     (routes::RUN_NODE_AGENTS, "run-node-agents.json"),
     (routes::PROJECT_AGENTS, "project-agents.json"),
+    // Neither subscription route is enveloped: the first answers the
+    // subscription and its snapshot, and the second answers nothing — what it
+    // pins is every frame the subscription it retires carried, as the real
+    // server served them (`tests/e2e/live.rs`).
+    (routes::SUBSCRIPTIONS, "subscriptions.json"),
+    (routes::SUBSCRIPTION, "subscription-frames.json"),
+    // The human-item routes serve the engine's own records unenveloped; their
+    // goldens are written by `tests/e2e/human_items.rs` from the real server,
+    // and reconciled with the engine's types below.
+    (routes::HUMAN_ITEMS, "human-items.json"),
+    (routes::HUMAN_ITEMS, "human-items-raise.json"),
+    (routes::HUMAN_ITEM, "human-item.json"),
+    (routes::HUMAN_ITEM_ANSWER, "human-item-answer.json"),
+    (routes::HUMAN_ITEM_COMPLETE, "human-item-complete.json"),
+    (routes::HUMAN_ITEM_DISMISS, "human-item-dismiss.json"),
 ];
-
-/// The binary that carries the hidden driver verb an adoption retains.
-///
-/// An in-process store would retain the *test* executable, which does not
-/// answer `drive-run`; the served process retains itself, and this is what it
-/// would retain.
-fn api_binary() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_onepipeline-api"))
-}
 
 /// The store the served process would build over a workspace's runs root: the
 /// root itself, and the graph records the fixtures keep beside it — where the
@@ -147,7 +149,7 @@ fn the_route_table_documents_no_route_the_contract_does_not() {
         .lines()
         .filter_map(|line| {
             let (method, rest) = line.split_once(' ')?;
-            matches!(method, "GET" | "POST")
+            matches!(method, "GET" | "POST" | "DELETE")
                 .then(|| (method, rest.split_whitespace().next().unwrap_or_default()))
         })
         .collect();
@@ -176,7 +178,7 @@ fn the_readme_indexes_every_route_and_names_the_served_schema() {
         .lines()
         .filter_map(|line| {
             let (method, rest) = line.split_once(' ')?;
-            matches!(method, "GET" | "POST")
+            matches!(method, "GET" | "POST" | "DELETE")
                 .then(|| (method, rest.split_whitespace().next().unwrap_or_default()))
         })
         .collect();
@@ -624,7 +626,15 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
     // fixture run was recorded on this name, so every liveness verdict below
     // is the one a reader on any other host reaches.
     std::env::set_var("HOSTNAME", READING_HOST);
-    let (_workspace, root) = fixture_run::workspace();
+    let (workspace, root) = fixture_run::workspace();
+    // `host` and `status` carry a free-space line per filesystem among the runs
+    // root and the `onevcs` state root the lifecycle workspaces are cut under.
+    // That root is this workspace's own, empty — beside the runs root as every
+    // served journey's is — rather than the operator's, so the golden pins the
+    // one line a shared filesystem reads as on any host, not this host's mounts.
+    let onevcs_home = workspace.path().join("onevcs-home");
+    fs::create_dir_all(&onevcs_home).expect("an empty onevcs state root");
+    std::env::set_var("ONEVCS_HOME", &onevcs_home);
     fixture_run::write(&root, fixture_run::RUN_ID);
     fixture_run::write(&root, fixture_run::OTHER_RUN_ID);
     // One run's launches wrote sessions and the other's wrote none, so the
@@ -634,11 +644,8 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
     let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
     let node = NodeId::try_from(fixture_run::NODE_ID).expect("valid");
     let project = ProjectId::try_from(fixture_run::PLAN_PROJECT).expect("the fixture's project");
-    let journal_end = fs::metadata(RunPaths::under(&root, fixture_run::RUN_ID).journal())
-        .expect("the fixture run's journal")
-        .len();
 
-    let served: [(&str, Value); 15] = [
+    let served: [(&str, Value); 14] = [
         ("projects.json", enveloped(store.projects())),
         ("project.json", enveloped(store.project(&project))),
         ("run-agents.json", enveloped(store.agents(&run))),
@@ -651,27 +658,6 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
             enveloped(store.project_agents(&project)),
         ),
         ("run-channel.json", enveloped(store.channel(&run))),
-        (
-            "run-watch.json",
-            at_journal_end(
-                serde_json::to_value(
-                    store
-                        .watch(
-                            &run,
-                            &WatchQuery {
-                                timeout: onepipeline::cli::WatchTimeout::Bounded(0),
-                                ..WatchQuery::default()
-                            },
-                        )
-                        .expect("a watch of no seconds reads the run once")
-                        .collect::<Vec<_>>(),
-                )
-                .expect("serialize the frames"),
-                journal_end,
-            ),
-        ),
-        // As the session the fixture runs were launched by, so the golden pins
-        // the acting session's key the report names beside what it reports.
         (
             "unwatched.json",
             enveloped(
@@ -793,12 +779,6 @@ fn every_write_verb_serves_the_payload_its_golden_pins() {
     // for the adoption below.
     let onevcs_home = tempfile::tempdir().expect("an empty onevcs state root");
     std::env::set_var("ONEVCS_HOME", onevcs_home.path());
-    let (_shutting, shutdown_root) = fixture_run::workspace();
-    fixture_run::write(&shutdown_root, fixture_run::RUN_ID);
-    let shutting = store_over(&shutdown_root).acting_as(Some(
-        &SessionId::try_from(fixture_run::SESSION.to_owned()).expect("the fixture's session"),
-    ));
-    let one = enveloped(shutting.run_shutdown(&run, &RunShutdownRequest::default()));
     let (_host, host_root) = fixture_run::workspace();
     fixture_run::write(&host_root, fixture_run::RUN_ID);
     fixture_run::write(&host_root, fixture_run::OTHER_RUN_ID);
@@ -821,51 +801,7 @@ fn every_write_verb_serves_the_payload_its_golden_pins() {
             }),
     );
     std::env::remove_var("ONEVCS_HOME");
-    pin_under("run-shutdown.json", one, Some(&shutdown_root));
     pin_under("shutdown.json", host, Some(&host_root));
-
-    // An adoption, retaining the compiled binary as the driver of the complete
-    // run — which settles it and lets go, so nothing is left running behind
-    // this test. The engine judges an adoption's ownership by the session its
-    // *environment* names rather than by one handed in — the served process
-    // exports its acting session for exactly that reason — so this process
-    // acts as the fixture's session for the length of the call. Nothing else
-    // in this binary reads the variable: every other verb is handed the
-    // session explicitly.
-    // Over a fresh copy: the reply above wrote to the first copy's journal a
-    // moment ago, which is a run being driven as far as the engine's liveness
-    // reading is concerned, and an adoption refuses one of those. The driver
-    // the engine retains resolves the run under the root *its* environment
-    // names — the served process exports its root for exactly that reason —
-    // so this process names the copy's root for the length of the call, as it
-    // names the session.
-    let (adopting_workspace, adopt_root) = fixture_run::workspace();
-    fixture_run::write(&adopt_root, fixture_run::RUN_ID);
-    fixture_run::adoptable_from(&adopt_root, fixture_run::RUN_ID, adopting_workspace.path());
-    // A driver recorded on another host cannot be probed, so it reads as live
-    // and quiet — `PARKED`, which is driven — and an adoption refuses it. The
-    // run is adopted from a driver proved gone on this host instead.
-    driven_by(&adopt_root, fixture_run::RUN_ID, 0x7FFF_FFF0);
-    let adopting = store_over(&adopt_root).driving_with(&api_binary());
-    std::env::set_var(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION);
-    std::env::set_var(onepipeline_ui::store::RUNS_DIR_ENV, &adopt_root);
-    let adopted = enveloped(adopting.adopt(&run));
-    std::env::remove_var(onepipeline_ui::cli::SESSION_ENV);
-    std::env::remove_var(onepipeline_ui::store::RUNS_DIR_ENV);
-    let pid = adopted["pid"]
-        .as_u64()
-        .unwrap_or_else(|| panic!("a detached adoption answers the driver's pid: {adopted}"));
-    assert!(pid > 0);
-    pin("run-adopt.json", adopted);
-    let lock = adopt_root.join(fixture_run::RUN_ID).join("owner.lock");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    while lock.exists() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    assert!(
-        !lock.exists(),
-        "the retained driver never let go of the run"
-    );
 }
 
 /// The envelope a route served, as JSON, or the failure that stops the golden
@@ -1071,49 +1007,6 @@ fn a_scratch_path_reads_as_the_golden_whichever_separator_recorded_it() {
 /// suite happened to run on.
 const READING_HOST: &str = "a-reading-host";
 
-/// Where a golden says a watch's cursor stood: at the end of the journal.
-///
-/// A cursor is a byte offset into the run's journal, and the fixture journal's
-/// length is a property of the host that wrote it — a settled member records
-/// the path its producer's scratch had, and a temporary directory is spelled
-/// differently on every platform. So the offset is replaced by this where it
-/// equals the journal's length, and kept where it does not: what the golden pins
-/// is that a watch of no seconds read the whole journal and says so, not how
-/// many bytes that was.
-const JOURNAL_END: &str = "end-of-journal";
-
-/// `frames` with every `cursor` standing at `journal_end` replaced by
-/// [`JOURNAL_END`].
-fn at_journal_end(frames: Value, journal_end: u64) -> Value {
-    let whole = format!(":{journal_end}");
-    match frames {
-        Value::Object(fields) => Value::Object(
-            fields
-                .into_iter()
-                .map(|(key, value)| {
-                    if key != "cursor" {
-                        return (key, at_journal_end(value, journal_end));
-                    }
-                    if let Some(run) = value
-                        .as_str()
-                        .and_then(|cursor| cursor.strip_suffix(&whole))
-                    {
-                        return (key, Value::String(format!("{run}:{JOURNAL_END}")));
-                    }
-                    (key, value)
-                })
-                .collect(),
-        ),
-        Value::Array(items) => Value::Array(
-            items
-                .into_iter()
-                .map(|item| at_journal_end(item, journal_end))
-                .collect(),
-        ),
-        other => other,
-    }
-}
-
 /// The same document with the read's own instant — and a retained driver's
 /// pid, a surface's queued instant, every scratch directory, and the
 /// workspace's `root` where one is named — replaced, wherever they appear.
@@ -1125,6 +1018,17 @@ fn normalized_under(document: Value, root: Option<&Path>) -> Value {
                 .map(|(key, value)| {
                     if key == "observed_at" {
                         (key, Value::String(OBSERVED_AT.to_owned()))
+                    } else if key == "free_bytes" || key == "total_bytes" {
+                        // Host capacity changes while the suite runs. The real HTTP
+                        // journey checks the SDK's measured values; this golden pins shape.
+                        (
+                            key,
+                            if value.is_null() {
+                                Value::Null
+                            } else {
+                                json!(1)
+                            },
+                        )
                     } else if key == "pid" {
                         (key, json!(DRIVER_PID))
                     } else if key == "queued_at" {
@@ -1231,8 +1135,19 @@ fn the_health_body_round_trips_and_names_the_release_this_crate_links() {
 #[test]
 fn every_enveloped_fixture_round_trips_byte_for_byte() {
     for (route, fixture) in ROUTE_FIXTURES {
-        if route == routes::HEALTHZ || route == routes::EVENTS || route == routes::RUN_WATCH {
-            continue; // Not enveloped, and enveloped one level down, and a list of frames.
+        if [
+            routes::HEALTHZ,
+            routes::EVENTS,
+            routes::SUBSCRIPTIONS,
+            routes::SUBSCRIPTION,
+        ]
+        .contains(&route)
+            || route.starts_with(routes::HUMAN_ITEMS)
+        {
+            // Not enveloped, and enveloped one level down, and a list of frames;
+            // the human-item routes serve the engine's own records, which
+            // `every_human_item_fixture_is_the_engines_record` reconciles.
+            continue;
         }
         let raw = read_fixture(fixture);
         let envelope: Envelope<Value> =
@@ -1287,12 +1202,12 @@ fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent()
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 21);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 27);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
     // nothing about.
-    assert_eq!(TIMELINE_SCHEMA_VERSION, 11);
+    assert_eq!(TIMELINE_SCHEMA_VERSION, 14);
     assert!(
         contract_text().contains(&format!("Timeline schema {TIMELINE_SCHEMA_VERSION}")),
         "docs/contract.md names no timeline schema {TIMELINE_SCHEMA_VERSION}"
@@ -2025,9 +1940,7 @@ fn the_serve_surface_parses_and_defaults_to_loopback() {
     let root = runs.path().to_str().expect("utf-8 path");
     let cli =
         Cli::try_parse_from(["onepipeline-api", "serve", "--runs-root", root]).expect("parse");
-    let Command::Serve(args) = &cli.command else {
-        panic!("`serve` parsed as {:?}", cli.command);
-    };
+    let Command::Serve(args) = &cli.command;
     assert_eq!(args.runs_root.as_path(), runs.path());
     assert_eq!(args.bind.to_string(), "127.0.0.1:8765");
     assert_eq!(args.session, None, "a session nobody named");
@@ -2042,9 +1955,7 @@ fn the_serve_surface_parses_and_defaults_to_loopback() {
         "0.0.0.0:9000",
     ])
     .expect("parse");
-    let Command::Serve(args) = &bound.command else {
-        panic!("`serve` parsed as {:?}", bound.command);
-    };
+    let Command::Serve(args) = &bound.command;
     assert_eq!(args.bind.to_string(), "0.0.0.0:9000");
 
     // The acting session, as the flag names it — and refused where the flag
@@ -2058,9 +1969,7 @@ fn the_serve_surface_parses_and_defaults_to_loopback() {
         "c276121e-6630-5213-be31-ca182068739e",
     ])
     .expect("parse");
-    let Command::Serve(args) = &acting.command else {
-        panic!("`serve` parsed as {:?}", acting.command);
-    };
+    let Command::Serve(args) = &acting.command;
     assert_eq!(
         args.session.as_ref().map(SessionId::as_str),
         Some("c276121e-6630-5213-be31-ca182068739e")
@@ -2240,8 +2149,6 @@ impl RunApi for Unimplemented {
         Ok(Vec::new().into_iter())
     }
 
-    type Watch = std::vec::IntoIter<onepipeline_ui::contract::WatchFrame>;
-
     fn projects(&self) -> Result<Envelope<Value>, ApiError> {
         Err(ApiError::Read("not implemented".to_owned()))
     }
@@ -2288,24 +2195,8 @@ impl RunApi for Unimplemented {
         })
     }
 
-    fn adopt(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::RunNotFound(run.clone()))
-    }
-
-    fn run_shutdown(
-        &self,
-        run: &RunId,
-        _request: &RunShutdownRequest,
-    ) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::RunNotFound(run.clone()))
-    }
-
     fn shutdown(&self, _request: &ShutdownRequest) -> Result<Envelope<Value>, ApiError> {
         Err(ApiError::Read("not implemented".to_owned()))
-    }
-
-    fn watch(&self, _run: &RunId, _query: &WatchQuery) -> Result<Self::Watch, ApiError> {
-        Ok(Vec::new().into_iter())
     }
 
     fn unwatched(&self) -> Result<Envelope<Value>, ApiError> {
@@ -2488,6 +2379,10 @@ fn the_vcs_vocabulary_this_crate_reads_is_the_one_that_library_declares() {
         ),
         (onevcs::EventKind::ChangeRetargeted, vcs::CHANGE_RETARGETED),
         (onevcs::EventKind::ChangeReopened, vcs::CHANGE_REOPENED),
+        (
+            onevcs::EventKind::PublicationResumed,
+            vcs::PUBLICATION_RESUMED,
+        ),
     ] {
         assert_eq!(wire(declared), copied, "{declared:?}");
     }
@@ -2674,6 +2569,9 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         input_bytes: 31,
         reason: Some("the member is between turns".into()),
         truncated: false,
+        offer: None,
+        accepted: None,
+        party: None,
     })
     .expect("the refusal serializes");
     let declared: Vec<&str> = refused
@@ -2697,6 +2595,9 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         input_bytes: 31,
         reason: None,
         truncated: false,
+        offer: None,
+        accepted: None,
+        party: None,
     })
     .expect("the delivery serializes");
     assert!(
@@ -2776,9 +2677,10 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     // `oneagentgraph` 0.2, which published two of them inline and had neither a
     // party, a per-turn bound, nor an observation on an activity.
     let started = serde_json::to_value(oneagentgraph::event::TurnStarted {
+        transcript: None,
         turn: 7,
         role: oneagentgraph::event::Party::User.as_str().to_string(),
-        instruction: "re-run the gate".into(),
+        instruction: Some("re-run the gate".into()),
         instruction_truncated: true,
         started_at: "2026-08-07T12:00:00.000Z".into(),
         origin: None,
@@ -2802,9 +2704,10 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     );
 
     let message = serde_json::to_value(oneagentgraph::event::TurnMessage {
+        transcript: None,
         turn: 7,
         role: oneagentgraph::event::Party::Assistant.as_str().to_string(),
-        text: "the gate is green".into(),
+        text: Some("the gate is green".into()),
         truncated: true,
         origin: None,
     })
@@ -2825,9 +2728,10 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     );
 
     let activity = serde_json::to_value(oneagentgraph::event::TurnActivity {
+        transcript: None,
         kind: graph::TOOL_RESULT.into(),
         name: None,
-        detail: "2 passed; 0 failed".into(),
+        detail: Some("2 passed; 0 failed".into()),
         // Both bound flags set, because that library skips either when it is
         // false: read off an activity that cut nothing, this gate would name
         // neither field, and a rename of one would pass it unchanged.
@@ -2865,9 +2769,10 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
     );
     assert_eq!(
         serde_json::to_value(oneagentgraph::event::TurnActivity {
+            transcript: None,
             kind: "tool_call".into(),
             name: Some("bash".into()),
-            detail: "just gate".into(),
+            detail: Some("just gate".into()),
             truncated: false,
             output: None,
             output_truncated: false,
@@ -3153,6 +3058,7 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
             criterion: None,
             deliver,
             persist: true,
+            delivery_timeout_seconds: None,
         })
         .expect("the command serializes")
     };
@@ -3184,8 +3090,8 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
     };
     for (disposition, word, read) in [
         (Reached::Queued, "queued", true),
-        (Reached::Worker, "worker", true),
-        (Reached::Supervisor, "supervisor", true),
+        (Reached::Worker { turn: None }, "worker", true),
+        (Reached::Supervisor { turn: None }, "supervisor", true),
         (
             Reached::JudgedWith {
                 completion_reason: "the note settled it".into(),
@@ -3193,7 +3099,7 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
             "judged-with",
             true,
         ),
-        (Reached::Carried, "carried", false),
+        (Reached::Carried { reason: None }, "carried", false),
     ] {
         assert_eq!(
             disposition.a_conversation_read_it(),
@@ -3203,6 +3109,40 @@ fn the_live_edit_this_crate_reads_a_delivery_off_is_the_one_the_sdk_declares() {
         );
         assert_eq!(reached(disposition), serde_json::json!(word));
     }
+
+    // How a live turn took the note, written beside a `worker` or `supervisor`
+    // disposition and omitted where the record does not say. Each word is the
+    // one `payload::edits` reads, and the pair is the whole of the SDK's set.
+    use onepipeline::note::NoteTurn;
+    let turns = [NoteTurn::Interrupted, NoteTurn::TurnEnd];
+    for turn in turns {
+        assert_eq!(
+            serde_json::to_value(Reached::Worker { turn: Some(turn) })
+                .expect("the disposition serializes")["turn"],
+            serde_json::json!(turn.as_str())
+        );
+        assert_eq!(
+            serde_json::to_value(Reached::Supervisor { turn: Some(turn) })
+                .expect("the disposition serializes")["turn"],
+            serde_json::json!(turn.as_str())
+        );
+        // Exhaustive, so a third way a turn can take a note fails this build.
+        match turn {
+            NoteTurn::Interrupted | NoteTurn::TurnEnd => {}
+        }
+    }
+    assert_eq!(
+        turns.map(NoteTurn::as_str),
+        ["interrupted", "turn-end"],
+        "the words `docs/contract.md`'s timeline schema 12 names"
+    );
+    assert!(
+        serde_json::to_value(Reached::Worker { turn: None })
+            .expect("the disposition serializes")
+            .get("turn")
+            .is_none(),
+        "a disposition that does not say how is written without `turn`"
+    );
 }
 
 /// Every classified failure and every fall-through reason the fixture reports
@@ -3282,6 +3222,66 @@ fn the_failure_kinds_and_fall_through_reasons_the_fixtures_carry_are_oneharnesss
         "no fixture report carries a classified failure or a fall-through, so this gate \
          holds nothing to the contract"
     );
+}
+
+/// Compare the exact browser records with files the linked producer writes, so
+/// renamed optional fields cannot disappear through permissive deserialization.
+#[test]
+fn the_browser_channel_records_match_the_sdks_writer() {
+    use onepipeline::channel::layout::{Channel, QueuedReply, Surface, REPLIES, SURFACES};
+    use std::sync::Arc;
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let output = std::process::Command::new("node")
+        .args([
+            "--input-type=module",
+            "--eval",
+            "import {channelFixtureRecords} from './apps/dag-ui-e2e/fixtures/runs.mjs'; process.stdout.write(JSON.stringify(channelFixtureRecords()));",
+        ])
+        .current_dir(root)
+        .output()
+        .expect("Node runs the same channel record builder as the browser fixture");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let records: Value = serde_json::from_slice(&output.stdout).expect("fixture records are JSON");
+    let scratch = tempfile::tempdir().expect("a channel for the SDK writer");
+    let transport: Arc<dyn onemessagebus::Transport> = Arc::new(
+        onemessagebus::LocalTransport::open(scratch.path()).expect("local channel transport"),
+    );
+    let channel = Channel::open(&transport).expect("the producer's channel layout");
+    for record in records[format!("{SURFACES}.jsonl")]
+        .as_array()
+        .expect("surface records")
+    {
+        let surface: Surface = serde_json::from_value(record.clone()).expect("SDK surface record");
+        channel.push(&surface).expect("the SDK writes the surface");
+    }
+    for record in records[format!("{REPLIES}.jsonl")]
+        .as_array()
+        .expect("reply records")
+    {
+        let reply: QueuedReply = serde_json::from_value(record.clone()).expect("SDK reply record");
+        channel
+            .replies()
+            .push(&reply)
+            .expect("the SDK writes the reply");
+    }
+    for (file, expected) in records.as_object().expect("named channel files") {
+        let written = fs::read_to_string(scratch.path().join(file))
+            .unwrap_or_else(|error| panic!("the SDK did not write fixture file {file}: {error}"));
+        let actual: Vec<Value> = written
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("SDK JSONL"))
+            .collect();
+        assert_eq!(
+            json!(actual),
+            *expected,
+            "browser {file} must match the producer's exact records"
+        );
+    }
 }
 
 /// The browser fixture writes tool summaries a real member could have written,
@@ -3418,6 +3418,8 @@ fn the_browser_files_every_kind_those_libraries_declare() {
         EventKind::TurnCompleted,
         EventKind::JudgeDecided,
         EventKind::TurnInterrupted,
+        EventKind::NoteAdmitted,
+        EventKind::NoteWithdrawn,
         EventKind::MemberHeartbeat,
         EventKind::FallbackAdvanced,
         EventKind::OneharnessSession,
@@ -3438,6 +3440,8 @@ fn the_browser_files_every_kind_those_libraries_declare() {
         | EventKind::TurnCompleted
         | EventKind::JudgeDecided
         | EventKind::TurnInterrupted
+        | EventKind::NoteAdmitted
+        | EventKind::NoteWithdrawn
         | EventKind::MemberHeartbeat
         | EventKind::FallbackAdvanced
         | EventKind::OneharnessSession
@@ -3990,4 +3994,260 @@ fn the_browser_fixture_excludes_the_linked_harness_binaries_from_its_path() {
         .collect();
     declared.sort_unstable();
     assert_eq!(corpus, declared);
+}
+
+/// The per-kind panel selection follows the declarations of the producer that
+/// owns each payload. VCS currently publishes kind names but no payload schema.
+#[test]
+fn timeline_record_fields_follow_the_producers_published_payloads() {
+    use onepipeline::event::{EventKind, PipelineKind};
+    fn declares(schema: &Value, root: &Value, key: &str) -> bool {
+        schema["properties"].get(key).is_some()
+            || schema["$ref"]
+                .as_str()
+                .and_then(|reference| reference.strip_prefix('#'))
+                .and_then(|pointer| root.pointer(pointer))
+                .is_some_and(|resolved| declares(resolved, root, key))
+            || ["allOf", "anyOf", "oneOf"].iter().any(|combinator| {
+                schema[*combinator]
+                    .as_array()
+                    .is_some_and(|choices| choices.iter().any(|choice| declares(choice, root, key)))
+            })
+    }
+    let pipeline = onepipeline::payload::registry();
+    let graph = oneagentgraph::event::registry();
+    let graph_schemas = oneagentgraph::event::payload_schemas();
+    let mut missing = Vec::new();
+    for &(kind, fields) in onepipeline_ui::payload::TIMELINE_RECORD_FIELDS {
+        let schema = if let Some(kind) = PipelineKind::from_wire(&EventKind(kind.into())) {
+            pipeline.schema(&onepipeline::payload::schema_of(kind))
+        } else if let Some((_, id)) = graph_schemas.iter().find(|(name, _)| name.as_str() == kind) {
+            graph.schema(id)
+        } else {
+            // VCS publishes no payload schemas; graph lifecycle payloads are
+            // likewise not in its public registry. Their kind declarations and
+            // the recorded-run journeys remain the available producer boundary.
+            assert!(
+                oneagentgraph::event::EventKind::ALL
+                    .iter()
+                    .any(|name| name.as_str() == kind)
+                    || serde_json::from_value::<onevcs::EventKind>(json!(kind)).is_ok(),
+                "undeclared kind {kind}"
+            );
+            continue;
+        }
+        .expect("the producer publishes its payload schema");
+        for &(key, _) in fields {
+            // Historical member-died records predate the typed cause payload and
+            // carried only reason; the real lanes journey keeps that old shape.
+            if !declares(schema, schema, key) && !(kind == "member-died" && key == "reason") {
+                missing.push(format!("{kind}.{key}"));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "panel fields no producer declares: {missing:?}"
+    );
+}
+
+/// The subscription bounds `docs/contract.md` states are the ones the hub
+/// keeps: its retained frames and the grace a disconnected subscription has.
+#[test]
+fn the_subscription_bounds_the_contract_states_are_the_ones_the_hub_keeps() {
+    use onepipeline_ui::contract::{DISCONNECTED_GRACE, RETAINED_FRAMES};
+    let contract = contract_text();
+    let thousands = |value: usize| {
+        let digits = value.to_string();
+        let (head, tail) = digits.split_at(digits.len() - 3);
+        format!("{head},{tail}")
+    };
+    assert!(
+        contract.contains(&format!(
+            "its latest **{}** emitted frames",
+            thousands(RETAINED_FRAMES)
+        )),
+        "docs/contract.md does not state the {RETAINED_FRAMES} retained frames the hub keeps"
+    );
+    assert!(
+        contract.contains(&format!(
+            "for at most **{} seconds**",
+            DISCONNECTED_GRACE.as_secs()
+        )),
+        "docs/contract.md does not state the {:?} grace the hub keeps",
+        DISCONNECTED_GRACE
+    );
+    assert!(
+        contract.contains(&format!(
+            "at most once every **{} polls**",
+            onepipeline_ui::live::ROW_POLLS_PER_READ
+        )),
+        "docs/contract.md does not state how often the hub reads a run's row"
+    );
+    // And the telemetry fold's interval, and the bound it keeps on a run that
+    // never goes quiet: twice it.
+    let refold = onepipeline_ui::live::TELEMETRY_REFOLD.as_secs();
+    assert!(
+        contract.contains(&format!("at least {refold} seconds after the last fold")),
+        "docs/contract.md does not state the {refold} s refold interval the hub keeps"
+    );
+    assert!(
+        contract.contains(&format!("once it is {} seconds behind", refold * 2)),
+        "docs/contract.md does not state the {} s bound the hub keeps",
+        refold * 2
+    );
+}
+
+/// What schema 27 serves is stated in `docs/contract.md`, beside the version:
+/// both status words a node holding finished work for a release settles in, and
+/// the `awaiting` list its result carries.
+#[test]
+fn the_contract_states_the_words_and_the_field_finished_work_held_for_a_release_serves() {
+    let text = contract_text();
+    for stated in [
+        "**Schema 27 is finished work held for a release.**",
+        "**`complete-but-draft`**",
+        "**`complete-but-held`**",
+        "`held-for-release`",
+        "`graph.node_results[NODE]` gains **`awaiting`**",
+        "`[{producer, target}]`",
+        "is served **no `awaiting`**, never an empty list",
+    ] {
+        assert!(
+            text.contains(stated),
+            "docs/contract.md does not state: {stated}"
+        );
+    }
+}
+
+/// The fields schema 26 and timeline schema 14 serve are each stated in
+/// `docs/contract.md`, beside the version that serves them: the description the
+/// engine's resolver gives a turn record and a live-activity entry, where a tool
+/// event sits, the harness session read whole, the line an unresolved reference
+/// is served as, and the runtime the browser reads off a check's own two stamps.
+#[test]
+fn the_contract_states_every_field_the_transcript_reading_serves() {
+    let text = contract_text();
+    for stated in [
+        "**Schema 26 is every turn read whole from its transcript.**",
+        "**Timeline schema 14 describes every turn record in one line.**",
+        "`views::transcript`",
+        "`transcript unavailable: <path>: <why>`",
+        "A live-activity entry gains **`description`** under schema 26",
+        "gains **`description`**: the linked engine resolver's one line",
+        "**`tool`**, `{index, tool_call_id?, turn?}`",
+        "A live tool event gains **`toolCallId`**",
+        "served whole and live as **`turns`**",
+        "**`unavailable`** carries the resolver's",
+        "`completed_at - started_at` for a finished check",
+    ] {
+        assert!(
+            text.contains(stated),
+            "docs/contract.md does not state: {stated}"
+        );
+    }
+}
+
+/// Where the engine's exported human-item schemas are checked in: beside the
+/// browser model whose types `packages/dag-model/src/human-items-codegen.ts`
+/// generates from them.
+fn human_items_schema_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/human-items.schema.json")
+}
+
+/// **The checked-in human-item schema is the linked engine's.** The browser's
+/// response types are generated from that file, so a moved engine whose
+/// records changed fails here — and the generated types fail their own drift
+/// test in `packages/dag-model` until regenerated — rather than the browser
+/// quietly reading an old shape. `UPDATE_CONTRACT_FIXTURES=1` rewrites it.
+#[test]
+fn the_checked_in_human_item_schema_is_the_linked_engines() {
+    let exported = onepipeline::human_items::schemas();
+    let path = human_items_schema_path();
+    if std::env::var_os(UPDATE).is_some() {
+        fs::write(&path, canonical(&exported)).expect("write the schema");
+    }
+    // Compared as JSON rather than as bytes: the file is formatted by the
+    // workspace's Biome, which owns how every JSON file under `packages/` is laid
+    // out, so after an update it is `just format` that settles its bytes.
+    let checked_in: Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap_or_default()).unwrap_or(Value::Null);
+    assert_eq!(
+        checked_in,
+        exported,
+        "{} is not what the linked engine's human_items::schemas() exports; rerun with \
+         {UPDATE}=1, then `just format` and regenerate the browser's types",
+        path.display()
+    );
+}
+
+/// **Every human-item golden is a record the engine accepts.** Each route's
+/// fixture decodes as the engine's own type for that route — whose decoders
+/// validate state, resolution, counts and previews.
+#[test]
+fn every_human_item_fixture_is_the_engines_record() {
+    use onepipeline::human_items::{HumanItemDetail, HumanItemReceipt};
+    use onepipeline_ui::human_items::HumanItemList;
+
+    let read =
+        |name: &str| fs::read_to_string(fixture_dir().join(name)).expect("the fixture reads");
+    let list: HumanItemList =
+        serde_json::from_str(&read("human-items.json")).expect("the list is the engine's views");
+    assert!(!list.items.is_empty(), "the list golden pins some items");
+    serde_json::from_str::<HumanItemDetail>(&read("human-item.json"))
+        .expect("the detail is the engine's HumanItemDetail");
+    for receipt in [
+        "human-items-raise.json",
+        "human-item-answer.json",
+        "human-item-complete.json",
+        "human-item-dismiss.json",
+    ] {
+        serde_json::from_str::<HumanItemReceipt>(&read(receipt))
+            .unwrap_or_else(|err| panic!("{receipt} is not the engine's receipt: {err}"));
+    }
+    // The schema's own vocabulary agrees: no owner-ended state, and the four
+    // priorities with their display labels.
+    let schema = onepipeline::human_items::schemas();
+    assert!(!schema.to_string().contains("owner_ended"));
+    assert_eq!(
+        schema["priority_labels"],
+        json!({"high": "High", "low": "Low", "medium": "Medium", "urgent": "Critical"})
+    );
+}
+
+/// **The engine judges every record of the shared verdict corpus as the
+/// corpus says.** `tests/fixtures/human-items/verdicts.json` is the one list of
+/// records the browser's parsers are also held to
+/// (`packages/dag-model/src/human-items.test.ts`), so a rule the engine's
+/// decoder gains or drops fails here first, and the corpus moving with it
+/// fails the browser's half until its parsers judge the same.
+#[test]
+fn the_engine_judges_every_human_item_verdict_as_the_corpus_says() {
+    use onepipeline::human_items::{HumanItemDetail, HumanItemView};
+
+    let corpus: Value = serde_json::from_str(
+        &fs::read_to_string(fixture_dir().join("human-items/verdicts.json"))
+            .expect("the corpus reads"),
+    )
+    .expect("the corpus parses");
+    let cases = corpus["cases"].as_array().expect("cases");
+    assert!(
+        cases.len() > 20,
+        "the corpus judges {} records",
+        cases.len()
+    );
+    for case in cases {
+        let record = case["record"].clone();
+        let accepted = match case["type"].as_str() {
+            Some("HumanItemDetail") => serde_json::from_value::<HumanItemDetail>(record).is_ok(),
+            Some("HumanItemView") => serde_json::from_value::<HumanItemView>(record).is_ok(),
+            other => panic!("a verdict of an unknown type {other:?}"),
+        };
+        assert_eq!(
+            accepted,
+            case["accept"].as_bool().expect("a verdict"),
+            "the engine judges {} otherwise",
+            case["name"]
+        );
+    }
 }

@@ -20,9 +20,8 @@ read as a whole: its telemetry tiles over the graph timeline, which is the same 
 the same lane words and the same clock used at three scopes — the whole run, one node,
 one conversation — each a single click into the last.
 
-It is not only a read. Every verb the `onepipeline` CLI has once a plan is running is
-here, from the run it is about: stop, adopt, attest, reply on the channel, and shut
-down a run, every run this session owns, or the whole host — each behind a confirm
+The browser can stop a run, attest a human action, reply on the channel, and shut
+down the whole host — each behind a confirm
 that names what it will act on, and each showing the engine's own receipt or refusal
 verbatim rather than a restatement of it. [`docs/dag-ui.md`](docs/dag-ui.md) is the
 design record; what follows is what the screens are.
@@ -65,23 +64,19 @@ the reader is at the end of it.
 
 ### Projects
 
-![The project list the app opens on: a grid of cards, each naming a plan and its qualified id, how many runs it holds, their states counted, and when it last wrote — with a card headed "(no project)" among them for the runs whose launch recorded none](docs/screens/11-project-list-1440x900.png)
-
-![A single project's page: its name and id, then the DAGs launched against it as rows, most recent first, each carrying its settlement, its nodes counted, what is driving it and when it last wrote](docs/screens/12-project-page-1440x900.png)
-
-A bare address is the project list, in the server's own order. The runs whose launch
-recorded no project are a card like any other, headed by that word rather than by the
-plan name of whichever run in them wrote last. A project's page is every DAG launched
-against it, each row the same row the flat run list serves. Nothing here recomputes an
-order or a count: the tallies are of the served rows, in the served words.
+The sidebar lists projects by most recent activity, with their runs underneath.
+Selecting a project opens its newest visible run. Kind filters are discovered from
+run labels and saved in the URL. Ungrouped runs sit under **Other runs** at the end.
+**Host** opens resources, unwatched runs, and the confirmed host shutdown.
 
 ### The channel
 
-![The Channel tab: the queue showing a waiting surface with its kind, its source, a blocking badge and its age, the replies written under it, and a reply composer with a free-text editor and the verdict shortcuts above it](docs/screens/13-channel-1440x900.png)
+![The Channel tab: questions with their correlated replies directly beneath them, one-line message previews, an unanswered question marked waiting, and the reply composer below](docs/screens/13-channel-1440x900.png)
 
-The run's channel, shown as the engine keeps it: the pending surface nobody has given
-up on, the waiting ones nobody has read, an abandoned one where the process serving it
-exited without an answer, and the answered ones. Reading it consumes nothing. The
+The run's channel pairs each question with the replies whose correlation answers it,
+newest question first. An unanswered question says it is waiting. Each message shows
+its first line and expands to its complete text; a reply's raw envelope is one further
+expansion away. Reading consumes nothing. The
 composer sends the editor's text **byte for byte** — never a parse of it — so a manager
 can type an envelope this app has never heard of and the engine's refusal of a
 malformed one is the engine's own.
@@ -117,7 +112,7 @@ GET /api/v2/runs/{run}                ?include_conversations=bool
 GET /api/v2/runs/{run}/timeline       ?scope=run|node&node=ID
 GET /api/v2/runs/{run}/conversations/{id}
 GET /api/v2/runs/{run}/artifacts/{id}
-GET /api/v2/events                    # SSE; fresh snapshot per connection
+GET /api/v2/events                    # SSE; a subscription's changes, else a fresh snapshot per connection
 GET /api/v2/projects                  # runs grouped by project, as `onepipeline runs` groups them
 GET /api/v2/projects/{project}
 GET /api/v2/runs/{run}/channel        # the channel, consuming nothing
@@ -126,10 +121,7 @@ POST /api/v2/runs/{run}/channel/reply # the envelope's bytes, verbatim; ?correla
 POST /api/v2/runs/{run}/channel/surface
 POST /api/v2/runs/{run}/attest
 POST /api/v2/runs/{run}/stop          # as the session `--session` names
-POST /api/v2/runs/{run}/adopt         # retains this binary as the driver
-POST /api/v2/runs/{run}/shutdown      # `onepipeline shutdown RUN`; {grace?, force?}
-POST /api/v2/shutdown                 # `--mine` or `--host`; {scope, grace?, force?}
-GET /api/v2/runs/{run}/watch          # SSE over `onepipeline watch`
+POST /api/v2/shutdown                 # host scope only; {scope: "host", grace?, force?}
 GET /api/v2/unwatched
 GET /api/v2/host
 GET /api/v2/runs/{run}/status
@@ -141,20 +133,28 @@ GET /api/v2/runs/{run}/telemetry
 GET /api/v2/runs/{run}/agents         # every oneharness session the run launched
 GET /api/v2/runs/{run}/nodes/{node}/agents
 GET /api/v2/projects/{project}/agents # the union over the project's runs
+POST /api/v2/subscriptions            # a tab's subscription: the sidebar and one visible view, then pushed changes
+DELETE /api/v2/subscriptions/{subscription}  # retire it
+GET /api/human-items                  # the host-wide action items: the engine's views, owner-scoped (sample mode only)
+POST /api/human-items                 # raise one, as its owner
+GET /api/human-items/{id}             # one item and every step it blocks
+POST /api/human-items/{id}/answer     # answer an open question
+POST /api/human-items/{id}/complete   # complete an open task, design reviews included
+POST /api/human-items/{id}/dismiss    # dismiss an open item, with an optional reason
 ```
 
 The first seven are the read surface the browser view was written against;
-the rest are every verb the `onepipeline` CLI has once a plan is running,
-wrapped — each a thin call into `onepipeline::verbs`, never a re-implementation
+the rest wrap the supported post-launch verbs — each a thin call into
+`onepipeline::verbs`, never a re-implementation
 and never the binary. Launching a plan and driving the planning stage are
 outside this API; a reply on any run's channel is inside it. The server acts as
 one launching session (`--session ID`, else `ONEPIPELINE_LAUNCHER_SESSION`),
-which is what its stops, adoptions and shutdowns are judged by.
+which is what its stops and shutdowns are judged by.
 
 <!-- llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the route index above and the version below are both read back against their source rather than left as second copies: `tests/contract.rs::the_readme_indexes_every_route_and_names_the_served_schema` holds every `METHOD path` line in this file to `routes::TABLE` in order, and asserts this file names "`telemetry_schema_version` ({TELEMETRY_SCHEMA_VERSION})" for the constant the envelope is served at. Deleting the `GET /api/v2/projects/{project}/agents` line fails it naming that route in the diff, which is how the agents routes reached this index at all. -->
 
 Every successful response carries the schema-version preamble —
-`api_version`, `telemetry_schema_version` (21), `observed_at` — with the payload
+`api_version`, `telemetry_schema_version` (27), `observed_at` — with the payload
 flattened alongside it. Every failure carries `{"error": {"code", "message"}}`.
 
 Payloads themselves come from the onepipeline SDK. Anything presentation-worthy
@@ -177,6 +177,8 @@ pip install onepipeline-api-cli        # prebuilt wheel, no Rust toolchain
 npm install -g onepipeline-api-cli     # prebuilt binary, no Rust toolchain
 ```
 
+The prebuilt binary ships for Linux x86_64 and arm64, Apple Silicon macOS and
+Windows x64; Intel macOS is not prebuilt, so `cargo install` is the way there.
 All three install one command, `onepipeline-api`:
 
 ```bash

@@ -1,5 +1,4 @@
 import {
-  act,
   cleanup,
   configure,
   render,
@@ -9,12 +8,11 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { AgentsView, NodeAgents } from "../features/agents/AgentsView";
 import {
   channelQueue,
   DASHBOARD_HISTORY_ID,
   DASHBOARD_TRANSCRIPT_TEXT,
-  HISTORY_RUN,
-  LIVE_PROJECT,
   LIVE_PROJECT_NAME,
   LIVE_RUN,
   QUEUED_NODE_SETS,
@@ -23,7 +21,6 @@ import {
   runAgents,
   runDetail,
   runStatus,
-  unwatched,
 } from "../test/fixtures";
 import {
   defaultResponder,
@@ -43,110 +40,27 @@ describe("projects", JOURNEY_TIMEOUT, () => {
   beforeEach(() => window.history.replaceState(null, "", "/"));
   afterEach(cleanup);
 
-  test("opens on the projects in the server's order, and a project opens to its runs", async () => {
+  test("opens the newest project run directly and keeps host controls off the sidebar", async () => {
     const { client } = telemetryHarness();
     render(<App client={client} />);
-    // The landing: one card per group, the `(no project)` group among them, in the
-    // order served rather than any order this app could compute.
-    const cards = await screen.findByRole("list", { name: "Projects" });
-    const names = within(cards)
-      .getAllByRole("listitem")
-      .map((item) => item.textContent ?? "");
-    expect(names[0]).toContain(LIVE_PROJECT_NAME);
-    expect(names[0]).toContain(LIVE_PROJECT);
-    expect(names[0]).toContain("1 run · 1 running");
-    expect(names[1]).toContain("(no project)");
-    expect(names[1]).toContain("1 run · 1 complete");
-    // The navigation lists the same groups, and says which list it is showing.
-    const navigation = screen.getByRole("navigation", { name: "Projects" });
-    expect(
-      within(navigation).getByRole("button", { name: /observe-live-run/ }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("list", { name: "DAG nodes" })).toBeNull();
-
-    // Opening the `(no project)` group: its page, from the listing it is served on.
-    await userEvent.click(
-      within(navigation).getByRole("button", { name: /\(no project\)/ }),
-    );
-    expect(window.location.search).toBe("?project=none");
-    const runs = await screen.findByRole("list", {
-      name: "Runs of (no project)",
-    });
-    const row = within(runs).getByRole("button", {
-      name: `Open ${HISTORY_RUN}`,
-    });
-    expect(row).toHaveTextContent("complete");
-    expect(row).toHaveTextContent("DRIVER DEAD");
-    expect(row).toHaveTextContent("1 pending · 1 done");
-    expect(row).toHaveTextContent("Last write");
-
-    // And a named project, from its own route, with the unread surfaces the row
-    // carries — then a run opened from it, with the page one step back.
-    await userEvent.click(
-      within(navigation).getByRole("button", { name: /observe-live-run/ }),
-    );
-    expect(window.location.search).toBe(
-      `?project=${encodeURIComponent(LIVE_PROJECT)}`,
-    );
-    const liveRuns = await screen.findByRole("list", {
-      name: `Runs of ${LIVE_PROJECT_NAME}`,
-    });
-    const liveRow = within(liveRuns).getByRole("button", {
-      name: `Open ${LIVE_RUN}`,
-    });
-    expect(liveRow).toHaveTextContent("ACTIVE");
-    expect(liveRow).toHaveTextContent("2 unread surfaces");
-    await userEvent.click(liveRow);
-    expect(await screen.findByText("Graph timeline")).toBeInTheDocument();
-    expect(new URLSearchParams(window.location.search).get("run")).toBe(
-      LIVE_RUN,
-    );
-    expect(new URLSearchParams(window.location.search).get("project")).toBe(
-      LIVE_PROJECT,
-    );
-    await userEvent.click(
-      screen.getByRole("button", { name: `Back to ${LIVE_PROJECT_NAME}` }),
-    );
-    expect(
-      await screen.findByRole("list", { name: `Runs of ${LIVE_PROJECT_NAME}` }),
-    ).toBeInTheDocument();
-  });
-
-  test("keeps the flat run list one toggle away, and says when the projects cannot be read", async () => {
-    const { client } = telemetryHarness((url) => {
-      if (url.pathname === "/api/v2/projects")
-        return Response.json(
-          { error: { code: "engine_error", message: "the root is gone" } },
-          { status: 500 },
-        );
-      return defaultResponder(url);
-    });
-    render(<App client={client} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "the root is gone",
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Runs" }));
-    expect(window.location.search).toBe("?list=runs");
-    // The flat list, and its first run opened, exactly as before.
     const navigation = await screen.findByRole("navigation", {
-      name: "DAG runs",
+      name: "Projects",
     });
-    expect(
-      within(navigation).getByRole("button", { name: RegExp(LIVE_RUN) }),
-    ).toBeInTheDocument();
-    expect(await screen.findByText("Graph timeline")).toBeInTheDocument();
-  });
-
-  test("a project a bookmark names that the server does not hold says so", async () => {
-    window.history.replaceState(null, "", "/?project=local-md%3Agone");
-    const { client } = telemetryHarness();
-    render(<App client={client} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "no such project",
+    await userEvent.click(
+      await within(navigation).findByRole("button", {
+        name: `Open ${LIVE_PROJECT_NAME}`,
+      }),
     );
+    await waitFor(() =>
+      expect(window.location.search).toContain(`run=${LIVE_RUN}`),
+    );
+    expect(within(navigation).queryByText(/session/)).toBeNull();
     expect(
-      screen.getByRole("region", { name: "local-md:gone" }),
-    ).toBeInTheDocument();
+      within(navigation).queryByRole("button", { name: /Shut down/ }),
+    ).toBeNull();
+    expect(
+      within(navigation).queryByRole("button", { name: "Runs" }),
+    ).toBeNull();
   });
 });
 
@@ -164,23 +78,28 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
       return defaultResponder(url);
     });
     render(<App client={client} />);
-    // The held surface is pending, the unread one waiting, the read one answered
-    // — each with its kind, source, blocking flag and age.
-    const pending = await screen.findByRole("region", {
-      name: "Pending surfaces",
+    const conversation = await screen.findByRole("region", {
+      name: "Surfaces",
     });
-    expect(pending).toHaveTextContent("ask-manager");
-    expect(pending).toHaveTextContent("from sentinel");
-    expect(pending).toHaveTextContent("blocking");
-    expect(pending).toHaveTextContent("node dashboard");
-    expect(pending).toHaveTextContent(/old/);
-    const waiting = screen.getByRole("region", { name: "Waiting surfaces" });
-    expect(waiting).toHaveTextContent("check-in");
-    expect(waiting).toHaveTextContent("non-blocking");
-    const answered = screen.getByRole("region", { name: "Answered surfaces" });
-    expect(answered).toHaveTextContent("the gate went red 0");
+    const managerQuestion = within(conversation).getByRole("group", {
+      name: /^Surface 1 message$/,
+    });
+    expect(managerQuestion).toHaveTextContent("ask-manager");
+    expect(managerQuestion).toHaveTextContent("from sentinel");
+    expect(managerQuestion).toHaveTextContent("blocking");
+    expect(managerQuestion).toHaveTextContent("node dashboard");
+    expect(managerQuestion).toHaveTextContent(/old/);
+    const checkIn = within(conversation).getByRole("group", {
+      name: /^Surface 2 message$/,
+    });
+    expect(checkIn).toHaveTextContent("check-in");
+    expect(checkIn).toHaveTextContent("non-blocking");
+    const gateQuestion = within(conversation).getByRole("group", {
+      name: /^Surface 0 message$/,
+    });
+    expect(gateQuestion).toHaveTextContent("the gate went red 0");
     expect(screen.getByRole("region", { name: "Replies" })).toHaveTextContent(
-      '"message": "carry on"',
+      "carry on",
     );
     expect(
       screen.getByRole("region", { name: "Command outcomes" }),
@@ -511,7 +430,7 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
       return defaultResponder(url);
     });
     render(<App client={client} />);
-    await screen.findByRole("region", { name: "Pending surfaces" });
+    await screen.findByRole("region", { name: "Surfaces" });
     await userEvent.click(screen.getByRole("button", { name: "Stop" }));
     const confirm = await screen.findByRole("dialog");
     expect(confirm).toHaveTextContent(`Stop ${LIVE_RUN}?`);
@@ -558,179 +477,6 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
     expect(screen.queryByRole("button", { name: "Force stop…" })).toBeNull();
   });
 
-  test("offers an adoption only when nothing is driving the run, and shows the pid answered", async () => {
-    const { client } = telemetryHarness((url) => {
-      if (verbOf(url) === "adopt")
-        return Response.json({
-          ...runStatus(),
-          run_id: HISTORY_RUN,
-          pid: 4242,
-        });
-      return defaultResponder(url);
-    });
-    render(<App client={client} />);
-    // The live run is ACTIVE: nothing to adopt.
-    expect(await screen.findByLabelText("Liveness ACTIVE")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Adopt" })).toBeNull();
-
-    window.history.replaceState(null, "", `/?run=${HISTORY_RUN}&view=channel`);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-    expect(
-      await screen.findByLabelText("Liveness DRIVER DEAD"),
-    ).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Adopt" }));
-    expect(
-      await screen.findByRole("alert", { name: "Adopt receipt" }),
-    ).toHaveTextContent('"pid": 4242');
-    expect(screen.getByText("Driver pid 4242")).toBeInTheDocument();
-  });
-
-  test("holds the watch as a stream and reads the unwatched badge for the session", async () => {
-    let watching = false;
-    const { client, sources } = telemetryHarness((url) => {
-      if (url.pathname === "/api/v2/unwatched")
-        return Response.json(unwatched(watching ? [] : [LIVE_RUN]));
-      return defaultResponder(url);
-    });
-    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=watch`);
-    render(<App client={client} />);
-    expect(await screen.findByLabelText("1 unwatched")).toHaveTextContent(
-      "this run",
-    );
-    expect(screen.getByText(/Not watching/)).toBeInTheDocument();
-
-    watching = true;
-    const panel = screen.getByRole("region", { name: "Watch" });
-    await userEvent.click(within(panel).getByRole("button", { name: "Watch" }));
-    // The stream is held on the watch route under the reading's profile, and the
-    // view says so.
-    const stream = sources.find((source) => source.url.includes("/watch?"));
-    expect(stream?.url).toContain(`/api/v2/runs/${LIVE_RUN}/watch?`);
-    expect(stream?.url).toContain("timeout=none");
-    expect(stream?.url).toContain("filter=detailed");
-    expect(
-      screen.getByText(`${LIVE_RUN} is being watched by this browser.`),
-    ).toBeInTheDocument();
-    act(() =>
-      stream?.emit(
-        "event",
-        {
-          watch: "event",
-          event: {
-            kind: "node-settled",
-            ts: "2026-07-26T12:00:00Z",
-            labels: { node: "docs" },
-          },
-        },
-        "0",
-      ),
-    );
-    act(() =>
-      stream?.emit(
-        "tick",
-        {
-          watch: "heartbeat",
-          run_id: LIVE_RUN,
-          unread: {
-            count: 1,
-            oldest_seconds: 12,
-            kinds: [{ kind: "finding", count: 1 }],
-          },
-        },
-        "1",
-      ),
-    );
-    const frames = screen.getByRole("list", { name: "Watch frames" });
-    expect(within(frames).getAllByRole("listitem")).toHaveLength(2);
-    expect(frames).toHaveTextContent("node-settled");
-    expect(frames).toHaveTextContent("docs");
-    expect(frames).toHaveTextContent("1 unread, oldest 12s");
-    // The badge re-reads once the server has this browser as the watcher.
-    expect(await screen.findByLabelText("0 unwatched")).toBeInTheDocument();
-
-    // The condition that ends the wait ends the hold, and the source with it.
-    act(() =>
-      stream?.emit(
-        "returned",
-        {
-          watch: "return",
-          run_id: LIVE_RUN,
-          condition: "surface-waiting",
-          exit: 0,
-          cursor: `1:${LIVE_RUN}:40`,
-          unread: { count: 1, oldest_seconds: 12, kinds: [] },
-        },
-        "2",
-      ),
-    );
-    expect(
-      screen.getByText("The wait ended: surface-waiting."),
-    ).toBeInTheDocument();
-    expect(stream?.closed).toBe(true);
-    // Both toggles — the header's and the panel's — read the hold as released.
-    for (const toggle of screen.getAllByRole("button", { name: "Watch" }))
-      expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(frames).toHaveTextContent("returned");
-  });
-
-  test("shows every rendered read as the API served it", async () => {
-    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=reads`);
-    const { client } = telemetryHarness((url) => {
-      if (
-        verbOf(url) === "transcript" &&
-        url.searchParams.get("node") === "publish"
-      )
-        return Response.json(
-          {
-            error: {
-              code: "refused",
-              message: "refused: run has recorded nothing for node 'publish'",
-            },
-          },
-          { status: 422 },
-        );
-      return defaultResponder(url);
-    });
-    render(<App client={client} />);
-    const status = await screen.findByRole("region", { name: "Status" });
-    expect(status).toHaveTextContent("ACTIVE");
-    expect(status).toHaveTextContent("2 unread, oldest 40s");
-    expect(status).toHaveTextContent(`${LIVE_RUN} ACTIVE 1/8 done`);
-
-    await userEvent.click(screen.getByRole("tab", { name: "Results" }));
-    expect(
-      await screen.findByRole("region", { name: "Results" }),
-    ).toHaveTextContent(`${LIVE_RUN} rendered results`);
-    await userEvent.click(screen.getByRole("tab", { name: "Goals" }));
-    expect(
-      await screen.findByRole("region", { name: "Goals" }),
-    ).toHaveTextContent(`${LIVE_RUN} rendered goals`);
-    await userEvent.click(screen.getByRole("tab", { name: "Transcript" }));
-    const transcript = await screen.findByRole("region", {
-      name: "Transcript",
-    });
-    await waitFor(() =>
-      expect(transcript).toHaveTextContent(`${LIVE_RUN} transcript`),
-    );
-    await userEvent.selectOptions(
-      within(transcript).getByLabelText("Node"),
-      "publish",
-    );
-    expect(
-      await within(transcript).findByRole("alert", {
-        name: "Transcript refused",
-      }),
-    ).toHaveTextContent("refused: run has recorded nothing for node 'publish'");
-    await userEvent.click(screen.getByRole("tab", { name: "Telemetry" }));
-    expect(
-      await screen.findByRole("region", { name: "Telemetry" }),
-    ).toHaveTextContent('"schema_version": 2');
-    await userEvent.click(screen.getByRole("tab", { name: "Host" }));
-    expect(
-      await screen.findByRole("region", { name: "Host" }),
-    ).toHaveTextContent("no live dispatches");
-  });
-
   test("keeps the composer on a run whose graph is still being planned", async () => {
     // A planning run has recorded no node yet; the channel is still a
     // post-launch route, so the composer is there.
@@ -768,8 +514,8 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
     const composer = await screen.findByRole("region", { name: "Reply" });
     expect(within(composer).getByLabelText("Shortcut")).toBeInTheDocument();
     expect(
-      await screen.findByRole("region", { name: "Pending surfaces" }),
-    ).toHaveTextContent("Nothing is waiting on an answer.");
+      await screen.findByRole("region", { name: "Surfaces" }),
+    ).toHaveTextContent("No surfaces yet.");
   });
 });
 
@@ -780,7 +526,14 @@ describe("the agents a run launched", JOURNEY_TIMEOUT, () => {
   test("lists a run's sessions by scope and attempt, and opens one to its transcript", async () => {
     window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=agents`);
     const { client, fetch } = telemetryHarness();
-    render(<App client={client} />);
+    render(
+      <AgentsView
+        client={client}
+        runId={LIVE_RUN}
+        count={3}
+        invalidations={0}
+      />,
+    );
     const panel = await screen.findByRole("region", { name: "Agents" });
     // The count the run detail carries, beside the listing it counts.
     await waitFor(() => expect(panel).toHaveTextContent("3 agents"));
@@ -869,7 +622,14 @@ describe("the agents a run launched", JOURNEY_TIMEOUT, () => {
           })
         : defaultResponder(url),
     );
-    render(<App client={client} />);
+    render(
+      <AgentsView
+        client={client}
+        runId={LIVE_RUN}
+        count={3}
+        invalidations={0}
+      />,
+    );
     const panel = await screen.findByRole("region", { name: "Agents" });
     const reply = await within(panel).findByRole("list", {
       name: "Review reply author · attempt 1",
@@ -894,7 +654,14 @@ describe("the agents a run launched", JOURNEY_TIMEOUT, () => {
       `/?run=${LIVE_RUN}&node=dashboard&tab=agents`,
     );
     const { client } = telemetryHarness();
-    render(<App client={client} />);
+    const view = render(
+      <NodeAgents
+        client={client}
+        runId={LIVE_RUN}
+        nodeId="dashboard"
+        invalidations={0}
+      />,
+    );
     const panel = await screen.findByRole("region", {
       name: "Agents of dashboard",
     });
@@ -904,87 +671,16 @@ describe("the agents a run launched", JOURNEY_TIMEOUT, () => {
       ).toHaveLength(3),
     );
     expect(within(panel).queryByText("Observer")).toBeNull();
-    // Another node of the same run, whose dispatches wrote no session, opened
-    // from the graph's own keyboard list.
-    await userEvent.click(screen.getByRole("button", { name: /Graph/ }));
-    await userEvent.click(
-      within(await screen.findByRole("list", { name: "DAG nodes" })).getByRole(
-        "button",
-        { name: /^foundation:/ },
-      ),
-    );
-    // The node's own tab strip — the run's views carry an Agents tab too.
-    await userEvent.click(
-      within(screen.getByRole("tablist", { name: "Node details" })).getByRole(
-        "tab",
-        { name: "Agents" },
-      ),
+    view.rerender(
+      <NodeAgents
+        client={client}
+        runId={LIVE_RUN}
+        nodeId="foundation"
+        invalidations={0}
+      />,
     );
     expect(
       await screen.findByRole("region", { name: "Agents of foundation" }),
     ).toHaveTextContent("No agents launched.");
-  });
-
-  test("shows the union across a project's runs on its page, with the count on its row, and says when it cannot be read", async () => {
-    window.history.replaceState(
-      null,
-      "",
-      `/?project=${encodeURIComponent(LIVE_PROJECT)}`,
-    );
-    const { client } = telemetryHarness();
-    render(<App client={client} />);
-    const page = await screen.findByRole("region", {
-      name: `Agents of ${LIVE_PROJECT_NAME}`,
-    });
-    await waitFor(() =>
-      expect(
-        within(page).getAllByRole("button", { name: "Open transcript" }),
-      ).toHaveLength(4),
-    );
-    // The count the project group carries, on its row in the navigation and
-    // beside the listing.
-    expect(page).toHaveTextContent("3 agents");
-    const navigation = screen.getByRole("navigation", { name: "Projects" });
-    expect(
-      within(navigation).getByRole("button", { name: /observe-live-run/ }),
-    ).toHaveTextContent("3 agents");
-    // The `(no project)` group has no id, so no agents route and no panel.
-    await userEvent.click(
-      within(navigation).getByRole("button", { name: /\(no project\)/ }),
-    );
-    await screen.findByRole("list", { name: "Runs of (no project)" });
-    expect(screen.queryByRole("region", { name: /^Agents of/ })).toBeNull();
-    cleanup();
-
-    // A pointer file the server could not read is the engine's refusal, shown
-    // as returned, and a count the server left off is not shown as a zero.
-    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=agents`);
-    const refused = telemetryHarness((url) => {
-      if (verbOf(url) === "agents")
-        return Response.json(
-          {
-            error: {
-              code: "refused",
-              message: "invalid: cannot read the run's pointer file",
-            },
-          },
-          { status: 422 },
-        );
-      if (url.pathname.endsWith(`/runs/${LIVE_RUN}`)) {
-        const detail = runDetail(LIVE_RUN);
-        return Response.json({
-          ...detail,
-          run: { ...detail.run, agent_count: undefined },
-        });
-      }
-      return defaultResponder(url);
-    });
-    render(<App client={refused.client} />);
-    const panel = await screen.findByRole("region", { name: "Agents" });
-    expect(
-      await within(panel).findByRole("alert", { name: "Agents refused" }),
-    ).toHaveTextContent("cannot read the run's pointer file");
-    expect(panel).not.toHaveTextContent("agents");
-    expect(runAgents(LIVE_RUN).sessions).toHaveLength(3);
   });
 });

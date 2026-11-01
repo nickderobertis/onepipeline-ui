@@ -19,8 +19,12 @@ import type { RunDetail, RunTimeline } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { Activity, Clock3, Cpu, Layers3, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { RecordDisclosure } from "../../lib/RecordDisclosure";
 import type { NodeView } from "../../lib/run-model";
+import { StructuredFields } from "../../lib/StructuredFields";
+import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration, formatDurationSeconds } from "../../lib/time";
+import { boundedZoom, TIMELINE_TIME_MARKS } from "./axis";
 import {
   type GraphRow,
   type GraphSegment,
@@ -48,6 +52,7 @@ export function OverallView({
   nodes,
   timeline,
   timelineError,
+  journalSeq,
   onSelectNode,
   selectedItemId,
   onSelectItem,
@@ -57,6 +62,8 @@ export function OverallView({
   readonly nodes: readonly NodeView[];
   readonly timeline?: RunTimeline;
   readonly timelineError?: Error;
+  /** The journal sequence number of the last record this view has rendered. */
+  readonly journalSeq?: number;
   readonly onSelectNode: (nodeId: string) => void;
   readonly selectedItemId?: string;
   readonly onSelectItem: (itemId?: string) => void;
@@ -79,9 +86,13 @@ export function OverallView({
     (span) => span.node_id === undefined,
   );
   const openedSpan = runLevel.find((span) => span.id === selectedItemId);
-  const openedEvent = runLevel
-    .flatMap((span) => span.events)
-    .find((event) => event.id === selectedItemId);
+  const openedEvent =
+    runLevel
+      .flatMap((span) => span.events)
+      .find((event) => (event.record_id ?? event.id) === selectedItemId) ??
+    runLevel
+      .flatMap((span) => span.events)
+      .find((event) => event.id === selectedItemId);
   const opened =
     openedSpan === undefined
       ? openedEvent === undefined
@@ -98,7 +109,7 @@ export function OverallView({
   }, [onSelectItem, selectedItemId]);
 
   return (
-    <div className="overall-view">
+    <div className="overall-view" data-journal-seq={journalSeq}>
       <ScrollArea className="h-full">
         <div className="p-[34px] max-sm:p-3">
           <section className="overall-hero">
@@ -113,6 +124,31 @@ export function OverallView({
                 ? `last event ${detail.run.last_event}`
                 : "no events recorded yet"}
             </p>
+          </section>
+          <section aria-label="Run records">
+            <RecordDisclosure label="Timing and usage">
+              <StructuredFields value={detail.telemetry} />
+            </RecordDisclosure>
+            <RecordDisclosure label="Goal and repository identities">
+              <StructuredFields
+                value={{
+                  goal: detail.graph?.plan.goal,
+                  repositories: [
+                    ...new Set(
+                      detail.graph?.plan.tasks.flatMap((task) =>
+                        task.repo ? [task.repo] : [],
+                      ) ?? [],
+                    ),
+                  ],
+                }}
+              />
+            </RecordDisclosure>
+            <RecordDisclosure label="Recorded results">
+              <StructuredFields value={detail.graph?.result} />
+            </RecordDisclosure>
+            <RecordDisclosure label="Provider health">
+              <StructuredFields value={detail.provider_health} />
+            </RecordDisclosure>
           </section>
           <section aria-label="Run metrics" className="metric-grid">
             <Metric
@@ -254,7 +290,7 @@ function GraphExecution({
     if (segment.kind === "record" && segment.nodeId === undefined)
       onOpenItem(segment.id);
     else if (segment.nodeId !== undefined) onOpenNode(segment.nodeId);
-    else if (segment.conversationId !== undefined) onOpenItem(segment.id);
+    else onOpenItem(segment.id);
   };
   const lineLanes = graph.line.lanes.filter(({ id }) =>
     graph.line.items.some((item) => item.laneId === id),
@@ -263,6 +299,7 @@ function GraphExecution({
   return (
     <div className="graph-timeline" data-rows-open={rowsOpen}>
       <Timeline
+        {...TIMELINE_TIME_MARKS}
         axis={{ origin: graph.range[0] }}
         expanded={false}
         items={graph.line.items}
@@ -270,11 +307,29 @@ function GraphExecution({
         lanes={lineLanes}
         markers={graph.line.markers}
         onExpandedChange={setRowsOpen}
-        onRangeChange={setZoom}
+        onRangeChange={(next) => setZoom(boundedZoom(next))}
         onSelect={(entry) => open(entry.payload)}
         range={range}
         selectedId={selectedItemId}
       />
+      {graph.line.markers.some((marker) => marker.at > graph.range[1]) && (
+        <section aria-label="Records after execution" className="p-3 border-t">
+          <h3 className="eyebrow">After execution ended</h3>
+          {graph.line.markers
+            .filter((marker) => marker.at > graph.range[1])
+            .map((marker) => (
+              <Button
+                key={marker.id}
+                onClick={() => open(marker.payload)}
+                variant="outline"
+                size="sm"
+              >
+                {marker.payload.label} ·{" "}
+                <Timestamp at={marker.payload.startedAt} />
+              </Button>
+            ))}
+        </section>
+      )}
       {rowsOpen && (
         <ol className="graph-rows">
           {graph.rows.map((row) => (
@@ -293,7 +348,7 @@ function GraphExecution({
               expanded={openRows.has(row.id)}
               origin={graph.range[0]}
               range={range}
-              onRangeChange={setZoom}
+              onRangeChange={(next) => setZoom(boundedZoom(next))}
               row={row}
               selectedItemId={selectedItemId}
             />
@@ -350,6 +405,7 @@ function GraphRowView({
         </span>
       </header>
       <Timeline
+        {...TIMELINE_TIME_MARKS}
         axis={{ origin }}
         expanded={expanded}
         items={expanded ? row.items : row.line}

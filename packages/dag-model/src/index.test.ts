@@ -649,6 +649,43 @@ describe("boundary failures", () => {
         plan: { ...graph.plan, goal: { id: "ship-it" } },
       }).success,
     ).toBe(false);
+    // Finished work held for a release, in both of the engine's words, and the
+    // releases each awaits beside the settlement's own detail.
+    const held = graphStateSchema.parse({
+      ...graph,
+      node_states: { build: "complete-but-held" },
+      node_status: { build: "complete-but-held" },
+      node_results: {
+        build: {
+          status: "complete-but-held",
+          outcome: "held-for-release",
+          awaiting: [
+            { producer: "github.com/example/engine", target: "crate" },
+          ],
+        },
+      },
+    });
+    expect(held.node_status.build).toBe("complete-but-held");
+    expect(held.node_results.build?.awaiting).toEqual([
+      { producer: "github.com/example/engine", target: "crate" },
+    ]);
+    expect(
+      graphStateSchema.parse({
+        ...graph,
+        node_states: { build: "complete-but-draft" },
+        node_status: { build: "complete-but-draft" },
+      }).node_status.build,
+    ).toBe("complete-but-draft");
+    // An entry naming no producer is no release, and an empty list is a wait on
+    // nothing: the server serves neither, so neither parses.
+    for (const awaiting of [[{ target: "crate" }], []]) {
+      expect(
+        graphStateSchema.safeParse({
+          ...graph,
+          node_results: { build: { awaiting } },
+        }).success,
+      ).toBe(false);
+    }
     // A status the vocabulary does not hold is refused at the parse rather than
     // reaching a renderer that has no meaning for it.
     expect(
@@ -885,6 +922,36 @@ describe("run timeline", () => {
     ],
   };
 
+  test("round-trips optional dispatch ownership and refuses invalid groups", () => {
+    const dispatch_group = {
+      id: "run.node:graph:producer:1",
+      label: "Dispatch 1",
+      order: 3,
+      started_at: "2026-07-26T12:00:00Z",
+    };
+    const event = { id: "e1", kind: "gate-run", at: "2026-07-26T12:00:01Z" };
+    expect(
+      timelineEventSchema.parse({ ...event, dispatch_group }).dispatch_group,
+    ).toEqual(dispatch_group);
+    expect(
+      timelineSpanSchema.parse({ ...span, dispatch_group }).dispatch_group,
+    ).toEqual(dispatch_group);
+    expect(
+      JSON.parse(JSON.stringify(timelineEventSchema.parse(event))),
+    ).not.toHaveProperty("dispatch_group");
+    expect(
+      JSON.parse(JSON.stringify(timelineSpanSchema.parse(span))),
+    ).not.toHaveProperty("dispatch_group");
+    for (const group of [
+      {},
+      { ...dispatch_group, order: -1 },
+      { ...dispatch_group, started_at: "invalid" },
+    ])
+      expect(() =>
+        timelineEventSchema.parse({ ...event, dispatch_group: group }),
+      ).toThrow();
+  });
+
   test("accepts an open span, a rollup, and reference-only heavy content", () => {
     const timeline = parseRunTimeline({
       api_version: 2,
@@ -1040,6 +1107,27 @@ describe("run timeline", () => {
         },
       }).success,
     ).toBe(false);
+    // How a live turn took the note rides beside the party that took it, and a
+    // record written before the engine said so — carrying none — still parses.
+    // A word outside the engine's pair is refused as an unknown party is.
+    const taken = (turn?: string) =>
+      timelineEventSchema.safeParse({
+        id: "e10",
+        kind: "edit-committed",
+        at: "2026-07-26T12:00:06Z",
+        redirection: {
+          reached: "worker",
+          ...(turn === undefined ? {} : { turn }),
+          delivered: true,
+          delivery: "live",
+          node_id: "api",
+        },
+      });
+    expect(taken("turn-end").data?.redirection?.turn).toBe("turn-end");
+    expect(taken("interrupted").data?.redirection?.turn).toBe("interrupted");
+    expect(taken().success).toBe(true);
+    expect(taken().data?.redirection?.turn).toBeUndefined();
+    expect(taken("sideways").success).toBe(false);
     // An ordinary record carries none, and is still a valid event.
     expect(
       timelineEventSchema.parse({
@@ -1277,11 +1365,8 @@ describe("shutdown", () => {
   });
 
   test("names the routes, the two scopes a body takes, and the engine's default grace", () => {
-    expect(API_V2_PATHS.runShutdown("run/1")).toBe(
-      "/api/v2/runs/run%2F1/shutdown",
-    );
     expect(API_V2_PATHS.shutdown).toBe("/api/v2/shutdown");
-    expect(hostShutdownScopeSchema.options).toEqual(["mine", "host"]);
+    expect(hostShutdownScopeSchema.options).toEqual(["host"]);
     expect(SHUTDOWN_DEFAULT_GRACE_SECONDS).toBe(600);
   });
 
@@ -1315,6 +1400,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "complete",
     "amend",
     "note",
+    "withdraw-note",
     "finding",
     "settle",
     "rework",
@@ -1365,6 +1451,54 @@ test("a reply envelope composed against the engine's grammar carries what the en
     }).success,
   ).toBe(false);
   expect(replyEnvelopeSchema.safeParse({}).success).toBe(true);
+});
+
+test("a note's delivery deadline and its withdrawal are spelled as the engine declares them", () => {
+  const sent = {
+    version: REPLY_ENVELOPE_VERSION,
+    commands: [
+      {
+        op: "note",
+        id: "docs",
+        addressee: "worker",
+        text: "measure it too",
+        delivery_timeout_seconds: 300,
+      },
+      {
+        op: "withdraw-note",
+        envelope: "reply-7",
+        index: 0,
+        reason: "superseded by the next note",
+      },
+    ],
+  };
+  expect(replyEnvelopeSchema.parse(JSON.parse(JSON.stringify(sent)))).toEqual(
+    sent,
+  );
+  const withCommand = (command: Record<string, unknown>) =>
+    replyEnvelopeSchema.safeParse({
+      version: REPLY_ENVELOPE_VERSION,
+      commands: [command],
+    }).success;
+  // A deadline no note can meet, a position before the first command, a
+  // fractional one, a blank reason and a withdrawal naming no envelope are each
+  // refused, as the engine refuses them.
+  const note = { op: "note", id: "docs", addressee: "worker", text: "x" };
+  expect(withCommand({ ...note, delivery_timeout_seconds: 0 })).toBe(false);
+  const withdrawal = {
+    op: "withdraw-note",
+    envelope: "reply-7",
+    index: 1,
+    reason: "r",
+  };
+  expect(withCommand(withdrawal)).toBe(true);
+  expect(withCommand({ ...withdrawal, index: -1 })).toBe(false);
+  expect(withCommand({ ...withdrawal, index: 0.5 })).toBe(false);
+  expect(withCommand({ ...withdrawal, reason: "" })).toBe(false);
+  expect(withCommand({ ...withdrawal, envelope: "" })).toBe(false);
+  expect(
+    withCommand({ op: "withdraw-note", envelope: "reply-7", index: 1 }),
+  ).toBe(false);
 });
 
 test("rework and retitle envelopes round-trip and refuse incomplete commands", () => {

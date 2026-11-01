@@ -46,11 +46,14 @@
 pub mod api;
 pub mod cli;
 pub mod contract;
+mod encoding;
 pub mod error;
 pub mod filter;
+pub mod human_items;
+pub mod live;
 pub mod liveness;
+pub mod patch;
 pub mod payload;
-mod running_image;
 pub mod server;
 pub mod store;
 pub mod telemetry;

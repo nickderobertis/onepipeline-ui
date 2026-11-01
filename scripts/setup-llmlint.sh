@@ -42,7 +42,7 @@ set -uo pipefail
 # `llmlint: ignore` directives + fragment version bumps — that `just
 # lint-llm-validate` runs with no model call (0.3.17), bundles config_lint v1.2
 # so `line_localizable_rules_require_attribution` is enforced (0.3.23), and ships
-# `llmlint fingerprint`, the judge digest `onepipeline-ui:lint-llm-diff` is cached
+# `llmlint fingerprint`, the judge digest `onepipeline-ui-judged-diff:lint-llm-diff` is cached
 # on, with `max_prompt_chars` splitting an oversized diff across judge calls (0.4.11).
 # llmlint: ignore[changed_behavior_has_e2e] this dependency floor selects the llmlint release the judged tier runs, and `tests/e2e/judged_tier.rs` drives that tier through the release this installs; installer control flow and its user-visible contract are unchanged.
 readonly LLMLINT_MIN="0.4.11"

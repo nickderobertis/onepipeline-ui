@@ -27,9 +27,9 @@
 //! a branch's own record states rather than one a comparison should refuse.
 //!
 //! **The timeline is the one exception, because its contract is the opposite.**
-//! `docs/contract.md` declares every timeline schema bump additive — new fields on
-//! the events it names, and every other span and event byte-for-byte what the
-//! schema before served — so a value that moved there without a bump saying so is
+//! `docs/contract.md` declares which fields each timeline schema adds and which
+//! bounds it corrects. Every other span and event stays byte-for-byte what the
+//! schema before served, so a value that moved without a bump saying so is
 //! exactly what a comparison should refuse.
 //! [`every_span_and_event_the_base_commits_timeline_served_is_served_unchanged`]
 //! compares those bytes, with the fields a newer schema declared set aside.
@@ -241,6 +241,15 @@ fn asked(run: &str) -> Vec<(&'static str, String)> {
             routes::PROJECT_AGENTS,
             routes::PROJECT_AGENTS.replace("{project}", fixture_run::PLAN_PROJECT),
         ),
+        // The human-item routes, asked so this covers every route a reader
+        // opens. Over a runs root they answer the engine's `unavailable`, which
+        // the comparison — holding only what a base commit answered `200` —
+        // skips, as it skips them against a base commit from before them.
+        (routes::HUMAN_ITEMS, routes::HUMAN_ITEMS.to_owned()),
+        (
+            routes::HUMAN_ITEM,
+            routes::HUMAN_ITEM.replace("{id}", "task-build"),
+        ),
     ]
 }
 
@@ -258,16 +267,12 @@ fn the_comparison_asks_for_every_route_the_contract_defines() {
         .map(|(route, _)| route)
         .collect();
     for route in routes::TABLE {
-        // The two streams have no single response to compare: each stays open
-        // rather than answering once, and what the event stream opens with is
-        // the run list this already asks for. `tests/e2e/server.rs` drives
-        // both. A route that writes to the run is not a comparison either: what
-        // it serves is what the engine did, and asking two servers to do it is
-        // two stops or two adoptions of one run.
-        if route.path == routes::EVENTS
-            || route.path == routes::RUN_WATCH
-            || route.method == routes::Method::Post
-        {
+        // The event stream stays open rather than answering once, and opens
+        // with the run list this already asks for. Server journeys cover it.
+        // A write route answers what the engine did, and retiring a
+        // subscription answers a bodiless 204; asking two servers to do either
+        // would perform the operation twice and compare no field.
+        if route.path == routes::EVENTS || route.method != routes::Method::Get {
             continue;
         }
         let route = route.path;
@@ -494,15 +499,129 @@ fn as_served_at(mut timeline: Value, base_schema: u64) -> Value {
         .map(|(_, field)| *field)
         .collect();
     for span in timeline["spans"].as_array_mut().into_iter().flatten() {
+        // Schema 13 adds ownership to spans as well as events.
+        if base_schema < 13 {
+            span.as_object_mut().expect("span").remove("dispatch_group");
+        }
         for event in span["events"].as_array_mut().into_iter().flatten() {
-            if let Some(event) = event.as_object_mut() {
-                for field in &added {
-                    event.remove(*field);
+            // Schema 14 gives a `turn-activity` the `reference` the other turn
+            // records already carried, so the field is new on that kind alone.
+            if base_schema < 14 && event["kind"] == "turn-activity" {
+                event.as_object_mut().expect("event").remove("reference");
+            }
+            for field in &added {
+                // A dotted field was added inside an object the event already
+                // carried, and only the leaf is newer than the base.
+                let (parents, leaf) = field.rsplit_once('.').unwrap_or(("", field));
+                let holder = parents
+                    .split('.')
+                    .filter(|key| !key.is_empty())
+                    .try_fold(&mut *event, |held, key| held.get_mut(key));
+                if let Some(holder) = holder.and_then(Value::as_object_mut) {
+                    holder.remove(leaf);
                 }
             }
         }
     }
     timeline
+}
+
+/// The current contract's ordering and group ownership, before compatibility
+/// projection removes fields or reorders the older schema's event arrays.
+fn assert_record_order(timeline: &Value) {
+    let mut groups: Vec<&Value> = Vec::new();
+    for span in timeline["spans"].as_array().expect("spans") {
+        let events = span["events"].as_array().expect("events");
+        for pair in events.windows(2) {
+            let key = |event: &Value| {
+                (
+                    event["at"].as_str().expect("timestamp").to_owned(),
+                    event["journal_order"].as_u64().expect("journal order"),
+                )
+            };
+            assert!(
+                key(&pair[0]) <= key(&pair[1]),
+                "records out of order: {pair:?}"
+            );
+        }
+        for event in events {
+            if let Some(group) = event.get("dispatch_group") {
+                if let Some(owner) = span.get("dispatch_group") {
+                    assert_eq!(group, owner, "record in another session's group: {event}");
+                }
+                if let Some(previous) = groups.iter().find(|held| held["id"] == group["id"]) {
+                    assert_eq!(*previous, group, "inconsistent group ownership");
+                } else {
+                    groups.push(group);
+                }
+            }
+        }
+    }
+    groups.sort_by_key(|group| group["order"].as_u64().expect("group order"));
+    for pair in groups.windows(2) {
+        assert!(
+            pair[0]["started_at"].as_str() <= pair[1]["started_at"].as_str(),
+            "groups out of opening order: {pair:?}"
+        );
+    }
+}
+
+/// Validate the envelope independently of the timeline's additive schema.
+fn telemetry_schemas_are_compatible(before: &Value, after: &Value) -> Result<(), String> {
+    let version = |body: &Value, side: &str| {
+        body["telemetry_schema_version"]
+            .as_u64()
+            .filter(|value| *value > 0 && u32::try_from(*value).is_ok())
+            .ok_or_else(|| format!("{side} declares an invalid telemetry schema: {body}"))
+    };
+    let base = version(before, "base commit")?;
+    let current = version(after, "this build")?;
+    if current < base {
+        return Err(format!(
+            "this build serves telemetry schema {current}, older than the base commit's {base}"
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn invalid_or_regressed_telemetry_schemas_fail_the_timeline_comparison() {
+    let serving = Serving::start(compared_store);
+    let path = timeline_paths(fixture_run::RUN_ID, &[])[0].clone();
+    let response = http::get(serving.address, &path);
+    assert_eq!(response.status, 200);
+    let mut before = response.json();
+    let mut after = before.clone();
+    before["telemetry_schema_version"] = 21.into();
+    after["telemetry_schema_version"] = 24.into();
+    assert_eq!(telemetry_schemas_are_compatible(&before, &after), Ok(()));
+    assert!(telemetry_schemas_are_compatible(&after, &before).is_err());
+    let mut missing = after.clone();
+    missing
+        .as_object_mut()
+        .expect("a timeline")
+        .remove("telemetry_schema_version");
+    assert!(telemetry_schemas_are_compatible(&before, &missing).is_err());
+    assert!(telemetry_schemas_are_compatible(&missing, &after).is_err());
+    for invalid in [
+        Value::Null,
+        serde_json::json!("22"),
+        serde_json::json!(-1),
+        serde_json::json!(0),
+        serde_json::json!(22.5),
+        serde_json::json!(u64::from(u32::MAX) + 1),
+    ] {
+        let mut broken = after.clone();
+        broken["telemetry_schema_version"] = invalid.clone();
+        assert!(
+            telemetry_schemas_are_compatible(&before, &broken).is_err(),
+            "current schema {invalid}"
+        );
+        assert!(
+            telemetry_schemas_are_compatible(&broken, &after).is_err(),
+            "base schema {invalid}"
+        );
+    }
 }
 
 /// One timeline as two servers answered it, with what is a property of the
@@ -518,6 +637,8 @@ fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value,
     );
     assert_eq!(after.status, 200, "{path} now: {}", after.body);
     let (mut before, mut after) = (before.json(), after.json());
+    telemetry_schemas_are_compatible(&before, &after)
+        .unwrap_or_else(|error| panic!("{path}: {error}"));
     let base_schema = before["timeline_schema_version"]
         .as_u64()
         .unwrap_or_else(|| panic!("{path} at the base commit declares no schema: {before}"));
@@ -534,10 +655,102 @@ fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value,
         "{path} serves timeline schema {schema} and `TIMELINE_EVENT_ADDITIONS` says \
          nothing about what it added"
     );
+    if schema >= 13 {
+        assert_record_order(&after);
+    }
+    // The execution boundary is also a schema 13 correction. Derive it from
+    // the records served, then exempt only the run and spans that were open.
+    if base_schema < 13 && schema >= 13 {
+        let run_timeline = if path.contains("scope=node") {
+            let run_path = format!(
+                "{}?scope=run",
+                path.split('?').next().expect("timeline path")
+            );
+            http::get(newer, &run_path).json()
+        } else {
+            after.clone()
+        };
+        let spans = run_timeline["spans"].as_array().expect("spans");
+        if let Some(run) = spans.iter().find(|span| span["kind"] == "run") {
+            let nodes: Vec<&Value> = spans.iter().filter(|span| span["kind"] == "node").collect();
+            let settlement = (!nodes.is_empty()
+                && nodes
+                    .iter()
+                    .all(|node| node["status"].is_string() && node["ended_at"].is_string()))
+            .then(|| {
+                nodes
+                    .iter()
+                    .filter_map(|node| node["ended_at"].as_str())
+                    .max()
+            })
+            .flatten();
+            let terminal = spans
+                .iter()
+                .flat_map(|span| span["events"].as_array().expect("events"))
+                .filter(|event| {
+                    ["run-stopped", "host-shutdown", "driver-exited"]
+                        .contains(&event["kind"].as_str().unwrap_or_default())
+                })
+                .filter_map(|event| event["at"].as_str())
+                .max();
+            let expected = settlement.or(terminal);
+            assert_eq!(
+                run["ended_at"].as_str(),
+                expected,
+                "execution ends at settlement or termination"
+            );
+            if let Some(end) = expected.map(str::to_owned) {
+                for old in before["spans"].as_array_mut().expect("spans") {
+                    if let Some(new) = after["spans"]
+                        .as_array_mut()
+                        .expect("spans")
+                        .iter_mut()
+                        .find(|new| new["id"] == old["id"])
+                    {
+                        if old["kind"] == "run"
+                            || (old["ended_at"].is_null() && new["ended_at"] == end)
+                        {
+                            if old["status"] == "running" {
+                                assert_eq!(new["status"], "stopped", "closed dispatch status");
+                                old.as_object_mut().expect("span").remove("status");
+                                new.as_object_mut().expect("span").remove("status");
+                            }
+                            old.as_object_mut().expect("span").remove("ended_at");
+                            new.as_object_mut().expect("span").remove("ended_at");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Schema 13 corrects session bounds to their own records. Compare all
+    // remaining fields, and retain exact bound comparisons once 13 is the base.
+    if base_schema < 13 && schema >= 13 {
+        for body in [&mut before, &mut after] {
+            for span in body["spans"].as_array_mut().expect("spans") {
+                // Compare the same records across the ordering correction,
+                // preserving ties. The current order is asserted above.
+                span["events"]
+                    .as_array_mut()
+                    .expect("events")
+                    .sort_by_key(|event| event["at"].as_str().expect("timestamp").to_owned());
+                if (span["kind"] == "dispatch" && span["reference"]["kind"] == "conversation")
+                    || (span["kind"] == "rollup" && span["label"] == "dispatch")
+                {
+                    let span = span.as_object_mut().expect("span");
+                    span.remove("started_at");
+                    span.remove("ended_at");
+                }
+            }
+        }
+    }
     for body in [&mut before, &mut after] {
         let body = body.as_object_mut().expect("a timeline");
         body.remove("observed_at");
         body.remove("timeline_schema_version");
+        // The envelope's telemetry schema is validated above independently:
+        // live-activity additions can advance it without changing the timeline.
+        body.remove("telemetry_schema_version");
     }
     (before, as_served_at(after, base_schema), base_schema)
 }
@@ -612,6 +825,51 @@ fn every_span_and_event_the_base_commits_timeline_served_is_served_unchanged() {
         &serving.runs_root(),
         &[(sibling::BINARY_ENV, sibling.as_str())],
     );
+
+    // These sessions first speak after their node dispatch. Assert the new
+    // bounds positively, rather than merely exempting them from old-schema equality.
+    for (node, session, start, end) in [
+        (
+            fixture_run::NODE_ID,
+            fixture_run::CONVERSATION_ID,
+            "2026-08-07T12:00:03.000Z",
+            "2026-08-07T12:00:05.500Z",
+        ),
+        (
+            "review",
+            fixture_run::REVIEW_CONVERSATION_ID,
+            "2026-08-07T12:00:22.000Z",
+            "2026-08-07T12:00:26.000Z",
+        ),
+    ] {
+        for scope in ["run", "node"] {
+            let path = format!(
+                "/api/v2/runs/{}/timeline?scope={scope}{}",
+                fixture_run::RUN_ID,
+                if scope == "node" {
+                    format!("&node={node}")
+                } else {
+                    String::new()
+                }
+            );
+            let body = http::get(serving.address, &path).json();
+            let spans = body["spans"].as_array().expect("spans");
+            let span = spans
+                .iter()
+                .find(|span| {
+                    if scope == "node" {
+                        span["id"] == format!("dispatch.{session}")
+                    } else {
+                        span["node_id"] == node
+                            && span["kind"] == "rollup"
+                            && span["label"] == "dispatch"
+                    }
+                })
+                .expect("the session lane");
+            assert_eq!(span["started_at"], start, "{path}: first own record");
+            assert_eq!(span["ended_at"], end, "{path}: last own record");
+        }
+    }
 
     for (run, nodes) in COMPARED_RUNS {
         for path in timeline_paths(run, nodes) {

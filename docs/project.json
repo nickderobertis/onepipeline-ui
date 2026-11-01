@@ -1,0 +1,28 @@
+{
+  "name": "docs",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:docs"],
+  "//": "The repository's documents, a project of their own so a change to one selects what reads it rather than the crate's root project, which owns every file no other project does and which the view depends on. The crate's targets name `docs/contract.md` among their inputs, so a change to the contract still selects the crate and, through it, the view and its journeys.",
+  "targets": {
+    "test": {
+      "//": "The view's drift gates over `docs/dag-ui.md` and the pictures `README.md` embeds from `docs/screens/`, run here so a change to a document re-checks it without selecting the view. The inputs are the files those two suites read.",
+      "command": "cd apps/dag-ui && npx vitest run --config vite.config.ts src/test/dag-ui-doc.test.ts src/test/visual-docs.test.ts",
+      "inputs": [
+        "default",
+        "embeddedView",
+        "{workspaceRoot}/README.md",
+        "{workspaceRoot}/screencomp.toml",
+        "{workspaceRoot}/shots/baseline/**/*",
+        "{workspaceRoot}/scripts/visual-capture.sh",
+        "{workspaceRoot}/.github/workflows/visual-docs.yml",
+        "{workspaceRoot}/apps/dag-ui-e2e/package.json",
+        "{workspaceRoot}/apps/dag-ui-e2e/viewports.ts",
+        "{workspaceRoot}/apps/dag-ui-e2e/gallery.screens.spec.ts"
+      ]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  }
+}

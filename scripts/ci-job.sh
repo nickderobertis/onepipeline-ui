@@ -76,7 +76,13 @@ case "$job" in
   test-linux)
     if [ "$tier" = "broader" ]; then
       # `just check`'s tiers and its aggregate, then `just budgets`: the sweep.
-      targets="format-check,lint,typecheck,build,test,test-baseline,test-cost,doc,check,budgets,budgets-host,install-smoke,wheel-smoke"
+      # No `wheel-smoke`: every project's `test` includes the release journeys
+      # (`onepipeline-ui-release:test`), whose rehearsal builds that same wheel
+      # through `just wheel-linux` and installs and runs it, beside the archive
+      # and npm package packed from its binary. Both compiled into one target
+      # directory, one waiting on the other's lock, so the second only set up a
+      # container and installed the wheel again.
+      targets="format-check,lint,typecheck,build,test,test-baseline,test-cost,doc,check,budgets,budgets-host,install-smoke"
     else
       # `check`'s own tiers, less the formatting, lint and type-check targets
       # `lint` runs over the same affected set, so this job does not compile the

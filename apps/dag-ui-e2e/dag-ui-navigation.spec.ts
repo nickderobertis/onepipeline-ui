@@ -8,6 +8,7 @@
 // over whole and its implementation is the spec (see apps/dag-ui/AGENTS.md), and these
 // are the journeys that would have to catch the regression.
 
+import { projectListSchema, runListSchema } from "@onepipeline-ui/dag-model";
 import {
   EVENT_CATEGORIES,
   eventCategoryLabel,
@@ -37,7 +38,7 @@ import { DESKTOP, PHONE, VIEWPORTS, type Viewport } from "./viewports";
 
 /** The left navigation's own scroll container. */
 const navigation = (page: Page): Locator =>
-  page.getByRole("navigation", { name: "DAG runs" });
+  page.getByRole("navigation", { name: "Projects" });
 const navigationViewport = (page: Page): Locator =>
   navigation(page).locator("[data-radix-scroll-area-viewport]");
 
@@ -111,13 +112,123 @@ async function open(page: Page, size: Viewport, path: string): Promise<void> {
   await expect(navigation(page).locator(".run-link").first()).toBeVisible();
 }
 
+for (const size of VIEWPORTS) {
+  test(`keeps every Host reading inside its column at ${size.name}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await page.goto("/?page=host");
+    const host = page.getByRole("region", { name: "Host", exact: true });
+    // The corpus's dispatch proofs and root paths are long unbroken strings, and its
+    // providers table has five columns: what widened this page past a phone.
+    await expect(host.getByRole("table").getByRole("row").nth(1)).toBeVisible();
+    await expect(
+      host.getByRole("button", { name: "Refresh host", exact: true }),
+    ).toBeVisible();
+    const viewport = page
+      .locator("[data-radix-scroll-area-viewport]")
+      .filter({ has: host });
+    const escaped = await viewport.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const region = element.querySelector('[aria-label="Host"]');
+      const outside = [...(region?.querySelectorAll("*") ?? [])].filter(
+        (child) => {
+          const box = child.getBoundingClientRect();
+          return box.width > 0 && box.right > bounds.right + 1;
+        },
+      );
+      return {
+        overflow: element.scrollWidth - element.clientWidth,
+        outside: outside.map(
+          (child) =>
+            `${child.tagName.toLowerCase()} ${child.textContent?.slice(0, 40)}`,
+        ),
+      };
+    });
+    expect(escaped.outside).toEqual([]);
+    expect(escaped.overflow).toBeLessThanOrEqual(1);
+    await expectThePageItselfDoesNotScroll(page);
+    // The table never scrolls on its own: wide enough, its headers stand apart;
+    // on a phone each dispatch stacks, one field to a line, led by its column.
+    const table = host.getByRole("region", {
+      name: "Providers and dispatches table",
+    });
+    const layout = await table.evaluate((element) => {
+      const visible = (node: Element) => node.getBoundingClientRect().width > 0;
+      const headers = [...element.querySelectorAll("th")].filter(visible);
+      const row = element.querySelector("tbody tr");
+      const cells = [...(row?.querySelectorAll("td") ?? [])];
+      return {
+        hidden: element.scrollWidth - element.clientWidth,
+        headers: headers.map((header) => {
+          const box = header.getBoundingClientRect();
+          return { text: header.textContent, left: box.left, right: box.right };
+        }),
+        cells: cells.map((cell) => {
+          const box = cell.getBoundingClientRect();
+          return {
+            label: getComputedStyle(cell, "::before").content,
+            top: box.top,
+            bottom: box.bottom,
+          };
+        }),
+      };
+    });
+    expect(layout.hidden).toBeLessThanOrEqual(1);
+    const columns = ["Run", "Node", "Provider", "Age (ms)", "Proof"];
+    if (size === PHONE) {
+      expect(layout.headers).toEqual([]);
+      expect(layout.cells.map(({ label }) => label)).toEqual(
+        columns.map((column) => `"${column}: "`),
+      );
+      for (const [index, cell] of layout.cells.entries())
+        if (index > 0)
+          expect(cell.top).toBeGreaterThanOrEqual(
+            (layout.cells[index - 1]?.bottom ?? 0) - 1,
+          );
+    } else {
+      expect(layout.headers.map(({ text }) => text)).toEqual(columns);
+      for (const [index, header] of layout.headers.entries())
+        if (index > 0)
+          expect(header.left).toBeGreaterThanOrEqual(
+            layout.headers[index - 1]?.right ?? 0,
+          );
+    }
+  });
+}
+
+test("offers no kind filter when no served run carries a kind", async ({
+  page,
+}) => {
+  await open(page, DESKTOP, `/?run=${runs().live}&view=graph`);
+  // The corpus this file shares records no `kind` label on any run, so a filter
+  // here would be a legend with nothing under it.
+  const served = projectListSchema.parse(
+    await (await page.request.get("/api/v2/projects")).json(),
+  );
+  expect(
+    served.projects.flatMap((group) =>
+      group.runs.flatMap((run) => (run.labels?.kind ? [run.labels.kind] : [])),
+    ),
+  ).toEqual([]);
+  await expect(navigation(page).getByRole("button").first()).toBeVisible();
+  await expect(
+    navigation(page).getByRole("group", { name: "Run kinds" }),
+  ).toHaveCount(0);
+  await expect(navigation(page).getByRole("checkbox")).toHaveCount(0);
+});
+
 for (const size of [DESKTOP, PHONE]) {
-  test(`scrolls the run list and pages the next runs in at ${size.name}`, async ({
+  test(`scrolls every project run independently of the workspace at ${size.name}`, async ({
     page,
   }) => {
     await open(page, size, `/?run=${runs().live}&view=graph`);
     const links = navigation(page).locator(".run-link");
-    await expect(links).toHaveCount(50);
+    await expect(links).toHaveCount(
+      projectListSchema
+        .parse(await (await page.request.get("/api/v2/projects")).json())
+        .projects.reduce((count, group) => count + group.runs.length, 0),
+    );
     // The run this reader is on is legible rather than ellipsized away: a list no run
     // can be identified from is not a navigation, at any width. At 160px the id shares
     // its row with a state pill and a chevron, which left `dag-ui-live` reading `d..`.
@@ -138,7 +249,17 @@ for (const size of [DESKTOP, PHONE]) {
     await expect
       .poll(() => scrollTop(navigationViewport(page)))
       .toBeGreaterThan(0);
-    await expect(links).toHaveCount(52);
+    let expectedCount = 0;
+    let cursor: string | undefined;
+    do {
+      const query = new URLSearchParams({ include_settled: "true" });
+      if (cursor) query.set("cursor", cursor);
+      const complete = await page.request.get(`/api/v2/runs?${query}`);
+      const listed = runListSchema.parse(await complete.json());
+      expectedCount += listed.runs.length;
+      cursor = listed.next_cursor;
+    } while (cursor);
+    await expect(links).toHaveCount(expectedCount);
     // The rows that just arrived are reachable by the same scroll that asked for them.
     await page.mouse.wheel(0, 10_000);
     await expect(links.last()).toBeInViewport();
@@ -222,7 +343,7 @@ test("walks graph to node to timeline item and back, restoring each selection", 
     page.getByRole("region", { name: "Timeline for dashboard" }),
   ).toBeVisible();
   await timeline(page)
-    .getByRole("button", { name: /engineer-dashboard/ })
+    .getByRole("button", { name: /^worker \(engineer-dashboard\)/ })
     .click();
   await expect(itemDetail(page)).toContainText(
     "Implementing the dashboard now",
@@ -287,7 +408,7 @@ test("restores a deep-linked moment at a narrow viewport", async ({ page }) => {
   // Every tab of the node is reachable too: the strip scrolls rather than setting a
   // width the region around it cannot afford.
   await expect(page.getByRole("tab", { name: "Timeline" })).toBeInViewport();
-  await page.getByRole("tab", { name: "Checks" }).click();
+  await page.getByRole("tab", { name: "Remote" }).click();
   await expect(page.locator(".facts")).toContainText("Verification coverage");
   await expectThePageItselfDoesNotScroll(page);
 });
@@ -826,7 +947,7 @@ for (const size of [DESKTOP, PHONE]) {
   }) => {
     await open(page, size, `/?run=${runs().live}&node=dashboard`);
     await timeline(page)
-      .getByRole("button", { name: /engineer-dashboard/ })
+      .getByRole("button", { name: /^worker \(engineer-dashboard\)/ })
       .click();
     await expect(itemDetail(page)).toContainText(
       "Implementing the dashboard now",

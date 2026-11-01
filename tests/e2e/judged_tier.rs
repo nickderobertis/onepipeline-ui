@@ -9,7 +9,7 @@
 //! run, and on a failure with no terminal attached.
 //!
 //! Everything is the real thing but one. The recipe is the committed
-//! `justfile`'s, the target is `nx.json`'s and `project.json`'s, Nx is the one
+//! `justfile`'s, the target is `nx.json`'s and `judged-diff/project.json`'s, Nx is the one
 //! this workspace pins, and `llmlint` is the one `just setup-llmlint` installed —
 //! found where that installer puts it and never replaced, so a changed judge is
 //! told apart by the real `llmlint fingerprint`. The one stand-in is the paid
@@ -38,7 +38,10 @@ use tempfile::TempDir;
 const COPIED: &[&str] = &[
     "justfile",
     "nx.json",
+    // The crate's root project, which owns every file the lint's own project
+    // does not — `CHANGED.md` among them — beside the lint's project itself.
     "project.json",
+    "judged-diff/project.json",
     // The Nx this workspace pins, which the borrowed install must match.
     "package.json",
     "bun.lock",
@@ -200,9 +203,11 @@ impl Fixture {
     fn with_config(extra: &str) -> Self {
         let dir = TempDir::new().expect("temp dir");
         let workspace = dir.path().join("workspace");
-        fs::create_dir_all(workspace.join("scripts")).expect("create the scratch workspace");
         for name in COPIED {
-            fs::copy(repo_root().join(name), workspace.join(name))
+            let destination = workspace.join(name);
+            fs::create_dir_all(destination.parent().expect("a parent directory"))
+                .expect("create the scratch workspace");
+            fs::copy(repo_root().join(name), destination)
                 .unwrap_or_else(|error| panic!("copy {name} into the scratch workspace: {error}"));
         }
         fs::write(
@@ -534,7 +539,8 @@ fn a_changed_harness_model_is_judged_again() {
     );
 }
 
-/// A changed tracked file is judged again.
+/// A changed tracked file is judged again — one the lint's own project does not
+/// own, since its key is every file in the workspace.
 #[test]
 fn a_changed_file_is_judged_again() {
     let fixture = Fixture::new();

@@ -1,0 +1,13 @@
+{
+  "name": "onepipeline-ui-judged-diff",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:tooling"],
+  "//": "The judged diff lint, a project of its own that no project depends on. Its key is every file in the workspace (`nx.json`'s `lint-llm-diff` default), and Nx marks a project affected by any file its targets' inputs name: on the crate's root project that key selected the crate, and through it the view and its journeys, for every change. Here it selects only this project. `just lint-llm-diff` runs it.",
+  "targets": {
+    "lint-llm-diff": {
+      "command": "llmlint --diff --diff-base \"$LLMLINT_DIFF_BASE_SHA\"",
+      "options": { "cwd": "." }
+    }
+  }
+}

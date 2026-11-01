@@ -37,7 +37,7 @@
 # `needs.*.result` without interpolating it into a shell command:
 #
 #   RELEASE_TAG   the tag of the Release to hold, e.g. v0.3.1
-#   JOB_RESULTS   whitespace-separated `name=result` pairs: the three platform
+#   JOB_RESULTS   whitespace-separated `name=result` pairs: the four platform
 #                 jobs and the publish job's own steps
 #   EXPECT_CRATE  'true' when upload-crate had to publish the crate
 #   EXPECT_NPM    'true' when upload-npm had to publish the launcher and frontend
@@ -114,7 +114,7 @@ BANNER_CLOSE="<!-- release-status: end -->"
 # say, so a packaging break reddens a release even where publishing is off. Then
 # the publish job's own steps: the availability check, the assembly, the SBOM on
 # the Release and the read-back, and each switched-on registry's upload.
-required="build-linux build-macos build-windows check build upload-github verify"
+required="build-linux build-linux-arm64 build-macos build-windows check build upload-github verify"
 if switched_on EXPECT_CRATE "$EXPECT_CRATE"; then
   required="$required upload-crate"
 fi

@@ -47,7 +47,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(21), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(27), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -269,6 +269,11 @@ fn every_route_over(run: &str, conversation: &str, artifact: &str) -> Vec<(&'sta
         // each verb, over runs built for what each one does; this is every
         // route a reader opens.
         .filter(|route| route.method == routes::Method::Get)
+        // The human-item routes serve no run's records: they are host-wide,
+        // served only over an engine sample bundle and the engine's
+        // `unavailable` over a runs root like this one, and
+        // `tests/e2e/human_items.rs` drives every one of them.
+        .filter(|route| !route.path.starts_with(routes::HUMAN_ITEMS))
         .map(|route| route.path)
         .map(|template| {
             let path = template
@@ -282,10 +287,6 @@ fn every_route_over(run: &str, conversation: &str, artifact: &str) -> Vec<(&'sta
                 .replace("/artifacts/{id}", &format!("/artifacts/{artifact}"));
             let path = match template {
                 routes::RUN_TIMELINE => format!("{path}?scope=run"),
-                // A watch of no seconds reads the run once and returns, which is
-                // the one shape of it a sweep over every route can read to the
-                // end.
-                routes::RUN_WATCH => format!("{path}?timeout=0"),
                 _ => path,
             };
             (template, path)
@@ -297,6 +298,162 @@ fn every_route_over(run: &str, conversation: &str, artifact: &str) -> Vec<(&'sta
 /// between the source and the native id reaches the route as `%3A`.
 fn encoded(project: &str) -> String {
     project.replace(':', "%3A")
+}
+
+#[test]
+fn a_private_github_home_with_a_public_destination_task_is_readable() {
+    let serving = Serving::start(|root| {
+        let run = root.join("github-private-home");
+        fs::create_dir_all(&run).expect("the recorded run directory");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/private-github-home");
+        let home = fs::read_to_string(fixture.join("github-home.md")).expect("the GitHub home");
+        assert!(
+            home.contains(r#""onetaskgraph.classification":"private""#),
+            "{home}"
+        );
+        assert!(
+            home.contains(r#""tasks":[{"task":"board:I_3","projection":"site:I_7"}]"#),
+            "{home}"
+        );
+        let projected: Value = serde_json::from_str(
+            &fs::read_to_string(fixture.join("public-projection.json"))
+                .expect("the public projection"),
+        )
+        .expect("the public projection is JSON");
+        assert_eq!(projected["repository"], "owner/library", "{projected}");
+        assert!(
+            !projected.to_string().contains("onepipeline."),
+            "{projected}"
+        );
+        for file in [
+            "launch.json",
+            "plan.json",
+            "events.jsonl",
+            "writeback-landed.json",
+            "writeback-projections.jsonl",
+        ] {
+            fs::copy(fixture.join(file), run.join(file)).expect("copy the engine's record");
+        }
+    });
+    let run = "github-private-home";
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true");
+    assert_eq!(listed.status, 200, "{}", listed.body);
+    let row = listed.json()["runs"]
+        .as_array()
+        .expect("runs")
+        .iter()
+        .find(|row| row["run_id"] == run)
+        .cloned()
+        .unwrap_or_else(|| panic!("the run is not listed: {}", listed.body));
+    assert_eq!(row["project"], "board:plan", "{row}");
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}"));
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    let detail = detail.json();
+    assert_enveloped(&detail);
+    assert_eq!(
+        detail["graph"]["node_status"],
+        json!({"anchor": "done", "examples": "parked"}),
+        "{detail}"
+    );
+    // The anchor's settlement as the engine recorded it: merged on the private
+    // repository's base, the parked public task settling nothing.
+    assert_eq!(
+        detail["graph"]["node_results"],
+        json!({"anchor": {
+            "kind": "agent",
+            "status": "done",
+            "completed": true,
+            "outcome": "merged",
+            "branch": "2/anchor",
+        }}),
+        "{detail}"
+    );
+    let results = http::get(serving.address, &format!("/api/v2/runs/{run}/results"));
+    assert_eq!(results.status, 200, "{}", results.body);
+    let results = results.json();
+    assert_enveloped(&results);
+    let rendered = results["rendered"].as_str().expect("the rendered results");
+    assert!(
+        rendered.contains("done (merged) — landed on its base"),
+        "{rendered}"
+    );
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    );
+    assert_eq!(timeline.status, 200, "{}", timeline.body);
+    let timeline = timeline.json();
+    assert_enveloped(&timeline);
+    let settled: Vec<Value> = timeline["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter(|event| event["kind"] == "node-settled")
+        .collect();
+    assert_eq!(settled.len(), 1, "{timeline}");
+    assert_eq!(settled[0]["node_id"], "anchor", "{timeline}");
+    assert_eq!(
+        settled[0]["fields"],
+        json!({"Status": "done", "Outcome": "merged"}),
+        "{timeline}"
+    );
+    let missing = http::get(serving.address, "/api/v2/runs/no-such-github-run");
+    assert_eq!(missing.status, 404, "{}", missing.body);
+}
+
+#[test]
+fn a_private_linear_home_with_a_public_destination_task_is_readable() {
+    let serving = Serving::start(|root| {
+        let run = root.join("linear-private-projections");
+        fs::create_dir_all(&run).expect("the recorded run directory");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/private-linear-home");
+        let home = fs::read_to_string(fixture.join("linear-home.md")).expect("the Linear home");
+        assert!(home.contains("onetaskgraph.public_projections"), "{home}");
+        assert!(
+            home.contains(r#""onetaskgraph.classification":"private""#),
+            "{home}"
+        );
+        assert!(home.contains(r#""projection":"views:"#), "{home}");
+        let view = fs::read_to_string(fixture.join("public-view.md")).expect("the public view");
+        assert!(view.contains("examples"), "{view}");
+        for file in [
+            "launch.json",
+            "plan.json",
+            "events.jsonl",
+            "writeback-landed.json",
+            "writeback-projections.jsonl",
+        ] {
+            fs::copy(fixture.join(file), run.join(file)).expect("copy the engine's record");
+        }
+    });
+    let run = "linear-private-projections";
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true");
+    assert_eq!(listed.status, 200, "{}", listed.body);
+    assert!(
+        listed.json()["runs"]
+            .as_array()
+            .expect("runs")
+            .iter()
+            .any(|row| row["run_id"] == run),
+        "{}",
+        listed.body
+    );
+    for suffix in ["", "/timeline?scope=run", "/results"] {
+        let response = http::get(serving.address, &format!("/api/v2/runs/{run}{suffix}"));
+        assert_eq!(response.status, 200, "{}", response.body);
+        assert_enveloped(&response.json());
+    }
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    assert_eq!(
+        detail["graph"]["node_status"]["examples"],
+        json!("parked"),
+        "{detail}"
+    );
+    let missing = http::get(serving.address, "/api/v2/runs/no-such-linear-run");
+    assert_eq!(missing.status, 404, "{}", missing.body);
 }
 
 #[test]
@@ -352,16 +509,6 @@ fn a_run_launched_from_a_plan_store_project_is_served_by_every_route() {
                     .any(|row| row["run_id"] == json!(fixture_run::RUN_ID)),
                 "{path} opens on a snapshot naming the run: {snapshot}"
             );
-            continue;
-        }
-        if template == onepipeline_ui::contract::routes::RUN_WATCH {
-            let mut stream = http::stream(serving.address, &path, None);
-            assert_eq!(stream.status, 200, "{path}");
-            let last = std::iter::from_fn(|| stream.next_frame())
-                .last()
-                .expect("a watch of no seconds returns");
-            assert_eq!(last.event, "returned", "{path}: {last:?}");
-            assert_eq!(last.json()["run_id"], json!(fixture_run::RUN_ID));
             continue;
         }
         let response = http::get(serving.address, &path);
@@ -671,7 +818,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(11));
+    assert_eq!(body["timeline_schema_version"], json!(14));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -1229,19 +1376,18 @@ fn span_named<'a>(spans: &'a [Value], id: &str) -> &'a Value {
 }
 
 #[test]
-fn each_attempt_of_a_re_asked_node_is_served_over_the_attempt_that_ran_it() {
+fn each_session_of_a_re_asked_node_is_served_over_its_own_records() {
     let serving = lanes();
     let spans = node_spans(&serving, fixture_run::RETRIED_NODE_ID);
 
-    // The abandoned attempt: it began where the run dispatched it, a second
-    // before its member came up, and it is over where the dispatch that
-    // superseded it began, because nothing else ever ended it.
+    // Redispatch proves the first session stopped, but adds none of the gap
+    // between its last record and the replacement session to its work.
     let abandoned = span_named(
         &spans,
         &format!("dispatch.{}", fixture_run::RETRIED_FIRST_CONVERSATION_ID),
     );
-    assert_eq!(abandoned["started_at"], json!("2026-08-07T12:00:01.000Z"));
-    assert_eq!(abandoned["ended_at"], json!("2026-08-07T12:01:00.000Z"));
+    assert_eq!(abandoned["started_at"], json!("2026-08-07T12:00:02.000Z"));
+    assert_eq!(abandoned["ended_at"], json!("2026-08-07T12:00:03.000Z"));
 
     // And the attempt that did the work, from the `node-dispatched` that asked
     // for it, which the run ended itself.
@@ -1249,18 +1395,8 @@ fn each_attempt_of_a_re_asked_node_is_served_over_the_attempt_that_ran_it() {
         &spans,
         &format!("dispatch.{}", fixture_run::RETRIED_SECOND_CONVERSATION_ID),
     );
-    assert_eq!(ran["started_at"], json!("2026-08-07T12:01:00.000Z"));
+    assert_eq!(ran["started_at"], json!("2026-08-07T12:01:01.000Z"));
     assert_eq!(ran["ended_at"], json!("2026-08-07T12:01:30.000Z"));
-
-    // Each is the moment the run asked for that attempt, and not the moment the
-    // session it ran first spoke: two attempts of one node are told apart by the
-    // dispatches that bracket them.
-    for (span, dispatched) in [
-        (abandoned, "2026-08-07T12:00:01.000Z"),
-        (ran, "2026-08-07T12:01:00.000Z"),
-    ] {
-        assert_eq!(span["started_at"], json!(dispatched), "{span}");
-    }
 
     // The two attempts of one node no longer read as having run over one window,
     // which is the whole of what a reader opens a node's timeline to see.
@@ -1297,12 +1433,11 @@ fn a_lifecycle_nodes_lanes_are_each_served_over_the_attempt_that_ran_them() {
     // The attempt is the unit a session is bracketed by, and this node had one:
     // both of the members it ran in sequence open at the `node-dispatched` that
     // asked for them, and each closes where the run said that member was over.
-    // A session is never opened from its own first word — the run's own boundary
-    // is what brackets it, and between two members of one attempt the run
-    // recorded no boundary at all.
-    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:00.000Z"));
+    // Each session opens on its own first record, including the drafter that
+    // started after the worker ended.
+    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:02.000Z"));
     assert_eq!(worked["ended_at"], json!("2026-08-07T12:20:00.000Z"));
-    assert_eq!(drafted["started_at"], json!("2026-08-07T12:02:00.000Z"));
+    assert_eq!(drafted["started_at"], json!("2026-08-07T12:20:01.000Z"));
     assert_eq!(drafted["ended_at"], json!("2026-08-07T12:20:40.000Z"));
     // The publication opens at the gate rather than at 12:02:01, where `onevcs`
     // cut the worktree the worker then spent eighteen minutes on.
@@ -1334,7 +1469,7 @@ fn a_session_the_graph_lost_and_one_whose_worktree_went_each_end_where_that_happ
         &lost,
         &format!("dispatch.{}", fixture_run::DIED_CONVERSATION_ID),
     );
-    assert_eq!(died["started_at"], json!("2026-08-07T12:05:00.000Z"));
+    assert_eq!(died["started_at"], json!("2026-08-07T12:05:01.000Z"));
     assert_eq!(died["ended_at"], json!("2026-08-07T12:05:30.000Z"));
     assert!(
         died["ended_at"].as_str()
@@ -1351,8 +1486,8 @@ fn a_session_the_graph_lost_and_one_whose_worktree_went_each_end_where_that_happ
         &taken,
         &format!("dispatch.{}", fixture_run::RECLAIMED_CONVERSATION_ID),
     );
-    assert_eq!(reclaimed["started_at"], json!("2026-08-07T12:06:00.000Z"));
-    assert_eq!(reclaimed["ended_at"], json!("2026-08-07T12:06:30.000Z"));
+    assert_eq!(reclaimed["started_at"], json!("2026-08-07T12:06:02.000Z"));
+    assert_eq!(reclaimed["ended_at"], json!("2026-08-07T12:06:03.000Z"));
     assert_eq!(
         span_named(&taken, &format!("node.{}", fixture_run::RECLAIMED_NODE_ID))["ended_at"],
         json!("2026-08-07T12:06:31.000Z")
@@ -1440,7 +1575,7 @@ fn a_member_no_graph_declared_is_not_read_off_the_persona_beside_it() {
     );
     // The span itself is served in full: what the run recorded about *when* the
     // session ran is not in doubt, only what to call it.
-    assert_eq!(dispatch["started_at"], json!("2026-08-07T12:07:00.000Z"));
+    assert_eq!(dispatch["started_at"], json!("2026-08-07T12:07:01.000Z"));
     assert_eq!(dispatch["ended_at"], json!("2026-08-07T12:07:30.000Z"));
 
     let run = http::get(
@@ -1717,7 +1852,7 @@ fn a_session_with_no_member_is_read_by_its_persona_only_where_a_graph_declared_t
         &format!("dispatch.{}", fixture_run::MUSED_CONVERSATION_ID),
     );
     assert_eq!(role_of(dispatch), None, "{dispatch}");
-    assert_eq!(dispatch["started_at"], json!("2026-08-07T12:04:00.000Z"));
+    assert_eq!(dispatch["started_at"], json!("2026-08-07T12:04:02.000Z"));
     assert!(session_of(fixture_run::MUSED_NODE_ID)
         .get("agent_role")
         .is_none());
@@ -1750,6 +1885,71 @@ fn a_session_with_no_member_is_read_by_its_persona_only_where_a_graph_declared_t
             .is_none(),
         "a member no graph declared was read off the persona beside it"
     );
+}
+
+#[test]
+fn observer_sessions_on_multiple_streams_keep_their_declared_roles() {
+    let streams = [
+        "dag-scope-1786925520009-4311",
+        "dag-scope-1786925520008-4311",
+    ];
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_lanes(root, fixture_run::LANES_RUN_ID);
+        let launch_path = dir.join("launch.json");
+        let mut launch: Value = serde_json::from_slice(&fs::read(&launch_path).unwrap()).unwrap();
+        launch.as_object_mut().unwrap().remove("observer_runs");
+        launch["graph_run"] = json!(streams[0]);
+        fs::write(launch_path, serde_json::to_vec(&launch).unwrap()).unwrap();
+        for stream in streams {
+            fixture_run::declare_graph(root, stream, &["monitor", "check-in"]);
+            // The graph opens before any member does. It carries neither a
+            // member nor a session; session grouping attaches it to this
+            // stream's first conversation once that conversation is recorded.
+            fixture_run::append_relayed_on(
+                &dir,
+                stream,
+                "graph-started",
+                json!({"run_id": stream, "onepipeline.run_id": fixture_run::LANES_RUN_ID}),
+                json!({}),
+            );
+            let members = if stream == streams[0] {
+                ["monitor", "check-in", "stranger"]
+            } else {
+                ["check-in", "monitor", "stranger"]
+            };
+            for member in members {
+                let session = format!("{stream}.{member}");
+                fixture_run::append_relayed_on(
+                    &dir,
+                    stream,
+                    "turn-started",
+                    json!({"run_id": stream, "onepipeline.run_id": fixture_run::LANES_RUN_ID, "session": session,
+                           "member": member, "persona": "monitor"}),
+                    json!({"turn": 1}),
+                );
+            }
+        }
+    });
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::LANES_RUN_ID,
+        ),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let timeline = response.json();
+    let spans = timeline["spans"].as_array().expect("spans");
+    for stream in streams {
+        for member in ["monitor", "check-in", "stranger"] {
+            let span = span_named(spans, &format!("run-session.{stream}.{member}"));
+            assert_eq!(
+                role_of(span),
+                (member != "stranger").then_some(member),
+                "{span}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -1976,9 +2176,9 @@ fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
         &spans,
         &format!("rollup.{}.agent.pr-author", fixture_run::DRAFTED_NODE_ID),
     );
-    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:00.000Z"));
+    assert_eq!(worked["started_at"], json!("2026-08-07T12:02:02.000Z"));
     assert_eq!(worked["ended_at"], json!("2026-08-07T12:20:00.000Z"));
-    assert_eq!(drafted["started_at"], json!("2026-08-07T12:02:00.000Z"));
+    assert_eq!(drafted["started_at"], json!("2026-08-07T12:20:01.000Z"));
     assert_eq!(drafted["ended_at"], json!("2026-08-07T12:20:40.000Z"));
 
     // The re-asked node's two attempts are one category, and it covers both.
@@ -1987,7 +2187,7 @@ fn a_run_scope_category_covers_the_sessions_in_it_rather_than_the_node() {
         &format!("rollup.{}.agent.worker", fixture_run::RETRIED_NODE_ID),
     );
     assert_eq!(retried["count"], json!(2));
-    assert_eq!(retried["started_at"], json!("2026-08-07T12:00:01.000Z"));
+    assert_eq!(retried["started_at"], json!("2026-08-07T12:00:02.000Z"));
     assert_eq!(retried["ended_at"], json!("2026-08-07T12:01:30.000Z"));
 
     // Every node of this run dispatched a worker, and every one of them is in the
@@ -2029,7 +2229,7 @@ fn a_publication_the_run_never_did_is_absent_and_one_it_never_ruled_on_has_no_st
         &working,
         &format!("dispatch.{}", fixture_run::WORKING_CONVERSATION_ID),
     );
-    assert_eq!(session["started_at"], json!("2026-08-07T12:04:00.000Z"));
+    assert_eq!(session["started_at"], json!("2026-08-07T12:04:02.000Z"));
     assert_eq!(session["ended_at"], Value::Null, "{session}");
 
     // The failure a user can cause: the gate refused the branch, so publication
@@ -2248,11 +2448,15 @@ fn a_settled_members_report_is_served_from_the_copy_the_run_retained() {
     }
 }
 
-/// A retained report longer than one response may carry is bounded exactly as a
-/// log is: the end of it, and the flag that says so.
+/// A retained report longer than any log tail is served whole: a report is a
+/// document a reader reads from its first criterion to its last, and the bound
+/// a log is served under would cut its beginning off.
 #[test]
-fn a_retained_report_bigger_than_one_response_is_served_as_its_tail() {
-    let report = report_document(&format!("{}the last thing it said", "n".repeat(70_000)));
+fn a_retained_report_bigger_than_a_log_tail_is_served_whole() {
+    let report = report_document(&format!(
+        "the first thing it said{}the last thing it said",
+        "n".repeat(70_000)
+    ));
     let serving = Serving::start(|root| {
         let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
         fixture_run::settle_member(
@@ -2276,14 +2480,13 @@ fn a_retained_report_bigger_than_one_response_is_served_as_its_tail() {
         ),
     )
     .json();
-    assert_eq!(body["truncated"], json!(true));
+    assert_eq!(body["truncated"], json!(false));
     assert_eq!(body["kind"], json!("worker_report"));
-    let content = body["content"].as_str().expect("content");
-    assert!(
-        content.ends_with(report.get(report.len() - 64..).expect("the report's end")),
-        "the tail is the end of the report"
+    assert_eq!(
+        body["content"].as_str(),
+        Some(report.as_str()),
+        "the whole report, its first sentence and its last"
     );
-    assert!(content.len() <= 64 * 1024);
 }
 
 /// A settlement whose report the run never kept.
@@ -2410,7 +2613,7 @@ fn a_oneharness_session_artifact_is_served_from_the_history_store_that_holds_it(
         store.path(),
         "a very talkative worker",
         "say more than one response can carry",
-        &"n".repeat(70_000),
+        &format!("{}the last thing it said", "n".repeat(70_000)),
     );
     let serving = Serving::start(|root| {
         let dir = fixture_run::write(root, fixture_run::RUN_ID);
@@ -2478,10 +2681,19 @@ fn a_oneharness_session_artifact_is_served_from_the_history_store_that_holds_it(
     );
     assert_eq!(content["prompt"], json!("land the wire contract"));
 
-    // A conversation longer than one response may carry is bounded exactly as a
-    // log is: the end of it, and the flag that says so. A transcript has no size
-    // its harness promised, and this is the one artifact kind whose bytes this
-    // server never wrote and cannot bound at the source.
+    // And the words are served structured, whole, as the one turn the
+    // invocation was: its prompt as the user's and its reply as the assistant's,
+    // read through the engine's resolver.
+    assert_eq!(body["turns"][0]["user"], json!("land the wire contract"));
+    assert_eq!(
+        body["turns"][0]["assistant"],
+        json!("the route table is landed")
+    );
+    assert_eq!(body["turns"][0]["model"], content["model"]);
+
+    // A conversation longer than a log's tail is served whole: a transcript is
+    // read from its first word to its last, and the tail a log is served as
+    // would have cut off what it was asked.
     let long = http::get(
         serving.address,
         &format!(
@@ -2492,16 +2704,14 @@ fn a_oneharness_session_artifact_is_served_from_the_history_store_that_holds_it(
     );
     assert_eq!(long.status, 200, "{}", long.body);
     let body = long.json();
-    assert_eq!(body["truncated"], json!(true));
-    let content = body["content"].as_str().expect("content");
+    assert_eq!(body["truncated"], json!(false));
+    let turn = &body["turns"][0];
+    assert_eq!(turn["user"], json!("say more than one response can carry"));
+    let reply = turn["assistant"].as_str().expect("the reply");
     assert!(
-        content.len() <= 64 * 1024,
-        "the body is bounded: {}",
-        content.len()
-    );
-    assert!(
-        content.ends_with("\"failure_kind\": null\n}"),
-        "the tail is the end of the record: {content}"
+        reply.len() > 70_000 && reply.ends_with("the last thing it said"),
+        "the whole reply, to its last sentence: {} bytes",
+        reply.len()
     );
 }
 
@@ -2631,17 +2841,17 @@ fn a_session_record_carries_the_model_the_harness_reported_and_the_refusal_it_ga
     );
 }
 
-/// A session whose next turn is still running is served by its finished run,
-/// exactly as the linked core renders that run — and the turn in flight, which
-/// has no record yet, is not an artifact.
+/// A session whose next turn is still running serves both: its finished run as
+/// the record the linked core closed it with, and the turn in flight live — the
+/// prompt it was given and what it has said so far, read out of the history
+/// file as it is written.
 ///
-/// The core renders a session as typed entries: each finished run's record, and
-/// an in-flight entry for a run that has streamed events but not closed. Only
-/// a record carries a `history_id`, so an artifact id selects a finished run
-/// and nothing else, and the bytes served for it are that record as the core
-/// serializes it — which is what a reader of `oneharness history show` sees.
+/// The writer opens every run with a line carrying its whole prompt and appends
+/// each event as it happens, so a run that has not closed is readable entry by
+/// entry through the engine's resolver; it has no closing record, so it is
+/// served `running` and with no reply of its own yet.
 #[test]
-fn a_session_with_a_turn_in_flight_serves_its_finished_run_and_not_the_running_one() {
+fn a_session_with_a_turn_in_flight_serves_its_finished_run_and_the_running_one_live() {
     use oneharness_core::domain::history::HistoryShowEntry;
 
     let store = tempfile::tempdir().expect("the oneharness history store");
@@ -2697,29 +2907,20 @@ fn a_session_with_a_turn_in_flight_serves_its_finished_run_and_not_the_running_o
     assert_eq!(body["kind"], json!("oneharness_session"));
     assert_eq!(
         body["content"].as_str(),
-        Some(
-            serde_json::to_string_pretty(finished)
-                .expect("the record")
-                .as_str()
-        ),
-        "the finished run is served as the core renders it"
+        Some(harness_history::served_record(finished).as_str()),
+        "the finished run is served as the core closed it"
     );
+    assert_eq!(body["turns"][0]["status"], json!("ok"), "{body}");
 
     let response = http::get(
         serving.address,
         &format!("/api/v2/runs/{}/artifacts/{running}", fixture_run::RUN_ID),
     );
-    assert_eq!(
-        response.status, 404,
-        "a run with no record yet is not an artifact: {}",
-        response.body
-    );
-    assert_eq!(
-        response.json()["error"]["code"],
-        json!("artifact_not_found"),
-        "{}",
-        response.body
-    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let turn = &response.json()["turns"][0];
+    assert_eq!(turn["status"], json!("running"), "{turn}");
+    assert_eq!(turn["user"], json!("land the wire contract"), "{turn}");
+    assert_eq!(turn["assistant"], json!("now landing the client"), "{turn}");
 }
 
 /// Reading one takes no lock and writes nothing under the store.
@@ -2949,14 +3150,16 @@ fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
             );
         }
         // The same store, named as the producer names it, holding an id no
-        // record in it carries.
+        // record in it carries. Named in the writer's spelling, because the
+        // line below expects the path the resolver joins from it, and macOS
+        // reaches the temporary `store` through a symlink the writer resolved.
         fixture_run::relay_harness_session(
             &dir,
             &fixture_run::HarnessSession {
                 stream: HARNESS_STREAM,
                 node: fixture_run::NODE_ID,
                 member: "worker",
-                history_dir: Some(&store),
+                history_dir: Some(&recorded.dir),
                 history_project: &recorded.project,
                 history_session: &recorded.session,
                 history_id: UNRECORDED_HISTORY_ID,
@@ -2983,6 +3186,9 @@ fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
         );
     }
 
+    // A pointer the run did record, at a file that holds no entry by that id:
+    // not a refusal, because nothing was followed anywhere it should not go, but
+    // the resolver's own line naming the file and why — never an empty session.
     let unknown = http::get(
         serving.address,
         &format!(
@@ -2990,8 +3196,22 @@ fn a_history_pointer_that_is_not_a_bare_name_is_refused_rather_than_joined() {
             fixture_run::RUN_ID
         ),
     );
-    assert_eq!(unknown.status, 404, "{}", unknown.body);
-    assert_eq!(unknown.json()["error"]["code"], json!("artifact_not_found"));
+    assert_eq!(unknown.status, 200, "{}", unknown.body);
+    let unavailable = unknown.json()["unavailable"].clone();
+    assert_eq!(
+        unavailable,
+        json!(format!(
+            "transcript unavailable: {}: missing-entry",
+            recorded.path.display()
+        )),
+        "{}",
+        unknown.body
+    );
+    assert!(
+        !unknown.body.contains(HIDDEN_TRANSCRIPT),
+        "{}",
+        unknown.body
+    );
 }
 
 /// A pointer whose components *resolve* out of the store, which no check on how
@@ -3149,11 +3369,17 @@ fn a_history_pointer_that_resolves_out_of_the_store_is_refused_rather_than_opene
 
     // Asked for first, so that by the time the refusals below have been read off
     // the log a line about this one would already be on it.
+    // A dangling link resolves nowhere, so there is nothing to refuse: it is a
+    // transcript that went away, said in the resolver's own words.
     let vanished = artifact(VANISHED_HISTORY_ID);
-    assert_eq!(vanished.status, 404, "{}", vanished.body);
-    assert_eq!(
-        vanished.json()["error"]["code"],
-        json!("artifact_not_found")
+    assert_eq!(vanished.status, 200, "{}", vanished.body);
+    let said = vanished.json()["unavailable"].clone();
+    assert!(
+        said.as_str().is_some_and(|said| {
+            said.starts_with("transcript unavailable: ") && said.ends_with(": missing-file")
+        }),
+        "{}",
+        vanished.body
     );
 
     for (what, escaped) in [
@@ -3446,6 +3672,49 @@ fn the_agents_a_run_launched_are_served_off_its_pointer_file_and_open_to_their_t
     );
     let serving = Serving::start_in(workspace, &[]);
 
+    for query in [
+        "scope=run".to_owned(),
+        format!("scope=node&node={}", fixture_run::NODE_ID),
+    ] {
+        let timeline = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/timeline?{query}", fixture_run::RUN_ID),
+        )
+        .json();
+        let spans = timeline["spans"].as_array().expect("timeline spans");
+        let worker_span = spans
+            .iter()
+            .find(|s| s["harness_scope"] == "node")
+            .expect("worker harness");
+        assert_eq!(worker_span["node_id"], fixture_run::NODE_ID);
+        assert_eq!(worker_span["reference"]["kind"], "oneharness_session");
+        assert!(!http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/artifacts/{}",
+                fixture_run::RUN_ID,
+                worker_span["reference"]["value"]
+                    .as_str()
+                    .expect("history id")
+            )
+        )
+        .json()["content"]
+            .as_str()
+            .expect("transcript")
+            .is_empty());
+        let observer_span = spans.iter().find(|s| s["harness_scope"] == "observer");
+        if query == "scope=run" {
+            let observer = observer_span.expect("observer harness");
+            assert_eq!(
+                observer["parent_id"],
+                format!("run.{}", fixture_run::RUN_ID)
+            );
+            assert!(observer.get("node_id").is_none());
+        } else {
+            assert!(observer_span.is_none());
+        }
+    }
+
     // The run's agents: both sessions, each carrying the engine's keys and the
     // repository's own, in the order they first appeared.
     let response = http::get(
@@ -3641,6 +3910,17 @@ fn a_pointer_file_that_cannot_be_read_is_refused_and_leaves_the_count_absent() {
     );
     assert_eq!(response.status, 422, "{}", response.body);
     assert_eq!(response.json()["error"]["code"], json!("refused"));
+    for query in [
+        "scope=run".to_owned(),
+        format!("scope=node&node={}", fixture_run::NODE_ID),
+    ] {
+        let timeline = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/timeline?{query}", fixture_run::RUN_ID),
+        );
+        assert_eq!(timeline.status, 422, "{}", timeline.body);
+        assert_eq!(timeline.json()["error"]["code"], "refused");
+    }
     let detail = http::get(
         serving.address,
         &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
@@ -4007,16 +4287,25 @@ fn a_run_directory_the_contract_cannot_name_is_never_announced_on_the_stream() {
 
 #[test]
 fn a_run_that_leaves_the_root_is_reported_removed() {
-    let serving = two_runs();
+    // Settled, so the server's reads of it write nothing (see `Serving::take_out`).
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+        fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+        fixture_run::summarize(root, fixture_run::OTHER_RUN_ID);
+    });
     let mut stream = http::stream(serving.address, "/api/v2/events", None);
     assert_eq!(stream.next_frame().expect("a snapshot").event, "snapshot");
 
-    std::fs::remove_dir_all(serving.run_dir(fixture_run::OTHER_RUN_ID))
-        .expect("the run leaves the root");
+    let taken_out = serving.take_out(fixture_run::OTHER_RUN_ID);
 
     let removed = stream.next_frame().expect("the removal is noticed");
     assert_eq!(removed.event, "run.removed");
     assert_eq!(removed.json()["run_id"], json!(fixture_run::OTHER_RUN_ID));
+    assert!(
+        !serving.run_dir(fixture_run::OTHER_RUN_ID).exists(),
+        "the server made the removed run again"
+    );
+    std::fs::remove_dir_all(&taken_out).expect("the moved run is deleted");
 }
 
 #[test]
@@ -4684,6 +4973,110 @@ fn a_note_carried_to_the_next_dispatch_is_served_as_not_yet_delivered() {
             "node_id": fixture_run::UNCONTROLLED_NODE_ID,
         }),
         "{carried}"
+    );
+}
+
+/// How a live turn took a note is served beside the party that took it, and a
+/// record that does not say is served as it always was.
+///
+/// The engine that links here can leave a running turn to end rather than
+/// interrupt it, and its `worker` and `supervisor` dispositions record which as
+/// `turn`. A planner who asked for `turn-end` reads whether that is what
+/// happened; a note recorded before the field existed still opens, saying
+/// nothing about it; and a word outside the engine's pair is a record this build
+/// cannot read, served as no redirection rather than relayed.
+#[test]
+fn a_notes_turn_is_served_where_the_record_names_one_and_nowhere_else() {
+    let note = |reached: &str, turn: Option<&str>| {
+        let mut operation = json!({
+            "kind": "note-delivered",
+            "node": fixture_run::REDIRECTED_NODE_ID,
+            "addressee": "worker",
+            "text": "x",
+            "reached": reached,
+        });
+        if let Some(turn) = turn {
+            operation["turn"] = json!(turn);
+        }
+        json!({
+            "author": "planner",
+            "command": {
+                "op": "note",
+                "id": fixture_run::REDIRECTED_NODE_ID,
+                "addressee": "worker",
+                "text": "x",
+                "deliver": "turn-end",
+                "delivery_timeout_seconds": 30,
+            },
+            "operations": [operation],
+            "operation_kinds": ["note-delivered"],
+        })
+    };
+    let notes = [
+        note("worker", Some("turn-end")),
+        note("supervisor", Some("interrupted")),
+        note("worker", None),
+        note("worker", Some("sideways")),
+    ];
+    let serving = Serving::start(move |root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        for payload in &notes {
+            fixture_run::append_relayed(
+                &dir,
+                "pipeline",
+                "edit-committed",
+                json!({ "run_id": fixture_run::RUN_ID }),
+                payload.clone(),
+            );
+        }
+    });
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+    )
+    .json();
+    assert_eq!(timeline["timeline_schema_version"], json!(14));
+    // Every appended record is stamped at one instant, after everything the
+    // live run wrote, so they are its last four edits in the order appended.
+    let appended: Vec<Value> = events_on(&timeline)
+        .into_iter()
+        .filter(|event| {
+            event["kind"] == json!("edit-committed")
+                && event["at"] == json!("2026-08-07T12:01:00.000Z")
+        })
+        .collect();
+    let [left_to_end, interrupted, unsaid, unreadable] = <[Value; 4]>::try_from(appended)
+        .unwrap_or_else(|appended| panic!("the four appended edits: {appended:?}"));
+    let served = |reached: &str, turn: Option<&str>| {
+        let mut redirection = json!({
+            "reached": reached,
+            "delivered": true,
+            "delivery": "live",
+            "node_id": fixture_run::REDIRECTED_NODE_ID,
+        });
+        if let Some(turn) = turn {
+            redirection["turn"] = json!(turn);
+        }
+        redirection
+    };
+    assert_eq!(
+        left_to_end["redirection"],
+        served("worker", Some("turn-end")),
+        "{left_to_end}"
+    );
+    assert_eq!(
+        interrupted["redirection"],
+        served("supervisor", Some("interrupted")),
+        "{interrupted}"
+    );
+    assert_eq!(
+        unsaid["redirection"],
+        served("worker", None),
+        "a record written before `turn` existed is served as it was: {unsaid}"
+    );
+    assert!(
+        unreadable.get("redirection").is_none(),
+        "a turn outside the engine's pair is not relayed: {unreadable}"
     );
 }
 
@@ -5497,6 +5890,12 @@ fn a_watched_stream_reports_only_that_run_and_notices_its_transcripts() {
         "the query's cursor continues the numbering"
     );
 
+    let seeded = stream
+        .next_frame()
+        .expect("existing activity follows the snapshot");
+    assert_eq!(seeded.event, "activity.changed");
+    assert!(seeded.json()["activity"][0]["event_id"].is_string());
+
     // A relayed turn is a transcript change, which is a separate fact from the
     // run's own state moving — and the one a detail view refetches on.
     let dir = serving.run_dir(fixture_run::RUN_ID);
@@ -5539,6 +5938,71 @@ fn a_watched_stream_reports_only_that_run_and_notices_its_transcripts() {
 }
 
 #[test]
+fn invalid_remote_check_metadata_is_omitted() {
+    for (invalid, invalid_conclusion) in [
+        (Value::Null, true),
+        (json!(""), true),
+        (json!(17), true),
+        (json!([]), true),
+        (json!({}), true),
+        (json!("not a URL or timestamp"), false),
+        (json!("2026-02-30T12:00:00Z"), false),
+    ] {
+        let serving = two_runs();
+        let journal = serving.run_dir(fixture_run::RUN_ID).join("events.jsonl");
+        let existing = std::fs::read_to_string(&journal).expect("the recorded journal");
+        let mut changed = false;
+        let rewritten: Vec<String> = existing
+            .lines()
+            .map(|line| {
+                let mut record: Value = serde_json::from_str(line).expect("a recorded envelope");
+                if record["kind"] == "change-check"
+                    && record["payload"]["name"] == "published-smoke"
+                {
+                    for key in ["conclusion", "url", "started_at", "completed_at"] {
+                        if key != "conclusion" || invalid_conclusion {
+                            record["payload"][key] = invalid.clone();
+                        }
+                    }
+                    changed = true;
+                }
+                serde_json::to_string(&record).expect("a recorded envelope serializes")
+            })
+            .collect();
+        assert!(
+            changed,
+            "the fixture must contain the check being exercised"
+        );
+        std::fs::write(&journal, format!("{}\n", rewritten.join("\n")))
+            .expect("record malformed optional metadata before the first read");
+        let response = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}", fixture_run::RUN_ID),
+        );
+        assert_eq!(response.status, 200, "{}", response.body);
+        let body = response.json();
+        let checks = body["node_details"][fixture_run::NODE_ID]["verification"]["checks"]
+            .as_array()
+            .expect("the recorded checks remain readable");
+        let check = checks
+            .iter()
+            .find(|check| check["name"] == "published-smoke")
+            .expect("the check remains visible even without optional metadata");
+        assert_eq!(check["status"], json!("completed"));
+        for key in ["conclusion", "url", "started_at", "completed_at"] {
+            if key == "conclusion" && !invalid_conclusion {
+                assert_eq!(check[key], json!("failure"));
+            } else {
+                assert!(
+                    check.get(key).is_none(),
+                    "{key} must omit {invalid}: {check}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn the_checks_a_host_observed_on_a_publication_are_served_with_their_logs() {
     let serving = two_runs();
     let body = http::get(
@@ -5562,6 +6026,16 @@ fn the_checks_a_host_observed_on_a_publication_are_served_with_their_logs() {
     assert_eq!(checks[1]["name"], json!("published-smoke"));
     assert_eq!(checks[1]["required"], json!(false));
     assert_eq!(checks[1]["state"], json!("failure"));
+    assert_eq!(checks[1]["status"], json!("completed"));
+    assert_eq!(checks[1]["conclusion"], json!("failure"));
+    assert_eq!(
+        checks[1]["url"],
+        json!("https://example.test/checks/published-smoke")
+    );
+    assert_eq!(checks[1]["started_at"], json!("2026-08-07T12:00:10Z"));
+    assert_eq!(checks[1]["completed_at"], json!("2026-08-07T12:00:12Z"));
+    assert!(checks[0].get("url").is_none());
+    assert!(checks[0].get("started_at").is_none());
     let log = checks[1]["artifact_id"].as_str().expect("the check's log");
     let failed = verification["records"]
         .as_array()
@@ -5673,6 +6147,12 @@ fn a_watched_stream_reports_what_a_turn_is_doing_before_it_is_done() {
         None,
     );
     assert_eq!(stream.next_frame().expect("a snapshot").event, "snapshot");
+
+    let seeded = stream
+        .next_frame()
+        .expect("existing activity follows the snapshot");
+    assert_eq!(seeded.event, "activity.changed");
+    assert!(seeded.json()["activity"][0]["event_id"].is_string());
 
     // One tool summary, published from inside a turn that has not finished:
     // exactly what `oneagentgraph` streams while a member works.
@@ -5959,6 +6439,159 @@ fn a_node_its_plan_kept_is_served_done_with_its_branch_and_head_and_never_landed
     assert_eq!(status["node_status"][keep], json!("done"), "{status}");
 }
 
+#[test]
+fn finished_work_held_for_a_release_is_served_in_its_own_word_with_what_it_awaits() {
+    let run = fixture_run::AWAITING_RELEASE_RUN_ID;
+    let held = fixture_run::HELD_UNLANDED_NODE_ID;
+    let draft = fixture_run::HELD_DRAFT_NODE_ID;
+    let released = fixture_run::RELEASED_NODE_ID;
+    let serving = Serving::start(|root| {
+        fixture_run::write_awaiting_release(root, run);
+    });
+
+    // The run-summary row counts each under its own word, beside the run's other
+    // nodes, so neither reads as one still running or one the vocabulary lacks.
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let row = listed["runs"]
+        .as_array()
+        .expect("runs")
+        .iter()
+        .find(|row| row["run_id"] == json!(run))
+        .unwrap_or_else(|| panic!("no row for {run}: {listed}"));
+    let counts = &row["node_counts"];
+    assert_eq!(counts["complete-but-held"], json!(1), "{counts}");
+    assert_eq!(counts["complete-but-draft"], json!(1), "{counts}");
+    assert_eq!(counts["done"], json!(1), "{counts}");
+    for absent in ["running", "unknown"] {
+        assert!(counts.get(absent).is_none(), "{absent}: {counts}");
+    }
+
+    let body = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    let graph = &body["graph"];
+    for (node, word) in [(held, "complete-but-held"), (draft, "complete-but-draft")] {
+        assert_eq!(graph["node_status"][node], json!(word), "{graph}");
+        assert_eq!(graph["node_states"][node], json!(word), "{graph}");
+        assert_eq!(
+            graph["node_results"][node]["status"],
+            json!(word),
+            "{graph}"
+        );
+        assert_eq!(
+            graph["node_results"][node]["completed"],
+            json!(false),
+            "finished but not landed is not done: {graph}"
+        );
+        // Nothing to redirect: a held node has no turn in flight.
+        assert!(graph["node_control"].get(node).is_none(), "{graph}");
+    }
+    // The node behind them has not started: neither held node is settled.
+    assert_ne!(
+        graph["node_status"][fixture_run::BEHIND_HELD_NODE_ID],
+        json!("running"),
+        "{graph}"
+    );
+
+    // Each node's awaited releases, entry for entry as its record listed them.
+    let held_result = &graph["node_results"][held];
+    assert_eq!(
+        held_result["outcome"],
+        json!("held-for-release"),
+        "{held_result}"
+    );
+    assert_eq!(
+        held_result["awaiting"],
+        json!([{ "producer": fixture_run::AWAITED_PRODUCER, "target": "crate" }]),
+        "{held_result}"
+    );
+    let detail = held_result["detail"]
+        .as_str()
+        .expect("the settlement's sentence");
+    assert!(detail.starts_with("complete, and held unlanded: awaiting the crate release of"));
+    assert!(detail.contains(fixture_run::HELD_UNLANDED_HEAD), "{detail}");
+    let draft_result = &graph["node_results"][draft];
+    assert_eq!(
+        draft_result["outcome"],
+        json!("change-draft"),
+        "{draft_result}"
+    );
+    assert_eq!(
+        draft_result["awaiting"],
+        json!([
+            { "producer": fixture_run::AWAITED_PRODUCER, "target": "crate" },
+            { "producer": fixture_run::AWAITED_SECOND_PRODUCER, "target": "npm" },
+        ]),
+        "{draft_result}"
+    );
+    // Its sentence names no release, so the entries above came off the record.
+    assert!(
+        !draft_result["detail"]
+            .as_str()
+            .expect("a detail")
+            .contains("github.com"),
+        "{draft_result}"
+    );
+    // A node whose record carries none is served none — absent, never an empty list.
+    let released_result = &graph["node_results"][released];
+    assert_eq!(
+        released_result["status"],
+        json!("done"),
+        "{released_result}"
+    );
+    assert!(
+        released_result.get("awaiting").is_none(),
+        "{released_result}"
+    );
+
+    // The run's per-node telemetry rows carry the same words as the graph.
+    let rows = body["run"]["nodes"].as_array().expect("node rows");
+    for (node, word) in [(held, "complete-but-held"), (draft, "complete-but-draft")] {
+        let row = rows
+            .iter()
+            .find(|row| row["node"] == json!(node))
+            .unwrap_or_else(|| panic!("no row for {node}: {rows:?}"));
+        assert_eq!(row["status"], json!(word), "{row}");
+    }
+
+    // The status read serves the same words.
+    let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status")).json();
+    assert_eq!(
+        status["node_status"][held],
+        json!("complete-but-held"),
+        "{status}"
+    );
+    assert_eq!(
+        status["node_status"][draft],
+        json!("complete-but-draft"),
+        "{status}"
+    );
+}
+
+#[test]
+fn an_awaiting_list_a_producer_wrote_badly_serves_only_the_releases_it_names() {
+    let run = fixture_run::MALFORMED_AWAITING_RUN_ID;
+    let serving = Serving::start(|root| {
+        fixture_run::write_malformed_awaiting(root, run);
+    });
+    let body = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    let results = &body["graph"]["node_results"];
+    // The one entry naming both a producer and a target, and none of the rest:
+    // a blank or missing field, or an entry that is not an object, names no release.
+    assert_eq!(
+        results[fixture_run::MIXED_AWAITING_NODE_ID]["awaiting"],
+        json!([{ "producer": fixture_run::AWAITED_PRODUCER, "target": "crate" }]),
+        "{results}"
+    );
+    // Nothing readable, or no list at all, is served no `awaiting` — never an
+    // empty list, which would read as a node waiting on nothing.
+    for node in [
+        fixture_run::UNREADABLE_AWAITING_NODE_ID,
+        fixture_run::LISTLESS_AWAITING_NODE_ID,
+    ] {
+        assert!(results[node].is_object(), "{node}: {results}");
+        assert!(results[node].get("awaiting").is_none(), "{node}: {results}");
+    }
+}
+
 /// The events of one kind a node's timeline lists, across its spans, oldest first.
 fn review_events<'a>(timeline: &'a Value, kind: &str) -> Vec<&'a Value> {
     let mut found = Vec::new();
@@ -6047,7 +6680,7 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
         ),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(11));
+    assert_eq!(timeline["timeline_schema_version"], json!(14));
     let drafted = review_events(&timeline, "change-drafted");
     assert_eq!(drafted.len(), 1, "{timeline}");
     assert_eq!(
@@ -6803,6 +7436,10 @@ fn a_filter_shapes_the_response_and_never_the_run() {
     assert_eq!(narrow["run"]["nodes"], wide["run"]["nodes"]);
     // Including the clock: the document describes the run, not the reading of it.
     assert_eq!(narrow["run"]["timing"], wide["run"]["timing"]);
+    // And the engine's telemetry fold, which is the whole run's sessions and
+    // usage however few of its events the reader asked to see.
+    assert!(wide["telemetry"].is_object(), "{wide}");
+    assert_eq!(narrow["telemetry"], wide["telemetry"]);
 }
 
 #[test]
@@ -7175,6 +7812,11 @@ fn a_watcher_is_told_the_activity_its_filter_admits_and_no_other() {
         );
         assert_eq!(stream.status, 200);
         assert_eq!(stream.frames(1)[0].event, "snapshot");
+        if admitted {
+            let seeded = stream.next_frame().expect("existing admitted activity");
+            assert_eq!(seeded.event, "activity.changed");
+        }
+
         fixture_run::append_relayed(
             &serving.run_dir(fixture_run::RUN_ID),
             "agentgraph",
@@ -7658,6 +8300,12 @@ fn a_stream_watching_a_run_with_no_such_profile_is_served_rather_than_broken() {
     );
     assert_eq!(stream.status, 200, "the stream opened rather than refusing");
     assert_eq!(stream.frames(1)[0].event, "snapshot");
+
+    let seeded = stream
+        .next_frame()
+        .expect("existing activity follows the snapshot");
+    assert_eq!(seeded.event, "activity.changed");
+    assert!(seeded.json()["activity"][0]["event_id"].is_string());
 
     // And it is still a working subscription: a record this run writes reaches it.
     fixture_run::append(
@@ -9715,18 +10363,6 @@ fn a_journal_carrying_a_judges_decision_is_served_by_every_route() {
             assert_eq!(row["last_event"], json!("judge-decided"), "{path}: {row}");
             continue;
         }
-        if template == onepipeline_ui::contract::routes::RUN_WATCH {
-            // A watch shows the decision as one of the run's meaningful events
-            // only where the engine counts it as one; what it owes a run carrying
-            // the record is to read it to the end and return.
-            let mut stream = http::stream(serving.address, &path, None);
-            assert_eq!(stream.status, 200, "{path}");
-            let last = std::iter::from_fn(|| stream.next_frame())
-                .last()
-                .expect("a watch of no seconds returns");
-            assert_eq!(last.event, "returned", "{path}: {last:?}");
-            continue;
-        }
         let response = http::get(serving.address, &path);
         assert_eq!(response.status, 200, "{path}: {}", response.body);
         if template == onepipeline_ui::contract::routes::HEALTHZ {
@@ -10976,13 +11612,15 @@ fn an_agents_relayed_words_are_its_text_and_reasoning_and_never_its_tool_calls()
     assert_eq!(tools_only.len(), 1, "{tools_only:?}");
 
     // Tool activity alone is served as it always was: the call, carrying the
-    // observation that answered it, and no text or reasoning on the turn.
+    // observation that answered it and the identity the harness minted for it,
+    // and no text or reasoning on the turn.
     let expected_tools = json!([{
         "index": 2,
         "kind": "tool_call",
         "name": "bash",
         "input": "{\"command\":\"just check\"}",
         "output": "check passed",
+        "toolCallId": "t1",
     }]);
     assert_eq!(tools_only[0]["tools"], expected_tools);
     assert_eq!(tools_only[0]["assistant"], json!(null));
@@ -11929,13 +12567,12 @@ const STRANGER: &str = "another-planner-session";
 /// before calling it failed.
 ///
 /// A ceiling on a **failure**, never a cost a passing journey pays: each wait
-/// returns the moment its condition holds, and the whole adoption journey below
-/// takes under two seconds on this host. The ceiling is generous because a
+/// returns the moment its condition holds, and the engine-driven journeys return
+/// as soon as their records arrive. The ceiling is generous because a
 /// driver is a process the kernel schedules, and a loaded host that took ten
 /// seconds to run one must not read as a driver that never wrote.
 ///
-/// Unix-only with the adoption journey it paces, which is the one thing that
-/// waits on a retained driver.
+/// Unix-only with the engine-driver journeys it paces.
 #[cfg(unix)]
 const DRIVER_PATIENCE: Duration = Duration::from_secs(60);
 
@@ -11964,9 +12601,9 @@ fn process_is_live(pid: u32) -> bool {
     unsafe { libc::kill(raw, 0) == 0 }
 }
 
-/// A retained driver this journey started through the server, ended if the
-/// journey did not end it: the one process a suite may signal is one it
-/// started, and its pid is the one the adopt route answered.
+/// A driver the pinned engine CLI started for this journey's read fixtures,
+/// ended if the journey did not end it. `Serving::drive_fixture` obtains the
+/// attached CLI process's pid from `Child::id` when it spawns it.
 #[cfg(unix)]
 struct RetainedDriver(u32);
 
@@ -11977,9 +12614,8 @@ impl Drop for RetainedDriver {
             let Ok(raw) = i32::try_from(self.0) else {
                 return;
             };
-            // SAFETY: the pid is the driver the adopt route reported to this
-            // journey, which started it; a stale pid is not signalled because
-            // the probe above found nothing there.
+            // SAFETY: the pid comes from Child::id for this journey's own
+            // attached engine CLI. SIGTERM passes no memory to libc.
             unsafe {
                 libc::kill(raw, libc::SIGTERM);
             }
@@ -12223,14 +12859,9 @@ fn a_run_holding_an_unanswered_question_is_waiting_and_the_row_says_how_many() {
     assert_eq!(row["state"], json!("parked"), "{row}");
 }
 
-/// A run whose recorded driver is alive on this host and whose journal has been
-/// quiet past the engine's threshold is `PARKED`: driven, by a driver that has
-/// nothing to say — never a run nothing drives. Every reading the API serves
-/// says so, and an adoption of it is refused naming that driver, leaving the
-/// driver running and recording no adoption.
 #[cfg(unix)]
 #[test]
-fn a_quiet_run_a_live_driver_holds_is_served_parked_and_its_adoption_is_refused() {
+fn a_quiet_run_a_live_driver_holds_is_served_parked() {
     /// The driver this journey started, ended with it however it ends.
     struct LiveDriver(std::process::Child);
     impl Drop for LiveDriver {
@@ -12277,32 +12908,6 @@ fn a_quiet_run_a_live_driver_holds_is_served_parked_and_its_adoption_is_refused(
     for nothing_driving in ["DRIVER DEAD", "UNDRIVEN"] {
         assert_ne!(status["liveness"], json!(nothing_driving), "{status}");
     }
-
-    let refused = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
-    assert_eq!(refused.status, 422, "{}", refused.body);
-    let refused = refused.json();
-    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
-    let message = refused["error"]["message"].as_str().expect("a message");
-    assert!(
-        message.contains(&format!("driver pid {pid}")) && message.contains("PARKED"),
-        "{message}"
-    );
-    assert!(
-        process_is_live(pid),
-        "the refused adoption ended the driver"
-    );
-    let adoptions = events_on(
-        &http::get(
-            serving.address,
-            &format!("/api/v2/runs/{run}/timeline?scope=run"),
-        )
-        .json(),
-    )
-    .iter()
-    .filter(|event| event["kind"] == json!("driver-adopted"))
-    .count();
-    assert_eq!(adoptions, 0, "a refused adoption recorded one");
-    drop(driver);
 }
 
 #[test]
@@ -12548,6 +13153,9 @@ fn a_session_opened_on_a_conflicted_merge_is_served_as_the_engine_journalled_it(
         None,
     );
     assert_eq!(stream.next_frame().expect("a snapshot").event, "snapshot");
+    let initial = stream.next_frame().expect("the run's existing activity");
+    assert_eq!(initial.event, "activity.changed");
+    assert!(initial.json()["activity"][0]["event_id"].is_string());
 
     // The object is onevcs's own type, serialized as that library writes it,
     // so a field it renames fails here rather than in a copy of its spelling.
@@ -12930,6 +13538,148 @@ fn a_reply_reaches_the_engine_byte_for_byte_and_is_answered_in_its_words() {
         Some("planner"),
         "an omitted author is the planner: {}",
         committed[0]
+    );
+}
+
+/// The note op's newer fields and the op that takes a note back pass through
+/// the reply route as written, and are answered in the engine's words.
+///
+/// A note asking for the running turn to be left to end, bounded by a delivery
+/// timeout, is the linked engine's to judge: over a run nothing is driving it is
+/// carried to the node's next dispatch and recorded exactly as it was sent. A
+/// timeout no turn can meet, and a `withdraw-note` naming a note the run cannot
+/// take back, are refused by that engine naming what they said — which is the
+/// proof each field reached it unrewritten.
+#[test]
+fn a_turn_end_note_and_its_withdrawal_reach_the_engine_and_are_answered_in_its_words() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let reply = format!("/api/v2/runs/{run}/channel/reply");
+    let post = |commands: Value| {
+        http::post(
+            serving.address,
+            &reply,
+            &json!({ "version": 3, "commands": commands }).to_string(),
+        )
+    };
+    let refused = |commands: Value| {
+        let answered = post(commands);
+        assert_eq!(answered.status, 422, "{}", answered.body);
+        let answered = answered.json();
+        assert_eq!(answered["error"]["code"], json!("refused"), "{answered}");
+        answered["error"]["message"]
+            .as_str()
+            .expect("the engine's refusal")
+            .to_owned()
+    };
+
+    // A node no dispatch has reached, for the note to be owed to.
+    let added = post(json!([{
+        "op": "add",
+        "node": {
+            "id": "extra",
+            "persona": "engineer",
+            "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done",
+        },
+    }]));
+    assert_eq!(added.status, 200, "{}", added.body);
+
+    let note = json!({
+        "op": "note",
+        "id": "extra",
+        "addressee": "worker",
+        "text": "and say which turn took it",
+        "deliver": "turn-end",
+        "delivery_timeout_seconds": 30,
+    });
+    let noted = post(json!([note]));
+    assert_eq!(noted.status, 200, "{}", noted.body);
+    let noted = noted.json();
+    assert_enveloped(&noted);
+    assert_eq!(noted["receipt"]["state"], json!("applied"), "{noted}");
+    assert_eq!(noted["receipt"]["commands"], json!("applied"), "{noted}");
+
+    // No turn was running to leave to end, so the engine carried it — and the
+    // timeline serves that as the delivery it was, with no turn to speak of.
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    )
+    .json();
+    let carried: Vec<Value> = events_on(&timeline)
+        .into_iter()
+        .filter(|event| event["redirection"]["node_id"] == json!("extra"))
+        .collect();
+    assert_eq!(
+        carried.len(),
+        1,
+        "one delivery for the one note: {timeline}"
+    );
+    assert_eq!(
+        carried[0]["redirection"],
+        json!({
+            "reached": "carried",
+            "delivered": false,
+            "delivery": "deferred",
+            "node_id": "extra",
+        }),
+        "{}",
+        carried[0]
+    );
+    // And the edit the engine committed names the command exactly as posted,
+    // `deliver` and `delivery_timeout_seconds` included.
+    // A timeout no turn can meet is the engine's refusal, naming the field.
+    let zero = refused(json!([{
+        "op": "note",
+        "id": "extra",
+        "addressee": "worker",
+        "text": "x",
+        "deliver": "turn-end",
+        "delivery_timeout_seconds": 0,
+    }]));
+    assert!(zero.contains("`delivery_timeout_seconds` is 0"), "{zero}");
+
+    // Each part of a withdrawal reaches the engine as written: the envelope it
+    // names, the position, and the reason, each refused in its own words.
+    let withdraw = |envelope: &str, index: u32, reason: &str| {
+        refused(json!([{
+            "op": "withdraw-note",
+            "envelope": envelope,
+            "index": index,
+            "reason": reason,
+        }]))
+    };
+    let unnumbered = withdraw("the-last-one", 0, "superseded");
+    assert!(
+        unnumbered.contains("withdraw-note: 'the-last-one' is not an envelope id"),
+        "{unnumbered}"
+    );
+    let unexplained = withdraw("0", 0, "  ");
+    assert!(
+        unexplained.contains("withdraw-note: `reason` is blank"),
+        "{unexplained}"
+    );
+    let unknown = withdraw("41", 0, "superseded");
+    assert!(
+        unknown.contains("withdraw-note: the run holds no envelope 41"),
+        "{unknown}"
+    );
+    // Nothing above was taken back: the carried note is still the run's only
+    // delivery of it, and no withdrawal was recorded.
+    let after = events_on(
+        &http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json(),
+    );
+    assert!(
+        !after
+            .iter()
+            .any(|event| event["kind"] == json!("note-withdrawn")),
+        "{after:?}"
     );
 }
 
@@ -13446,250 +14196,6 @@ fn a_run_lists_scratch_reclamation_and_declared_maintenance_as_the_engine_wrote_
     fs::write(&journal, conforming).expect("restore the journal");
 }
 
-/// The `host-shutdown` records one run's journal carries.
-fn host_shutdowns(serving: &Serving, run: &str) -> Vec<Value> {
-    events_on(
-        &http::get(
-            serving.address,
-            &format!("/api/v2/runs/{run}/timeline?scope=run"),
-        )
-        .json(),
-    )
-    .into_iter()
-    .filter(|event| event["kind"] == json!("host-shutdown"))
-    .collect()
-}
-
-/// Whether a run's own record, read through the API, says a host shutdown put
-/// it down.
-fn held_for_shutdown(serving: &Serving, run: &str) -> bool {
-    !host_shutdowns(serving, run).is_empty()
-}
-
-#[test]
-fn a_run_shutdown_is_the_engines_report_under_the_acting_session() {
-    let run = fixture_run::RUN_ID;
-    let shutdown = format!("/api/v2/runs/{run}/shutdown");
-    let owner = Serving::start_as(
-        |root| {
-            fixture_run::write(root, fixture_run::RUN_ID);
-            fixture_run::write(root, fixture_run::OTHER_RUN_ID);
-        },
-        fixture_run::SESSION,
-    );
-
-    // An empty body is the default shutdown: the engine's own grace, nothing
-    // forced — answered with the engine's report of this one run.
-    let answered = http::post(owner.address, &shutdown, "");
-    assert_eq!(answered.status, 200, "{}", answered.body);
-    let report = answered.json();
-    assert_enveloped(&report);
-    assert_eq!(report["scope"], json!("run"), "{report}");
-    assert_eq!(report["complete"], json!(true), "{report}");
-    assert_eq!(
-        report["grace_seconds"],
-        json!(onepipeline::cli::DEFAULT_SHUTDOWN_GRACE_SECONDS)
-    );
-    assert_eq!(report["forced"], json!(false));
-    assert_eq!(
-        report["root"],
-        json!(owner.runs_root().display().to_string()),
-        "the report names the runs root it read"
-    );
-    let runs = report["runs"].as_array().expect("the runs acted on");
-    assert_eq!(runs.len(), 1, "one run, and only the one named: {report}");
-    assert_eq!(runs[0]["run_id"], json!(run));
-    assert_eq!(runs[0]["owner"], json!("[mine]"));
-    assert_eq!(runs[0]["forced_over_owner"], json!(false));
-    assert_eq!(
-        runs[0]["dispatches"],
-        json!([]),
-        "nothing live to interrupt"
-    );
-    // The driver was recorded on another host, so this one signals nothing and
-    // says so in `stop`'s own word.
-    assert_eq!(runs[0]["teardown"], json!("elsewhere"));
-    assert!(report["not_pushed"].is_array(), "{report}");
-    let rendered = report["rendered"].as_str().expect("the engine's own text");
-    assert!(
-        rendered.starts_with("shutdown  scope run  grace 600s"),
-        "{rendered}"
-    );
-    assert!(rendered.contains(run), "{rendered}");
-    // The run's own record says a host shutdown put it down — and it is not a
-    // stop: no `run-stopped` is journalled, and the run stays adoptable.
-    let recorded = host_shutdowns(&owner, run);
-    assert_eq!(recorded.len(), 1, "{recorded:?}");
-    assert!(held_for_shutdown(&owner, run));
-    assert!(
-        !held_for_shutdown(&owner, fixture_run::OTHER_RUN_ID),
-        "a run scope acts on the run it names and no other"
-    );
-
-    // A grace and a force, as the body names them.
-    let forced = http::post(owner.address, &shutdown, r#"{"grace": 30, "force": true}"#);
-    assert_eq!(forced.status, 200, "{}", forced.body);
-    let forced = forced.json();
-    assert_eq!(forced["grace_seconds"], json!(30), "{forced}");
-    assert_eq!(forced["forced"], json!(true));
-    // And a grace of zero is the engine's force path, without the flag.
-    let zero = http::post(owner.address, &shutdown, r#"{"grace": 0}"#).json();
-    assert_eq!(zero["grace_seconds"], json!(0), "{zero}");
-    assert_eq!(zero["forced"], json!(true), "{zero}");
-}
-
-#[test]
-fn a_refused_shutdown_is_the_engines_refusal_and_signals_nothing() {
-    let run = fixture_run::RUN_ID;
-    let shutdown = format!("/api/v2/runs/{run}/shutdown");
-    let stranger = Serving::start_as(
-        |root| {
-            fixture_run::write(root, fixture_run::RUN_ID);
-        },
-        STRANGER,
-    );
-
-    // Another session's run, under the run scope: `409 not_owner`, naming the
-    // owner as the engine names it, and nothing held or journalled.
-    let refused = http::post(stranger.address, &shutdown, "");
-    assert_eq!(refused.status, 409, "{}", refused.body);
-    let refused = refused.json();
-    assert_eq!(refused["error"]["code"], json!("not_owner"));
-    let said = refused["error"]["message"].as_str().expect("the refusal");
-    assert!(said.contains("[claude-code:"), "{said}");
-    assert!(!said.contains(fixture_run::SESSION), "{said}");
-    // Not even forced: `force` skips the wait, never the ownership rule.
-    let forced = http::post(stranger.address, &shutdown, r#"{"force": true}"#);
-    assert_eq!(forced.status, 409, "{}", forced.body);
-    assert!(!held_for_shutdown(&stranger, run), "nothing was signalled");
-    assert_eq!(host_shutdowns(&stranger, run), Vec::<Value>::new());
-
-    // A run that is not there.
-    let absent = http::post(
-        stranger.address,
-        "/api/v2/runs/run-that-is-not-there/shutdown",
-        "",
-    );
-    assert_eq!(absent.status, 404, "{}", absent.body);
-    assert_eq!(absent.json()["error"]["code"], json!("run_not_found"));
-
-    // Bodies that are not the shape, refused before the engine is asked.
-    for body in [
-        r#"{"grace": -1}"#,
-        r#"{"grace": "ten minutes"}"#,
-        r#"{"grace": 1.5}"#,
-        r#"{"force": "yes"}"#,
-        r#"{"scope": "host"}"#,
-        "not json",
-    ] {
-        let shapeless = http::post(stranger.address, &shutdown, body);
-        assert_eq!(shapeless.status, 422, "{body}: {}", shapeless.body);
-        assert_eq!(
-            shapeless.json()["error"]["code"],
-            json!("invalid_request"),
-            "{body}"
-        );
-    }
-    for body in [
-        "",
-        "{}",
-        r#"{"scope": "run"}"#,
-        r#"{"scope": "host", "grace": -5}"#,
-    ] {
-        let shapeless = http::post(stranger.address, "/api/v2/shutdown", body);
-        assert_eq!(shapeless.status, 422, "{body}: {}", shapeless.body);
-        assert_eq!(
-            shapeless.json()["error"]["code"],
-            json!("invalid_request"),
-            "{body}"
-        );
-    }
-    // A grace this host's clock cannot count to: the engine's own refusal.
-    let unbounded = http::post(
-        stranger.address,
-        "/api/v2/shutdown",
-        &json!({ "scope": "host", "grace": u64::MAX }).to_string(),
-    );
-    assert_eq!(unbounded.status, 422, "{}", unbounded.body);
-    assert_eq!(unbounded.json()["error"]["code"], json!("refused"));
-    assert!(!held_for_shutdown(&stranger, run), "nothing was signalled");
-}
-
-#[test]
-fn mine_acts_on_this_sessions_runs_and_host_on_every_run_naming_each_owner() {
-    let mine = fixture_run::RUN_ID;
-    let theirs = fixture_run::OTHER_RUN_ID;
-    let build = |root: &Path| {
-        fixture_run::write(root, mine);
-        fixture_run::write(root, theirs);
-        fixture_run::launched_by(root, theirs, "codex", fixture_run::LIVE_SESSION);
-    };
-
-    // `mine`: this session's run, and never another's — which is left exactly
-    // as it was.
-    let serving = Serving::start_as(build, fixture_run::SESSION);
-    let answered = http::post(
-        serving.address,
-        "/api/v2/shutdown",
-        r#"{"scope": "mine", "grace": 45}"#,
-    );
-    assert_eq!(answered.status, 200, "{}", answered.body);
-    let report = answered.json();
-    assert_enveloped(&report);
-    assert_eq!(report["scope"], json!("mine"), "{report}");
-    assert_eq!(report["grace_seconds"], json!(45));
-    let acted: Vec<&Value> = report["runs"]
-        .as_array()
-        .expect("the runs acted on")
-        .iter()
-        .map(|run| &run["run_id"])
-        .collect();
-    assert_eq!(acted, vec![&json!(mine)], "{report}");
-    assert_eq!(report["runs"][0]["owner"], json!("[mine]"));
-    assert!(held_for_shutdown(&serving, mine));
-    assert!(
-        !held_for_shutdown(&serving, theirs),
-        "another session's run"
-    );
-    assert_eq!(host_shutdowns(&serving, theirs), Vec::<Value>::new());
-
-    // `host`: every run under the root, whoever owns it — acting over the
-    // ownership rule and naming the owner it acted over.
-    let serving = Serving::start_as(build, fixture_run::SESSION);
-    let answered = http::post(serving.address, "/api/v2/shutdown", r#"{"scope": "host"}"#);
-    assert_eq!(answered.status, 200, "{}", answered.body);
-    let report = answered.json();
-    assert_eq!(report["scope"], json!("host"), "{report}");
-    assert_eq!(
-        report["grace_seconds"],
-        json!(onepipeline::cli::DEFAULT_SHUTDOWN_GRACE_SECONDS)
-    );
-    let runs = report["runs"].as_array().expect("the runs acted on");
-    assert_eq!(runs.len(), 2, "{report}");
-    let other = runs
-        .iter()
-        .find(|run| run["run_id"] == json!(theirs))
-        .unwrap_or_else(|| panic!("the other session's run was acted on: {report}"));
-    assert_eq!(other["forced_over_owner"], json!(true), "{other}");
-    let owner = other["owner"].as_str().expect("the owner");
-    assert!(owner.starts_with("[codex:"), "the owner is named: {owner}");
-    assert!(!owner.contains(fixture_run::LIVE_SESSION), "{owner}");
-    let own = runs
-        .iter()
-        .find(|run| run["run_id"] == json!(mine))
-        .expect("this session's own run");
-    assert_eq!(own["forced_over_owner"], json!(false));
-    assert!(
-        report["rendered"]
-            .as_str()
-            .is_some_and(|said| said.contains("which is another session's run")),
-        "{report}"
-    );
-    assert!(held_for_shutdown(&serving, mine));
-    assert!(held_for_shutdown(&serving, theirs));
-    assert_eq!(host_shutdowns(&serving, theirs).len(), 1);
-}
-
 /// A process that outlives the shell that started it, so that nothing in this
 /// test is its parent: `init` reaps it the moment a teardown ends it, which is
 /// what a dispatch whose driver has gone looks like to the host.
@@ -13738,166 +14244,6 @@ impl Drop for Orphan {
     }
 }
 
-// llmlint: ignore-block[tests_mirror_real_usage] in both journeys below, the dispatch registry entry is the one a
-// driver writes when it starts a node's process — node, pid, this host and the process's own
-// start token — and the journey writes it rather than earning it through a driver, because a
-// driver that keeps a dispatch alive for as long as a journey needs is one running a harness
-// and a model. The process it names is real, started here and proven alive by the engine's own
-// probe, and everything after the entry — the ask, the wait, the teardown that kills it, and
-// the report — is the engine's, reached through the route.
-#[cfg(target_os = "linux")]
-#[test]
-fn a_shutdown_that_killed_a_dispatch_answers_its_whole_report_as_not_complete() {
-    let run = fixture_run::RUN_ID;
-    let shutdown = format!("/api/v2/runs/{run}/shutdown");
-    let worker = Orphan::start();
-    let started = worker.started();
-    let serving = Serving::start_as(
-        |root| {
-            fixture_run::write(root, run);
-            fixture_run::dispatching_on_this_host(
-                root,
-                run,
-                fixture_run::NODE_ID,
-                worker.0,
-                &started,
-            );
-        },
-        fixture_run::SESSION,
-    );
-
-    // A dispatch that is asked, waited on for a second, and does not go: the
-    // deadline reaps it. That is a shutdown that did not do what it was asked,
-    // and it is answered `200` with the whole report saying so.
-    let answered = http::post(serving.address, &shutdown, r#"{"grace": 1}"#);
-    assert_eq!(answered.status, 200, "{}", answered.body);
-    let report = answered.json();
-    assert_enveloped(&report);
-    assert_eq!(report["complete"], json!(false), "{report}");
-    let dispatches = report["runs"][0]["dispatches"]
-        .as_array()
-        .unwrap_or_else(|| panic!("the dispatches acted on: {report}"));
-    assert_eq!(dispatches.len(), 1, "{report}");
-    let stopped = &dispatches[0];
-    assert_eq!(stopped["node"], json!(fixture_run::NODE_ID));
-    assert_eq!(stopped["pid"], json!(worker.0));
-    // Asked: the turn the run's records named was sent the redirection, and
-    // what the lever answered — no turn there, or a lever that broke — is the
-    // engine's own word. Neither is a failure of the shutdown; the deadline
-    // applies either way.
-    assert!(
-        matches!(
-            stopped["interrupt"].as_str(),
-            Some("no-turn" | "failed" | "delivered")
-        ),
-        "{stopped}"
-    );
-    assert_eq!(stopped["ended"], json!("killed"), "{stopped}");
-    assert!(
-        stopped["waited_ms"]
-            .as_u64()
-            .is_some_and(|waited| waited >= 1_000),
-        "the grace was waited out: {stopped}"
-    );
-    assert_eq!(
-        report["runs"][0]["teardown"],
-        json!("signalled"),
-        "{report}"
-    );
-    assert!(!worker.alive(), "the teardown ended the dispatch");
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn a_forced_shutdown_asks_nothing_and_its_teardown_is_complete() {
-    let run = fixture_run::RUN_ID;
-    let worker = Orphan::start();
-    let started = worker.started();
-    let serving = Serving::start_as(
-        |root| {
-            fixture_run::write(root, run);
-            fixture_run::dispatching_on_this_host(
-                root,
-                run,
-                fixture_run::NODE_ID,
-                worker.0,
-                &started,
-            );
-        },
-        fixture_run::SESSION,
-    );
-    let answered = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/shutdown"),
-        r#"{"force": true}"#,
-    );
-    assert_eq!(answered.status, 200, "{}", answered.body);
-    let report = answered.json();
-    // Torn down without being asked is exactly what a forced shutdown asks
-    // for, so the engine counts it complete.
-    assert_eq!(report["complete"], json!(true), "{report}");
-    let stopped = &report["runs"][0]["dispatches"][0];
-    assert_eq!(stopped["interrupt"], json!("not-asked"), "{report}");
-    assert_eq!(stopped["ended"], json!("killed"), "{report}");
-    assert!(!worker.alive(), "the teardown ended the dispatch");
-}
-// llmlint: ignore-end[tests_mirror_real_usage]
-
-#[test]
-fn a_shutdown_that_could_not_preserve_a_branch_answers_its_whole_report_as_not_complete() {
-    // The live run's records name the branch its pr-author node works on, in a
-    // repository this host's `onevcs` state root has never heard of — the
-    // served workspace's own, empty. The push is refused, and the shutdown
-    // says so rather than failing: `200`, the whole report, not complete.
-    let run = fixture_run::RUN_ID;
-    let serving = Serving::start_as(
-        |root| {
-            fixture_run::write_live(root, run);
-            fs::create_dir_all(onepipeline::views::RunPaths::under(root, run).dispatches())
-                .expect("the dispatch registry");
-        },
-        fixture_run::LIVE_SESSION,
-    );
-    let answered = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/shutdown"),
-        r#"{"force": true}"#,
-    );
-    assert_eq!(answered.status, 200, "{}", answered.body);
-    let report = answered.json();
-    assert_enveloped(&report);
-    assert_eq!(report["complete"], json!(false), "{report}");
-    let branch = &report["runs"][0]["branches"][0];
-    assert_eq!(
-        branch["identity"],
-        json!("nickderobertis/onepipeline-ui"),
-        "{report}"
-    );
-    assert_eq!(branch["branch"], json!("feature/ship"), "{report}");
-    assert_eq!(branch["result"], json!("refused"), "{report}");
-    assert_eq!(branch["remote"], Value::Null, "{report}");
-    assert!(
-        branch["detail"]
-            .as_str()
-            .is_some_and(|why| why.contains("not a registered repository")),
-        "the refusal is the sibling's own words: {branch}"
-    );
-    assert!(
-        report["rendered"]
-            .as_str()
-            .is_some_and(|said| said.contains("could not be preserved")),
-        "{report}"
-    );
-    // The teardown itself was clean: what the report withholds success over is
-    // the branch alone.
-    assert_eq!(
-        report["runs"][0]["teardown"],
-        json!("elsewhere"),
-        "{report}"
-    );
-    assert_eq!(report["not_pushed"], json!([]), "{report}");
-}
-
 #[test]
 fn the_acting_sessions_key_is_the_one_its_own_runs_rows_carry() {
     let build = |root: &Path| {
@@ -13940,656 +14286,6 @@ fn the_acting_sessions_key_is_the_one_its_own_runs_rows_carry() {
     let unwatched = http::get(nobody.address, "/api/v2/unwatched").json();
     assert!(unwatched.get("session_key").is_none(), "{unwatched}");
 }
-
-// llmlint: ignore-block[tests_mirror_real_usage] the state is the one the engine itself
-// records for a run being driven — a launch record naming a live pid on this host, which is
-// what `onepipeline adopt` and the adopt route write — and the journey writes that record
-// rather than earning it through the adopt route, because a driver that stays driving for
-// as long as a journey needs is one dispatching a node, which takes a harness and a model.
-// The driver a deterministic fixture can earn settles its one human action as waiting and
-// lets go on its own clock, as `an_adoption_retains_this_binary_and_the_driver_outlives_the_server`
-// below shows, so a second adoption raced against it would be refused or accepted by
-// timing. The pid named is this test's own instead: a process proven alive for the whole
-// journey, read by the engine's own probe, and the refusal is the engine's own.
-#[test]
-fn an_adoption_of_a_run_something_is_driving_is_refused() {
-    // A run whose driver is a live process on this host — this very test —
-    // is being driven, and the engine refuses to take it over: its own
-    // refusal, naming the way out, before anything is written.
-    let serving = Serving::start_as(
-        |root| {
-            fixture_run::write_live(root, fixture_run::RUN_ID);
-            fixture_run::driven_on_this_host(root, fixture_run::RUN_ID, std::process::id());
-        },
-        fixture_run::LIVE_SESSION,
-    );
-    let adoptions = |address| {
-        events_on(
-            &http::get(
-                address,
-                &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
-            )
-            .json(),
-        )
-        .iter()
-        .filter(|event| event["kind"] == json!("driver-adopted"))
-        .count()
-    };
-    let before = adoptions(serving.address);
-    let driving = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{}/adopt", fixture_run::RUN_ID),
-        "",
-    );
-    assert_eq!(driving.status, 422, "{}", driving.body);
-    let driving = driving.json();
-    assert_eq!(driving["error"]["code"], json!("refused"));
-    assert!(
-        driving["error"]["message"]
-            .as_str()
-            .is_some_and(|said| said.contains("still being driven")),
-        "{driving}"
-    );
-    assert_eq!(adoptions(serving.address), before, "nothing was written");
-    // And a run that is not there.
-    let absent = http::post(
-        serving.address,
-        "/api/v2/runs/run-that-is-not-there/adopt",
-        "",
-    );
-    assert_eq!(absent.status, 404, "{}", absent.body);
-    assert_eq!(absent.json()["error"]["code"], json!("run_not_found"));
-}
-// llmlint: ignore-end[tests_mirror_real_usage]
-
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this journey is not
-// expensive: it runs in under two seconds — three drivers, each settling a one-node graph
-// and exiting — and the sixty seconds beside it is `DRIVER_PATIENCE`, the ceiling a
-// *failing* wait reaches before it gives up, which no passing run pays. The tiers behind
-// edges of their own here are the ones that need something a checkout may lack (`strace`,
-// the base commit's server); this needs the compiled binary every other journey in this
-// module drives.
-#[cfg(unix)]
-#[test]
-fn an_adoption_retains_this_binary_and_the_driver_outlives_the_server() {
-    let (workspace, root) = fixture_run::workspace();
-    let dir = workspace.path().to_path_buf();
-    fixture_run::write_awaiting_attestation(&root, fixture_run::RUN_ID, &dir);
-    let run = fixture_run::RUN_ID;
-    let adopt = format!("/api/v2/runs/{run}/adopt");
-    let detail = |address| http::get(address, &format!("/api/v2/runs/{run}")).json();
-    let events = |address| {
-        events_on(&http::get(address, &format!("/api/v2/runs/{run}/timeline?scope=run")).json())
-    };
-    // How many times the run's own record says it was adopted: the journalled
-    // `driver-adopted`, which the driver writes once it holds the run.
-    let adoptions = |address| {
-        events(address)
-            .iter()
-            .filter(|event| event["kind"] == json!("driver-adopted"))
-            .count()
-    };
-
-    // Refused for a stranger, before anything is written.
-    let stranger = Serving::start_in_as(workspace, STRANGER);
-    let refused = http::post(stranger.address, &adopt, "");
-    assert_eq!(refused.status, 409, "{}", refused.body);
-    assert_eq!(refused.json()["error"]["code"], json!("not_owner"));
-    assert_eq!(adoptions(stranger.address), 0);
-    let (_, workspace) = stranger.stop_keeping_workspace(Stop::Terminate);
-
-    // Adopted by the owner: the driver's pid answered, and **the server stopped
-    // at once** — before the driver has done anything but claim the run. The
-    // driver was never the server's to end: it goes on, drives the run, and
-    // everything it writes is written to a run no server is serving.
-    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
-    let adopted = http::post(serving.address, &adopt, "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let adopted = adopted.json();
-    assert_enveloped(&adopted);
-    assert_eq!(adopted["run_id"], json!(run));
-    let pid = u32::try_from(adopted["pid"].as_u64().expect("the driver's pid")).expect("a pid");
-    let driver = RetainedDriver(pid);
-    assert!(process_is_live(pid), "the pid answered is a process");
-    let (status, workspace) = serving.stop_keeping_workspace(Stop::Terminate);
-    assert!(status.success(), "{status}");
-
-    // What the driver does after that is the engine's own: it folds the graph,
-    // finds one human action nobody has taken, settles it as waiting — there is
-    // nothing to dispatch — and, with nothing left that can move without the
-    // channel, lets go of the run. All of it read off the run record by a
-    // server started afterwards, which held no handle on any of it.
-    let restarted = Serving::start_in_as(workspace, fixture_run::SESSION);
-    eventually("the driver settled the human action as waiting", || {
-        events(restarted.address).iter().any(|event| {
-            event["kind"] == json!("node-settled")
-                && event["node_id"] == json!(fixture_run::APPROVAL_NODE_ID)
-        })
-    });
-    assert!(
-        events(restarted.address)
-            .iter()
-            .any(|event| event["kind"] == json!("driver-adopted")),
-        "the adoption is journalled"
-    );
-    let driven = detail(restarted.address);
-    assert_eq!(
-        driven["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
-        json!("waiting"),
-        "{driven}"
-    );
-    // The driver let go, and the reader proves it gone rather than leaving
-    // the run reading as driven for as long as any server lives: it was the
-    // server that retained it that would have had to reap it, and that server
-    // is gone, so `init` did. What the run reads as is what the engine's own
-    // rule makes of a run on this host whose driver is not there.
-    eventually("the driver let go of the run", || !process_is_live(pid));
-    // Nothing drives it, and its one human action is outstanding: the
-    // engine reads that as a run paused on its decision.
-    eventually("the run reads as paused, nothing driving it", || {
-        detail(restarted.address)["run"]["state"] == json!("paused")
-    });
-    drop(driver);
-
-    // The person answers. Nothing is driving the run, so the attestation is
-    // applied by the call itself — and a second adoption, retained by this
-    // server and reaped by it, drives the graph to completion.
-    let attested = http::post(
-        restarted.address,
-        &format!("/api/v2/runs/{run}/attest"),
-        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
-    );
-    assert_eq!(attested.status, 200, "{}", attested.body);
-    assert_eq!(attested.json()["receipt"]["state"], json!("applied"));
-    let again = http::post(restarted.address, &adopt, "");
-    assert_eq!(again.status, 200, "{}", again.body);
-    let second = u32::try_from(again.json()["pid"].as_u64().expect("a pid")).expect("a pid");
-    let driver = RetainedDriver(second);
-    assert_ne!(second, pid);
-    eventually("the second adoption was journalled", || {
-        adoptions(restarted.address) == 2
-    });
-    eventually("the second driver completed the graph", || {
-        detail(restarted.address)["run"]["state"] == json!("settled")
-    });
-    let settled = detail(restarted.address);
-    assert_eq!(
-        settled["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
-        json!("done"),
-        "{settled}"
-    );
-    // And this server, the driver's parent, reaped it: a driver that has gone
-    // is not a live process, so the run is adoptable again rather than read
-    // as driven by a zombie until the server exits.
-    eventually("the server reaped the driver it retained", || {
-        !process_is_live(second)
-    });
-    drop(driver);
-    // Adopting a settled run something is not driving is the engine's own
-    // answer — a fresh driver that settles it again at once — and never a
-    // refusal for a driver that is no longer there.
-    let third = http::post(restarted.address, &adopt, "");
-    assert_eq!(third.status, 200, "{}", third.body);
-    let third = u32::try_from(third.json()["pid"].as_u64().expect("a pid")).expect("a pid");
-    let driver = RetainedDriver(third);
-    eventually("the third driver settled and was reaped", || {
-        !process_is_live(third)
-    });
-    drop(driver);
-}
-// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
-
-/// A server installed at `installed` — a copy of the built binary, which is
-/// what a package manager puts on disk — in an environment changed by
-/// `environment`. It keeps the name it retains each driver from under the
-/// workspace's own cache, `cache` below it, as every server here does.
-#[cfg(target_os = "linux")]
-fn installed_server(
-    installed: &Path,
-    workspace: tempfile::TempDir,
-    environment: &[(&str, &str)],
-) -> Serving {
-    fs::create_dir_all(installed.parent().expect("an install directory"))
-        .expect("the install directory");
-    fs::copy(assert_cmd::cargo::cargo_bin("onepipeline-api"), installed)
-        .expect("the binary is installed");
-    Serving::start_binary_in_as_with_env(installed, workspace, fixture_run::SESSION, environment)
-}
-
-/// Write another build beside `installed`, ready to be renamed over it the way
-/// a package upgrade or a rebuild installs one, and answer where it is.
-///
-/// The build put there is one that only says it was run, into `ran`, and
-/// drives nothing — so a driver started from the path rather than from the
-/// running engine is one this journey can see.
-#[cfg(target_os = "linux")]
-fn stage_incoming(installed: &Path, ran: &Path) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let incoming = installed.with_extension("incoming");
-    fs::write(
-        &incoming,
-        format!("#!/bin/sh\necho \"$*\" >> '{}'\nexit 97\n", ran.display()),
-    )
-    .expect("the incoming build");
-    fs::set_permissions(&incoming, fs::Permissions::from_mode(0o755))
-        .expect("the incoming build is executable");
-    incoming
-}
-
-/// Install another build over `installed` while its server runs: staged
-/// beside it, then renamed over it.
-#[cfg(target_os = "linux")]
-fn install_over(installed: &Path, ran: &Path) {
-    fs::rename(stage_incoming(installed, ran), installed)
-        .expect("the incoming build replaces the installed one");
-}
-
-/// The copies of a running image kept under `cache`, as the server keeps them.
-#[cfg(target_os = "linux")]
-fn kept_images(cache: &Path) -> Vec<PathBuf> {
-    let Ok(images) = fs::read_dir(cache.join("onepipeline-api").join("drivers")) else {
-        return Vec::new();
-    };
-    images
-        .map(|image| image.expect("a kept image").path().join("onepipeline-api"))
-        .collect()
-}
-
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same two drivers as
-// `an_adoption_retains_this_binary_and_the_driver_outlives_the_server` above, each settling
-// a one-node graph and exiting; what this adds is a copy of the built binary, made twice —
-// once as the install and once by the server as the kept image — which is the behaviour
-// under test rather than a cost beside it. The same holds for the race journey after it.
-/// The journey a server upgraded in place meets: its file is replaced while it
-/// runs, and an adoption through it still retains a driver — one running the
-/// engine this server links, not the build now on disk — which drives the run
-/// exactly as a driver retained from an untouched file does.
-#[cfg(target_os = "linux")]
-#[test]
-fn an_adoption_through_a_server_whose_file_was_replaced_retains_the_engine_it_runs() {
-    let (workspace, root) = fixture_run::workspace();
-    let dir = workspace.path().to_path_buf();
-    fixture_run::write_awaiting_attestation(&root, fixture_run::RUN_ID, &dir);
-    let run = fixture_run::RUN_ID;
-    let adopt = format!("/api/v2/runs/{run}/adopt");
-    let installed = dir.join("installed").join("onepipeline-api");
-    let cache = dir.join("cache");
-    let ran = dir.join("the-incoming-build-ran");
-    let serving = installed_server(&installed, workspace, &[]);
-    let detail = |address| http::get(address, &format!("/api/v2/runs/{run}")).json();
-    let events = |address| {
-        events_on(&http::get(address, &format!("/api/v2/runs/{run}/timeline?scope=run")).json())
-    };
-
-    install_over(&installed, &ran);
-    // Linux now names the running server's executable for a file that is gone.
-    let named = fs::read_link(format!("/proc/{}/exe", serving.pid())).expect("its executable");
-    assert!(
-        named.to_string_lossy().ends_with(" (deleted)"),
-        "{}",
-        named.display()
-    );
-
-    // Adopted through the replaced server: a receipt carrying the driver's pid.
-    let adopted = http::post(serving.address, &adopt, "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let adopted = adopted.json();
-    assert_enveloped(&adopted);
-    assert_eq!(adopted["run_id"], json!(run));
-    let pid = u32::try_from(adopted["pid"].as_u64().expect("the driver's pid")).expect("a pid");
-    let driver = RetainedDriver(pid);
-
-    // And that driver is the engine the server links: retained from the one name
-    // for the running image the server kept — a copy, since the file it started
-    // from is gone — byte for byte the build it started
-    // from, while the build installed over it never ran.
-    let kept = kept_images(&cache);
-    assert_eq!(kept.len(), 1, "{kept:?}");
-    assert!(
-        fs::read(&kept[0]).expect("the kept image")
-            == fs::read(assert_cmd::cargo::cargo_bin("onepipeline-api")).expect("the built binary"),
-        "the kept image is the build the server started from"
-    );
-
-    // It drives the run as a driver retained from an untouched file does: the
-    // adoption journalled, the human action settled as waiting, then let go.
-    eventually("the driver settled the human action as waiting", || {
-        events(serving.address).iter().any(|event| {
-            event["kind"] == json!("node-settled")
-                && event["node_id"] == json!(fixture_run::APPROVAL_NODE_ID)
-        })
-    });
-    assert!(
-        events(serving.address)
-            .iter()
-            .any(|event| event["kind"] == json!("driver-adopted")),
-        "the adoption is journalled"
-    );
-    let driven = detail(serving.address);
-    assert_eq!(
-        driven["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
-        json!("waiting"),
-        "{driven}"
-    );
-    eventually("the server reaped the driver it retained", || {
-        !process_is_live(pid)
-    });
-    // Nothing drives it, and its one human action is outstanding: the
-    // engine reads that as a run paused on its decision.
-    eventually("the run reads as paused, nothing driving it", || {
-        detail(serving.address)["run"]["state"] == json!("paused")
-    });
-    drop(driver);
-
-    // Answered, and adopted again through the same replaced server: the second
-    // driver is retained from the same kept image and completes the graph.
-    let attested = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/attest"),
-        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
-    );
-    assert_eq!(attested.status, 200, "{}", attested.body);
-    let again = http::post(serving.address, &adopt, "");
-    assert_eq!(again.status, 200, "{}", again.body);
-    let second = u32::try_from(again.json()["pid"].as_u64().expect("a pid")).expect("a pid");
-    let driver = RetainedDriver(second);
-    eventually("the second driver completed the graph", || {
-        detail(serving.address)["run"]["state"] == json!("settled")
-    });
-    let settled = detail(serving.address);
-    assert_eq!(
-        settled["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
-        json!("done"),
-        "{settled}"
-    );
-    eventually("the server reaped the second driver", || {
-        !process_is_live(second)
-    });
-    drop(driver);
-    assert_eq!(
-        kept_images(&cache),
-        kept,
-        "one kept image serves every adoption"
-    );
-    assert!(
-        !ran.exists(),
-        "the build installed over the server never ran"
-    );
-}
-// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
-
-/// A server that cannot keep a name for the engine it runs refuses the
-/// adoption, naming why, rather than answering a receipt for a driver that
-/// never started — before its file is replaced and after — and the run is
-/// untouched, so the adoption can be made once the cause is gone.
-#[cfg(target_os = "linux")]
-#[test]
-fn an_adoption_through_a_replaced_server_that_cannot_keep_its_engine_is_refused() {
-    let (workspace, root) = fixture_run::workspace();
-    let dir = workspace.path().to_path_buf();
-    fixture_run::write_awaiting_attestation(&root, fixture_run::RUN_ID, &dir);
-    let run = fixture_run::RUN_ID;
-    let adopt = format!("/api/v2/runs/{run}/adopt");
-    let installed = dir.join("installed").join("onepipeline-api");
-    // A cache that is a file: nothing can be kept under it.
-    let cache = dir.join("cache");
-    fs::write(&cache, "not a directory").expect("the blocking file");
-    let ran = dir.join("the-incoming-build-ran");
-    let serving = installed_server(&installed, workspace, &[]);
-    let refused_naming = |why: &str| {
-        let refused = http::post(serving.address, &adopt, "");
-        assert_eq!(refused.status, 500, "{}", refused.body);
-        let error = &refused.json()["error"];
-        assert_eq!(error["code"], json!("engine_error"), "{error}");
-        let message = error["message"].as_str().expect("a message");
-        assert!(
-            message.contains(why) && message.contains("could be kept"),
-            "{message}"
-        );
-    };
-
-    refused_naming("no name for the engine this server runs");
-    install_over(&installed, &ran);
-    refused_naming("has been replaced");
-
-    let events = events_on(
-        &http::get(
-            serving.address,
-            &format!("/api/v2/runs/{run}/timeline?scope=run"),
-        )
-        .json(),
-    );
-    assert!(
-        !events
-            .iter()
-            .any(|event| event["kind"] == json!("driver-adopted")),
-        "nothing was adopted"
-    );
-    assert!(
-        !ran.exists(),
-        "the build installed over the server never ran"
-    );
-}
-
-/// A process this journey starts to stand as the run's parked driver: alive,
-/// silent, and recorded as the run's driver, so the engine reads the run as
-/// driven and refuses to adopt it while it lives. Ending it is what installs
-/// the upgrade: it renames `incoming` over `installed` and only then exits — so
-/// the build on disk changes while the server runs, and the driver an adoption
-/// then retains is the one place the incoming build could be started from.
-#[cfg(target_os = "linux")]
-struct ParkedDriver {
-    pid: u32,
-    reaped: Option<std::thread::JoinHandle<()>>,
-}
-
-#[cfg(target_os = "linux")]
-impl ParkedDriver {
-    fn start(incoming: &Path, installed: &Path) -> Self {
-        let mut child = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(r#"trap 'mv -f "$1" "$2"; exit 0' TERM; while :; do sleep 0.05; done"#)
-            .arg("parked-driver")
-            .arg(incoming)
-            .arg(installed)
-            .spawn()
-            .expect("the parked driver starts");
-        let pid = child.id();
-        // Reaped the moment it exits: the engine waits for the driver it ended
-        // to be gone, and a zombie of this journey's would read as still there.
-        let reaped = std::thread::spawn(move || {
-            let _ = child.wait();
-        });
-        Self {
-            pid,
-            reaped: Some(reaped),
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-impl Drop for ParkedDriver {
-    fn drop(&mut self) {
-        if process_is_live(self.pid) {
-            if let Ok(raw) = i32::try_from(self.pid) {
-                // SAFETY: the pid is the parked driver this journey started and
-                // has not yet reaped; signalling it touches no memory.
-                unsafe {
-                    libc::kill(raw, libc::SIGTERM);
-                }
-            }
-        }
-        if let Some(reaped) = self.reaped.take() {
-            let _ = reaped.join();
-        }
-    }
-}
-
-/// Rewrite the run's launch record to name `pid` as its driver on this host,
-/// unstamped — the record a driver that went quiet leaves, which the engine
-/// reads as parked once it has been silent past the threshold.
-#[cfg(target_os = "linux")]
-fn parked_on_this_host(root: &Path, run: &str, pid: u32) {
-    let record = root.join(run).join("launch.json");
-    let mut launch: Value =
-        serde_json::from_str(&fs::read_to_string(&record).expect("the launch record"))
-            .expect("the launch record is json");
-    launch["pid"] = json!(pid);
-    launch["host"] = json!(onepipeline_ui::liveness::hostname());
-    launch
-        .as_object_mut()
-        .expect("the launch record is an object")
-        .remove("started");
-    fs::write(
-        &record,
-        serde_json::to_string_pretty(&launch).expect("the record serializes"),
-    )
-    .expect("rewrite the launch record");
-}
-
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] two drivers settling a
-// one-node graph, as in the journey above, and a copy of the built binary as the install.
-/// A run a live driver holds, however quiet, is that driver's: the engine reads
-/// it as `PARKED` — driven — and an adoption is refused, naming the driver, and
-/// ends nothing, starts nothing and leaves the installed build alone. The
-/// upgrade lands when that driver goes, while the server runs, and the adoption
-/// made after it still answers its receipt with a driver retained from the
-/// engine the server links, which completes the run; the incoming build never
-/// runs.
-#[cfg(target_os = "linux")]
-#[test]
-fn an_upgrade_landing_after_a_refused_adoption_never_starts_the_new_build() {
-    let (workspace, root) = fixture_run::workspace();
-    let dir = workspace.path().to_path_buf();
-    fixture_run::write_awaiting_attestation(&root, fixture_run::RUN_ID, &dir);
-    let run = fixture_run::RUN_ID;
-    let adopt = format!("/api/v2/runs/{run}/adopt");
-    let installed = dir.join("installed").join("onepipeline-api");
-    let ran = dir.join("the-incoming-build-ran");
-    // The engine's own threshold, at the one second it will take, so a driver
-    // quiet for a second reads as parked.
-    let serving = installed_server(
-        &installed,
-        workspace,
-        &[("ONEPIPELINE_PARKED_AFTER_SECONDS", "1")],
-    );
-    let detail = |address| http::get(address, &format!("/api/v2/runs/{run}")).json();
-    let adoptions = |address| {
-        events_on(&http::get(address, &format!("/api/v2/runs/{run}/timeline?scope=run")).json())
-            .iter()
-            .filter(|event| event["kind"] == json!("driver-adopted"))
-            .count()
-    };
-    let built =
-        fs::read(assert_cmd::cargo::cargo_bin("onepipeline-api")).expect("the built binary");
-
-    // A first adoption settles the human action as waiting, and the person
-    // answers it once that driver has let go: the run the second adoption takes
-    // over has its whole graph ready to complete.
-    let first = http::post(serving.address, &adopt, "");
-    assert_eq!(first.status, 200, "{}", first.body);
-    let first = u32::try_from(first.json()["pid"].as_u64().expect("a pid")).expect("a pid");
-    let driver = RetainedDriver(first);
-    eventually("the first driver let go and was reaped", || {
-        !process_is_live(first)
-    });
-    // Nothing drives it, and its one human action is outstanding: the
-    // engine reads that as a run paused on its decision.
-    eventually("the run reads as paused, nothing driving it", || {
-        detail(serving.address)["run"]["state"] == json!("paused")
-    });
-    drop(driver);
-    let attested = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/attest"),
-        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
-    );
-    assert_eq!(attested.status, 200, "{}", attested.body);
-    assert_eq!(attested.json()["receipt"]["state"], json!("applied"));
-
-    // Then the run is held by a driver that went quiet, which installs the
-    // upgrade when it is ended.
-    let incoming = stage_incoming(&installed, &ran);
-    let parked = ParkedDriver::start(&incoming, &installed);
-    parked_on_this_host(&root, run, parked.pid);
-    // Parked is the engine's own verdict, and adoption asks it: a recorded
-    // driver alive on this host, silent past the threshold. The last thing the
-    // run recorded is the attestation, so twice the threshold after it the
-    // verdict holds, and goes on holding: nothing else writes to the run.
-    std::thread::sleep(Duration::from_secs(2));
-
-    // An adoption of a run a live driver holds is refused, and ends nothing.
-    let refused = http::post(serving.address, &adopt, "");
-    assert_eq!(refused.status, 422, "{}", refused.body);
-    let refused = refused.json();
-    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
-    let message = refused["error"]["message"].as_str().expect("a message");
-    assert!(
-        message.contains(&format!("driver pid {}", parked.pid)) && message.contains("PARKED"),
-        "{message}"
-    );
-    assert!(
-        process_is_live(parked.pid),
-        "the refused adoption left the parked driver running"
-    );
-    assert!(incoming.exists(), "nothing installed the upgrade");
-    assert!(fs::read(&installed).expect("the installed build") == built);
-    assert_eq!(adoptions(serving.address), 1);
-
-    // The driver goes, installing the upgrade as it does: the path now holds the
-    // incoming build, and the server's own file is gone.
-    drop(parked);
-    assert!(!incoming.exists(), "the upgrade was installed");
-    assert!(
-        fs::read(&installed).expect("the installed build") != built,
-        "the path names the incoming build"
-    );
-    let named = fs::read_link(format!("/proc/{}/exe", serving.pid())).expect("its executable");
-    assert!(
-        named.to_string_lossy().ends_with(" (deleted)"),
-        "{}",
-        named.display()
-    );
-
-    let adopted = http::post(serving.address, &adopt, "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let adopted = adopted.json();
-    assert_enveloped(&adopted);
-    assert_eq!(adopted["run_id"], json!(run));
-    let second = u32::try_from(adopted["pid"].as_u64().expect("the driver's pid")).expect("a pid");
-    let driver = RetainedDriver(second);
-
-    // And the driver started is the engine the server links, which completes
-    // the run; the build installed before the adoption never ran.
-    eventually("the second adoption was journalled", || {
-        adoptions(serving.address) == 2
-    });
-    eventually("the driver completed the graph", || {
-        detail(serving.address)["run"]["state"] == json!("settled")
-    });
-    let settled = detail(serving.address);
-    assert_eq!(
-        settled["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
-        json!("done"),
-        "{settled}"
-    );
-    eventually("the server reaped the driver it retained", || {
-        !process_is_live(second)
-    });
-    drop(driver);
-    assert!(
-        !ran.exists(),
-        "the build installed before the adoption never ran"
-    );
-    let kept = kept_images(&dir.join("cache"));
-    assert_eq!(kept.len(), 1, "{kept:?}");
-    assert!(
-        fs::read(&kept[0]).expect("the kept image") == built,
-        "every driver was retained from the build the server started from"
-    );
-}
-// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 // llmlint: ignore-block[e2e_not_mocked] the one process stood in for from here to the end
 // of the journey below is the paid model turn: the `oneharness run` onejudge spawns per side
@@ -14737,8 +14433,46 @@ fn harness_step(index: usize, command: &str) -> [oneharness_core::domain::events
 /// leaves no turn waiting on a release that will never come.
 #[cfg(unix)]
 fn install_held_harness(fakes: &Path) -> PathBuf {
-    use oneharness_core::domain::report::RunStreamEnvelope;
     fs::create_dir_all(fakes).expect("the double's directory");
+    let documents = held_harness();
+    for (name, text) in documents["files"].as_object().expect("the double's files") {
+        fs::write(fakes.join(name), text.as_str().expect("a file's text")).expect("a file");
+    }
+    let program = fakes.join("oneharness");
+    fs::write(
+        &program,
+        documents["program"]
+            .as_str()
+            .expect("the double's program")
+            .replace(HELD_HARNESS_FAKES, &fakes.display().to_string()),
+    )
+    .expect("the double");
+    // Owner-only: the pinned CLI starts this journey's dispatch as this user.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&program, fs::Permissions::from_mode(0o700))
+            .expect("the double is executable");
+    }
+    program
+}
+
+/// The placeholder [`held_harness`]'s program names its directory by, which the
+/// installer replaces with the directory it writes the double's files into.
+#[cfg(unix)]
+const HELD_HARNESS_FAKES: &str = "@FAKES@";
+
+/// The browser tier's copy of [`held_harness`], which its held-turn journey
+/// installs the way [`install_held_harness`] does.
+#[cfg(unix)]
+const HELD_HARNESS_FIXTURE: &str = "apps/dag-ui-e2e/fixtures/held-turn-harness.json";
+
+/// Everything a held turn is dispatched over: the files of
+/// [`write_two_party_node_scope_graph`]'s graph, and what
+/// [`install_held_harness`] writes — each file the double reads, by name, and
+/// its program with its directory left as [`HELD_HARNESS_FAKES`].
+#[cfg(unix)]
+fn held_harness() -> Value {
+    use oneharness_core::domain::report::RunStreamEnvelope;
     let lines = |events: &[oneharness_core::domain::events::ActionEvent]| {
         events
             .iter()
@@ -14755,46 +14489,28 @@ fn install_held_harness(fakes: &Path) -> PathBuf {
     };
     let opening = harness_step(0, "cargo build");
     let held = harness_step(2, "cargo test");
-    fs::write(fakes.join("agent-opening.ndjson"), lines(&opening)).expect("the opening");
-    fs::write(fakes.join("agent-held.ndjson"), lines(&held)).expect("the held work");
     let mut events = opening.to_vec();
-    events.extend(held);
-    fs::write(
-        fakes.join("agent-result.ndjson"),
-        format!(
-            "{}\n",
-            serde_json::to_string(&RunStreamEnvelope::Result {
-                report: harness_report("Built the change.", Some(events)),
-            })
-            .expect("the result line")
-        ),
-    )
-    .expect("the result");
-    fs::write(
-        fakes.join("supervisor.json"),
-        serde_json::to_string(&harness_report(
-            &json!({ "completion": true, "reason": "the turn did what the task asked" })
-                .to_string(),
-            None,
-        ))
-        .expect("the supervisor's report"),
-    )
-    .expect("the supervisor's answer");
-    fs::write(
-        fakes.join("verdict.json"),
-        serde_json::to_string(&harness_report(
-            &json!({ "value": true, "reason": "the turn did what the task asked" }).to_string(),
-            None,
-        ))
-        .expect("the evaluator's report"),
-    )
-    .expect("the evaluator's answer");
-    let program = fakes.join("oneharness");
-    fs::write(
-        &program,
-        format!(
-            r#"#!/bin/sh
-fakes='{fakes}'
+    events.extend(held.clone());
+    let result = format!(
+        "{}\n",
+        serde_json::to_string(&RunStreamEnvelope::Result {
+            report: harness_report("Built the change.", Some(events)),
+        })
+        .expect("the result line")
+    );
+    let supervisor = serde_json::to_string(&harness_report(
+        &json!({ "completion": true, "reason": "the turn did what the task asked" }).to_string(),
+        None,
+    ))
+    .expect("the supervisor's report");
+    let verdict = serde_json::to_string(&harness_report(
+        &json!({ "value": true, "reason": "the turn did what the task asked" }).to_string(),
+        None,
+    ))
+    .expect("the evaluator's report");
+    let program = format!(
+        r#"#!/bin/sh
+fakes='{HELD_HARNESS_FAKES}'
 hold() {{
   i=0
   while [ ! -f "$fakes/$1" ]; do
@@ -14823,19 +14539,56 @@ case " $* " in
   esac
   ;;
 esac
-"#,
-            fakes = fakes.display()
-        ),
-    )
-    .expect("the double");
-    // Owner-only: the one process that runs it is the dispatch this journey's own
-    // server starts, as this user.
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&program, fs::Permissions::from_mode(0o700))
-            .expect("the double is executable");
+"#
+    );
+    // llmlint: ignore[least_privilege_grants] `mode` is a required field of a two-party
+    // member, and `bypass` is the one approval mode oneagentgraph's contract names — there is
+    // no narrower one to choose, and without the field no turn ever opens. What it grants is
+    // handed to the stand-in `oneharness` above, which runs no tool at all.
+    let node_scope = "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: onejudge\n    \
+         base_config: ./onejudge.base.yaml\n    agent:\n      \
+         oneharness_config: ./oneharness.toml\n    judge:\n      \
+         oneharness_config: ./oneharness.toml\n    mode: bypass\n";
+    json!({
+        "graph": {
+            "oneharness.toml": "run_mode = \"fallback\"\nharnesses = [\"claude-code\"]\n",
+            "onejudge.base.yaml": "system_prompt: Do the work.\nuser:\n  persona: Review it.\n  \
+                done_when: the original task is complete\n  max_turns: 12\n",
+            "node-scope.yaml": node_scope,
+        },
+        "placeholder": HELD_HARNESS_FAKES,
+        "program": program,
+        "files": {
+            "agent-opening.ndjson": lines(&opening),
+            "agent-held.ndjson": lines(&held),
+            "agent-result.ndjson": result,
+            "supervisor.json": supervisor,
+            "verdict.json": verdict,
+        },
+    })
+}
+
+/// **The browser tier holds a turn with this suite's double.** Its held-turn
+/// journey installs [`HELD_HARNESS_FIXTURE`] rather than writing an `oneharness`
+/// of its own, so the document is what the linked `oneharness_core` serializes
+/// and onejudge reads here; rewritten with `UPDATE_CONTRACT_FIXTURES` set.
+#[cfg(unix)]
+#[test]
+fn the_browser_tiers_held_turn_double_is_the_one_this_suite_holds_turns_with() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(HELD_HARNESS_FIXTURE);
+    let rendered = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&held_harness()).expect("serialize")
+    );
+    if std::env::var_os("UPDATE_CONTRACT_FIXTURES").is_some() {
+        fs::write(&path, &rendered).expect("rewrite the browser tier's double");
+        return;
     }
-    program
+    assert!(
+        fs::read_to_string(&path).unwrap_or_default() == rendered,
+        "{HELD_HARNESS_FIXTURE} is not this suite's held-turn double — re-run with \
+         UPDATE_CONTRACT_FIXTURES=1 to accept the change deliberately"
+    );
 }
 
 /// The node-scope graph a dispatch of [`fixture_run::write_awaiting_dispatch`]'s
@@ -14845,31 +14598,13 @@ esac
 /// takes is one `oneharness run` of whatever `ONEAGENTGRAPH_ONEHARNESS_BIN` names.
 #[cfg(unix)]
 fn write_two_party_node_scope_graph(dir: &Path) -> PathBuf {
-    fs::write(
-        dir.join("oneharness.toml"),
-        "run_mode = \"fallback\"\nharnesses = [\"claude-code\"]\n",
-    )
-    .expect("the harness config");
-    fs::write(
-        dir.join("onejudge.base.yaml"),
-        "system_prompt: Do the work.\nuser:\n  persona: Review it.\n  \
-         done_when: the original task is complete\n  max_turns: 12\n",
-    )
-    .expect("the onejudge base config");
-    let graph = dir.join("node-scope.yaml");
-    // llmlint: ignore[least_privilege_grants] `mode` is a required field of a two-party
-    // member, and `bypass` is the one approval mode oneagentgraph's contract names — there is
-    // no narrower one to choose, and without the field no turn ever opens. What it grants is
-    // handed to the stand-in `oneharness` above, which runs no tool at all.
-    fs::write(
-        &graph,
-        "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: onejudge\n    \
-         base_config: ./onejudge.base.yaml\n    agent:\n      \
-         oneharness_config: ./oneharness.toml\n    judge:\n      \
-         oneharness_config: ./oneharness.toml\n    mode: bypass\n",
-    )
-    .expect("the node-scope graph");
-    graph
+    for (name, text) in held_harness()["graph"]
+        .as_object()
+        .expect("the graph's files")
+    {
+        fs::write(dir.join(name), text.as_str().expect("a file's text")).expect("a graph file");
+    }
+    dir.join("node-scope.yaml")
 }
 
 /// The notes a conversation's spool holds that it has not answered yet.
@@ -14909,12 +14644,12 @@ fn notes_awaiting_an_answer(state: &Path) -> usize {
     found
 }
 
-/// A note posted through the reply route into a run adopted through the adopt
-/// route waits on the held turn it was offered to **without stopping the run**:
-/// the adopted driver is this binary's copy of the engine, which delivers a live
-/// note off the run's single writer, so while the turn has not taken it the run
-/// goes on journalling that turn's work and its member's heartbeat, and every
-/// read goes on serving the run as live. Once the turn ends and the conversation
+/// A note posted through the reply route into a run driven by the pinned CLI
+/// waits on the held turn it was offered to **without stopping the run**. The
+/// envelope is answered at hand-off with the note `queued`, and the engine
+/// delivers the note off the run's single writer, so while the turn has not
+/// taken it the run goes on journalling that turn's work, its member's liveness
+/// goes on advancing, and every read goes on serving the run as live. Once the turn ends and the conversation
 /// takes the note, the delivery is recorded and the run settles.
 ///
 /// Nothing is stood in for but the paid model turn: the server, the adopted
@@ -14923,12 +14658,7 @@ fn notes_awaiting_an_answer(state: &Path) -> usize {
 /// [`install_held_harness`]'s. An engine whose writer waits on the note itself
 /// journals nothing from the moment the note is offered until the turn ends, and
 /// fails the wait for the turn's further work.
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
-// `an_adoption_retains_this_binary_and_the_driver_outlives_the_server`: one driver settling
-// a one-node graph through a scripted conversation in a few seconds, most of it the
-// member's own heartbeat interval; the sixty seconds beside it is the ceiling a failing
-// wait reaches, which no passing run pays. It needs nothing a checkout may lack: the
-// compiled binary and a shell script it writes itself.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 #[cfg(unix)]
 #[test]
 fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_live() {
@@ -14963,8 +14693,8 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
                 &harness.display().to_string(),
             ),
             ("ONEAGENTGRAPH_STATE_DIR", &state.display().to_string()),
-            // Short, so the member heartbeats every couple of seconds and the
-            // journal has something to go on recording while the note waits.
+            // Short, so the member heartbeats every couple of seconds and its
+            // liveness has somewhere to go while the note waits.
             ("ONEAGENTGRAPH_HEARTBEAT_TIMEOUT", "8"),
             (
                 "ONEPIPELINE_NODE_SCRATCH_DIR",
@@ -14996,10 +14726,7 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
             .count()
     };
 
-    let adopted = http::post(address, &format!("/api/v2/runs/{run}/adopt"), "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let pid = serving.drive_fixture(run);
     let driver = RetainedDriver(pid);
     eventually("the adopted run's worker turn to open", || {
         fakes.join("turn-0.opened").exists()
@@ -15030,12 +14757,12 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     );
     assert_eq!(notes_awaiting_an_answer(&dir), 0);
 
-    // The note, into the held turn. Its answer is owed once the conversation has
-    // taken it, which is not until the turn ends — so it is posted beside the
-    // journey rather than in front of it.
+    // The envelope is acknowledged with its note queued while delivery waits
+    // on the held turn. Post beside the journey so a writer blocking on delivery
+    // is caught by the journal and receipt checks below.
     let envelope = json!({
-        "version": 2,
-        "commands": [{ "op": "note", "id": node, "addressee": "worker", "text": HELD_TURN_NOTE }],
+        "version": 3,
+        "commands": [{ "op": "note", "id": node, "addressee": "worker", "deliver": "turn-end", "text": HELD_TURN_NOTE }],
     })
     .to_string();
     let reply = std::thread::spawn(move || {
@@ -15050,18 +14777,38 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         notes_awaiting_an_answer(&dir) == 1
     });
     let activity = count("turn-activity");
-    let beats = count("member-heartbeat");
+    // A member's liveness is kept beside the journal, in `liveness.json`, and is
+    // read here the way every reader of the engine reads it: through the
+    // engine's own fold of the run, never by parsing the file.
+    let paths = onepipeline::views::RunPaths::under(&root, run);
+    let alive = move || {
+        onepipeline::views::RunView::open(&paths)
+            .expect("the engine reads the adopted run")
+            .state
+            .activity
+            .get(node)
+            .and_then(|activity| activity.last_heartbeat_at)
+    };
+    eventually("the member's liveness to be recorded", || alive().is_some());
+    let first_beat = alive();
 
-    // The held turn goes on working, and its member goes on heartbeating, while
-    // the note still waits on the turn to end — and all of it reaches the run's
-    // journal, which a writer waiting on the note would have held back.
+    // The held turn goes on working, and its member's liveness goes on
+    // advancing, while the note still waits on the turn to end — the work
+    // reaching the run's journal, which a writer waiting on the note would have
+    // held back.
     fs::write(fakes.join("turn.go"), "go").expect("release the turn's further work");
     eventually("the held turn's further work to reach the journal", || {
         count("turn-activity") > activity
     });
-    eventually(
-        "the member's heartbeat to keep reaching the journal",
-        || count("member-heartbeat") >= beats + 2,
+    eventually("the member's liveness to advance", || alive() > first_beat);
+    let second_beat = alive();
+    eventually("the member's liveness to go on advancing", || {
+        alive() > second_beat
+    });
+    assert_eq!(
+        count("member-heartbeat"),
+        0,
+        "this engine keeps a member's beats out of the journal"
     );
     assert_eq!(
         notes_awaiting_an_answer(&dir),
@@ -15069,9 +14816,21 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         "the conversation took the note before its turn ended, so nothing above was recorded \
          while one was waiting"
     );
-    assert!(
-        !reply.is_finished(),
-        "the reply was answered before the turn took the note"
+    // onepipeline #1094 answers an envelope at receiver hand-off, not at delivery.
+    // A v2 envelope has no deliver field and reads as live; v3 turn-end keeps
+    // this turn held while proving that the queued reply has already finished.
+    eventually(
+        "the queued note's reply to finish before the turn ends",
+        || reply.is_finished(),
+    );
+    let answered = reply.join().expect("the reply thread");
+    assert_eq!(answered.status, 200, "{}", answered.body);
+    let receipt = answered.json();
+    assert_eq!(receipt["receipt"]["state"], json!("applied"), "{receipt}");
+    assert_eq!(
+        receipt["receipt"]["notes"][node],
+        json!("queued"),
+        "{receipt}"
     );
     let live = detail();
     assert_eq!(live["run"]["state"], json!("active"), "{live}");
@@ -15089,10 +14848,6 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     // The turn ends, the conversation takes the note, and the run records the
     // delivery and settles.
     fs::write(fakes.join("turn.settle"), "go").expect("release the turn's end");
-    let answered = reply.join().expect("the reply thread");
-    assert_eq!(answered.status, 200, "{}", answered.body);
-    let receipt = answered.json();
-    assert_eq!(receipt["receipt"]["state"], json!("applied"), "{receipt}");
     // The driver records a presentation when it next reads the turn's stream
     // after the delivery, not before the receipt is answered.
     eventually("the note's presentation to be recorded", || {
@@ -15100,6 +14855,42 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
             .iter()
             .any(|event| event["kind"] == json!("note-shown"))
     });
+    let raw: Vec<Value> = fs::read_to_string(root.join(run).join("events.jsonl"))
+        .expect("the adopted run's journal")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a journal envelope"))
+        .collect();
+    let operations: Vec<&Value> = raw
+        .iter()
+        .filter(|event| event["kind"] == json!("edit-committed"))
+        .flat_map(|event| {
+            event["payload"]["operations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
+        .filter(|operation| {
+            operation["kind"] == json!("note-delivered")
+                && operation["text"] == json!(HELD_TURN_NOTE)
+        })
+        .collect();
+    assert_eq!(
+        operations.len(),
+        1,
+        "the note is delivered exactly once: {raw:?}"
+    );
+    assert_eq!(
+        operations[0]["envelope"], receipt["receipt"]["reply"],
+        "{}",
+        operations[0]
+    );
+    assert_eq!(operations[0]["index"], json!(0), "{}", operations[0]);
+    assert_eq!(
+        operations[0]["turn"],
+        json!("turn-end"),
+        "{}",
+        operations[0]
+    );
     let recorded = journal();
     let delivered = recorded
         .iter()
@@ -15107,44 +14898,26 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         .expect("the note's delivery was recorded");
     assert_eq!(
         recorded[delivered]["redirection"],
-        json!({ "reached": "worker", "delivered": true, "delivery": "live", "node_id": node }),
+        json!({
+            "reached": "worker",
+            "turn": "turn-end",
+            "delivered": true,
+            "delivery": "live",
+            "node_id": node,
+        }),
         "{}",
         recorded[delivered]
     );
-    // The engine names the command envelope an edit came in on the record it
-    // committed — the reply the receipt answered with — and the watch route
-    // serves that record as the engine's own machine record, so the field
-    // reaches a reader as the engine journalled it. The timeline's projection of
-    // the same edit is the contract's `{author, redirection}` and is unchanged.
-    let mut watched = http::stream(
-        address,
-        &format!("/api/v2/runs/{run}/watch?timeout=0&until=settled"),
-        None,
-    );
-    assert_eq!(watched.status, 200);
-    let committed: Vec<Value> = std::iter::from_fn(|| watched.next_frame())
-        .filter(|frame| frame.event == "event")
-        .map(|frame| frame.json()["event"].clone())
-        .filter(|event| event["kind"] == json!("edit-committed"))
-        .collect();
-    assert_eq!(committed.len(), 1, "{committed:?}");
-    assert!(
-        committed[0]["payload"]["envelope"].is_u64(),
-        "{}",
-        committed[0]
-    );
-    assert_eq!(
-        committed[0]["payload"]["envelope"], receipt["receipt"]["reply"],
-        "the edit names the envelope the reply was answered as: {receipt} / {}",
-        committed[0]
-    );
+    // The timeline projects an edit as `{author, redirection}`; the engine's
+    // command envelope id is not part of that projection.
     assert!(
         recorded[delivered].get("envelope").is_none(),
         "{}",
         recorded[delivered]
     );
     // And the envelope the driver claimed is answered rather than left claimed:
-    // the channel holds no unclaimed command and one outcome, for that reply.
+    // the channel holds no unclaimed command and one outcome, for that reply —
+    // retaining its queued result after delivery, as #1094 requires.
     let channel = http::get(address, &format!("/api/v2/runs/{run}/channel")).json();
     assert_eq!(channel["commands"], json!([]), "{channel}");
     assert_eq!(
@@ -15152,7 +14925,7 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         json!([{
             "id": receipt["receipt"]["reply"],
             "applied": true,
-            "results": [{ "index": 0, "op": "note", "outcome": "applied" }],
+            "results": [{ "index": 0, "op": "note", "outcome": "queued" }],
         }]),
         "{channel}"
     );
@@ -15267,8 +15040,7 @@ esac
         ),
     )
     .expect("the double");
-    // Owner-only: the one process that runs it is the dispatch this journey's own
-    // server starts, as this user.
+    // Owner-only: the pinned CLI starts this journey's dispatch as this user.
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&program, fs::Permissions::from_mode(0o700))
@@ -15324,7 +15096,7 @@ fn node_has_settled(status: &Value) -> bool {
 }
 
 /// Serve `workspace` with the panel double installed at the seam a dispatch's
-/// turns spawn `oneharness` through, and adopt its run through the adopt route.
+/// turns spawn `oneharness` through, and adopt its run by the pinned engine CLI.
 #[cfg(unix)]
 fn adopt_with_panel_harness(
     workspace: tempfile::TempDir,
@@ -15366,20 +15138,11 @@ fn adopt_with_panel_harness(
         ],
         &inherited,
     );
-    let adopted = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{}/adopt", fixture_run::RUN_ID),
-        "",
-    );
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let pid = serving.drive_fixture(fixture_run::RUN_ID);
     (serving, RetainedDriver(pid))
 }
 
-/// A run adopted through the adopt route is driven by this binary's copy of the
-/// engine, so a member judged by a panel judges as the CLI-driven engine does:
-/// each read-only harness judge is handed onejudge's one evidence contract — no
+/// Each read-only harness judge is handed onejudge's one evidence contract — no
 /// read-only or permission instruction, and no ban on its shell — and the
 /// member's `judge_settings` reach the provider block onejudge is handed.
 ///
@@ -15574,7 +15337,111 @@ fn an_adopted_member_whose_judge_settings_name_a_composed_key_fails_before_any_t
 // llmlint: ignore-end[tests_mirror_real_usage]
 // llmlint: ignore-end[e2e_not_mocked]
 
-/// An adoption through the built binary drives a run whose plan lives in a
+/// A node held on a private tracker that did not answer is drawn and adoptable
+/// whichever engine journalled the hold.
+///
+/// Engine 0.90.0 journals each unanswered source of a `source` hold with its
+/// `cause` and, for a rate limit whose provider gave a reset, `retry_at_ms`; an
+/// earlier engine journalled neither. One server holds a run of each, both
+/// driven by a driver proved dead mid-hold. Each is listed as one an adoption
+/// may take over, its held node keeps its node and an open `queued` span naming
+/// the `source` reason, and the `node-held` record stays among the node's
+/// events. Then the pinned engine CLI adopts each, as the browser's adoption
+/// does: it reads the hold back, settles the approval as waiting, and the same
+/// routes serve the adopted run.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+#[cfg(unix)]
+#[test]
+fn a_node_held_on_an_unanswered_source_renders_and_adopts_with_or_without_its_cause() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let runs = [
+        (fixture_run::SOURCE_HELD_RUN_ID, true),
+        (fixture_run::SOURCE_HELD_EARLIER_RUN_ID, false),
+    ];
+    for (run, rate_limited) in runs {
+        fixture_run::write_held_on_source(&root, run, &dir, fixture_run::source_hold(rate_limited));
+    }
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+    let node = fixture_run::APPROVAL_NODE_ID;
+    let listed = http::get(serving.address, "/api/v2/runs").json();
+    for (run, _) in runs {
+        let row = listed["runs"]
+            .as_array()
+            .expect("the listed runs")
+            .iter()
+            .find(|row| row["run_id"] == json!(run))
+            .cloned()
+            .unwrap_or_else(|| panic!("{run} is not listed: {listed}"));
+        assert_eq!(row["liveness"], json!("DRIVER DEAD"), "{row}");
+
+        let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+        assert!(
+            detail["graph"]["node_status"].get(node).is_some(),
+            "the held node is not drawn: {detail}"
+        );
+        let spans = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=node&node={node}"),
+        )
+        .json()["spans"]
+            .as_array()
+            .expect("spans")
+            .clone();
+        let queued = queued_spans(&spans);
+        assert_eq!(queued.len(), 1, "{spans:?}");
+        assert_eq!(
+            queued[0]["reasons"],
+            json!([{ "kind": "source" }]),
+            "{}",
+            queued[0]
+        );
+        assert_eq!(queued[0]["ended_at"], Value::Null, "{}", queued[0]);
+        let node_span = span_named(&spans, &format!("node.{node}"));
+        assert!(
+            node_span["events"]
+                .as_array()
+                .expect("events")
+                .iter()
+                .any(|event| event["kind"] == "node-held"),
+            "{node_span}"
+        );
+    }
+
+    for (run, _) in runs {
+        let pid = serving.drive_fixture(run);
+        let driver = RetainedDriver(pid);
+        eventually(
+            &format!("the driver adopted {run} and settled its approval"),
+            || {
+                http::get(serving.address, &format!("/api/v2/runs/{run}")).json()["graph"]
+                    ["node_status"][node]
+                    == json!("waiting")
+            },
+        );
+        eventually("the driver let go and was reaped", || !process_is_live(pid));
+        drop(driver);
+        let events = events_on(
+            &http::get(
+                serving.address,
+                &format!("/api/v2/runs/{run}/timeline?scope=run"),
+            )
+            .json(),
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event["kind"] == json!("driver-adopted"))
+                .count(),
+            1,
+            "{events:?}"
+        );
+    }
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// The pinned engine CLI drives a run whose plan lives in a
 /// `local-md` onetaskgraph store, on a host that offers **no** `onetaskgraph`
 /// executable. The engine this binary links compiles that store in, so the
 /// retained driver reads the project and projects the run onto it in process,
@@ -15588,11 +15455,7 @@ fn an_adopted_member_whose_judge_settings_name_a_composed_key_fails_before_any_t
 /// read off the store itself: the project's task document carries the
 /// settlement the second driver reached, and every projection the run recorded
 /// landed.
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
-// `an_adoption_retains_this_binary_and_the_driver_outlives_the_server` above: two drivers,
-// each settling a one-node human graph, in about two seconds; the sixty seconds beside it
-// is the ceiling a failing wait reaches, which no passing run pays. It needs nothing a
-// checkout may lack: the compiled binary, and a folder of Markdown it writes itself.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 #[cfg(unix)]
 #[test]
 fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_executable() {
@@ -15631,7 +15494,6 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
             ("ONETASKGRAPH_BIN", &refusing.display().to_string()),
         ],
     );
-    let adopt = format!("/api/v2/runs/{run}/adopt");
     let detail = |address| http::get(address, &format!("/api/v2/runs/{run}")).json();
     let events = |address| {
         events_on(&http::get(address, &format!("/api/v2/runs/{run}/timeline?scope=run")).json())
@@ -15648,10 +15510,7 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
     assert_eq!(row["project"], json!(project), "{row}");
 
     // The first driver settles the human action as waiting and lets go.
-    let adopted = http::post(serving.address, &adopt, "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let pid = serving.drive_fixture(run);
     let driver = RetainedDriver(pid);
     eventually(
         "the first driver settled the human action as waiting",
@@ -15672,9 +15531,7 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
         &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
     );
     assert_eq!(attested.status, 200, "{}", attested.body);
-    let again = http::post(serving.address, &adopt, "");
-    assert_eq!(again.status, 200, "{}", again.body);
-    let second = u32::try_from(again.json()["pid"].as_u64().expect("a pid")).expect("a pid");
+    let second = serving.drive_fixture(run);
     let driver = RetainedDriver(second);
     eventually("the second driver completed the graph", || {
         detail(serving.address)["run"]["state"] == json!("settled")
@@ -15767,11 +15624,7 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
 /// A misspelled entry is still refused: the test then rewrites that entry's
 /// `path` as `paths`, and a second adoption's write-back is refused as a
 /// configuration setting naming exactly that entry.
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
-// `an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_executable`
-// above: two retained drivers over a one-node human graph, in a few seconds; the
-// sixty seconds beside it is the ceiling a failing wait reaches. It needs nothing a
-// checkout may lack: the compiled binary, and files it writes itself.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 #[cfg(unix)]
 #[test]
 fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metadata_fields() {
@@ -15805,7 +15658,6 @@ fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metad
         &[("FOLLOWUPS_BOARD_TOKEN", "not-a-real-token")],
         &inherited,
     );
-    let adopt = format!("/api/v2/runs/{run}/adopt");
     let node_status = |address| {
         http::get(address, &format!("/api/v2/runs/{run}")).json()["graph"]["node_status"]
             [fixture_run::APPROVAL_NODE_ID]
@@ -15822,10 +15674,7 @@ fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metad
         .collect()
     };
 
-    let adopted = http::post(serving.address, &adopt, "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let pid = serving.drive_fixture(run);
     let driver = RetainedDriver(pid);
     eventually("the driver settled the human action as waiting", || {
         node_status(serving.address) == json!("waiting")
@@ -15850,10 +15699,7 @@ fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metad
     // file, and the next driver's write-back is refused naming that entry —
     // the refusal a store predating `metadata_fields` gives the correct one.
     fs::write(&configuration, followups("paths")).expect("the store configuration");
-    let refused = http::post(serving.address, &adopt, "");
-    assert_eq!(refused.status, 200, "{}", refused.body);
-    let pid =
-        u32::try_from(refused.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let pid = serving.drive_fixture(run);
     let driver = RetainedDriver(pid);
     eventually("the second driver let go and was reaped", || {
         !process_is_live(pid)
@@ -15877,10 +15723,130 @@ fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metad
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
-/// A flow the provisioned CLI holds live under a runs root: `onepipeline flow
-/// run --name NAME --session SESSION`, over a program that waits for a file this
-/// journey writes. Ended by writing that file — never by a signal — and waited
-/// on, so the flow is over when this is dropped.
+/// An adoption through the built binary drives a run whose only plan-store
+/// configuration is the host's user layer, where two sources are refined with
+/// nothing but `routes` and a third is fully defined — the layer a host keeps
+/// when the full definitions of the routed sources live in one repository's
+/// tracked `onetaskgraph.yaml` and the store is used from everywhere else.
+///
+/// Neither the run's launch directory nor the server's own working directory
+/// has a project document above it, so no layer gives the two refined sources a
+/// `plugin`. A store that refuses such a source refuses the whole configuration
+/// — `sources.followups: missing field plugin` — and every write-back the
+/// driver attempts with it, including the ones onto the third source, which
+/// neither refined source names. The read routes serving the run under that
+/// source's project, the driver settling the run's human action as waiting,
+/// and every projection it attempted landing on that project are the proof
+/// that this binary's store leaves the refined sources unconfigured instead.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_reads_a_user_layer_that_refines_sources_it_does_not_define() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_attestation(&root, run, &dir);
+    let (project, task) = fixture_run::launch_from_local_md_store(&root, run, &dir);
+    let before = fs::read_to_string(&task).expect("the task document");
+
+    // The `local-md` source moves out of the launch directory's project document
+    // into the user layer, beside two sources that layer only routes.
+    let project_document = dir.join("onetaskgraph.yaml");
+    let local_md = fs::read_to_string(&project_document).expect("the store configuration");
+    fs::remove_file(&project_document).expect("the project document is removed");
+    let routed = |source: &str| {
+        format!(
+            "  {source}:\n    routes:\n      - repositories: [\"example-org/*\"]\n        \
+             to: example-org-tracker\n"
+        )
+    };
+    let home = dir.join("configuration-home");
+    let user_layer = home.join("onetaskgraph").join("config.yaml");
+    fs::create_dir_all(user_layer.parent().expect("a directory")).expect("the layer's directory");
+    fs::write(
+        &user_layer,
+        format!("{local_md}{}{}", routed("followups"), routed("plans")),
+    )
+    .expect("the user layer");
+    let working = std::env::current_dir().expect("the server's working directory");
+    for start in [dir.as_path(), working.as_path()] {
+        assert!(
+            start
+                .ancestors()
+                .all(|directory| !directory.join("onetaskgraph.yaml").exists()),
+            "a project document is discoverable from {}",
+            start.display()
+        );
+    }
+
+    // A source this suite's own host configures through `ONETASKGRAPH_SOURCES__*`
+    // would be merged into the layers the driver reads, so it meets none of them.
+    let inherited: Vec<String> = std::env::vars()
+        .map(|(name, _)| name)
+        .filter(|name| name.starts_with("ONETASKGRAPH_"))
+        .collect();
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &[("XDG_CONFIG_HOME", &home.display().to_string())],
+        &inherited,
+    );
+
+    let listed = http::get(serving.address, "/api/v2/runs");
+    assert_eq!(listed.status, 200, "{}", listed.body);
+    let row = listed.json()["runs"]
+        .as_array()
+        .expect("the listed runs")
+        .iter()
+        .find(|row| row["run_id"] == json!(run))
+        .cloned()
+        .expect("the run is listed");
+    assert_eq!(row["project"], json!(project), "{row}");
+    let group = http::get(
+        serving.address,
+        &format!("/api/v2/projects/{}", project.replace(':', "%3A")),
+    );
+    assert_eq!(group.status, 200, "{}", group.body);
+    assert_eq!(group.json()["project"], json!(project), "{}", group.body);
+
+    // The one route that loads the plan-store configuration: an adoption, whose
+    // driver reads the run's project off the store and writes back onto it.
+    let pid = serving.drive_fixture(run);
+    let driver = RetainedDriver(pid);
+    eventually("the driver settled the human action as waiting", || {
+        http::get(serving.address, &format!("/api/v2/runs/{run}")).json()["graph"]["node_status"]
+            [fixture_run::APPROVAL_NODE_ID]
+            == json!("waiting")
+    });
+    eventually("the driver let go and was reaped", || !process_is_live(pid));
+    drop(driver);
+
+    let records: Vec<Value> = fs::read_to_string(
+        root.join(run)
+            .join(onepipeline::cli::WRITEBACK_PROJECTIONS_FILE),
+    )
+    .expect("the projection record")
+    .lines()
+    .map(|line| serde_json::from_str(line).expect("a projection record line"))
+    .collect();
+    assert!(!records.is_empty(), "no projection was attempted");
+    for record in &records {
+        assert_eq!(record["project"], json!(project), "{record}");
+        assert_eq!(record["outcome"], json!("projected"), "{record}");
+    }
+    assert!(
+        records.iter().any(|record| record["actions"]["updated"]
+            .as_u64()
+            .is_some_and(|updated| updated > 0)),
+        "no projection wrote the settlement through the store: {records:?}"
+    );
+    let after = fs::read_to_string(&task).expect("the task document");
+    assert_ne!(after, before, "the task document was not written back");
+    assert!(after.contains("onepipeline.settlement"), "{after}");
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 #[cfg(unix)]
 struct LiveFlow {
     holder: std::process::Child,
@@ -15930,20 +15896,10 @@ impl Drop for LiveFlow {
 /// the run a watch of its own, because a live flow covers only the runs
 /// launched in it. The route serves the flow's own row beside the run's,
 /// unfiltered, as the engine's verb words it — the same rows the CLI prints.
-/// Held, the server's watch of the run clears the run's row and leaves the
-/// flow's, which nothing here watches.
-///
-/// The adoption half adopts a run of no flow beside a live flow of its owner:
-/// the driver settles its human action as waiting, the launch record it rewrote
-/// as it claimed the run still names no flow, and the flow lists no member.
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
-// `an_adoption_retains_this_binary_and_the_driver_outlives_the_server`: one driver over a
-// one-node human graph and two flows over a shell loop, in a few seconds; the sixty seconds
-// beside each wait is the ceiling a failing wait reaches. It needs the compiled binary and
-// the provisioned CLI every comparison in this module already drives.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this retained read journey starts one real flow with the pinned engine CLI already provisioned by the tier, then queries the API. It has no additional host prerequisite or reusable expensive setup needing a narrower project edge.
 #[cfg(unix)]
 #[test]
-fn a_run_launched_outside_any_flow_is_read_watched_and_adopted_beside_a_live_flow() {
+fn a_run_launched_outside_any_flow_is_read_beside_a_live_flow() {
     let run = fixture_run::RUN_ID;
     let serving = Serving::start_as(
         |root| {
@@ -15993,60 +15949,7 @@ fn a_run_launched_outside_any_flow_is_read_watched_and_adopted_beside_a_live_flo
     assert_eq!(flow_row["standing"], json!("LIVE"), "{flow_row}");
     let said = printed();
     assert!(said.contains(run) && said.contains("flow plan"), "{said}");
-
-    // Held by the server's watch: the run is watched, the flow still is not.
-    let mut stream = http::stream(
-        serving.address,
-        &format!("/api/v2/runs/{run}/watch?timeout=none&tick=1&until=settled"),
-        None,
-    );
-    assert_eq!(stream.status, 200);
-    std::iter::from_fn(|| stream.next_frame())
-        .find(|frame| frame.event == "tick")
-        .expect("a heartbeat, so the watch is held");
-    let during = rows(serving.address);
-    assert_eq!(during, vec![flow_row.clone()], "{during:?}");
-    let said = printed();
-    assert!(!said.contains(run) && said.contains("flow plan"), "{said}");
-    drop(stream);
     drop(flow);
-    drop(serving);
-
-    // Adopted beside a live flow of the run's owner, the run stays of no flow.
-    let (workspace, root) = fixture_run::workspace();
-    let dir = workspace.path().to_path_buf();
-    fixture_run::write_awaiting_attestation(&root, run, &dir);
-    let flow = LiveFlow::start(&root, "plan", fixture_run::SESSION);
-    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
-    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
-    let driver = RetainedDriver(pid);
-    eventually("the driver settled the human action as waiting", || {
-        http::get(serving.address, &format!("/api/v2/runs/{run}")).json()["graph"]["node_status"]
-            [fixture_run::APPROVAL_NODE_ID]
-            == json!("waiting")
-    });
-    eventually("the driver let go and was reaped", || !process_is_live(pid));
-    drop(driver);
-    let launch: Value = serde_json::from_str(
-        &fs::read_to_string(root.join(run).join("launch.json")).expect("the launch record"),
-    )
-    .expect("a launch record");
-    assert_eq!(
-        launch["pid"],
-        json!(pid),
-        "the driver claimed the run: {launch}"
-    );
-    assert!(launch.get("flow").is_none(), "{launch}");
-    let members = root.join(".flows").join("plan").join("members");
-    let joined: Vec<_> = fs::read_dir(&members)
-        .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
-        .unwrap_or_default();
-    assert!(joined.is_empty(), "{joined:?}");
-    drop(flow);
-    serving.stop_on(Stop::Terminate);
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
@@ -16062,11 +15965,7 @@ fn a_run_launched_outside_any_flow_is_read_watched_and_adopted_beside_a_live_flo
 /// project carries its settled status and settlement, neither project holds an
 /// item for the other's task, and every projection the drivers recorded landed
 /// with each item's destination in its task's own source.
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
-// `an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_executable`
-// above: three drivers, each settling a human action, in a few seconds over two folders of
-// Markdown the journey writes itself; the sixty seconds beside each wait is the ceiling a
-// failing wait reaches, which no passing run pays.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 #[cfg(unix)]
 #[test]
 fn an_adopted_run_settles_a_plan_spanning_two_sources_where_each_task_lives() {
@@ -16076,14 +15975,10 @@ fn an_adopted_run_settles_a_plan_spanning_two_sources_where_each_task_lives() {
     fixture_run::write_awaiting_attestation(&root, run, &dir);
     let plan = fixture_run::launch_across_two_local_md_sources(&root, run, &dir);
     let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
-    let adopt = format!("/api/v2/runs/{run}/adopt");
     let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
     let status = |node: &str| detail()["graph"]["node_status"][node].clone();
     let drive = |until: &str, settled: &dyn Fn() -> bool| {
-        let adopted = http::post(serving.address, &adopt, "");
-        assert_eq!(adopted.status, 200, "{}", adopted.body);
-        let pid = u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid"))
-            .expect("a pid");
+        let pid = serving.drive_fixture(run);
         let driver = RetainedDriver(pid);
         eventually(until, settled);
         eventually("the driver let go and was reaped", || !process_is_live(pid));
@@ -16248,7 +16143,7 @@ fn project_nodes(dir: &Path, project: &str) -> Vec<String> {
         .collect()
 }
 
-/// A run adopted through `POST /api/v2/runs/{run}/adopt` writes back only what
+/// A run produced through the pinned engine CLI writes back only what
 /// changed: every projection the retained drivers attempt is a member-scoped
 /// record at version 4 of `writeback-projections.jsonl`, naming the store calls
 /// it made, the approval's existing item is written through a targeted update
@@ -16262,11 +16157,7 @@ fn project_nodes(dir: &Path, project: &str) -> Vec<String> {
 /// engine's to say, and nothing here does. The fixture seeds the baseline as
 /// `onepipeline start` does, with no word landed on the approval, so a baseline
 /// naming a landed status is one the drivers wrote.
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
-// `an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_executable`
-// above: two drivers, each settling a one-node human graph in about two seconds over a
-// folder of Markdown the journey writes itself; the sixty seconds beside it is the ceiling
-// a failing wait reaches, which no passing run pays.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 #[cfg(unix)]
 #[test]
 fn an_adopted_run_writes_back_member_scoped_projections_and_keeps_its_landed_baseline() {
@@ -16280,14 +16171,10 @@ fn an_adopted_run_writes_back_member_scoped_projections_and_keeps_its_landed_bas
         serde_json::from_str(&fs::read_to_string(&landed_file).expect("the seeded baseline"))
             .expect("the seeded baseline parses");
     let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
-    let adopt = format!("/api/v2/runs/{run}/adopt");
     let detail = |address| http::get(address, &format!("/api/v2/runs/{run}")).json();
 
     // The first driver settles the human action as waiting and lets go.
-    let adopted = http::post(serving.address, &adopt, "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let first =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let first = serving.drive_fixture(run);
     let driver = RetainedDriver(first);
     eventually("the first driver let go and was reaped", || {
         !process_is_live(first)
@@ -16305,9 +16192,7 @@ fn an_adopted_run_writes_back_member_scoped_projections_and_keeps_its_landed_bas
         &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
     );
     assert_eq!(attested.status, 200, "{}", attested.body);
-    let again = http::post(serving.address, &adopt, "");
-    assert_eq!(again.status, 200, "{}", again.body);
-    let second = u32::try_from(again.json()["pid"].as_u64().expect("a pid")).expect("a pid");
+    let second = serving.drive_fixture(run);
     let driver = RetainedDriver(second);
     eventually("the second driver was reaped", || !process_is_live(second));
     drop(driver);
@@ -16393,56 +16278,6 @@ fn stored_task(dir: &Path, id: &str) -> onetaskgraph_plugin_api::Task {
         .pop()
         .expect("the store holds the task")
         .item
-}
-
-/// An adoption of a run whose undispatched agent node states no
-/// `## Acceptance criteria` section is refused through the route with the
-/// engine's own C6b refusal, and nothing is adopted.
-///
-/// The linked engine holds every node an adoption could still dispatch to that
-/// rule before it writes anything. So the route answers `422 refused` naming
-/// the node and the rule, the run's record gains no `driver-adopted`, and no
-/// driver was started.
-#[test]
-fn an_adoption_of_a_run_whose_undispatched_node_states_no_criteria_is_refused() {
-    let (workspace, root) = fixture_run::workspace();
-    let dir = workspace.path().to_path_buf();
-    let run = fixture_run::RUN_ID;
-    // Never read: the refusal comes before anything is dispatched over it.
-    fixture_run::write_awaiting_dispatch_without_criteria(
-        &root,
-        run,
-        &dir,
-        &dir.join("node-scope.yaml"),
-    );
-    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
-
-    let refused = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
-    assert_eq!(refused.status, 422, "{}", refused.body);
-    let refused = refused.json();
-    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
-    assert!(
-        refused["error"]["message"]
-            .as_str()
-            .is_some_and(|said| said.contains(&format!(
-                "node '{}': no criteria section",
-                fixture_run::DISPATCH_NODE_ID
-            ))),
-        "{refused}"
-    );
-    let events = events_on(
-        &http::get(
-            serving.address,
-            &format!("/api/v2/runs/{run}/timeline?scope=run"),
-        )
-        .json(),
-    );
-    assert!(
-        !events
-            .iter()
-            .any(|event| event["kind"] == json!("driver-adopted")),
-        "a refused adoption was journalled: {events:?}"
-    );
 }
 
 /// The variable `onepipeline start` reads the node-scope graph a run's
@@ -16555,29 +16390,8 @@ fn launch_rendered_over_local_md_store(
     )
     .expect("the host template");
 
-    let onepipeline = |arguments: &[&str]| {
-        let output = std::process::Command::new(sibling::binary())
-            .args(arguments)
-            .current_dir(dir)
-            .env(onepipeline_ui::store::RUNS_DIR_ENV, root)
-            .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
-            .env(NODE_GRAPH_ENV, node_graph)
-            .env(
-                onepipeline_ui::store::GRAPH_RECORDS_ENV,
-                fixture_run::graph_records_for(root),
-            )
-            .env_remove(onepipeline::templates::ROOT_ENVIRONMENT)
-            .env_remove(onepipeline::templates::REQUIRE_RENDERED_ENVIRONMENT)
-            .output()
-            .expect("the provisioned onepipeline runs");
-        assert!(
-            output.status.success(),
-            "`onepipeline {}` refused: {}",
-            arguments.join(" "),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        output.stdout
-    };
+    let onepipeline =
+        |arguments: &[&str]| provisioned_onepipeline(root, dir, node_graph, arguments);
 
     let approval = create_store_task(
         dir,
@@ -16621,7 +16435,7 @@ fn launch_rendered_over_local_md_store(
         &[&approval],
     );
 
-    let launched = onepipeline(&[
+    let run = started_and_let_go(&onepipeline(&[
         "start",
         &format!(
             "{}:{}",
@@ -16633,17 +16447,75 @@ fn launch_rendered_over_local_md_store(
         "template-root",
         onepipeline::templates::REQUIRE_RENDERED_FLAG,
         "true",
-    ]);
-    let launched: Value = serde_json::from_slice(&launched).expect("start prints its launch");
+    ]));
+    let template_root = template_root
+        .canonicalize()
+        .expect("the template root resolves");
+    (run, template_root)
+}
+
+/// Run the `onepipeline` CLI this crate pins, from `dir`, over the runs root
+/// `root` and the node-scope graph `node_graph`, with no template setting
+/// inherited from the host, and answer what it printed. A refusal fails the
+/// journey with what the CLI said.
+#[cfg(unix)]
+fn provisioned_onepipeline(
+    root: &Path,
+    dir: &Path,
+    node_graph: &Path,
+    arguments: &[&str],
+) -> Vec<u8> {
+    provisioned_onepipeline_with_env(root, dir, node_graph, &[], arguments)
+}
+
+/// [`provisioned_onepipeline`] with `environment` set on top of what it sets, for a
+/// launch whose plan names repositories the linked `onevcs` has to resolve.
+#[cfg(unix)]
+fn provisioned_onepipeline_with_env(
+    root: &Path,
+    dir: &Path,
+    node_graph: &Path,
+    environment: &[(&str, &str)],
+    arguments: &[&str],
+) -> Vec<u8> {
+    let output = std::process::Command::new(sibling::binary())
+        .args(arguments)
+        .current_dir(dir)
+        .env(onepipeline_ui::store::RUNS_DIR_ENV, root)
+        .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+        .env(NODE_GRAPH_ENV, node_graph)
+        .env(
+            onepipeline_ui::store::GRAPH_RECORDS_ENV,
+            fixture_run::graph_records_for(root),
+        )
+        .env_remove(onepipeline::templates::ROOT_ENVIRONMENT)
+        .env_remove(onepipeline::templates::REQUIRE_RENDERED_ENVIRONMENT)
+        // The plan-store user layer `Serving` gives its server, so `start`
+        // reads the store this journey configures and none of the host's.
+        .env("XDG_CONFIG_HOME", dir.join("config"))
+        .envs(environment.iter().copied())
+        .output()
+        .expect("the provisioned onepipeline runs");
+    assert!(
+        output.status.success(),
+        "`onepipeline {}` refused: {}",
+        arguments.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output.stdout
+}
+
+/// The run a detached `start` printed as `launched`, once the driver it left
+/// has let go of it.
+#[cfg(unix)]
+fn started_and_let_go(launched: &[u8]) -> String {
+    let launched: Value = serde_json::from_slice(launched).expect("start prints its launch");
     let run = launched["run_id"].as_str().expect("a run id").to_owned();
     let pid = u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
     eventually("the launched driver let go of the run", || {
         !process_is_live(pid)
     });
-    let template_root = template_root
-        .canonicalize()
-        .expect("the template root resolves");
-    (run, template_root)
+    run
 }
 
 /// The launch record of `run` under `root`, as the engine last wrote it.
@@ -16655,12 +16527,9 @@ fn launch_record(root: &Path, run: &str) -> Value {
     .expect("the launch record parses")
 }
 
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
-// `an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names` below, plus the
-// `onepipeline` CLI every comparison in this module already provisions: a real launch of
-// a two-node plan whose driver lets go at once, then one dispatch, settling in seconds.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 /// A run a host launched with its own template root and the rendered-only check
-/// on, over a `local-md` store, is adopted through the route once its approval is
+/// on, over a `local-md` store, is adopted through the pinned CLI once its approval is
 /// attested, and the driver the adoption retains dispatches the rendered node.
 ///
 /// The launch is the released engine's own `start`: it resolved the root it was
@@ -16674,7 +16543,7 @@ fn an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispa
     let (workspace, root) = fixture_run::workspace();
     let dir = workspace.path().to_path_buf();
     let log = dir.join("harness.log");
-    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states: a real one bills a model call and answers differently on each run. What this journey is about — the released engine's `start` over a real `local-md` store, the adopt route, the retained driver and the executor that dispatches the rendered task — is all real, and the stand-in only records that the dispatch reached it.
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states: a real one bills a model call and answers differently on each run. What this journey is about — the released engine's `start` over a real `local-md` store, the pinned engine CLI, the retained driver and the executor that dispatches the rendered task — is all real, and the stand-in only records that the dispatch reached it.
     let standin = write_harness_standin(&dir, &log);
     // llmlint: ignore-end[e2e_not_mocked]
     write_extending_config(&dir, &standin);
@@ -16716,10 +16585,7 @@ fn an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispa
         &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
     );
     assert_eq!(attested.status, 200, "{}", attested.body);
-    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let pid = serving.drive_fixture(run.as_str());
     let driver = RetainedDriver(pid);
 
     let kinds = |address| {
@@ -16755,12 +16621,302 @@ fn an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispa
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+/// The `local-md` source [`launch_copied_from_plan_task_renderings`] copies the
+/// plan into: a second folder of Markdown beside the fixture's, configured in the
+/// same `onetaskgraph.yaml`.
+#[cfg(unix)]
+const COPY_DESTINATION: &str = "plan-home";
+
+/// Launch a run the way a host whose plan was drafted in one source and homed in
+/// another does, with the released `onepipeline` this crate pins.
+///
+/// The plan is drafted in the fixture's `local-md` source: its approval
+/// [`fixture_run::APPROVAL_NODE_ID`] and the agent node
+/// [`fixture_run::DISPATCH_NODE_ID`] it gates, each rendered by the store from
+/// the engine's built-in `plan-task`, as `onepipeline template resolve` states it.
+/// The store this crate links then copies the project and its tasks into
+/// [`COPY_DESTINATION`] — the call `onetaskgraph project copy --tasks` makes —
+/// and `start` launches the copy under the rendered-only check. Its driver
+/// settles the approval as waiting and lets go.
+///
+/// Answers the run id and the copy's report, project first.
+#[cfg(unix)]
+fn launch_copied_from_plan_task_renderings(
+    root: &Path,
+    dir: &Path,
+    node_graph: &Path,
+) -> (String, onetaskgraph_core::CopyReport) {
+    fixture_run::configure_local_md_store(dir);
+    let configuration = dir.join("onetaskgraph.yaml");
+    let drafts = fs::read_to_string(&configuration).expect("the store configuration");
+    let home_store = dir.join("home-store");
+    fs::create_dir_all(&home_store).expect("the destination's folder");
+    fs::write(
+        &configuration,
+        format!(
+            "{drafts}  {COPY_DESTINATION}:\n    plugin: local-md\n    config:\n      root: {:?}\n",
+            home_store.display().to_string()
+        ),
+    )
+    .expect("the store configuration with its destination");
+    let onepipeline =
+        |arguments: &[&str]| provisioned_onepipeline(root, dir, node_graph, arguments);
+
+    let loader = onepipeline(&[
+        "template",
+        "resolve",
+        onepipeline::templates::BUILT_IN,
+        "--json",
+    ]);
+    let input = onetaskgraph_core::TemplateInput::Loader(
+        onetaskgraph_core::LoaderDocument::from_json(&String::from_utf8_lossy(&loader))
+            .expect("the engine states a loader document"),
+    );
+    let rendered = |criterion: &str| {
+        let answers = onetaskgraph_core::Answers::from_yaml(&format!(
+            "acceptance_criteria:\n  - {criterion}\n"
+        ))
+        .expect("the answers");
+        let rendering = input
+            .load()
+            .expect("plan-task loads")
+            .render(&answers)
+            .expect("plan-task renders");
+        onetaskgraph_core::Body::rendered(&input, rendering).expect("a rendering")
+    };
+    let approval = create_store_task(
+        dir,
+        "Approve the change",
+        rendered("The change is approved."),
+        &[
+            ("onepipeline.id", json!(fixture_run::APPROVAL_NODE_ID)),
+            ("onepipeline.kind", json!("human")),
+        ],
+        &[],
+    );
+    create_store_task(
+        dir,
+        "Resolve the config chain",
+        rendered("The work is done."),
+        &[
+            ("onepipeline.id", json!(fixture_run::DISPATCH_NODE_ID)),
+            ("onepipeline.persona", json!("engineer")),
+        ],
+        &[&approval],
+    );
+
+    // An empty environment, so the host's own store configuration is not read.
+    let loaded = onetaskgraph_core::config::load(
+        dir,
+        &onetaskgraph_core::Environment::from_os_pairs(Vec::new()),
+        &onetaskgraph_core::config::Layer::default(),
+    )
+    .expect("the store configuration loads");
+    let engine = onetaskgraph_core::Engine::build(&loaded.config, &loaded.secrets);
+    let drafted = onetaskgraph_core::GlobalId::try_from(format!(
+        "{}:{}",
+        fixture_run::LOCAL_MD_SOURCE,
+        fixture_run::LOCAL_MD_PROJECT
+    ))
+    .expect("a project id");
+    let report = tokio::runtime::Runtime::new()
+        .expect("a runtime")
+        .block_on(
+            engine.copy(&onetaskgraph_core::CopyRequest {
+                items: onetaskgraph_core::CopyItems::new(vec![drafted]).expect("one item"),
+                scope: onetaskgraph_core::CopyScope::Projects { tasks: true },
+                status_policy: onetaskgraph_core::StatusPolicy::Source,
+                destination: onetaskgraph_plugin_api::SourceName::try_from(
+                    COPY_DESTINATION.to_owned(),
+                )
+                .expect("a source name"),
+                match_by: None,
+                target_task: None,
+                recreate: false,
+                create: false,
+                dry_run: false,
+                comments: false,
+                no_link: false,
+                expect: None,
+                statuses: Vec::new(),
+                conditions: onetaskgraph_core::CopyConditions::default(),
+            }),
+        )
+        .expect("the store copies the plan");
+    let home = report
+        .items
+        .first()
+        .and_then(onetaskgraph_core::CopyOutcome::destination)
+        .unwrap_or_else(|| panic!("the copy names where the project landed: {report:?}"))
+        .to_string();
+
+    let run = started_and_let_go(&onepipeline(&[
+        "start",
+        &home,
+        "--detach",
+        onepipeline::templates::REQUIRE_RENDERED_FLAG,
+        "true",
+    ]));
+    (run, report)
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+/// A plan of `plan-task` renderings that the store this binary links copied into
+/// another `local-md` source, launched from there under `--require-rendered true`,
+/// is driven through the pinned CLI once its stopped driver's approval is attested,
+/// and the engine driver loads the copy and
+/// settles every node.
+///
+/// The copy is what a host's own tooling makes of a plan homed somewhere other
+/// than where it was drafted: each task arrives carrying the `onetaskgraph.origin`
+/// it was copied from and the `onetaskgraph.template` provenance whose
+/// `body_digest` is what the destination stores. The settlements are read back
+/// twice: off the run's own record the server serves, and off the copied tasks,
+/// where the driver's write-back lands.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_settles_a_store_copied_plan_launched_under_the_rendered_only_check() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let log = dir.join("harness.log");
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states: a real one bills a model call and answers differently on each run. What this journey is about — the linked store's copy, the released engine's `start` over the copy, the pinned engine CLI and the retained driver that loads and settles it — is all real, and the stand-in only answers the one turn.
+    let standin = write_harness_standin(&dir, &log);
+    // llmlint: ignore-end[e2e_not_mocked]
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let (run, report) = launch_copied_from_plan_task_renderings(&root, &dir, &graph);
+
+    // Every task the copy filed carries where it came from and the rendering
+    // it holds, and what it holds is what that provenance digests.
+    let copied: Vec<String> = report
+        .items
+        .iter()
+        .skip(1)
+        .map(|item| {
+            item.destination()
+                .unwrap_or_else(|| panic!("a task the copy did not land: {report:?}"))
+                .to_string()
+        })
+        .collect();
+    assert_eq!(copied.len(), 2, "{report:?}");
+    for id in &copied {
+        let task = stored_task(&dir, id);
+        let origin = task.metadata[onetaskgraph_core::GlobalId::ORIGIN_KEY]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id} names no origin: {:?}", task.metadata))
+            .to_owned();
+        assert!(
+            origin.starts_with(&format!("{}:", fixture_run::LOCAL_MD_SOURCE)),
+            "{id} was not copied from the draft: {origin}"
+        );
+        let provenance: onetaskgraph_core::TemplateProvenance = serde_json::from_value(
+            task.metadata[onetaskgraph_core::TemplateProvenance::KEY].clone(),
+        )
+        .unwrap_or_else(|error| panic!("{id} carries no provenance: {error}"));
+        assert_eq!(
+            provenance.template,
+            format!("onepipeline:{}", onepipeline::templates::BUILT_IN),
+            "{id}"
+        );
+        assert_eq!(
+            provenance.body_digest.to_string(),
+            onetaskgraph_core::template::body_digest(task.content.as_deref().unwrap_or_default()),
+            "{id}'s provenance does not digest what the destination stores"
+        );
+    }
+    let launched = launch_record(&root, &run);
+    assert_eq!(
+        launched[onepipeline::templates::REQUIRE_RENDERED_KEY],
+        json!(true),
+        "{launched}"
+    );
+
+    let state = dir.join("state");
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+        ],
+    );
+    let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    assert_eq!(
+        detail()["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
+        json!("waiting"),
+        "{}",
+        detail()["graph"]
+    );
+    let attested = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/attest"),
+        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
+    );
+    assert_eq!(attested.status, 200, "{}", attested.body);
+    let pid = serving.drive_fixture(run.as_str());
+    let driver = RetainedDriver(pid);
+
+    eventually("the adopted driver settled the run", || {
+        detail()["run"]["state"] == json!("settled")
+    });
+    let settled = detail();
+    for node in [fixture_run::APPROVAL_NODE_ID, fixture_run::DISPATCH_NODE_ID] {
+        assert_eq!(
+            settled["graph"]["node_status"][node],
+            json!("done"),
+            "{node}: {}",
+            settled["graph"]
+        );
+    }
+    let kinds: Vec<Value> = events_on(
+        &http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json(),
+    )
+    .iter()
+    .map(|event| event["kind"].clone())
+    .collect();
+    for kind in ["driver-adopted", "node-dispatched"] {
+        assert!(kinds.contains(&json!(kind)), "{kind}: {kinds:?}");
+    }
+    assert!(
+        fs::read_to_string(&log).is_ok_and(|ran| ran.contains("The work is done.")),
+        "the dispatch did not run the copied rendering"
+    );
+    eventually("each settlement reached its copied task", || {
+        copied
+            .iter()
+            .all(|id| stored_task(&dir, id).status.name == "done")
+    });
+    for id in &copied {
+        assert!(
+            stored_task(&dir, id)
+                .metadata
+                .contains_key("onepipeline.settlement"),
+            "{id}"
+        );
+    }
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 /// The harness stand-in a dispatch here runs: it records the argv it was given
-/// and answers as the adapter expects, so a journey can read back *that* it ran
-/// and *what as*.
+/// and the prompt it was handed, on one line, and answers as the adapter
+/// expects, so a journey can read back *that* it ran and *what as*.
+///
+/// Where the engine opens the turn with control, the prompt is the first line
+/// of its stdin: the `claude-code` adapter runs it `-p --input-format
+/// stream-json` and writes the task as one `user` message, then holds stdin
+/// open for control frames, so it reads that line and no more. Where oneharness
+/// refuses control — on macOS a long `$TMPDIR` puts the control socket past the
+/// 104-byte `sun_path` — the task rides `-p` as its positional instead and stdin
+/// is empty; either way the task is somewhere on the one line.
 ///
 /// The harness program is the one process this suite stands in for, and it is
-/// the narrowest place to cut: everything above it — the adopt route, the
+/// the narrowest place to cut: everything above it — the pinned engine CLI, the
 /// driver, the executor, the graph run, and the oneharness config loader that
 /// picks this program — is the linked engine doing its own work. Standing in
 /// for the engine instead, at `ONEPIPELINE_ONEAGENTGRAPH_BIN`, would be asking
@@ -16785,7 +16941,9 @@ fn write_named_harness_standin(dir: &Path, name: &str, log: &Path) -> PathBuf {
     fs::write(
         &standin,
         format!(
-            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {:?}\nprintf '{{\"type\":\"result\",\
+            "#!/bin/sh\nIFS= read -r prompt\n\
+             printf '%s %s %s\\n' \"$0\" \"$*\" \"$prompt\" >> {:?}\n\
+             printf '{{\"type\":\"result\",\
              \"subtype\":\"success\",\"is_error\":false,\"result\":\"done\",\
              \"session_id\":\"standin\"}}\\n'\n",
             log.display().to_string()
@@ -16823,8 +16981,7 @@ fn write_committing_harness_standin(dir: &Path, log: &Path) -> PathBuf {
         ),
     )
     .expect("the committing harness stand-in");
-    // Owner-only: the one process that runs it is the dispatch this journey's own
-    // server starts, as this user.
+    // Owner-only: the pinned CLI starts this journey's dispatch as this user.
     fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o700))
         .expect("chmod the committing harness stand-in");
     standin
@@ -16871,14 +17028,7 @@ fn write_node_scope_graph(dir: &Path) -> PathBuf {
     graph
 }
 
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this journey needs
-// nothing a checkout may lack — the compiled binary every other journey in this module
-// drives, and a `/bin/sh` script it writes itself — which is what the tiers behind edges
-// of their own here need (`strace`, the base commit's server). It dispatches a real turn
-// through a retained driver, and settles in about a second: measured, once the turn's
-// oneharness history is under the journey's own state directory. The 27 seconds this
-// once recorded, and the minutes a busy host made of it, were that turn queueing on the
-// history lock every harness turn on the host shares rather than the engine's own work.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 #[cfg(unix)]
 #[test]
 fn an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names() {
@@ -16907,13 +17057,10 @@ fn an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names() {
             ("XDG_STATE_HOME", &state.display().to_string()),
         ],
     );
-    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let pid = serving.drive_fixture(run);
     let driver = RetainedDriver(pid);
 
-    // The run's own record says the adopt route reached a real dispatch: the
+    // The run's own record says the pinned engine CLI reached a real dispatch: the
     // node went ready, was dispatched, and the graph that dispatch composed
     // started a member. Nothing here is the journey's to write — each is the
     // engine's, read back off the timeline the server serves.
@@ -16935,7 +17082,7 @@ fn an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names() {
 
     // And the member that started ran the harness the **parent** config names,
     // reached only by following the child's `extends`. The stand-in records the
-    // argv it was given, so what is asserted is the whole answer: the program
+    // argv and prompt it was given, so what is asserted is the whole answer: the program
     // the chain selected, composed by the `claude-code` adapter the parent
     // asked for, carrying this node's own task.
     eventually(
@@ -16954,13 +17101,218 @@ fn an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names() {
     drop(driver);
     serving.stop_on(Stop::Terminate);
 }
+
+/// A harness stand-in whose turn holds until `<dir>/turn.go` exists, then starts
+/// a child of its own and keeps running: the next provider process a dispatch
+/// starts, placed by the journey rather than by a model's timing. It records its
+/// own pid in `turn.pid` once its turn is open, and the child's in
+/// `late-child.pid` once it has started it, each written whole by a rename so a
+/// reader never meets half a pid.
+#[cfg(unix)]
+fn write_late_child_harness_standin(dir: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let standin = dir.join("late-child-harness");
+    let file = |name: &str| format!("{:?}", dir.join(name).display().to_string());
+    fs::write(
+        &standin,
+        format!(
+            "#!/bin/sh\nIFS= read -r prompt\n\
+             echo $$ > {turn}.tmp && mv {turn}.tmp {turn}\n\
+             while [ ! -f {go} ]; do sleep 0.05; done\n\
+             sleep 600 &\n\
+             echo $! > {child}.tmp && mv {child}.tmp {child}\n\
+             wait\n",
+            turn = file("turn.pid"),
+            go = file("turn.go"),
+            child = file("late-child.pid"),
+        ),
+    )
+    .expect("the late-child harness stand-in");
+    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o700))
+        .expect("chmod the late-child harness stand-in");
+    standin
+}
+
+#[cfg(unix)]
+fn recorded_pid(path: &Path) -> u32 {
+    eventually(&format!("{} to be recorded", path.display()), || {
+        path.is_file()
+    });
+    fs::read_to_string(path)
+        .expect("the recorded pid")
+        .trim()
+        .parse()
+        .expect("a pid")
+}
+
+/// Whether the process `pid` names has ended, counting a zombie as ended: a
+/// process whose parent the stop ended waits there only for `init` to reap it,
+/// and runs nothing.
+#[cfg(unix)]
+fn process_ended(pid: u32) -> bool {
+    if !process_is_live(pid) {
+        return true;
+    }
+    let state = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .expect("ps runs");
+    let state = String::from_utf8_lossy(&state.stdout);
+    state.trim().is_empty() || state.trim_start().starts_with('Z')
+}
+
+/// The connection by which the process `pid` holds at an engine ordering
+/// failpoint listening on `listener`, within [`DRIVER_PATIENCE`].
+///
+/// The failpoint announces the pid of the process meeting it, and any other
+/// process meeting it — one that inherited the same variable — is released at
+/// once, so only `pid` is held.
+#[cfg(unix)]
+fn held_by(listener: &std::net::TcpListener, pid: u32) -> std::net::TcpStream {
+    use std::io::{BufRead, Write};
+
+    listener
+        .set_nonblocking(true)
+        .expect("a non-blocking listener");
+    let deadline = std::time::Instant::now() + DRIVER_PATIENCE;
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream.set_nonblocking(false).expect("a blocking stream");
+                stream
+                    .set_read_timeout(Some(DRIVER_PATIENCE))
+                    .expect("a read timeout");
+                let mut announced = String::new();
+                std::io::BufReader::new(&stream)
+                    .read_line(&mut announced)
+                    .expect("the failpoint announces its pid");
+                if announced.trim() == pid.to_string() {
+                    return stream;
+                }
+                (&stream).write_all(b"g").expect("release another process");
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "pid {pid} never met the failpoint within {DRIVER_PATIENCE:?}"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => panic!("the failpoint's listener failed: {error}"),
+        }
+    }
+}
+
+/// End `pid` with `SIGKILL`, for a process this journey's own stand-in started
+/// and recorded and the stop under test left running.
+#[cfg(unix)]
+fn end_recorded(pid: u32) {
+    let Ok(raw) = i32::try_from(pid) else {
+        return;
+    };
+    // SAFETY: the pid is one this journey's stand-in recorded for a process it
+    // started; SIGKILL passes no memory to libc.
+    unsafe {
+        libc::kill(raw, libc::SIGKILL);
+    }
+}
+
+/// A stop through `POST /api/v2/runs/{run}/stop` that reports success leaves no
+/// process the run's node dispatch started running — including one the dispatch
+/// started while the stop was in progress, after the stop had listed the tree it
+/// was about to signal.
+///
+/// That is the race a stop under load meets: its listing is a moment old by the
+/// time its signals go out, and a dispatch that starts its next provider turn
+/// inside that moment starts a process no walk found, which is then handed to
+/// `init` and runs on spending what the stop was asked to stop. The stop runs in
+/// this server's process, through the engine it links, so the server is the one
+/// told where to hold.
+///
+/// A body the route refuses first leaves the dispatch running, so a stop that
+/// never reached the engine ends nothing.
+#[cfg(unix)]
+#[test]
+fn a_stop_that_reports_success_leaves_no_process_its_dispatch_started_running() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states: a real one bills a model call and cannot be told when to start its next process. What this journey is about — the pinned engine CLI's driver and dispatch, the route, and the stop the linked engine runs in the server — is all real, and the stand-in only starts a child when released and records its pid.
+    let standin = write_late_child_harness_standin(&dir);
+    // llmlint: ignore-end[e2e_not_mocked]
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_dispatch(&root, run, &dir, &graph);
+
+    // llmlint: ignore-block[tests_mirror_real_usage] which side of the stop's listing the dispatch starts its process on is the property, and no request can place it. The linked engine's own ordering failpoint only orders the real processes; the launch, the dispatch, the route, the stop and every outcome asserted are the real binaries' own.
+    let listed = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback listener");
+    let gate = listed.local_addr().expect("an address").to_string();
+    let state = dir.join("state");
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+            ("ONEPIPELINE_TEST_STOP_LISTED_GATE", &gate),
+        ],
+    );
+    let driver = serving.drive_fixture(run);
+    let _driver = RetainedDriver(driver);
+    let turn = recorded_pid(&dir.join("turn.pid"));
+
+    let stop = format!("/api/v2/runs/{run}/stop");
+    let refused = http::post(serving.address, &stop, r#"{"force": "yes"}"#);
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], json!("invalid_request"));
+    assert!(
+        !process_ended(turn) && !process_ended(driver),
+        "a stop the route refused ended the dispatch it never reached"
+    );
+
+    let late_child = dir.join("late-child.pid");
+    let stopped = std::thread::scope(|scope| {
+        let stopping =
+            scope.spawn(|| http::post_within(serving.address, &stop, "", DRIVER_PATIENCE));
+        // The stop has listed the tree and holds before signalling any of it.
+        let mut at_the_listing = held_by(&listed, serving.pid());
+        fs::write(dir.join("turn.go"), "go").expect("the turn is released");
+        eventually("the dispatch to start a process after the listing", || {
+            late_child.is_file()
+        });
+        std::io::Write::write_all(&mut at_the_listing, b"g").expect("the stop is released");
+        stopping.join().expect("the stop answers")
+    });
+    // llmlint: ignore-end[tests_mirror_real_usage]
+    let child = recorded_pid(&late_child);
+    let started = [driver, turn, child];
+    let left: Vec<u32> = started
+        .iter()
+        .copied()
+        .filter(|pid| !process_ended(*pid))
+        .collect();
+    // Read the instant the stop answered, and only then cleaned up, by the pids
+    // the journey started or its stand-in recorded: once their parents are gone
+    // nothing else on this host reaches them.
+    for pid in &left {
+        end_recorded(*pid);
+    }
+    assert_eq!(stopped.status, 200, "{}", stopped.body);
+    let stopped = stopped.json();
+    assert_enveloped(&stopped);
+    assert_eq!(stopped["stopped"], json!(true), "{stopped}");
+    assert_eq!(stopped["teardown"], json!("signalled"), "{stopped}");
+    assert!(
+        left.is_empty(),
+        "pids {left:?} of {started:?} — the driver, the dispatch's turn and the child that \
+         turn started after the stop listed the tree — were still running once the stop \
+         reported success"
+    );
+}
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
-// `an_adopted_dispatch_runs_under_the_harness_its_configs_parent_names` above, plus `git`,
-// which every checkout of this repository already has: the session is cut by the linked
-// `onevcs` over a scratch repository the journey seeds in its own workspace, and the
-// whole journey settles in seconds.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 #[cfg(unix)]
 #[test]
 fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() {
@@ -16971,7 +17323,7 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
     // llmlint: ignore[e2e_not_mocked] the harness program is the one process this
     // journey stands in for, on the terms `write_harness_standin` states: a real one
     // bills a model call and answers differently on each run. Everything the branch
-    // under test passes through — the adopt route, the retained driver, the engine's
+    // under test passes through — the pinned engine CLI, the retained driver, the engine's
     // executor and graph run, and the linked `onevcs` cutting the session over real
     // git — is real, and the stand-in only commits the work a real agent would leave.
     let standin = write_committing_harness_standin(&dir, &log);
@@ -17005,10 +17357,7 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
             (onevcs::branches::PREFIX_ENV, ""),
         ],
     );
-    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let pid = serving.drive_fixture(run);
     let driver = RetainedDriver(pid);
 
     // The adopted driver opened the node's session, the stand-in committed onto
@@ -17096,7 +17445,9 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// A harness stand-in for a dispatch on either side of the publication boundary:
-/// it records the argv it was given in a file of its own under `records`, and
+/// it records the argv it was given in `argv-<pid>.txt` under `records`, and the
+/// first line of its stdin — the stream-json prompt frame, where the turn was
+/// opened with control — beside it in `stdin-<pid>.txt`, and
 /// commits one file under [`fixture_run::EXPORT_SOURCE_DIRECTORY`] in the
 /// worktree it is run in — the one directory an export producer may change — in
 /// words that name nothing private.
@@ -17114,12 +17465,13 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
     fs::write(
         &standin,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" > {:?}/argv-$$.txt\n\
+            "#!/bin/sh\nIFS= read -r prompt\nprintf '%s\\n' \"$*\" > {records:?}/argv-$$.txt\n\
+             printf '%s' \"$prompt\" > {records:?}/stdin-$$.txt\n\
              mkdir -p {dir}\nprintf 'a generic example\\n' > {dir}/sample-$$.md\n\
              git add {dir} && git commit -q -m 'feat: add a generic example' >&2 || exit 1\n\
              printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
              \"result\":\"done\",\"session_id\":\"standin\"}}\\n'\n",
-            records.display().to_string(),
+            records = records.display().to_string(),
             dir = fixture_run::EXPORT_SOURCE_DIRECTORY,
         ),
     )
@@ -17131,11 +17483,54 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
     standin
 }
 
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
-// `an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders` above: the
-// compiled binary, `/bin/sh` stand-ins it writes itself and `git`, with each session cut,
-// kept and exported by the linked `onevcs` over two scratch repositories in the journey's
-// own workspace, settling in seconds.
+/// Every dispatch [`write_exporting_harness_standin`] recorded under `records`:
+/// each one's argv followed by the task it was handed, which the adapter writes
+/// as a stream-json `user` frame on stdin where the turn has control and as
+/// `-p`'s positional where oneharness refused it (see `write_harness_standin`) —
+/// so the text is read from whichever carried it.
+#[cfg(unix)]
+fn dispatched_tasks(records: &Path) -> Vec<String> {
+    fs::read_dir(records)
+        .expect("the dispatch records")
+        .map(|entry| entry.expect("a record").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("argv-"))
+        })
+        .map(|path| {
+            let argv = fs::read_to_string(&path).expect("an argv record");
+            let stdin_of = path.with_file_name(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .expect("a record name")
+                    .replacen("argv-", "stdin-", 1),
+            );
+            let stdin = fs::read_to_string(&stdin_of).expect("a stdin record");
+            let streamed = argv.contains("--input-format stream-json");
+            if stdin.is_empty() {
+                assert!(
+                    !streamed,
+                    "a stream-json turn was written no prompt frame: {argv}"
+                );
+                return argv;
+            }
+            assert!(
+                streamed,
+                "a prompt reached stdin outside a stream-json turn: {argv}"
+            );
+            let frame: Value = serde_json::from_str(&stdin).unwrap_or_else(|err| {
+                panic!("the prompt is not a stream-json frame: {err}: {stdin}")
+            });
+            let text = frame["message"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("the prompt frame carries no text: {frame}"));
+            format!("{argv}{text}")
+        })
+        .collect()
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 /// The publication boundary of the engine this binary links, driven through
 /// this server's routes over a plan spanning a private and a public repository
 /// of one synthetic owner.
@@ -17143,7 +17538,7 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
 /// A live edit relayed by the reply route that gives the public repository an
 /// ordinary dependency on the private node is refused in the engine's own
 /// neutral words, naming no node, and leaves the graph as it was. The adoption
-/// that follows dispatches both nodes through the driver this server retains:
+/// that follows dispatches both nodes through the pinned CLI driver:
 /// the private producer keeps its branch, the engine exports the one directory
 /// its export edge names into the public repository, and the public consumer
 /// starts from that export — told only the neutral context the engine's contract
@@ -17157,7 +17552,7 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
     let records = dir.join("dispatches");
     // llmlint: ignore[e2e_not_mocked] the harness program is the one process this
     // journey stands in for, on the terms `write_harness_standin` states. The reply
-    // and adopt routes, the retained driver, the engine's boundary, and the linked
+    // route, the pinned CLI driver, the engine's boundary, and the linked
     // `onevcs` keeping, exporting and publishing over real git are all real; the
     // stand-in only commits the work a real agent would leave.
     let standin = write_exporting_harness_standin(&dir, &records);
@@ -17241,10 +17636,7 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
         "a refused edit changed the graph"
     );
 
-    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let pid = serving.drive_fixture(run);
     let driver = RetainedDriver(pid);
     eventually("both nodes of the mixed run settled", || {
         let graph = &detail()["graph"];
@@ -17255,7 +17647,225 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
             )
         })
     });
-    let detail = detail();
+    assert_the_consumer_built_on_the_export_alone(&detail(), &repos, &records);
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+/// A **private coordinating** plan — a `local-md` project classified private,
+/// holding the whole graph and its export edge, whose tasks state no visibility
+/// of their own — launched by the released `start` this crate pins, attested
+/// through this server and adopted through the pinned CLI, keeps its public task
+/// public and hands it only the export.
+///
+/// The engine this binary links classifies each task by its own declaration and
+/// repositories, never by the project it is filed under. One that tightened every
+/// task of a private project to private read the consumer, in the public
+/// repository, as private — which no export consumer may be — and refused the
+/// launch, so a coordinating plan could never carry a public task at all. Here
+/// the served plan carries no classification for the consumer; a live edit relayed
+/// through this server's reply route is refused by the server's own linked engine
+/// with the coordination guidance that engine documents; and after the attest
+/// route releases the approval and the adoption drives the run, the export reached
+/// the public origin and nothing private did.
+#[cfg(unix)]
+#[test]
+fn an_adopted_private_coordination_run_keeps_its_public_task_public_and_hands_it_only_the_export() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let records = dir.join("dispatches");
+    // llmlint: ignore-block[e2e_not_mocked] two third-party boundaries are doubled here and nothing else: `seed_boundary`'s refusing `gh`, because asking a real forge about a synthetic owner is a third-party host call no journey may make, and the harness program, on the terms `write_harness_standin` states, because a real one bills a model provider. The store, the released `start`, the reply and attest routes, the pinned CLI driver, the engine's boundary, and the linked `onevcs` keeping, exporting and publishing over real git are all real; the stand-in only commits the work a real agent would leave.
+    let repos = scratch_repo::seed_boundary(&dir);
+    let standin = write_exporting_harness_standin(&dir, &records);
+    // llmlint: ignore-end[e2e_not_mocked]
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let producer = fixture_run::EXPORT_PRODUCER_NODE_ID;
+    let consumer = fixture_run::EXPORT_CONSUMER_NODE_ID;
+
+    fixture_run::configure_private_coordination_store(&dir);
+    let criteria = |task: &str| {
+        onetaskgraph_core::Body::plain(format!(
+            "{task}\n\n## Acceptance criteria\n\n- The work is done.\n"
+        ))
+    };
+    let approval = create_store_task(
+        &dir,
+        "Approve the example",
+        onetaskgraph_core::Body::plain("Approve the example."),
+        &[
+            ("onepipeline.id", json!(fixture_run::APPROVAL_NODE_ID)),
+            ("onepipeline.kind", json!("human")),
+        ],
+        &[],
+    );
+    let produced = create_store_task(
+        &dir,
+        "feat: generalize the example",
+        criteria("Write a generic example of the work."),
+        &[
+            ("onepipeline.id", json!(producer)),
+            ("onepipeline.repo", json!(repos.private.alias)),
+            ("onepipeline.publish", json!("preserve")),
+            ("onepipeline.persona", json!("engineer")),
+        ],
+        &[&approval],
+    );
+    create_store_task(
+        &dir,
+        "feat: add examples",
+        criteria("Build the public examples on the exported one."),
+        &[
+            ("onepipeline.id", json!(consumer)),
+            ("onepipeline.repo", json!(repos.public.alias)),
+            ("onepipeline.persona", json!("engineer")),
+        ],
+        &[&produced],
+    );
+
+    let state = dir.join("state");
+    let onevcs_home = dir.join(crate::serving::ONEVCS_HOME_DIR);
+    let environment = [
+        ("ONEPIPELINE_PROJECT_DIR", dir.display().to_string()),
+        ("XDG_STATE_HOME", state.display().to_string()),
+        (
+            scratch_repo::GIT_CONFIG_ENV,
+            repos.private.gitconfig.display().to_string(),
+        ),
+        (onevcs::branches::PREFIX_ENV, String::new()),
+        (
+            scratch_repo::GH_ENV,
+            repos.refusing_gh.display().to_string(),
+        ),
+    ];
+    let environment: Vec<(&str, &str)> = environment
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    let onevcs_home = onevcs_home.display().to_string();
+    let launching: Vec<(&str, &str)> = environment
+        .iter()
+        .copied()
+        .chain([(crate::serving::ONEVCS_HOME_ENV, onevcs_home.as_str())])
+        .collect();
+    let project = format!(
+        "{}:{}",
+        fixture_run::LOCAL_MD_SOURCE,
+        fixture_run::LOCAL_MD_PROJECT
+    );
+    let run = started_and_let_go(&provisioned_onepipeline_with_env(
+        &root,
+        &dir,
+        &graph,
+        &launching,
+        &["start", &project, "--detach"],
+    ));
+
+    let serving = Serving::start_in_as_with_env(workspace, fixture_run::SESSION, &environment);
+    let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    // The plan the server serves is the one the store's private project launched,
+    // and its consumer carries no classification: nothing made it private.
+    let launched = detail();
+    let tasks = launched["graph"]["plan"]["tasks"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the plan's tasks: {launched}"));
+    let task = |id: &str| -> &Value {
+        tasks
+            .iter()
+            .find(|task| task["id"] == json!(id))
+            .unwrap_or_else(|| panic!("the plan holds no {id:?}: {launched}"))
+    };
+    assert!(
+        task(consumer).get("classification").is_none(),
+        "the private project made its public task private: {}",
+        task(consumer)
+    );
+
+    // The supervision this server performs is its own linked engine's: a live edit
+    // giving a public task an ordinary dependency on the private producer is
+    // refused before anything is applied, naming nothing private, and the refusal
+    // carries the coordination this engine documents — one private coordinating
+    // plan whose tasks each keep their own visibility — rather than an older
+    // engine's guidance, which said nothing of how such a plan is coordinated.
+    let ordinary = json!({"version": 3, "commands": [{"op": "add", "node": {
+        "id": "outer",
+        "repo": repos.public.alias,
+        "persona": "engineer",
+        "title": "feat: ship outer",
+        "task": "Ship outer.\n\n## Acceptance criteria\n\n- outer is published.\n",
+        "deps": [producer],
+    }}]});
+    let refused = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/channel/reply"),
+        &ordinary.to_string(),
+    );
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    let refused = refused.json();
+    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
+    let said = refused["error"]["message"]
+        .as_str()
+        .expect("the refusal's words");
+    assert!(
+        said.contains(
+            "inside one private coordinating plan whose tasks each keep their own visibility"
+        ),
+        "the refusal carries no coordination guidance: {said}"
+    );
+    for named in [
+        "outer",
+        producer,
+        consumer,
+        scratch_repo::PRIVATE_ALIAS,
+        fixture_run::EXPORT_PLAN_NAME,
+    ] {
+        assert!(!said.contains(named), "the refusal names {named:?}: {said}");
+    }
+    assert_eq!(
+        detail()["graph"]["plan"]["tasks"],
+        launched["graph"]["plan"]["tasks"],
+        "a refused edit changed the graph"
+    );
+
+    let attested = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/attest"),
+        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
+    );
+    assert_eq!(attested.status, 200, "{}", attested.body);
+    let driver = RetainedDriver(serving.drive_fixture(&run));
+    eventually("both nodes of the coordination run settled", || {
+        let graph = &detail()["graph"];
+        [producer, consumer].iter().all(|node| {
+            matches!(
+                graph["node_status"][node].as_str(),
+                Some("done" | "failed" | "skipped")
+            )
+        })
+    });
+    assert_the_consumer_built_on_the_export_alone(&detail(), &repos, &records);
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// What a settled mixed run of [`fixture_run::EXPORT_PRODUCER_NODE_ID`] and
+/// [`fixture_run::EXPORT_CONSUMER_NODE_ID`] owes, read off its served `detail`,
+/// the two repositories' origins and the dispatches recorded under `records`: the
+/// producer kept a neutral `export/` branch, the consumer settled `done` on a
+/// neutral `public/` one, the public origin holds the exported directory and none
+/// of the private history, and the consumer was told only the context the engine
+/// documents for its side.
+#[cfg(unix)]
+fn assert_the_consumer_built_on_the_export_alone(
+    detail: &Value,
+    repos: &scratch_repo::BoundaryRepos,
+    records: &Path,
+) {
+    let producer = fixture_run::EXPORT_PRODUCER_NODE_ID;
+    let consumer = fixture_run::EXPORT_CONSUMER_NODE_ID;
     let results = &detail["graph"]["node_results"];
     assert_eq!(
         results[producer]["outcome"],
@@ -17329,10 +17939,7 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
     // What each side was told: the consumer's dispatch carries exactly the context the
     // engine's contract documents for an export's consumer, and nothing of the private
     // side; the producer is told it is the private side of a mixed plan.
-    let dispatched: Vec<String> = fs::read_dir(&records)
-        .expect("the dispatch records")
-        .map(|entry| fs::read_to_string(entry.expect("a record").path()).expect("a record"))
-        .collect();
+    let dispatched = dispatched_tasks(records);
     assert_eq!(dispatched.len(), 2, "{dispatched:#?}");
     let told = |task: &str| -> &String {
         dispatched
@@ -17378,17 +17985,14 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
         "onevcs asked no host through {}: {asked:?}",
         scratch_repo::GH_ENV
     );
-    drop(driver);
-    serving.stop_on(Stop::Terminate);
 }
-// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// The plan writer a stacked-preserve journey adopts a run of.
 #[cfg(unix)]
 type WriteStacked = fn(&Path, &str, &Path, &Path, &str, &str) -> PathBuf;
 
 /// Seed a scratch repository, write the stacked-preserve run `write` writes
-/// against it, adopt that run through the server's own adopt route, and wait for
+/// against it, drive that run through the pinned engine CLI, and wait for
 /// both its kept nodes to settle.
 ///
 /// What comes back is the serving server, the repository, the run's served
@@ -17402,8 +18006,8 @@ fn adopt_stacked_preserve(
     let repo = scratch_repo::seed(&dir);
     let log = dir.join("harness.log");
     // llmlint: ignore[e2e_not_mocked] the harness program is the one process these
-    // journeys stand in for, on the terms `write_harness_standin` states. The adopt
-    // route, the retained driver, the engine's placement and closeout, and the linked
+    // journeys stand in for, on the terms `write_harness_standin` states. The pinned
+    // CLI driver, the engine's placement and closeout, and the linked
     // `onevcs` cutting and keeping each session over real git are all real; the
     // stand-in only commits the work a real agent would leave.
     let standin = write_committing_harness_standin(&dir, &log);
@@ -17433,10 +18037,7 @@ fn adopt_stacked_preserve(
             (onevcs::branches::PREFIX_ENV, ""),
         ],
     );
-    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let pid = serving.drive_fixture(run);
     let driver = RetainedDriver(pid);
 
     let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
@@ -17643,10 +18244,7 @@ fn a_dispatch_whose_config_names_a_parent_that_is_not_there_settles_the_node() {
         fixture_run::SESSION,
         &[("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string())],
     );
-    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    let pid = serving.drive_fixture(run);
     let driver = RetainedDriver(pid);
 
     let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
@@ -17709,7 +18307,8 @@ fn write_config_for(dir: &Path, name: &str, log: &Path) -> PathBuf {
 // oneharness history is under the journey's own state directory.
 #[cfg(unix)]
 #[test]
-fn graph_override_edits_relayed_by_the_reply_route_decide_the_adopted_runs_next_dispatches() {
+fn graph_override_edits_relayed_by_the_reply_route_are_served_and_invalid_edits_leave_them_unchanged(
+) {
     let (workspace, root) = fixture_run::workspace();
     let dir = workspace.path().to_path_buf();
     let log = dir.join("harness.log");
@@ -17857,229 +18456,9 @@ fn graph_override_edits_relayed_by_the_reply_route_decide_the_adopted_runs_next_
         edited["plan"]["tasks"],
         "a refused edit left the lists as they were"
     );
-    assert!(!log.exists(), "nothing dispatched before the adoption");
-
-    // Adopted: the driver this server retains is the engine this binary links,
-    // and it replays the journalled edits on the dispatches that follow.
-    let adopted = http::post(serving.address, &format!("/api/v2/runs/{run}/adopt"), "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid =
-        u32::try_from(adopted.json()["pid"].as_u64().expect("the driver's pid")).expect("a pid");
-    let driver = RetainedDriver(pid);
-    let ran = || fs::read_to_string(&log).unwrap_or_default();
-    // Waited on by task rather than by line: a task carries its criteria section
-    // on lines of its own, so one dispatch's argv spans several lines of the log.
-    eventually("both nodes dispatched", || {
-        let ran = ran();
-        ran.contains("Dispatch under the node's own override.")
-            && ran.contains("Dispatch under the run-wide override.")
-    });
-    let ran = ran();
-    let line_of = |task: &str| {
-        ran.lines()
-            .find(|line| line.contains(task))
-            .unwrap_or_else(|| panic!("no dispatch was given {task:?}: {ran}"))
-            .to_owned()
-    };
-    // The node's own list composes after the run-wide one, so its entry wins.
-    assert!(
-        line_of("Dispatch under the node's own override.").contains("harness-own"),
-        "{ran}"
-    );
-    // The cleared node composes the run-wide list alone.
-    assert!(
-        line_of("Dispatch under the run-wide override.").contains("harness-run-wide"),
-        "{ran}"
-    );
-    for superseded in ["harness-stale", "harness-planned"] {
-        assert!(
-            !ran.contains(superseded),
-            "a replaced list reached a dispatch: {ran}"
-        );
-    }
-    drop(driver);
-    serving.stop_on(Stop::Terminate);
+    assert!(!log.exists(), "reply edits do not drive the run");
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
-
-#[test]
-fn a_watch_streams_frames_and_makes_the_server_the_runs_watcher() {
-    // Acting as the live run's owner, because `unwatched` answers for the runs
-    // the acting session owns and no other — and over a run whose summary
-    // document is current, because that verb decides settlement off the
-    // document alone and folds nothing, exactly as the CLI does.
-    let serving = Serving::start_as(
-        |root| {
-            fixture_run::write_live(root, fixture_run::RUN_ID);
-            fixture_run::summarize(root, fixture_run::RUN_ID);
-        },
-        fixture_run::LIVE_SESSION,
-    );
-    let run = fixture_run::RUN_ID;
-    let watch = format!("/api/v2/runs/{run}/watch");
-    let unwatched = |address| http::get(address, "/api/v2/unwatched").json();
-
-    // Nothing watches the live run: reported, by the server and by the CLI.
-    let before = unwatched(serving.address);
-    assert_enveloped(&before);
-    assert_eq!(before["reported"][0]["run"], json!(run), "{before}");
-    assert!(before["reported"][0]["why_not_watched"]
-        .as_str()
-        .is_some_and(|why| !why.is_empty()));
-    let said = sibling::run(
-        &serving.runs_root(),
-        Some(fixture_run::LIVE_SESSION),
-        &["unwatched"],
-    );
-    assert!(
-        String::from_utf8_lossy(&said.stdout).contains(run),
-        "the CLI reports the run too: {}",
-        String::from_utf8_lossy(&said.stderr)
-    );
-
-    // Held: the server is the watcher. The frames come as they happen — the
-    // run's meaningful events first, then a heartbeat every tick.
-    let mut stream = http::stream(
-        serving.address,
-        &format!("{watch}?timeout=none&tick=1&until=settled"),
-        None,
-    );
-    assert_eq!(stream.status, 200);
-    let first = stream.next_frame().expect("a frame");
-    assert_eq!(first.event, "event", "{first:?}");
-    assert_eq!(first.json()["watch"], json!("event"));
-    let tick = std::iter::from_fn(|| stream.next_frame())
-        .find(|frame| frame.event == "tick")
-        .expect("a heartbeat");
-    assert_eq!(tick.json()["run_id"], json!(run), "{tick:?}");
-    let during = unwatched(serving.address);
-    assert_eq!(during["reported"], json!([]), "{during}");
-    let said = sibling::run(
-        &serving.runs_root(),
-        Some(fixture_run::LIVE_SESSION),
-        &["unwatched"],
-    );
-    assert!(
-        !String::from_utf8_lossy(&said.stdout).contains(run),
-        "the CLI reads the run as watched while the stream is held: {}",
-        String::from_utf8_lossy(&said.stdout)
-    );
-
-    // Closed by the client: the record goes with it.
-    drop(stream);
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        let after = unwatched(serving.address);
-        if after["reported"][0]["run"] == json!(run) {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the watcher record outlived the stream: {after}"
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    }
-
-    // A watch of no seconds reads the run once and returns, ending the stream
-    // on the `returned` frame.
-    let mut once = http::stream(serving.address, &format!("{watch}?timeout=0"), None);
-    let frames: Vec<http::Frame> = std::iter::from_fn(|| once.next_frame()).collect();
-    let last = frames.last().expect("frames");
-    assert_eq!(last.event, "returned", "{frames:?}");
-    let returned = last.json();
-    assert_eq!(returned["condition"], json!("elapsed"), "{returned}");
-    assert!(returned["cursor"]
-        .as_str()
-        .is_some_and(|c| c.starts_with("1:")));
-    // And resumed from that cursor, nothing already reported is reported again.
-    let cursor = returned["cursor"].as_str().expect("a cursor").to_owned();
-    let mut resumed = http::stream(
-        serving.address,
-        &format!("{watch}?timeout=0&cursor={cursor}"),
-        None,
-    );
-    let frames: Vec<http::Frame> = std::iter::from_fn(|| resumed.next_frame()).collect();
-    assert!(
-        frames.iter().all(|frame| frame.event != "event"),
-        "{frames:?}"
-    );
-
-    // Shaped through a filter, as the CLI's `--filter` shapes a watch: a spec
-    // that excludes the settlements reports no event of them, and the stream
-    // still returns.
-    let mut shaped = http::stream(
-        serving.address,
-        &format!(
-            "{watch}?timeout=0&filter={}",
-            "%7B%22exclude%22%3A%5B%7B%22kind%22%3A%22node-settled%22%7D%5D%7D"
-        ),
-        None,
-    );
-    let frames: Vec<http::Frame> = std::iter::from_fn(|| shaped.next_frame()).collect();
-    let settlements = |frames: &[http::Frame]| {
-        frames
-            .iter()
-            .filter(|frame| frame.event == "event")
-            .filter(|frame| frame.json()["event"]["kind"] == json!("node-settled"))
-            .count()
-    };
-    assert_eq!(
-        settlements(&frames),
-        0,
-        "the excluded settlements were reported: {frames:?}"
-    );
-    assert!(
-        frames.iter().any(|frame| frame.event == "event"),
-        "the events the spec admits are still reported: {frames:?}"
-    );
-    assert_eq!(
-        frames.last().map(|frame| frame.event.as_str()),
-        Some("returned")
-    );
-    let mut unshaped = http::stream(serving.address, &format!("{watch}?timeout=0"), None);
-    let frames: Vec<http::Frame> = std::iter::from_fn(|| unshaped.next_frame()).collect();
-    assert!(
-        settlements(&frames) > 0,
-        "unshaped, the settlements are reported: {frames:?}"
-    );
-
-    // Several conditions at once, comma-separated as a query string spells a
-    // repeatable flag: the wait returns on the first of them that fires and
-    // says which one did.
-    let mut several = http::stream(
-        serving.address,
-        &format!("{watch}?timeout=0&until=settled,node-settled"),
-        None,
-    );
-    let returned = std::iter::from_fn(|| several.next_frame())
-        .last()
-        .expect("a watch of no seconds returns")
-        .json();
-    assert!(
-        matches!(
-            returned["condition"].as_str(),
-            Some("settled" | "node-settled" | "elapsed")
-        ),
-        "{returned}"
-    );
-
-    // The refusals: a condition the verb does not return on and a wait that is
-    // not one, at the boundary; a cursor this run cannot place and a node it
-    // does not hold, in the engine's words, before the stream opens.
-    for (query, code) in [
-        ("until=whenever", "invalid_request"),
-        ("until=settled,whenever", "invalid_request"),
-        ("until=", "invalid_request"),
-        ("timeout=soon", "invalid_request"),
-        ("tick=often", "invalid_request"),
-        ("cursor=1:elsewhere:5", "refused"),
-        ("until=node=nope", "refused"),
-    ] {
-        let refused = http::get(serving.address, &format!("{watch}?{query}"));
-        assert_eq!(refused.status, 422, "{query}: {}", refused.body);
-        assert_eq!(refused.json()["error"]["code"], json!(code), "{query}");
-    }
-}
 
 #[test]
 fn an_owed_run_that_converged_with_a_failure_is_unwatched_until_it_is_closed() {
@@ -18166,15 +18545,36 @@ fn unwatched_asks_under_the_wake_budget_the_servers_environment_sets() {
         &budget,
     );
     let run = fixture_run::RUN_ID;
-    let mut stream = http::stream(
-        serving.address,
-        &format!("/api/v2/runs/{run}/watch?timeout=none&tick=1&until=settled"),
-        None,
+    struct Watcher(std::process::Child);
+    impl Drop for Watcher {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut watcher = Watcher(
+        std::process::Command::new(sibling::binary())
+            .args([
+                "watch",
+                run,
+                "--timeout",
+                "none",
+                "--tick-interval",
+                "1",
+                "--until",
+                "settled",
+            ])
+            .env(onepipeline_ui::store::RUNS_DIR_ENV, serving.runs_root())
+            .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::LIVE_SESSION)
+            .env(onepipeline::cli::WAKE_BUDGET_ENV, "60")
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("the pinned engine starts the watch"),
     );
-    assert_eq!(stream.status, 200);
-    std::iter::from_fn(|| stream.next_frame())
-        .find(|frame| frame.event == "tick")
-        .expect("a heartbeat, so the watch is held");
+    let mut reader = std::io::BufReader::new(watcher.0.stdout.take().expect("watch stdout"));
+    let mut frame = String::new();
+    std::io::BufRead::read_line(&mut reader, &mut frame).expect("a frame proves the watch is held");
+    assert!(!frame.is_empty());
 
     let unwatched = http::get(serving.address, "/api/v2/unwatched").json();
     assert_enveloped(&unwatched);
@@ -18196,7 +18596,7 @@ fn unwatched_asks_under_the_wake_budget_the_servers_environment_sets() {
         String::from_utf8_lossy(&said.stdout),
         String::from_utf8_lossy(&said.stderr)
     );
-    drop(stream);
+    drop(watcher);
     drop(serving);
 
     // A budget the engine refuses is the server's misconfiguration, served as
@@ -18229,6 +18629,9 @@ fn host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone() {
         .expect("the old driver starts");
     let ended_pid = ended_driver.id();
     assert!(ended_driver.wait().expect("the old driver ends").success());
+    // The stop's teardown as its record said it, written before anything reads
+    // the run: a journal is append-only, and a reader resumes from what it
+    // already folded of it rather than reading that history again.
     let set_teardown = |dir: &Path, teardown: &str| {
         let journal = dir.join("events.jsonl");
         let text = fs::read_to_string(&journal).expect("the stopped run's journal");
@@ -18242,25 +18645,31 @@ fn host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone() {
         let lines: Vec<String> = records.iter().map(ToString::to_string).collect();
         fs::write(journal, format!("{}\n", lines.join("\n"))).expect("record the teardown");
     };
-    let serving = Serving::start(|root| {
-        fixture_run::write_stopped_mid_flight(root, fixture_run::RUN_ID);
-        fixture_run::dispatching_on_this_host(
-            root,
-            fixture_run::RUN_ID,
-            fixture_run::NODE_ID,
-            worker.0,
-            &worker.started(),
-        );
-        let ended = fixture_run::write_stopped_mid_flight(root, fixture_run::STOPPED_RUN_ID);
-        fixture_run::driven_on_this_host(root, fixture_run::STOPPED_RUN_ID, ended_pid);
-        set_teardown(&ended, "signalled");
-        assert!(!ended.join("dispatches").exists());
-    });
-    let response = http::get(serving.address, "/api/v2/host");
-    assert_eq!(response.status, 200, "{}", response.body);
-    let host = response.json();
-    assert_enveloped(&host);
-    let text = host["rendered"].as_str().expect("the host rendering");
+    let host_with = |teardown: &str| {
+        let serving = Serving::start(|root| {
+            fixture_run::write_stopped_mid_flight(root, fixture_run::RUN_ID);
+            fixture_run::dispatching_on_this_host(
+                root,
+                fixture_run::RUN_ID,
+                fixture_run::NODE_ID,
+                worker.0,
+                &worker.started(),
+            );
+            let ended = fixture_run::write_stopped_mid_flight(root, fixture_run::STOPPED_RUN_ID);
+            fixture_run::driven_on_this_host(root, fixture_run::STOPPED_RUN_ID, ended_pid);
+            set_teardown(&ended, teardown);
+            assert!(!ended.join("dispatches").exists());
+        });
+        let response = http::get(serving.address, "/api/v2/host");
+        assert_eq!(response.status, 200, "{}", response.body);
+        let host = response.json();
+        assert_enveloped(&host);
+        host["rendered"]
+            .as_str()
+            .expect("the host rendering")
+            .to_owned()
+    };
+    let text = host_with("signalled");
     assert!(text.contains(fixture_run::RUN_ID), "{text}");
     assert!(text.contains(fixture_run::NODE_ID), "{text}");
     assert!(text.contains("proven gone"), "{text}");
@@ -18268,14 +18677,7 @@ fn host_reports_a_live_dispatch_and_proves_a_signalled_pre_registry_run_gone() {
     assert!(!text.contains("UNPROVEN"), "{text}");
 
     // A teardown that could not signal its workers leaves them unproven.
-    set_teardown(
-        &serving.runs_root().join(fixture_run::STOPPED_RUN_ID),
-        "identity-declined",
-    );
-    let response = http::get(serving.address, "/api/v2/host");
-    assert_eq!(response.status, 200, "{}", response.body);
-    let host = response.json();
-    let text = host["rendered"].as_str().expect("the host rendering");
+    let text = host_with("identity-declined");
     assert!(text.contains("UNPROVEN"), "{text}");
     assert!(text.contains(fixture_run::STOPPED_RUN_ID), "{text}");
 }
@@ -18408,12 +18810,8 @@ fn an_invalidation_names_the_project_group_that_moved() {
     assert_eq!(data["project"], json!(fixture_run::PLAN_PROJECT), "{data}");
 }
 
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] This journey belongs
-// to the e2e tier that already owns server plan reads and adoption. It uses that tier's
-// existing CLI and server prerequisites, with no extra build, provisioning or paid
-// dependency; the only additional process is a loopback board. Both cache modes together
-// took 17.8 seconds under nextest, so there is no separate expensive dependency to isolate.
-/// The browser's retained engine reads and settles a remotely stored plan with
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+/// The pinned CLI engine reads and settles a remotely stored plan with
 /// caching enabled, using the same source configuration as the launching CLI,
 /// and the server's reads of that plan's project answer the same with the cache
 /// on or off.
@@ -18443,12 +18841,21 @@ fn strip_clock(value: &mut Value) {
         Value::Object(fields) => {
             for clock in [
                 "observed_at",
+                "started_at",
+                "wall_ms",
                 "last_progress_at",
                 "last_write_at",
                 "timing",
                 "node_work_ms",
             ] {
                 fields.remove(clock);
+            }
+            if let Some(buckets) = fields.get_mut("buckets").and_then(Value::as_array_mut) {
+                for bucket in buckets {
+                    if let Some(bucket) = bucket.as_object_mut() {
+                        bucket.remove("ms");
+                    }
+                }
             }
             fields.values_mut().for_each(strip_clock);
         }
@@ -18621,9 +19028,6 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
     assert_eq!(grouped.json()["project"], json!("board:plan"));
 
     // A mistyped run id is refused before anything is adopted.
-    let missing = http::post(serving.address, "/api/v2/runs/missing-approval/adopt", "");
-    assert_eq!(missing.status, 404, "{}", missing.body);
-    assert_eq!(missing.json()["error"]["code"], json!("run_not_found"));
 
     let settled = http::post(serving.address, &format!("{detail_path}/channel/reply"),
         &json!({"version": 2, "commands": [{"op": "settle", "id": "approve", "outcome": "done", "evidence": "Approved in the browser"}]}).to_string());
@@ -18632,9 +19036,7 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
         .as_array()
         .expect("requests")
         .len();
-    let adopted = http::post(serving.address, &format!("{detail_path}/adopt"), "");
-    assert_eq!(adopted.status, 200, "{}", adopted.body);
-    let pid = u32::try_from(adopted.json()["pid"].as_u64().expect("driver pid")).expect("pid");
+    let pid = serving.drive_fixture(run);
     let driver = RetainedDriver(pid);
     eventually("the adopted engine settled the remote plan", || {
         http::get(serving.address, &detail_path).json()["run"]["state"] == json!("settled")
@@ -18730,6 +19132,675 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
     // llmlint: ignore-end[tests_mirror_real_usage]
     serving.stop_on(Stop::Terminate);
     reads
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// The `Status` options the closure journeys' boards carry: the shipped
+/// terminal names, `Done` and `Cancelled`, which the linked store names a
+/// closed item after when its card contradicts its closure.
+#[cfg(unix)]
+const CLOSURE_BOARD_OPTIONS: [&str; 6] = [
+    "Todo",
+    "Queued",
+    "In Progress",
+    "Needs Attention",
+    "Done",
+    "Cancelled",
+];
+
+/// One seeded issue of a closure journey's board, in the shape
+/// `github_board.py` documents.
+#[cfg(unix)]
+fn seeded_issue(
+    number: u64,
+    title: &str,
+    metadata: Value,
+    (status, state, reason): (&str, &str, Option<&str>),
+    parent: Option<&str>,
+) -> Value {
+    let content = if parent.is_some() {
+        format!("## What\nDo {title}.\n\n## Why\nSo the run can settle.\n\n## Acceptance criteria\n- {title} is done.")
+    } else {
+        String::new()
+    };
+    json!({
+        "number": number,
+        "title": title,
+        "content": content,
+        "metadata": metadata,
+        "status": status,
+        "state": state,
+        "reason": reason,
+        "parent": parent,
+    })
+}
+
+/// The `onetaskgraph.yaml` declaring one `github-projects` source, `board`, on
+/// `board`'s loopback endpoint and nothing else: no setting names a closure of
+/// any kind. `extra` is appended under `sources:` as it is written.
+#[cfg(unix)]
+fn closure_board_config(board: &crate::github_board::GitHubBoard, extra: &str) -> String {
+    format!(
+        "sources:\n  board:\n    plugin: github-projects\n    config:\n      owner: generic\n      \
+         project_number: 1\n      token_env: CACHE_BOARD_TOKEN\n      endpoint: {}/graphql\n      \
+         status_mapping:\n        todo: Todo\n        queued: Queued\n        in-progress: In Progress\n        \
+         unknown: Needs Attention\n        done: Done\n        cancelled: Cancelled\n{extra}",
+        board.url,
+    )
+}
+
+/// The engine's variables a journey launching with the provisioned CLI must not
+/// inherit from the host running it.
+#[cfg(unix)]
+fn inherited_engine_variables() -> Vec<String> {
+    std::env::vars()
+        .map(|(name, _)| name)
+        .filter(|name| name.starts_with("ONETASKGRAPH_") || name.starts_with("ONEPIPELINE_"))
+        .collect()
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+/// A run driven by the pinned CLI reads its remote plan through the linked
+/// store, which names a closed item's status after its
+/// closure: a follow-up an earlier run settled `done`, whose issue closed as
+/// completed while its card still read `Todo`, is at `Done` on the board once
+/// the adopted engine settles, with its issue still closed as completed — and
+/// the open task beside it is served and settled exactly as every other remote
+/// plan's is.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_moves_the_card_of_its_plans_completed_task_to_done() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    // Start validates the dispatch graph even though this human-only plan never dispatches it.
+    fs::create_dir_all(dir.join("graphs")).expect("graph directory");
+    fs::write(dir.join("graphs/node-scope.yaml"),
+        "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: oneharness\n    oneharness_config: oneharness.toml\n")
+        .expect("the launch graph");
+    fs::write(
+        dir.join("graphs/oneharness.toml"),
+        "run_mode = \"fallback\"\nharnesses = [\"claude-code\"]\n",
+    )
+    .expect("the unused dispatch harness configuration");
+    let run = "closed-followups";
+    let human = |id: &str| json!({"onepipeline.id": id, "onepipeline.kind": "human", "onetaskgraph.repositories": []});
+    // The follow-up an earlier run settled: the engine continues a node from its
+    // stored settlement, never from its card.
+    let mut shipped = human("shipped");
+    shipped["onepipeline.settlement"] = json!({"status": "done", "outcome": "settled-from-evidence", "detail": "Shipped by its follow-up"});
+    let board = crate::github_board::GitHubBoard::start_seeded(
+        &dir,
+        &json!({
+            "repository": "generic/approval",
+            "options": CLOSURE_BOARD_OPTIONS,
+            "issues": {
+                "plan": seeded_issue(1, run, json!({
+                    "onepipeline.schema_version": 3,
+                    "onepipeline.concurrency": 1,
+                    "onepipeline.goal": {"text": "Keep people's board edits"},
+                }), ("Todo", "OPEN", None), None),
+                "shipped": seeded_issue(2, "shipped", shipped,
+                    ("Todo", "CLOSED", Some("COMPLETED")), Some("plan")),
+                "approve": seeded_issue(4, "approve", human("approve"),
+                    ("Todo", "OPEN", None), Some("plan")),
+            },
+        }),
+    );
+    fs::write(
+        dir.join("onetaskgraph.yaml"),
+        closure_board_config(&board, ""),
+    )
+    .expect("the store configuration");
+
+    let inherited = inherited_engine_variables();
+    let mut launch = std::process::Command::new(sibling::binary());
+    for name in &inherited {
+        launch.env_remove(name);
+    }
+    let launched = launch
+        .args(["start", "board:plan"])
+        .current_dir(&dir)
+        .env(onepipeline_ui::store::RUNS_DIR_ENV, &root)
+        .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+        .env("CACHE_BOARD_TOKEN", &board.token)
+        .output()
+        .expect("launch the plan");
+    assert!(
+        launched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&launched.stderr)
+    );
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &[("CACHE_BOARD_TOKEN", board.token.as_str())],
+        &inherited,
+    );
+    let detail_path = format!("/api/v2/runs/{run}");
+
+    // The open task, with the fields and values every remote plan's is served with.
+    let detail = http::get(serving.address, &detail_path);
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    let detail = detail.json();
+    let tasks = detail["graph"]["plan"]["tasks"]
+        .as_array()
+        .expect("the source tasks");
+    let approve = tasks
+        .iter()
+        .find(|task| task["id"] == json!("approve"))
+        .unwrap_or_else(|| panic!("the open task is not served: {detail}"));
+    assert_eq!(approve["task"], json!("## What\nDo approve.\n\n## Why\nSo the run can settle.\n\n## Acceptance criteria\n- approve is done."));
+    assert_eq!(
+        detail["graph"]["node_status"]["approve"],
+        json!("waiting"),
+        "{detail}"
+    );
+    assert_eq!(
+        detail["graph"]["node_status"]["shipped"],
+        json!("done"),
+        "{detail}"
+    );
+    let grouped = http::get(serving.address, "/api/v2/projects/board:plan");
+    assert_eq!(grouped.status, 200, "{}", grouped.body);
+    assert_eq!(grouped.json()["project"], json!("board:plan"));
+
+    let settled = http::post(serving.address, &format!("{detail_path}/channel/reply"),
+        &json!({"version": 2, "commands": [{"op": "settle", "id": "approve", "outcome": "done", "evidence": "Approved in the browser"}]}).to_string());
+    assert_eq!(settled.status, 200, "{}", settled.body);
+    let pid = serving.drive_fixture(run);
+    let driver = RetainedDriver(pid);
+    eventually("the adopted engine settled the plan", || {
+        http::get(serving.address, &detail_path).json()["run"]["state"] == json!("settled")
+    });
+    eventually("the adopted engine let go", || !process_is_live(pid));
+    drop(driver);
+
+    let state = board.state();
+    let held = |name: &str| {
+        let issue = &state["issues"][name];
+        (
+            issue["status"].clone(),
+            issue["state"].clone(),
+            issue["reason"].clone(),
+        )
+    };
+    // The completed follow-up's card follows its closure, and its issue keeps it.
+    assert_eq!(
+        held("shipped"),
+        (json!("Done"), json!("CLOSED"), json!("COMPLETED")),
+        "{state}"
+    );
+    // The open task is where its settlement put it.
+    assert_eq!(
+        held("approve"),
+        (json!("Done"), json!("CLOSED"), json!("COMPLETED")),
+        "{state}"
+    );
+    let body = state["issues"]["approve"]["body"]
+        .as_str()
+        .expect("projected body");
+    let metadata: Value = serde_json::from_str(
+        body.split("<!-- onetaskgraph.metadata\n")
+            .nth(1)
+            .expect("metadata slot")
+            .split("\n-->")
+            .next()
+            .expect("slot JSON"),
+    )
+    .expect("metadata JSON");
+    assert_eq!(
+        metadata["onepipeline.settlement"],
+        json!({"status": "done", "outcome": "settled-from-evidence", "detail": "Approved in the browser"}),
+        "{metadata}"
+    );
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// A harness stand-in whose first dispatch is still running when the run is
+/// put down: the first time it is run it records that it was and waits, never
+/// committing, so the node cannot land; every later run commits one file in
+/// the worktree it is run in and answers as [`write_harness_standin`]'s does.
+///
+/// Still the one process a journey stands in for, on
+/// [`write_committing_harness_standin`]'s terms. The wait is bounded, so a
+/// dispatch nothing ends still exits on its own.
+#[cfg(unix)]
+fn write_held_once_harness_standin(dir: &Path, log: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let standin = dir.join("held-once-harness");
+    let held = dir.join("held-once");
+    fs::write(
+        &standin,
+        format!(
+            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {log:?}\n\
+             if [ ! -e {held:?} ]; then : > {held:?}; exec sleep 120; fi\n\
+             printf 'the dispatch wrote this\\n' > work-$$.txt\n\
+             git add work-$$.txt && git commit -q -m 'feat: ship the service' >&2 || exit 1\n\
+             printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
+             \"result\":\"done\",\"session_id\":\"standin\"}}\\n'\n",
+            log = log.display().to_string(),
+            held = held.display().to_string(),
+        ),
+    )
+    .expect("the held-once harness stand-in");
+    // Owner-only: the one process that runs it is a dispatch this journey's own
+    // launch or server starts, as this user.
+    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o700))
+        .expect("chmod the held-once harness stand-in");
+    standin
+}
+
+/// How long a dispatch's run holds a redirecting interrupt for the turn it
+/// aborted to end, before taking the redirect back and answering: oneharness's
+/// `REDIRECT_DELIVERY_DEADLINE`, a deliberate bound that crate keeps private, so
+/// mirrored here and held to the linked crate's declaration by
+/// [`the_mirrored_redirect_delivery_deadline_is_the_linked_oneharness_one`]. A
+/// host shutdown whose redirect reaches a turn that never ends waits all of it
+/// out before the grace starts.
+#[cfg(unix)]
+const REDIRECT_DELIVERY_DEADLINE_SECONDS: u64 = 60;
+
+/// The mirrored deadline is the one the `oneharness-core` this lock resolves
+/// declares, read from that crate's own source where cargo unpacked it: the
+/// constant is private, so its declaration is the one authority there is, and a
+/// release that moves or renames it fails here by name rather than leaving
+/// [`HELD_SHUTDOWN_PATIENCE`] derived from a bound nothing applies.
+#[cfg(unix)]
+#[test]
+fn the_mirrored_redirect_delivery_deadline_is_the_linked_oneharness_one() {
+    let metadata =
+        std::process::Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .args(["metadata", "--format-version", "1", "--locked", "--offline"])
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .expect("run cargo metadata");
+    assert!(
+        metadata.status.success(),
+        "{}",
+        String::from_utf8_lossy(&metadata.stderr)
+    );
+    let metadata: Value = serde_json::from_slice(&metadata.stdout).expect("cargo metadata's JSON");
+    let manifests: Vec<&str> = metadata["packages"]
+        .as_array()
+        .expect("the resolved packages")
+        .iter()
+        .filter(|package| package["name"] == json!("oneharness-core"))
+        .map(|package| package["manifest_path"].as_str().expect("a manifest path"))
+        .collect();
+    assert_eq!(
+        manifests.len(),
+        1,
+        "one oneharness-core resolution: {manifests:?}"
+    );
+    let control = Path::new(manifests[0])
+        .parent()
+        .expect("the crate's root")
+        .join("src/io/control.rs");
+    let source = fs::read_to_string(&control).expect("the linked oneharness's control module");
+    let declaration = format!(
+        "const REDIRECT_DELIVERY_DEADLINE: std::time::Duration = \
+         std::time::Duration::from_secs({REDIRECT_DELIVERY_DEADLINE_SECONDS});"
+    );
+    assert!(
+        source.contains(&declaration),
+        "{} no longer declares `{declaration}`",
+        control.display()
+    );
+}
+
+/// The grace the held dispatch's host shutdown names, counted from the moment
+/// the interrupt answers.
+#[cfg(unix)]
+const HELD_SHUTDOWN_GRACE_SECONDS: u64 = 1;
+
+/// How long a host shutdown over a dispatch that never ends its turn is given to
+/// answer: the delivery deadline, then the grace, then a margin of half that
+/// deadline for the kill, the teardown and the preserving push on a loaded host.
+/// [`DRIVER_PATIENCE`] alone is the deadline itself, so a shutdown that waits it
+/// out raced the request it answers. The journey below takes the path that
+/// never redirects, so it answers in about the grace; the patience still covers
+/// the bound, so a release that redirects anyway fails on the answer it gave,
+/// by name, rather than on a request that gave up.
+#[cfg(unix)]
+const HELD_SHUTDOWN_PATIENCE: Duration = Duration::from_secs(
+    REDIRECT_DELIVERY_DEADLINE_SECONDS
+        + HELD_SHUTDOWN_GRACE_SECONDS
+        + REDIRECT_DELIVERY_DEADLINE_SECONDS / 2,
+);
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+/// A run driven by the pinned CLI marks its plan's home done once it settles;
+/// this reader serves the records that driver writes.
+///
+/// The released CLI launches a one-node plan whose home is a project item on
+/// the loopback board, open at `In Progress`, from a directory whose
+/// `onetaskgraph.yaml` declares that board and names no closure and no home.
+/// The node's first dispatch is still running when the shutdown route puts the
+/// run down, so nothing has landed. The pinned CLI's engine driver
+/// dispatches the node again; the harness stand-in
+/// commits in the session the linked `onevcs` cut, the node lands
+/// `local-direct` on `owner/service`, and the run settles with every node
+/// `done`. The store then moves the home's card to the board's project-kind
+/// `done` option and closes its issue as completed, in one option write and one
+/// close and without reading the board's items, and the run's journal holds the
+/// one `home-status` record that says it was written.
+#[cfg(unix)]
+#[test]
+fn an_adopted_run_that_settles_marks_its_plans_home_done() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let repos = scratch_repo::seed_boundary(&dir);
+    let service = &repos.private;
+    let log = dir.join("harness.log");
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states. The launch, the reply route, the pinned CLI driver, the linked `onevcs` cutting and landing the session over real git, and the linked store reading and writing the loopback board over HTTP are all real; the stand-in only waits or commits what an agent would.
+    let standin = write_held_once_harness_standin(&dir, &log);
+    // llmlint: ignore-end[e2e_not_mocked]
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+
+    let node = "ship";
+    let board = crate::github_board::GitHubBoard::start_seeded(
+        &dir,
+        &json!({
+            "repository": "owner/service",
+            // The project kind's `done` is an option of its own, so the card
+            // the home ends at is the project half of the mapping and no task's.
+            "options": CLOSURE_BOARD_OPTIONS.iter().copied().chain(["Shipped"]).collect::<Vec<_>>(),
+            "issues": {
+                "plan": seeded_issue(1, "ship-the-service", json!({
+                    "onepipeline.schema_version": 3,
+                    "onepipeline.concurrency": 1,
+                    "onepipeline.goal": {"text": "Ship the service"},
+                }), ("In Progress", "OPEN", None), None),
+                // Its repository is the issue's own, `owner/service`, which is
+                // the scratch service's origin.
+                node: seeded_issue(2, node, json!({
+                    "onepipeline.id": node,
+                    "onepipeline.persona": "engineer",
+                }), ("Todo", "OPEN", None), Some("plan")),
+            },
+        }),
+    );
+    let config = closure_board_config(&board, "");
+    let per_kind = "        done: Done\n";
+    assert_eq!(config.matches(per_kind).count(), 1, "{config}");
+    fs::write(
+        dir.join("onetaskgraph.yaml"),
+        config.replace(
+            per_kind,
+            "        done:\n          task: Done\n          project: Shipped\n",
+        ),
+    )
+    .expect("the store configuration");
+
+    // The dispatch's control socket lives under the state directory, and on
+    // macOS a `$TMPDIR` workspace puts it past the 104-byte `sun_path`, where
+    // oneharness refuses control and the shutdown answers that it had no turn
+    // to redirect rather than trying the lever below. A short root keeps every
+    // platform on the one path this journey holds.
+    let short_state = tempfile::Builder::new()
+        .tempdir_in("/tmp")
+        .expect("a short state root");
+    let state = short_state.path().join("state");
+    // The shutdown's redirect is delivered by running `oneharness interrupt` from
+    // this variable or, unset, from PATH, so a host with an `oneharness` there
+    // waits out the dispatch's whole delivery deadline and one without it does
+    // not. Naming a program nothing writes puts every host on the second path:
+    // the lever fails at once and the grace alone ends the dispatch.
+    let interrupt_client = dir.join("no-oneharness-here");
+    let onevcs_home = dir.join(crate::serving::ONEVCS_HOME_DIR);
+    let environment: Vec<(&str, String)> = vec![
+        ("CACHE_BOARD_TOKEN", board.token.clone()),
+        (
+            "ONEAGENTGRAPH_ONEHARNESS_BIN",
+            interrupt_client.display().to_string(),
+        ),
+        ("ONEPIPELINE_PROJECT_DIR", dir.display().to_string()),
+        ("XDG_STATE_HOME", state.display().to_string()),
+        // The store's user layer: this workspace's own, empty, so the sources the
+        // home's write asks are the launch directory's and no host's.
+        ("XDG_CONFIG_HOME", dir.join("config").display().to_string()),
+        (
+            scratch_repo::GIT_CONFIG_ENV,
+            service.gitconfig.display().to_string(),
+        ),
+        (onevcs::branches::PREFIX_ENV, String::new()),
+        (
+            scratch_repo::GH_ENV,
+            repos.refusing_gh.display().to_string(),
+        ),
+    ];
+    let inherited = inherited_engine_variables();
+    let mut launch = std::process::Command::new(sibling::binary());
+    for name in &inherited {
+        launch.env_remove(name);
+    }
+    let launched = launch
+        .args(["start", "board:plan", "--detach"])
+        .current_dir(&dir)
+        .envs(environment.iter().map(|(name, value)| (name, value)))
+        .env(crate::serving::ONEVCS_HOME_ENV, &onevcs_home)
+        .env(onepipeline_ui::store::RUNS_DIR_ENV, &root)
+        .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+        .env(NODE_GRAPH_ENV, &graph)
+        .env(
+            onepipeline_ui::store::GRAPH_RECORDS_ENV,
+            fixture_run::graph_records_for(&root),
+        )
+        .output()
+        .expect("launch the plan");
+    assert!(
+        launched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&launched.stderr)
+    );
+    let launched: Value =
+        serde_json::from_slice(&launched.stdout).expect("start prints its launch");
+    let run = launched["run_id"].as_str().expect("a run id").to_owned();
+    let launched_pid =
+        u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    // The launching driver started the node's first dispatch, which waits.
+    eventually("the launched driver dispatched the node", || {
+        dir.join("held-once").exists()
+    });
+
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &environment
+            .iter()
+            .map(|(name, value)| (*name, value.as_str()))
+            .collect::<Vec<_>>(),
+        &inherited,
+    );
+    let detail_path = format!("/api/v2/runs/{run}");
+    let detail = || http::get(serving.address, &detail_path).json();
+    let base = || {
+        let landed = on_origin(service, &["rev-parse", scratch_repo::BASE_BRANCH]);
+        assert!(
+            landed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&landed.stderr)
+        );
+        String::from_utf8_lossy(&landed.stdout).trim().to_owned()
+    };
+    let seeded_base = base();
+    let journal = root.join(&run).join("events.jsonl");
+    let recorded = || -> Vec<Value> {
+        fs::read_to_string(&journal)
+            .expect("the run's journal")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("a journal record"))
+            .collect()
+    };
+    // The shutdown learns a dispatch's turn only from the agentgraph records the
+    // driver relays into the run's journal. Until one lands it has no turn to ask
+    // and only waits out the grace, so the journey waits for the turn to be
+    // recorded and the shutdown always takes the same path.
+    eventually("the run's journal recorded the dispatch's turn", || {
+        recorded().iter().any(|record| {
+            record["source"] == json!("agentgraph")
+                && record["kind"] == json!("turn-started")
+                && record["labels"]["node"] == json!(node)
+        })
+    });
+
+    // Put down mid-dispatch, before its node lands: the run is adoptable, the
+    // service's base has not moved, and the home is where it was seeded.
+    // The shutdown cannot deliver its redirect, so the grace counts from at
+    // once; the waiting dispatch is killed once it is out, the branch pushes,
+    // and only then does the route answer.
+    let shutdown = http::post_within(
+        serving.address,
+        "/api/v2/shutdown",
+        &json!({"scope": "host", "grace": HELD_SHUTDOWN_GRACE_SECONDS}).to_string(),
+        HELD_SHUTDOWN_PATIENCE,
+    );
+    assert_eq!(shutdown.status, 200, "{}", shutdown.body);
+    let shutdown = shutdown.json();
+    let stopped: Vec<&Value> = shutdown["runs"][0]["dispatches"]
+        .as_array()
+        .expect("the dispatches the shutdown acted on")
+        .iter()
+        .collect();
+    assert_eq!(stopped.len(), 1, "{shutdown}");
+    assert_eq!(stopped[0]["node"], json!(node), "{shutdown}");
+    // The answer names the client it could not run, which is what holds every
+    // host to the one path: a shutdown that found another `oneharness` would
+    // name a redirect here instead.
+    assert_eq!(stopped[0]["interrupt"], json!("failed"), "{shutdown}");
+    assert!(
+        stopped[0]["detail"]
+            .as_str()
+            .expect("what the interrupt answered")
+            .contains(&format!(
+                "cannot run `{} interrupt`",
+                interrupt_client.display()
+            )),
+        "{shutdown}"
+    );
+    assert_eq!(stopped[0]["ended"], json!("killed"), "{shutdown}");
+    eventually("the launched driver let go of the run", || {
+        !process_is_live(launched_pid)
+    });
+    assert_ne!(
+        detail()["run"]["state"],
+        json!("settled"),
+        "{}",
+        detail()["run"]
+    );
+    assert_ne!(
+        detail()["graph"]["node_status"][node],
+        json!("done"),
+        "{}",
+        detail()["graph"]
+    );
+    assert_eq!(base(), seeded_base, "the node landed before the adoption");
+    let before = board.state();
+    assert_eq!(
+        (
+            &before["issues"]["plan"]["status"],
+            &before["issues"]["plan"]["state"]
+        ),
+        (&json!("In Progress"), &json!("OPEN")),
+        "{before}"
+    );
+
+    let pid = serving.drive_fixture(run.as_str());
+    let driver = RetainedDriver(pid);
+    let homed = || -> Vec<Value> {
+        recorded()
+            .into_iter()
+            .filter(|record| {
+                record["source"] == json!("pipeline") && record["kind"] == json!("home-status")
+            })
+            .collect()
+    };
+    eventually("the adopted run settled", || {
+        detail()["run"]["state"] == json!("settled")
+    });
+    eventually("the adopted run's home was written", || !homed().is_empty());
+    eventually("the adopted engine let go", || !process_is_live(pid));
+    drop(driver);
+
+    let settled = detail();
+    assert_eq!(settled["run"]["run_id"], json!(run), "{}", settled["run"]);
+    assert_eq!(
+        settled["run"]["state"],
+        json!("settled"),
+        "{}",
+        settled["run"]
+    );
+    let statuses = settled["graph"]["node_status"]
+        .as_object()
+        .expect("the node statuses");
+    assert_eq!(
+        statuses.keys().map(String::as_str).collect::<Vec<_>>(),
+        [node],
+        "{}",
+        settled["graph"]
+    );
+    assert_eq!(statuses[node], json!("done"), "{}", settled["graph"]);
+    assert_eq!(
+        settled["graph"]["node_results"][node]["outcome"],
+        json!("merged"),
+        "{}",
+        settled["graph"]
+    );
+    let nodes = settled["run"]["nodes"].as_array().expect("the run's nodes");
+    assert_eq!(nodes.len(), 1, "{}", settled["run"]);
+    assert_eq!(nodes[0]["node"], json!(node), "{}", settled["run"]);
+    assert_ne!(base(), seeded_base, "the node never landed");
+
+    let after = board.state();
+    let home = &after["issues"]["plan"];
+    assert_eq!(
+        (&home["status"], &home["state"], &home["reason"]),
+        (&json!("Shipped"), &json!("CLOSED"), &json!("COMPLETED")),
+        "{after}"
+    );
+    // The home is written by the item the launch recorded, never found by
+    // listing the board.
+    let requests = after["requests"]
+        .as_array()
+        .expect("the board's request log");
+    let home_writes = requests
+        .iter()
+        .filter(|request| {
+            let query = request["query"].as_str().unwrap_or_default();
+            query.contains("updateProjectV2ItemFieldValue(")
+                && request["variables"]["input"]["itemId"] == json!("ITEM-plan")
+        })
+        .count();
+    let home_closes = requests
+        .iter()
+        .filter(|request| {
+            let query = request["query"].as_str().unwrap_or_default();
+            query.contains("updateIssue(")
+                && request["variables"]["input"]["id"] == json!("plan")
+                && request["variables"]["input"]["stateInput"]["value"] == json!("CLOSED")
+        })
+        .count();
+    assert_eq!((home_writes, home_closes), (1, 1), "{requests:#?}");
+    for request in requests {
+        let query = request["query"].as_str().expect("a query");
+        assert!(
+            !query.contains("items("),
+            "a request read the board's items: {request}"
+        );
+    }
+
+    let records = homed();
+    assert_eq!(records.len(), 1, "{records:#?}");
+    assert_eq!(
+        records[0]["payload"]["outcome"],
+        json!("written"),
+        "{}",
+        records[0]
+    );
+    serving.stop_on(Stop::Terminate);
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
@@ -18875,7 +19946,9 @@ fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_event
             .get(&format!("e{index}"))
             .unwrap_or_else(|| panic!("record {index} ({record}) is not served"));
         assert_eq!(event["kind"], record["kind"], "{event}");
-        if record["kind"] == json!("planner-surfaced") {
+        if record["kind"] == json!("planner-surface-queued")
+            || record["kind"] == json!("planner-surfaced")
+        {
             assert_eq!(
                 event["surface"]["kind"], record["payload"]["kind"],
                 "{event}"
@@ -18890,12 +19963,193 @@ fn a_reworked_and_readjusted_stack_is_served_whole_through_the_run_results_event
         [
             "change-base-overridden",
             "change-closed",
+            "finding",
             "readjust-pending",
             "review-comment",
             "review-reply-pending",
             "stack-merged-out-of-order",
         ]
     );
+}
+
+/// `text` with every age it counts back from now, such as `1877h43m ago`,
+/// spelled `<age> ago`: an age is the one part of a rendering that two reads
+/// of one unchanged run can disagree on, by when each was asked. Only a whole
+/// word that is an age, followed by a whole word `ago`, is masked.
+fn without_ages(text: &str) -> String {
+    let mut masked = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(" ago") {
+        let (before, after) = (&rest[..at], &rest[at + " ago".len()..]);
+        let start = before
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| c.is_whitespace())
+            .map_or(0, |(space, c)| space + c.len_utf8());
+        let word = &before[start..];
+        let ends_a_word = !after.starts_with(char::is_alphanumeric);
+        masked.push_str(&before[..start]);
+        masked.push_str(if ends_a_word && is_an_age(word) {
+            "<age>"
+        } else {
+            word
+        });
+        masked.push_str(" ago");
+        rest = after;
+    }
+    masked.push_str(rest);
+    masked
+}
+
+/// Whether `word` is an age as a rendering spells one: one or more counts,
+/// each its digits followed by one unit of `d`, `h`, `m` or `s`.
+fn is_an_age(word: &str) -> bool {
+    let mut rest = word;
+    while !rest.is_empty() {
+        let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        let mut tail = rest[digits..].chars();
+        if digits == 0 || !matches!(tail.next(), Some('d' | 'h' | 'm' | 's')) {
+            return false;
+        }
+        rest = tail.as_str();
+    }
+    !word.is_empty()
+}
+
+#[test]
+fn without_ages_spells_the_two_reads_ci_saw_a_minute_apart_alike() {
+    let earlier = "it had not reached its base when this settled 1877h43m ago — open the change";
+    let later = "it had not reached its base when this settled 1877h44m ago — open the change";
+    assert_ne!(earlier, later);
+    assert_eq!(without_ages(earlier), without_ages(later));
+    assert_eq!(
+        without_ages(earlier),
+        "it had not reached its base when this settled <age> ago — open the change"
+    );
+}
+
+#[test]
+fn without_ages_masks_every_age_in_a_rendering() {
+    assert_eq!(
+        without_ages("settled 2d ago, seen 5s ago\n  observed 1h0m30s ago"),
+        "settled <age> ago, seen <age> ago\n  observed <age> ago"
+    );
+}
+
+#[test]
+fn without_ages_leaves_prose_that_is_not_an_age_as_written() {
+    for prose in [
+        "long ago",
+        "a week ago",
+        "ms ago",
+        "12 ago",
+        "3m3 ago",
+        "x3m ago",
+        "in 3m agora",
+        "ago",
+        "",
+    ] {
+        assert_eq!(without_ages(prose), prose, "{prose:?}");
+    }
+}
+
+#[test]
+fn without_ages_keeps_text_whose_last_character_before_ago_is_multibyte() {
+    for text in ["é ago", "café ago", "— ago", "é3m ago", "naïve 🙂 ago"] {
+        assert_eq!(without_ages(text), text, "{text:?}");
+    }
+    assert_eq!(without_ages("café 3m ago — ✓"), "café <age> ago — ✓");
+    assert_eq!(without_ages("é\u{2003}3m ago"), "é\u{2003}<age> ago");
+}
+
+#[test]
+fn without_ages_returns_text_with_no_age_unchanged() {
+    for text in [
+        "dag-ui-review-loop  failed\n  api  done (change-review-draft)",
+        "agony, agora and sago",
+        "✓ ünïcödé — 日本語",
+    ] {
+        assert_eq!(without_ages(text), text, "{text:?}");
+    }
+}
+
+/// A continuation's rework read off the store names the superseded node's
+/// settled head, `replaces_head`, where the store's provenance carried it — a
+/// field no record the engine wrote before carried. No route's contract serves
+/// it, so the run whose journal holds it is served through the run, results,
+/// events and timeline routes exactly as a twin whose record predates it.
+#[test]
+fn a_continued_rework_naming_the_head_it_replaced_is_served_as_one_that_names_none() {
+    let corpus = fixture_run::review_loop();
+    let headed = corpus["run_id"]
+        .as_str()
+        .expect("the corpus's run")
+        .to_owned();
+    let unheaded = format!("{headed}-unheaded");
+    let mut twin = corpus.clone();
+    twin["run_id"] = json!(unheaded);
+    twin["launch"]["run_id"] = json!(unheaded);
+    twin["stream"] = json!(format!(
+        "{}-unheaded",
+        corpus["stream"].as_str().expect("the corpus's stream")
+    ));
+    let stripped = twin["records"]
+        .as_array_mut()
+        .expect("the corpus's records")
+        .iter_mut()
+        .filter_map(|record| record.pointer_mut("/payload/continued/rework"))
+        .filter_map(|rework| rework.as_object_mut()?.remove("replaces_head"))
+        .count();
+    assert_eq!(
+        stripped, 1,
+        "the corpus holds one continued rework naming its head"
+    );
+    let serving = Serving::start(|root| {
+        fixture_run::write_review_loop_corpus(root, &corpus);
+        fixture_run::write_review_loop_corpus(root, &twin);
+    });
+    // The twin as the headed run would read: its own run id is the one thing
+    // that tells the two apart on any route, and the instant each answer was
+    // given the one thing that tells two answers apart — in `observed_at`, and
+    // in every age the rendered text counts back from it, which two reads
+    // either side of a minute's turn spell differently.
+    let as_headed = |served: &Value| -> Value {
+        let mut read: Value = serde_json::from_str(&without_ages(
+            &served.to_string().replace(&unheaded, &headed),
+        ))
+        .expect("a served document re-read");
+        if let Some(envelope) = read.as_object_mut() {
+            envelope.remove("observed_at");
+        }
+        read
+    };
+
+    for path in ["", "/results", "/timeline?scope=run"] {
+        let read = |run: &str| {
+            let served = http::get(serving.address, &format!("/api/v2/runs/{run}{path}"));
+            assert_eq!(served.status, 200, "{run}{path}: {}", served.body);
+            served.json()
+        };
+        assert_eq!(
+            as_headed(&read(&headed)),
+            as_headed(&read(&unheaded)),
+            "{path} reads the two runs differently"
+        );
+    }
+
+    let mut stream = http::stream(serving.address, "/api/v2/events", None);
+    assert_eq!(stream.status, 200);
+    let snapshot = stream.next_frame().expect("a snapshot");
+    assert_eq!(snapshot.event, "snapshot");
+    let snapshot = snapshot.json();
+    let announced = |run: &str| {
+        snapshot["runs"]
+            .as_array()
+            .and_then(|runs| runs.iter().find(|listed| listed["run_id"] == json!(run)))
+            .cloned()
+            .unwrap_or_else(|| panic!("{run} is not announced: {snapshot}"))
+    };
+    assert_eq!(announced(&headed), as_headed(&announced(&unheaded)));
 }
 
 /// The run a continued node names is the one it was settled on, on another
@@ -18993,4 +20247,1220 @@ fn the_events_stream_announces_each_record_of_a_reworked_stack_as_it_is_written(
     for key in ["state", "phase", "last_event", "last_progress_at"] {
         assert_eq!(announced[key], detail["run"][key], "{key}");
     }
+}
+
+/// Continued sessions may relay the same VCS envelope again. Identity is the
+/// producer's stream and sequence, regardless of how many journal lines carry it.
+#[test]
+fn repeated_journal_identities_count_once_on_both_timeline_scopes() {
+    let original = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let repeated = Serving::start(|root| {
+        let dir = fixture_run::write(root, fixture_run::RUN_ID);
+        let path = dir.join("events.jsonl");
+        let journal = fs::read_to_string(&path).expect("the recorded journal");
+        let triples: String = journal
+            .lines()
+            .flat_map(|line| [line, line, line])
+            .map(|line| format!("{line}\n"))
+            .collect();
+        fs::write(path, triples).expect("repeat each recorded identity three times");
+    });
+    for query in [
+        "scope=run".to_owned(),
+        format!("scope=node&node={}", fixture_run::NODE_ID),
+    ] {
+        let read = |address| {
+            let response = http::get(
+                address,
+                &format!("/api/v2/runs/{}/timeline?{query}", fixture_run::RUN_ID),
+            );
+            assert_eq!(response.status, 200, "{}", response.body);
+            let mut body = response.json();
+            body.as_object_mut()
+                .expect("an envelope")
+                .remove("observed_at");
+            body
+        };
+        assert_eq!(read(original.address), read(repeated.address), "{query}");
+    }
+}
+
+#[test]
+fn recorded_sessions_use_their_own_records_and_the_run_ends_at_settlement() {
+    let corpus = fixture_run::recorded_timeline();
+    let records = corpus["records"].as_array().expect("records");
+    let serving = Serving::start(|root| {
+        fixture_run::write_recorded_timeline(root);
+    });
+    let run = corpus["run_id"].as_str().expect("run");
+    let node = corpus["node"].as_str().expect("node");
+    let read = |query| {
+        http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?{query}"),
+        )
+        .json()
+    };
+    let node_timeline = read(format!("scope=node&node={node}"));
+    let overall = read("scope=run".to_owned());
+    for role in ["worker", "pr-author"] {
+        let stream = records
+            .iter()
+            .find(|e| e["kind"] == "member-started" && e["labels"]["member"] == role)
+            .expect("a recorded member")["stream"]
+            .as_str()
+            .expect("stream");
+        let own: Vec<&Value> = records.iter().filter(|e| e["stream"] == stream).collect();
+        let first = own
+            .iter()
+            .map(|e| e["ts"].as_str().expect("timestamp"))
+            .min()
+            .expect("first");
+        let last = own
+            .iter()
+            .map(|e| e["ts"].as_str().expect("timestamp"))
+            .max()
+            .expect("last");
+        for timeline in [&node_timeline, &overall] {
+            let span = timeline["spans"]
+                .as_array()
+                .expect("spans")
+                .iter()
+                .find(|s| s["agent_role"] == role)
+                .expect("session lane");
+            assert_eq!(span["started_at"], first, "{role}: {span}");
+            assert_eq!(span["ended_at"], last, "{role}: {span}");
+        }
+    }
+    let end = &records
+        .iter()
+        .find(|e| e["kind"] == "node-settled")
+        .expect("settlement")["ts"];
+    assert_eq!(overall["spans"][0]["ended_at"], *end);
+    let late = events_on(&overall)
+        .into_iter()
+        .find(|e| e["kind"] == "completion-requested")
+        .expect("late marker");
+    assert!(late["at"].as_str() > end.as_str());
+}
+
+#[test]
+fn terminal_execution_records_close_open_spans_before_late_commands() {
+    for kind in ["run-stopped", "host-shutdown", "driver-exited"] {
+        let corpus = fixture_run::recorded_termination(kind);
+        let run = corpus["run_id"].as_str().expect("run");
+        let node = corpus["node"].as_str().expect("node");
+        let serving = Serving::start(|root| {
+            fixture_run::write_recorded_timeline_corpus(root, &corpus);
+        });
+        for query in ["scope=run".to_owned(), format!("scope=node&node={node}")] {
+            let served = http::get(
+                serving.address,
+                &format!("/api/v2/runs/{run}/timeline?{query}"),
+            )
+            .json();
+            let spans = served["spans"].as_array().expect("spans");
+            assert!(
+                spans.iter().all(|s| !s["ended_at"].is_null()),
+                "{kind}: {served}"
+            );
+            let node = spans.iter().find(|s| s["kind"] == "node").expect("node");
+            assert_eq!(node["ended_at"], "2026-10-13T17:24:58.128Z", "{kind}");
+            for session in spans.iter().filter(|s| s["kind"] == "dispatch") {
+                assert_eq!(session["ended_at"], node["ended_at"], "{kind}: {session}");
+                assert_eq!(session["status"], "stopped", "{kind}: {session}");
+            }
+            if query == "scope=run" {
+                assert_eq!(spans[0]["ended_at"], node["ended_at"]);
+                for late in ["completion-requested", "planner-replied", "edit-committed"] {
+                    let events = events_on(&served);
+                    let marker = events
+                        .iter()
+                        .find(|e| e["kind"] == late)
+                        .expect("late marker");
+                    assert!(marker["at"].as_str() > node["ended_at"].as_str());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn open_timeline_spans_only_say_running_while_the_driver_is_alive() {
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_onepipeline-api"))
+        .arg("--help")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .expect("short-lived process");
+    let ended_pid = child.id();
+    child.wait().expect("reap the process");
+    for (pid, expected) in [(std::process::id(), "running"), (ended_pid, "undriven")] {
+        let serving = Serving::start(|root| {
+            fixture_run::write_live(root, fixture_run::RUN_ID);
+            fixture_run::driven_on_this_host(root, fixture_run::RUN_ID, pid);
+        });
+        let timeline = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
+        )
+        .json();
+        let open: Vec<&Value> = timeline["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .filter(|s| s["kind"] == "dispatch" && s["ended_at"].is_null())
+            .collect();
+        assert!(!open.is_empty(), "{timeline}");
+        assert!(
+            open.iter().all(|s| s["status"] == expected),
+            "{expected}: {open:?}"
+        );
+    }
+}
+
+#[test]
+fn replayed_retries_preserve_record_identity_and_timestamp_ties() {
+    let corpus: Value = serde_json::from_str(include_str!(
+        "../../apps/dag-ui-e2e/fixtures/timeline-retries.json"
+    ))
+    .expect("retry corpus");
+    let serving = Serving::start(|root| {
+        fixture_run::write_recorded_timeline_corpus(root, &corpus);
+    });
+    let run = corpus["run_id"].as_str().expect("run");
+    let node = corpus["node"].as_str().expect("node");
+    let served = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=node&node={node}"),
+    )
+    .json();
+    let span = served["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .find(|s| s["kind"] == "node")
+        .expect("node");
+    let events = span["events"].as_array().expect("events");
+    let identities: std::collections::BTreeSet<(&str, u64)> = corpus["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .filter(|r| r["labels"]["node"] == node)
+        .map(|r| {
+            (
+                r["stream"].as_str().expect("stream"),
+                r["seq"].as_u64().expect("seq"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        events.len(),
+        identities.len(),
+        "duplicate relays counted as new events"
+    );
+    for pair in events.windows(2) {
+        assert!(pair[0]["at"].as_str() <= pair[1]["at"].as_str());
+        if pair[0]["at"] == pair[1]["at"] {
+            assert!(pair[0]["journal_order"].as_u64() <= pair[1]["journal_order"].as_u64());
+        }
+    }
+}
+
+#[test]
+fn a_later_adoption_takeover_or_dispatch_reopens_the_execution_range() {
+    for kind in ["driver-adopted", "driver-taken-over", "node-dispatched"] {
+        let mut corpus = fixture_run::recorded_termination("driver-exited");
+        let node = corpus["node"].as_str().expect("node").to_owned();
+        let payload = match kind {
+            "driver-adopted" => json!({"adoption":1,"pid":1}),
+            "driver-taken-over" => fixture_run::review_loop()["records"]
+                .as_array()
+                .expect("records")
+                .iter()
+                .find(|r| r["kind"] == kind)
+                .expect("recorded takeover")["payload"]
+                .clone(),
+            _ => json!({"attempt":2,"persona":"engineer"}),
+        };
+        let mut event = json!({"v":2,"ts":"2026-10-15T10:26:00.000Z","stream":"recorded-termination","seq":3,
+            "source":"pipeline","kind":kind,"labels":{"run_id":corpus["run_id"]},"payload":payload,"artifacts":[]});
+        if kind == "node-dispatched" {
+            event["labels"]["node"] = json!(node);
+        }
+        corpus["records"]
+            .as_array_mut()
+            .expect("records")
+            .push(event);
+        let serving = Serving::start(|root| {
+            fixture_run::write_recorded_timeline_corpus(root, &corpus);
+        });
+        let timeline = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/timeline?scope=run",
+                corpus["run_id"].as_str().expect("run")
+            ),
+        )
+        .json();
+        assert!(
+            timeline["spans"][0]["ended_at"].is_null(),
+            "{kind}: {timeline}"
+        );
+    }
+}
+
+/// A member's heartbeat is served from wherever the engine that recorded the run
+/// kept it. A run recorded before liveness moved out of the journal carries its
+/// `member-heartbeat` records, and its timeline goes on listing them; the same
+/// run recorded since carries none and a `<run>/liveness.json`, and its timeline
+/// serves every other record without them. Each run's liveness is the engine's
+/// own word for it, on the run's status and on its row, and the beat kept
+/// beside the journal is one that word counts: the run whose last journalled
+/// record is days old reads as driven because its member was heard from just
+/// now, where its journalled twin reads as parked.
+#[test]
+fn a_run_with_journalled_heartbeats_and_one_with_its_liveness_beside_the_journal_both_serve_their_timeline_and_liveness(
+) {
+    let journalled = fixture_run::recorded_timeline();
+    let run = journalled["run_id"].as_str().expect("run").to_owned();
+    let beside = format!("{run}-liveness");
+    let serving = Serving::start(|root| {
+        fixture_run::write_recorded_timeline(root);
+        let mut corpus = journalled.clone();
+        corpus["run_id"] = json!(beside);
+        corpus["launch"]["run_id"] = json!(beside);
+        let records = corpus["records"].as_array_mut().expect("records");
+        let beats: Vec<Value> = records
+            .iter()
+            .filter(|record| record["kind"] == "member-heartbeat")
+            .cloned()
+            .collect();
+        records.retain(|record| record["kind"] != "member-heartbeat");
+        let dir = fixture_run::write_recorded_timeline_corpus(root, &corpus);
+        // The engine's `<run>/liveness.json`: one entry per member, keyed as the
+        // beats it replaces were labelled, stamped as a beat just now — to the
+        // millisecond, the one stamp the engine reads.
+        let now = time::OffsetDateTime::now_utc()
+            .format(time::macros::format_description!(
+                "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+            ))
+            .expect("an instant");
+        let mut members: Vec<Value> = beats
+            .iter()
+            .map(|beat| {
+                json!({
+                    "node": beat["labels"]["node"],
+                    "graph_run": beat["labels"]["run_id"],
+                    "member": beat["labels"]["member"],
+                    "last_heartbeat_at": now,
+                })
+            })
+            .collect();
+        members.dedup();
+        fs::write(
+            dir.join("liveness.json"),
+            serde_json::to_string_pretty(&json!({ "schema_version": 1, "members": members }))
+                .expect("the liveness document"),
+        )
+        .expect("the run's liveness");
+    });
+    let timeline = |id: &str| {
+        let response = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{id}/timeline?scope=run"),
+        );
+        assert_eq!(response.status, 200, "{id}: {}", response.body);
+        events_on(&response.json())
+    };
+    let kinds = |events: &[Value]| -> Vec<String> {
+        events
+            .iter()
+            .map(|event| event["kind"].as_str().expect("a kind").to_owned())
+            .collect()
+    };
+    let with_beats = timeline(&run);
+    let without_beats = timeline(&beside);
+    let heartbeat = |kind: &String| kind == "member-heartbeat";
+    assert_eq!(
+        kinds(&with_beats)
+            .iter()
+            .filter(|kind| heartbeat(kind))
+            .count(),
+        2,
+        "the journalled run's timeline lists its beats: {with_beats:?}"
+    );
+    assert!(
+        !kinds(&without_beats).iter().any(heartbeat),
+        "{without_beats:?}"
+    );
+    assert_eq!(
+        kinds(&without_beats),
+        kinds(&with_beats)
+            .into_iter()
+            .filter(|kind| !heartbeat(kind))
+            .collect::<Vec<_>>(),
+        "the run without beats serves every other record"
+    );
+
+    let status = |id: &str| {
+        let response = http::get(serving.address, &format!("/api/v2/runs/{id}/status"));
+        assert_eq!(response.status, 200, "{id}: {}", response.body);
+        response.json()["liveness"].clone()
+    };
+    let rows = http::get(serving.address, "/api/v2/runs?include_settled=true").json();
+    let row = |id: &str| {
+        rows["runs"]
+            .as_array()
+            .expect("runs")
+            .iter()
+            .find(|row| row["run_id"] == id)
+            .unwrap_or_else(|| panic!("no row for {id}: {rows}"))["liveness"]
+            .clone()
+    };
+    assert_eq!(status(&run), json!("PARKED"));
+    assert_eq!(row(&run), json!("PARKED"), "{rows}");
+    assert_eq!(status(&beside), json!("ACTIVE"));
+    assert_eq!(row(&beside), json!("ACTIVE"), "{rows}");
+}
+
+#[test]
+fn record_panels_select_each_kinds_facts_and_omit_absent_or_irrelevant_fields() {
+    let original = fixture_run::recorded_timeline();
+    let serving = Serving::start(|root| {
+        fixture_run::write_recorded_timeline(root);
+        fixture_run::write_lanes(root, fixture_run::LANES_RUN_ID);
+        let current: oneagentgraph::event::MemberDied = serde_json::from_value(json!({
+            "rule":"process-exited", "cause":"exited", "detail":"process exited 1", "exit_code":1
+        }))
+        .expect("the producer's typed failure payload");
+        fixture_run::append_relayed_on(
+            &root.join(fixture_run::LANES_RUN_ID),
+            "current-member-failure",
+            "member-died",
+            json!({"run_id":fixture_run::LANES_RUN_ID,"node":fixture_run::DIED_NODE_ID,"member":"worker"}),
+            serde_json::to_value(current).expect("failure payload"),
+        );
+
+        for kind in ["run-stopped", "host-shutdown", "driver-exited"] {
+            fixture_run::write_recorded_timeline_corpus(
+                root,
+                &fixture_run::recorded_termination(kind),
+            );
+        }
+    });
+    let run = original["run_id"].as_str().expect("run");
+    let mut events = Vec::new();
+    for id in [
+        run.to_owned(),
+        fixture_run::LANES_RUN_ID.to_owned(),
+        format!("{run}-run-stopped"),
+        format!("{run}-host-shutdown"),
+        format!("{run}-driver-exited"),
+    ] {
+        events.extend(events_on(
+            &http::get(
+                serving.address,
+                &format!("/api/v2/runs/{id}/timeline?scope=run"),
+            )
+            .json(),
+        ));
+    }
+    let cases: &[(&str, &[&str])] = &[
+        (
+            "edit-committed",
+            &["Author", "Operations", "Operation kinds"],
+        ),
+        ("planner-replied", &["Author", "Completion", "Reason"]),
+        ("node-dispatched", &["Attempt", "Persona"]),
+        ("session-opened", &["Branch", "Base"]),
+        ("session-closed", &["Branch"]),
+        ("gate-run", &["Gate", "Result", "Duration (seconds)"]),
+        ("graph-started", &["Name", "Graph"]),
+        ("graph-settled", &["Exit code"]),
+        ("member-started", &["Runner", "Engine"]),
+        ("member-settled", &["Verdict", "Reason"]),
+        ("member-died", &["Reason"]),
+        ("turn-started", &["Turn", "Role"]),
+        ("turn-completed", &["Turn", "Role"]),
+        ("turn-message", &["Turn", "Role", "Message"]),
+        ("node-settled", &["Status", "Outcome", "Detail"]),
+        ("completion-requested", &["Reason"]),
+        ("run-stopped", &["Owner", "Forced"]),
+        ("host-shutdown", &["Scope", "Owner", "Teardown"]),
+        ("driver-exited", &["Settlement"]),
+    ];
+    for &(kind, expected) in cases {
+        let event = events
+            .iter()
+            .find(|e| {
+                e["kind"] == kind
+                    && (kind != "member-died" || e["stream"] != "current-member-failure")
+            })
+            .unwrap_or_else(|| panic!("no {kind}"));
+        let fields = event["fields"]
+            .as_object()
+            .unwrap_or_else(|| panic!("no fields on {kind}: {event}"));
+        let labels: Vec<&str> = fields.keys().map(String::as_str).collect();
+        assert_eq!(labels, expected, "{kind}: {event}");
+        assert!(fields
+            .values()
+            .all(|v| !v.is_null() && v != "" && v != &json!([]) && v != &json!({})));
+    }
+    let current = events
+        .iter()
+        .find(|e| e["stream"] == "current-member-failure")
+        .expect("current failure");
+    assert_eq!(
+        current["fields"],
+        json!({"Rule":"process-exited","Cause":"exited","Detail":"process exited 1"})
+    );
+    let heartbeat = events
+        .iter()
+        .find(|e| e["kind"] == "member-heartbeat")
+        .expect("heartbeat");
+    assert!(
+        heartbeat.get("fields").is_none(),
+        "an empty fact list is omitted"
+    );
+    let activity = events
+        .iter()
+        .find(|e| e["kind"] == "turn-activity")
+        .expect("tool call");
+    assert_eq!(activity["fields"]["Tool"], "command_execution");
+    for event in &events {
+        if let Some(fields) = event["fields"].as_object() {
+            for absent in ["Token", "Worktree", "Config"] {
+                assert!(!fields.contains_key(absent), "{event}");
+            }
+        }
+    }
+}
+
+#[test]
+fn harness_timeline_metadata_uses_typed_records_and_recovers_from_unreadable_bounds() {
+    use oneharness_core::domain::history::{HistoryLine, HistoryRunRecord, HistoryShowEntry};
+    #[derive(Clone, Copy, Debug)]
+    enum Case {
+        Closed,
+        NoEnd,
+        Missing,
+        Malformed,
+        Oversized,
+        BadStart,
+        BadEnd,
+        BadTimes,
+        Backwards,
+    }
+    const START: &str = "2026-08-07T12:00:03Z";
+    const END: &str = "2026-08-07T12:00:12Z";
+    for case in [
+        Case::Closed,
+        Case::NoEnd,
+        Case::Missing,
+        Case::Malformed,
+        Case::Oversized,
+        Case::BadStart,
+        Case::BadEnd,
+        Case::BadTimes,
+        Case::Backwards,
+    ] {
+        let (workspace, root) = fixture_run::workspace();
+        fixture_run::write(&root, fixture_run::RUN_ID);
+        let recorded = launched_session(
+            &workspace.path().join("history"),
+            &root,
+            fixture_run::RUN_ID,
+            node_launch(fixture_run::NODE_ID),
+            "metadata recovery",
+            "the recorded transcript",
+        );
+        let mut record = oneharness_core::io::history::read_session_display(&recorded.path)
+            .expect("producer's session")
+            .into_iter()
+            .find_map(|entry| match entry {
+                HistoryShowEntry::Record(record) => Some(record),
+                _ => None,
+            })
+            .expect("producer's record");
+        record.timestamp = START.to_owned();
+        record.started_at = Some(START.to_owned());
+        record.finished_at = Some(END.to_owned());
+        record.duration_ms = Some(9000);
+        record.model_ms = Some(9000);
+        record.tool_ms = Some(0);
+        record.observed_tool_ms = None;
+        record.time_to_first_token_ms = None;
+        match case {
+            Case::NoEnd => {
+                record.started_at = None;
+                record.finished_at = None;
+                record.model_ms = None;
+                record.tool_ms = None;
+            }
+            Case::Oversized => record.text = Some("x".repeat(70 * 1024)),
+            Case::BadStart => record.started_at = Some("invalid start".to_owned()),
+            Case::BadEnd => record.finished_at = Some("invalid end".to_owned()),
+            Case::BadTimes => {
+                record.timestamp = "invalid timestamp".to_owned();
+                record.started_at = Some("invalid start".to_owned());
+            }
+            Case::Backwards => record.finished_at = Some("2026-08-07T12:00:02Z".to_owned()),
+            Case::Closed | Case::Missing | Case::Malformed => {}
+        }
+        let line = HistoryLine::Run(HistoryRunRecord::from_record(&record));
+        fs::write(
+            &recorded.path,
+            format!(
+                "{}\n",
+                serde_json::to_string(&line).expect("producer's wire format")
+            ),
+        )
+        .expect("recorded metadata");
+        match case {
+            Case::Missing => fs::remove_file(&recorded.path).expect("swept history"),
+            Case::Malformed => {
+                fs::write(&recorded.path, "{broken history\n").expect("corrupted history")
+            }
+            _ => {}
+        }
+        let serving = Serving::start_in(workspace, &[]);
+        let pointers = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{}/agents", fixture_run::RUN_ID),
+        )
+        .json();
+        let pointer_start = &pointers["sessions"][0]["runs"][0]["started"];
+        assert!(pointer_start.is_string(), "{case:?}: {pointers}");
+        let started = if matches!(case, Case::Missing | Case::Malformed | Case::BadTimes) {
+            pointer_start.clone()
+        } else {
+            json!(START)
+        };
+        let closed = matches!(case, Case::Closed | Case::BadStart | Case::Oversized);
+        for query in [
+            "scope=run".to_owned(),
+            format!("scope=node&node={}", fixture_run::NODE_ID),
+        ] {
+            let response = http::get(
+                serving.address,
+                &format!("/api/v2/runs/{}/timeline?{query}", fixture_run::RUN_ID),
+            );
+            assert_eq!(response.status, 200, "{case:?}: {}", response.body);
+            let timeline = response.json();
+            let span = timeline["spans"]
+                .as_array()
+                .expect("spans")
+                .iter()
+                .find(|span| span["harness_scope"] == "node")
+                .expect("recorded harness");
+            assert_eq!(span["started_at"], started, "{case:?}: {span}");
+            assert_eq!(
+                span["ended_at"],
+                if closed { json!(END) } else { started.clone() },
+                "{case:?}: {span}"
+            );
+            assert_eq!(
+                span["status"],
+                if closed { "done" } else { "no-recorded-end" },
+                "{case:?}: {span}"
+            );
+            assert_eq!(span["reference"]["value"], recorded.history_id);
+        }
+    }
+}
+#[test]
+fn browser_supervision_is_removed_and_shutdown_is_host_only() {
+    let serving = Serving::start_as(
+        |root| {
+            fixture_run::write(root, fixture_run::RUN_ID);
+            fixture_run::write(root, fixture_run::OTHER_RUN_ID);
+        },
+        fixture_run::SESSION,
+    );
+    for suffix in ["watch", "adopt", "shutdown"] {
+        let path = format!("/api/v2/runs/{}/{suffix}", fixture_run::RUN_ID);
+        let answer = if suffix == "watch" {
+            http::get(serving.address, &path)
+        } else {
+            http::post(serving.address, &path, "")
+        };
+        assert_eq!(answer.status, 404, "{}", answer.body);
+        let error = answer.json();
+        assert_eq!(error["error"]["code"], json!("removed_route"));
+        assert!(error["error"]["message"].as_str().unwrap().contains(&path));
+        assert!(error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains(env!("CARGO_PKG_VERSION")));
+    }
+    for scope in [
+        json!("mine"),
+        json!("run"),
+        json!({"run": fixture_run::RUN_ID}),
+        json!({"scope":"run", "run":fixture_run::RUN_ID}),
+        json!("unknown"),
+        json!(null),
+        json!(false),
+        json!(0),
+        json!([]),
+    ] {
+        let answer = http::post(
+            serving.address,
+            "/api/v2/shutdown",
+            &json!({"scope": scope}).to_string(),
+        );
+        assert_eq!(answer.status, 400, "{}", answer.body);
+        assert_eq!(
+            answer.json()["error"]["code"],
+            json!("removed_shutdown_scope")
+        );
+        assert!(answer.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains(&scope.to_string()));
+    }
+    let unwatched = http::get(serving.address, "/api/v2/unwatched");
+    assert_eq!(unwatched.status, 200, "{}", unwatched.body);
+    assert!(unwatched.json()["reported"].is_array());
+    let host = http::post(
+        serving.address,
+        "/api/v2/shutdown",
+        r#"{"scope":"host", "grace":0}"#,
+    );
+    assert_eq!(host.status, 200, "{}", host.body);
+    assert_eq!(host.json()["scope"], json!("host"));
+    assert!(host.json()["runs"].is_array());
+}
+
+/// The processes the process `pid` started that are still its children, as the
+/// kernel lists them under each of its threads.
+#[cfg(target_os = "linux")]
+fn children_of(pid: u32) -> Vec<u32> {
+    let mut children = Vec::new();
+    for task in fs::read_dir(format!("/proc/{pid}/task")).expect("the server's threads") {
+        // A thread that ended after the listing has no children left to list.
+        let listed =
+            fs::read_to_string(task.expect("a thread").path().join("children")).unwrap_or_default();
+        children.extend(listed.split_whitespace().map(|child| {
+            child
+                .parse::<u32>()
+                .expect("the kernel lists children as pids")
+        }));
+    }
+    children
+}
+
+/// No route this server answers starts, adopts or drives a run — the removed
+/// adopt and watch routes included — so a driver's teardown, observer graph
+/// and all, is never this process's to run.
+///
+/// The run under test is the one a driver takes over at once: undriven, its
+/// recorded driver proved gone, launched from a directory on this host, its one
+/// human action ready. Every route the contract declares is asked about it, the
+/// writes with bodies a client could send, and then the server is asked to
+/// stop it and to shut the host down. Had any of those started a driver, the
+/// launch record would name a new pid and count an adoption, the journal would
+/// carry `driver-adopted`, its liveness would read `ACTIVE` — and on Linux, the
+/// driver would be this server's child.
+#[cfg(unix)]
+#[test]
+fn no_route_starts_adopts_or_drives_a_run() {
+    use onepipeline_ui::contract::routes;
+
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    fixture_run::write_awaiting_attestation(&root, run, &dir);
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+    let launch = |serving: &Serving| -> Value {
+        serde_json::from_str(
+            &fs::read_to_string(serving.run_dir(run).join("launch.json"))
+                .expect("the launch record"),
+        )
+        .expect("the launch record parses")
+    };
+    let recorded = launch(&serving);
+    let undriven = |serving: &Serving, after: &str| {
+        let now = launch(serving);
+        assert_eq!(
+            (&now["pid"], &now["host"], &now["adoptions"]),
+            (&recorded["pid"], &recorded["host"], &recorded["adoptions"]),
+            "after {after}, a driver claimed the run: {now}"
+        );
+        let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status"));
+        assert_eq!(status.status, 200, "{}", status.body);
+        assert_ne!(
+            status.json()["liveness"],
+            json!("ACTIVE"),
+            "after {after}, something is driving the run: {}",
+            status.body
+        );
+        let timeline = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        )
+        .json();
+        assert!(
+            !events_on(&timeline)
+                .iter()
+                .any(|event| event["kind"] == json!("driver-adopted")),
+            "after {after}, a driver adopted the run: {timeline}"
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            children_of(serving.pid()),
+            Vec::<u32>::new(),
+            "after {after}, the server has started a process"
+        );
+    };
+    undriven(&serving, "nothing");
+
+    // The removed supervision routes: refused, and nothing started behind them.
+    for (suffix, adopt) in [("adopt", true), ("watch", false)] {
+        let path = format!("/api/v2/runs/{run}/{suffix}");
+        let answer = if adopt {
+            http::post(serving.address, &path, r#"{"attach":true}"#)
+        } else {
+            http::get(serving.address, &path)
+        };
+        assert_eq!(answer.status, 404, "{path}: {}", answer.body);
+        assert_eq!(answer.json()["error"]["code"], json!("removed_route"));
+        undriven(&serving, &path);
+    }
+
+    // Every route the contract declares, but the two that end something, which
+    // are asked last. A body a client could send to each write.
+    let project = encoded(fixture_run::PLAN_PROJECT);
+    for route in routes::TABLE {
+        if [routes::RUN_STOP, routes::SHUTDOWN].contains(&route.path) {
+            continue;
+        }
+        let path = route
+            .path
+            .replace("{run}", run)
+            .replace("{project}", &project)
+            .replace("{node}", fixture_run::APPROVAL_NODE_ID)
+            .replace("{id}", fixture_run::CONVERSATION_ID)
+            .replace("{subscription}", "00000000-0000-4000-8000-000000000000");
+        let asked = format!("{} {path}", route.method.as_str());
+        match route.method {
+            routes::Method::Get if route.path == routes::EVENTS => {
+                let mut stream = http::stream(serving.address, &path, None);
+                assert!(
+                    stream.frame_within(DRIVER_PATIENCE).is_some(),
+                    "{asked} opened"
+                );
+            }
+            routes::Method::Get => {
+                let path = if route.path == routes::RUN_TIMELINE {
+                    format!("{path}?scope=run")
+                } else {
+                    path
+                };
+                http::get(serving.address, &path);
+            }
+            routes::Method::Post => {
+                let body = match route.path {
+                    routes::RUN_ATTEST => {
+                        json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string()
+                    }
+                    routes::SUBSCRIPTIONS => json!({ "run": run }).to_string(),
+                    _ => "{}".to_owned(),
+                };
+                http::post(serving.address, &path, &body);
+            }
+            routes::Method::Delete => {
+                http::delete(serving.address, &path);
+            }
+        }
+        undriven(&serving, &asked);
+    }
+
+    // Stopping the run and shutting the host down end things; neither drives.
+    let stop = http::post(serving.address, &format!("/api/v2/runs/{run}/stop"), "{}");
+    assert!(stop.status < 500, "{}", stop.body);
+    undriven(&serving, "the stop");
+    let host = http::post(
+        serving.address,
+        "/api/v2/shutdown",
+        r#"{"scope":"host", "grace":0}"#,
+    );
+    assert_eq!(host.status, 200, "{}", host.body);
+    undriven(&serving, "the host shutdown");
+}
+
+#[cfg(unix)]
+fn write_closing_harness_standin(dir: &Path, log: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let standin = dir.join("closing-harness");
+    fs::write(
+        &standin,
+        format!(
+            "#!/bin/sh\nprintf '%s %s\\n' \"$0\" \"$*\" >> {:?}\n\
+             printf 'the dispatch wrote this\\n' > work-$$.txt\n\
+             git add work-$$.txt && git commit -q -m 'feat: ship the service' \
+             -m 'Closes #7' >&2 || exit 1\n\
+             printf '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
+             \"result\":\"done\",\"session_id\":\"standin\"}}\\n'\n",
+            log.display().to_string()
+        ),
+    )
+    .expect("the closing harness stand-in");
+    // Owner-only: the pinned CLI starts this journey's dispatch as this user.
+    fs::set_permissions(&standin, std::fs::Permissions::from_mode(0o700))
+        .expect("chmod the closing harness stand-in");
+    standin
+}
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this retained read journey produces records with the pinned engine CLI already provisioned by this tier, then queries the real API. It has no additional host prerequisite or reusable expensive setup needing another project edge.
+#[cfg(unix)]
+#[test]
+fn a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let repos = scratch_repo::seed_boundary(&dir);
+    let service = &repos.private;
+    let log = dir.join("harness.log");
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states. The launch, the attest route, the pinned CLI driver, the linked `onevcs` cutting and landing the session over real git, and the linked store reading and writing the loopback board over HTTP are all real; the stand-in only commits what an agent would.
+    let standin = write_closing_harness_standin(&dir, &log);
+    // llmlint: ignore-end[e2e_not_mocked]
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+
+    fixture_run::configure_local_md_store(&dir);
+    let approval = create_store_task(
+        &dir,
+        "Approve the change",
+        onetaskgraph_core::Body::plain("Approve the change."),
+        &[
+            ("onepipeline.id", json!(fixture_run::APPROVAL_NODE_ID)),
+            ("onepipeline.kind", json!("human")),
+        ],
+        &[],
+    );
+    let node = "ship";
+    create_store_task(
+        &dir,
+        "feat: ship the service",
+        onetaskgraph_core::Body::plain(
+            "## What\nShip the service.\n\n## Why\nIssue 7 asks for it.\n\n\
+             ## Acceptance criteria\n- The service is shipped.",
+        ),
+        &[
+            ("onepipeline.id", json!(node)),
+            ("onepipeline.persona", json!("engineer")),
+            ("onepipeline.repo", json!(service.alias)),
+        ],
+        &[&approval],
+    );
+    let open = |number: u64| {
+        seeded_issue(
+            number,
+            &format!("issue {number}"),
+            json!({}),
+            ("Todo", "OPEN", None),
+            None,
+        )
+    };
+    let board = crate::github_board::GitHubBoard::start_seeded(
+        &dir,
+        &json!({
+            "repository": "owner/service",
+            "options": CLOSURE_BOARD_OPTIONS,
+            "issues": {"seven": open(7), "nine": open(9)},
+        }),
+    );
+    // The plan source the store tasks above were written to, beside the board.
+    let local_md = fs::read_to_string(dir.join("onetaskgraph.yaml"))
+        .expect("the plan source's configuration")
+        .strip_prefix("sources:\n")
+        .expect("a sources mapping")
+        .to_owned();
+    fs::write(
+        dir.join("onetaskgraph.yaml"),
+        closure_board_config(&board, &local_md),
+    )
+    .expect("the store configuration");
+    let before = board.state();
+
+    let state = dir.join("state");
+    let onevcs_home = dir.join(crate::serving::ONEVCS_HOME_DIR);
+    let environment: Vec<(&str, String)> = vec![
+        ("CACHE_BOARD_TOKEN", board.token.clone()),
+        ("ONEPIPELINE_PROJECT_DIR", dir.display().to_string()),
+        ("XDG_STATE_HOME", state.display().to_string()),
+        // The store's user layer: this workspace's own, empty, so the sources a
+        // landing's closures ask are the launch directory's and no host's.
+        ("XDG_CONFIG_HOME", dir.join("config").display().to_string()),
+        (
+            scratch_repo::GIT_CONFIG_ENV,
+            service.gitconfig.display().to_string(),
+        ),
+        (onevcs::branches::PREFIX_ENV, String::new()),
+        (
+            scratch_repo::GH_ENV,
+            repos.refusing_gh.display().to_string(),
+        ),
+    ];
+    let inherited = inherited_engine_variables();
+    let mut launch = std::process::Command::new(sibling::binary());
+    for name in &inherited {
+        launch.env_remove(name);
+    }
+    let launched = launch
+        .args([
+            "start",
+            &format!(
+                "{}:{}",
+                fixture_run::LOCAL_MD_SOURCE,
+                fixture_run::LOCAL_MD_PROJECT
+            ),
+            "--detach",
+        ])
+        .current_dir(&dir)
+        .envs(environment.iter().map(|(name, value)| (name, value)))
+        .env(crate::serving::ONEVCS_HOME_ENV, &onevcs_home)
+        .env(onepipeline_ui::store::RUNS_DIR_ENV, &root)
+        .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+        .env(NODE_GRAPH_ENV, &graph)
+        .env(
+            onepipeline_ui::store::GRAPH_RECORDS_ENV,
+            fixture_run::graph_records_for(&root),
+        )
+        .output()
+        .expect("launch the plan");
+    assert!(
+        launched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&launched.stderr)
+    );
+    let launched: Value =
+        serde_json::from_slice(&launched.stdout).expect("start prints its launch");
+    let run = launched["run_id"].as_str().expect("a run id").to_owned();
+    let pid = u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
+    eventually("the launched driver let go of the run", || {
+        !process_is_live(pid)
+    });
+
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &environment
+            .iter()
+            .map(|(name, value)| (*name, value.as_str()))
+            .collect::<Vec<_>>(),
+        &inherited,
+    );
+    let detail_path = format!("/api/v2/runs/{run}");
+    let detail = || http::get(serving.address, &detail_path).json();
+    // Stopped before its node landed: the launch dispatched nothing, and the board
+    // is as it was seeded.
+    assert_eq!(
+        detail()["graph"]["node_status"][node],
+        json!("blocked"),
+        "{}",
+        detail()["graph"]
+    );
+    assert!(!log.exists(), "the launch dispatched the node");
+
+    let attested = http::post(
+        serving.address,
+        &format!("{detail_path}/attest"),
+        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
+    );
+    assert_eq!(attested.status, 200, "{}", attested.body);
+    let pid = serving.drive_fixture(run.as_str());
+    let driver = RetainedDriver(pid);
+    eventually("the adopted run's node settled", || {
+        matches!(
+            detail()["graph"]["node_status"][node].as_str(),
+            Some("done" | "failed")
+        )
+    });
+    let journal = root.join(&run).join("events.jsonl");
+    let closures = || -> Vec<Value> {
+        fs::read_to_string(&journal)
+            .expect("the run's journal")
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("a journal record"))
+            .filter(|record| {
+                record["source"] == json!("pipeline") && record["kind"] == json!("landing-closures")
+            })
+            .collect()
+    };
+    eventually("the landing's closures were recorded", || {
+        !closures().is_empty()
+    });
+    eventually("the adopted run settled", || {
+        detail()["run"]["state"] == json!("settled")
+    });
+    eventually("the adopted engine let go", || !process_is_live(pid));
+    drop(driver);
+    let settled = detail();
+    assert_eq!(
+        settled["graph"]["node_results"][node]["outcome"],
+        json!("merged"),
+        "{}",
+        settled["graph"]
+    );
+
+    // Issue 7's card is `Done` and its issue closed as completed; issue 9 is as
+    // it was seeded.
+    let after = board.state();
+    let held = |state: &Value, name: &str| {
+        let issue = &state["issues"][name];
+        (
+            issue["status"].clone(),
+            issue["state"].clone(),
+            issue["reason"].clone(),
+        )
+    };
+    assert_eq!(
+        held(&after, "seven"),
+        (json!("Done"), json!("CLOSED"), json!("COMPLETED")),
+        "{after}"
+    );
+    assert_eq!(after["issues"]["nine"], before["issues"]["nine"], "{after}");
+    // Read by repository and number: nothing read the board's items or searched.
+    let requests = after["requests"]
+        .as_array()
+        .expect("the board's request log");
+    assert!(!requests.is_empty(), "the store asked the board nothing");
+    for request in requests {
+        let query = request["query"].as_str().expect("a query");
+        assert!(
+            !query.contains("items(") && !query.contains("search("),
+            "a request read the board's items or searched: {request}"
+        );
+    }
+
+    // One record of the store's closures, naming the commit the node landed at.
+    let landed = on_origin(service, &["rev-parse", scratch_repo::BASE_BRANCH]);
+    assert!(
+        landed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&landed.stderr)
+    );
+    let landed = String::from_utf8_lossy(&landed.stdout).trim().to_owned();
+    let records = closures();
+    assert_eq!(records.len(), 1, "{records:#?}");
+    let payload = &records[0]["payload"];
+    assert_eq!(payload["commit"], json!(landed), "{payload}");
+    assert_eq!(payload["node"], json!(node), "{payload}");
+    assert_eq!(payload["closes"], json!(["owner/service#7"]), "{payload}");
+    assert_eq!(payload["outcome"], json!("projected"), "{payload}");
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+/// A body served gzip-encoded, decoded.
+fn gunzipped(body: &[u8]) -> Value {
+    use std::io::Read;
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(body)
+        .read_to_string(&mut text)
+        .expect("the body is gzip");
+    serde_json::from_str(&text).expect("the body is JSON")
+}
+
+#[test]
+fn a_response_is_gzip_encoded_exactly_when_the_request_takes_gzip() {
+    let serving = two_runs();
+    let path = "/api/v2/runs?include_settled=true";
+    let plain = http::get_raw(serving.address, path);
+    assert_eq!(plain.header("content-encoding"), None);
+    let mut want: Value = serde_json::from_slice(&plain.body).expect("JSON");
+    want["observed_at"] = Value::Null;
+
+    // A browser's header: gzip among others. The body is the same document,
+    // in fewer bytes, and says what it was served under.
+    let encoded = http::get_raw_with(
+        serving.address,
+        path,
+        &[("Accept-Encoding", "gzip, deflate, br, zstd")],
+    );
+    assert_eq!(encoded.status, 200);
+    assert_eq!(encoded.header("content-encoding"), Some("gzip"));
+    assert_eq!(encoded.header("vary"), Some("accept-encoding"));
+    assert_eq!(encoded.header("content-type"), plain.header("content-type"));
+    assert!(
+        encoded.body.len() < plain.body.len(),
+        "{} encoded bytes for {} plain ones",
+        encoded.body.len(),
+        plain.body.len()
+    );
+    let mut served = gunzipped(&encoded.body);
+    served["observed_at"] = Value::Null;
+    assert_eq!(served, want);
+    // Gzip taken by weight, by its alias, or by the wildcard is taken alike.
+    for taken in [
+        "br;q=1.0, gzip;q=0.8",
+        "gzip; Q=0.001",
+        "x-gzip",
+        "*",
+        "br, *;q=0.5",
+    ] {
+        let encoded = http::get_raw_with(serving.address, path, &[("Accept-Encoding", taken)]);
+        assert_eq!(encoded.status, 200, "{taken}");
+        assert_eq!(encoded.header("content-encoding"), Some("gzip"), "{taken}");
+        let mut served = gunzipped(&encoded.body);
+        served["observed_at"] = Value::Null;
+        assert_eq!(served, want, "{taken}");
+    }
+
+    // A request that refuses gzip, by name even where the wildcard takes
+    // everything else, or names only what this server does not
+    // speak, is served the body as it is.
+    // A weight HTTP does not spell is no offer of gzip either.
+    for refused in [
+        "gzip;q=0, br",
+        "br",
+        "identity",
+        "*;q=0",
+        "*, gzip;q=0",
+        "gzip;q=2",
+        "gzip;q=nan",
+    ] {
+        let served = http::get_raw_with(serving.address, path, &[("Accept-Encoding", refused)]);
+        assert_eq!(served.status, 200, "{refused}");
+        assert_eq!(served.header("content-encoding"), None, "{refused}");
+        assert_eq!(served.header("vary"), Some("accept-encoding"), "{refused}");
+        let mut body: Value = serde_json::from_slice(&served.body).expect("plain JSON");
+        body["observed_at"] = Value::Null;
+        assert_eq!(body, want, "{refused}");
+    }
+
+    // An error is the error contract either way, encoded when asked.
+    let missing = http::get_raw_with(
+        serving.address,
+        "/api/v2/runs/no-such-run",
+        &[("Accept-Encoding", "gzip")],
+    );
+    assert_eq!(missing.status, 404);
+    assert_eq!(missing.header("content-encoding"), Some("gzip"));
+    assert!(gunzipped(&missing.body)["error"]["code"].is_string());
+
+    // A response with no body is sent with none, encoded or not: a retired
+    // subscription's 204 carries no gzip stream to decode.
+    let subscribed = http::post(
+        serving.address,
+        "/api/v2/subscriptions",
+        &json!({ "view": { "type": "sidebar" } }).to_string(),
+    );
+    assert_eq!(subscribed.status, 201);
+    let subscription = subscribed.json()["subscription"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    let retired = http::delete_raw_with(
+        serving.address,
+        &format!("/api/v2/subscriptions/{subscription}"),
+        &[("Accept-Encoding", "gzip")],
+    );
+    assert_eq!(retired.status, 204);
+    assert_eq!(retired.header("content-encoding"), None);
+    assert!(retired.body.is_empty(), "{:?}", retired.body);
 }

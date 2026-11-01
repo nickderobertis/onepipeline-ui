@@ -2,7 +2,7 @@ import {
   type NodeDetail,
   parseRunDetail,
   parseRunTimeline,
-  TELEMETRY_SCHEMA_VERSION,
+  type SubscriptionView,
 } from "@onepipeline-ui/dag-model";
 import {
   act,
@@ -23,6 +23,7 @@ import {
   LONG_SESSION,
   longConversation,
   PR_URL,
+  projectList,
   RUN_CHECK_IN_SESSION,
   runDetail,
   runList,
@@ -38,8 +39,6 @@ import {
   isRunDetail,
   isRunList,
   isTimeline,
-  selectedRuns,
-  selectionOf,
   telemetryHarness,
 } from "../test/telemetry-harness";
 import { App } from "./App";
@@ -235,10 +234,11 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       ).toBeInTheDocument();
     }
 
-    // The run row above them, counted on the server over that same derivation.
-    expect(
-      screen.getByRole("button", { name: new RegExp(LIVE_RUN) }),
-    ).toHaveTextContent("1 pending · 1 running · 1 waiting · 1 blocked");
+    // The run row above them carries the counts its trimmed sidebar row serves:
+    // done, failed and running, counted on the server over that same derivation.
+    const row = screen.getByRole("button", { name: new RegExp(LIVE_RUN) });
+    for (const count of ["1 running", "1 done", "1 failed"])
+      expect(row).toHaveTextContent(count);
 
     // And the node view each card opens.
     for (const { node, status } of SERVED_STATUSES) {
@@ -258,29 +258,11 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   });
 
   test("keeps every card on the graph readable when a live update settles a node", async () => {
-    // The re-read a live update raises serves the node settled, as the server
-    // folds it once the executor records the settlement: done on every surface,
-    // and no longer in flight, so no turn the run can address.
+    // The patch a live update pushes serves the node settled, as the server folds
+    // it once the executor records the settlement: done on every surface, and no
+    // longer in flight, so no turn the run can address.
     const served = runDetail(LIVE_RUN);
-    const done = {
-      ...served,
-      run: {
-        ...served.run,
-        nodes: served.run.nodes.map((node) =>
-          node.node === "dashboard" ? { ...node, status: "done" } : node,
-        ),
-      },
-      graph: {
-        ...served.graph,
-        node_states: { ...served.graph.node_states, dashboard: "done" },
-        node_status: { ...served.graph.node_status, dashboard: "done" },
-        node_control: {},
-      },
-    };
-    let settled = false;
-    const { client, sources } = telemetryHarness((url) =>
-      settled && isRunDetail(url) ? Response.json(done) : defaultResponder(url),
-    );
+    const { client, push } = telemetryHarness();
     render(<App client={client} />);
     // Asked for by role, which a card React Flow holds hidden does not answer to.
     // This environment's resize observer never reports, so a card is readable
@@ -289,8 +271,22 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       await screen.findByRole("article", { name: "dashboard: running" }),
     ).toBeVisible();
 
-    settled = true;
-    sources[0]?.emit("run.changed", { run_id: LIVE_RUN }, "2");
+    act(() =>
+      push("detail.patch", {
+        run_id: LIVE_RUN,
+        ops: [
+          {
+            p: ["run", "nodes"],
+            v: served.run.nodes.map((node) =>
+              node.node === "dashboard" ? { ...node, status: "done" } : node,
+            ),
+          },
+          { p: ["graph", "node_states", "dashboard"], v: "done" },
+          { p: ["graph", "node_status", "dashboard"], v: "done" },
+          { p: ["graph", "node_control"], v: {} },
+        ],
+      }),
+    );
     expect(
       await screen.findByRole("article", { name: "dashboard: done" }),
     ).toBeVisible();
@@ -303,26 +299,33 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   test("still counts a run whose statuses the server could not fold", async () => {
     // When a run's authoritative journal will not fold, the server counts its nodes
     // from the tolerant telemetry index instead, whose statuses are an open string.
-    // The row has to show those words too — a run going wrong is exactly the one an
-    // operator is looking at — after the vocabulary it does know, not instead of it.
-    const degraded = {
-      ...runList,
-      runs: runList.runs.map((run) =>
-        run.run_id === LIVE_RUN
-          ? { ...run, node_counts: { improvised: 2, running: 1, absent: 0 } }
-          : run,
-      ),
-    };
-    const { client } = telemetryHarness((url) =>
-      isRunList(url) ? Response.json(degraded) : defaultResponder(url),
-    );
+    // A trimmed sidebar row carries the running, done and failed counts alone, so
+    // the row shows what it can count in the vocabulary it knows — and never a
+    // status counted zero times.
+    const { client } = telemetryHarness((url) => {
+      if (url.pathname === "/api/v2/projects")
+        return Response.json({
+          ...projectList,
+          projects: projectList.projects.map((group) => ({
+            ...group,
+            runs: group.runs.map((run) =>
+              run.run_id === LIVE_RUN
+                ? {
+                    ...run,
+                    node_counts: { improvised: 2, running: 1, absent: 0 },
+                  }
+                : run,
+            ),
+          })),
+        });
+      return defaultResponder(url);
+    });
     render(<App client={client} />);
 
     const row = await screen.findByRole("button", {
       name: new RegExp(LIVE_RUN),
     });
-    expect(row).toHaveTextContent("1 running · 2 improvised");
-    // A status counted zero times is not a status this run has.
+    expect(row).toHaveTextContent("1 running");
     expect(row).not.toHaveTextContent("absent");
   });
 
@@ -366,6 +369,48 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  test("names what a held node awaits even when its settlement recorded no detail", async () => {
+    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&node=followup`);
+    const held = () => {
+      const payload = runDetail(LIVE_RUN);
+      return {
+        ...payload,
+        graph: {
+          ...payload.graph,
+          node_status: {
+            ...payload.graph.node_status,
+            followup: "complete-but-held",
+          },
+          node_results: {
+            ...payload.graph.node_results,
+            followup: {
+              status: "complete-but-held",
+              outcome: "held-for-release",
+              // A blank sentence is no detail: the producer wrote nothing in it.
+              detail: "  ",
+              awaiting: [
+                { producer: "github.com/example/engine", target: "crate" },
+              ],
+            },
+          },
+        },
+      };
+    };
+    const { client } = telemetryHarness((url) =>
+      isRunDetail(url) ? Response.json(held()) : defaultResponder(url),
+    );
+    render(<App client={client} />);
+
+    const panel = await screen.findByRole("region", {
+      name: "Awaited releases",
+    });
+    expect(within(panel).getByRole("listitem")).toHaveTextContent(
+      "the crate release of github.com/example/engine",
+    );
+    expect(within(panel).queryByText("Detail")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   test("walks back to the graph from the breadcrumb button", async () => {
     window.history.replaceState(
       null,
@@ -401,6 +446,73 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(
       await within(detail()).findByText("Implementing the dashboard now"),
     ).toBeInTheDocument();
+  });
+
+  test("says how a live turn took a note, where the record says", async () => {
+    // A manager's note through the engine that says how the running turn took it
+    // — left to end, here — and one recorded before the engine said so, both on
+    // the node the planner already redirected.
+    const noted = parseRunTimeline(runTimeline(LIVE_RUN));
+    const redirected = noted.spans.find((span) =>
+      span.events.some((event) => event.id === "event-10"),
+    );
+    if (redirected === undefined) throw new Error("fixture lost event-10");
+    const note = (id: string, turn?: "turn-end") => ({
+      id,
+      kind: "edit-committed",
+      at: "2026-07-26T11:00:51.000Z",
+      node_id: "dashboard",
+      redirection: {
+        reached: "worker" as const,
+        ...(turn === undefined ? {} : { turn }),
+        delivered: true,
+        delivery: "live" as const,
+        node_id: "dashboard",
+      },
+    });
+    redirected.events.push(
+      note("note-turn-end", "turn-end"),
+      note("note-unsaid"),
+    );
+    const open = (event: string) => {
+      window.history.replaceState(
+        null,
+        "",
+        `/?run=${LIVE_RUN}&node=dashboard&event=${event}`,
+      );
+      const { client } = telemetryHarness((url) =>
+        isTimeline(url) ? Response.json(noted) : defaultResponder(url),
+      );
+      render(<App client={client} />);
+    };
+
+    // The planner asked for the turn to be left to end, and the record says it was.
+    open("note-turn-end");
+    expect(
+      await within(await openedDetail()).findByText(
+        "Left to end — the note reached it as it ended",
+      ),
+    ).toBeVisible();
+    expect(within(detail()).getByText("Turn")).toBeInTheDocument();
+    expect(
+      within(detail()).getByText(
+        "Live — into the turn that was already running",
+      ),
+    ).toBeInTheDocument();
+    cleanup();
+
+    // A note recorded before the engine said how still opens as the delivery it
+    // was, with no row claiming either way.
+    open("note-unsaid");
+    expect(
+      await within(await openedDetail()).findByText(
+        "Live — into the turn that was already running",
+      ),
+    ).toBeVisible();
+    expect(within(detail()).queryByText("Turn")).toBeNull();
+    expect(
+      within(detail()).queryByText(/^Left to end|^Interrupted —/),
+    ).toBeNull();
   });
 
   test("shows a verification, a publication, and an aggregate as themselves", async () => {
@@ -572,16 +684,22 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   });
 
   test("reports the graph timeline as unread rather than as an empty run", async () => {
-    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=overall`);
+    // The graph is on screen first; moving to Overall subscribes the run's
+    // timeline, and until that answer arrives nothing has read it.
+    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=graph`);
     let release: (response: Response) => void = () => {};
+    let holding = false;
     const held = telemetryHarness((url) => {
-      if (isTimeline(url))
+      if (isTimeline(url) && holding)
         return new Promise<Response>((resolve) => {
           release = resolve;
         });
       return defaultResponder(url);
     });
     const view = render(<App client={held.client} />);
+    await screen.findByText("dashboard");
+    holding = true;
+    await userEvent.click(screen.getByRole("tab", { name: "Overall" }));
     // "No timeline" would be a claim about a record nothing has read yet.
     expect(
       await screen.findByText("Loading the run's timeline…"),
@@ -595,15 +713,20 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     ).toBeInTheDocument();
     view.unmount();
 
-    const failing = telemetryHarness((url) =>
-      isTimeline(url)
+    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=graph`);
+    let failing = false;
+    const refused = telemetryHarness((url) =>
+      isTimeline(url) && failing
         ? Response.json(
             { error: { code: "unreadable", message: "Journal is corrupt" } },
             { status: 500 },
           )
         : defaultResponder(url),
     );
-    render(<App client={failing.client} />);
+    render(<App client={refused.client} />);
+    await screen.findByText("dashboard");
+    failing = true;
+    await userEvent.click(screen.getByRole("tab", { name: "Overall" }));
     expect(await screen.findByText("Timeline unavailable")).toBeInTheDocument();
     expect(screen.getByText(/Journal is corrupt/)).toBeInTheDocument();
   });
@@ -678,16 +801,20 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   });
 
   test("reports a node timeline still on its way, then invites a selection", async () => {
-    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&node=dashboard`);
+    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=graph`);
     let release: (response: Response) => void = () => {};
+    let holding = false;
     const { client } = telemetryHarness((url) => {
-      if (isTimeline(url))
+      if (isTimeline(url) && holding)
         return new Promise<Response>((resolve) => {
           release = resolve;
         });
       return defaultResponder(url);
     });
     render(<App client={client} />);
+    await screen.findByText("dashboard");
+    holding = true;
+    fireEvent.click(screen.getByRole("button", { name: "dashboard: running" }));
     // The node view opens before its record has arrived. "No recorded timeline"
     // would be a claim about a journal nothing has read yet.
     expect(
@@ -715,16 +842,20 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     ).toBeInTheDocument();
     view.unmount();
 
+    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=graph`);
+    let refusing = false;
     const failing = telemetryHarness((url) =>
-      isTimeline(url)
+      isTimeline(url) && refusing
         ? Response.json(
             { error: { code: "unreadable", message: "Journal is corrupt" } },
             { status: 500 },
           )
         : defaultResponder(url),
     );
-    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&node=dashboard`);
     render(<App client={failing.client} />);
+    await screen.findByText("dashboard");
+    refusing = true;
+    fireEvent.click(screen.getByRole("button", { name: "dashboard: running" }));
     expect(await screen.findByText("Timeline unavailable")).toBeInTheDocument();
     expect(screen.getByText("Journal is corrupt")).toBeInTheDocument();
   });
@@ -748,7 +879,11 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       await screen.findByText("Users can inspect transcripts"),
     ).toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Dependencies" }));
-    expect(await screen.findByText("foundation")).toBeInTheDocument();
+    // Each dependency with the status it holds, and what this node releases.
+    expect(await screen.findByText("foundation (done)")).toBeInTheDocument();
+    expect(
+      screen.getByText("publish, followup", { exact: true }),
+    ).toBeInTheDocument();
   });
 
   test("reads a steps-shaped node's task from the steps that carry it", async () => {
@@ -797,7 +932,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     window.history.replaceState(null, "", `/?run=${LIVE_RUN}&node=foundation`);
     const { client } = telemetryHarness();
     const view = render(<App client={client} />);
-    await userEvent.click(await screen.findByRole("tab", { name: "PR" }));
+    await userEvent.click(await screen.findByRole("tab", { name: "Remote" }));
     const [link] = await screen.findAllByRole("link", { name: /Pull request/ });
     expect(link).toHaveAttribute("href", PR_URL);
     expect(link).toHaveAttribute("target", "_blank");
@@ -806,7 +941,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
 
     window.history.replaceState(null, "", `/?run=${LIVE_RUN}&node=dashboard`);
     render(<App client={client} />);
-    await userEvent.click(await screen.findByRole("tab", { name: "PR" }));
+    await userEvent.click(await screen.findByRole("tab", { name: "Remote" }));
     expect(
       screen.getByText("Publication").nextElementSibling,
     ).toHaveTextContent("Not recorded");
@@ -874,7 +1009,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         isRunDetail(url) ? Response.json(served) : defaultResponder(url),
       );
       render(<App client={client} />);
-      await userEvent.click(await screen.findByRole("tab", { name: "PR" }));
+      await userEvent.click(await screen.findByRole("tab", { name: "Remote" }));
       for (const name of expectedLinks) {
         expect(
           screen.getAllByRole("link", { name: new RegExp(name) }).length,
@@ -904,72 +1039,76 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   });
 
   test("reads only the selected run, and a transcript only when one is opened", async () => {
-    const { client, fetch } = telemetryHarness();
+    const { client, fetch, views } = telemetryHarness();
     render(<App client={client} />);
     await screen.findByText("dashboard");
 
-    const paths = (): string[] =>
-      fetch.mock.calls.map((call: unknown[]) =>
-        new URL(String(call[0]), window.location.origin).toString(),
+    const paths = (): URL[] =>
+      fetch.mock.calls.map(
+        (call: unknown[]) => new URL(String(call[0]), window.location.origin),
       );
-    expect(paths().some((url: string) => isTimeline(new URL(url)))).toBe(false);
-    const details = paths().filter((url: string) => isRunDetail(new URL(url)));
-    // One detail, for the run being looked at — not one for every listed run —
-    // and it asks the server to leave the transcripts out of it.
-    expect(details).toHaveLength(1);
-    expect(details[0]).toContain(LIVE_RUN);
-    expect(details[0]).toContain("include_conversations=false");
-    expect(paths().some((url: string) => isConversation(new URL(url)))).toBe(
+    // Nothing is read off the read routes: the page holds what its one
+    // subscription answered, which is the run being looked at and its detail —
+    // not one for every listed run, and no timeline the graph does not show.
+    expect(paths().some((url) => isRunDetail(url) || isTimeline(url))).toBe(
       false,
     );
+    expect(views.at(-1)).toStrictEqual({
+      type: "detail",
+      run_id: LIVE_RUN,
+      filter: "detailed",
+    });
+    expect(paths().some((url) => isConversation(url))).toBe(false);
 
     await userEvent.click(screen.getByRole("tab", { name: "Overall" }));
     await waitFor(() =>
-      expect(
-        paths().some(
-          (value: string) =>
-            isTimeline(new URL(value)) &&
-            new URL(value).searchParams.get("scope") === "run",
-        ),
-      ).toBe(true),
+      expect(views.at(-1)).toStrictEqual({
+        type: "timeline",
+        run_id: LIVE_RUN,
+        scope: "run",
+        filter: "detailed",
+      }),
     );
-    const runLevelConversationReads = paths().filter((url: string) =>
-      isConversation(new URL(url)),
+    const runLevelConversationReads = paths().filter((url) =>
+      isConversation(url),
     ).length;
-    expect(
-      paths().filter(
-        (value: string) =>
-          isTimeline(new URL(value)) && new URL(value).searchParams.has("node"),
-      ),
-    ).toHaveLength(0);
     await userEvent.click(screen.getByRole("tab", { name: "Graph" }));
+    await waitFor(() =>
+      expect(views.at(-1)).toStrictEqual({
+        type: "detail",
+        run_id: LIVE_RUN,
+        filter: "detailed",
+      }),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "dashboard: running" }));
     await waitFor(() =>
-      expect(
-        paths().some(
-          (value: string) =>
-            isTimeline(new URL(value)) &&
-            new URL(value).searchParams.get("node") === "dashboard",
-        ),
-      ).toBe(true),
+      expect(views.at(-1)).toStrictEqual({
+        type: "timeline",
+        run_id: LIVE_RUN,
+        scope: "node",
+        node: "dashboard",
+        filter: "detailed",
+      }),
     );
     await openTranscript(/engineer-dashboard/);
     await waitFor(() =>
-      expect(
-        paths().filter((url: string) => isConversation(new URL(url))),
-      ).toHaveLength(runLevelConversationReads + 1),
+      expect(paths().filter((url) => isConversation(url))).toHaveLength(
+        runLevelConversationReads + 1,
+      ),
     );
   });
 
-  test("tags each row with its launching session and refreshes it on SSE invalidation", async () => {
-    const { client, sources, fetch } = telemetryHarness();
+  test("shows launching sessions in header details and updates a row from its pushed frame", async () => {
+    const { client, fetch, push } = telemetryHarness();
     render(<App client={client} />);
-    // One flat list: the session is a tag on the row rather than a heading the
-    // list is broken into, so it never outranks the order the server serves.
-    expect(await screen.findByText(/Codex session/)).toBeInTheDocument();
-    expect(screen.getByText(/Claude session/)).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: /session/ })).toBeNull();
+    await userEvent.click(await screen.findByText("Run details"));
+    expect(
+      await screen.findByText(/Launching session: Codex session/),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("navigation")).queryByText(/session/),
+    ).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: RegExp(HISTORY_RUN) }));
     await waitFor(() =>
@@ -977,23 +1116,30 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     );
     expect(await screen.findByText("archive")).toBeInTheDocument();
 
-    // The invalidation names one run, so what is read is that one row — never the
-    // first page, which would throw away every page a reader had scrolled to.
-    const selections = () =>
-      fetch.mock.calls
-        .map((call: unknown[]) =>
-          selectedRuns(new URL(String(call[0]), window.location.origin)),
-        )
-        .filter((named): named is string[] => named !== undefined);
-    const pages = () =>
-      fetch.mock.calls.filter((call: unknown[]) => {
-        const url = new URL(String(call[0]), window.location.origin);
-        return isRunList(url) && selectedRuns(url) === undefined;
-      }).length;
-    const before = pages();
-    sources[0]?.emit("run.changed", { run_id: HISTORY_RUN }, "8");
-    await waitFor(() => expect(selections()).toContainEqual([HISTORY_RUN]));
-    expect(pages()).toBe(before);
+    // Another run moving arrives as its one trimmed row, and the sidebar shows
+    // it without the page reading the list, or the row, again.
+    const listReads = () =>
+      fetch.mock.calls.filter((call: unknown[]) =>
+        isRunList(new URL(String(call[0]), window.location.origin)),
+      ).length;
+    const before = listReads();
+    act(() =>
+      push("run.changed", {
+        row: {
+          id: LIVE_RUN,
+          name: LIVE_RUN,
+          group: { project: "local-md:observatory", name: "observe-live-run" },
+          kind: null,
+          state: "settled",
+          nodes: { total: 8, done: 7, failed: 1, running: 0 },
+          updated_at: "2026-07-26T12:30:00.000Z",
+        },
+      }),
+    );
+    expect(
+      await screen.findByRole("button", { name: RegExp(LIVE_RUN) }),
+    ).toHaveTextContent("7 done");
+    expect(listReads()).toBe(before);
   });
 
   test("shows live activity while leaving a settled transcript unread", async () => {
@@ -1002,43 +1148,52 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       "",
       `/?run=${LIVE_RUN}&view=overall&event=${ORCHESTRATOR_SPAN}`,
     );
-    const { client, sources, fetch } = telemetryHarness();
+    const { client, sources, fetch, push } = telemetryHarness();
     render(<App client={client} />);
     const turn = await screen.findByText("Coordinating the execution frontier");
-    await waitFor(() => expect(sources).toHaveLength(2));
+    await waitFor(() => expect(sources.length).toBeGreaterThan(0));
     const reads = (matches: (url: URL) => boolean): number =>
       fetch.mock.calls.filter((call: unknown[]) =>
         matches(new URL(String(call[0]), window.location.origin)),
       ).length;
     const conversations = reads(isConversation);
-    const timelines = reads(isTimeline);
 
-    sources[1]?.emit(
-      "activity.changed",
-      {
+    // The header's activity line is the detail's `run.live_activity`, patched
+    // with the rest of the detail.
+    act(() =>
+      push("detail.patch", {
         run_id: LIVE_RUN,
-        activity: [
+        ops: [
           {
-            node: "dashboard",
-            at: Date.now() / 1000,
-            kind: "tool",
-            name: "Read",
-            detail: "server.py",
-            events: 12,
+            p: ["run", "live_activity"],
+            v: [
+              {
+                event_id: "e14",
+                node: "dashboard",
+                at: Date.now(),
+                kind: "tool",
+                name: "Read",
+                detail: "server.py",
+                description: "Read src/server.py",
+                events: 12,
+              },
+            ],
           },
         ],
-      },
-      "9",
+      }),
     );
 
-    expect(await screen.findByText("dashboard: Read server.py")).toBeVisible();
-    // The run really was re-read, which is what makes the transcript's stillness a
-    // decision rather than an update that never arrived.
-    await waitFor(() => expect(reads(isTimeline)).toBeGreaterThan(timelines));
+    // The server's own line for the call, never one assembled here from its
+    // name and the journal's summary.
+    expect(
+      await screen.findByText("dashboard: Read src/server.py"),
+    ).toBeVisible();
     // Work elsewhere in the run cannot change a session that has stopped recording,
     // so the operator reading it is neither re-served it nor shown a skeleton: the
-    // very element they were reading is still the one on the page.
+    // very element they were reading is still the one on the page, and nothing was
+    // read to put the activity there.
     expect(reads(isConversation)).toBe(conversations);
+    expect(reads(isRunDetail)).toBe(0);
     expect(screen.getByText("Coordinating the execution frontier")).toBe(turn);
     expect(screen.queryByText("Loading transcript…")).toBeNull();
   });
@@ -1047,7 +1202,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     window.history.replaceState(null, "", `/?run=${LIVE_RUN}&node=dashboard`);
     let turns = 1;
     let release: ((response: Response) => void) | undefined;
-    const { client, sources } = telemetryHarness((url) => {
+    const { client, push } = telemetryHarness((url) => {
       if (isTimeline(url)) return Response.json(workerTurnsTimeline(turns));
       if (isConversation(url) && url.pathname.endsWith(WORKER_SESSION))
         // The re-read is held open, so what the panel shows *while* it is in flight
@@ -1065,8 +1220,17 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       "Implementing the dashboard now",
     );
 
+    // The timeline patch says the session recorded another turn, which is what
+    // asks for the open transcript again.
     turns = 2;
-    sources.at(-1)?.emit("conversation.changed", { run_id: LIVE_RUN }, "9");
+    act(() =>
+      push("timeline.patch", {
+        run_id: LIVE_RUN,
+        scope: "node",
+        node: "dashboard",
+        ops: [{ p: ["spans"], v: workerTurnsTimeline(2).spans }],
+      }),
+    );
     await waitFor(() => expect(release).toBeDefined());
 
     // Mid-refetch: the turn already being read is untouched and nothing loading has
@@ -1091,7 +1255,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     window.history.replaceState(null, "", `/?run=${LIVE_RUN}&node=dashboard`);
     let turns = 1;
     let refuses = false;
-    const { client, sources, fetch } = telemetryHarness((url) => {
+    const { client, fetch, push } = telemetryHarness((url) => {
       if (isTimeline(url)) return Response.json(workerTurnsTimeline(turns));
       if (isConversation(url) && url.pathname.endsWith(WORKER_SESSION))
         return refuses
@@ -1114,10 +1278,19 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         isConversation(new URL(String(call[0]), window.location.origin)),
       ).length;
     const before = reads();
+    const recorded = (count: number) =>
+      act(() =>
+        push("timeline.patch", {
+          run_id: LIVE_RUN,
+          scope: "node",
+          node: "dashboard",
+          ops: [{ p: ["spans"], v: workerTurnsTimeline(count).spans }],
+        }),
+      );
 
     refuses = true;
     turns = 2;
-    sources.at(-1)?.emit("conversation.changed", { run_id: LIVE_RUN }, "9");
+    recorded(2);
     await waitFor(() => expect(reads()).toBeGreaterThan(before));
     // Refusing a read that is already in hand is nothing but microtask work, so one
     // macrotask boundary is past everything it was going to do to the page. Waiting
@@ -1138,7 +1311,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     // costs the reader nothing more than the turn it did not deliver.
     refuses = false;
     turns = 3;
-    sources.at(-1)?.emit("conversation.changed", { run_id: LIVE_RUN }, "10");
+    recorded(3);
     expect(
       await within(detail()).findByText("Dashboard turn 2 arrived"),
     ).toBeVisible();
@@ -1169,77 +1342,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       await within(detail()).findByText("Implementing the dashboard now"),
     ).toBeVisible();
     expect(screen.queryByText("Loading transcript…")).toBeNull();
-  });
-
-  test("loads the next run-list page when the sidebar reaches its end", async () => {
-    const { client, fetch } = telemetryHarness((url) => {
-      if (isRunList(url)) {
-        return Response.json(
-          url.searchParams.has("cursor")
-            ? { ...runList, runs: [runList.runs[1]] }
-            : { ...runList, runs: [runList.runs[0]], next_cursor: "page-2" },
-        );
-      }
-      return defaultResponder(url);
-    });
-    render(<App client={client} />);
-    expect(
-      await screen.findByRole("button", { name: RegExp(LIVE_RUN) }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: RegExp(HISTORY_RUN) }),
-    ).toBeNull();
-
-    await userEvent.click(
-      screen.getByRole("button", { name: "Load more runs" }),
-    );
-
-    expect(
-      await screen.findByRole("button", { name: RegExp(HISTORY_RUN) }),
-    ).toBeInTheDocument();
-    expect(
-      fetch.mock.calls.some((call: unknown[]) =>
-        String(call[0]).includes("cursor=page-2"),
-      ),
-    ).toBe(true);
-  });
-
-  test("reports a failed next page and can load it on a later scroll", async () => {
-    let continuationAttempts = 0;
-    const { client } = telemetryHarness((url) => {
-      if (!isRunList(url)) return defaultResponder(url);
-      if (!url.searchParams.has("cursor"))
-        return Response.json({
-          ...runList,
-          runs: [runList.runs[0]],
-          next_cursor: "page-2",
-        });
-      continuationAttempts += 1;
-      if (continuationAttempts === 1) throw new Error("next page unavailable");
-      return Response.json({ ...runList, runs: [runList.runs[1]] });
-    });
-    render(<App client={client} />);
-    await screen.findByRole("button", { name: RegExp(LIVE_RUN) });
-
-    const viewport = document.querySelector<HTMLElement>(
-      "[data-radix-scroll-area-viewport]",
-    );
-    if (viewport === null) throw new Error("scroll viewport was not rendered");
-    Object.defineProperties(viewport, {
-      clientHeight: { configurable: true, value: 100 },
-      scrollHeight: { configurable: true, value: 200 },
-      scrollTop: { configurable: true, value: 100 },
-    });
-    fireEvent.scroll(viewport);
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Telemetry request failed",
-    );
-
-    fireEvent.scroll(viewport);
-    expect(
-      await screen.findByRole("button", { name: RegExp(HISTORY_RUN) }),
-    ).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
   test("opens on the run as a whole when the address names no view", async () => {
@@ -1495,6 +1597,8 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
   test("shows the loading state, then an empty history", async () => {
     let release: (response: Response) => void = () => {};
     const { client } = telemetryHarness((url) => {
+      if (url.pathname === "/api/v2/projects")
+        return Response.json({ ...runList, projects: [] });
       if (isRunList(url))
         return new Promise<Response>((resolve) => {
           release = resolve;
@@ -1529,10 +1633,10 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(await screen.findByText("dashboard")).toBeInTheDocument();
   });
 
-  test("surfaces a read failure and clears it when the stream reconnects", async () => {
+  test("surfaces a refused subscription and clears it when a refresh is served", async () => {
     let offline = true;
-    const { client, sources } = telemetryHarness((url) => {
-      if (isRunList(url) && offline)
+    const { client } = telemetryHarness((url) => {
+      if (url.pathname === "/api/v2/projects" && offline)
         return Response.json(
           { error: { code: "offline", message: "Telemetry offline" } },
           { status: 503 },
@@ -1544,79 +1648,121 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       "Telemetry offline",
     );
 
-    // A reconnecting browser re-opens the stream with a fresh snapshot, which is
-    // the app's evidence that live telemetry recovered.
+    // Asking again subscribes from scratch, and a served answer is the app's
+    // evidence that live telemetry recovered.
     offline = false;
-    sources[0]?.emit("snapshot", runList, "1");
+    await userEvent.click(screen.getByRole("button", { name: /Refresh/ }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(await screen.findByText("dashboard")).toBeInTheDocument();
   });
 
-  test("surfaces a snapshot that fails contract validation", async () => {
-    const { client, sources } = telemetryHarness();
+  test("surfaces a frame that fails contract validation, and applies nothing after it", async () => {
+    const { client, push } = telemetryHarness();
     render(<App client={client} />);
     await screen.findByText("dashboard");
 
-    // A peer that ships a schema the app does not accept must be reported, not
-    // silently rendered from whatever survived. Derived from the accepted
-    // version rather than written out, so this stays a rejection when that
-    // version is bumped instead of quietly becoming the accepted one.
-    sources[0]?.emit(
-      "snapshot",
-      { ...runList, telemetry_schema_version: TELEMETRY_SCHEMA_VERSION + 1 },
-      "5",
+    // A peer that ships a frame the app does not accept must be reported, not
+    // silently rendered from whatever survived: a row carrying a field the
+    // contract does not name is such a frame.
+    act(() =>
+      push("run.changed", {
+        row: {
+          id: LIVE_RUN,
+          name: LIVE_RUN,
+          group: null,
+          kind: null,
+          state: "settled",
+          nodes: { total: 1, done: 1, failed: 0, running: 0 },
+          updated_at: "2026-07-26T12:30:00.000Z",
+          session: "not a sidebar field",
+        },
+      }),
     );
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "contract validation",
+    );
+    expect(screen.getByText("dashboard")).toBeInTheDocument();
+    // And a well-formed frame after it is not applied: the stream stopped.
+    act(() =>
+      push("run.changed", {
+        row: {
+          id: LIVE_RUN,
+          name: LIVE_RUN,
+          group: null,
+          kind: null,
+          state: "settled",
+          nodes: { total: 8, done: 8, failed: 0, running: 0 },
+          updated_at: "2026-07-26T12:31:00.000Z",
+        },
+      }),
+    );
+    expect(
+      screen.getByRole("button", { name: RegExp(LIVE_RUN) }),
+    ).not.toHaveTextContent("8 done");
+  });
+
+  test("surfaces a patch that does not apply rather than guessing at it", async () => {
+    const { client, push } = telemetryHarness();
+    render(<App client={client} />);
+    await screen.findByText("dashboard");
+    act(() =>
+      push("detail.patch", {
+        run_id: LIVE_RUN,
+        ops: [{ p: ["graph", "no-such-member", "x"], v: 1 }],
+      }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "A patch could not be applied",
+    );
+    // What was on screen stays: the refused patch replaced nothing.
     expect(screen.getByText("dashboard")).toBeInTheDocument();
   });
 
-  test("surfaces a dropped event stream", async () => {
-    const { client, sources } = telemetryHarness();
+  test("surfaces a dropped event stream, and clears it once frames flow again", async () => {
+    const { client, sources, push } = telemetryHarness();
     render(<App client={client} />);
     await screen.findByText("dashboard");
+    await waitFor(() => expect(sources.length).toBeGreaterThan(0));
 
-    sources[0]?.fail();
+    act(() => sources.at(-1)?.fail());
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Live telemetry stream disconnected",
     );
+    act(() =>
+      push("detail.patch", {
+        run_id: LIVE_RUN,
+        ops: [{ p: ["observed_at"], v: "2026-07-26T12:30:00Z" }],
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
-  test("surfaces a detail failure triggered by a live update", async () => {
-    let details = 0;
-    const { client, sources } = telemetryHarness((url) => {
-      if (isRunDetail(url)) {
-        details += 1;
-        // The first read is the one that put the run on screen; a re-read raised
-        // by a live update is the failure this proves.
-        if (details > 1)
-          return Response.json(
-            { error: { code: "offline", message: "Detail unavailable" } },
-            { status: 503 },
-          );
-      }
-      return defaultResponder(url);
-    });
+  test("asks for nothing when the run it shows changes", async () => {
+    const { client, fetch, push } = telemetryHarness();
     render(<App client={client} />);
     await screen.findByText("dashboard");
-
-    sources[0]?.emit("run.changed", { run_id: LIVE_RUN }, "2");
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Detail unavailable",
+    const before = fetch.mock.calls.length;
+    // A change to the open run arrives as its patch, which is applied to what is
+    // on screen: no detail, timeline or list is read for it.
+    act(() =>
+      push("detail.patch", {
+        run_id: LIVE_RUN,
+        ops: [
+          { p: ["graph", "node_states", "dashboard"], v: "done" },
+          { p: ["graph", "node_status", "dashboard"], v: "done" },
+          { p: ["graph", "node_control"], v: {} },
+        ],
+      }),
     );
+    expect(
+      await screen.findByRole("button", { name: /^dashboard: done\b/ }),
+    ).toBeInTheDocument();
+    expect(fetch.mock.calls.length).toBe(before);
   });
 
-  test("stays quiet when an invalidated run has already been removed", async () => {
+  test("stays quiet when the run it shows is removed", async () => {
     let removed = false;
-    const { client, sources } = telemetryHarness((url) => {
-      if (isRunList(url)) {
-        const served = removed
-          ? { ...runList, runs: runList.runs.slice(1) }
-          : runList;
-        const named = selectedRuns(url);
-        return Response.json(
-          named === undefined ? served : selectionOf(served, named),
-        );
-      }
+    const { client, push } = telemetryHarness((url) => {
       if (removed && url.pathname.endsWith(LIVE_RUN))
         return Response.json(
           { error: { code: "run_not_found", message: "no recorded run" } },
@@ -1627,10 +1773,10 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     render(<App client={client} />);
     await screen.findByText("dashboard");
 
-    // The invalidation names a run the sweep has already taken away; the view
-    // follows the list instead of reporting a telemetry failure.
+    // The run the page shows is swept away; the view follows the sidebar to the
+    // run that remains instead of reporting a telemetry failure.
     removed = true;
-    sources[0]?.emit("run.changed", { run_id: LIVE_RUN }, "4");
+    act(() => push("run.removed", { run_id: LIVE_RUN }));
     expect(await screen.findByText("archive")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -1660,29 +1806,60 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     consoleError.mockRestore();
   });
 
+  test("reports the Host page's listing it could not read, beside the reports it could", async () => {
+    window.history.replaceState(null, "", "/?page=host");
+    const { client } = telemetryHarness((url) =>
+      isRunList(url)
+        ? Response.json(
+            { error: { code: "unreadable", message: "Runs root is gone" } },
+            { status: 503 },
+          )
+        : defaultResponder(url),
+    );
+    render(<App client={client} />);
+    const runs = await screen.findByRole("region", {
+      name: "Runs on the host",
+    });
+    expect(await within(runs).findByRole("alert")).toHaveTextContent(
+      "Listing unavailable: Runs root is gone",
+    );
+    // The host's own reports are still read and shown.
+    expect(await screen.findByText(/^Unwatched runs: \d+/)).toBeInTheDocument();
+  });
+
   test("drops a removed run and falls back to the remaining one", async () => {
     let removed = false;
-    const { client, sources } = telemetryHarness((url) => {
-      if (isRunList(url)) {
-        const served = removed
-          ? { ...runList, runs: runList.runs.slice(1) }
-          : runList;
-        const named = selectedRuns(url);
-        return Response.json(
-          named === undefined ? served : selectionOf(served, named),
-        );
-      }
+    const { client, push, fetch } = telemetryHarness((url) => {
+      if (url.pathname === "/api/v2/projects")
+        return Response.json({
+          ...projectList,
+          projects: projectList.projects
+            .map((group) => ({
+              ...group,
+              runs: group.runs.filter(
+                (run) => !removed || run.run_id !== LIVE_RUN,
+              ),
+            }))
+            .filter((group) => group.runs.length > 0),
+        });
       return defaultResponder(url);
     });
     render(<App client={client} />);
     await screen.findByText("dashboard");
 
-    // The row goes because the selection names it in `missing` — the server's own
-    // companion list — rather than because the list was refetched from page one.
+    // The row goes because its frame says so — the list is not read again.
+    const before = fetch.mock.calls.filter((call: unknown[]) =>
+      isRunList(new URL(String(call[0]), window.location.origin)),
+    ).length;
     removed = true;
-    sources[0]?.emit("run.removed", { run_id: LIVE_RUN }, "3");
+    act(() => push("run.removed", { run_id: LIVE_RUN }));
     expect(await screen.findByText("archive")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: RegExp(LIVE_RUN) })).toBeNull();
+    expect(
+      fetch.mock.calls.filter((call: unknown[]) =>
+        isRunList(new URL(String(call[0]), window.location.origin)),
+      ).length,
+    ).toBe(before);
   });
 });
 
@@ -1706,20 +1883,17 @@ test(
 
 describe("the reading a viewer asks for", () => {
   /** The filter every read of the selected run was taken under, in order. */
-  const filtersAsked = (fetch: { mock: { calls: unknown[][] } }): string[] =>
-    fetch.mock.calls
-      .map(
-        (call: unknown[]) => new URL(String(call[0]), window.location.origin),
-      )
-      .filter((url) => isRunDetail(url) || isTimeline(url))
-      .map((url) => url.searchParams.get("filter") ?? "");
+  const filtersAsked = (views: readonly SubscriptionView[]): string[] =>
+    views
+      .filter((view) => view.type === "detail" || view.type === "timeline")
+      .map((view) => ("filter" in view ? view.filter : undefined) ?? "");
 
   test(
     "switches between decisions and detailed activity, and says which is on",
     JOURNEY_TIMEOUT,
     async () => {
       window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=overall`);
-      const { client, fetch } = telemetryHarness();
+      const { client, views } = telemetryHarness();
       render(<App client={client} />);
       await screen.findByRole("heading", { name: LIVE_RUN });
 
@@ -1735,22 +1909,22 @@ describe("the reading a viewer asks for", () => {
       expect(activity).toHaveAttribute("aria-pressed", "true");
       expect(decisions).toHaveAttribute("aria-pressed", "false");
       await waitFor(() =>
-        expect(filtersAsked(fetch).length).toBeGreaterThan(0),
+        expect(filtersAsked(views).length).toBeGreaterThan(0),
       );
-      expect(new Set(filtersAsked(fetch))).toEqual(new Set(["detailed"]));
+      expect(new Set(filtersAsked(views))).toEqual(new Set(["detailed"]));
 
       // Narrowing to the decisions is one click, and every read of the run is
       // taken again under the profile it names — so the graph, the timeline and
       // the stream can never be showing three different slices of one run.
-      const before = filtersAsked(fetch).length;
+      const before = filtersAsked(views).length;
       await userEvent.click(decisions);
       expect(decisions).toHaveAttribute("aria-pressed", "true");
       expect(activity).toHaveAttribute("aria-pressed", "false");
       await waitFor(() =>
-        expect(filtersAsked(fetch).length).toBeGreaterThan(before),
+        expect(filtersAsked(views).length).toBeGreaterThan(before),
       );
-      expect(filtersAsked(fetch).slice(before)).toContain("planner");
-      expect(filtersAsked(fetch).slice(before)).not.toContain("detailed");
+      expect(filtersAsked(views).slice(before)).toContain("planner");
+      expect(filtersAsked(views).slice(before)).not.toContain("detailed");
 
       // And the reading is in the address, like every other selection: a reader
       // who narrowed their attention can send someone what they were looking at.
@@ -1783,15 +1957,15 @@ describe("the reading a viewer asks for", () => {
         "",
         `/?run=${LIVE_RUN}&view=overall&detail=decisions`,
       );
-      const { client, fetch } = telemetryHarness();
+      const { client, views } = telemetryHarness();
       render(<App client={client} />);
       await screen.findByRole("heading", { name: LIVE_RUN });
       await waitFor(() =>
-        expect(filtersAsked(fetch).length).toBeGreaterThan(0),
+        expect(filtersAsked(views).length).toBeGreaterThan(0),
       );
       // Every read from the first one: a bookmarked reading is not a reading the
       // app arrives at after showing the other one first.
-      expect(new Set(filtersAsked(fetch))).toEqual(new Set(["planner"]));
+      expect(new Set(filtersAsked(views))).toEqual(new Set(["planner"]));
       expect(
         within(
           screen.getByRole("group", { name: "Level of detail" }),
@@ -1865,23 +2039,15 @@ describe("a read that outlives the invalidation that arrived during it", () => {
     JOURNEY_TIMEOUT,
     async () => {
       window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=graph`);
-      const { client, sources, release, reads } = heldDetail(LIVE_RUN);
+      const { client, release, reads } = heldDetail(LIVE_RUN);
       render(<App client={client} />);
       await screen.findByText("Loading execution history…");
       await waitFor(() => expect(reads()).toBe(1));
-
-      // The run is recording continuously: every poll tick invalidates it while
-      // the read of it is still in flight.
-      for (const id of ["2", "3", "4", "5", "6"])
-        act(() => sources[0]?.emit("run.changed", { run_id: LIVE_RUN }, id));
-      // Not one further read is started while one is out. Forty reads of one run
-      // in flight together is the other half of the livelock: each makes the next
-      // slower, and none of them ever lands.
+      // One subscription is out for the run, and nothing asks for it again while
+      // it is: the run's changes arrive on its stream once it is answered.
       expect(reads()).toBe(1);
 
       release();
-      // The read was invalidated five times before it landed, and it is still this
-      // reading's read — so the detail is rendered rather than discarded.
       expect(await screen.findByText("dashboard")).toBeInTheDocument();
       expect(screen.queryByText("Loading execution history…")).toBeNull();
     },
@@ -1891,26 +2057,23 @@ describe("a read that outlives the invalidation that arrived during it", () => {
     "discards a read of the run the reader has moved away from",
     JOURNEY_TIMEOUT,
     async () => {
-      // Under the flat list, where the other run is one row away.
-      window.history.replaceState(
-        null,
-        "",
-        `/?list=runs&run=${LIVE_RUN}&view=graph`,
-      );
+      window.history.replaceState(null, "", `/?run=${HISTORY_RUN}&view=graph`);
       const { client, release } = heldDetail(LIVE_RUN);
       render(<App client={client} />);
-      await screen.findByText("Loading execution history…");
+      expect(await screen.findByText("archive")).toBeInTheDocument();
 
-      // The reader moves to the other run while the first one's read is still out,
-      // and that run answers at once.
+      // The reader opens the live run, whose subscription is held, and moves back
+      // to the other run before it answers.
+      await userEvent.click(
+        await screen.findByRole("button", { name: RegExp(LIVE_RUN) }),
+      );
       await userEvent.click(
         await screen.findByRole("button", { name: RegExp(HISTORY_RUN) }),
       );
       expect(await screen.findByText("archive")).toBeInTheDocument();
 
-      // Only now does the read they moved away from land. Letting a still-current
-      // read land is not the same as letting any read land: this one describes a
-      // different reading, and drawing it here would put one run's detail on
+      // Only now does the subscription they moved away from answer. It describes
+      // a different reading, and drawing it here would put one run's detail on
       // screen under another's name.
       release();
       await expect(

@@ -36,7 +36,10 @@ function itemReading(row: TimelineRow): ItemReading {
     ...(row.durationMs === null
       ? {}
       : { duration: formatDuration(row.durationMs) }),
-    running: row.endedAt === null && row.rowKind === "span",
+    running:
+      row.endedAt === null &&
+      row.rowKind === "span" &&
+      row.status === "running",
     ...(row.status ? { status: row.status } : {}),
   };
 }

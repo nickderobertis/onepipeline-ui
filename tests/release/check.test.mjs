@@ -5,7 +5,7 @@
 // registry doubles with nothing staged: whatever it lets through would show up
 // as an upload.
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -23,6 +23,7 @@ import {
   githubDouble,
   ROOT,
   recipe,
+  recipeRunning,
   registryDoubles,
   releaseEnv,
   scratch,
@@ -47,7 +48,7 @@ after(async () => {
 });
 
 const allBuilt =
-  "build-linux=success build-macos=success build-windows=success";
+  "build-linux=success build-linux-arm64=success build-macos=success build-windows=success";
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const publish = (args, extra) => recipe("publish", args, { ...env, ...extra });
@@ -55,7 +56,8 @@ const publish = (args, extra) => recipe("publish", args, { ...env, ...extra });
 test("a build job the workflow reported no result for counts as missing, and publish uploads nothing platform-independent", () => {
   // build-windows is left out, as a workflow that stopped reporting it would.
   const extra = {
-    BUILD_RESULTS: "build-linux=success build-macos=success",
+    BUILD_RESULTS:
+      "build-linux=success build-linux-arm64=success build-macos=success",
   };
   const check = publish(["check"], extra);
   assert.notEqual(check.status, 0, check.output);
@@ -77,7 +79,7 @@ test("PyPI answering a 200 that is not JSON is refused, never read as nothing se
   try {
     const check = publish(["check"], {
       BUILD_RESULTS:
-        "build-linux=success build-macos=success build-windows=success",
+        "build-linux=success build-linux-arm64=success build-macos=success build-windows=success",
     });
     assert.notEqual(check.status, 0, check.output);
     assert.match(
@@ -274,7 +276,9 @@ test("a release-status.sh stopped by a signal fails settle rather than ending it
   assert.ok(!existsSync(hold));
 });
 
-test("once every platform is served, publish's uploads still refuse an --out its build never staged", () => {
+// Every platform's files where the four build jobs leave them, under their
+// planned names; `unseed` takes them away again.
+function seedPlatforms() {
   const V = version();
   for (const job of Object.keys(PLATFORMS))
     for (const artifact of plan(job).artifacts) {
@@ -295,6 +299,433 @@ test("once every platform is served, publish's uploads still refuse an --out its
         writeFileSync(join(pkg, `${V}.tgz`), artifact.file);
       }
     }
+}
+function unseed() {
+  registries.clear();
+  for (const file of readdirSync(gh.assets)) rmSync(join(gh.assets, file));
+  for (const dir of ["pypi", "npm"]) {
+    rmSync(join(registries.state, dir), { recursive: true, force: true });
+    mkdirSync(join(registries.state, dir));
+  }
+}
+
+const platformPackages = () =>
+  Object.keys(PLATFORMS).flatMap((job) =>
+    plan(job)
+      .artifacts.filter((a) => a.registry === "npm")
+      .map((a) => a.package),
+  );
+
+test("a platform package npm lists before it serves is waited for, and check passes only once npm serves it", async () => {
+  const V = version();
+  const linux = `onepipeline-api-cli-linux-x64@${V}`;
+  seedPlatforms();
+  // v0.40.0's linux-x64, minutes after its publish: the packument names the
+  // version and the tarball answers 404.
+  registries.unserve([linux]);
+  const served = registries.served().length;
+  try {
+    const started = Date.now();
+    const running = recipeRunning("publish", ["check"], {
+      ...env,
+      BUILD_RESULTS: allBuilt,
+      RELEASE_CHECK_BUDGET: "120",
+    });
+    await sleep(4000);
+    assert.deepEqual(
+      registries
+        .served()
+        .slice(served)
+        .filter((line) => line.includes("linux-x64")),
+      [],
+      "nothing served it while npm did not",
+    );
+    registries.clear();
+    const check = await running;
+    assert.equal(check.status, 0, check.output);
+    assert.match(check.stdout, /every platform's v\S+ files are served/);
+    assert.ok(Date.now() - started >= 4000, "it waited for npm to serve it");
+    // Every platform package was fetched by version, the late one included.
+    assert.deepEqual(
+      registries
+        .served()
+        .slice(served)
+        .map((line) => line.split(" ")[1])
+        .sort(),
+      platformPackages()
+        .map((pkg) => `${pkg}-${V}.tgz`)
+        .sort(),
+    );
+    assert.deepEqual(registries.uploads(), []);
+  } finally {
+    unseed();
+  }
+});
+
+test("a platform package npm does not list yet is waited for beside one it lists and does not serve, and check passes once npm serves both", async () => {
+  const V = version();
+  seedPlatforms();
+  // A successful build's package npm has not even listed, and another it lists
+  // with no tarball behind it.
+  registries.hide([`onepipeline-api-cli-linux-x64@${V}`]);
+  registries.unserve([`onepipeline-api-cli-win32-x64@${V}`]);
+  const served = registries.served().length;
+  try {
+    const running = recipeRunning("publish", ["check"], {
+      ...env,
+      BUILD_RESULTS: allBuilt,
+      RELEASE_CHECK_BUDGET: "120",
+    });
+    await sleep(4000);
+    registries.clear();
+    const check = await running;
+    assert.equal(check.status, 0, check.output);
+    assert.deepEqual(
+      registries
+        .served()
+        .slice(served)
+        .map((line) => line.split(" ")[1])
+        .sort(),
+      platformPackages()
+        .map((pkg) => `${pkg}-${V}.tgz`)
+        .sort(),
+    );
+  } finally {
+    unseed();
+  }
+});
+
+const wheelOf = (job) =>
+  plan(job).artifacts.find((a) => a.registry === "pypi").file;
+
+// Waits until the running recipe has printed `pattern` or exited, whichever
+// comes first, so the registry changes only once the recipe is waiting on it.
+async function untilPrinted(running, pattern) {
+  for (let i = 0; i < 1200 && !running.exited(); i++) {
+    if (pattern.test(running.output())) return;
+    await sleep(100);
+  }
+}
+
+test("wheels PyPI does not list yet are waited for beside platform packages npm does not list yet, and check passes once both serve them", async () => {
+  const V = version();
+  seedPlatforms();
+  // v0.41.1's check, at 05:25:58: PyPI's JSON listed the Linux wheel but not
+  // the macOS and Windows ones uploaded about forty seconds before, and npm
+  // listed none of the platform packages the jobs had published — linux-x64's
+  // three minutes before. It reported all five missing six seconds in.
+  registries.hide([
+    wheelOf("macos"),
+    wheelOf("windows"),
+    ...platformPackages().map((pkg) => `${pkg}@${V}`),
+  ]);
+  const served = registries.served().length;
+  try {
+    const running = recipeRunning("publish", ["check"], {
+      ...env,
+      BUILD_RESULTS: allBuilt,
+      RELEASE_CHECK_BUDGET: "120",
+    });
+    await untilPrinted(running, /PyPI does not list .+ yet/);
+    registries.clear();
+    const check = await running;
+    assert.equal(check.status, 0, check.output);
+    assert.match(check.stdout, /every platform's v\S+ files are served/);
+    for (const job of ["macos", "windows"])
+      assert.match(
+        check.stderr,
+        new RegExp(`PyPI does not list .*${escapeRegExp(wheelOf(job))}`),
+      );
+    assert.match(check.stderr, /PyPI \S+.*: listed after \d+s/);
+    // Every platform package was then fetched by version, as an install does.
+    assert.deepEqual(
+      registries
+        .served()
+        .slice(served)
+        .map((line) => line.split(" ")[1])
+        .sort(),
+      platformPackages()
+        .map((pkg) => `${pkg}-${V}.tgz`)
+        .sort(),
+    );
+    assert.deepEqual(registries.uploads(), []);
+    assert.deepEqual(gh.uploads(), []);
+  } finally {
+    unseed();
+  }
+});
+
+test("a wheel PyPI never lists within the wait fails check, and no upload publishes the launcher or the crate past it", () => {
+  const wheel = wheelOf("windows");
+  seedPlatforms();
+  registries.hide([wheel]);
+  try {
+    const extra = { BUILD_RESULTS: allBuilt, RELEASE_CHECK_BUDGET: "3" };
+    const check = publish(["check"], extra);
+    assert.notEqual(check.status, 0, check.output);
+    assert.match(
+      check.stderr,
+      new RegExp(
+        `PyPI ${escapeRegExp(wheel)}: still not listed after \\d+ reads`,
+      ),
+    );
+    assert.match(
+      check.stderr,
+      new RegExp(`not every platform published .*PyPI ${escapeRegExp(wheel)}`),
+    );
+    for (const registry of ["crate", "npm", "github"]) {
+      const upload = publish(["upload", registry], extra);
+      assert.notEqual(upload.status, 0, `${registry}: ${upload.output}`);
+      assert.match(
+        upload.stderr,
+        new RegExp(
+          `not every platform published .*PyPI ${escapeRegExp(wheel)}`,
+        ),
+        registry,
+      );
+    }
+    assert.deepEqual(registries.uploads(), []);
+    assert.deepEqual(gh.uploads(), []);
+  } finally {
+    unseed();
+  }
+});
+
+test("a frontend npm does not list yet when publish's verify asks is installed once npm serves it, not refused on the first answer", async () => {
+  const V = version();
+  // What publish's build and upload leave: the SBOM on the Release, and the
+  // frontend package on npm carrying the bundle staged under --out. The crate
+  // is switched off, so hiding the frontend by name hides nothing else.
+  const sbom = plan("publish").artifacts.find((a) => a.kind === "sbom").file;
+  writeFileSync(join(gh.assets, sbom), "{}");
+  mkdirSync(join(ROOT, "target"), { recursive: true });
+  const out = mkdtempSync(join(ROOT, "target", "release-journey-frontend-"));
+  const bundle = "<!doctype html><title>this release's view</title>\n";
+  const staged = join(out, "npm", "onepipeline-ui", "dist");
+  mkdirSync(staged, { recursive: true });
+  writeFileSync(join(staged, "index.html"), bundle);
+  const pack = join(dir, "frontend-pack");
+  mkdirSync(join(pack, "package", "dist"), { recursive: true });
+  const manifest = { name: "onepipeline-ui", version: V };
+  writeFileSync(
+    join(pack, "package", "package.json"),
+    JSON.stringify(manifest),
+  );
+  writeFileSync(join(pack, "package", "dist", "index.html"), bundle);
+  const pkg = join(registries.state, "npm", "onepipeline-ui");
+  mkdirSync(pkg, { recursive: true });
+  execFileSync("tar", ["-czf", join(pkg, `${V}.tgz`), "-C", pack, "package"]);
+  writeFileSync(join(pkg, `${V}.json`), JSON.stringify(manifest));
+  // v0.41.0's verify ran six seconds after `upload npm` returned, and npm's
+  // `time` for that frontend is 97 seconds after the upload.
+  registries.hide([`onepipeline-ui@${V}`]);
+  const calls = gh.calls().length;
+  const served = registries.served().length;
+  try {
+    const running = recipeRunning("publish", ["verify", "--out", out], {
+      ...env,
+      CARGO_REGISTRY_TOKEN: "",
+      RELEASE_VERIFY_BUDGET: "20",
+    });
+    // The Release is read first; npm is asked straight after.
+    for (let i = 0; i < 1200 && gh.calls().length === calls; i++)
+      await sleep(100);
+    for (let i = 0; i < 30 && !running.exited(); i++) await sleep(100);
+    registries.clear();
+    const verify = await running;
+    assert.doesNotMatch(verify.stderr, /npm does not serve onepipeline-ui/);
+    assert.ok(
+      registries.served().slice(served).includes(`npm onepipeline-ui-${V}.tgz`),
+      verify.output,
+    );
+    assert.doesNotMatch(
+      verify.stderr,
+      /does not carry the frontend this release built/,
+    );
+    // The frontend installed and was this release's; what stops verify now is
+    // the launcher, which nothing here published.
+    assert.notEqual(verify.status, 0, verify.output);
+    assert.match(
+      verify.stderr,
+      /npm onepipeline-api-cli \S+: still not installable after \d+ attempts/,
+    );
+    assert.deepEqual(registries.uploads(), []);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+    rmSync(pack, { recursive: true, force: true });
+    rmSync(pkg, { recursive: true, force: true });
+    unseed();
+  }
+});
+
+test("the wait is one deadline for every platform package, not one per package", () => {
+  const V = version();
+  seedPlatforms();
+  try {
+    // What asking npm about every platform package costs when it serves them
+    // all, measured on this host now: each platform package adds its own npm
+    // calls, so only the time beyond this is the wait.
+    const servedStarted = Date.now();
+    const served = publish(["check"], {
+      BUILD_RESULTS: allBuilt,
+      RELEASE_CHECK_BUDGET: "20",
+    });
+    assert.equal(served.status, 0, served.output);
+    const asking = (Date.now() - servedStarted) / 1000;
+    // Two packages npm never serves: the second gets what the first left.
+    registries.unserve([
+      `onepipeline-api-cli-linux-x64@${V}`,
+      `onepipeline-api-cli-win32-x64@${V}`,
+    ]);
+    const started = Date.now();
+    const check = publish(["check"], {
+      BUILD_RESULTS: allBuilt,
+      RELEASE_CHECK_BUDGET: "20",
+    });
+    const elapsed = (Date.now() - started) / 1000 - asking;
+    assert.notEqual(check.status, 0, check.output);
+    for (const pkg of ["linux-x64", "win32-x64"])
+      assert.match(
+        check.stderr,
+        new RegExp(
+          `not every platform published .*npm onepipeline-api-cli-${pkg}@`,
+        ),
+      );
+    // retry-install backs off 1, 2, 4 and 8 s, so one 20 s budget runs out
+    // after about 15 s of waiting, and two of them after about 30.
+    assert.ok(elapsed >= 14, `it waited the budget: ${elapsed} s`);
+    assert.ok(elapsed < 26, `not a budget per package: ${elapsed} s`);
+  } finally {
+    unseed();
+  }
+});
+
+test("a budget that is not whole seconds is refused before anything is asked", () => {
+  const check = publish(["check"], {
+    BUILD_RESULTS: allBuilt,
+    RELEASE_CHECK_BUDGET: "-5",
+  });
+  assert.equal(check.status, 2, check.output);
+  assert.match(
+    check.stderr,
+    /RELEASE_CHECK_BUDGET must be a whole number of seconds, not '-5'/,
+  );
+});
+
+test("a platform package npm never serves within the wait fails check, and no upload publishes the launcher past it", () => {
+  const V = version();
+  seedPlatforms();
+  registries.unserve([`onepipeline-api-cli-win32-x64@${V}`]);
+  try {
+    const extra = { BUILD_RESULTS: allBuilt, RELEASE_CHECK_BUDGET: "3" };
+    const check = publish(["check"], extra);
+    assert.notEqual(check.status, 0, check.output);
+    assert.match(
+      check.stderr,
+      /npm onepipeline-api-cli-win32-x64 \S+: still not installable after \d+ attempts/,
+    );
+    assert.match(
+      check.stderr,
+      new RegExp(
+        `not every platform published .*npm onepipeline-api-cli-win32-x64@${escapeRegExp(V)}`,
+      ),
+    );
+    // An upload's own check does not wait, and does not take npm's listing of
+    // a version for npm serving it either.
+    for (const registry of ["crate", "npm", "github"]) {
+      const upload = publish(["upload", registry], extra);
+      assert.notEqual(upload.status, 0, `${registry}: ${upload.output}`);
+      assert.match(upload.stderr, /not every platform published/, registry);
+    }
+    assert.deepEqual(registries.uploads(), []);
+    assert.deepEqual(gh.uploads(), []);
+  } finally {
+    unseed();
+  }
+});
+
+test("a platform package or wheel whose build job did not succeed is reported at once, never waited for as a slow registry", () => {
+  const V = version();
+  seedPlatforms();
+  registries.hide([`onepipeline-api-cli-win32-x64@${V}`, wheelOf("windows")]);
+  const served = registries.served().length;
+  try {
+    const started = Date.now();
+    const check = publish(["check"], {
+      BUILD_RESULTS:
+        "build-linux=success build-linux-arm64=success build-macos=success build-windows=failure",
+      RELEASE_CHECK_BUDGET: "600",
+    });
+    assert.notEqual(check.status, 0, check.output);
+    assert.ok(
+      Date.now() - started < 60_000,
+      "it did not spend the wait on a package nothing published",
+    );
+    assert.match(
+      check.stderr,
+      new RegExp(
+        `build-windows \\(failure\\), PyPI ${escapeRegExp(wheelOf("windows"))}, npm onepipeline-api-cli-win32-x64@${escapeRegExp(V)}`,
+      ),
+    );
+    assert.doesNotMatch(
+      check.stderr,
+      /attempt \d+ failed|still not installable|PyPI does not list|still not listed/,
+    );
+    assert.deepEqual(
+      registries.served().slice(served),
+      [],
+      "no package was fetched",
+    );
+  } finally {
+    unseed();
+  }
+});
+
+// The arm64 Linux job is the one platform job added back after a release
+// shipped without it, so the launcher that pins its package is held to it the
+// way it is held to every other: a failed job and a package npm never serves
+// each stop every platform-independent upload.
+test("an arm64 Linux job that failed, or whose package npm never serves, keeps the launcher unpublished", () => {
+  const V = version();
+  const arm64 = `onepipeline-api-cli-linux-arm64@${V}`;
+  assert.ok(platformPackages().includes("onepipeline-api-cli-linux-arm64"));
+  for (const [results, hidden, expected] of [
+    [
+      allBuilt.replace(
+        "build-linux-arm64=success",
+        "build-linux-arm64=failure",
+      ),
+      () => registries.hide([arm64]),
+      `build-linux-arm64 \\(failure\\), npm ${escapeRegExp(arm64)}`,
+    ],
+    [
+      allBuilt,
+      () => registries.unserve([arm64]),
+      `not every platform published .*npm ${escapeRegExp(arm64)}`,
+    ],
+  ]) {
+    seedPlatforms();
+    hidden();
+    try {
+      const extra = { BUILD_RESULTS: results, RELEASE_CHECK_BUDGET: "3" };
+      const check = publish(["check"], extra);
+      assert.notEqual(check.status, 0, check.output);
+      assert.match(check.stderr, new RegExp(expected));
+      for (const registry of ["crate", "npm", "github"]) {
+        const upload = publish(["upload", registry], extra);
+        assert.notEqual(upload.status, 0, `${registry}: ${upload.output}`);
+        assert.match(upload.stderr, /not every platform published/, registry);
+      }
+      assert.deepEqual(registries.uploads(), []);
+      assert.deepEqual(gh.uploads(), []);
+    } finally {
+      unseed();
+    }
+  }
+});
+
+test("once every platform is served, publish's uploads still refuse an --out its build never staged", () => {
+  seedPlatforms();
   mkdirSync(join(ROOT, "target"), { recursive: true });
   const out = mkdtempSync(join(ROOT, "target", "release-journey-unbuilt-"));
   try {
@@ -320,10 +751,6 @@ test("once every platform is served, publish's uploads still refuse an --out its
     assert.deepEqual(registries.uploads(), []);
   } finally {
     rmSync(out, { recursive: true, force: true });
-    for (const file of readdirSync(gh.assets)) rmSync(join(gh.assets, file));
-    for (const dir of ["pypi", "npm"]) {
-      rmSync(join(registries.state, dir), { recursive: true, force: true });
-      mkdirSync(join(registries.state, dir));
-    }
+    unseed();
   }
 });

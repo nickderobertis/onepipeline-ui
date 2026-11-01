@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
 import { CAPTURE_INSTANT } from "./capture-clock";
+import "./capture-workspace";
 import e2eConfig from "./playwright.config";
 
 /**

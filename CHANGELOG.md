@@ -7,6 +7,239 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.64.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.63.0...v0.64.0) - 2026-11-01
+
+### Added
+
+- *(deps)* [**breaking**] link the engine whose plan store makes a create safe to retry ([#563](https://github.com/nickderobertis/onepipeline-ui/pull/563))
+
+## [0.62.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.62.0...v0.62.1) - 2026-10-30
+
+### Fixed
+
+- *(deps)* link the engine whose plan store re-copies unchanged Linear plans with no write ([#553](https://github.com/nickderobertis/onepipeline-ui/pull/553))
+
+## [0.62.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.61.0...v0.62.0) - 2026-10-30
+
+### Added
+
+- [**breaking**] add a separate human action items view ([#547](https://github.com/nickderobertis/onepipeline-ui/pull/547))
+
+## [0.61.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.60.0...v0.61.0) - 2026-10-30
+
+### Fixed
+
+- *(deps)* link the engine whose observer keeps a stopped turn from reading as lost ([#549](https://github.com/nickderobertis/onepipeline-ui/pull/549))
+- *(deps)* [**breaking**] link the engine whose store lets a private GitHub home hold public tasks ([#546](https://github.com/nickderobertis/onepipeline-ui/pull/546))
+
+## [0.60.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.59.1...v0.60.0) - 2026-10-30
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine whose onevcs never refuses a removal at the public boundary ([#545](https://github.com/nickderobertis/onepipeline-ui/pull/545))
+
+## [0.59.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.59.0...v0.59.1) - 2026-10-29
+
+### Fixed
+
+- *(deps)* link the engine carrying the plan store and launcher fixes ([#541](https://github.com/nickderobertis/onepipeline-ui/pull/541))
+
+## [0.59.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.58.1...v0.59.0) - 2026-10-27
+
+### Performance
+
+- *(deps)* [**breaking**] link the engine whose store batches private-source copies ([#531](https://github.com/nickderobertis/onepipeline-ui/pull/531))
+
+## [0.58.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.58.0...v0.58.1) - 2026-10-27
+
+### Fixed
+
+- *(npm)* make the npm-installed onepipeline-api command become the read API process instead of running it as a child ([#528](https://github.com/nickderobertis/onepipeline-ui/pull/528))
+
+## [0.58.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.57.0...v0.58.0) - 2026-10-27
+
+### Added
+
+- *(deps)* [**breaking**] link the engine that ships its SBOM on npm, and ship the read API's SBOM in every npm platform package ([#524](https://github.com/nickderobertis/onepipeline-ui/pull/524))
+
+## [0.57.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.56.0...v0.57.0) - 2026-10-27
+
+### Added
+
+- *(deps)* [**breaking**] link the engine that holds a local-direct landing for its release, and show nodes held for one ([#521](https://github.com/nickderobertis/onepipeline-ui/pull/521))
+
+## [0.56.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.55.0...v0.56.0) - 2026-10-27
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine whose driver stays responsive however large its journal grows ([#522](https://github.com/nickderobertis/onepipeline-ui/pull/522))
+- *(deps)* link the engine whose plan store carries an id-only anchor into a public projection ([#516](https://github.com/nickderobertis/onepipeline-ui/pull/516))
+
+## [0.55.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.54.0...v0.55.0) - 2026-10-26
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine that keeps every run's observer monitor on its own config ([#513](https://github.com/nickderobertis/onepipeline-ui/pull/513))
+
+## [0.54.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.53.1...v0.54.0) - 2026-10-25
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine whose private-term check honours a host's public phrases ([#511](https://github.com/nickderobertis/onepipeline-ui/pull/511))
+
+## [0.53.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.53.0...v0.53.1) - 2026-10-25
+
+### Fixed
+
+- *(deps)* link the engine that ends a run's observer judge command when the run ends ([#508](https://github.com/nickderobertis/onepipeline-ui/pull/508))
+
+## [0.53.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.52.0...v0.53.0) - 2026-10-25
+
+### Added
+
+- [**breaking**] link the screened export coordination engine ([#489](https://github.com/nickderobertis/onepipeline-ui/pull/489))
+
+## [0.52.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.51.0...v0.52.0) - 2026-10-25
+
+### Added
+
+- [**breaking**] link the engine that holds nodes only on trackers their edges name ([#465](https://github.com/nickderobertis/onepipeline-ui/pull/465))
+
+## [0.51.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.50.0...v0.51.0) - 2026-10-24
+
+### Added
+
+- *(deps)* [**breaking**] show every conversation whole from its transcript, open it at any tool call, and time the timeline ([#457](https://github.com/nickderobertis/onepipeline-ui/pull/457))
+
+### Fixed
+
+- *(deps)* link the engine whose stop ends every turn a dispatch started ([#458](https://github.com/nickderobertis/onepipeline-ui/pull/458))
+
+## [0.50.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.49.0...v0.50.0) - 2026-10-24
+
+### Fixed
+
+- *(deps)* [**breaking**] follow onepipeline 0.89.0's types in the read API's public surface ([#455](https://github.com/nickderobertis/onepipeline-ui/pull/455))
+- *(deps)* link the engine that links the status-preserving plan store ([#453](https://github.com/nickderobertis/onepipeline-ui/pull/453))
+
+## [0.49.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.48.1...v0.49.0) - 2026-10-24
+
+### Added
+
+- *(deps)* [**breaking**] link the engine that skips withdrawn tasks and carries live-added images ([#446](https://github.com/nickderobertis/onepipeline-ui/pull/446))
+
+### Performance
+
+- keep the Observatory current from pushed changes instead of refetching ([#444](https://github.com/nickderobertis/onepipeline-ui/pull/444))
+
+## [0.48.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.48.0...v0.48.1) - 2026-10-23
+
+### Fixed
+
+- *(test)* capture the Graph view only once its edges are drawn ([#443](https://github.com/nickderobertis/onepipeline-ui/pull/443))
+
+## [0.48.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.47.0...v0.48.0) - 2026-10-23
+
+### Performance
+
+- *(deps)* [**breaking**] link the engine whose plan store approves in fewer calls ([#441](https://github.com/nickderobertis/onepipeline-ui/pull/441))
+
+## [0.47.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.46.0...v0.47.0) - 2026-10-23
+
+### Added
+
+- *(deps)* [**breaking**] one project-centric navigation with run kinds and a Host page ([#432](https://github.com/nickderobertis/onepipeline-ui/pull/432))
+
+### Fixed
+
+- serve the recorded agent role for observer-graph sessions ([#436](https://github.com/nickderobertis/onepipeline-ui/pull/436))
+
+## [0.46.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.45.2...v0.46.0) - 2026-10-22
+
+### Added
+
+- [**breaking**] link onepipeline with pooled server cleanup ([#431](https://github.com/nickderobertis/onepipeline-ui/pull/431))
+
+### Fixed
+
+- make the shutdown dialog test and recorded-run screenshots deterministic ([#434](https://github.com/nickderobertis/onepipeline-ui/pull/434))
+
+## [0.45.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.45.1...v0.45.2) - 2026-10-22
+
+### Added
+
+- one Remote tab with a per-check table, and a paired one-line channel ([#428](https://github.com/nickderobertis/onepipeline-ui/pull/428))
+
+## [0.45.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.45.0...v0.45.1) - 2026-10-22
+
+### Fixed
+
+- place every timeline event and span where its own records put it ([#426](https://github.com/nickderobertis/onepipeline-ui/pull/426))
+
+## [0.45.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.44.0...v0.45.0) - 2026-10-22
+
+### Added
+
+- [**breaking**] remove watch, adopt and owner-scoped shutdown from the Observatory and its read API ([#425](https://github.com/nickderobertis/onepipeline-ui/pull/425))
+- *(deps)* [**breaking**] link the engine whose plan store verifies Linear copies and homes private plans privately ([#422](https://github.com/nickderobertis/onepipeline-ui/pull/422))
+
+## [0.44.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.43.1...v0.44.0) - 2026-10-21
+
+### Performance
+
+- *(deps)* [**breaking**] link the engine whose plan store copies faster ([#411](https://github.com/nickderobertis/onepipeline-ui/pull/411))
+
+## [0.43.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.43.0...v0.43.1) - 2026-10-21
+
+### Fixed
+
+- *(ci)* finish the Linux test job reliably inside its time limit ([#409](https://github.com/nickderobertis/onepipeline-ui/pull/409))
+
+## [0.43.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.42.0...v0.43.0) - 2026-10-20
+
+### Added
+
+- *(deps)* [**breaking**] link the engine whose manager notes interrupt live turns ([#405](https://github.com/nickderobertis/onepipeline-ui/pull/405))
+
+### Fixed
+
+- *(release)* finish a re-run whose earlier attempt already published ([#403](https://github.com/nickderobertis/onepipeline-ui/pull/403))
+
+## [0.42.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.41.2...v0.42.0) - 2026-10-20
+
+### Added
+
+- *(deps)* [**breaking**] link the engine that marks a plan's home done when its run settles ([#400](https://github.com/nickderobertis/onepipeline-ui/pull/400))
+
+## [0.41.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.41.1...v0.41.2) - 2026-10-20
+
+### Added
+
+- *(release)* build, publish and verify linux-arm64 again as a sixth release job ([#390](https://github.com/nickderobertis/onepipeline-ui/pull/390))
+
+### Fixed
+
+- *(release)* wait for wheels and npm packages a registry has not listed yet ([#391](https://github.com/nickderobertis/onepipeline-ui/pull/391))
+- *(deps)* link the engine release carrying this plan's fixes ([#388](https://github.com/nickderobertis/onepipeline-ui/pull/388))
+
+## [0.41.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.41.0...v0.41.1) - 2026-10-20
+
+### Added
+
+- relay publication-resumed and serve a continued rework through every route ([#386](https://github.com/nickderobertis/onepipeline-ui/pull/386))
+
+## [0.41.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.40.2...v0.41.0) - 2026-10-20
+
+### Added
+
+- *(deps)* [**breaking**] link the engine that moves landed issues to done ([#384](https://github.com/nickderobertis/onepipeline-ui/pull/384))
+
+## [0.40.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.40.0...v0.40.1) - 2026-10-19
+
+### Fixed
+
+- *(release)* publish and verify the npm package on every platform ([#379](https://github.com/nickderobertis/onepipeline-ui/pull/379))
+
 ## [0.40.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.39.0...v0.40.0) - 2026-10-19
 
 ### Added

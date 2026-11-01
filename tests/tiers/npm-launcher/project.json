@@ -1,0 +1,51 @@
+{
+  "name": "onepipeline-ui-npm-launcher",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:api", "type:test", "lang:rust"],
+  "targets": {
+    "test": {
+      "command": "just _tier-test-covered npm-launcher",
+      "dependsOn": [
+        { "projects": ["onepipeline-ui"], "target": "ensure-node-without-execve" },
+        { "projects": ["dag-ui"], "target": "build" }
+      ],
+      "inputs": ["npmLauncherJourneys"],
+      "outputs": [
+        "{workspaceRoot}/target/llvm-cov-target/npm-launcher-*.profraw"
+      ]
+    },
+    "test-quick": {
+      "command": "just _tier-test npm-launcher",
+      "dependsOn": [
+        { "projects": ["onepipeline-ui"], "target": "ensure-node-without-execve" },
+        { "projects": ["dag-ui"], "target": "build" }
+      ],
+      "inputs": ["npmLauncherJourneys"]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  },
+  "namedInputs": {
+    "npmLauncherJourneys": [
+      "apiServerSurface",
+      "embeddedView",
+      "testTiers",
+      "sharedGlobals",
+      "{workspaceRoot}/npm/onepipeline-api-cli/**/*",
+      "{workspaceRoot}/scripts/npm-build.mjs",
+      "{workspaceRoot}/scripts/sbom.mjs",
+      "{workspaceRoot}/scripts/ensure-node-without-execve.sh",
+      "{workspaceRoot}/tests/e2e/main.rs",
+      "{workspaceRoot}/tests/e2e/ensure_node_without_execve.rs",
+      "{workspaceRoot}/tests/e2e/packaging.rs",
+      "{workspaceRoot}/tests/support/fixture_run.rs",
+      "{workspaceRoot}/tests/support/harness_history.rs",
+      "{workspaceRoot}/tests/support/http.rs",
+      "{workspaceRoot}/tests/support/journal_schema.rs",
+      "{workspaceRoot}/tests/support/serving.rs",
+      "{workspaceRoot}/tests/support/sibling.rs"
+    ]
+  }
+}

@@ -292,15 +292,14 @@ fn a_run_with_no_summary_is_folded_once_across_two_listings() {
 
     let folding = cost.since(&first).under(&journal_path).bytes;
     let after = cost.since(&second).under(&journal_path).bytes;
-    // The engine's own cold open, and nothing beside it. `RunView::open` reads
-    // the journal whole for the view's events and whole again to fold it into
-    // the checkpoint it writes beside the summary, and then reads back the
-    // prefix that checkpoint covers to seal it — a third read that is at most
-    // the journal again. That is the price the linked engine puts on a run it
-    // has never summarized; one more whole read would be this server folding
-    // beside it rather than reading what it cached.
-    assert!(
-        (journal * 2..=journal * 3).contains(&folding),
+    // The engine's own cold open, and nothing beside it. `RunSummary::of` folds
+    // the journal once, into the checkpoint it writes beside the summary, whose
+    // seal is over that document alone, so nothing reads the covered prefix
+    // back. That is the price the linked engine puts on a run it has never
+    // summarized; any more would be this server folding beside it rather than
+    // reading what it cached.
+    assert_eq!(
+        folding, journal,
         "the first listing read {folding} bytes of a {journal}-byte journal, which is not \
          the engine's own cold open of it"
     );
@@ -370,11 +369,24 @@ fn an_idle_subscriber_opens_nothing_reads_nothing_and_does_not_spin() {
     // recording anything.
     let marker = serving.mark("marker-idle-stream");
     let opened = Instant::now();
-    let idle = Duration::from_millis(TRACED_POLL_MS * 10);
-    assert!(
-        stream.frame_within(idle).is_none(),
-        "a store where nothing recorded anything woke its subscriber"
-    );
+    // Count completed polls rather than demanding that the host schedule ten
+    // wakeups in exactly ten intervals. The deadline detects a stopped poller;
+    // lateness changes only how long this readiness wait takes.
+    let deadline = opened + Duration::from_secs(30);
+    let mut woke = false;
+    loop {
+        if stream
+            .frame_within(Duration::from_millis(TRACED_POLL_MS))
+            .is_some()
+        {
+            woke = true;
+            break;
+        }
+        let ticks = serving.cost_so_far().since(&marker).listings_of(&root);
+        if ticks >= 10 || Instant::now() >= deadline {
+            break;
+        }
+    }
     let elapsed = opened.elapsed();
     drop(stream);
     let cost = serving.finish().since(&marker);
@@ -383,19 +395,21 @@ fn an_idle_subscriber_opens_nothing_reads_nothing_and_does_not_spin() {
     // allowed to do. A tick is one listing of the runs root — which is what lets
     // a run that appeared since the last tick be noticed.
     let ticks = cost.listings_of(&root);
-    // A count of poll intervals inside a bounded wait this journey itself set,
-    // so the quotient is tens rather than anything a `usize` could lose.
-    #[allow(clippy::cast_possible_truncation)]
-    let due = (elapsed.as_millis() / u128::from(TRACED_POLL_MS)) as usize;
     assert!(
-        ticks <= due + 1,
-        "the subscriber took {ticks} ticks over {elapsed:?}, where a poll of \
-         {TRACED_POLL_MS}ms is {due} — it is spinning rather than waiting"
+        !woke,
+        "a store where nothing recorded anything woke its subscriber"
     );
     assert!(
-        ticks + 1 >= due,
-        "the subscriber took {ticks} ticks over {elapsed:?}, where a poll of \
-         {TRACED_POLL_MS}ms is {due} — it is not polling at all"
+        ticks >= 10,
+        "the subscriber completed only {ticks} polls within {elapsed:?} — it stopped polling"
+    );
+    // Each tick must ask the kernel to wait. The trace stamps a sleep when it
+    // starts, so one begun before the marker can precede a tick counted here.
+    // Scheduling delays cannot change how many waits the subscriber requested.
+    let sleeps = cost.poll_sleeps();
+    assert!(
+        ticks <= sleeps + 1,
+        "the subscriber took {ticks} ticks but requested only {sleeps} poll sleeps — it is spinning"
     );
 
     for n in 0..3 {
@@ -892,11 +906,7 @@ fn a_session_is_recorded_and_served_without_reading_an_index_or_walking_the_stor
             .expect("the session holds its finished run");
         assert_eq!(
             body["content"].as_str(),
-            Some(
-                serde_json::to_string_pretty(&entry)
-                    .expect("a record")
-                    .as_str()
-            ),
+            Some(crate::harness_history::served_record(&entry).as_str()),
             "the session served is not the record the core renders for {}",
             session.history_id
         );
@@ -1004,6 +1014,34 @@ fn a_session_is_recorded_and_served_without_reading_an_index_or_walking_the_stor
                 >= 2,
             "the trace never saw {} written and read, so it saw nothing: {reached} accesses",
             session.path.display()
+        );
+    }
+}
+
+/// Follow the real child and every task it starts through shutdown, including
+/// descendants that detach. Both supervisor and terminal stops must leave no
+/// survivor within ten seconds of the server's successful exit.
+#[test]
+fn stopping_the_server_leaves_no_process_it_started_alive() {
+    for stop in [
+        crate::serving::Stop::Terminate,
+        crate::serving::Stop::Interrupt,
+    ] {
+        let serving = Traced::start(|root| {
+            fixture_run::write(root, fixture_run::RUN_ID);
+        });
+        assert_eq!(http::get(serving.address, "/healthz").status, 200);
+        assert_eq!(http::get(serving.address, "/api/v2/runs").status, 200);
+        assert_eq!(
+            http::get(serving.address, "/api/v2/no-such-route").status,
+            404
+        );
+        // A live server must be rejected by the same check used after stop.
+        let live_server_reported_exited = serving.all_tasks_exited();
+        serving.stop_without_survivors(stop);
+        assert!(
+            !live_server_reported_exited,
+            "the liveness check missed the server"
         );
     }
 }

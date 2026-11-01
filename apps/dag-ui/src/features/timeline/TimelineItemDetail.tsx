@@ -12,6 +12,7 @@ import {
   Button,
   Card,
   CardContent,
+  type ConversationFocus,
   ConversationTimeline,
   ScrollArea,
   Separator,
@@ -24,6 +25,7 @@ import type {
   AgentRole,
   DagConversation,
   Redirection as RedirectionRecord,
+  TimelineEvent,
   TimelineReference,
   TimelineRelease,
   TimelineSurface,
@@ -31,6 +33,7 @@ import type {
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ExternalLink, ListTree, TriangleAlert } from "lucide-react";
 import { useState } from "react";
+import { HarnessConversation } from "../../lib/HarnessConversation";
 import type { NodeView } from "../../lib/run-model";
 import { StoredArtifact, servableArtifact } from "../../lib/StoredArtifact";
 import { Timestamp } from "../../lib/Timestamp";
@@ -153,7 +156,14 @@ function Body({
   if (surface !== undefined)
     return <SurfaceRecord row={row} surface={surface} />;
   if (reference?.kind === "conversation")
-    return <Session row={row} transcript={transcript} />;
+    return (
+      <>
+        {row.rowKind === "event" && (
+          <Recorded row={row} reference={reference} />
+        )}
+        <Session row={row} transcript={transcript} />
+      </>
+    );
   if (isVerification(row))
     return (
       <Verification
@@ -222,6 +232,70 @@ function JudgeDecisions({ turn }: { readonly turn: Turn }) {
   );
 }
 
+/**
+ * The conversation turn an event row opens: the turn a tool event was published
+ * inside, and a turn record's own id otherwise.
+ */
+function turnOf(event: TimelineEvent): string {
+  return event.tool?.turn ?? event.id;
+}
+
+/**
+ * Where opening a row puts the reader in its conversation: on the tool call a
+ * `turn-activity` record is, by the identity the harness minted for it where the
+ * served turn carries that identity, and by the producer's index otherwise. No
+ * focus for any other row, which opens the turn as it always has.
+ */
+function focusOf(
+  row: TimelineRow,
+  turns: readonly Turn[],
+): ConversationFocus | undefined {
+  if (row.rowKind !== "event" || row.event.tool === undefined) return undefined;
+  const opened = turnOf(row.event);
+  const turn = turns.find(({ id }) => id === opened);
+  if (turn === undefined) return undefined;
+  const { index, tool_call_id: toolCallId } = row.event.tool;
+  return toolCallId !== undefined &&
+    turn.tools.some((tool) => tool.toolCallId === toolCallId)
+    ? { turnId: turn.id, toolCallId }
+    : { turnId: turn.id, eventIndex: index };
+}
+
+/**
+ * What the recorder cut from a turn of a run recorded before turn records pointed
+ * at their transcript, said where the turn is read.
+ *
+ * The server serves these flags only when neither the member's report nor a
+ * history file the run names holds the whole text, so the copy below is all
+ * there is — and a prompt cut mid-sentence must not read as one the agent was
+ * given cut. Nothing at all on a turn read whole, which is every turn of a run
+ * recorded with references.
+ */
+function RecorderCut({ turn }: { readonly turn: Turn }) {
+  const cut = [
+    turn.unknown.instruction_truncated === true ? "its prompt" : undefined,
+    turn.unknown.truncated === true ? "its reply" : undefined,
+    turn.tools.some((tool) => tool.output_truncated === true)
+      ? "a tool's output"
+      : undefined,
+    turn.tools.some((tool) => tool.input_truncated === true)
+      ? "a tool's input"
+      : undefined,
+  ].filter((part): part is string => part !== undefined);
+  if (cut.length === 0) return null;
+  return (
+    <Alert className="mb-3" role="note">
+      <TriangleAlert />
+      <AlertTitle>Cut by the recorder</AlertTitle>
+      <AlertDescription>
+        The run's recorder cut {cut.join(", ")} to its bound, and no whole copy
+        exists: neither the member's report nor a history file this run names
+        holds it.
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 /** A dispatched session: the turn that was opened, or the whole conversation. */
 function Session({
   row,
@@ -232,10 +306,11 @@ function Session({
 }) {
   const [visible, setVisible] = useState(PAGE_SIZE);
   const availableTurns = transcript.conversation?.conversation.turns ?? [];
+  const opened = row.rowKind === "event" ? turnOf(row.event) : undefined;
   const turns: readonly Turn[] =
-    row.rowKind === "event"
-      ? availableTurns.filter(({ id }) => id === row.event.id)
-      : availableTurns;
+    opened === undefined
+      ? availableTurns
+      : availableTurns.filter(({ id }) => id === opened);
   const sync = useTimelineScrollSync(
     turns.map((turn) => ({ id: turn.id, time: Date.parse(turn.timestamp) })),
   );
@@ -263,6 +338,7 @@ function Session({
     );
   const { conversation, attribution } = transcript.conversation;
   const author = roleLabel(attribution.agentRole, attribution.transportRole);
+  const focus = focusOf(row, turns);
   // The turns sit on the design system's own card surface rather than straight on
   // the page: `TurnCard` paints its own bubbles and nothing behind them.
   return (
@@ -286,6 +362,7 @@ function Session({
         <div className="conversation-timeline-sticky">
           <ConversationTimeline
             cursor={sync.cursor}
+            {...(focus === undefined ? {} : { focus })}
             onSelectTurn={sync.scrollTo}
             turns={[...turns]}
           />
@@ -305,7 +382,12 @@ function Session({
                   key={turn.id}
                   ref={(element) => sync.register(turn.id, element)}
                 >
-                  <TurnCard author={{ label: author }} turn={turn} />
+                  <RecorderCut turn={turn} />
+                  <TurnCard
+                    author={{ label: author }}
+                    {...(focus?.turnId === turn.id ? { focus } : {})}
+                    turn={turn}
+                  />
                   <JudgeDecisions turn={turn} />
                 </div>
               ))}
@@ -411,9 +493,11 @@ function SettledReport({
 }
 
 /**
- * The conversation one oneharness invocation had: the prompt it ran, the text it
- * finished on, what it cost — what the agent actually did, which raw event kinds
- * are a poor substitute for.
+ * The conversation one oneharness invocation had — the prompt it ran, every tool
+ * it called, the text it finished on — read whole by the server from the history
+ * file and drawn as the conversation turn it was, through the design system's own
+ * `TurnCard`. A pointer at a transcript the store no longer holds is said in the
+ * server's own words, naming the file and why.
  */
 function HarnessSession({
   artifactId,
@@ -430,14 +514,10 @@ function HarnessSession({
 }) {
   return (
     <>
-      <StoredArtifact
+      <HarnessConversation
         artifactId={artifactId}
         client={client}
-        heading="Oneharness conversation"
-        missing="This record named no conversation."
-        noun="conversation"
         runId={runId}
-        unreadable="The history store holds no readable copy of that conversation."
       />
       <Recorded reference={reference} row={row} />
     </>
@@ -536,6 +616,19 @@ function Redirection({
               : "Deferred — onto the node's next dispatch"}
           </dd>
         </div>
+        {/* Only where the record says: a planner who asked for the turn to be
+            left to end reads whether it was, and a record written before the
+            engine said so has nothing to show here. */}
+        {redirection.turn !== undefined && (
+          <div>
+            <dt>Turn</dt>
+            <dd>
+              {redirection.turn === "turn-end"
+                ? "Left to end — the note reached it as it ended"
+                : "Interrupted — its replacement opened on the note"}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Redirected at</dt>
           <dd>
@@ -654,6 +747,31 @@ function Recorded({
   readonly row: TimelineRow;
   readonly reference?: TimelineReference;
 }) {
+  if (row.rowKind === "event") {
+    return (
+      <>
+        <dl className="facts">
+          <div>
+            <dt>Recorded at</dt>
+            <dd>
+              <Timestamp at={row.startedAt} relative />
+            </dd>
+          </div>
+          {Object.entries(row.event.fields ?? {}).map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>
+                {typeof value === "string" ? value : JSON.stringify(value)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        {reference !== undefined && (
+          <Reference reference={reference} fallback="No recorded artifact." />
+        )}
+      </>
+    );
+  }
   const located = row.rowKind === "group" ? undefined : row;
   const rollup =
     row.rowKind === "span" && row.span.count !== undefined
@@ -672,16 +790,19 @@ function Recorded({
             <Timestamp at={row.startedAt} relative />
           </dd>
         </div>
-        <div>
-          <dt>Ended</dt>
-          <dd>
-            {row.endedAt === null ? (
-              "Still running"
-            ) : (
-              <Timestamp at={row.endedAt} relative />
-            )}
-          </dd>
-        </div>
+        {row.rowKind === "span" &&
+          (row.endedAt !== null || row.status === "running") && (
+            <div>
+              <dt>Ended</dt>
+              <dd>
+                {row.endedAt === null ? (
+                  "Still running"
+                ) : (
+                  <Timestamp at={row.endedAt} relative />
+                )}
+              </dd>
+            </div>
+          )}
         <div>
           <dt>Status</dt>
           <dd>{row.status ?? "Not recorded"}</dd>
@@ -718,7 +839,14 @@ function Recorded({
       </dl>
       <h3 className="detail-heading">Reference</h3>
       <Reference
-        fallback="This item points at no recorded artifact."
+        fallback={
+          // A dispatch names its conversation whenever the run recorded one, so a
+          // dispatch naming none is one whose transcript this run does not hold —
+          // said in words, rather than left as a panel with no conversation in it.
+          row.rowKind === "span" && row.span.kind === "dispatch"
+            ? "No transcript was recorded for this dispatch."
+            : "This item points at no recorded artifact."
+        }
         reference={reference}
       />
     </>

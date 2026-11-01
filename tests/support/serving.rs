@@ -12,7 +12,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use tempfile::TempDir;
 
@@ -75,6 +75,8 @@ pub struct Serving {
     /// captured rather than inherited.
     log: Option<Arc<Mutex<String>>>,
     stopped: bool,
+    engine_environment: Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>,
+    engine_session: Option<String>,
 }
 
 impl Serving {
@@ -128,6 +130,18 @@ impl Serving {
         let (workspace, runs) = fixture_run::workspace();
         build(&runs);
         Self::spawn_as(workspace, &[], false, None, None, arguments)
+    }
+
+    /// The same, acting as `session`, with `arguments` after the ones every
+    /// server here is started with.
+    pub fn start_as_with_args(
+        build: impl FnOnce(&Path),
+        session: &str,
+        arguments: &[&str],
+    ) -> Self {
+        let (workspace, runs) = fixture_run::workspace();
+        build(&runs);
+        Self::spawn_as(workspace, &[], false, None, Some(session), arguments)
     }
 
     /// The same, served by `binary` rather than the one this suite was built
@@ -201,6 +215,26 @@ impl Serving {
             false,
             None,
             Some(session),
+            &[],
+        )
+    }
+
+    /// [`start_in_as_with_env_removing`](Self::start_in_as_with_env_removing)'s
+    /// unattributed counterpart: a server that acts as nobody.
+    pub fn start_in_with_env_removing(
+        workspace: TempDir,
+        environment: &[(&str, &str)],
+        removed: &[String],
+    ) -> Self {
+        let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
+        Self::spawn_from(
+            &binary,
+            workspace,
+            environment,
+            removed,
+            false,
+            None,
+            None,
             &[],
         )
     }
@@ -305,6 +339,13 @@ impl Serving {
             // each adopted driver from — a link to, or a copy of, the image it
             // runs: this workspace's own, removed with it.
             .env("XDG_CACHE_HOME", workspace.path().join("cache"))
+            // Nor the operator's plan-store configuration: the store an adopted
+            // driver links reads its user layer under `XDG_CONFIG_HOME`, and a
+            // host that declares private sources there has every task the
+            // driver could dispatch held on asking them. This workspace's own,
+            // where nothing is configured; a journey that wants a user layer
+            // names one.
+            .env("XDG_CONFIG_HOME", workspace.path().join("config"))
             // Nor the operator's harnesses: a run's status carries the engine's
             // provider block, which probes every harness it finds on `PATH` —
             // the operator's own subscriptions, for up to a minute each, which
@@ -333,8 +374,12 @@ impl Serving {
         for name in removed {
             command.env_remove(name);
         }
+        command.envs(environment.iter().copied());
+        let engine_environment = command
+            .get_envs()
+            .map(|(key, value)| (key.to_owned(), value.map(std::ffi::OsStr::to_owned)))
+            .collect();
         let mut child = command
-            .envs(environment.iter().copied())
             .stdout(Stdio::piped())
             .stderr(if capture {
                 Stdio::piped()
@@ -367,7 +412,40 @@ impl Serving {
             workspace,
             log,
             stopped: false,
+            engine_environment,
+            engine_session: session.map(str::to_owned),
         }
+    }
+
+    /// Produce records with the pinned engine CLI, then test this server's reads.
+    pub fn drive_fixture(&self, run: &str) -> u32 {
+        let mut command = Command::new(crate::sibling::binary());
+        command.args(["adopt", run, "--attach"]);
+        for (key, value) in &self.engine_environment {
+            match value {
+                Some(value) => {
+                    command.env(key, value);
+                }
+                None => {
+                    command.env_remove(key);
+                }
+            }
+        }
+        command.env(onepipeline_ui::store::RUNS_DIR_ENV, self.runs_root());
+        if let Some(session) = &self.engine_session {
+            command.env(onepipeline_ui::cli::SESSION_ENV, session);
+        }
+        let mut child = command
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("the pinned engine starts the fixture driver");
+        let pid = child.id();
+        // Own and reap this setup process here, independently of the read API.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        pid
     }
 
     /// The serving process's pid, for a journey that reads what the kernel
@@ -419,6 +497,23 @@ impl Serving {
     /// runs this server is reading.
     pub fn runs_root(&self) -> std::path::PathBuf {
         self.workspace.path().join(fixture_run::RUNS_DIR)
+    }
+
+    /// Take `run` out of the root in one rename, beside the root, and return
+    /// where it went.
+    ///
+    /// One step rather than a recursive delete in place, because a delete is many
+    /// steps and the server reads the run between them: a run whose summary is
+    /// gone and whose journal is not is one the engine folds again, and its read
+    /// writes `summary.json` and `checkpoint.json` back — test-macos reported
+    /// `DirectoryNotEmpty` from exactly that. Once renamed, no path the server
+    /// reads reaches the directory, so whatever deletes it afterwards has no
+    /// writer to race. The caller still owes the run being settled first (see
+    /// [`fixture_run::summarize`]), so that no read is mid-fold at the rename.
+    pub fn take_out(&self, run: &str) -> std::path::PathBuf {
+        let taken = self.workspace.path().join(format!("{run}.taken-out"));
+        std::fs::rename(self.run_dir(run), &taken).expect("the run leaves the root");
+        taken
     }
 
     /// Ask the server to stop the given way, and return the status it exited
@@ -615,4 +710,41 @@ fn path_without_harnesses() -> std::ffi::OsString {
             .filter(|dir| !bins.iter().any(|bin| dir.join(bin).exists())),
     )
     .expect("a PATH")
+}
+
+/// Every entry under `dir` and what it holds — a file's bytes and modification
+/// time, a directory's modification time (and no bytes) — so a journey can say
+/// that nothing wrote into a run between two points, byte for byte.
+///
+/// `dir`'s own entry is left out: renaming it out of the root is the one change
+/// a journey makes to it on purpose.
+///
+/// Each entry's metadata is read from the entry itself rather than from the
+/// listing: on Windows a listing reports the timestamps NTFS keeps in the
+/// parent's index, which it brings up to date lazily, so a directory written
+/// into before the first reading can show a later time at the second though
+/// nothing touched it in between.
+pub fn tree(dir: &Path) -> std::collections::BTreeMap<std::path::PathBuf, (Vec<u8>, SystemTime)> {
+    let mut found = std::collections::BTreeMap::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(next) = pending.pop() {
+        for entry in std::fs::read_dir(&next).expect("a readable directory") {
+            let entry = entry.expect("a directory entry");
+            let path = entry.path();
+            let about = std::fs::symlink_metadata(&path).expect("an entry's metadata");
+            if about.is_dir() {
+                pending.push(path.clone());
+            }
+            let bytes = if about.is_dir() {
+                Vec::new()
+            } else {
+                std::fs::read(&path).expect("a readable file")
+            };
+            found.insert(
+                path.strip_prefix(dir).expect("under dir").to_path_buf(),
+                (bytes, about.modified().expect("a modification time")),
+            );
+        }
+    }
+    found
 }

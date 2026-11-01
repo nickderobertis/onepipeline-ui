@@ -35,6 +35,11 @@ export CARGO_TERM_QUIET := "true"
 # the comparison that would prove nothing. Provisioned into the tree rather than
 # taken from PATH for that reason, and exported so every tier asks the same one.
 onepipeline-version := `awk '/^name = "onepipeline"$/{found=1; next} found && /^version = /{gsub(/[",]/, "", $3); print $3; exit}' Cargo.lock`
+# Where the lock resolves that library from: crates.io, or during a fast adoption
+# the one git commit it links. The version alone cannot say which, because an
+# adopted commit still reports the last release's version, so the sibling is
+# provisioned from — and held to — this as well. Read off the same lock block.
+onepipeline-source := `awk '/^name = "onepipeline"$/{found=1; next} found && /^source = /{gsub(/"/, "", $3); print $3; exit} found && /^$/{exit}' Cargo.lock`
 
 # The extension `cargo install` gives the file it writes, so the name below is
 # the one the platform actually produced. Derived rather than spelled out a
@@ -49,6 +54,12 @@ export ONEPIPELINE_UI_ONEPIPELINE_BIN := justfile_directory() / ".tools/bin/onep
 # above is: it is built from another commit of *this* repository rather than
 # installed, so nothing on PATH can be it.
 export ONEPIPELINE_UI_BASELINE_BIN := justfile_directory() / ".tools/bin/onepipeline-api-baseline" + sibling-exe
+
+# A real Node release without `process.execve`, which the npm launcher journeys
+# run the launcher under to see it refuse (`tests/e2e/packaging.rs`). Clone-local
+# for the sibling's reason: a node on PATH is whatever release the host has, and
+# the journey is about one that predates the API.
+export ONEPIPELINE_UI_NODE_WITHOUT_EXECVE := justfile_directory() / ".tools/node-without-execve/bin/node"
 
 # The release tools, pinned once: release-plz.yml installs release-plz at its
 # RELEASE_PLZ_VERSION and release.yml cargo-cyclonedx, which
@@ -87,6 +98,7 @@ _crate-bootstrap:
     @just _ensure-tool cargo-llvm-cov
     @just _ensure-tool cargo-auditable
     @just _ensure-sibling
+    @just _ensure-node-without-execve
     @cargo fetch --locked --quiet
 
 # The sibling CLI, at the exact version the lock pins its library to. Unlike the
@@ -97,11 +109,20 @@ _crate-bootstrap:
 # through the `onepipeline-ui:ensure-sibling` Nx target, because the binary they
 # need is clone-local (`AGENTS.md`).
 #
-# Fetched as the release's own archive for this host when that release publishes
-# one, checked against its published checksum and version, and compiled only when
-# it does not; `scripts/ensure-sibling.sh` holds the order and its refusals.
+# A crates.io pin is fetched as the release's own archive for this host when that
+# release publishes one, checked against its published checksum and version, and
+# compiled only when it does not; a git pin is compiled from its exact commit and
+# never fetched. `scripts/ensure-sibling.sh` holds the order and its refusals.
 _ensure-sibling:
-    @bash scripts/ensure-sibling.sh "{{onepipeline-version}}"
+    @bash scripts/ensure-sibling.sh "{{onepipeline-version}}" "{{onepipeline-source}}"
+
+# The pinned node release that predates `process.execve`, for the npm launcher
+# tier, which reaches this through the `onepipeline-ui:ensure-node-without-execve`
+# Nx target. Fetched as that release's own archive, held to its published digest,
+# and refused rather than installed when it is not that release.
+# `scripts/ensure-node-without-execve.sh` holds the pin and its refusals.
+_ensure-node-without-execve:
+    @bash scripts/ensure-node-without-execve.sh "{{os()}}-{{arch()}}"
 
 # The base commit's own server, for the journeys that compare what this build
 # serves against what it served. Behind its own Nx target rather than inside the
@@ -189,6 +210,13 @@ ci-lint *args:
 ci-test-linux *args:
     @bash scripts/ci-job.sh test-linux "$@"
 
+# It compiles everything from nothing, so nothing runs it; the runs it made and
+# their arguments are in docs/linux-cold-cache-timing.md.
+# Time the Linux job's recipe on a cold Rust cache, in a clone of one commit.
+[positional-arguments]
+measure-cold-linux *args:
+    @bash scripts/measure-cold-linux.sh "$@"
+
 # The Windows job: the platform-sensitive tiers, the browser build, the install.
 [positional-arguments]
 ci-test-windows *args:
@@ -217,20 +245,39 @@ ci-warm-macos:
 
 # The documented install path, `cargo install --path .`, into a root under
 # `target/` rather than the user's own, smoke-tested as every published artifact
-# is. Warnings denied for the reason release.yml denies them.
+# is. The dev profile shares the units `dag-ui:build-api-server` compiles. The
+# release rehearsal and release jobs prove the release-profile binaries; see
+# docs/release-sweep-timing.md for the measured cost of compiling both here.
 # The bin directory is resolved by `cd`, so a root cargo did not write is named
 # rather than read as a command missing from PATH, and the binary is handed to
 # the smoke test by its path: the Windows leg's PATH lookup did not find it there.
-# Compiled at low priority: see `packaging-priority`.
+# Compiled, when it has to be, at low priority: see `packaging-priority`.
+# Its units go to this clone's build directory, `target` (cargo's
+# `build.build-dir`), so the dependency graph is still shared, and its binary to a
+# target directory of its own: `cargo install --path .` otherwise re-links
+# `target/debug/onepipeline-api` with the install's features, replacing the file
+# the test tiers running beside it in the same Nx run exec — the e2e tier's
+# `cli::` journeys found no binary there on macOS.
+# That sharing holds on Linux only. Windows and macOS name an executable's unit
+# without a hash, so a shared build directory still gives the install and the
+# test tiers one `deps/onepipeline_api` file: the install replaces it, and the
+# next tier's `cargo test --no-run` re-links `target/debug/onepipeline-api.exe`
+# while the e2e tier is executing it, which Windows refuses ("Access is denied",
+# CI run 40115634774). There the install builds in a directory of its own.
 # Install this revision the documented way and smoke-test the installed binary.
+# llmlint: ignore-block[diagnostics_error_or_absent] `_crate-lint` denies all compiler warnings over this same dev build with `clippy --all-targets -- -D warnings` in every CI selection that runs this install. RUSTFLAGS here would rebuild its shared units under another flag set; the install adds no source or feature clippy did not check.
 _crate-install-smoke:
-    @RUSTFLAGS="-D warnings" {{packaging-priority}} cargo install --path . --locked --quiet --root target/install-smoke
+    @{{packaging-priority}} cargo install --path . --locked --debug --quiet --root target/install-smoke \
+      --target-dir target/install-smoke/target \
+      --config 'build.build-dir="{{ if os() == "linux" { "target" } else { "target/install-smoke/build" } }}"'
     @bin="$(cd target/install-smoke/bin && pwd)" \
       || { echo "cargo install wrote no target/install-smoke/bin: $(ls target/install-smoke 2>&1)" >&2; exit 1; }; \
       PATH="$bin:$PATH" bash scripts/smoke-published.sh --command "$bin/onepipeline-api" \
       --expect-version "$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)" \
       --label "cargo install onepipeline-ui on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}" \
       || { echo "installed into $bin: $(ls -la "$bin" 2>&1)" >&2; exit 1; }
+
+# llmlint: ignore-end[diagnostics_error_or_absent]
 
 # The release's x86_64 Linux wheel, built by the one definition release.yml's
 # `build-linux` job runs (`wheel-linux`), then installed into a fresh virtualenv
@@ -245,10 +292,10 @@ _crate-wheel-smoke:
       --expect-version "$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)" \
       --label "onepipeline-api-cli wheel on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}"
 
-# The packaging targets' release builds are long batch compiles that `ci-test-linux`
-# runs beside the test tiers, and the cost journeys count a subscriber's poll
-# ticks, which a starved server misses: at a lower priority those compiles take
-# only the CPU the tiers leave, and every core once the tiers are done. `nice`
+# An install whose units nothing has compiled yet is a long batch compile that
+# `ci-test-linux` runs beside the test tiers, and the cost journeys count a
+# subscriber's poll ticks, which a starved server misses: at a lower priority it
+# takes only the CPU the tiers leave, and every core once they are done. `nice`
 # where the host has it; where it does not, the command runs as it is.
 packaging-priority := `command -v nice >/dev/null 2>&1 && echo "nice -n 10" || true`
 
@@ -312,10 +359,10 @@ typecheck:
 build:
     @bash scripts/nx.sh run-many -t build
 
-# Shared by the release's `build-linux` job (through `release-linux build`) and
-# ci.yml's `wheel` job, so a pull request meets the prerequisites and maturin
-# invocation a release does. Needs Docker, and the browser view `just build`
-# writes.
+# Shared by the release's `build-linux` and `build-linux-arm64` jobs (through
+# `release-linux build` and `release-linux-arm64 build`) and ci.yml's `wheel`
+# job, so a pull request meets the prerequisites and maturin invocation a
+# release does. Needs Docker, and the browser view `just build` writes.
 # Build the onepipeline-api-cli wheel for one Linux target in the release's image.
 [positional-arguments]
 wheel-linux target out="dist":
@@ -323,11 +370,17 @@ wheel-linux target out="dist":
 
 # One recipe per release job in `.github/workflows/release.yml`; the phases
 # each takes are in scripts/release.mjs's header. `build` needs `just build`
-# first, and the Linux one Docker, the macOS and Windows ones maturin.
+# first, and the Linux ones Docker on their own architecture, the macOS and
+# Windows ones maturin.
 # The build-linux release job: build, install, publish and verify Linux.
 [positional-arguments]
 release-linux *args:
     @node scripts/release.mjs linux "$@"
+
+# The build-linux-arm64 release job: build, install, publish and verify arm64 Linux.
+[positional-arguments]
+release-linux-arm64 *args:
+    @node scripts/release.mjs linux-arm64 "$@"
 
 # The build-macos release job: build, install, publish and verify Apple Silicon.
 [positional-arguments]
@@ -393,7 +446,7 @@ _release-venv:
            && echo "{{python-pins}}" > .tools/release-venv/pins; } \
       || { echo "cannot install {{python-pins}} into .tools/release-venv from .tools/release-wheels — delete .tools/release-wheels/pins and re-run to fetch them again" >&2; exit 1; }
 
-# Every project's own test target — the crate's unit, e2e and repo-tooling tiers,
+# Every project's own test target — the crate's unit, e2e, repo-tooling and npm-launcher tiers,
 # the frontend's components, and the browser journeys — and the coverage floor
 # measured over the crate's tiers together. `test-baseline` and `test-cost` are
 # the two tiers outside this, each for what it needs that nothing else does.
@@ -441,9 +494,9 @@ _crate-format:
 _crate-lint:
     @cargo clippy --all-targets --locked --quiet -- -D warnings
 
-# The crate's suite runs as seven Nx projects, one per tier, each selecting its
+# The crate's suite runs as ten Nx projects, one per tier, each selecting its
 # tests through the nextest profile of the same name in `.config/nextest.toml`,
-# which is where the eight filters are written and partition the suite. Three
+# which is where the ten filters are written and partition the suite. Four
 # tiers are instrumented and run here; the baseline comparison, the cost
 # journeys, the linked-report journeys, the judged tier's journeys and the CI
 # jobs' recipes run through `_tier-test` below, for what each needs that the rest
@@ -469,7 +522,7 @@ _tier-test-covered profile:
       || { echo "the $1 tier failed — the failing tests are listed above" >&2; exit 1; }
 
 # 95% line coverage is the gate; lower it only with a documented reason in
-# AGENTS.md. Measured over the union of the three instrumented tiers, which is the
+# AGENTS.md. Measured over the union of the four instrumented tiers, which is the
 # suite less the baseline and cost tiers — the same lines the floor was measured
 # over when one target ran all three. `onepipeline-ui-coverage:coverage` depends
 # on each tier's `test`, so a tier with nothing new to say replays its profiles
@@ -513,11 +566,11 @@ test-quick:
     @bash scripts/nx.sh run-many -t test-quick
 
 # Drives the compiled binary and the committed npm launcher — never a stub. The
-# whole e2e binary, which six tiers share between them (`.config/nextest.toml`):
+# whole e2e binary, which nine tiers share between them (`.config/nextest.toml`):
 # that split is about what each change pays for and what the gate provisions for
 # which tier, and reaching for the journeys themselves should not have to know it.
 # The whole `e2e` test binary in one run, every tier's share of it together.
-test-e2e: _ensure-baseline
+test-e2e: _ensure-baseline _ensure-node-without-execve
     @cargo nextest run --locked -E 'binary(e2e)' --status-level fail
 
 # Run the CLI, e.g. `just run serve --runs-root ./runs`.
@@ -608,7 +661,7 @@ lint-llm-validate *args:
 
 # The blocking `llmlint` PR check; `just gate` runs it before you push.
 #
-# Runs the cached Nx target `onepipeline-ui:lint-llm-diff`, which is llmlint
+# Runs the cached Nx target `onepipeline-ui-judged-diff:lint-llm-diff`, which is llmlint
 # itself keyed on the tracked tree, the resolved base commit and `llmlint
 # fingerprint`: a pass is replayed only for that tree, base and judge, and a
 # failure is never cached. Trailing arguments are Nx's — `--skip-nx-cache`
@@ -627,4 +680,4 @@ lint-llm-diff base="origin/main" *nx_args:
     # terminal (the spike-nx-output-loss report). Remove once Nx collects
     # run-commands output on `close`.
     export NX_RUN_COMMANDS_DIRECTLY=false
-    LLMLINT_DIFF_BASE_SHA="$sha" exec bash scripts/nx.sh run onepipeline-ui:lint-llm-diff "$@"
+    LLMLINT_DIFF_BASE_SHA="$sha" exec bash scripts/nx.sh run onepipeline-ui-judged-diff:lint-llm-diff "$@"

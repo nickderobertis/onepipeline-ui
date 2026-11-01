@@ -28,7 +28,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Uri};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde_json::Value;
 use tokio::net::TcpListener;
@@ -37,13 +37,16 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::api::RunApi;
 use crate::contract::{
-    routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventsQuery,
-    NextQuery, NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunShutdownRequest,
-    RunsPage, RunsQuery, ShutdownRequest, StopRequest, SurfaceRequest, TimelineQuery,
-    TimelineScope, TranscriptQuery, WatchQuery,
+    routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId, EventsQuery,
+    HumanItemAnswerRequest, HumanItemCompleteRequest, HumanItemDismissRequest, HumanItemId,
+    NextQuery, NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunsPage, RunsQuery,
+    ShutdownRequest, StopRequest, SubscribeRequest, SubscriptionId, SurfaceRequest, TimelineQuery,
+    TimelineScope, TranscriptQuery,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
+use crate::human_items::{Act, HumanItemList};
+use crate::live::Hub;
 use crate::store::{RunStore, HEARTBEAT_INTERVAL};
 use crate::ui::View;
 
@@ -65,6 +68,8 @@ struct Serving {
     /// What answers every path the API does not own: the view under `--ui`,
     /// and the error contract's 404 without it.
     view: Option<Arc<View>>,
+    /// Every subscription this process holds.
+    hub: Hub,
 }
 
 /// The router serving one runs root, ending its streams when `stopping` is set,
@@ -73,7 +78,7 @@ struct Serving {
 // enforce here and no place to enforce it from. This is `docs/contract.md`'s whole surface
 // over a directory of runs, with no accounts and no principal but the **one** session the
 // whole server acts as — `--session`, resolved once at startup, which the engine's own
-// ownership rule judges every stop and adoption by — and the CLI's `--bind` defaults to
+// ownership rule judges every stop by — and the CLI's `--bind` defaults to
 // loopback, so an operator who exposes it wider puts whatever their host uses in front of
 // it, exactly as they would in front of a shell holding `onepipeline`. Adding an
 // authentication layer would be a change to the contract this crate is the Rust rendering
@@ -99,10 +104,7 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::RUN_CHANNEL_SURFACE, post(channel_surface))
         .route(routes::RUN_ATTEST, post(attest))
         .route(routes::RUN_STOP, post(stop))
-        .route(routes::RUN_ADOPT, post(adopt))
-        .route(routes::RUN_SHUTDOWN, post(run_shutdown))
         .route(routes::SHUTDOWN, post(shutdown))
-        .route(routes::RUN_WATCH, get(watch))
         .route(routes::UNWATCHED, get(unwatched))
         .route(routes::HOST, get(host))
         .route(routes::RUN_STATUS, get(status))
@@ -114,12 +116,21 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::RUN_AGENTS, get(agents))
         .route(routes::RUN_NODE_AGENTS, get(node_agents))
         .route(routes::PROJECT_AGENTS, get(project_agents))
+        .route(routes::SUBSCRIPTIONS, post(subscribe))
+        .route(routes::SUBSCRIPTION, delete(unsubscribe))
+        .route(routes::HUMAN_ITEMS, get(human_items).post(raise_human_item))
+        .route(routes::HUMAN_ITEM, get(human_item))
+        .route(routes::HUMAN_ITEM_ANSWER, post(answer_human_item))
+        .route(routes::HUMAN_ITEM_COMPLETE, post(complete_human_item))
+        .route(routes::HUMAN_ITEM_DISMISS, post(dismiss_human_item))
         .fallback(fallback)
         .with_state(Serving {
+            hub: Hub::new(store.clone(), Arc::clone(&stopping)),
             store: Arc::new(store),
             stopping,
             view: view.map(Arc::new),
         })
+        .layer(axum::middleware::from_fn(crate::encoding::negotiate))
 }
 // llmlint: ignore-end[authorization_enforced_server_side]
 
@@ -270,6 +281,13 @@ impl IntoResponse for ApiError {
 /// response the same way must not meet a framework's own — and under `--ui`
 /// a client under `/api` must not meet a page.
 async fn fallback(State(serving): Store, uri: Uri) -> Response {
+    let parts: Vec<_> = uri.path().split('/').collect();
+    if matches!(
+        parts.as_slice(),
+        ["", "api", "v2", "runs", _, "watch" | "adopt" | "shutdown"]
+    ) {
+        return ApiError::RemovedRoute(uri.path().to_owned()).into_response();
+    }
     match &serving.view {
         Some(view) if !crate::ui::is_api_path(uri.path()) => view.answer(uri.path()).await,
         _ => ApiError::NoSuchRoute.into_response(),
@@ -292,6 +310,20 @@ where
         // The worker panicked. The panic itself can name a path or a record, so
         // it reaches the process's own stderr and the client gets the contract's
         // opaque read failure.
+        Err(_) => ApiError::Read("unexpected read failure".to_owned()).into_response(),
+    }
+}
+
+/// [`answer`] for the routes that serve the engine's own record unenveloped:
+/// the human-item routes, whose bodies are the engine's exported schemas.
+async fn answer_record<F, T>(work: F) -> Response
+where
+    F: FnOnce() -> Result<T, ApiError> + Send + 'static,
+    T: serde::Serialize + Send + 'static,
+{
+    match tokio::task::spawn_blocking(work).await {
+        Ok(Ok(record)) => Json(record).into_response(),
+        Ok(Err(error)) => error.into_response(),
         Err(_) => ApiError::Read("unexpected read failure".to_owned()).into_response(),
     }
 }
@@ -373,6 +405,9 @@ async fn events(
     headers: HeaderMap,
     Query(raw): Query<HashMap<String, String>>,
 ) -> Response {
+    if raw.contains_key("subscription") {
+        return subscription_events(&serving, &raw, &headers);
+    }
     let query = match events_query(&raw, &headers) {
         Ok(query) => query,
         Err(error) => return error.into_response(),
@@ -406,6 +441,100 @@ async fn events(
     Sse::new(ReceiverStream::new(rx))
         .keep_alive(KeepAlive::new().interval(HEARTBEAT_INTERVAL))
         .into_response()
+}
+
+/// `GET /api/v2/events?subscription=ID&after=EVENT-ID`: one subscription's
+/// frames after the cursor, then each as it is emitted.
+///
+/// A non-empty `Last-Event-ID` — what a browser's `EventSource` sends on its own
+/// reconnect — takes precedence over `after`. A malformed id or cursor is `400`,
+/// never guessed at; a subscription this process no longer holds is `410` with
+/// `{code: "subscription-unavailable", reason}`, which a client answers by
+/// recreating the same view.
+fn subscription_events(
+    serving: &Serving,
+    raw: &HashMap<String, String>,
+    headers: &HeaderMap,
+) -> Response {
+    let read = || -> Result<(SubscriptionId, Option<EventId>), ApiError> {
+        if let Some(extra) = raw
+            .keys()
+            .find(|key| !["subscription", "after"].contains(&key.as_str()))
+        {
+            return Err(ApiError::InvalidSubscription(format!(
+                "a subscription's stream takes no {extra}: its view says what it shows"
+            )));
+        }
+        let subscription = SubscriptionId::try_from(
+            raw.get("subscription")
+                .map(String::as_str)
+                .unwrap_or_default(),
+        )?;
+        let header = headers
+            .get("last-event-id")
+            .map(|value| {
+                value.to_str().map_err(|_| {
+                    ApiError::InvalidSubscription("Last-Event-ID is not text".to_owned())
+                })
+            })
+            .transpose()?
+            .filter(|value| !value.is_empty());
+        let after = header
+            .or_else(|| raw.get("after").map(String::as_str))
+            .map(EventId::try_from)
+            .transpose()?;
+        Ok((subscription, after))
+    };
+    let (subscription, after) = match read() {
+        Ok(read) => read,
+        Err(error) => return error.into_response(),
+    };
+    match serving.hub.connect(subscription, after) {
+        Err(unavailable) => (
+            axum::http::StatusCode::GONE,
+            Json(serde_json::json!({
+                "code": "subscription-unavailable",
+                "reason": unavailable.as_str(),
+            })),
+        )
+            .into_response(),
+        Ok(stream) => {
+            use tokio_stream::StreamExt;
+            let frames = tokio_stream::iter(stream.replay)
+                .chain(ReceiverStream::new(stream.frames))
+                .map(Ok::<_, Infallible>);
+            Sse::new(frames)
+                .keep_alive(KeepAlive::new().interval(HEARTBEAT_INTERVAL))
+                .into_response()
+        }
+    }
+}
+
+/// `POST /api/v2/subscriptions`: the subscription and its initial state, `201`.
+// llmlint: ignore[authorization_enforced_server_side] a subscription is a read: it serves exactly what the read routes beside it serve — the run list's rows, a run's detail, timeline and channel — to the same caller those routes serve, under `docs/contract.md`'s one surface with no principal but the server's one `--session` and `--bind` on loopback by default, and it creates read state only, never ownership of a run. What this handler owes is the boundary it keeps: the body, the view, the filter and every id are parsed and refused before anything is opened.
+async fn subscribe(State(serving): Store, raw: String) -> Response {
+    let request = match SubscribeRequest::parse(&raw) {
+        Ok(request) => request,
+        Err(error) => return error.into_response(),
+    };
+    let hub = serving.hub.clone();
+    match tokio::task::spawn_blocking(move || hub.subscribe(&request)).await {
+        Ok(Ok(subscribed)) => (axum::http::StatusCode::CREATED, Json(subscribed)).into_response(),
+        Ok(Err(error)) => error.into_response(),
+        Err(_) => ApiError::Read("unexpected read failure".to_owned()).into_response(),
+    }
+}
+
+/// `DELETE /api/v2/subscriptions/{subscription}`: `204`, whether or not it was
+/// still held.
+async fn unsubscribe(State(serving): Store, Path(subscription): Path<String>) -> Response {
+    match SubscriptionId::try_from(subscription.as_str()) {
+        Ok(subscription) => {
+            serving.hub.retire(subscription);
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => error.into_response(),
+    }
 }
 
 /// A boolean query parameter, or the contract's refusal of what was sent.
@@ -661,147 +790,20 @@ async fn stop(State(serving): Store, Path(run): Path<String>, raw: String) -> Re
 }
 
 // llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
-async fn adopt(State(serving): Store, Path(run): Path<String>) -> Response {
-    let run = match run_id(&run) {
-        Ok(run) => run,
-        Err(error) => return error.into_response(),
-    };
-    answer(move || serving.store.adopt(&run)).await
-}
-
-// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
-async fn run_shutdown(State(serving): Store, Path(run): Path<String>, raw: String) -> Response {
-    let run = match run_id(&run) {
-        Ok(run) => run,
-        Err(error) => return error.into_response(),
-    };
-    // An empty body is the default shutdown — the engine's own grace, nothing
-    // forced — as an empty body on `stop` is a stop that forces nothing.
-    let request: RunShutdownRequest = if raw.trim().is_empty() {
-        RunShutdownRequest::default()
-    } else {
-        match body("{grace?, force?}", &raw) {
-            Ok(request) => request,
-            Err(error) => return error.into_response(),
-        }
-    };
-    answer(move || serving.store.run_shutdown(&run, &request)).await
-}
-
-// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
 async fn shutdown(State(serving): Store, raw: String) -> Response {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+        if let Some(scope) = value.get("scope") {
+            if scope != "host" {
+                return ApiError::RemovedShutdownScope(scope.to_string()).into_response();
+            }
+        }
+    }
     let request: ShutdownRequest = match body("{scope, grace?, force?}", &raw) {
         Ok(request) => request,
         Err(error) => return error.into_response(),
     };
     answer(move || serving.store.shutdown(&request)).await
 }
-
-async fn watch(
-    State(serving): Store,
-    Path(run): Path<String>,
-    Query(raw): Query<HashMap<String, String>>,
-) -> Response {
-    let run = match run_id(&run) {
-        Ok(run) => run,
-        Err(error) => return error.into_response(),
-    };
-    let query = match watch_query(&raw) {
-        Ok(query) => query,
-        Err(error) => return error.into_response(),
-    };
-    // The engine rules on the request before it waits, and it rules from
-    // inside a blocking read of the run — so the ruling is taken on a worker,
-    // and a refusal is this response rather than a frame.
-    let opened = {
-        let serving = serving.clone();
-        tokio::task::spawn_blocking(move || serving.store.watch(&run, &query)).await
-    };
-    let mut frames = match opened {
-        Ok(Ok(frames)) => frames,
-        Ok(Err(error)) => return error.into_response(),
-        Err(_) => return ApiError::Read("unexpected read failure".to_owned()).into_response(),
-    };
-    let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(FRAME_BUFFER);
-    // The same two reasons to stop the event stream keeps: the client went
-    // away, or this process was asked to. Dropping the frames ends the engine's
-    // wait, and with it the watcher record it wrote for this connection.
-    let closed = tx.clone();
-    let stopping = Arc::clone(&serving.stopping);
-    let stop = move || closed.is_closed() || stopping.load(Ordering::Relaxed);
-    tokio::task::spawn_blocking(move || {
-        while let Some(frame) = frames.next_frame_unless(&stop) {
-            let event = Event::default()
-                .id(frame.id.to_string())
-                .event(frame.event.as_str())
-                .data(frame.data.to_string());
-            if tx.blocking_send(Ok(event)).is_err() {
-                return;
-            }
-        }
-    });
-    Sse::new(ReceiverStream::new(rx))
-        .keep_alive(KeepAlive::new().interval(HEARTBEAT_INTERVAL))
-        .into_response()
-}
-
-/// `?until=&timeout=&tick=&filter=&cursor=`, each parsed by the engine's own
-/// parser where the engine declares one.
-///
-/// `until` is repeatable, which a query string spells as either a repeated key
-/// or a comma-separated list; axum's map keeps one value per key, so the list
-/// form is the one read here and a repeated key is the last of them.
-fn watch_query(raw: &HashMap<String, String>) -> Result<WatchQuery, ApiError> {
-    let mut query = WatchQuery {
-        filter: filter_spec(raw)?,
-        cursor: raw.get("cursor").cloned(),
-        ..WatchQuery::default()
-    };
-    if let Some(until) = raw.get("until") {
-        query.until = until
-            .split(',')
-            .map(str::trim)
-            .filter(|condition| !condition.is_empty())
-            .map(|condition| {
-                condition
-                    .parse::<onepipeline::cli::WatchUntil>()
-                    .map_err(ApiError::InvalidRequest)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        if query.until.is_empty() {
-            return Err(ApiError::InvalidRequest(
-                "until names no condition".to_owned(),
-            ));
-        }
-    }
-    if let Some(timeout) = raw.get("timeout") {
-        query.timeout = timeout
-            .parse::<onepipeline::cli::WatchTimeout>()
-            .map_err(ApiError::InvalidRequest)?;
-    }
-    if let Some(tick) = raw.get("tick") {
-        let seconds = tick.parse::<u64>().map_err(|_| {
-            ApiError::InvalidRequest(format!(
-                "tick must be a whole number of seconds, got {tick:?}"
-            ))
-        })?;
-        query.tick = std::time::Duration::from_secs(seconds);
-    }
-    if let Some(cursor) = &query.cursor {
-        if cursor.is_empty() || cursor.len() > CURSOR_MAX_LEN || !cursor.is_ascii() {
-            return Err(ApiError::InvalidRequest(
-                "cursor is not a token an earlier watch returned".to_owned(),
-            ));
-        }
-    }
-    Ok(query)
-}
-
-/// The longest cursor a watch accepts, before the engine places it.
-///
-/// A bound rather than a limit anyone will meet: the token an earlier watch
-/// returned is short, and an unbounded one is an unbounded refusal message.
-const CURSOR_MAX_LEN: usize = 256;
 
 async fn unwatched(State(serving): Store) -> Response {
     answer(move || serving.store.unwatched()).await
@@ -894,4 +896,104 @@ async fn project_agents(State(serving): Store, Path(project): Path<String>) -> R
         Err(error) => return error.into_response(),
     };
     answer(move || serving.store.project_agents(&project)).await
+}
+
+/// The item a human-item route is about, validated.
+fn human_item_id(id: &str) -> Result<HumanItemId, ApiError> {
+    HumanItemId::try_from(id)
+}
+
+/// `GET /api/human-items`: the engine's own `HumanItemFilter`, decoded from the
+/// query by its own declaration, so a selector this route accepted and the
+/// CLI's `list` did not — or the reverse — cannot exist.
+async fn human_items(State(serving): Store, uri: Uri) -> Response {
+    let filter = match Query::<onepipeline::human_items::HumanItemFilter>::try_from_uri(&uri) {
+        Ok(Query(filter)) => filter,
+        Err(rejection) => {
+            return ApiError::InvalidRequest(rejection.body_text()).into_response();
+        }
+    };
+    answer_record(move || {
+        let (items, session) = serving.store.human_items();
+        items
+            .list(session, &filter)
+            .map(|items| HumanItemList { items })
+    })
+    .await
+}
+
+async fn human_item(State(serving): Store, Path(id): Path<String>) -> Response {
+    let id = match human_item_id(&id) {
+        Ok(id) => id,
+        Err(error) => return error.into_response(),
+    };
+    answer_record(move || {
+        let (items, session) = serving.store.human_items();
+        items.detail(session, &id)
+    })
+    .await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`. What this handler enforces server-side is that session's authority, the ownership rule `stop` keeps: `HumanItems::raise` refuses an item whose owner is any other session, and the body is decoded by the engine's own `HumanItemInput` before anything is written.
+async fn raise_human_item(State(serving): Store, raw: String) -> Response {
+    let input: onepipeline::human_items::HumanItemInput =
+        match body("the engine's HumanItemInput", &raw) {
+            Ok(input) => input,
+            Err(error) => return error.into_response(),
+        };
+    answer_record(move || {
+        let (items, session) = serving.store.human_items();
+        items.raise(session, input)
+    })
+    .await
+}
+
+/// One write to item `id`, as the acting session.
+async fn act_on_human_item(serving: Serving, id: &str, act: Result<Act, ApiError>) -> Response {
+    let (id, act) = match human_item_id(id).and_then(|id| act.map(|act| (id, act))) {
+        Ok(pair) => pair,
+        Err(error) => return error.into_response(),
+    };
+    answer_record(move || {
+        let (items, session) = serving.store.human_items();
+        items.act(session, &id, act)
+    })
+    .await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`. What this handler enforces server-side is that session's authority, the ownership rule `stop` keeps: `HumanItems::act` refuses an item another session owns before the engine is asked, and the actor is that session rather than anything the body says.
+async fn answer_human_item(State(serving): Store, Path(id): Path<String>, raw: String) -> Response {
+    let act =
+        body::<HumanItemAnswerRequest>("{text}", &raw).map(|request| Act::Answer(request.text));
+    act_on_human_item(serving, &id, act).await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`. What this handler enforces server-side is that session's authority, the ownership rule `stop` keeps: `HumanItems::act` refuses an item another session owns before the engine is asked, and the actor is that session rather than anything the body says.
+async fn complete_human_item(
+    State(serving): Store,
+    Path(id): Path<String>,
+    raw: String,
+) -> Response {
+    // An empty body is the `{}` this route takes, as a bare `stop` is.
+    let act = if raw.trim().is_empty() {
+        Ok(Act::Complete)
+    } else {
+        body::<HumanItemCompleteRequest>("{}", &raw).map(|_| Act::Complete)
+    };
+    act_on_human_item(serving, &id, act).await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`. What this handler enforces server-side is that session's authority, the ownership rule `stop` keeps: `HumanItems::act` refuses an item another session owns before the engine is asked, and the actor is that session rather than anything the body says.
+async fn dismiss_human_item(
+    State(serving): Store,
+    Path(id): Path<String>,
+    raw: String,
+) -> Response {
+    let act = if raw.trim().is_empty() {
+        Ok(Act::Dismiss(None))
+    } else {
+        body::<HumanItemDismissRequest>("{reason?}", &raw)
+            .map(|request| Act::Dismiss(request.reason))
+    };
+    act_on_human_item(serving, &id, act).await
 }

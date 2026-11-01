@@ -145,7 +145,43 @@ pub const API_VERSION: u32 = 2;
 /// the same value; the version moves because a client that has never seen the
 /// lists shows a node about to dispatch under another model or harness config
 /// as one dispatching under the graph as written.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 21;
+/// Schema 22 adds the exact timeline `event_id` to each live-activity entry.
+/// Schema 23 separates observed checks’ conclusions and remote URLs and retains
+/// the producer’s optional start and finish timestamps.
+///
+/// **Schema 25 is pushed changes.** A tab subscribes to the sidebar and at most
+/// one visible run view (`POST /api/v2/subscriptions`) and its stream carries
+/// trimmed sidebar rows and patches of the payloads it already holds, never a
+/// whole one; and the run detail's `run` gains `live_activity`, what each node
+/// was last seen doing, so the header's activity line is patched with the rest.
+/// Every field 24 served is served with the same meaning and the same value; the
+/// version moves because a client written against 24 re-reads whole payloads on
+/// every change and has never seen `live_activity`.
+///
+/// **Schema 26 is every turn read whole from its transcript.** A conversation's
+/// prompts, replies, words and tool calls are read through the engine's
+/// `views::transcript` resolver out of the history file each turn record points
+/// at, so a run recorded with references serves no cut flag at all, and a
+/// reference that resolves to nothing serves `transcript unavailable: <path>:
+/// <why>` in the text's place. A live tool event gains `toolCallId` where the
+/// harness minted one; a live-activity entry gains `description`, the
+/// resolver's one line for the call; an `oneharness_session` artifact gains
+/// `turns`, the invocation read whole as one conversation turn, and
+/// `unavailable` where it could not be read; a transcript or report artifact is
+/// served whole rather than as its tail. Every other field 25 served is served
+/// with the same meaning; the version moves because a client written against 25
+/// shows a cut prompt as the whole of one and has never seen `description`.
+///
+/// **Schema 27 is finished work held for a release.** The node-status vocabulary
+/// gains the engine's `complete-but-draft` — a node whose change request is held
+/// as a draft, served `unknown` before — and `complete-but-held`, a node whose
+/// finished branch is kept unlanded on its origin, each served as itself in every
+/// view of a node and in `node_states`. A node's result gains `awaiting`, the
+/// `[{producer, target}]` releases its settlement still awaits, absent where the
+/// record carried none. Every other field 26 served is served with the same
+/// meaning; the version moves because a client written against 26 switches on a
+/// vocabulary that holds neither word.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 27;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
@@ -262,7 +298,29 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 21;
 /// ended — the last such settlement or lift — rather than at the moment it was
 /// opened. Additive as `surface` was in 9: every other event, and every span of a
 /// run that recorded none of those, is byte-for-byte what 10 served.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 11;
+///
+/// **Schema 12 says how a live turn took a note.** The engine that links here
+/// can leave a party's running turn to end rather than interrupt it, and records
+/// which it did as `turn` — `interrupted` or `turn-end` — on a `worker` or
+/// `supervisor` disposition. A `redirection` read off such a record carries it
+/// beside `reached`; one written before the field existed carries none. Every
+/// other event is byte-for-byte what 11 served.
+///
+/// **Schema 13 reads execution records by identity and their own clock.**
+/// Repeated producer identities count once, event arrays use record timestamps,
+/// session lanes use their own records, and post-execution commands remain
+/// markers. Producer identity, journal order, per-kind facts and harness launch
+/// scope are served separately from transcript addresses.
+///
+/// **Schema 14 describes every turn record in one line.** A `turn-started`,
+/// `turn-message` or `turn-activity` event gains `description`: the engine
+/// resolver's one line for the entry the record points at — a shell call's
+/// command, a file tool's verb and path, a search's pattern, a message's first
+/// line — or its `transcript unavailable` line. A `turn-activity` event gains
+/// `tool`, `{index, tool_call_id?, turn?}`, and the conversation `reference` of
+/// the turn it was published inside: where it sits in that conversation. Every
+/// other event is byte-for-byte what 13 served.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 14;
 
 /// The largest run-list page any request can ask for.
 ///
@@ -284,7 +342,9 @@ pub mod routes {
     pub const RUN_CONVERSATION: &str = "/api/v2/runs/{run}/conversations/{id}";
     /// One recorded artifact of one run.
     pub const RUN_ARTIFACT: &str = "/api/v2/runs/{run}/artifacts/{id}";
-    /// The server-sent event stream; every connection opens with a fresh snapshot.
+    /// The server-sent event stream: a subscription's changes under
+    /// `?subscription=`, and otherwise the invalidation stream, which opens with
+    /// a fresh snapshot.
     pub const EVENTS: &str = "/api/v2/events";
     /// The runs grouped by project, as `verbs::runs` groups them.
     pub const PROJECTS: &str = "/api/v2/projects";
@@ -302,15 +362,8 @@ pub mod routes {
     pub const RUN_ATTEST: &str = "/api/v2/runs/{run}/attest";
     /// End the run and its dispatch tree: `verbs::stop`.
     pub const RUN_STOP: &str = "/api/v2/runs/{run}/stop";
-    /// Retain this binary as a fresh driver: `verbs::adopt`.
-    pub const RUN_ADOPT: &str = "/api/v2/runs/{run}/adopt";
-    /// Shut one run down, gently: `verbs::shutdown` at run scope.
-    pub const RUN_SHUTDOWN: &str = "/api/v2/runs/{run}/shutdown";
-    /// Shut down every run this session owns, or the whole host:
-    /// `verbs::shutdown` at `mine` or `host` scope.
+    /// Shut down the entire host through the SDK.
     pub const SHUTDOWN: &str = "/api/v2/shutdown";
-    /// A watch on the run as a server-sent event stream: `verbs::watch`.
-    pub const RUN_WATCH: &str = "/api/v2/runs/{run}/watch";
     /// Which of the acting session's runs nothing is watching: `verbs::Unwatched::within`,
     /// under the wake budget the server's environment sets.
     pub const UNWATCHED: &str = "/api/v2/unwatched";
@@ -334,19 +387,38 @@ pub mod routes {
     pub const RUN_NODE_AGENTS: &str = "/api/v2/runs/{run}/nodes/{node}/agents";
     /// The union over a project's runs: `verbs::project_agents`.
     pub const PROJECT_AGENTS: &str = "/api/v2/projects/{project}/agents";
+    /// Create a subscription to the sidebar and at most one visible run view,
+    /// answered with its initial snapshot.
+    pub const SUBSCRIPTIONS: &str = "/api/v2/subscriptions";
+    /// Retire a subscription: its reads and its stream end.
+    pub const SUBSCRIPTION: &str = "/api/v2/subscriptions/{subscription}";
+    /// The host-wide human-item list (`GET`), and raising one (`POST`):
+    /// the engine store's `query` and `apply(Raise)`.
+    pub const HUMAN_ITEMS: &str = "/api/human-items";
+    /// One human item and every step it blocks.
+    pub const HUMAN_ITEM: &str = "/api/human-items/{id}";
+    /// Answer an open question: `apply(Answer)`.
+    pub const HUMAN_ITEM_ANSWER: &str = "/api/human-items/{id}/answer";
+    /// Complete an open task, design reviews included: `apply(Complete)`.
+    pub const HUMAN_ITEM_COMPLETE: &str = "/api/human-items/{id}/complete";
+    /// Dismiss an open item, with an optional reason: `apply(Dismiss)`.
+    pub const HUMAN_ITEM_DISMISS: &str = "/api/human-items/{id}/dismiss";
 
     /// The HTTP method a route answers.
     ///
-    /// Two, and only two: a read is a `GET`, and a verb that writes to the run —
-    /// claims a surface, submits an envelope, stops, adopts or shuts down — is a
-    /// `POST`, so
-    /// nothing a browser prefetches or a proxy retries can act on a run.
+    /// A read is a `GET`, and a verb that writes to the run — claims a surface,
+    /// submits an envelope, stops or shuts down — is a `POST`, so nothing a
+    /// browser prefetches or a proxy retries can act on a run. Creating a
+    /// subscription is a `POST` too, and retiring one a `DELETE`: both change
+    /// what this process reads for a tab, and neither touches a run.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Method {
         /// A read.
         Get,
-        /// A write to the run.
+        /// A write to the run, or the creation of a subscription.
         Post,
+        /// The retirement of a subscription.
+        Delete,
     }
 
     impl Method {
@@ -356,6 +428,7 @@ pub mod routes {
             match self {
                 Self::Get => "GET",
                 Self::Post => "POST",
+                Self::Delete => "DELETE",
             }
         }
     }
@@ -383,8 +456,15 @@ pub mod routes {
         }
     }
 
+    const fn delete(path: &'static str) -> Route {
+        Route {
+            method: Method::Delete,
+            path,
+        }
+    }
+
     /// How many routes the contract defines.
-    pub const COUNT: usize = 30;
+    pub const COUNT: usize = 35;
 
     /// Every route above with its method, in the order `docs/contract.md`
     /// lists them.
@@ -404,10 +484,7 @@ pub mod routes {
         post(RUN_CHANNEL_SURFACE),
         post(RUN_ATTEST),
         post(RUN_STOP),
-        post(RUN_ADOPT),
-        post(RUN_SHUTDOWN),
         post(SHUTDOWN),
-        get(RUN_WATCH),
         get(UNWATCHED),
         get(HOST),
         get(RUN_STATUS),
@@ -419,6 +496,14 @@ pub mod routes {
         get(RUN_AGENTS),
         get(RUN_NODE_AGENTS),
         get(PROJECT_AGENTS),
+        post(SUBSCRIPTIONS),
+        delete(SUBSCRIPTION),
+        get(HUMAN_ITEMS),
+        post(HUMAN_ITEMS),
+        get(HUMAN_ITEM),
+        post(HUMAN_ITEM_ANSWER),
+        post(HUMAN_ITEM_COMPLETE),
+        post(HUMAN_ITEM_DISMISS),
     ];
 
     /// Every route's path, in the same order — read off [`TABLE`] rather than
@@ -704,90 +789,6 @@ pub struct EventFrame {
     pub data: Value,
 }
 
-/// The three frames `GET /api/v2/runs/{run}/watch` streams, named as the SSE
-/// `event:` line names them.
-///
-/// One per variant of the SDK's own `WatchFrame`: a meaningful event, a
-/// heartbeat, and the ending that closes the stream. The data beside each is
-/// the machine record `onepipeline watch` prints for that frame, rendered by
-/// the SDK, so a client of this stream and a script reading that verb read one
-/// shape.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WatchEvent {
-    /// One meaningful event of the run.
-    Event,
-    /// Nothing happened for a whole tick, and the watch is still there.
-    Tick,
-    /// The wait is over, and this says why; the stream closes after it.
-    Returned,
-}
-
-impl WatchEvent {
-    /// The name this frame is written as in an SSE `event:` line.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Event => "event",
-            Self::Tick => "tick",
-            Self::Returned => "returned",
-        }
-    }
-}
-
-/// One frame of `GET /api/v2/runs/{run}/watch`.
-///
-/// `data` is the machine record the SDK renders for the frame — a bare
-/// [`Value`], because the record's shape is the engine's own and this crate
-/// projects it rather than restating it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct WatchFrame {
-    /// The server-issued cursor within the connection, from zero.
-    pub id: u64,
-    /// Which kind of frame this is.
-    pub event: WatchEvent,
-    /// The engine's own record for it.
-    pub data: Value,
-}
-
-/// The query of `GET /api/v2/runs/{run}/watch`: the shape of the wait, as the
-/// CLI's own flags take it.
-///
-/// Every field is the SDK's own type where the SDK declares one — a condition
-/// and a timeout are parsed by the engine's parsers, so a spelling the CLI
-/// refuses is refused here in the same words — and the filter is this crate's,
-/// resolved against the run being watched.
-#[derive(Debug, Clone, PartialEq)]
-pub struct WatchQuery {
-    /// What ends the wait, beside the run finishing and nothing driving it.
-    pub until: Vec<onepipeline::cli::WatchUntil>,
-    /// How long to wait before giving up.
-    pub timeout: onepipeline::cli::WatchTimeout,
-    /// How long a silence may last before the stream says it is still there;
-    /// zero turns the heartbeat off.
-    pub tick: std::time::Duration,
-    /// Which events are reported.
-    pub filter: Option<FilterSpec>,
-    /// The cursor an earlier watch returned, to resume from. Placed against the
-    /// run by the engine, which is the one reading that decides it.
-    // llmlint: ignore[invalid_states_unrepresentable] the token is external input the engine's `WatchRequest` takes as a `String` for the reason the engine states on that field: whether it is a cursor is decided by placing it against *this run's journal*, which only the engine's own read can do, and a type here that claimed it without that read would be a second reading of a token whose one reading is the engine's. The boundary this crate keeps is the bound and the character set in `server::watch_query`.
-    pub cursor: Option<String>,
-}
-
-impl Default for WatchQuery {
-    fn default() -> Self {
-        Self {
-            until: vec![onepipeline::cli::WatchUntil::default()],
-            timeout: onepipeline::cli::WatchTimeout::Bounded(
-                onepipeline::cli::DEFAULT_WATCH_TIMEOUT_SECONDS,
-            ),
-            tick: std::time::Duration::from_secs(onepipeline::cli::DEFAULT_WATCH_TICK_SECONDS),
-            filter: None,
-            cursor: None,
-        }
-    }
-}
-
 /// The query of `POST /api/v2/runs/{run}/channel/next`: the profile the
 /// answered events are shaped through.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -837,33 +838,40 @@ pub struct StopRequest {
     pub force: bool,
 }
 
-/// The body of `POST /api/v2/runs/{run}/shutdown`.
+/// The body of `POST /api/human-items/{id}/answer`.
 ///
-/// Empty or absent is the default shutdown — the engine's own default grace,
-/// nothing forced — exactly as an empty body on `stop` is a stop that forces
-/// nothing.
+/// The answer alone: the actor is the acting session, never the body's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HumanItemAnswerRequest {
+    /// The answer. Blank once trimmed is the engine's refusal.
+    // llmlint: ignore[invalid_states_unrepresentable] the engine's `HumanItemAction::Answer` declares its text a `String` and its own decoder and `apply` refuse a blank one in their own words; a type here that refused first would restate the engine's rule in this crate's words.
+    pub text: String,
+}
+
+/// The body of `POST /api/human-items/{id}/complete`: nothing.
+///
+/// Completion takes no approval, board copy or key — a design review completes
+/// with the reference the item stored when it was raised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HumanItemCompleteRequest {}
+
+/// The body of `POST /api/human-items/{id}/dismiss`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RunShutdownRequest {
-    /// How long, in integer seconds, a dispatch has to end itself after it is
-    /// asked. Omitted, the engine's own default; `0` is the engine's force path.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grace: Option<u64>,
-    /// Skip the interrupt and the wait and go straight to the teardown.
-    /// Omitted, `false`.
+pub struct HumanItemDismissRequest {
+    /// Why. Absent, `null` or blank is no reason, as the engine reads it.
     #[serde(default)]
-    pub force: bool,
+    pub reason: Option<String>,
 }
 
 /// Which runs `POST /api/v2/shutdown` acts on.
 ///
-/// The engine's two scopes that name no one run. One run is the run route's,
-/// so a body cannot name a run here and a path there.
+/// The host is the only scope this API accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ShutdownScope {
-    /// Every run the acting session owns, as `runs --mine` selects them.
-    Mine,
     /// Every run under the runs root, whoever owns it.
     Host,
 }
@@ -875,10 +883,10 @@ pub struct ShutdownRequest {
     /// Which runs. Required: a shutdown that named none is refused before
     /// anything is signalled, as the engine's own verb refuses one.
     pub scope: ShutdownScope,
-    /// As [`RunShutdownRequest::grace`].
+    /// How long, in integer seconds, to allow dispatches to end themselves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grace: Option<u64>,
-    /// As [`RunShutdownRequest::force`].
+    /// Skip the interrupt and wait. Omitted, false.
     #[serde(default)]
     pub force: bool,
 }
@@ -1358,6 +1366,7 @@ identifier!(
 );
 identifier!(ArtifactId, "artifact identifier", InvalidArtifactId);
 identifier!(DispatchId, "dispatch identifier", InvalidDispatchId);
+identifier!(HumanItemId, "human-item identifier", InvalidHumanItemId);
 
 /// The wire's closed reference vocabulary: what the record a reference sits on
 /// points at.
@@ -1641,4 +1650,364 @@ fn check_segment(value: &str, max_len: usize) -> Result<(), String> {
         return Err("must not start with '.'".to_owned());
     }
     Ok(())
+}
+
+/// How many emitted frames a subscription keeps for a reconnect to replay.
+///
+/// `docs/contract.md`'s bound: the latest frames, plus the cursor before the
+/// oldest of them. A cursor older than that boundary is answered with a reset.
+/// `tests/contract.rs` holds the contract's wording of it to this.
+pub const RETAINED_FRAMES: usize = 4096;
+
+/// How long a disconnected subscription keeps recording its changes before it
+/// expires. A connected stream never expires, however quiet it is.
+/// `tests/contract.rs` holds the contract's wording of it to this.
+pub const DISCONNECTED_GRACE: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// A subscription's id: an opaque UUID this process minted.
+///
+/// Parsed rather than carried as text, so a path segment or a body field that
+/// is not one is refused before any subscription is looked up by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SubscriptionId(uuid::Uuid);
+
+impl SubscriptionId {
+    /// A fresh id.
+    #[must_use]
+    pub fn mint() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+}
+
+impl TryFrom<&str> for SubscriptionId {
+    type Error = ApiError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        canonical_uuid(value).map(Self).ok_or_else(|| {
+            ApiError::InvalidSubscription(format!("{value:?} is not a subscription id"))
+        })
+    }
+}
+
+impl fmt::Display for SubscriptionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.hyphenated().fmt(f)
+    }
+}
+
+impl Serialize for SubscriptionId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+/// A UUID written the one way this process writes one: lowercase and hyphenated.
+///
+/// One spelling only, so two strings naming the same subscription or epoch are
+/// the same string — a cursor compared as text and a cursor compared as a UUID
+/// cannot disagree.
+fn canonical_uuid(value: &str) -> Option<uuid::Uuid> {
+    let parsed = uuid::Uuid::try_parse(value).ok()?;
+    (parsed.hyphenated().to_string() == value).then_some(parsed)
+}
+
+/// One position in a server's frame sequence: `<epoch UUID>:<sequence>`.
+///
+/// The epoch is chosen when the server starts, so a cursor names the process
+/// that issued it, and the sequence increases across every frame and snapshot
+/// boundary that process issues — with gaps, because other subscriptions take
+/// numbers too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EventId {
+    /// The issuing process's epoch.
+    pub epoch: uuid::Uuid,
+    /// The position in its sequence.
+    pub seq: u64,
+}
+
+impl EventId {
+    /// A fresh epoch, for a starting server.
+    #[must_use]
+    pub fn fresh_epoch() -> uuid::Uuid {
+        uuid::Uuid::new_v4()
+    }
+}
+
+impl TryFrom<&str> for EventId {
+    type Error = ApiError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let refused = || ApiError::InvalidSubscription(format!("{value:?} is not an event id"));
+        let (epoch, seq) = value.split_once(':').ok_or_else(refused)?;
+        let epoch = canonical_uuid(epoch).ok_or_else(refused)?;
+        // An unsigned decimal, written the one way: no sign, no leading zero.
+        if seq.is_empty()
+            || !seq.bytes().all(|byte| byte.is_ascii_digit())
+            || (seq.len() > 1 && seq.starts_with('0'))
+        {
+            return Err(refused());
+        }
+        let seq = seq.parse::<u64>().map_err(|_| refused())?;
+        Ok(Self { epoch, seq })
+    }
+}
+
+impl fmt::Display for EventId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.epoch.hyphenated(), self.seq)
+    }
+}
+
+impl Serialize for EventId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+/// Which timeline a subscription's view reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewScope {
+    /// The whole run (the Overall view).
+    Run,
+    /// One node's work (a node's timeline tab).
+    Node(NodeId),
+}
+
+/// What one subscription shows besides the sidebar: nothing, or one visible
+/// run view.
+///
+/// The Graph view selects `detail`, Overall `timeline` at run scope, a node's
+/// timeline `timeline` at node scope, and Channel `channel`. The Host page and a
+/// page with no run open select `sidebar` alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubscriptionView {
+    /// The sidebar alone.
+    Sidebar,
+    /// The run's detail.
+    Detail {
+        /// The run.
+        run_id: RunId,
+        /// Which events the detail carries, under the detail route's grammar
+        /// and default.
+        filter: Option<FilterSpec>,
+    },
+    /// The run's timeline, with the detail beside it for the header and graph
+    /// state already on screen.
+    Timeline {
+        /// The run.
+        run_id: RunId,
+        /// The run or one node.
+        scope: ViewScope,
+        /// Which events both carry.
+        filter: Option<FilterSpec>,
+    },
+    /// The run's channel queue, with the detail beside it.
+    Channel {
+        /// The run.
+        run_id: RunId,
+    },
+}
+
+impl SubscriptionView {
+    /// Read a view off a request body, refusing any member the contract does
+    /// not name and any combination it does not allow.
+    ///
+    /// # Errors
+    ///
+    /// `400 invalid_subscription` for a malformed view: an unknown `type`, a
+    /// missing or extra member, a `scope` other than `run` or `node`, a node scope
+    /// naming no node or a run scope naming one, or a filter or id that does not
+    /// parse.
+    pub fn parse(value: &Value) -> Result<Self, ApiError> {
+        let refused = |why: &str| ApiError::InvalidSubscription(format!("the view {why}"));
+        let object = value
+            .as_object()
+            .ok_or_else(|| refused("is not an object"))?;
+        let allow = |members: &[&str]| -> Result<(), ApiError> {
+            match object.keys().find(|key| !members.contains(&key.as_str())) {
+                Some(extra) => Err(refused(&format!("takes no member {extra:?}"))),
+                None => Ok(()),
+            }
+        };
+        let text = |name: &str| -> Result<Option<&str>, ApiError> {
+            match object.get(name) {
+                None => Ok(None),
+                Some(Value::String(text)) => Ok(Some(text.as_str())),
+                Some(_) => Err(refused(&format!(
+                    "names {name} as something other than a string"
+                ))),
+            }
+        };
+        let run_id = || -> Result<RunId, ApiError> {
+            let run = text("run_id")?.ok_or_else(|| refused("names no run_id"))?;
+            RunId::try_from(run).map_err(|error| refused(&error.to_string()))
+        };
+        let filter = || -> Result<Option<FilterSpec>, ApiError> {
+            text("filter")?
+                .map(|spec| FilterSpec::parse(spec).map_err(|error| refused(&error.to_string())))
+                .transpose()
+        };
+        match text("type")? {
+            Some("sidebar") => {
+                allow(&["type"])?;
+                Ok(Self::Sidebar)
+            }
+            Some("detail") => {
+                allow(&["type", "run_id", "filter"])?;
+                Ok(Self::Detail {
+                    run_id: run_id()?,
+                    filter: filter()?,
+                })
+            }
+            Some("timeline") => {
+                allow(&["type", "run_id", "scope", "node", "filter"])?;
+                let scope = match (text("scope")?, text("node")?) {
+                    (Some("run"), None) => ViewScope::Run,
+                    (Some("node"), Some(node)) => ViewScope::Node(
+                        NodeId::try_from(node).map_err(|error| refused(&error.to_string()))?,
+                    ),
+                    (Some("node"), None) => return Err(refused("scopes to a node and names none")),
+                    (Some("run"), Some(_)) => {
+                        return Err(refused("covers the whole run and names a node"))
+                    }
+                    _ => return Err(refused("names a scope other than run or node")),
+                };
+                Ok(Self::Timeline {
+                    run_id: run_id()?,
+                    scope,
+                    filter: filter()?,
+                })
+            }
+            Some("channel") => {
+                allow(&["type", "run_id"])?;
+                Ok(Self::Channel { run_id: run_id()? })
+            }
+            Some(other) => Err(refused(&format!("names an unknown type {other:?}"))),
+            None => Err(refused("names no type")),
+        }
+    }
+
+    /// The run this view reads, or `None` for the sidebar alone.
+    #[must_use]
+    pub fn run_id(&self) -> Option<&RunId> {
+        match self {
+            Self::Sidebar => None,
+            Self::Detail { run_id, .. }
+            | Self::Timeline { run_id, .. }
+            | Self::Channel { run_id } => Some(run_id),
+        }
+    }
+
+    /// The view as it is served back: the same members, with the filter in its
+    /// normalized spelling and omitted where none was asked for.
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        let filtered = |mut value: Value, filter: &Option<FilterSpec>| {
+            if let Some(filter) = filter {
+                value["filter"] = Value::String(filter.as_query_value());
+            }
+            value
+        };
+        match self {
+            Self::Sidebar => serde_json::json!({ "type": "sidebar" }),
+            Self::Detail { run_id, filter } => filtered(
+                serde_json::json!({ "type": "detail", "run_id": run_id }),
+                filter,
+            ),
+            Self::Timeline {
+                run_id,
+                scope: ViewScope::Run,
+                filter,
+            } => filtered(
+                serde_json::json!({ "type": "timeline", "run_id": run_id, "scope": "run" }),
+                filter,
+            ),
+            Self::Timeline {
+                run_id,
+                scope: ViewScope::Node(node),
+                filter,
+            } => filtered(
+                serde_json::json!({ "type": "timeline", "run_id": run_id, "scope": "node", "node": node }),
+                filter,
+            ),
+            Self::Channel { run_id } => serde_json::json!({ "type": "channel", "run_id": run_id }),
+        }
+    }
+}
+
+/// How a subscription comes to be: fresh, in place of another, or recreated
+/// after the one a tab held was lost — the three a body can say, and never two
+/// of them at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubscribeOrigin {
+    /// A tab subscribing for the first time.
+    Fresh,
+    /// The subscription this one replaces, retired once this one is made.
+    Replaces(SubscriptionId),
+    /// The last frame applied, when recreating a subscription the server no
+    /// longer has; answered with a reset rather than a snapshot.
+    Resume(EventId),
+}
+
+/// The body of `POST /api/v2/subscriptions`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubscribeRequest {
+    /// What the tab shows.
+    pub view: SubscriptionView,
+    /// Whether it is fresh, a replacement, or a recreation.
+    pub origin: SubscribeOrigin,
+}
+
+impl SubscribeRequest {
+    /// Read the body, refusing what the contract does not name.
+    ///
+    /// # Errors
+    ///
+    /// `400 invalid_subscription` for a body that is not JSON, names a member
+    /// beside `view`, `replaces` and `resume`, carries both `replaces` and
+    /// `resume`, or carries an id or a view that does not parse.
+    pub fn parse(body: &str) -> Result<Self, ApiError> {
+        let value: Value = serde_json::from_str(body).map_err(|error| {
+            ApiError::InvalidSubscription(format!("the body is not JSON: {error}"))
+        })?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| ApiError::InvalidSubscription("the body is not an object".to_owned()))?;
+        if let Some(extra) = object
+            .keys()
+            .find(|key| !["view", "replaces", "resume"].contains(&key.as_str()))
+        {
+            return Err(ApiError::InvalidSubscription(format!(
+                "the body takes no member {extra:?}"
+            )));
+        }
+        let text = |name: &str| -> Result<Option<&str>, ApiError> {
+            match object.get(name) {
+                None => Ok(None),
+                Some(Value::String(text)) => Ok(Some(text.as_str())),
+                Some(_) => Err(ApiError::InvalidSubscription(format!(
+                    "{name} is not a string"
+                ))),
+            }
+        };
+        let replaces = text("replaces")?
+            .map(SubscriptionId::try_from)
+            .transpose()?;
+        let resume = text("resume")?.map(EventId::try_from).transpose()?;
+        let origin = match (replaces, resume) {
+            (None, None) => SubscribeOrigin::Fresh,
+            (Some(replaced), None) => SubscribeOrigin::Replaces(replaced),
+            (None, Some(resumed)) => SubscribeOrigin::Resume(resumed),
+            (Some(_), Some(_)) => {
+                return Err(ApiError::InvalidSubscription(
+                    "replaces and resume are mutually exclusive".to_owned(),
+                ))
+            }
+        };
+        let view =
+            SubscriptionView::parse(object.get("view").ok_or_else(|| {
+                ApiError::InvalidSubscription("the body names no view".to_owned())
+            })?)?;
+        Ok(Self { view, origin })
+    }
 }

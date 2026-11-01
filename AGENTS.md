@@ -129,12 +129,16 @@ the failure the pin exists to prevent. It is fetched as that release's own
 archive for the host, held to the `.sha256` published beside it and to its
 `--version`, and compiled only when the release ships no archive for the host
 (`scripts/ensure-sibling.sh`); an archive that fails either check is refused, never
-compiled around.
+compiled around. A git pin (fast adoption of an unreleased engine commit) is
+compiled from that exact commit and never fetched, because the commit still
+reports the last release's version: the binary is stamped with the lock's source
+and its own digest, and a same-version build from anywhere else is replaced.
 
 **Pull-request CI is four jobs, each one recipe.** `lint`, `test-linux`,
-`test-windows` and `test-macos`, and their 30-minute cap, are an interface other
+`test-windows` and `test-macos`, and their caps (36 minutes for Linux, 30 for the others), are an interface other
 work builds against (`.github/tests/ci-jobs.test.mjs`); speed a job up by
-cutting its work, never by splitting one suite across more jobs.
+cutting its work, never by splitting one suite across more jobs. `docs/release-sweep-timing.md` records the measurements and margin behind
+Linux’s cap.
 
 **`.tools/` holds a second clone-local binary, and it is the server this branch
 forked from.** `tests/e2e/baseline.rs` asks whether every field the base commit
@@ -206,7 +210,7 @@ fans one uniformly-named target across all of them.
   rules on what every PR owes. It is the last whole-gate run a release gets:
   `release.yml` re-runs no tests. A Release made by hand naming a commit no sweep
   covered therefore gets only the artifact proofs below — every file installed
-  and run before it publishes and again from the registry after.
+  and run before it publishes, and read back from its registry after.
 - **Each release job's work is one recipe, and two rules hold the release
   together** (`scripts/release.mjs` says what each phase does): every target is
   compiled **once**, and the archive, wheel and npm package are packed from that
@@ -216,7 +220,42 @@ fans one uniformly-named target across all of them.
   leaves the other platforms published and the platform-independent artifacts
   unpublished** until it is re-run — and a re-run finishes the release, because
   every upload publishes only what its registry does not already serve. A
-  target is changed in `scripts/release.mjs`'s table and nowhere else.
+  rebuild is not byte-identical, so a re-run keeps what PyPI and npm took from
+  an earlier attempt rather than uploading over it, waits for a version npm
+  holds and does not serve yet, and the Release's archive and checksum follow
+  them as a pair (`upload github` in `scripts/release.mjs` says how); `verify`
+  then installs and runs what the registries serve, and names a target they
+  serve as more than one build. v0.41.2's build-windows could not be finished
+  by re-running it before that. A
+  target is changed in `scripts/release.mjs`'s table and nowhere else. The
+  platform jobs are `build-linux`, `build-linux-arm64` (on the
+  `ubuntu-24.04-arm` runner, so the arm64 binary is built and run natively),
+  `build-macos` (Apple Silicon only; Intel macOS is not released) and
+  `build-windows`, which with release-plz and `publish` make six CD jobs.
+  Pull-request CI builds no arm64 Linux leg.
+- **npm serves a publish minutes after `npm publish` returns, and names a
+  version before it serves the tarball** — longer than a platform job has
+  left after compiling — **and PyPI's JSON API can omit a wheel uploaded
+  seconds before.** So no platform job waits for npm; `publish`'s `check`
+  fetches every platform package by version and re-reads PyPI until it lists
+  every wheel, within one deadline, before the launcher that pins them goes
+  out. A registry that has not answered yet is late, never missing: only a
+  failed job or a missing Release asset is reported without the wait.
+  v0.41.1's check read two late wheels as missing, so waited for nothing and
+  failed in six seconds over five files both registries served minutes later.
+  `verify` likewise asks npm for the frontend only through its retried
+  install: v0.41.0's one `npm view` refused a frontend npm listed 97 seconds
+  after its upload. npm also installs a launcher whose platform package it
+  cannot fetch and exits 0, so an install that lacks the platform package is
+  retried, never counted.
+- **An `npm publish` that exits 0 may have been staged, not published**, and
+  an upload fails on one. A staged version is served by nothing until a
+  maintainer approves it (`npm stage approve <id>`), and a re-run cannot publish
+  over it: it waits `RELEASE_NPM_HELD_BUDGET` seconds (five minutes) for npm to
+  serve it, naming the stage id, so approve, then re-run — or approve while the
+  re-run waits. A release that is to publish unattended
+  needs a credential npm lets publish directly — a registry setting, not code
+  here.
 - **Never hand-edit a version.** `pyproject.toml` takes it from Cargo.toml via
   `dynamic = ["version"]` and the npm packages via `scripts/npm-build.mjs`, so a
   literal version anywhere else is a second source to drift.
@@ -334,8 +373,9 @@ fans one uniformly-named target across all of them.
   a command parsed but is not implemented. `scripts/smoke-published.sh` asserts
   all three against every published artifact, on every platform. Being asked to
   stop is a success too, and that one is the *wrapper's* contract as much as the
-  binary's: a supervisor signals whatever it started, which for npm is the node
-  launcher in front of the binary. `src/server.rs` is the one source for which
+  binary's: a supervisor signals whatever it started, which for npm is the
+  binary on Linux and macOS (the node launcher execs it) and the node launcher
+  in front of it on Windows. `src/server.rs` is the one source for which
   stops are honoured and `tests/packaging.rs` holds the launcher and the
   journeys to it — v0.3.1 shipped exiting 143 with the binary already correct.
 - Do not commit secrets. Values live in the platform secret store, referenced by

@@ -1,5 +1,6 @@
 import { API_V2_FILTER_PROFILES, isProjectId } from "@onepipeline-ui/dag-model";
 import { useCallback, useSyncExternalStore } from "react";
+import { appRootPath } from "./humanItemsRoute";
 
 /**
  * The whole drill-down, held in the query string: which run, which node, which view,
@@ -14,6 +15,10 @@ export interface UrlSelection {
    * who wants every run in one order.
    */
   readonly list: ListMode;
+  readonly host: boolean;
+  readonly hiddenKinds: readonly string[];
+  readonly selectHost: () => void;
+  readonly selectKinds: (kinds: readonly string[]) => void;
   /**
    * The project whose page is open, as the address spells it: a qualified
    * project id, or {@link NO_PROJECT_KEY} for the group of runs that recorded
@@ -62,24 +67,20 @@ export interface UrlSelection {
   readonly showOverall: () => void;
   readonly selectDetail: (detail: DetailLevel) => void;
   readonly selectNodeTab: (tab: NodeTab) => void;
-  /** Open one of the run's supervising readings: the channel, the watch, or the reads. */
+  /** Open one of the run’s readings. */
   readonly selectView: (view: RunView) => void;
 }
 
 /**
  * The readings of one run. `graph` and `overall` are the two readings of its
- * recorded execution; `channel`, `watch` and `reads` are the supervising
+ * recorded execution; `channel` is the supervising
  * surface — what the CLI does to a run once its plan has started, each wired to
- * the route the contract names for it — and `agents` is every oneharness
- * session the run's launches wrote, each opening to its transcript.
+ * the route the contract names for it.
  */
 export const RUN_VIEWS = {
   graph: "graph",
   overall: "overall",
   channel: "channel",
-  watch: "watch",
-  reads: "reads",
-  agents: "agents",
 } as const;
 export type RunView = keyof typeof RUN_VIEWS;
 
@@ -143,9 +144,7 @@ export const NODE_TAB_LABELS = {
   task: "Task",
   criteria: "Acceptance criteria",
   dependencies: "Dependencies",
-  pr: "PR",
-  checks: "Checks",
-  agents: "Agents",
+  remote: "Remote",
 };
 export type NodeTab = keyof typeof NODE_TAB_LABELS;
 
@@ -201,22 +200,47 @@ export function useUrlSelection(): UrlSelection {
   const detail: DetailLevel = isDetailLevel(namedDetail)
     ? namedDetail
     : "activity";
-  const nodeTab = isNodeTab(namedTab) ? namedTab : "timeline";
+  const nodeTab =
+    namedTab === "pr" || namedTab === "checks"
+      ? "remote"
+      : isNodeTab(namedTab)
+        ? namedTab
+        : "timeline";
   const view: RunView = isRunView(named)
     ? named
     : nodeId === undefined
       ? "overall"
       : "graph";
 
-  const update = useCallback((change: (next: URLSearchParams) => void) => {
-    const next = new URLSearchParams(window.location.search);
-    change(next);
-    window.history.pushState(null, "", `${window.location.pathname}?${next}`);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  }, []);
+  // Every selection is of a run view or the Host page, so making one from the
+  // action-items page leaves it for the app's root; the kinds shown are a
+  // preference of the sidebar, which that page has too, so they stay put.
+  const update = useCallback(
+    (change: (next: URLSearchParams) => void, stay = false) => {
+      const next = new URLSearchParams(window.location.search);
+      change(next);
+      const path = stay
+        ? window.location.pathname
+        : appRootPath(window.location.pathname);
+      window.history.pushState(null, "", `${path}?${next}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    },
+    [],
+  );
 
   return {
     list,
+    host: params.get("page") === "host",
+    hiddenKinds: params.getAll("hide-kind"),
+    selectHost: () =>
+      update((next) => {
+        next.set("page", "host");
+      }),
+    selectKinds: (kinds) =>
+      update((next) => {
+        next.delete("hide-kind");
+        for (const kind of kinds) next.append("hide-kind", kind);
+      }, true),
     projectKey,
     runId,
     nodeId,
@@ -252,6 +276,7 @@ export function useUrlSelection(): UrlSelection {
     selectRun: (id) =>
       update((next) => {
         next.set("run", id);
+        next.delete("page");
         next.delete("node");
         next.delete("event");
         next.delete("tab");

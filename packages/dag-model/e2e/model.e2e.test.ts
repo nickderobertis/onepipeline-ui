@@ -1,14 +1,19 @@
 import { readFile } from "node:fs/promises";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This verifies the package export as a consumer uses it.
 import {
-  adoptedSchema,
+  applyPatch,
   channelNextSchema,
   channelQueueSchema,
   conversationSchema,
   conversationTurnSchema,
   dagConversationSchema,
   graphStateSchema,
+  HUMAN_ITEM_PRIORITY_LABELS,
+  humanItemDetailSchema,
+  humanItemListSchema,
+  humanItemReceiptSchema,
   launchProvenanceSchema,
+  liveActivitySchema,
   nodeConversationsSchema,
   nodeTelemetrySchema,
   parseRunDetail,
@@ -30,15 +35,17 @@ import {
   runSummarySchema,
   runTelemetryDocumentSchema,
   runTranscriptSchema,
+  SIDEBAR_ROW_FIELDS,
+  SUBSCRIPTION_FRAME_TYPES,
   sessionLinkSchema,
   sseEventNameSchema,
   stoppedSchema,
+  subscribedSchema,
+  subscriptionFrameSchema,
   surfacedSchema,
   TELEMETRY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
   unwatchedSchema,
-  watchEventNameSchema,
-  watchFrameDataSchema,
 } from "@onepipeline-ui/dag-model";
 import { expect, test } from "vitest";
 import { z } from "zod";
@@ -127,6 +134,31 @@ test("a package consumer validates an API response through the public export", (
       runs: [],
     }).runs,
   ).toEqual([]);
+  const activity = {
+    node: "dashboard",
+    at: 1786104004500,
+    kind: "tool_use",
+    name: "Bash",
+    detail: "just check",
+    description: "just check",
+    events: 1,
+    event_id: "e14",
+  };
+  expect(
+    liveActivitySchema.parse(JSON.parse(JSON.stringify(activity))),
+  ).toEqual(activity);
+  const legacy = JSON.parse(
+    JSON.stringify({ ...activity, event_id: undefined }),
+  );
+  expect(() => liveActivitySchema.parse(legacy)).toThrow();
+  expect(() =>
+    liveActivitySchema.parse({ ...activity, event_id: "" }),
+  ).toThrow();
+  // A schema-25 entry carries no served line, and this client never makes one up.
+  const undescribed = JSON.parse(
+    JSON.stringify({ ...activity, description: undefined }),
+  );
+  expect(() => liveActivitySchema.parse(undescribed)).toThrow();
 });
 
 test("the checked-in v2 run-detail contract parses and v1 is rejected", async () => {
@@ -192,6 +224,16 @@ test("the checked-in v2 run-timeline contract parses, and v1's meaning is refuse
     style: "automated",
     version: "1.4.0",
     landing_commit: "0f1e2d3c4b5a69788796a5b4c3d2e1f001122334",
+  });
+
+  // How a live turn took a note, beside the party that took it: this one was
+  // left to end and reached as it did, rather than interrupted.
+  expect(events.find((event) => event.id === "e8a")?.redirection).toEqual({
+    reached: "worker",
+    turn: "turn-end",
+    delivered: true,
+    delivery: "live",
+    node_id: "api",
   });
 
   // Where a change request's review stood: a required check that skipped is
@@ -815,6 +857,9 @@ test("this repository's own served goldens parse through the public parsers", as
     "verification",
     "publication",
     "rollup",
+    // Harness sessions recorded only in the pointer file also open transcripts.
+    "dispatch",
+    "dispatch",
   ]);
   // The aggregate lane carries what it stands for rather than the window the
   // waits fell in, which is what a client plots it at.
@@ -880,7 +925,6 @@ test("the projects and every wrapped verb this repository serves parse through t
   );
   expect(surfaced.state).toBe("queued");
 
-  // Stopping and adopting.
   const stopped = stoppedSchema.parse(await served("run-stop.json"));
   expect(stopped).toMatchObject({
     stopped: true,
@@ -888,42 +932,6 @@ test("the projects and every wrapped verb this repository serves parse through t
     forced: false,
     teardown: "elsewhere",
   });
-  expect(adoptedSchema.parse(await served("run-adopt.json")).pid).toBe(4242);
-
-  // The watch stream's three frames, each named by its SSE event and carrying
-  // the record the engine prints for it.
-  const frames = z
-    .array(
-      z.object({
-        id: z.number(),
-        event: watchEventNameSchema,
-        data: watchFrameDataSchema,
-      }),
-    )
-    .parse(await served("run-watch.json"));
-  expect(frames.map((frame) => frame.event)).toEqual([
-    "event",
-    "event",
-    "returned",
-  ]);
-  const ending = frames.at(-1)?.data;
-  expect(ending?.watch).toBe("return");
-  if (ending?.watch === "return") {
-    expect(ending.condition).toBe("settled");
-    expect(ending.cursor).toMatch(/^1:/);
-    expect(ending.unread.oldest_seconds).toBeNull();
-  }
-  expect(
-    watchFrameDataSchema.parse({
-      watch: "heartbeat",
-      run_id: "run-20260807-a1b2c3",
-      unread: {
-        count: 1,
-        oldest_seconds: 4,
-        kinds: [{ kind: "finding", count: 1 }],
-      },
-    }).watch,
-  ).toBe("heartbeat");
   expect(unwatchedSchema.parse(await served("unwatched.json"))).toMatchObject({
     reported: [],
     unresolved: [],
@@ -978,6 +986,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
     "complete",
     "amend",
     "note",
+    "withdraw-note",
     "finding",
     "settle",
     "rework",
@@ -1191,4 +1200,81 @@ test("the graph serves a node's overrides and the run-wide list, and absent read
     graphStateSchema.safeParse({ ...golden.graph, run_node_sets: "a=1" })
       .success,
   ).toBe(false);
+});
+
+test("the subscription and every frame type the server served parse through the public export", async () => {
+  const subscribed = subscribedSchema.parse(await served("subscriptions.json"));
+  expect(subscribed.initial.type).toBe("snapshot");
+  if (subscribed.initial.type !== "snapshot") return;
+  const { snapshot } = subscribed.initial;
+  // Every sidebar row carries exactly the fields the contract lists for one.
+  for (const row of snapshot.sidebar)
+    expect(
+      Object.keys(row).filter((key) => key !== "started_at"),
+    ).toStrictEqual(SIDEBAR_ROW_FIELDS.filter((key) => key !== "started_at"));
+  expect(snapshot.visible.type).toBe("detail");
+  const frames = z
+    .array(subscriptionFrameSchema)
+    .parse(await served("subscription-frames.json"));
+  expect(new Set(frames.map((frame) => frame.type))).toStrictEqual(
+    new Set(SUBSCRIPTION_FRAME_TYPES),
+  );
+  // The detail patch the served stream carried applies to the detail the
+  // served snapshot holds, and the result is still a detail.
+  const patch = frames.find((frame) => frame.type === "detail.patch");
+  if (patch?.type !== "detail.patch" || snapshot.visible.type !== "detail")
+    throw new Error("no detail patch was served");
+  expect(() =>
+    runDetailSchema.parse(applyPatch(snapshot.visible.detail, patch.ops)),
+  ).not.toThrow();
+  for (const frame of frames)
+    if (frame.type !== "reset") expect(frame.base < frame.id).toBe(true);
+});
+
+test("a patch the contract does not allow is refused rather than guessed at", () => {
+  const held = { spans: [{ id: "a", events: [] }], run_id: "r" };
+  expect(
+    applyPatch(held, [{ p: ["spans", 0, "events"], a: [{ id: "e" }] }]),
+  ).toStrictEqual({ spans: [{ id: "a", events: [{ id: "e" }] }], run_id: "r" });
+  expect(held.spans[0]?.events).toStrictEqual([]);
+  for (const refused of [
+    { p: [], v: {} },
+    { p: [], d: true as const },
+    { p: ["missing", "x"], v: 1 },
+    { p: ["spans", 3], v: {} },
+    { p: ["run_id"], a: [1] },
+    { p: ["spans", 0], d: true as const },
+  ])
+    expect(() => applyPatch(held, [refused])).toThrow();
+});
+
+test("the human-item goldens the server serves parse as the engine's records", async () => {
+  // `tests/e2e/human_items.rs` writes these from the real server over the
+  // engine's live runtime, and `tests/contract.rs` decodes each with the
+  // engine's own types; parsing them here holds the browser's half to the same
+  // bytes.
+  const list = humanItemListSchema.parse(await served("human-items.json"));
+  expect(list.items.map(({ item }) => item.priority)).toEqual([
+    "urgent",
+    "high",
+    "medium",
+  ]);
+  expect(
+    list.items.map(({ item }) => HUMAN_ITEM_PRIORITY_LABELS[item.priority]),
+  ).toEqual(["Critical", "High", "Medium"]);
+  const detail = humanItemDetailSchema.parse(await served("human-item.json"));
+  expect(detail.nodes).toHaveLength(detail.blocked.total);
+  // A receipt names the journal event the engine wrote, never a sample.
+  for (const name of [
+    "human-items-raise.json",
+    "human-item-answer.json",
+    "human-item-complete.json",
+    "human-item-dismiss.json",
+  ])
+    expect(humanItemReceiptSchema.parse(await served(name)).event_id).toMatch(
+      /^human-items:\d+$/u,
+    );
+  // A refusal is the error contract, never a record.
+  const refusal: unknown = await served("error.json");
+  expect(() => humanItemReceiptSchema.parse(refusal)).toThrow();
 });

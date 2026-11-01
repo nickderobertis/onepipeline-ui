@@ -99,31 +99,21 @@ the API, or route those paths to it.
 
 ## Use
 
-**The app opens on the projects.** A bare address is the project list
-`GET /api/v2/projects` serves: one card per project, in the server's own order —
-newest activity first, by the group's last write — each carrying the plan's name
-and its qualified id, how many runs, when it last wrote, and its runs' states
-counted in the server's own words (`2 active · 1 settled`). The `(no project)`
-group — the runs whose launch recorded none — is a card like any other, wherever
-its own recency puts it, headed by that word rather than by the plan name of
-whichever run in it wrote last. The left navigation lists the same groups as rows.
-Clicking either opens the project's page, `GET /api/v2/projects/{project}` (the
-`(no project)` group has no id and no route, so its page is taken off the listing):
-every DAG launched against it, most recent activity first, each row the same row
-the run list serves — its settlement, its nodes counted, what is driving it in the
-engine's word, how many surfaces nobody has read, and when it last wrote — and
-each opening to the run view below. The project rides in the address (`?project=`,
-with `none` for the group that has no id), so a page is linkable and a run opened
-from one keeps the page one step back. Nothing here recomputes the order or the
-counts; the tallies are of the served rows, in the served words.
+**Projects are the sidebar's one list.** Groups come from `GET /api/v2/projects`,
+most recent activity first, and expand into runs by newest launch first, with undated launches last by activity.
+Opening a project selects its newest visible run. Effective `labels.kind` values
+populate the kind filter from data, including unfamiliar kinds; all are shown by
+default and hidden kinds are kept in repeated `hide-kind` URL parameters. A run
+without a kind carries no badge. Runs without a resolved group sit under **Other
+runs** at the end. Copy-origin and overlay groups are resolved by the engine.
 
-**The flat run list is one toggle away** (`?list=runs`), and under it an address
-naming no run opens the first one served, as it always did. That list is one flat
-list, ordered by last activity, tagged by the launching Claude or Codex session
-read from the `launch` attribution the row carries — its `session_key`, the same
-fingerprint `just runs` prints — rather than gathered into sections by it: a
-grouping that outranks time is what the projects are for. A run with no launch
-record at all reads as `Unattributed`. Select a run, then:
+There is no project landing or separate project page. The run id stays in `?run=`;
+its launching session is in **Run details** in the header. **Host** opens the host's
+resources, provider health, dispatches, and runs. Its unwatched count is read on entry
+and **Refresh host**, never on a cadence. Host shutdown lives there alone, with a
+confirmation naming each owner and the number of runs it affects.
+
+Select a run, then:
 
 - **Overall** is where an address that names no view lands, and it is the run read
   as a whole: its telemetry tiles over the **graph timeline** (below).
@@ -137,7 +127,7 @@ record at all reads as `Unattributed`. Select a run, then:
   that says nothing about having more beside it.
 - select a node in the graph or keyboard-accessible node list to open its
   **timeline view** (below).
-- **Channel**, **Watch** and **Reads** are the supervising surface, described in
+- **Channel** is the supervising surface, described in
   [Supervising a run](#supervising-a-run): every verb the CLI has once a plan is
   running, from the run it is about.
 - **Agents** is every agent the run launched, described in
@@ -185,37 +175,19 @@ act. The run view now offers every post-launch verb, each wired to its one route
 and nothing else — the routes are named verb by verb below — and every receipt and
 refusal is shown **as the API returned it** — the engine's own object, the engine's
 own words — never restated. The header of a run carries the controls that are about
-the run as a whole; three tabs beside Graph and Overall carry the rest, and a
-fourth, **Agents**, is the section after this one.
+the run as a whole; two tabs beside Graph and Overall carry the rest, and a
+third, **Agents**, is the section after this one.
 
 - **Status and liveness** in the header are `GET .../status`: the engine's own word
   for how the run is being driven, read again on every stream invalidation and on a
   ten-second clock of its own, because a driver that dies writes nothing and the
-  stream announces nothing. That word is what decides whether **Adopt** is offered:
-  only under `DRIVER DEAD` or `UNDRIVEN`, the two the engine's own `adopt` will take
-  over, and never under `ACTIVE` or `PARKED`, where offering it would be offering
-  the engine's refusal. An adoption is `POST .../adopt`, and the pid it answers is
-  shown.
+  stream announces nothing.
 - **Stop** is `POST .../stop` as the acting session, behind one confirm. A run
   another session owns comes back `409 not_owner` naming the owner as the engine
   names it — `[codex:160c290a]`, never the raw session — and that refusal is shown
   verbatim; only then is a **forced stop** offered, behind a second confirm that
   names the owner it would override. It is never the default and never the first
   dialog. The body sent is `{force}` exactly as the route takes it.
-- **Watch** holds `GET .../watch` as a server-sent stream for as long as the toggle
-  is on, under the reading's filter profile and with no clock on the wait. While it
-  is held the server is the run's registered watcher, and the Watch tab says the run
-  is being watched by this browser and lists the frames as they arrive: the events
-  under the profile, the heartbeats with the run's unread accounting, and the
-  `returned` frame that ends the wait — on which the client closes the source
-  itself, so the browser does not reopen a wait that is over. The stream asks for a
-  two-second heartbeat, and that is for the server rather than the reader: the wait
-  runs on a blocking worker that learns the browser has gone only when a write to
-  it fails, so a watch with no heartbeat keeps the watcher record for as long as
-  the run stays quiet. The **unwatched badge** beside the toggle is
-  `GET /api/v2/unwatched` for the acting session — how many runs it owns that
-  nothing is watching, and whether this is one — read again on the first frame and
-  once the server has had a heartbeat in which to notice the close.
 - **Channel** is the run's channel. The queue is `GET .../channel`, a reading that
   consumes nothing, shown as the engine keeps it: the **pending** surface (the held
   one nobody has given up on), the **waiting** ones nobody has read, an
@@ -249,47 +221,28 @@ fourth, **Agents**, is the section after this one.
   reads says which field rather than sending something the engine would refuse for
   a reason that is not the reader's. A correlation names the question a verdict
   answers.
-- **Reads** are the rendered verbs, each a panel showing the SDK's own text — byte
-  for byte what the binary prints, because those verbs answer rendered views rather
-  than records: `status`, `results`, `goals`, the `transcript` per node (a node the
-  run never dispatched is the engine's refusal, shown as such), `telemetry` as the
-  SDK's own document, and the `host` view. `monitor` is the existing timeline under
-  a profile.
+- The former Reads information is structured in the remaining views: status and
+  unread age in **Run details**, goals, repository identities, results, timing and
+  usage in **Overall**, per-node outcomes in **Task**, publication and checks in
+  **Remote**, and transcript turns in the conversation. Host resources are on **Host**.
 
-`e2e/dag-ui-supervise.spec.ts` drives every one of these against the real API over
+`e2e/dag-ui-controls.spec.ts` drives every one of these against the real API over
 runs the fixture writes for them alone — the supervised run the acting session
 owns, the run another session owns, and the run nothing drives — so the live run
-every other journey reads is left as it was. The run nothing drives is adopted
-twice: once to settle its human action, and once — after the composer has edited
-its graph overrides — to dispatch its two agent nodes, whose transcripts say which
-oneharness config each ran under.
+every other journey reads is left as it was.
 
-### Shutting down a run, all my runs, or the host
+A reply to a node whose turn is still open is answered at hand-off: the receipt
+names each live note under `notes`, `queued` while it waits for the turn to take
+it, and **Command outcomes** shows the envelope applied with that note's `queued`
+result. `e2e/dag-ui-held-turn.spec.ts` drives that through the composer on a
+server of its own, against a run the pinned `onepipeline` adopts and dispatches
+to the harness double `tests/e2e/server.rs` holds its own turn open with.
 
-The view can end the running work it shows, through the engine's own host
-shutdown — the same verb as `onepipeline shutdown`, and nothing decided here: the
-interrupt that asks each dispatch to wrap up and commit, the wait, the teardown of
-whatever is still standing, and the push that preserves every branch are all the
-engine's.
+### Shutting down the host
 
-- **Shut down this run** sits in a run's header beside Stop and Adopt, and is
-  `POST .../runs/{run}/shutdown`.
-- **Shut down all my runs** and **Shut down the entire host** sit at the top of the
-  runs listing, and are `POST /api/v2/shutdown` with `scope` `mine` or `host`.
+**Shut down the entire host** stays at the top of the run listing until navigation moves it to the Host page. It calls `POST /api/v2/shutdown` with `scope: "host"`. The dialog names every listed run and its recorded launcher, reading the listing to its end before enabling confirmation. It states that shutdown acts over owners. No watcher or acting-session report is read by the run page.
 
-Every one opens a **confirm dialog before anything is sent**, and nothing is sent
-unless it is confirmed; cancelling, or Escape, sends nothing. The dialog names,
-by run id, **exactly which runs it will act on and who owns each**, read off the
-runs listing the view already holds — read to its end first — and told apart by
-the acting session's own key, which `GET /api/v2/unwatched` serves: this session's
-runs as *this session's*, and every other run under its launcher and session key.
-*All my runs* acts on this session's runs and no other's. *The entire host* says
-in words that it acts on runs other sessions own, over their owners, and lists
-them apart from this session's. The dialog offers the **grace** — ten minutes by
-default, the engine's own, as a number with a minutes or seconds unit, sent as
-whole seconds — and a **force** option, never on by default, whose label says what
-it gives up: it skips the interrupt and the wait and goes straight to the
-teardown, and whatever a worker had not committed is lost.
+The grace defaults to ten minutes and is sent as whole seconds. Force defaults off and explains that it skips the interrupt and wait. Cancelling or Escape sends nothing.
 
 A shutdown waits out its grace, which is minutes, so while its request is open the
 control says it is **still proceeding and shows its evidence**: the time elapsed,
@@ -308,6 +261,15 @@ incomplete**, never as a success.
 server of its own over a corpus written for it alone, under an empty
 `ONEVCS_HOME`, where nothing names a process except the one a journey spawns to be
 killed.
+
+## Action items
+
+The sidebar's **Action items** entry opens `/human-items`, a page of its own beside
+the Host page: the host-wide queue of tasks and questions the engine's human-item
+contract describes, read and written through the `/api/human-items` routes. Its
+layout, keyboard model, density target and what it is proven against are in
+[`docs/human-items.md`](human-items.md); the journeys are
+`apps/dag-ui-e2e/dag-ui-human-items.spec.ts`.
 
 ## The agents a run launched
 
@@ -335,11 +297,6 @@ anything for it.
   with no count beside it rather than a zero.
 - **A node's Agents tab** is `GET .../nodes/{node}/agents`: the sessions that
   node's dispatches wrote, and none for a node that dispatched nothing.
-- **A project's page** ends with the union across its runs,
-  `GET /api/v2/projects/{project}/agents`, grouped the same way, and its row in the
-  navigation and its card on the landing carry the group's `agent_count`. The
-  `(no project)` group has no id and so no route, and its page shows its runs
-  alone.
 - **Open transcript** on a harness run opens it through the conversation view the
   app already has for a `oneharness_session` artifact — `GET
   /api/v2/runs/{run}/artifacts/{history_id}`, asked for under the run the entry
@@ -349,7 +306,7 @@ anything for it.
   the browser, and a session the store no longer holds says so in place of the
   conversation.
 
-`e2e/dag-ui-supervise.spec.ts` drives the run's, a node's and a project's agents
+`e2e/dag-ui-controls.spec.ts` drives the run's, a node's and a project's agents
 against the real API over runs whose pointer files the fixture wrote beside their
 journals, opening one session's transcript from the run and another from the
 project page, and holds both counts to the sessions those files name.
@@ -500,8 +457,17 @@ Escape key. It is a **timeline over a transcript**, both projected from
   exception table only for the kinds those rules would misfile; it is never served,
   and a kind no rule names still draws, under a default category of its own. The
   transcript row beside a marker carries the same glyph, so one record is
-  recognisable on both surfaces. The axis
-  reads local wall-clock time and elapsed-from-start, and the compact line and the
+  recognisable on both surfaces. A tool call's row is one line, the server's own
+  description of it — a shell call's command, a file tool's verb and path, a
+  search's pattern — and opening it opens the conversation turn it was made in,
+  focused on that call. Every conversation is read whole from the transcript the
+  turn was recorded in; a turn whose transcript is gone says so and names the
+  file, and only a run recorded before turns pointed at their transcript, with no
+  report and no history file left, shows the recorder's cut copy — under a note
+  saying so. The axis carries a marker at round second, minute or hour steps, and
+  a crosshair under the pointer reads that point's time and the time elapsed since
+  the plot's start; the markers read local wall-clock time and elapsed-from-start,
+  and the compact line and the
   expanded lanes always span the same window, so a moment does not move when the
   view is collapsed. An aggregate is plotted at the total it carries, not across
   the window its records happened to fall in. The compact line is sized to fit
@@ -578,12 +544,18 @@ Escape key. It is a **timeline over a transcript**, both projected from
   An **edit** by an author other than the planner is named by that author on its
   row and in its facts, and the engine's own report of it is a surface like any
   other, `edit-applied`, raised by that author.
-- the node's **task, completion criteria, dependencies, PR, gate result and
-  agents** are tabs beside the timeline, one selection away rather than a wall of
-  blocks. Seven names do not fit every width, so below the breakpoint they wrap onto a second
-  row rather than hiding the ones past the edge behind a scroller — down to the
-  phone, where the same names need four rows and 170px of an 844px screen, and
-  the strip scrolls again so the timeline the view opens on has room to be drawn.
+- the node's **task, completion criteria, dependencies and Remote** are tabs
+  beside the timeline. Remote keeps the change request, branch, merge and release
+  information above a table of checks, with status, conclusion, runtime and
+  requiredness. A finished check's runtime is its own `completed_at` minus its own
+  `started_at`; a running one counts on from its start and says `running`; a queued
+  one shows none.
+  Each recorded check URL opens its destination. The tab strip wraps at intermediate
+  widths and scrolls on the phone so the timeline has room to be drawn.
+
+The channel pairs each surface with the replies whose correlation answers it, newest
+surface first. An unanswered surface says it is waiting. Each message starts as one
+line and expands to its whole text; a reply's raw envelope is one disclosure deeper.
 
 Nothing in either surface grows with the size of the run. A run of eight or more
 consecutive same-kind siblings arrives as one grouped row, and a conversation
@@ -679,10 +651,21 @@ being photographed.
 | `08-conversation` | a conversation in the right panel |
 | `09-node-redirected` | a node reading as having a reachable turn, with the redirection that turn took open beside it |
 | `10-node-no-turn-to-reach` | a node whose run has no turn to reach, with the note that could only be deferred open beside it |
-| `11-project-list` | the projects the app opens on, the `(no project)` group among them |
-| `12-project-page` | a project's page: its runs, newest activity first |
+| `11-project-list` | projects and their runs in one sidebar |
+| `12-host` | host resources, unwatched runs and host shutdown |
+| `21-remote` | publication, release and each check’s evidence |
 | `13-channel` | the channel: the queue, the composer and the surface form |
 | `14-channel-graph-overrides` | the composer editing a node's graph overrides as an ordered list, composed into the editor |
+| `15-recorded-node-collapsed` | the recorded worker and change request drafter in their own groups, collapsed |
+| `16-recorded-node-expanded` | the same recorded sessions with their lanes expanded |
+| `17-recorded-gate-run` | the gate's own result and measured duration |
+| `18-recorded-session-closed` | the closed session's recorded fields |
+| `19-recorded-node-dispatched` | the dispatch's attempt and persona |
+| `20-recorded-overall` | execution ending at settlement and the completion marker 41 hours later |
+| `22-node-timeline-crosshair` | the node timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
+| `23-overall-timeline-crosshair` | the overall timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
+| `24-held-graph` | a run holding finished work for releases: a held-unlanded and a draft node, each card naming what it awaits |
+| `25-held-node` | the draft node's view, naming every release it awaits in full above the settlement's detail |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the
@@ -748,11 +731,7 @@ the merged event store — `serve-fixture.mjs` serves it through the compiled bi
 and `playwright.config.ts` starts both that server and Vite. Nothing between the
 browser and the read model is doubled. The server acts as the session that launched
 the supervised runs, so a stop on one of them is the owner's and a stop on any other
-is refused naming its owner; and the run an adoption takes over is recorded as
-driven on *this* host under a pid nothing can hold, with the host name pinned in the
-server's environment to the one the fixture wrote, so the engine proves the driver
-gone rather than reading the run as driven. The adopted driver is this repository's
-own binary at the engine's driver verb, settling a graph of one human action.
+is refused naming its owner. Run driving belongs to the engine CLI; this binary has no browser or hidden CLI control that adopts a run.
 
 The gallery spec lives beside the journeys because it drives the same surfaces against
 the same stack, but it asserts nothing and writes images, so `playwright.config.ts`
@@ -821,3 +800,5 @@ strict journal, so no served run fails one and not the other, and a browser only
 sees the failure with the whole API unreachable. Those branches carry a
 line-scoped `llmlint: ignore[changed_behavior_has_e2e]` naming this reason, and
 are driven through the real telemetry client in `src/app/App.test.tsx`.
+
+The run header keeps the run id, liveness, Stop and last activity on one line at every gallery viewport. Stop is absent after the run ends, including failure and explicit stop. The activity clips with an ellipsis, keeps its full text in its title, and opens the exact node timeline event named by its `event_id`.

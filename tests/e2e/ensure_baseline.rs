@@ -10,7 +10,7 @@
 //! failure that is silent: a stale server answers every request, and a comparison
 //! against the wrong commit says nothing while looking exactly like one that did.
 //!
-//! One thing is stood in for: `cargo` on PATH. The real provisioning compiles a
+//! The guard journeys substitute `cargo` on PATH. Real provisioning compiles a
 //! whole dependency graph a generation old, which is neither quick nor offline.
 //! The recipe under test is the real one, run out of a copy of the real justfile
 //! over the real script, against a real git repository with a real base commit —
@@ -18,7 +18,7 @@
 //! from, are both readable here. The copy is the point rather than a shortcut:
 //! the recipe writes into `justfile_directory()`, and a journey that let it write
 //! into the repository would provision over the binary the rest of the suite
-//! reads.
+//! reads. `baseline_reuse` separately exercises real Cargo reuse and source identity.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -42,11 +42,13 @@ const SUITES_THAT_SERVE_THE_BASELINE: [&str; 1] = ["onepipeline-ui-baseline:test
 
 /// The crate's test tiers: the Nx project and target each runs as, and the
 /// nextest profile in `.config/nextest.toml` that selects its tests.
-const TIERS: [(&str, &str, &str); 8] = [
+const TIERS: [(&str, &str, &str); 10] = [
     ("onepipeline-ui", "test", "unit"),
     ("onepipeline-ui-e2e", "test", "e2e"),
     ("onepipeline-ui-repo-tooling", "test", "repo-tooling"),
+    ("onepipeline-ui-npm-launcher", "test", "npm-launcher"),
     ("onepipeline-ui-baseline", "test-baseline", "baseline"),
+    ("onepipeline-ui-baseline-reuse", "test", "baseline-reuse"),
     ("onepipeline-ui-cost", "test-cost", "cost"),
     ("onepipeline-ui-linked-report", "test", "linked-report"),
     ("onepipeline-ui-ci-jobs", "test", "ci-jobs"),
@@ -808,10 +810,10 @@ fn every_tier_is_keyed_by_every_module_its_journeys_read() {
 
 /// Every test runs under exactly one tier.
 ///
-/// The suite is seven Nx projects, each running its own nextest profile, and the
-/// seven filters are the halves of one partition: `unit` is every binary but the
+/// The suite is ten Nx projects, each running its own nextest profile, and the
+/// ten filters are the halves of one partition: `unit` is every binary but the
 /// two the other tiers draw on, and inside `e2e` the `e2e` profile is `not` what
-/// the other five select. They are written as module lists in two places, so
+/// the other eight select. They are written as module lists in two places, so
 /// nothing but this holds them to each other — and either side drifting alone is
 /// silent: widen an exclusion and tests stop running under the coverage floor,
 /// narrow an inclusion and a whole tier is declared for and runs nowhere. The
@@ -835,12 +837,14 @@ fn the_tier_profiles_partition_the_suite() {
         .collect();
     let profiles = tier_profiles();
 
-    // Inside the `e2e` binary: the six selections are disjoint, and the `e2e`
+    // Inside the `e2e` binary: the eight selections are disjoint, and the `e2e`
     // profile excludes exactly their union.
     let mut drawn = std::collections::BTreeSet::new();
     for profile in [
         "repo-tooling",
+        "npm-launcher",
         "baseline",
+        "baseline-reuse",
         "cost",
         "linked-report",
         "ci-jobs",
@@ -867,7 +871,9 @@ fn the_tier_profiles_partition_the_suite() {
     let others: std::collections::BTreeSet<String> = [
         "e2e",
         "repo-tooling",
+        "npm-launcher",
         "baseline",
+        "baseline-reuse",
         "cost",
         "linked-report",
         "ci-jobs",

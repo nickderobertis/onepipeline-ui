@@ -97,11 +97,13 @@ test("shows a node its plan kept as done, on its branch at its head, and never a
     server.origin,
     facts.run,
     facts.node,
-    "PR",
+    "Remote",
   );
-  await expect(keptPr).toHaveText(
-    /^\s*Publication\s*Not recorded\s*Release\s*Not recorded\s*$/,
-  );
+  await expect(keptPr).toContainText("PublicationNot recorded");
+  await expect(keptPr).toContainText(`Branch${facts.branch}`);
+  await expect(keptPr).toContainText("MergeNot merged");
+  await expect(keptPr).toContainText("ReleaseNot recorded");
+  await expect(keptPr).toContainText("No checks observed");
   await expect(keptPr.getByRole("link")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Pull request" })).toHaveCount(0);
 
@@ -113,7 +115,7 @@ test("shows a node its plan kept as done, on its branch at its head, and never a
     server.origin,
     facts.run,
     facts.landed_node,
-    "PR",
+    "Remote",
   );
   await expect(
     landed.getByRole("link", { name: "Pull request" }),

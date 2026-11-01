@@ -102,10 +102,9 @@ function verify(release, { root = ROOT, extra = {} } = {}) {
 function faultyCheckout() {
   const root = join(dir, "faulty-checkout");
   mkdirSync(join(root, "scripts"), { recursive: true });
-  copyFileSync(
-    join(ROOT, "scripts/release.mjs"),
-    join(root, "scripts/release.mjs"),
-  );
+  // release.mjs and the module it imports, so the copy loads as the original.
+  for (const script of ["release.mjs", "sbom.mjs"])
+    copyFileSync(join(ROOT, "scripts", script), join(root, "scripts", script));
   copyFileSync(
     join(ROOT, "release-targets.toml"),
     join(root, "release-targets.toml"),

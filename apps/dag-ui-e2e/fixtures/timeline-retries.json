@@ -1,0 +1,4891 @@
+{
+  "run_id": "dag-ui-timeline-retries",
+  "node": "onepipeline-ui-link-retire-scope-4",
+  "origin": {
+    "run": "Retire-a-branch-as-merged-only-on-its-own-repository-s-merged-change-request--and-adopt-it-here",
+    "repository": "https://github.com/nickderobertis/onepipeline-ui",
+    "node": "onepipeline-ui-link-retire-scope-4",
+    "trim": "One settled node; local paths, session tokens, prompts, tool output and checks removed. Late completion-requested is synthetic, settlement + 41 hours.",
+    "variant": "Synthetic replay of the recording: a second attempt one hour later, review-reply persona in its drafting graph, equal tool timestamps, and three relays of one VCS identity."
+  },
+  "plan": {
+    "schema_version": 3,
+    "goal": {
+      "text": "Recorded public repository work (prose trimmed)."
+    },
+    "tasks": [
+      {
+        "id": "onepipeline-ui-link-retire-scope-4",
+        "task": "Recorded public repository work (prose trimmed).",
+        "persona": "engineer",
+        "deps": [],
+        "max_turns": 150,
+        "amendment": "The onepipeline dependency is held exactly at 0.70.1, the published release whose tag contains commit c1f8e4cf (the retirement fix); earlier context saying the pinned release lacks that fix described 0.70.0 and does not bear on this node. The API-server test module passes when run with this host's ONETASKGRAPH_SOURCES__* variables removed from its environment; a failure that occurs only while those variables are present is a host-environment failure outside this node, named in the report with that evidence rather than fixed here.",
+        "repo": "github.com/nickderobertis/onepipeline-ui",
+        "title": "fix(deps): link the engine whose onevcs retires a branch only on its own repository's merged change request",
+        "adoption": "published",
+        "consumes": {
+          "onepipeline-link-retire-scope-2": "crate"
+        }
+      }
+    ]
+  },
+  "launch": {
+    "run_id": "dag-ui-timeline-retries",
+    "plan": "plan.json",
+    "launcher": "codex",
+    "session": "recorded-owner",
+    "pid": 1,
+    "host": "recording-host",
+    "started_at": "2026-10-12T15:19:44.688Z",
+    "heartbeat_interval": 1800,
+    "adoptions": 0
+  },
+  "records": [
+    {
+      "v": 2,
+      "ts": "2026-10-12T15:19:44.688Z",
+      "stream": "U-17UN402ICR95C-711041",
+      "seq": 1,
+      "source": "pipeline",
+      "kind": "run-started",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "plan": {
+          "schema_version": 3,
+          "goal": {
+            "text": "Recorded public repository work (prose trimmed)."
+          },
+          "tasks": [
+            {
+              "id": "onepipeline-ui-link-retire-scope-4",
+              "task": "Recorded public repository work (prose trimmed).",
+              "persona": "engineer",
+              "deps": [],
+              "max_turns": 150,
+              "amendment": "The onepipeline dependency is held exactly at 0.70.1, the published release whose tag contains commit c1f8e4cf (the retirement fix); earlier context saying the pinned release lacks that fix described 0.70.0 and does not bear on this node. The API-server test module passes when run with this host's ONETASKGRAPH_SOURCES__* variables removed from its environment; a failure that occurs only while those variables are present is a host-environment failure outside this node, named in the report with that evidence rather than fixed here.",
+              "repo": "github.com/nickderobertis/onepipeline-ui",
+              "title": "fix(deps): link the engine whose onevcs retires a branch only on its own repository's merged change request",
+              "adoption": "published",
+              "consumes": {
+                "onepipeline-link-retire-scope-2": "crate"
+              }
+            }
+          ]
+        },
+        "dir": "/recorded/repository",
+        "heartbeat_interval": 1800
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:56:12.490Z",
+      "stream": "U-17UN402ICR95C-4033122",
+      "seq": 5,
+      "source": "pipeline",
+      "kind": "node-ready",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:56:12.605Z",
+      "stream": "U-17UN402ICR95C-4033122",
+      "seq": 7,
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "kind": "release-wait",
+        "message": "node 'onepipeline-ui-link-retire-scope-4' is held under published adoption, waiting on 1 release(s):\n- github.com/nickderobertis/onepipeline crate \u2014 automated release, waited 0s, last answer: no-answer-yet\nNothing times this out and nothing will fail the node. Keep waiting, flip this node to `adoption: fast` by live edit, or stop the run.",
+        "source": "proposal",
+        "blocking": false
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:56:12.612Z",
+      "stream": "U-17UN402ICR95C-4033122",
+      "seq": 8,
+      "source": "pipeline",
+      "kind": "release-wait",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "awaiting": [
+          {
+            "dep": "onepipeline-link-retire-scope-2",
+            "identity": "github.com/nickderobertis/onepipeline",
+            "target": "crate",
+            "style": "automated",
+            "since": "2026-10-13T16:56:12.503Z",
+            "waited_seconds": 0,
+            "last_answer": "no-answer-yet"
+          }
+        ]
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:56:12.888Z",
+      "stream": "U-17UN402ICR95C-4033122",
+      "seq": 11,
+      "source": "pipeline",
+      "kind": "node-held",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "reasons": [
+          {
+            "kind": "release",
+            "awaiting": ["onepipeline-link-retire-scope-2"]
+          }
+        ]
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:56:15.493Z",
+      "stream": "U-17UN402ICR95C-4033122",
+      "seq": 13,
+      "source": "pipeline",
+      "kind": "release-arrived",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "dep": "onepipeline-link-retire-scope-2",
+        "identity": "github.com/nickderobertis/onepipeline",
+        "target": "crate",
+        "style": "automated",
+        "version": "0.70.1"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:56:15.663Z",
+      "stream": "U-17UN402ICR95C-4033122",
+      "seq": 14,
+      "source": "pipeline",
+      "kind": "node-dispatched",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "persona": "engineer",
+        "attempt": 1,
+        "notes_spent": [
+          {
+            "addressee": "both",
+            "text": "Recorded public repository work (prose trimmed).",
+            "criterion": "The change leaves onepipeline-ui's workflow triggers and the test that enforces their omission of ready_for_review unchanged.",
+            "reached": "worker"
+          }
+        ]
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:56:15.835Z",
+      "stream": "U-17UN402ICR95C-4033122",
+      "seq": 15,
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "released": [
+          {
+            "kind": "release",
+            "awaiting": ["onepipeline-link-retire-scope-2"]
+          }
+        ]
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:56:16.765Z",
+      "stream": "onevcs-s-21958ac13f0e",
+      "seq": 0,
+      "source": "vcs",
+      "kind": "session-opened",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "token": "redacted-session",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "base": "main",
+        "worktree": "/recorded/worktree"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:16.757Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 1,
+      "source": "agentgraph",
+      "kind": "graph-started",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "graph": "/recorded/graph",
+        "name": "node-scope",
+        "dir": "/recorded/dir"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:16.757Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 2,
+      "source": "agentgraph",
+      "kind": "member-started",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "runner": "library",
+        "engine": "onejudge",
+        "config": "/recorded/config",
+        "worktree": "/recorded/worktree"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:16.760Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 3,
+      "source": "agentgraph",
+      "kind": "turn-started",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029.worker"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "instruction": "Recorded public repository work (prose trimmed).",
+        "instruction_truncated": true,
+        "started_at": "2026-10-13T16:56:16.760Z",
+        "origin": "task"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:56:17.328Z",
+      "stream": "U-17UN402ICR95C-4033122",
+      "seq": 16,
+      "source": "pipeline",
+      "kind": "note-shown",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "addressee": "worker",
+        "text": "Recorded public repository work (prose trimmed).",
+        "reached": "carried",
+        "party": "worker",
+        "turn": 1,
+        "evidence": "opening-task"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:18.413Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 4,
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029.worker"
+      },
+      "payload": {
+        "kind": "message",
+        "name": null,
+        "detail": "Recorded public repository work (prose trimmed).",
+        "output": "Recorded public repository work (prose trimmed).",
+        "index": 0
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:20.347Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 5,
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029.worker"
+      },
+      "payload": {
+        "kind": "message",
+        "name": null,
+        "detail": "Recorded public repository work (prose trimmed).",
+        "output": "Recorded public repository work (prose trimmed).",
+        "index": 0
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:26.303Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 6,
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029.worker"
+      },
+      "payload": {
+        "kind": "message",
+        "name": null,
+        "detail": "Recorded public repository work (prose trimmed).",
+        "output": "Recorded public repository work (prose trimmed).",
+        "index": 0
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:28.069Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 7,
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029.worker"
+      },
+      "payload": {
+        "kind": "tool_call",
+        "name": "command_execution",
+        "detail": "/recorded/detail",
+        "truncated": true,
+        "output": "Recorded public repository work (prose trimmed).",
+        "output_truncated": true,
+        "tool_call_id": "exec-ac86c351-0bfb-43d7-8b6b-58a1a9934eff",
+        "index": 1
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:31.767Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 8,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:36.249Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 9,
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029.worker"
+      },
+      "payload": {
+        "kind": "tool_call",
+        "name": "command_execution",
+        "detail": "/recorded/detail",
+        "truncated": true,
+        "output": "Recorded public repository work (prose trimmed).",
+        "tool_call_id": "exec-e555142f-6518-46e6-b0f2-017ce91cd99e",
+        "index": 2
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:42.328Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 10,
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029.worker"
+      },
+      "payload": {
+        "kind": "message",
+        "name": null,
+        "detail": "Recorded public repository work (prose trimmed).",
+        "output": "Recorded public repository work (prose trimmed).",
+        "index": 3
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:42.422Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 11,
+      "source": "agentgraph",
+      "kind": "turn-message",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029.worker"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "text": "Recorded public repository work (prose trimmed)."
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:42.422Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 12,
+      "source": "agentgraph",
+      "kind": "turn-completed",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029.worker"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "usage": {},
+        "started_at": "2026-10-13T16:56:16.760Z",
+        "finished_at": "2026-10-13T16:56:42.422Z"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:42.423Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 13,
+      "source": "agentgraph",
+      "kind": "turn-started",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029.worker"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "user",
+        "instruction": "Recorded public repository work (prose trimmed).",
+        "started_at": "2026-10-13T16:56:42.422Z"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:56:42.493Z",
+      "stream": "U-17UN402ICR95C-4033122",
+      "seq": 17,
+      "source": "pipeline",
+      "kind": "note-shown",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "addressee": "worker",
+        "text": "Recorded public repository work (prose trimmed).",
+        "reached": "carried",
+        "party": "supervisor",
+        "turn": 1,
+        "evidence": "answering-turn"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:46.778Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 14,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:57:01.787Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 15,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:57:06.742Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 16,
+      "source": "agentgraph",
+      "kind": "turn-completed",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029.worker"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "user",
+        "usage": {},
+        "started_at": "2026-10-13T16:56:42.422Z",
+        "finished_at": "2026-10-13T16:57:06.742Z"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:57:16.792Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 17,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:57:31.797Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 18,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:57:46.802Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 19,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:01.806Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 20,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:14.951Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 21,
+      "source": "agentgraph",
+      "kind": "fallback-advanced",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "identity": "claude-code:alternate",
+        "reason": "Recorded public repository work (prose trimmed).",
+        "role": "agent",
+        "turn": 1
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:14.951Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 22,
+      "source": "agentgraph",
+      "kind": "fallback-advanced",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "identity": "claude-code:alternate2",
+        "reason": "Recorded public repository work (prose trimmed).",
+        "role": "agent",
+        "turn": 1
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:14.951Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 23,
+      "source": "agentgraph",
+      "kind": "oneharness-session",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "role": "judge",
+        "turn": 2,
+        "identity": "codex:primary",
+        "session_id": "01a13632-48f3-74f3-a3c7-6260230f3eb4",
+        "history_id": "01a13632-45bf-7100-95b8-d18518fa9534",
+        "history_dir": "/recorded/history_dir",
+        "history_project": "home-nick-.onevcs-workspaces-github.com-nickderobertis-onepipeline-ui-95f7516c419c-pool-1-worktree",
+        "history_session": "node-scope-1791910576755-4064029-worker-judge-20261013T165706Z-4109409"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:14.952Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 24,
+      "source": "agentgraph",
+      "kind": "member-settled",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "completed": true,
+        "verdict": [
+          {
+            "criterion": "every acceptance criterion stated in the task is met, with every change this dispatch made committed and nothing half-applied left behind",
+            "kind": "boolean",
+            "verdict": {
+              "value": true,
+              "reason": "Recorded public repository work (prose trimmed).",
+              "usage": {
+                "input_tokens": 360275,
+                "output_tokens": 1294,
+                "cache_read_tokens": 312064
+              }
+            }
+          }
+        ],
+        "completion_reason": "Recorded public repository work (prose trimmed).",
+        "report_path": "/recorded/report_path"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:14.956Z",
+      "stream": "node-scope-1791910576755-4064029",
+      "seq": 25,
+      "source": "agentgraph",
+      "kind": "graph-settled",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "exit_code": 0,
+        "members": {
+          "worker": "settled"
+        }
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:16.236Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 1,
+      "source": "vcs",
+      "kind": "fetch",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "remote": "origin",
+        "checkout": "/recorded/checkout"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:56:16.740Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 2,
+      "source": "vcs",
+      "kind": "session-opened",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "token": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "base": "main",
+        "worktree": "/recorded/worktree",
+        "clone": "/recorded/clone",
+        "execution_checkout": "/recorded/execution_checkout",
+        "publication_checkout": "/recorded/publication_checkout",
+        "placement": {
+          "kind": "slot",
+          "slot": 1,
+          "created": false
+        },
+        "continued": true
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:16.716Z",
+      "stream": "pr-author-1791910696714-4159400",
+      "seq": 1,
+      "source": "agentgraph",
+      "kind": "graph-started",
+      "labels": {
+        "run_id": "pr-author-1791910696714-4159400",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "pr-author",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "pr-author"
+      },
+      "payload": {
+        "graph": "/recorded/graph",
+        "name": "pr-author",
+        "dir": "/recorded/dir"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:16.716Z",
+      "stream": "pr-author-1791910696714-4159400",
+      "seq": 2,
+      "source": "agentgraph",
+      "kind": "member-started",
+      "labels": {
+        "run_id": "pr-author-1791910696714-4159400",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "pr-author",
+        "persona": "pr-author",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "pr-author"
+      },
+      "payload": {
+        "runner": "library",
+        "engine": "oneharness",
+        "config": "/recorded/config",
+        "worktree": "/recorded/worktree"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:31.722Z",
+      "stream": "pr-author-1791910696714-4159400",
+      "seq": 3,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "pr-author-1791910696714-4159400",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "pr-author",
+        "persona": "pr-author",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "pr-author"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:36.570Z",
+      "stream": "pr-author-1791910696714-4159400",
+      "seq": 4,
+      "source": "agentgraph",
+      "kind": "turn-started",
+      "labels": {
+        "run_id": "pr-author-1791910696714-4159400",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "pr-author",
+        "persona": "pr-author",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "pr-author",
+        "session": "pr-author-1791910696714-4159400.pr-author"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "instruction": "Recorded public repository work (prose trimmed).",
+        "instruction_truncated": true,
+        "started_at": "2026-10-13T16:58:16.716Z",
+        "origin": "task"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:36.570Z",
+      "stream": "pr-author-1791910696714-4159400",
+      "seq": 5,
+      "source": "agentgraph",
+      "kind": "turn-completed",
+      "labels": {
+        "run_id": "pr-author-1791910696714-4159400",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "pr-author",
+        "persona": "pr-author",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "pr-author",
+        "session": "pr-author-1791910696714-4159400.pr-author"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "usage": {
+          "input_tokens": 60811,
+          "output_tokens": 370,
+          "cache_read_tokens": 26624
+        },
+        "started_at": "2026-10-13T16:58:16.716Z",
+        "finished_at": "2026-10-13T16:58:36.570Z"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:36.570Z",
+      "stream": "pr-author-1791910696714-4159400",
+      "seq": 6,
+      "source": "agentgraph",
+      "kind": "member-settled",
+      "labels": {
+        "run_id": "pr-author-1791910696714-4159400",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "pr-author",
+        "persona": "pr-author",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "pr-author"
+      },
+      "payload": {
+        "completed": true,
+        "verdict": [],
+        "completion_reason": null,
+        "report_path": "/recorded/report_path"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:36.574Z",
+      "stream": "pr-author-1791910696714-4159400",
+      "seq": 7,
+      "source": "agentgraph",
+      "kind": "graph-settled",
+      "labels": {
+        "run_id": "pr-author-1791910696714-4159400",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "pr-author",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "pr-author"
+      },
+      "payload": {
+        "exit_code": 0,
+        "members": {
+          "pr-author": "settled"
+        }
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:38.778Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 3,
+      "source": "vcs",
+      "kind": "change-described",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323",
+        "id": "323",
+        "base": "main",
+        "title": "fix(deps): link the engine whose onevcs retires a branch only on its own repository's merged change request",
+        "artifact": "a-cd4805419fd3"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:40.784Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 4,
+      "source": "vcs",
+      "kind": "fetch",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "remote": "origin",
+        "checkout": "/recorded/checkout"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:41.297Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 5,
+      "source": "vcs",
+      "kind": "push",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "remote": "origin",
+        "accepted": true,
+        "output": "Recorded public repository work (prose trimmed).",
+        "preserved_log": "/recorded/preserved_log",
+        "head": "1a71cafe769cb76607e8b9ae153a4dd2ab843a7b"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:41.951Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 6,
+      "source": "vcs",
+      "kind": "change-opened",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323",
+        "host": "github",
+        "id": "323",
+        "base": "main",
+        "author": "nickderobertis"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:42.225Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 7,
+      "source": "vcs",
+      "kind": "lock-wait",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "git:/home/nick/.ai-orchestrator/repos/nickderobertis__onepipeline-ui/.git",
+        "elapsed": 0.003369521,
+        "queue_position": 1
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:42.225Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 8,
+      "source": "vcs",
+      "kind": "lock-acquired",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "git:/home/nick/.ai-orchestrator/repos/nickderobertis__onepipeline-ui/.git"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:42.225Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 9,
+      "source": "vcs",
+      "kind": "merge-queued",
+      "phase": "integrate",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "git:/home/nick/.ai-orchestrator/repos/nickderobertis__onepipeline-ui/.git",
+        "queue_position": 1,
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:45.899Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 10,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "changes",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:48.955Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 11,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / pages-preflight",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:50.885Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 12,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "suppressions",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:50.885Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 13,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "quality",
+        "required": false,
+        "status": "in_progress",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:52.755Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 14,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / arches",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:54.148Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 15,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / cleanup-preview",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "skipped",
+        "state": "skipped"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:55.671Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 16,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "browser-windows",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:57.613Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 17,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / prune-history",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "skipped",
+        "state": "skipped"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:58:59.096Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 18,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "pr-title",
+        "required": true,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:59:00.712Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 19,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "llmlint",
+        "required": true,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:59:03.133Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 20,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / capture (x86_64, shots/current, shots/verify, Visual docs)",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:59:05.258Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 21,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "sweep",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "skipped",
+        "state": "skipped"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:59:07.477Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 22,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / report (x86_64, shots/current, shots/verify, Visual docs)",
+        "required": true,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:59:07.477Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 23,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "cross (macos-latest)",
+        "required": false,
+        "status": "queued",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:59:09.490Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 24,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / deploy-pages",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:59:09.490Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 25,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "cross (windows-latest)",
+        "required": true,
+        "status": "in_progress",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:59:10.746Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 26,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / aggregate-comment",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "skipped",
+        "state": "skipped"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:59:12.720Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 27,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "msrv",
+        "required": true,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:59:14.511Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 28,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "deny",
+        "required": true,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:59:16.364Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 29,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "wheel (x86_64-unknown-linux-gnu)",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T16:59:18.053Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 30,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "wheel (aarch64-unknown-linux-gnu)",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:02:37.537Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 31,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "cross (windows-latest)",
+        "required": true,
+        "status": "completed",
+        "from_status": "in_progress",
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:08:35.844Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 32,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "quality",
+        "required": false,
+        "status": "completed",
+        "from_status": "in_progress",
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:08:35.844Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 33,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "install (ubuntu-latest)",
+        "required": true,
+        "status": "in_progress",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:08:35.844Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 34,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "install (macos-latest)",
+        "required": false,
+        "status": "queued",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:08:35.844Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 35,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "install (windows-latest)",
+        "required": true,
+        "status": "in_progress",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:08:35.844Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 36,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "gate",
+        "required": true,
+        "status": "in_progress",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:09:08.905Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 37,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "gate",
+        "required": true,
+        "status": "completed",
+        "from_status": "in_progress",
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:16:39.781Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 38,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "install (ubuntu-latest)",
+        "required": true,
+        "status": "completed",
+        "from_status": "in_progress",
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:23:09.656Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 39,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "install (windows-latest)",
+        "required": true,
+        "status": "completed",
+        "from_status": "in_progress",
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:23:09.656Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 40,
+      "source": "vcs",
+      "kind": "checks-settled",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323",
+        "id": "323",
+        "head": "1a71cafe769cb76607e8b9ae153a4dd2ab843a7b",
+        "verdict": "passed",
+        "skipped": []
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:23:09.656Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 41,
+      "source": "vcs",
+      "kind": "gate-run",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "gate": "required-checks",
+        "attempt": 1,
+        "started_at": "2026-10-13T16:58:42.215Z",
+        "ended_at": "2026-10-13T17:23:09.656Z",
+        "seconds": 1467.441,
+        "verdict": "passed",
+        "checks": [
+          {
+            "name": "cross (windows-latest)",
+            "required": true,
+            "started_at": "2026-10-13T16:37:59Z",
+            "completed_at": "2026-10-13T17:02:05Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "deny",
+            "required": true,
+            "started_at": "2026-10-13T16:37:58Z",
+            "completed_at": "2026-10-13T16:38:35Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "gate",
+            "required": true,
+            "started_at": "2026-10-13T17:08:29Z",
+            "completed_at": "2026-10-13T17:08:34Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "install (ubuntu-latest)",
+            "required": true,
+            "started_at": "2026-10-13T17:08:29Z",
+            "completed_at": "2026-10-13T17:16:10Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "install (windows-latest)",
+            "required": true,
+            "started_at": "2026-10-13T17:08:29Z",
+            "completed_at": "2026-10-13T17:22:42Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "llmlint",
+            "required": true,
+            "started_at": "2026-10-13T16:37:44Z",
+            "completed_at": "2026-10-13T16:40:29Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "msrv",
+            "required": true,
+            "started_at": "2026-10-13T16:37:58Z",
+            "completed_at": "2026-10-13T16:38:53Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "pr-title",
+            "required": true,
+            "started_at": "2026-10-13T16:37:44Z",
+            "completed_at": "2026-10-13T16:37:47Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "visual-docs / report (x86_64, shots/current, shots/verify, Visual docs)",
+            "required": true,
+            "started_at": "2026-10-13T16:50:36Z",
+            "completed_at": "2026-10-13T16:50:58Z",
+            "conclusion": "success"
+          }
+        ]
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:24:49.323Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 42,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / pages-preflight",
+        "required": false,
+        "status": "queued",
+        "from_status": "completed",
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:24:50.810Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 43,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / pages-preflight",
+        "required": false,
+        "status": "completed",
+        "from_status": "queued",
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:24:51.542Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 44,
+      "source": "vcs",
+      "kind": "change-merged",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323",
+        "sha": "0b780676bb80fddf7e68e4ed1ad8c615ef992370",
+        "landed_at": "2026-10-13T17:24:39.000Z",
+        "landing": "0b780676bb80fddf7e68e4ed1ad8c615ef992370"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:24:51.542Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 45,
+      "source": "vcs",
+      "kind": "merge-completed",
+      "phase": "integrate",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "git:/home/nick/.ai-orchestrator/repos/nickderobertis__onepipeline-ui/.git",
+        "sha": "0b780676bb80fddf7e68e4ed1ad8c615ef992370",
+        "landed_at": "2026-10-13T17:24:39.000Z",
+        "landing": "0b780676bb80fddf7e68e4ed1ad8c615ef992370"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:24:52.213Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 46,
+      "source": "vcs",
+      "kind": "release-probed",
+      "phase": "release",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "target": "crate",
+        "form": "script",
+        "outcome": "released",
+        "elapsed_ms": 270,
+        "version": "0.32.0"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T17:24:53.812Z",
+      "stream": "onevcs-nick/304/onepipeline-ui-link-retire-scope",
+      "seq": 1,
+      "source": "vcs",
+      "kind": "published",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "policy": "change-auto",
+        "outcome": "merged",
+        "url": null,
+        "landing": "landed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:24:52.454Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 47,
+      "source": "vcs",
+      "kind": "release-probed",
+      "phase": "release",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "target": "pypi-cli",
+        "form": "script",
+        "outcome": "released",
+        "elapsed_ms": 234,
+        "version": "0.31.1"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:24:52.790Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 48,
+      "source": "vcs",
+      "kind": "release-probed",
+      "phase": "release",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "target": "npm-cli",
+        "form": "script",
+        "outcome": "released",
+        "elapsed_ms": 334,
+        "version": "0.31.1"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:24:53.116Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 49,
+      "source": "vcs",
+      "kind": "release-probed",
+      "phase": "release",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "target": "npm-ui",
+        "form": "script",
+        "outcome": "released",
+        "elapsed_ms": 324,
+        "version": "0.31.1"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:24:56.041Z",
+      "stream": "s-21958ac13f0e",
+      "seq": 50,
+      "source": "vcs",
+      "kind": "session-closed",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "token": "redacted-session",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "returned": {
+          "slot": 1
+        }
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T17:24:58.128Z",
+      "stream": "U-17UN402ICR95C-4033122",
+      "seq": 21,
+      "source": "pipeline",
+      "kind": "node-settled",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "status": "done",
+        "outcome": "merged",
+        "detail": "Recorded public repository work (prose trimmed).",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "landing": "landed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:57:48.077Z",
+      "stream": "releases-95f7516c419c",
+      "seq": 2082,
+      "source": "vcs",
+      "kind": "release-observed",
+      "phase": "release",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "target": "pypi-cli",
+        "style": "automated",
+        "version": "0.32.0",
+        "landing_commit": "0b780676bb80fddf7e68e4ed1ad8c615ef992370"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:56:16.765Z",
+      "stream": "onevcs-s-21958ac13f0e",
+      "seq": 0,
+      "source": "vcs",
+      "kind": "session-opened",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "token": "redacted-session",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "base": "main",
+        "worktree": "/recorded/worktree"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:56:16.765Z",
+      "stream": "onevcs-s-21958ac13f0e",
+      "seq": 0,
+      "source": "vcs",
+      "kind": "session-opened",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "token": "redacted-session",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "base": "main",
+        "worktree": "/recorded/worktree"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T17:56:15.663Z",
+      "stream": "recorded-retry-driver",
+      "seq": 0,
+      "source": "pipeline",
+      "kind": "node-dispatched",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "persona": "engineer",
+        "attempt": 2,
+        "notes_spent": [
+          {
+            "addressee": "both",
+            "text": "Recorded public repository work (prose trimmed).",
+            "criterion": "The change leaves onepipeline-ui's workflow triggers and the test that enforces their omission of ready_for_review unchanged.",
+            "reached": "worker"
+          }
+        ],
+        "reason": "Retry recorded work."
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T17:56:16.765Z",
+      "stream": "onevcs-s-21958ac13f0e-retry",
+      "seq": 0,
+      "source": "vcs",
+      "kind": "session-opened",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "token": "redacted-session",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "base": "main",
+        "worktree": "/recorded/worktree"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:16.757Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 1,
+      "source": "agentgraph",
+      "kind": "graph-started",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "graph": "/recorded/graph",
+        "name": "node-scope",
+        "dir": "/recorded/dir"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:16.757Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 2,
+      "source": "agentgraph",
+      "kind": "member-started",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "runner": "library",
+        "engine": "onejudge",
+        "config": "/recorded/config",
+        "worktree": "/recorded/worktree"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:16.760Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 3,
+      "source": "agentgraph",
+      "kind": "turn-started",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029-retry.worker"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "instruction": "Recorded public repository work (prose trimmed).",
+        "instruction_truncated": true,
+        "started_at": "2026-10-13T16:56:16.760Z",
+        "origin": "task"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:18.413Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 4,
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029-retry.worker"
+      },
+      "payload": {
+        "kind": "message",
+        "name": null,
+        "detail": "Recorded public repository work (prose trimmed).",
+        "output": "Recorded public repository work (prose trimmed).",
+        "index": 0
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:18.413Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 5,
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029-retry.worker"
+      },
+      "payload": {
+        "kind": "message",
+        "name": null,
+        "detail": "Recorded public repository work (prose trimmed).",
+        "output": "Recorded public repository work (prose trimmed).",
+        "index": 0
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:26.303Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 6,
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029-retry.worker"
+      },
+      "payload": {
+        "kind": "message",
+        "name": null,
+        "detail": "Recorded public repository work (prose trimmed).",
+        "output": "Recorded public repository work (prose trimmed).",
+        "index": 0
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:28.069Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 7,
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029-retry.worker"
+      },
+      "payload": {
+        "kind": "tool_call",
+        "name": "command_execution",
+        "detail": "/recorded/detail",
+        "truncated": true,
+        "output": "Recorded public repository work (prose trimmed).",
+        "output_truncated": true,
+        "tool_call_id": "exec-ac86c351-0bfb-43d7-8b6b-58a1a9934eff",
+        "index": 1
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:31.767Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 8,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:36.249Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 9,
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029-retry.worker"
+      },
+      "payload": {
+        "kind": "tool_call",
+        "name": "command_execution",
+        "detail": "/recorded/detail",
+        "truncated": true,
+        "output": "Recorded public repository work (prose trimmed).",
+        "tool_call_id": "exec-e555142f-6518-46e6-b0f2-017ce91cd99e",
+        "index": 2
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:42.328Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 10,
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029-retry.worker"
+      },
+      "payload": {
+        "kind": "message",
+        "name": null,
+        "detail": "Recorded public repository work (prose trimmed).",
+        "output": "Recorded public repository work (prose trimmed).",
+        "index": 3
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:42.422Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 11,
+      "source": "agentgraph",
+      "kind": "turn-message",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029-retry.worker"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "text": "Recorded public repository work (prose trimmed)."
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:42.422Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 12,
+      "source": "agentgraph",
+      "kind": "turn-completed",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029-retry.worker"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "usage": {},
+        "started_at": "2026-10-13T16:56:16.760Z",
+        "finished_at": "2026-10-13T16:56:42.422Z"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:42.423Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 13,
+      "source": "agentgraph",
+      "kind": "turn-started",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029-retry.worker"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "user",
+        "instruction": "Recorded public repository work (prose trimmed).",
+        "started_at": "2026-10-13T16:56:42.422Z"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:46.778Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 14,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:57:01.787Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 15,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:57:06.742Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 16,
+      "source": "agentgraph",
+      "kind": "turn-completed",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer",
+        "session": "node-scope-1791910576755-4064029-retry.worker"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "user",
+        "usage": {},
+        "started_at": "2026-10-13T16:56:42.422Z",
+        "finished_at": "2026-10-13T16:57:06.742Z"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:57:16.792Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 17,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:57:31.797Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 18,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:57:46.802Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 19,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:01.806Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 20,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:14.951Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 21,
+      "source": "agentgraph",
+      "kind": "fallback-advanced",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "identity": "claude-code:alternate",
+        "reason": "Recorded public repository work (prose trimmed).",
+        "role": "agent",
+        "turn": 1
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:14.951Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 22,
+      "source": "agentgraph",
+      "kind": "fallback-advanced",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "identity": "claude-code:alternate2",
+        "reason": "Recorded public repository work (prose trimmed).",
+        "role": "agent",
+        "turn": 1
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:14.951Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 23,
+      "source": "agentgraph",
+      "kind": "oneharness-session",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "role": "judge",
+        "turn": 2,
+        "identity": "codex:primary",
+        "session_id": "01a13632-48f3-74f3-a3c7-6260230f3eb4",
+        "history_id": "01a13632-45bf-7100-95b8-d18518fa9534",
+        "history_dir": "/recorded/history_dir",
+        "history_project": "home-nick-.onevcs-workspaces-github.com-nickderobertis-onepipeline-ui-95f7516c419c-pool-1-worktree",
+        "history_session": "node-scope-1791910576755-4064029-worker-judge-20261013T165706Z-4109409"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:14.952Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 24,
+      "source": "agentgraph",
+      "kind": "member-settled",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "completed": true,
+        "verdict": [
+          {
+            "criterion": "every acceptance criterion stated in the task is met, with every change this dispatch made committed and nothing half-applied left behind",
+            "kind": "boolean",
+            "verdict": {
+              "value": true,
+              "reason": "Recorded public repository work (prose trimmed).",
+              "usage": {
+                "input_tokens": 360275,
+                "output_tokens": 1294,
+                "cache_read_tokens": 312064
+              }
+            }
+          }
+        ],
+        "completion_reason": "Recorded public repository work (prose trimmed).",
+        "report_path": "/recorded/report_path"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:14.956Z",
+      "stream": "node-scope-1791910576755-4064029-retry",
+      "seq": 25,
+      "source": "agentgraph",
+      "kind": "graph-settled",
+      "labels": {
+        "run_id": "node-scope-1791910576755-4064029-retry",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "engineer"
+      },
+      "payload": {
+        "exit_code": 0,
+        "members": {
+          "worker": "settled"
+        }
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:16.236Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 1,
+      "source": "vcs",
+      "kind": "fetch",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "remote": "origin",
+        "checkout": "/recorded/checkout"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:56:16.740Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 2,
+      "source": "vcs",
+      "kind": "session-opened",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "token": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "base": "main",
+        "worktree": "/recorded/worktree",
+        "clone": "/recorded/clone",
+        "execution_checkout": "/recorded/execution_checkout",
+        "publication_checkout": "/recorded/publication_checkout",
+        "placement": {
+          "kind": "slot",
+          "slot": 1,
+          "created": false
+        },
+        "continued": true
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:16.716Z",
+      "stream": "review-reply-recorded",
+      "seq": 1,
+      "source": "agentgraph",
+      "kind": "graph-started",
+      "labels": {
+        "run_id": "review-reply-recorded",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "review-reply",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "review-reply"
+      },
+      "payload": {
+        "graph": "/recorded/graph",
+        "name": "pr-author",
+        "dir": "/recorded/dir"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:16.716Z",
+      "stream": "review-reply-recorded",
+      "seq": 2,
+      "source": "agentgraph",
+      "kind": "member-started",
+      "labels": {
+        "run_id": "review-reply-recorded",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "review-reply",
+        "persona": "review-reply",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "review-reply"
+      },
+      "payload": {
+        "runner": "library",
+        "engine": "oneharness",
+        "config": "/recorded/config",
+        "worktree": "/recorded/worktree"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:31.722Z",
+      "stream": "review-reply-recorded",
+      "seq": 3,
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "labels": {
+        "run_id": "review-reply-recorded",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "review-reply",
+        "persona": "review-reply",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "review-reply"
+      },
+      "payload": {},
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:36.570Z",
+      "stream": "review-reply-recorded",
+      "seq": 4,
+      "source": "agentgraph",
+      "kind": "turn-started",
+      "labels": {
+        "run_id": "review-reply-recorded",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "review-reply",
+        "persona": "review-reply",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "review-reply",
+        "session": "review-reply-recorded.review-reply"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "instruction": "Recorded public repository work (prose trimmed).",
+        "instruction_truncated": true,
+        "started_at": "2026-10-13T16:58:16.716Z",
+        "origin": "task"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:36.570Z",
+      "stream": "review-reply-recorded",
+      "seq": 5,
+      "source": "agentgraph",
+      "kind": "turn-completed",
+      "labels": {
+        "run_id": "review-reply-recorded",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "review-reply",
+        "persona": "review-reply",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "review-reply",
+        "session": "review-reply-recorded.review-reply"
+      },
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "usage": {
+          "input_tokens": 60811,
+          "output_tokens": 370,
+          "cache_read_tokens": 26624
+        },
+        "started_at": "2026-10-13T16:58:16.716Z",
+        "finished_at": "2026-10-13T16:58:36.570Z"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:36.570Z",
+      "stream": "review-reply-recorded",
+      "seq": 6,
+      "source": "agentgraph",
+      "kind": "member-settled",
+      "labels": {
+        "run_id": "review-reply-recorded",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "review-reply",
+        "persona": "review-reply",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "review-reply"
+      },
+      "payload": {
+        "completed": true,
+        "verdict": [],
+        "completion_reason": null,
+        "report_path": "/recorded/report_path"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:36.574Z",
+      "stream": "review-reply-recorded",
+      "seq": 7,
+      "source": "agentgraph",
+      "kind": "graph-settled",
+      "labels": {
+        "run_id": "review-reply-recorded",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "review-reply",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.persona": "review-reply"
+      },
+      "payload": {
+        "exit_code": 0,
+        "members": {
+          "pr-author": "settled"
+        }
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:38.778Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 3,
+      "source": "vcs",
+      "kind": "change-described",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323",
+        "id": "323",
+        "base": "main",
+        "title": "fix(deps): link the engine whose onevcs retires a branch only on its own repository's merged change request",
+        "artifact": "a-cd4805419fd3"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:40.784Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 4,
+      "source": "vcs",
+      "kind": "fetch",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "remote": "origin",
+        "checkout": "/recorded/checkout"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:41.297Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 5,
+      "source": "vcs",
+      "kind": "push",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "remote": "origin",
+        "accepted": true,
+        "output": "Recorded public repository work (prose trimmed).",
+        "preserved_log": "/recorded/preserved_log",
+        "head": "1a71cafe769cb76607e8b9ae153a4dd2ab843a7b"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:41.951Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 6,
+      "source": "vcs",
+      "kind": "change-opened",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323",
+        "host": "github",
+        "id": "323",
+        "base": "main",
+        "author": "nickderobertis"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:42.225Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 7,
+      "source": "vcs",
+      "kind": "lock-wait",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "git:/home/nick/.ai-orchestrator/repos/nickderobertis__onepipeline-ui/.git",
+        "elapsed": 0.003369521,
+        "queue_position": 1
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:42.225Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 8,
+      "source": "vcs",
+      "kind": "lock-acquired",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "git:/home/nick/.ai-orchestrator/repos/nickderobertis__onepipeline-ui/.git"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:42.225Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 9,
+      "source": "vcs",
+      "kind": "merge-queued",
+      "phase": "integrate",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "git:/home/nick/.ai-orchestrator/repos/nickderobertis__onepipeline-ui/.git",
+        "queue_position": 1,
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:45.899Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 10,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "changes",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:48.955Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 11,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / pages-preflight",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:50.885Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 12,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "suppressions",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:50.885Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 13,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "quality",
+        "required": false,
+        "status": "in_progress",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:52.755Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 14,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / arches",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:54.148Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 15,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / cleanup-preview",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "skipped",
+        "state": "skipped"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:55.671Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 16,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "browser-windows",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:57.613Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 17,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / prune-history",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "skipped",
+        "state": "skipped"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:58:59.096Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 18,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "pr-title",
+        "required": true,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:59:00.712Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 19,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "llmlint",
+        "required": true,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:59:03.133Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 20,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / capture (x86_64, shots/current, shots/verify, Visual docs)",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:59:05.258Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 21,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "sweep",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "skipped",
+        "state": "skipped"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:59:07.477Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 22,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / report (x86_64, shots/current, shots/verify, Visual docs)",
+        "required": true,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:59:07.477Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 23,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "cross (macos-latest)",
+        "required": false,
+        "status": "queued",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:59:09.490Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 24,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / deploy-pages",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:59:09.490Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 25,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "cross (windows-latest)",
+        "required": true,
+        "status": "in_progress",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:59:10.746Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 26,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / aggregate-comment",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "skipped",
+        "state": "skipped"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:59:12.720Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 27,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "msrv",
+        "required": true,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:59:14.511Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 28,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "deny",
+        "required": true,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:59:16.364Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 29,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "wheel (x86_64-unknown-linux-gnu)",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T17:59:18.053Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 30,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "wheel (aarch64-unknown-linux-gnu)",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:02:37.537Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 31,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "cross (windows-latest)",
+        "required": true,
+        "status": "completed",
+        "from_status": "in_progress",
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:08:35.844Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 32,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "quality",
+        "required": false,
+        "status": "completed",
+        "from_status": "in_progress",
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:08:35.844Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 33,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "install (ubuntu-latest)",
+        "required": true,
+        "status": "in_progress",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:08:35.844Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 34,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "install (macos-latest)",
+        "required": false,
+        "status": "queued",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:08:35.844Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 35,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "install (windows-latest)",
+        "required": true,
+        "status": "in_progress",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:08:35.844Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 36,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "gate",
+        "required": true,
+        "status": "in_progress",
+        "from_status": null,
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:09:08.905Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 37,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "gate",
+        "required": true,
+        "status": "completed",
+        "from_status": "in_progress",
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:16:39.781Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 38,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "install (ubuntu-latest)",
+        "required": true,
+        "status": "completed",
+        "from_status": "in_progress",
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:23:09.656Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 39,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "install (windows-latest)",
+        "required": true,
+        "status": "completed",
+        "from_status": "in_progress",
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:23:09.656Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 40,
+      "source": "vcs",
+      "kind": "checks-settled",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323",
+        "id": "323",
+        "head": "1a71cafe769cb76607e8b9ae153a4dd2ab843a7b",
+        "verdict": "passed",
+        "skipped": []
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:23:09.656Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 41,
+      "source": "vcs",
+      "kind": "gate-run",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "gate": "required-checks",
+        "attempt": 1,
+        "started_at": "2026-10-13T16:58:42.215Z",
+        "ended_at": "2026-10-13T17:23:09.656Z",
+        "seconds": 1467.441,
+        "verdict": "passed",
+        "checks": [
+          {
+            "name": "cross (windows-latest)",
+            "required": true,
+            "started_at": "2026-10-13T16:37:59Z",
+            "completed_at": "2026-10-13T17:02:05Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "deny",
+            "required": true,
+            "started_at": "2026-10-13T16:37:58Z",
+            "completed_at": "2026-10-13T16:38:35Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "gate",
+            "required": true,
+            "started_at": "2026-10-13T17:08:29Z",
+            "completed_at": "2026-10-13T17:08:34Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "install (ubuntu-latest)",
+            "required": true,
+            "started_at": "2026-10-13T17:08:29Z",
+            "completed_at": "2026-10-13T17:16:10Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "install (windows-latest)",
+            "required": true,
+            "started_at": "2026-10-13T17:08:29Z",
+            "completed_at": "2026-10-13T17:22:42Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "llmlint",
+            "required": true,
+            "started_at": "2026-10-13T16:37:44Z",
+            "completed_at": "2026-10-13T16:40:29Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "msrv",
+            "required": true,
+            "started_at": "2026-10-13T16:37:58Z",
+            "completed_at": "2026-10-13T16:38:53Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "pr-title",
+            "required": true,
+            "started_at": "2026-10-13T16:37:44Z",
+            "completed_at": "2026-10-13T16:37:47Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "visual-docs / report (x86_64, shots/current, shots/verify, Visual docs)",
+            "required": true,
+            "started_at": "2026-10-13T16:50:36Z",
+            "completed_at": "2026-10-13T16:50:58Z",
+            "conclusion": "success"
+          }
+        ]
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:24:49.323Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 42,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / pages-preflight",
+        "required": false,
+        "status": "queued",
+        "from_status": "completed",
+        "conclusion": null,
+        "state": "pending"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:24:50.810Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 43,
+      "source": "vcs",
+      "kind": "change-check",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "name": "visual-docs / pages-preflight",
+        "required": false,
+        "status": "completed",
+        "from_status": "queued",
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:24:51.542Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 44,
+      "source": "vcs",
+      "kind": "change-merged",
+      "phase": "review",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323",
+        "sha": "0b780676bb80fddf7e68e4ed1ad8c615ef992370",
+        "landed_at": "2026-10-13T17:24:39.000Z",
+        "landing": "0b780676bb80fddf7e68e4ed1ad8c615ef992370"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:24:51.542Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 45,
+      "source": "vcs",
+      "kind": "merge-completed",
+      "phase": "integrate",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "git:/home/nick/.ai-orchestrator/repos/nickderobertis__onepipeline-ui/.git",
+        "sha": "0b780676bb80fddf7e68e4ed1ad8c615ef992370",
+        "landed_at": "2026-10-13T17:24:39.000Z",
+        "landing": "0b780676bb80fddf7e68e4ed1ad8c615ef992370"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:24:52.213Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 46,
+      "source": "vcs",
+      "kind": "release-probed",
+      "phase": "release",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "target": "crate",
+        "form": "script",
+        "outcome": "released",
+        "elapsed_ms": 270,
+        "version": "0.32.0"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T18:24:53.812Z",
+      "stream": "onevcs-nick/304/onepipeline-ui-link-retire-scope-retry",
+      "seq": 1,
+      "source": "vcs",
+      "kind": "published",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "policy": "change-auto",
+        "outcome": "merged",
+        "url": null,
+        "landing": "landed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:24:52.454Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 47,
+      "source": "vcs",
+      "kind": "release-probed",
+      "phase": "release",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "target": "pypi-cli",
+        "form": "script",
+        "outcome": "released",
+        "elapsed_ms": 234,
+        "version": "0.31.1"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:24:52.790Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 48,
+      "source": "vcs",
+      "kind": "release-probed",
+      "phase": "release",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "target": "npm-cli",
+        "form": "script",
+        "outcome": "released",
+        "elapsed_ms": 334,
+        "version": "0.31.1"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:24:53.116Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 49,
+      "source": "vcs",
+      "kind": "release-probed",
+      "phase": "release",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "target": "npm-ui",
+        "form": "script",
+        "outcome": "released",
+        "elapsed_ms": 324,
+        "version": "0.31.1"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:24:56.041Z",
+      "stream": "s-21958ac13f0e-retry",
+      "seq": 50,
+      "source": "vcs",
+      "kind": "session-closed",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "session": "redacted-session",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "token": "redacted-session",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "returned": {
+          "slot": 1
+        }
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T18:24:58.128Z",
+      "stream": "recorded-retry-driver",
+      "seq": 1,
+      "source": "pipeline",
+      "kind": "node-settled",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "status": "done",
+        "outcome": "merged",
+        "detail": "Recorded public repository work (prose trimmed).",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "landing": "landed"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 1,
+      "ts": "2026-10-13T18:57:48.077Z",
+      "stream": "releases-95f7516c419c-retry",
+      "seq": 2082,
+      "source": "vcs",
+      "kind": "release-observed",
+      "phase": "release",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "engineer",
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "target": "pypi-cli",
+        "style": "automated",
+        "version": "0.32.0",
+        "landing_commit": "0b780676bb80fddf7e68e4ed1ad8c615ef992370"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T17:30:00.000Z",
+      "stream": "recorded-member-failure",
+      "seq": 0,
+      "source": "agentgraph",
+      "kind": "member-died",
+      "labels": {
+        "run_id": "recorded-member-failure",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "member": "worker",
+        "persona": "engineer",
+        "onepipeline.run_id": "dag-ui-timeline-retries"
+      },
+      "payload": {
+        "rule": "process-exited",
+        "cause": "exited",
+        "detail": "process exited 1",
+        "exit_code": 1
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T16:58:16.740Z",
+      "stream": "recorded-pr-author-vcs",
+      "seq": 0,
+      "source": "vcs",
+      "kind": "session-opened",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "pr-author",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.persona": "pr-author"
+      },
+      "payload": {
+        "token": "redacted-session",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "base": "main",
+        "worktree": "/recorded/worktree"
+      },
+      "artifacts": []
+    },
+    {
+      "v": 2,
+      "ts": "2026-10-13T17:58:16.740Z",
+      "stream": "recorded-review-reply-vcs",
+      "seq": 0,
+      "source": "vcs",
+      "kind": "session-opened",
+      "phase": "development",
+      "labels": {
+        "run_id": "dag-ui-timeline-retries",
+        "node": "onepipeline-ui-link-retire-scope-4",
+        "persona": "review-reply",
+        "onepipeline.run_id": "dag-ui-timeline-retries",
+        "onepipeline.persona": "review-reply"
+      },
+      "payload": {
+        "token": "redacted-session",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "base": "main",
+        "worktree": "/recorded/worktree"
+      },
+      "artifacts": []
+    }
+  ],
+  "terminations": [
+    {
+      "kind": "run-stopped",
+      "payload": {
+        "owner": "recorded-owner",
+        "forced": false
+      }
+    },
+    {
+      "kind": "host-shutdown",
+      "payload": {
+        "scope": "host",
+        "owner": "recorded-owner",
+        "forced": false,
+        "grace_seconds": 30,
+        "dispatches": 0,
+        "graceful": 0,
+        "killed": 0,
+        "teardown": "nothing-to-stop",
+        "root": "/recorded/runs",
+        "branches": []
+      }
+    },
+    {
+      "kind": "driver-exited",
+      "payload": {
+        "pid": 1,
+        "settlement": "awaiting-planner",
+        "reason": null,
+        "last_answered_command": null
+      }
+    }
+  ],
+  "late_records": [
+    {
+      "kind": "planner-replied",
+      "payload": {
+        "author": "planner",
+        "completion": true,
+        "reason": "Recorded late closure"
+      }
+    },
+    {
+      "kind": "edit-committed",
+      "payload": {
+        "author": "planner",
+        "command": {},
+        "operations": [],
+        "operation_kinds": []
+      }
+    }
+  ]
+}

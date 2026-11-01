@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "project": "tracker:project-1",
+  "project_metadata": {
+    "onepipeline.concurrency": 1,
+    "onepipeline.driver": {
+      "run": "linear-private-projections",
+      "host": "U-17UN402ICR95C",
+      "session": "session-linear-private-projections",
+      "pid": 1723588,
+      "claimed_at": "2026-10-29T09:08:47.771Z",
+      "lease": {
+        "interval_seconds": 3600,
+        "cancel_grace_seconds": 300
+      }
+    },
+    "onepipeline.goal": {
+      "text": "Deliver the plan"
+    },
+    "onepipeline.schema_version": 3
+  },
+  "items": {
+    "anchor": {
+      "destination": "tracker:issue-1",
+      "title": "chore: anchor",
+      "content_sha256": "d34b64eea0983b6d4cbfff6adde221effeb49eca62b3871ab60a6ad6214d7d1a",
+      "status": "in progress",
+      "metadata": {
+        "onepipeline.id": "anchor",
+        "onepipeline.node": "anchor",
+        "onepipeline.persona": "engineer"
+      },
+      "delivers": [],
+      "depends_on": []
+    },
+    "examples": {
+      "destination": "tracker:issue-2",
+      "title": "examples",
+      "content_sha256": "7ba31b4380dd33c1881dca00932ec7c60ef71858ea28beb9a3cf3334a68fdb68",
+      "status": "parked",
+      "metadata": {
+        "onepipeline.id": "examples",
+        "onepipeline.node": "examples",
+        "onepipeline.parked": true,
+        "onepipeline.persona": "engineer"
+      },
+      "delivers": [],
+      "depends_on": []
+    }
+  }
+}

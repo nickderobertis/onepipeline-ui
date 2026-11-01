@@ -12,14 +12,9 @@
  * appends to the same journals the initial build wrote, as an executor appends to them.
  */
 
-import {
-  appendFileSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { appendLines } from "../load/journal.ts";
 import { thisHost } from "./this-host.mjs";
 
 /** The in-flight run every graph, node and timeline journey opens. */
@@ -77,6 +72,19 @@ const JUDGED_REPORT = `${JSON.stringify(
 )}\n`;
 /** A settled run holding the outcomes only a recorded result carries. */
 export const OUTCOMES_RUN = "dag-ui-outcomes";
+/**
+ * A run holding finished work for releases, as `onepipeline` 0.95 settles it: one
+ * node held unlanded on its origin, one held as a draft change request.
+ */
+export const AWAITING_RUN = "dag-ui-awaiting";
+/** That run's node whose finished branch is held unlanded: `complete-but-held`. */
+export const HELD_NODE = "adopt";
+/** That run's node whose change request is held as a draft: `complete-but-draft`. */
+export const DRAFT_NODE = "pin";
+/** The producer both held nodes await a release of, as its normalized origin. */
+export const AWAITED_PRODUCER = "github.com/example/engine";
+/** The second producer the draft node awaits, so its card counts one more. */
+export const AWAITED_SECOND_PRODUCER = "github.com/example/schemas";
 /** A run whose result was recorded with no authoritative journal behind it. */
 export const LEGACY_RUN = "dag-ui-legacy";
 /** A second run of the *same* launching session as {@link LIVE_RUN}. */
@@ -444,6 +452,8 @@ function harnessSessionRecord(
   historyId = HARNESS_SESSION_ARTIFACT,
   session = HARNESS_SESSION_FILE,
   text = HARNESS_SESSION_TEXT,
+  recordedAt = "2026-08-17T00:11:58Z",
+  finishedAt = null,
 ) {
   return `${JSON.stringify({
     type: "run",
@@ -452,7 +462,7 @@ function harnessSessionRecord(
     session,
     name: session.replace(/-\d{8}T\d{6}Z-\d+$/u, ""),
     project: HARNESS_CWD,
-    timestamp: "2026-08-17T00:11:58Z",
+    timestamp: recordedAt,
     harness: "claude-code",
     variant: "alternate",
     harness_id: "claude-code:alternate",
@@ -461,8 +471,18 @@ function harnessSessionRecord(
     permission_mode: "default",
     status: "ok",
     exit_code: 0,
-    duration_ms: 4200,
-    finished_at: null,
+    duration_ms:
+      finishedAt === null
+        ? 4200
+        : Date.parse(finishedAt) - Date.parse(recordedAt),
+    ...(finishedAt === null
+      ? {}
+      : {
+          started_at: recordedAt,
+          model_ms: Date.parse(finishedAt) - Date.parse(recordedAt),
+          tool_ms: 0,
+        }),
+    finished_at: finishedAt,
     text,
     text_source: "json:result",
     usage: {
@@ -661,6 +681,7 @@ function projectOf(runId) {
       return OBSERVATORY_PROJECT;
     case HISTORY_RUN:
     case OUTCOMES_RUN:
+    case AWAITING_RUN:
     case LEGACY_RUN:
       return ARCHIVE_PROJECT;
     // The adoptable run names no project: a driver writes a run's settlement
@@ -793,10 +814,17 @@ class Journal {
 function appendEvent(dir, source, kind, labels, payload = {}) {
   const path = join(dir, "events.jsonl");
   const existing = readFileSync(path, "utf8");
-  const seq = existing.split("\n").filter(Boolean).length;
+  const records = existing.split("\n").filter(Boolean);
+  const seq = records.length;
+  // Never stamped before the record it follows, as no writer appending to a
+  // journal stamps one: a run whose last steps are timed a little past the
+  // corpus's "now" would otherwise take a record that moves nothing it shows.
+  const last = records.length
+    ? Date.parse(JSON.parse(records[records.length - 1]).ts)
+    : Number.NEGATIVE_INFINITY;
   const line = JSON.stringify({
     v: 1,
-    ts: stamp(now()),
+    ts: stamp(Math.max(now(), last + 1)),
     stream: `a-recording-host-${labels.run_id}`,
     seq,
     source,
@@ -805,7 +833,9 @@ function appendEvent(dir, source, kind, labels, payload = {}) {
     payload,
     artifacts: [],
   });
-  appendFileSync(path, `${line}\n`);
+  // Through the one fixture writer, which leaves the append receipt the
+  // engine's own writer would.
+  appendLines(path, [line]);
 }
 
 /**
@@ -1010,7 +1040,7 @@ function relayTurn(
   });
 }
 
-function writeLiveRun(root) {
+function writeLiveRun(root, checkOrigin) {
   const dir = runDir(root, LIVE_RUN);
   mkdirSync(join(dir, "artifacts"), { recursive: true });
   // The oneharness store this run's worker wrote its conversation into. Outside
@@ -1259,6 +1289,30 @@ function writeLiveRun(root) {
       id: "12",
       base: "main",
       author: "a-recording-host",
+    },
+  );
+  // A review of that change request answered in its threads before it merged:
+  // one comment declined with a posted reply, and a drafting of the replies a
+  // second comment was owed that posted nothing.
+  journal.advance(1).emit(
+    "pipeline",
+    "review-reply-posted",
+    { ...run, node: "foundation" },
+    {
+      comment: "review-7",
+      disposition: "declined",
+      url: `${FOUNDATION_PR}#discussion_r7`,
+      commits: [],
+    },
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "review-reply-not-drafted",
+    { ...run, node: "foundation" },
+    {
+      comments: ["review-8"],
+      ending: "failed",
+      detail: "the reply drafter exited non-zero",
     },
   );
   journal
@@ -1571,16 +1625,36 @@ function writeLiveRun(root) {
       CHECK_ARTIFACT,
     ],
     ["e2e", true, "queued", "in_progress", null, undefined],
+    ["queued-check", false, null, "queued", null, undefined],
+    ["skipped-check", true, "queued", "completed", "skipped", undefined],
   ]) {
-    journal
-      .advance(1)
-      .emit(
-        "vcs",
-        "change-check",
-        { ...run, node: "remote-open" },
-        { name, required, status, from_status: from, conclusion },
-        log === undefined ? [] : [{ id: log, kind: "log", bytes: 33 }],
-      );
+    journal.advance(1).emit(
+      "vcs",
+      "change-check",
+      { ...run, node: "remote-open" },
+      {
+        name,
+        required,
+        status,
+        from_status: from,
+        conclusion,
+        // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 (Cargo.lock) declares no change-check payload schema to validate this fixture against. Its change-check-times golden fixes the time/conclusion names; url exercises the consumer's existing optional check-address slot, not a claim that every producer records it. Older absent/null metadata remains optional; host Check does not write the event and cannot supply a false gate.
+        url: `${checkOrigin}/healthz?check=${name}`,
+        // A finished check carries both of its own stamps, one still running
+        // only the start — which is what its runtime so far is counted from —
+        // and a queued one neither.
+        ...(status === "completed"
+          ? {
+              started_at: stamp(journal.at - 4000),
+              completed_at: stamp(journal.at),
+            }
+          : status === "in_progress"
+            ? { started_at: stamp(journal.at - 2000) }
+            : {}),
+        // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+      },
+      log === undefined ? [] : [{ id: log, kind: "log", bytes: 33 }],
+    );
   }
   // The contention the merge queue met, timed by `onevcs` itself: thousands of
   // these is the normal shape, which is why the reading is a summary.
@@ -1797,7 +1871,7 @@ function writeLiveRun(root) {
         cost_usd: 0.42,
       },
       started_at: startedAt,
-      finished_at: stamp(journal.at),
+      completed_at: stamp(journal.at),
     });
     journal.advance(8);
   }
@@ -1876,13 +1950,60 @@ function writeLiveRun(root) {
   // dashboard worker's — also relayed as the artifact below, so one session
   // opens from the timeline and from the agents listing to one record — and
   // the drafting of a reply to a review comment on that worker's draft.
+  const relayed = journal.lines.map((line) => JSON.parse(line));
+  const workerAt =
+    relayed.find(
+      (event) =>
+        event.source === "agentgraph" &&
+        event.labels.session === WORKER_SESSION,
+    )?.ts ?? stamp(start);
+  const observerAt =
+    relayed.find(
+      (event) =>
+        event.source === "agentgraph" && event.labels.node === undefined,
+    )?.ts ?? stamp(start);
+  const replierAt = stamp(journal.at);
+  for (const [id, session, text, at] of [
+    [
+      HARNESS_SESSION_ARTIFACT,
+      HARNESS_SESSION_FILE,
+      HARNESS_SESSION_TEXT,
+      workerAt,
+    ],
+    [
+      OBSERVER_HISTORY_ID,
+      OBSERVER_SESSION_FILE,
+      "nothing has been quiet",
+      observerAt,
+    ],
+    [
+      REPLIER_HISTORY_ID,
+      REPLIER_SESSION_FILE,
+      "the review reply is drafted",
+      replierAt,
+    ],
+  ]) {
+    writeFileSync(
+      join(harnessHistory.dir, HARNESS_PROJECT, `${session}.jsonl`),
+      harnessSessionRecord(
+        id,
+        session,
+        text,
+        at,
+        id === OBSERVER_HISTORY_ID ? stamp(Date.parse(at) + 42_000) : null,
+      ),
+    );
+  }
+  harnessHistory.bytes = readFileSync(
+    join(harnessHistory.dir, HARNESS_PROJECT, `${HARNESS_SESSION_FILE}.jsonl`),
+  ).length;
   writePointerFile(dir, [
     pointerLine(
       harnessHistory.dir,
       OBSERVER_SESSION_FILE,
       OBSERVER_HISTORY_ID,
       "claude-code",
-      "2026-08-17T00:11:00Z",
+      observerAt,
       agentLabels(LIVE_RUN, "observer"),
     ),
     pointerLine(
@@ -1890,7 +2011,7 @@ function writeLiveRun(root) {
       HARNESS_SESSION_FILE,
       HARNESS_SESSION_ARTIFACT,
       "claude-code:alternate",
-      "2026-08-17T00:11:58Z",
+      workerAt,
       agentLabels(LIVE_RUN, "node", "dashboard", 1),
     ),
     pointerLine(
@@ -1898,7 +2019,7 @@ function writeLiveRun(root) {
       REPLIER_SESSION_FILE,
       REPLIER_HISTORY_ID,
       "claude-code",
-      "2026-08-17T00:12:00Z",
+      replierAt,
       agentLabels(LIVE_RUN, "review-reply", "dashboard", 1),
     ),
   ]);
@@ -2219,6 +2340,43 @@ function writeOutcomesRun(root) {
     node: "migrate",
     persona: "worker",
   });
+  // Three manager notes the running turn took: two through the engine that says
+  // how — one left to end as the planner asked, one interrupting the turn — and
+  // one recorded before the engine said so, which carries no `turn` at all.
+  // Stamped at the dispatch itself, so the run's own bounds are what they were
+  // before these were recorded.
+  const note = (text, turn) =>
+    journal.emit(
+      "pipeline",
+      "edit-committed",
+      { ...run, node: "migrate" },
+      {
+        author: "planner",
+        command: {
+          op: "note",
+          id: "migrate",
+          addressee: "worker",
+          text,
+          ...(turn === undefined
+            ? {}
+            : { deliver: "turn-end", delivery_timeout_seconds: 300 }),
+        },
+        operations: [
+          {
+            kind: "note-delivered",
+            node: "migrate",
+            addressee: "worker",
+            text,
+            reached: "worker",
+            ...(turn === undefined ? {} : { turn }),
+          },
+        ],
+        operation_kinds: ["note-delivered"],
+      },
+    );
+  note("finish the table you are on before the index", "turn-end");
+  note("stop: the index is on the wrong column", "interrupted");
+  note("and keep the old column until the backfill reads it");
   journal
     .advance(2)
     .emit(
@@ -2227,6 +2385,123 @@ function writeOutcomesRun(root) {
       { ...run, node: "migrate" },
       { status: "failed" },
     );
+  journal.write();
+}
+
+/**
+ * Finished work held for releases, in the `node-settled` records the engine writes.
+ *
+ * `engine` landed. `adopt` publishes `local-direct`, so its finished branch opens no
+ * change request: it is kept on its origin and settles `complete-but-held` as
+ * `held-for-release`, under the engine's own sentence naming the one release it
+ * awaits. `pin` opened a change request held as a draft, settling
+ * `complete-but-draft` as `change-draft` and awaiting two releases from two
+ * producers — and its `detail` names neither, so whatever the view says it waits on
+ * can only have come from the record's `awaiting`. `rollout`, behind both, has not
+ * started: neither held node is settled.
+ */
+function writeAwaitingRun(root) {
+  const run = { run_id: AWAITING_RUN };
+  const dir = runDir(root, AWAITING_RUN);
+  const task = (verb) =>
+    `## What\n${verb} the engine.\n\n## Acceptance criteria\nThe engine is adopted`;
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Adopt the new engine" },
+    name: "adopt-engine",
+    concurrency: 3,
+    tasks: [
+      { id: "engine", persona: "worker", task: task("Ship") },
+      {
+        id: HELD_NODE,
+        persona: "worker",
+        task: task("Adopt"),
+        deps: ["engine"],
+      },
+      {
+        id: DRAFT_NODE,
+        persona: "worker",
+        task: task("Pin"),
+        deps: ["engine"],
+      },
+      {
+        id: "rollout",
+        persona: "worker",
+        task: task("Roll out"),
+        deps: [HELD_NODE, DRAFT_NODE],
+      },
+    ],
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  writeJson(
+    join(dir, "launch.json"),
+    launch(AWAITING_RUN, "claude-code", CLAUDE_SESSION, stamp(HISTORIC), 4246),
+  );
+  const journal = new Journal(dir, streamOf(AWAITING_RUN), HISTORIC);
+  declareGraph(root, journal.stream, HOST_MEMBERS);
+  journal.emit("pipeline", "run-started", run, { plan });
+  journal
+    .advance(1)
+    .emit(
+      "pipeline",
+      "node-dispatched",
+      { ...run, node: "engine", persona: "worker" },
+      { attempt: 1 },
+    );
+  journal.advance(30).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: "engine" },
+    {
+      status: "done",
+      outcome: "merged",
+      branch: "feature/engine",
+      change_url: "https://example.invalid/changes/21",
+      landing: "landed",
+    },
+  );
+  for (const node of [HELD_NODE, DRAFT_NODE]) {
+    journal
+      .advance(1)
+      .emit(
+        "pipeline",
+        "node-dispatched",
+        { ...run, node, persona: "worker" },
+        { attempt: 1 },
+      );
+  }
+  const head = "9c41e07d2b5a8f36e1d0c4b7a29f58e3d6c1b0a4";
+  journal.advance(40).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: HELD_NODE },
+    {
+      status: "complete-but-held",
+      outcome: "held-for-release",
+      branch: "feature/adopt",
+      head,
+      remote: "pushed",
+      landing: "unlanded",
+      detail: `complete, and held unlanded: awaiting the crate release of ${AWAITED_PRODUCER}, kept on feature/adopt at ${head} (pushed); it lands when that release arrives`,
+      awaiting: [{ producer: AWAITED_PRODUCER, target: "crate" }],
+    },
+  );
+  journal.advance(5).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: DRAFT_NODE },
+    {
+      status: "complete-but-draft",
+      outcome: "change-draft",
+      branch: "feature/pin",
+      change_url: "https://example.invalid/changes/22",
+      detail: "complete, and held as a draft until its pins can be released",
+      awaiting: [
+        { producer: AWAITED_PRODUCER, target: "crate" },
+        { producer: AWAITED_SECOND_PRODUCER, target: "npm" },
+      ],
+    },
+  );
   journal.write();
 }
 
@@ -2960,8 +3235,63 @@ function writeNamedRun(root) {
   Journal.writeMerged(join(dir, "events.jsonl"), [driver, observers, nodes]);
 }
 
+/**
+ * Answers arrive out of question order. tests/contract.rs compares these records
+ * and filenames with the SDK's actual channel writer so its storage cannot drift.
+ */
+export function channelFixtureRecords() {
+  const surfaces = [0, 1, 2].map((id) => ({
+    event: "queued",
+    id,
+    kind: "finding",
+    source: "proposal",
+    blocking: false,
+    queued_at: now() - (3 - id) * 1000,
+    correlation: `c-${String(id).padStart(32, "0")}`,
+    message: `Question ${id} ${"long preview ".repeat(30)}\nQuestion final sentinel ${id}`,
+  }));
+  return {
+    "surfaces.jsonl": surfaces,
+    "replies.jsonl": [1, 0, 2, 3].map((id, index) => ({
+      id: index,
+      at: now(),
+      ...(id === 2
+        ? {}
+        : { correlation: surfaces[id === 3 ? 0 : id].correlation }),
+      reply: {
+        completion: false,
+        ...(id === 2
+          ? {}
+          : {
+              message:
+                id === 3
+                  ? `Follow-up answer ${"long preview ".repeat(30)}\nFollow-up final sentinel`
+                  : `Answer ${id} ${"long preview ".repeat(30)}\nAnswer final sentinel ${id}`,
+            }),
+      },
+    })),
+  };
+}
+
+function writeChannelRun(root) {
+  const channel = join(root, HISTORY_RUN, "channel");
+  mkdirSync(channel, { recursive: true });
+  for (const [name, records] of Object.entries(channelFixtureRecords())) {
+    writeFileSync(
+      join(channel, name),
+      `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+    );
+  }
+}
+
 /** Write every run this fixture serves, oldest first. */
-export function buildRuns(root, workspace, review = false) {
+export function buildRuns(
+  root,
+  workspace,
+  review = false,
+  checkOrigin = "http://127.0.0.1",
+) {
+  buildRecordedTimelines(root);
   mkdirSync(root, { recursive: true });
   writeSupervisedRun(root, review);
   writeElsewhereRun(root);
@@ -2978,11 +3308,13 @@ export function buildRuns(root, workspace, review = false) {
   writeBusyRun(root);
   writeUnattributedRun(root);
   writeHistoryRun(root);
+  writeChannelRun(root);
   writeOutcomesRun(root);
+  writeAwaitingRun(root);
   writeLegacyRun(root);
   writeSiblingRun(root);
   writeNamedRun(root);
-  writeLiveRun(root);
+  writeLiveRun(root, checkOrigin);
 }
 
 /** Everything the fixture wrote, published beside the runs it serves. */
@@ -2992,6 +3324,7 @@ export function facts(workspace) {
       live: LIVE_RUN,
       history: HISTORY_RUN,
       outcomes: OUTCOMES_RUN,
+      awaiting: AWAITING_RUN,
       legacy: LEGACY_RUN,
       sibling: SIBLING_RUN,
       unattributed: UNATTRIBUTED_RUN,
@@ -3001,6 +3334,17 @@ export function facts(workspace) {
       supervised: SUPERVISED_RUN,
       elsewhere: ELSEWHERE_RUN,
       adoptable: ADOPTABLE_RUN,
+    },
+    /**
+     * The awaiting run's two held nodes, and the producers whose releases they
+     * await: `held` one release of `producer`, `draft` that and one of
+     * `second_producer`.
+     */
+    awaiting: {
+      held: HELD_NODE,
+      draft: DRAFT_NODE,
+      producer: AWAITED_PRODUCER,
+      second_producer: AWAITED_SECOND_PRODUCER,
     },
     /** The session the served API acts as, which owns the supervised runs. */
     supervisor_session: SUPERVISOR_SESSION,
@@ -3520,6 +3864,157 @@ export function shutdownFacts() {
   };
 }
 
+/** The one run of the held-turn corpus below. */
+export const HELD_TURN_RUN = "dag-ui-held-turn";
+/** Its one agent node, whose first turn the harness double holds open. */
+export const HELD_TURN_NODE = "resolve";
+/**
+ * The project it was launched from, in a `local-md` store of its own: an
+ * adopted driver reads a run's plan source before it dispatches anything, and
+ * one with no store to read holds its ready node queued indefinitely.
+ */
+const HELD_TURN_PROJECT = "local-md:held-turn";
+
+/**
+ * The held-turn harness double and the two-party graph it is dispatched over,
+ * as `tests/e2e/server.rs` installs them for its own held turn and pins this
+ * copy to: the `oneharness_core` documents each turn answers with, and the
+ * double's program with its directory left as `placeholder`.
+ */
+const HELD_TURN_HARNESS = JSON.parse(
+  readFileSync(new URL("./held-turn-harness.json", import.meta.url), "utf8"),
+);
+
+/** Where the held-turn corpus keeps everything that is not a run. */
+const heldTurnDir = (workspace) => join(workspace, "held-turn");
+
+/**
+ * What the read API and the driver a journey adopts the held-turn run with are
+ * both started under, as the Rust journey starts its own: the harness double in
+ * place of `oneharness`, a heartbeat short enough that the member's liveness
+ * moves while a journey watches it, and a reply wait longer than the hold, all
+ * inside the workspace rather than the host's.
+ */
+export function heldTurnEnvironment(workspace) {
+  const dir = heldTurnDir(workspace);
+  return {
+    ONEAGENTGRAPH_ONEHARNESS_BIN: join(dir, "harness-double", "oneharness"),
+    ONEAGENTGRAPH_STATE_DIR: join(dir, "oneagentgraph-state"),
+    ONEAGENTGRAPH_HEARTBEAT_TIMEOUT: "8",
+    ONEPIPELINE_NODE_SCRATCH_DIR: join(dir, "scratch"),
+    ONEPIPELINE_REPLY_TIMEOUT_SECONDS: "120",
+    ONEPIPELINE_PROJECT_DIR: dir,
+    XDG_STATE_HOME: join(dir, "xdg-state"),
+    // Nor the operator's plan-store user layer, cache or `onevcs` state: a
+    // private source declared there holds every task the driver could
+    // dispatch on asking it.
+    XDG_CONFIG_HOME: join(dir, "config"),
+    XDG_CACHE_HOME: join(dir, "cache"),
+    ONEVCS_HOME: join(workspace, "onevcs-home"),
+  };
+}
+
+/**
+ * Write the held-turn corpus under `root`: one run nothing is driving, owned by
+ * the acting session, whose one agent node an adoption dispatches over a
+ * two-party (`kind: onejudge`) member — the only kind with a conversation for a
+ * live note to wait in — whose every turn is the harness double's. The double
+ * holds the first agent turn open on `turn.go` and again on `turn.settle`, files
+ * a journey writes into {@link heldTurnFacts}'s `fakes`.
+ *
+ * Its driver is proved gone the way the adoptable run's is: recorded on this host
+ * under a pid above the kernel's maximum. A corpus of its own, because a turn
+ * held open in the main corpus would be a run every other journey reads moving.
+ */
+export function buildHeldTurnRuns(root, workspace) {
+  mkdirSync(root, { recursive: true });
+  const dir = heldTurnDir(workspace);
+  const fakes = join(dir, "harness-double");
+  mkdirSync(fakes, { recursive: true });
+  mkdirSync(join(dir, "scratch"), { recursive: true });
+  for (const [name, text] of Object.entries(HELD_TURN_HARNESS.graph))
+    writeFileSync(join(dir, name), text);
+  // The store, configured where the engine discovers a run's: the
+  // `onetaskgraph.yaml` in its working directory.
+  const [source, project] = HELD_TURN_PROJECT.split(":");
+  const store = join(dir, "plan-project-store");
+  mkdirSync(join(store, "projects"), { recursive: true });
+  writeFileSync(
+    join(dir, "onetaskgraph.yaml"),
+    `sources:\n  ${source}:\n    plugin: local-md\n    config:\n      root: ${JSON.stringify(store)}\n`,
+  );
+  writeFileSync(
+    join(store, "projects", `${project}.md`),
+    '---\ntitle: "Held turn"\n---\n\n',
+  );
+  for (const [name, text] of Object.entries(HELD_TURN_HARNESS.files))
+    writeFileSync(join(fakes, name), text);
+  writeFileSync(
+    join(fakes, "oneharness"),
+    HELD_TURN_HARNESS.program.replaceAll(HELD_TURN_HARNESS.placeholder, fakes),
+    { mode: 0o700 },
+  );
+  const run = { run_id: HELD_TURN_RUN };
+  const runPath = runDir(root, HELD_TURN_RUN);
+  mkdirSync(join(runPath, "channel"), { recursive: true });
+  mkdirSync(join(runPath, "dispatches"), { recursive: true });
+  // A persona the node-scope graph's library ships, because the engine refuses
+  // a note to a direct agent node with none, and an `## Acceptance criteria`
+  // section, because it refuses to adopt a run with a node lacking one (C6b).
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Hold a turn open" },
+    name: "held-turn",
+    concurrency: 1,
+    tasks: [
+      {
+        id: HELD_TURN_NODE,
+        persona: "engineer",
+        task: "## What\nDo the work the graph dispatches.\n\n## Acceptance criteria\n\n- The work is done.\n",
+      },
+    ],
+  };
+  writeJson(join(runPath, "plan.json"), plan);
+  const start = now() - 12 * 60 * 1000;
+  const record = launch(
+    HELD_TURN_RUN,
+    "claude-code",
+    SUPERVISOR_SESSION,
+    stamp(start),
+    0x7ffffff0,
+  );
+  delete record.graph;
+  writeJson(join(runPath, "launch.json"), {
+    ...record,
+    project: HELD_TURN_PROJECT,
+    dir,
+    node_graph: join(dir, "node-scope.yaml"),
+    host: thisHost(),
+  });
+  const journal = new Journal(runPath, streamOf(HELD_TURN_RUN), start);
+  journal.emit("pipeline", "run-started", run, {
+    plan,
+    graph: null,
+    dir,
+    heartbeat_interval: 1800,
+  });
+  journal.write();
+}
+
+/** What the held-turn corpus wrote, published beside it as `facts()` is beside the main one. */
+export function heldTurnFacts(workspace) {
+  return {
+    run: HELD_TURN_RUN,
+    node: HELD_TURN_NODE,
+    session: SUPERVISOR_SESSION,
+    // The host the run's driver is recorded on, which an adoption has to be
+    // made on to prove that driver gone.
+    host: thisHost(),
+    fakes: join(heldTurnDir(workspace), "harness-double"),
+    environment: heldTurnEnvironment(workspace),
+  };
+}
+
 /** The one run of the preserve corpus below. */
 export const PRESERVE_RUN = "dag-ui-preserve";
 /** Its node whose plan stated `publish: "preserve"`. */
@@ -3662,10 +4157,11 @@ export function preservedFacts() {
 }
 
 /**
- * The review-loop corpus: one run `onepipeline` 0.78 journals for a stacked change
+ * The review-loop corpus: one run `onepipeline` 0.79 journals for a stacked change
  * set taken over from another host and taken through review — continued from the
- * store, reworked, restacked, retitled, answered and declined, and readjusted as its
- * root landed, until a later host superseded its driver.
+ * store, reworked, restacked, resumed, retitled, answered and declined, and
+ * readjusted as its root landed, with the issues each landing closed handed to the
+ * plan store, until a later host superseded its driver.
  *
  * The records are one document, `review-loop.json`, which `tests/e2e/server.rs`
  * serves through every read route from the same file, so the run the view renders
@@ -3732,4 +4228,878 @@ const REVIEW_LOOP_NODE = "docs";
 /** What the review-loop corpus wrote, published beside it as `facts()` is beside the main one. */
 export function reviewLoopFacts() {
   return { run: REVIEW_LOOP.run_id, replied_node: REVIEW_LOOP_NODE };
+}
+
+/** The recorded timeline and its stop-boundary recovery variants. */
+function buildRecordedTimelines(root) {
+  const original = JSON.parse(
+    readFileSync(new URL("./timeline-recorded.json", import.meta.url), "utf8"),
+  );
+  writeRecordedTimeline(root, original);
+  // A replay with harness-only records proves they cannot consume graph idle.
+  const harnesses = structuredClone(original);
+  harnesses.run_id = `${original.run_id}-harnesses`;
+  harnesses.launch.run_id = harnesses.run_id;
+  for (const record of harnesses.records) {
+    record.labels["onepipeline.run_id"] = harnesses.run_id;
+    if (record.source !== "agentgraph") record.labels.run_id = harnesses.run_id;
+  }
+  writeRecordedTimeline(root, harnesses);
+  const historyStore = join(root, "..", "timeline-harness-history");
+  mkdirSync(join(historyStore, HARNESS_PROJECT), { recursive: true });
+  const observerStart = stamp(Date.parse(original.records[0].ts) + 1000);
+  const workerStart = original.records.find(
+    (record) => record.kind === "node-dispatched",
+  ).ts;
+  const pointers = [];
+  for (const [name, id, scope, started, finished] of [
+    [
+      "timeline-observer",
+      "01a00d0f-c094-7660-b26c-8a53baaf9e01",
+      "observer",
+      observerStart,
+      stamp(Date.parse(observerStart) + 42_000),
+    ],
+    [
+      "timeline-worker",
+      "01a00d0f-c094-7660-b26c-8a53baaf9e02",
+      "node",
+      workerStart,
+      null,
+    ],
+  ]) {
+    const session = `${name}-20261013T000000Z-1`;
+    writeFileSync(
+      join(historyStore, HARNESS_PROJECT, `${session}.jsonl`),
+      harnessSessionRecord(
+        id,
+        session,
+        `${name} transcript`,
+        started,
+        finished,
+      ),
+    );
+    pointers.push(
+      pointerLine(
+        historyStore,
+        session,
+        id,
+        "claude-code",
+        started,
+        agentLabels(
+          harnesses.run_id,
+          scope,
+          scope === "node" ? original.node : undefined,
+          scope === "node" ? 1 : undefined,
+        ),
+      ),
+    );
+  }
+  writePointerFile(join(root, harnesses.run_id), pointers);
+  const retries = JSON.parse(
+    readFileSync(new URL("./timeline-retries.json", import.meta.url), "utf8"),
+  );
+  writeRecordedTimeline(root, retries);
+  // Producer-stamped progress boundaries are hidden by the real planner
+  // profile; gate milestones remain, while all graph activity is excluded.
+  const filtered = structuredClone(retries);
+  filtered.run_id = `${retries.run_id}-filtered`;
+  filtered.launch.run_id = filtered.run_id;
+  for (const record of filtered.records) {
+    record.labels["onepipeline.run_id"] = filtered.run_id;
+    if (record.source !== "agentgraph") record.labels.run_id = filtered.run_id;
+    if (["node-dispatched", "node-settled"].includes(record.kind))
+      record.labels.significance = "progress";
+    if (record.kind === "gate-run") record.labels.significance = "milestone";
+  }
+  writeRecordedTimeline(root, filtered);
+  for (const terminal of original.terminations) {
+    const corpus = structuredClone(original);
+    corpus.run_id = `${original.run_id}-${terminal.kind}`;
+    corpus.launch.run_id = corpus.run_id;
+    const end = corpus.records.find(
+      (record) => record.kind === "node-settled",
+    ).ts;
+    corpus.records = corpus.records.filter(
+      (record) =>
+        ![
+          "node-settled",
+          "member-settled",
+          "graph-settled",
+          "session-closed",
+        ].includes(record.kind),
+    );
+    corpus.records.push({
+      v: 2,
+      ts: end,
+      stream: "recorded-termination",
+      seq: 0,
+      source: "pipeline",
+      kind: terminal.kind,
+      payload: terminal.payload,
+      labels: { run_id: corpus.run_id },
+      artifacts: [],
+    });
+    for (const [index, late] of corpus.late_records.entries()) {
+      corpus.records.push({
+        v: 2,
+        ts: "2026-10-15T10:25:01.000Z",
+        stream: "recorded-termination",
+        seq: index + 1,
+        source: "pipeline",
+        kind: late.kind,
+        payload: late.payload,
+        labels: { run_id: corpus.run_id },
+        artifacts: [],
+      });
+    }
+    for (const record of corpus.records) {
+      record.labels["onepipeline.run_id"] = corpus.run_id;
+      if (record.source === "pipeline" || record.source === "vcs")
+        record.labels.run_id = corpus.run_id;
+    }
+    if (terminal.kind === "run-stopped") {
+      const clipped = structuredClone(corpus);
+      clipped.run_id = `${original.run_id}-clipping`;
+      clipped.launch.run_id = clipped.run_id;
+      const gate = original.records.find(
+        (record) => record.kind === "gate-run",
+      );
+      for (const [index, id] of ["late-gate-a", "late-gate-b"].entries()) {
+        const record = structuredClone(gate);
+        record.stream = "recorded-late-work";
+        record.seq = index;
+        record.ts = `2026-10-15T10:25:0${index + 2}.000Z`;
+        record.artifacts = [{ id, kind: "log", bytes: 0 }];
+        clipped.records.push(record);
+      }
+      const close = structuredClone(
+        original.records.find((record) => record.kind === "session-closed"),
+      );
+      close.stream = "recorded-late-work";
+      close.seq = 2;
+      close.ts = "2026-10-15T10:25:04.000Z";
+      clipped.records.push(close);
+      for (const record of clipped.records) {
+        record.labels["onepipeline.run_id"] = clipped.run_id;
+        if (record.source !== "agentgraph")
+          record.labels.run_id = clipped.run_id;
+      }
+      writeRecordedTimeline(root, clipped);
+    }
+    writeRecordedTimeline(root, corpus);
+  }
+}
+
+/** Write producer timestamps and identities without renumbering the journal. */
+function writeRecordedTimeline(root, corpus) {
+  const dir = join(root, corpus.run_id);
+  mkdirSync(dir, { recursive: true });
+  writeJson(join(dir, "plan.json"), corpus.plan);
+  writeJson(join(dir, "launch.json"), corpus.launch);
+  writeFileSync(
+    join(dir, "events.jsonl"),
+    `${corpus.records.map((record) => JSON.stringify(record)).join("\n")}\n`,
+  );
+  for (const record of corpus.records) {
+    if (record.kind === "member-started")
+      declareGraph(root, record.stream, [record.labels.member]);
+  }
+}
+
+/** A converged failure with a driver proved gone on this host, for header journeys. */
+export function writeFailedHeaderRun(root) {
+  const runId = "dag-ui-header-failed";
+  const dir = runDir(root, runId);
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Show an ended failure" },
+    concurrency: 1,
+    tasks: [
+      {
+        id: "failed",
+        persona: "worker",
+        task: "## What\nExercise a failure.\n\n## Acceptance criteria\nThe failure is recorded.",
+      },
+    ],
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  writeJson(join(dir, "launch.json"), {
+    ...launch(runId, "codex", CODEX_SESSION, stamp(HISTORIC), 0x7ffffff0),
+    host: thisHost(),
+  });
+  writeJson(join(dir, "result.json"), {
+    run_id: runId,
+    state: "failed",
+    ok: false,
+    nodes: [{ id: "failed", status: "failed" }],
+  });
+  const journal = new Journal(dir, streamOf(runId), HISTORIC);
+  journal.emit("pipeline", "run-started", { run_id: runId }, { plan });
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    run_id: runId,
+    node: "failed",
+    persona: "worker",
+  });
+  journal
+    .advance(1)
+    .emit(
+      "pipeline",
+      "node-settled",
+      { run_id: runId, node: "failed" },
+      { status: "failed" },
+    );
+  journal.write();
+  return runId;
+}
+
+/** A project's six kinds, a copy-origin main, an ungrouped run and an ended legacy run. */
+export function buildProjectCentricRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const project = "local-md:project-centric";
+  const kinds = [
+    "planning",
+    "spikes",
+    "main",
+    "finalize",
+    "design",
+    "follow-ups",
+  ];
+  for (const [index, kind] of kinds.entries()) {
+    const run = `project-${kind}`;
+    writeEventlessRun(root, run, "claude-code", SUPERVISOR_SESSION);
+    const dir = join(root, run);
+    const record = launch(
+      run,
+      "claude-code",
+      SUPERVISOR_SESSION,
+      stamp(HISTORIC + index * 1000),
+      4248,
+    );
+    Object.assign(record, {
+      project: kind === "main" ? "local-md:board-copy" : project,
+      labels: { kind },
+      ...(kind === "main" ? { project_origin: project } : { group: project }),
+    });
+    writeJson(join(dir, "launch.json"), record);
+    const journal = new Journal(dir, streamOf(run), HISTORIC + index * 1000);
+    journal.emit("pipeline", "run-started", { run_id: run }, {});
+    journal.write();
+  }
+  for (const [id, started, activity] of [
+    ["order-tied-a", HISTORIC, HISTORIC],
+    ["order-tied-b", HISTORIC, HISTORIC],
+    ["order-tied-active", HISTORIC, HISTORIC + 1000],
+    ["order-undated-old", undefined, HISTORIC],
+    ["order-undated-active", undefined, HISTORIC + 1000],
+  ]) {
+    writeEventlessRun(root, id);
+    const recordPath = join(root, id, "launch.json");
+    const record = launch(id, "a-plain-shell", "", undefined, 4248);
+    Object.assign(record, {
+      group: "local-md:ordering",
+      ...(started === undefined ? {} : { started_at: stamp(started) }),
+    });
+    writeJson(recordPath, record);
+    const journal = new Journal(join(root, id), streamOf(id), activity);
+    journal.emit("pipeline", "run-started", { run_id: id }, {});
+    journal.write();
+  }
+  writeEventlessRun(root, "project-ungrouped");
+  writeEventlessRun(root, "project-unfamiliar");
+  const unfamiliar = join(root, "project-unfamiliar", "launch.json");
+  writeJson(unfamiliar, {
+    ...launch("project-unfamiliar", "a-plain-shell", "", stamp(HISTORIC), 4248),
+    labels: { kind: "field-research" },
+    group: "local-md:another-project",
+  });
+  // No labels or group were recorded at launch. The fixture entry point invokes
+  // the pinned engine's label verb after this ended journal has been written.
+  writeEventlessRun(root, "project-before-labels");
+  const dir = join(root, "project-before-labels");
+  const journal = new Journal(
+    dir,
+    streamOf("project-before-labels"),
+    HISTORIC - 10000,
+  );
+  journal.emit(
+    "pipeline",
+    "run-started",
+    { run_id: "project-before-labels" },
+    {},
+  );
+  journal
+    .advance(1)
+    .emit(
+      "pipeline",
+      "run-stopped",
+      { run_id: "project-before-labels" },
+      { forced: false },
+    );
+  journal.write();
+}
+
+export function projectCentricFacts() {
+  return {
+    project: "local-md:project-centric",
+    kinds: ["planning", "spikes", "main", "finalize", "design", "follow-ups"],
+  };
+}
+
+/**
+ * The run whose turns are read whole from their transcripts, and the run recorded
+ * before references whose sessions are read the best way each can be.
+ */
+export const TRANSCRIPTS_RUN = "dag-ui-transcripts";
+export const TRANSCRIPTS_LEGACY_RUN = "dag-ui-transcripts-legacy";
+
+/**
+ * The real sessions this corpus's history store is built from: recorded on an
+ * operator's host, trimmed and redacted (`tests/fixtures/history/README.md`).
+ */
+const RECORDED_HISTORY = new URL(
+  "../../../tests/fixtures/history/",
+  import.meta.url,
+);
+const RECORDED_JUDGE = {
+  project: "home-operator-projects-ai-orchestrator",
+  session:
+    "design-doc-1791501848591-2551400-worker-judge-20261008T232956Z-2575155",
+};
+
+/** The last words of every text a journey reads to its end. */
+export const TRANSCRIPT_SENTINELS = {
+  instruction:
+    "The whole instruction ends with this sentence, after the bound.",
+  output: "The whole output ends with this line, past sixty-four KiB.",
+  report: "The whole report ends with this sentence, past four thousand.",
+  reportHead: "The report opens with this sentence.",
+  session: "The whole drafting prompt ends with this sentence.",
+  log: "The gate log ends with this line.",
+};
+
+/** The gate log the reported node stored, longer than a log is served as. */
+export const TRANSCRIPT_LOG = "artifact-transcripts-gate";
+
+/** One recorded session's lines, as the fixture file holds them. */
+function recordedLines({ project, session }) {
+  return readFileSync(
+    new URL(`${project}/${session}.jsonl`, RECORDED_HISTORY),
+    "utf8",
+  )
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+/** `text`, grown past `bytes` with `filler`, ending on `sentinel`. */
+function grown(text, filler, bytes, sentinel) {
+  let whole = `${text}\n`;
+  while (Buffer.byteLength(whole) < bytes) whole += filler;
+  return `${whole}\n${sentinel}`;
+}
+
+/**
+ * One invocation of the recorded judge turn, re-addressed and re-sized, as the
+ * current oneharness writes one: an opening `run-started` line carrying the whole
+ * prompt, then each event as it happened, then — for one that closed — the
+ * closing line. The prompt and the read's output are grown past the recorder's
+ * old bounds so a reader can be shown they arrive whole.
+ */
+function writeSession(store, { session, historyId, started, closed, prompt }) {
+  const recorded = recordedLines(RECORDED_JUDGE);
+  const close = recorded.find((line) => line.type === "run");
+  const lines = [
+    {
+      type: "run-started",
+      schema_version: "1.11",
+      history_id: historyId,
+      harness_id: close.harness_id,
+      prompt,
+      started,
+    },
+    ...recorded
+      .filter((line) => line.type === "event")
+      .map((line) => ({
+        ...line,
+        run_id: historyId,
+        event: {
+          ...line.event,
+          output:
+            line.event.index === 1
+              ? grown(
+                  line.event.output,
+                  "test result: ok. 1 passed; 0 failed; 0 ignored\n",
+                  70 * 1024,
+                  TRANSCRIPT_SENTINELS.output,
+                )
+              : line.event.output,
+        },
+      })),
+    ...(closed ? [{ ...close, history_id: historyId, session, prompt }] : []),
+  ];
+  const dir = join(store, RECORDED_JUDGE.project);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${session}.jsonl`);
+  writeFileSync(
+    path,
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+  );
+  return path;
+}
+
+/** A `transcript` reference, as `oneagentgraph` 0.8 writes one. */
+function transcriptAt(store, session, historyId, extra = {}) {
+  return {
+    history_dir: store,
+    history_project: RECORDED_JUDGE.project,
+    history_session: session,
+    history_id: historyId,
+    ...extra,
+  };
+}
+
+/** The recorded judge turn's long prompt, grown past the old bound. */
+const longPrompt = (sentinel) =>
+  grown(
+    recordedLines(RECORDED_JUDGE).find((line) => line.type === "run").prompt,
+    "Read the whole plan out of the plan store, then land each node in order. ",
+    6 * 1024,
+    sentinel,
+  );
+
+/** The history ids and session files this corpus's store holds. */
+export const TRANSCRIPT_SESSIONS = {
+  died: {
+    session: "node-scope-1792900000000-4400-worker-skill-20261024T000000Z-4401",
+    historyId: "01a17000-0000-7000-8000-000000000001",
+  },
+  removed: {
+    session: "node-scope-1792900000000-4400-worker-skill-20261024T000100Z-4402",
+    historyId: "01a17000-0000-7000-8000-000000000002",
+  },
+  drafted: {
+    session: "pr-author-1792900000001-4400-20261024T000200Z-4403",
+    historyId: "01a17000-0000-7000-8000-000000000003",
+  },
+  live: {
+    session: "node-scope-1792900000002-4400-worker-skill-20261024T000300Z-4404",
+    historyId: "01a17000-0000-7000-8000-000000000004",
+  },
+  legacy: {
+    session: "node-scope-1792800000000-4500-worker-skill-20261020T000000Z-4501",
+    historyId: "01a16000-0000-7000-8000-000000000001",
+  },
+};
+
+/** The relayed session ids, `{stream}.{member}`. */
+const TRANSCRIPT_STREAM = "node-scope-1792900000000-4400";
+const DRAFTED_STREAM = "pr-author-1792900000001-4400";
+const LIVE_STREAM = "node-scope-1792900000002-4400";
+
+/** The tasks the transcripts run plans: what a reader opens each one for. */
+const TRANSCRIPT_TASKS = [
+  ["died", "A worker that died mid-turn, read whole from its history file."],
+  ["drafted", "A change request drafter's standalone harness session."],
+  ["reported", "A worker whose report is longer than a preview."],
+  ["live", "A worker still in its turn."],
+];
+
+/** The tasks the legacy run plans, one per reading a cut copy can get. */
+const LEGACY_TASKS = [
+  ["reported", "A member whose stored report holds the whole turn."],
+  ["historied", "A member with no report, whose history file the run names."],
+  ["neither", "A member with no report and no history file."],
+];
+
+function plannedRun(root, runId, tasks, start) {
+  const dir = runDir(root, runId);
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Read every turn whole" },
+    name: runId,
+    concurrency: tasks.length,
+    tasks: tasks.map(([id, what]) => ({
+      id,
+      persona: "worker",
+      task: `## What\n${what}\n\n## Acceptance criteria\nIt is read whole`,
+    })),
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  writeJson(
+    join(dir, "launch.json"),
+    launch(runId, "claude-code", CLAUDE_SESSION, stamp(start), 4243),
+  );
+  const journal = new Journal(dir, streamOf(runId), start);
+  journal.runId = runId;
+  journal.emit("pipeline", "run-started", { run_id: runId }, { plan });
+  return { dir, journal };
+}
+
+/** The corpus the transcript journeys read, under `root`. */
+export function buildTranscriptRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const store = join(root, "..", "transcript-history");
+  const start = now() - 10 * 60 * 1000;
+  const S = TRANSCRIPT_SESSIONS;
+  const instruction = longPrompt(TRANSCRIPT_SENTINELS.instruction);
+
+  writeSession(store, {
+    ...S.died,
+    started: stamp(start),
+    closed: false,
+    prompt: instruction,
+  });
+  // A turn whose history file was there and is gone: written, then removed, as a
+  // store that lost it leaves it.
+  rmSync(
+    writeSession(store, {
+      ...S.removed,
+      started: stamp(start),
+      closed: true,
+      prompt: instruction,
+    }),
+  );
+  writeSession(store, {
+    ...S.drafted,
+    started: stamp(start),
+    closed: true,
+    prompt: longPrompt(TRANSCRIPT_SENTINELS.session),
+  });
+  writeSession(store, {
+    ...S.live,
+    started: stamp(start),
+    closed: false,
+    prompt: instruction,
+  });
+
+  const { dir, journal } = plannedRun(
+    root,
+    TRANSCRIPTS_RUN,
+    TRANSCRIPT_TASKS,
+    start,
+  );
+  const run = { run_id: TRANSCRIPTS_RUN };
+  const recorded = recordedLines(RECORDED_JUDGE).filter(
+    (line) => line.type === "event",
+  );
+  const relayedSession = (stream, node, member, at) => {
+    const labels = {
+      ...run,
+      node,
+      member,
+      persona: member,
+      session: `${stream}.${member}`,
+    };
+    journal
+      .advance(1)
+      .emit("pipeline", "node-dispatched", { ...run, node, persona: member });
+    journal.advance(1).emit("agentgraph", "member-started", labels, {});
+    journal.advance(1).emit("agentgraph", "turn-started", labels, {
+      transcript: transcriptAt(store, at.session, at.historyId),
+      turn: 1,
+      role: "assistant",
+      started_at: stamp(journal.at),
+    });
+    for (const line of recorded) {
+      journal.advance(1).emit("agentgraph", "turn-activity", labels, {
+        transcript: transcriptAt(store, at.session, at.historyId, {
+          index: line.event.index,
+          ...(line.event.tool_call_id
+            ? { tool_call_id: line.event.tool_call_id }
+            : {}),
+        }),
+        kind: line.event.kind,
+        name: line.event.name,
+        ...(line.event.tool_call_id
+          ? { tool_call_id: line.event.tool_call_id }
+          : {}),
+        index: line.event.index,
+      });
+    }
+    return labels;
+  };
+
+  // A worker that died in its second turn: its first read whole off a file that
+  // never closed, its second pointing at a file the store no longer holds.
+  const died = relayedSession(TRANSCRIPT_STREAM, "died", "worker", S.died);
+  journal.advance(1).emit("agentgraph", "turn-started", died, {
+    transcript: transcriptAt(store, S.removed.session, S.removed.historyId),
+    turn: 2,
+    role: "assistant",
+    started_at: stamp(journal.at),
+  });
+  journal.advance(2).emit(
+    "agentgraph",
+    "member-died",
+    { ...run, node: "died", member: "worker", persona: "worker" },
+    {
+      signal: "SIGKILL",
+      detail: "the worker's process stopped mid-turn",
+    },
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: "died" },
+    {
+      status: "failed",
+      detail: "the worker died",
+    },
+  );
+
+  // A drafter's standalone invocation, pointed at and never relayed turn by turn.
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...run,
+    node: "drafted",
+    persona: "pr-author",
+  });
+  journal.advance(1).emit(
+    "agentgraph",
+    "oneharness-session",
+    { ...run, node: "drafted", member: "pr-author", persona: "pr-author" },
+    {
+      role: "agent",
+      turn: 1,
+      identity: "claude-code:alternate",
+      history_id: S.drafted.historyId,
+      history_dir: store,
+      history_project: RECORDED_JUDGE.project,
+      history_session: S.drafted.session,
+    },
+    [{ id: S.drafted.historyId, kind: "oneharness_session", bytes: 0 }],
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: "drafted" },
+    {
+      status: "done",
+      outcome: "published",
+    },
+  );
+
+  // A settled worker whose report is longer than the old preview.
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...run,
+    node: "reported",
+    persona: "worker",
+  });
+  const report = `${JSON.stringify(
+    {
+      schema_version: 8,
+      control: null,
+      verdicts: [
+        {
+          criterion: "it is read whole",
+          met: true,
+          reason: grown(
+            TRANSCRIPT_SENTINELS.reportHead,
+            "Every criterion was read against the branch it names. ",
+            6000,
+            TRANSCRIPT_SENTINELS.report,
+          ),
+        },
+      ],
+      usage: {},
+    },
+    null,
+    2,
+  )}\n`;
+  const settled = journal.advance(1).lines.length;
+  journal.emit(
+    "agentgraph",
+    "member-settled",
+    { ...run, node: "reported", member: "worker", persona: "worker" },
+    { completed: true, verdict: [], completion_reason: "it is read whole" },
+    [
+      {
+        id: `report-${journal.stream}-reported`,
+        kind: "report",
+        bytes: report.length,
+      },
+    ],
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "node-settled",
+    { ...run, node: "reported" },
+    {
+      status: "done",
+      outcome: "merged",
+      detail: "Gate completed successfully",
+    },
+    [{ id: TRANSCRIPT_LOG, kind: "log", bytes: 0 }],
+  );
+
+  // A worker still in its turn, whose history file the journey grows.
+  relayedSession(LIVE_STREAM, "live", "worker", S.live);
+  journal.write();
+  retainReport(dir, journal.stream, settled, report);
+  // A gate log longer than the end of it a log is served as.
+  mkdirSync(join(dir, "artifacts"), { recursive: true });
+  writeFileSync(
+    join(dir, "artifacts", TRANSCRIPT_LOG),
+    grown(
+      "the first line the gate printed",
+      "test result: ok. 1 passed; 0 failed; 0 ignored\n",
+      80 * 1024,
+      TRANSCRIPT_SENTINELS.log,
+    ),
+  );
+
+  buildLegacyTranscriptRun(root, store, start);
+}
+
+/**
+ * A run recorded before references: every turn record carries the recorder's
+ * cut copy and flag, and nothing points at a transcript. One member left a
+ * report; one left none but its history file is named by the run; one left
+ * neither.
+ */
+function buildLegacyTranscriptRun(root, store, start) {
+  const S = TRANSCRIPT_SESSIONS;
+  const whole = longPrompt(TRANSCRIPT_SENTINELS.instruction);
+  writeSession(store, {
+    ...S.legacy,
+    started: stamp(start),
+    closed: true,
+    prompt: whole,
+  });
+  const { dir, journal } = plannedRun(
+    root,
+    TRANSCRIPTS_LEGACY_RUN,
+    LEGACY_TASKS,
+    start,
+  );
+  const run = { run_id: TRANSCRIPTS_LEGACY_RUN };
+  // The recorder kept a text's head, cut on a character boundary.
+  const bound = 4096;
+  const cut = (text) =>
+    Buffer.from(text)
+      .subarray(0, bound)
+      .toString("utf8")
+      .replace(/\uFFFD$/u, "");
+  const sessions = [];
+  let reported;
+  for (const [index, [node]] of LEGACY_TASKS.entries()) {
+    // Each member is a graph run of its own, on a stream of its own, and its
+    // session id is spelled from that stream.
+    const graph = new Journal(
+      dir,
+      `node-scope-179280000000${index}-4500`,
+      journal.at,
+    );
+    sessions.push(graph);
+    const member = { ...run, node, member: "worker", persona: "worker" };
+    journal
+      .advance(1)
+      .emit("pipeline", "node-dispatched", { ...run, node, persona: "worker" });
+    graph.at = journal.at;
+    graph.advance(1).emit(
+      "agentgraph",
+      "turn-started",
+      { ...member, session: `${graph.stream}.worker` },
+      {
+        turn: 1,
+        role: "assistant",
+        instruction: cut(whole),
+        instruction_truncated: true,
+        started_at: stamp(graph.at),
+      },
+    );
+    if (node === "neither") {
+      // Everything else the recorder cut of this turn, with nothing whole of
+      // any of it: its reply's head, its call's summary and its output's tail.
+      const labels = { ...member, session: `${graph.stream}.worker` };
+      graph.advance(1).emit("agentgraph", "turn-activity", labels, {
+        kind: "tool_call",
+        name: "Bash",
+        detail: "just check --all-targets ".repeat(10).slice(0, 160),
+        truncated: true,
+        tool_call_id: "toolu_01LegacyCutCall",
+        index: 0,
+      });
+      graph.advance(1).emit("agentgraph", "turn-activity", labels, {
+        kind: "tool_result",
+        name: "Bash",
+        detail: "",
+        output: "test result: ok. 1 passed\n".repeat(200).slice(-bound),
+        output_truncated: true,
+        tool_call_id: "toolu_01LegacyCutCall",
+        index: 1,
+      });
+      graph.advance(1).emit("agentgraph", "turn-message", labels, {
+        turn: 1,
+        role: "assistant",
+        text: cut("Landed every node in order. ".repeat(300)),
+        truncated: true,
+      });
+    }
+    if (node === "historied") {
+      graph.advance(1).emit(
+        "agentgraph",
+        "oneharness-session",
+        member,
+        {
+          role: "agent",
+          turn: 1,
+          identity: "claude-code:alternate",
+          history_id: S.legacy.historyId,
+          history_dir: store,
+          history_project: RECORDED_JUDGE.project,
+          history_session: S.legacy.session,
+        },
+        [{ id: S.legacy.historyId, kind: "oneharness_session", bytes: 0 }],
+      );
+    }
+    if (node === "reported") {
+      reported = { stream: graph.stream, seq: graph.lines.length };
+      graph
+        .advance(1)
+        .emit(
+          "agentgraph",
+          "member-settled",
+          member,
+          { completed: true, verdict: [], completion_reason: "landed" },
+          [{ id: `report-${graph.stream}`, kind: "report", bytes: 0 }],
+        );
+    }
+    journal.at = graph.at;
+  }
+  Journal.writeMerged(journal.path, [journal, ...sessions]);
+  retainReport(
+    dir,
+    reported.stream,
+    reported.seq,
+    `${JSON.stringify({
+      schema_version: 12,
+      transcript: {
+        messages: [
+          { role: "user", content: whole },
+          { role: "assistant", content: "landed every node in order" },
+        ],
+      },
+      completion_reason: "landed",
+      control: null,
+      supervisor_control: null,
+    })}\n`,
+  );
+}
+
+/** What the transcript journeys need to know about the corpus they read. */
+export function transcriptFacts() {
+  return {
+    run: TRANSCRIPTS_RUN,
+    legacyRun: TRANSCRIPTS_LEGACY_RUN,
+    sentinels: TRANSCRIPT_SENTINELS,
+    sessions: TRANSCRIPT_SESSIONS,
+    log: TRANSCRIPT_LOG,
+    project: RECORDED_JUDGE.project,
+    conversations: {
+      died: `${TRANSCRIPT_STREAM}.worker`,
+      live: `${LIVE_STREAM}.worker`,
+    },
+    drafted: DRAFTED_STREAM,
+  };
 }

@@ -203,6 +203,59 @@ pub fn write_waiting_approval(root: &Path, run: &str, dir: &Path) -> PathBuf {
     write_undriven(root, run, dir, &plan, &[waiting])
 }
 
+/// The run [`write_held_on_source`] writes with the hold engine 0.90.0 journals.
+pub const SOURCE_HELD_RUN_ID: &str = "run-20260807-5c6d7e";
+/// The run [`write_held_on_source`] writes with the hold an earlier engine journalled.
+pub const SOURCE_HELD_EARLIER_RUN_ID: &str = "run-20260807-6d7e8f";
+/// The private tracker both holds name as unanswered.
+pub const HELD_SOURCE: &str = "vault";
+/// The reset the rate-limited provider gave, as epoch milliseconds.
+pub const HELD_SOURCE_RETRY_AT_MS: u64 = 1_786_104_600_000;
+
+/// The `source` hold reason the engine journals on `node-held` for a node whose
+/// tracker did not answer: one `unanswered` entry for [`HELD_SOURCE`], carrying
+/// `cause` and, for a rate limit whose provider gave a reset, `retry_at_ms` —
+/// or, with `rate_limited` false, the entry an engine before 0.90.0 wrote,
+/// which carries neither.
+pub fn source_hold(rate_limited: bool) -> Value {
+    let mut unanswered = json!({
+        "source": HELD_SOURCE,
+        "reason": "the tracker refused the read: 429 Too Many Requests",
+    });
+    if rate_limited {
+        unanswered["cause"] = json!("rate-limited");
+        unanswered["retry_at_ms"] = json!(HELD_SOURCE_RETRY_AT_MS);
+    }
+    json!({ "kind": "source", "unanswered": [unanswered] })
+}
+
+/// A run nothing is driving, launched from `dir` on this host, whose approval
+/// [`APPROVAL_NODE_ID`] the last driver recorded held on `hold` and never
+/// released — the run a browser adopts after its driver died mid-hold.
+pub fn write_held_on_source(root: &Path, run: &str, dir: &Path, hold: Value) -> PathBuf {
+    let plan = json!({
+        "schema_version": 2,
+        "goal": { "text": "get the change approved" },
+        "name": "approval",
+        "concurrency": 1,
+        "tasks": [
+            { "id": APPROVAL_NODE_ID, "kind": "human", "task": "Approve the change." },
+        ],
+    });
+    let held = json!({
+        "v": 1,
+        "ts": "2026-08-07T12:00:01.000Z",
+        "stream": "a-recording-host-4242",
+        "seq": 1,
+        "source": "pipeline",
+        "kind": "node-held",
+        "labels": { "run_id": run, "node": APPROVAL_NODE_ID },
+        "payload": { "reasons": [hold] },
+        "artifacts": [],
+    });
+    write_undriven(root, run, dir, &plan, &[held])
+}
+
 /// The launch record, plan and journal of a run nothing is driving: `plan`
 /// started, followed by `journalled`.
 fn write_undriven(
@@ -364,6 +417,42 @@ pub fn configure_local_md_store(dir: &Path) -> PathBuf {
                     "onepipeline.schema_version": 2,
                     "onepipeline.goal": { "text": "get the change approved" },
                     "onepipeline.concurrency": 1,
+                }),
+            ),
+        ],
+        "",
+    );
+    store
+}
+
+/// [`configure_local_md_store`]'s source with its project written as a
+/// **private coordinating** one: the project itself is classified private,
+/// named [`EXPORT_PLAN_NAME`], and carries the plan's one export edge — from
+/// [`EXPORT_PRODUCER_NODE_ID`] to [`EXPORT_CONSUMER_NODE_ID`] — as its reserved
+/// `onepipeline.export_edges`. No task is written and nothing says what any task's
+/// visibility is: each task the journey files keeps its own. Answers the store's
+/// root.
+pub fn configure_private_coordination_store(dir: &Path) -> PathBuf {
+    let store = configure_local_md_store(dir);
+    write_store_item(
+        &store
+            .join("projects")
+            .join(format!("{LOCAL_MD_PROJECT}.md")),
+        &[
+            ("title", json!(EXPORT_PLAN_NAME)),
+            ("classification", json!("private")),
+            (
+                "metadata",
+                json!({
+                    "onepipeline.schema_version": onepipeline::plan::PLAN_SCHEMA_VERSION,
+                    "onepipeline.goal": { "text": "publish a generic example of private work" },
+                    "onepipeline.concurrency": 1,
+                    "onepipeline.export_edges": [{
+                        "from": EXPORT_PRODUCER_NODE_ID,
+                        "to": EXPORT_CONSUMER_NODE_ID,
+                        "source_directory": EXPORT_SOURCE_DIRECTORY,
+                        "target_directory": EXPORT_TARGET_DIRECTORY,
+                    }],
                 }),
             ),
         ],
@@ -1157,6 +1246,30 @@ pub fn write_in_project(root: &Path, run: &str, project: Option<&str>) -> PathBu
     dir
 }
 
+/// Rewrite `dir`'s journal in merge order — `(ts, stream, seq)`, the order the
+/// SDK's own reader merges on — keeping every line as it was written.
+fn merge_order_journal(dir: &Path) {
+    let journal = dir.join("events.jsonl");
+    let text = fs::read_to_string(&journal).expect("the journal");
+    let mut lines: Vec<(time::OffsetDateTime, String, u64, &str)> = text
+        .lines()
+        .map(|line| {
+            let event: Value = serde_json::from_str(line).expect("a journal envelope");
+            let at = time::OffsetDateTime::parse(
+                event["ts"].as_str().expect("a stamped envelope"),
+                &time::format_description::well_known::Rfc3339,
+            )
+            .expect("an RFC 3339 stamp");
+            let stream = event["stream"].as_str().expect("a stream").to_owned();
+            let seq = event["seq"].as_u64().expect("a sequence number");
+            (at, stream, seq, line)
+        })
+        .collect();
+    lines.sort_by(|a, b| (a.0, &a.1, a.2).cmp(&(b.0, &b.1, b.2)));
+    let ordered: String = lines.iter().map(|line| format!("{}\n", line.3)).collect();
+    fs::write(&journal, ordered).expect("the journal, in merge order");
+}
+
 /// The plan the run executed.
 fn plan() -> Value {
     json!({
@@ -1585,6 +1698,11 @@ fn journal(run: &str) -> String {
                 "status": "completed",
                 "from_status": "in_progress",
                 "conclusion": "failure",
+                // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 (Cargo.lock) declares no change-check payload schema, as the producer-schema contract test records. The time/conclusion names follow its change-check-times golden; url exercises this reader's optional address slot only when supplied. Missing/null metadata stays absent, and the host Check type is not an event writer to gate against.
+                "url": "https://example.test/checks/published-smoke",
+                "started_at": "2026-08-07T12:00:10Z",
+                "completed_at": "2026-08-07T12:00:12Z",
+                // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
             }),
             json!([{ "id": CHECK_LOG_ARTIFACT, "kind": "log", "bytes": 39 }]),
         )
@@ -2002,6 +2120,11 @@ pub fn settle_member(dir: &Path, member: &SettledMember, produced: Produced) {
     });
     let settlement: Envelope = serde_json::from_value(line.clone()).expect("the settled envelope");
     fs::write(&journal, format!("{existing}{line}\n")).expect("append to the journal");
+    // A settlement is stamped when the member settled, which can be before what
+    // a fixture's journal already holds, and a driver appends each record as it
+    // happens: a summary folds the journal in the order it was appended, so the
+    // record is kept where it fell rather than behind what came after it.
+    merge_order_journal(dir);
     report::retain(&paths_of(dir), &settlement);
 }
 
@@ -5659,6 +5782,271 @@ pub fn write_kept_by_plan(root: &Path, run: &str) -> PathBuf {
     dir
 }
 
+/// The run id of the awaiting-release fixture below.
+pub const AWAITING_RELEASE_RUN_ID: &str = "run-20261026-a3e1c7";
+/// That run's node whose finished branch is held unlanded on its origin.
+pub const HELD_UNLANDED_NODE_ID: &str = "adopt";
+/// That run's node whose change request is held as a draft.
+pub const HELD_DRAFT_NODE_ID: &str = "pin";
+/// That run's node that landed, and so awaits nothing.
+pub const RELEASED_NODE_ID: &str = "engine";
+/// That run's node behind both held ones.
+pub const BEHIND_HELD_NODE_ID: &str = "rollout";
+/// The producer both held nodes await a release of, as its normalized origin.
+pub const AWAITED_PRODUCER: &str = "github.com/example/engine";
+/// The second producer the draft node awaits a release of.
+pub const AWAITED_SECOND_PRODUCER: &str = "github.com/example/schemas";
+/// The commit the held-unlanded node's branch was kept at.
+pub const HELD_UNLANDED_HEAD: &str = "9c41e07d2b5a8f36e1d0c4b7a29f58e3d6c1b0a4";
+
+/// A run with finished work waiting on releases, as `onepipeline` 0.95 writes it.
+///
+/// `adopt` publishes `local-direct`, so its finished branch opens no change
+/// request: it is kept on its origin and settles `complete-but-held` as
+/// `held-for-release`, with the engine's own sentence naming the one release it
+/// awaits. `pin` opened a change request that is held as a draft and settles
+/// `complete-but-draft` as `change-draft`, awaiting two releases from two
+/// producers — and its `detail` names neither, so a reader that served the wait
+/// out of the prose rather than the record's `awaiting` would serve nothing.
+/// `engine` landed and carries no `awaiting`, and `rollout`, behind both held
+/// nodes, has not started, because neither held node is settled.
+pub fn write_awaiting_release(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "launcher": "claude-code",
+            "session": SESSION,
+            "pid": 4254,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let plan = json!({
+        "schema_version": 2,
+        "name": "awaiting-release",
+        "concurrency": 3,
+        "tasks": [
+            { "id": RELEASED_NODE_ID, "persona": "worker", "task": "## What\nShip the engine." },
+            {
+                "id": HELD_UNLANDED_NODE_ID,
+                "persona": "worker",
+                "deps": [RELEASED_NODE_ID],
+                "task": "## What\nAdopt the engine.",
+            },
+            {
+                "id": HELD_DRAFT_NODE_ID,
+                "persona": "worker",
+                "deps": [RELEASED_NODE_ID],
+                "task": "## What\nPin the engine.",
+            },
+            {
+                "id": BEHIND_HELD_NODE_ID,
+                "persona": "worker",
+                "deps": [HELD_UNLANDED_NODE_ID, HELD_DRAFT_NODE_ID],
+                "task": "## What\nRoll it out.",
+            },
+        ],
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    let at = |node: &str| json!({ "run_id": run, "node": node });
+    let dispatched = |node: &str| json!({ "run_id": run, "node": node, "persona": "worker" });
+    let mut journal = Journal::new("a-recording-host-4254");
+    journal
+        .emit(
+            START,
+            "pipeline",
+            "run-started",
+            json!({ "run_id": run }),
+            run_started(plan),
+        )
+        .emit(
+            "2026-08-07T12:00:01.000Z",
+            "pipeline",
+            "node-dispatched",
+            dispatched(RELEASED_NODE_ID),
+            json!({ "attempt": 1 }),
+        )
+        .emit(
+            "2026-08-07T12:00:10.000Z",
+            "pipeline",
+            "node-settled",
+            at(RELEASED_NODE_ID),
+            json!({
+                "status": "done",
+                "outcome": "merged",
+                "branch": "feature/engine",
+                "change_url": "https://example.invalid/changes/21",
+                "landing": "landed",
+            }),
+        );
+    for node in [HELD_UNLANDED_NODE_ID, HELD_DRAFT_NODE_ID] {
+        journal.emit(
+            "2026-08-07T12:00:11.000Z",
+            "pipeline",
+            "node-dispatched",
+            dispatched(node),
+            json!({ "attempt": 1 }),
+        );
+    }
+    journal
+        // Field for field what the engine's lifecycle settles a held-unlanded
+        // node with, its sentence composed as `release::held_detail` composes it.
+        .emit(
+            "2026-08-07T12:00:40.000Z",
+            "pipeline",
+            "node-settled",
+            at(HELD_UNLANDED_NODE_ID),
+            json!({
+                "status": "complete-but-held",
+                "outcome": "held-for-release",
+                "branch": "feature/adopt",
+                "head": HELD_UNLANDED_HEAD,
+                "remote": "pushed",
+                "landing": "unlanded",
+                "detail": format!(
+                    "complete, and held unlanded: awaiting the crate release of \
+                     {AWAITED_PRODUCER}, kept on feature/adopt at {HELD_UNLANDED_HEAD} \
+                     (pushed); it lands when that release arrives"
+                ),
+                "awaiting": [{ "producer": AWAITED_PRODUCER, "target": "crate" }],
+            }),
+        )
+        .emit(
+            "2026-08-07T12:00:45.000Z",
+            "pipeline",
+            "node-settled",
+            at(HELD_DRAFT_NODE_ID),
+            json!({
+                "status": "complete-but-draft",
+                "outcome": "change-draft",
+                "branch": "feature/pin",
+                "change_url": "https://example.invalid/changes/22",
+                "detail": "complete, and held as a draft until its pins can be released",
+                "awaiting": [
+                    { "producer": AWAITED_PRODUCER, "target": "crate" },
+                    { "producer": AWAITED_SECOND_PRODUCER, "target": "npm" },
+                ],
+            }),
+        );
+    fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    declare_graph(root, &journal.stream, &["worker"]);
+    dir
+}
+
+/// The run id of the malformed-awaiting fixture below.
+pub const MALFORMED_AWAITING_RUN_ID: &str = "run-20261026-b7d2f4";
+/// That run's node whose `awaiting` mixes one readable entry among unreadable ones.
+pub const MIXED_AWAITING_NODE_ID: &str = "mixed";
+/// That run's node whose `awaiting` holds no readable entry at all.
+pub const UNREADABLE_AWAITING_NODE_ID: &str = "unreadable";
+/// That run's node whose `awaiting` is not a list.
+pub const LISTLESS_AWAITING_NODE_ID: &str = "listless";
+
+/// A run whose held settlements a producer wrote badly: `awaiting` entries missing
+/// a producer or a target, blank, or not objects at all, and one `awaiting` that is
+/// not a list. Each is marked [`departing_by_design`], because the journey is about
+/// what a reader serves of a record no engine should write.
+pub fn write_malformed_awaiting(root: &Path, run: &str) -> PathBuf {
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(
+        dir.join("launch.json"),
+        pretty(&json!({
+            "run_id": run,
+            "plan": "plan.json",
+            "launcher": "claude-code",
+            "session": SESSION,
+            "pid": 4255,
+            "host": "a-recording-host",
+            "started_at": START,
+            "heartbeat_interval": 1_800,
+            "adoptions": 0,
+        })),
+    )
+    .expect("the launch record");
+    let nodes = [
+        MIXED_AWAITING_NODE_ID,
+        UNREADABLE_AWAITING_NODE_ID,
+        LISTLESS_AWAITING_NODE_ID,
+    ];
+    let plan = json!({
+        "schema_version": 2,
+        "name": "malformed-awaiting",
+        "concurrency": 3,
+        "tasks": nodes
+            .iter()
+            .map(|node| json!({ "id": node, "persona": "worker", "task": "## What\nHold it." }))
+            .collect::<Vec<_>>(),
+    });
+    fs::write(dir.join("plan.json"), pretty(&plan)).expect("the plan");
+    let held = |awaiting: Value| {
+        departing_by_design(
+            "node-settled",
+            json!({
+                "status": "complete-but-held",
+                "outcome": "held-for-release",
+                "branch": "feature/held",
+                "awaiting": awaiting,
+            }),
+        )
+    };
+    let mut journal = Journal::new("a-recording-host-4255");
+    journal.emit(
+        START,
+        "pipeline",
+        "run-started",
+        json!({ "run_id": run }),
+        run_started(plan),
+    );
+    for node in nodes {
+        journal.emit(
+            "2026-08-07T12:00:01.000Z",
+            "pipeline",
+            "node-dispatched",
+            json!({ "run_id": run, "node": node, "persona": "worker" }),
+            json!({ "attempt": 1 }),
+        );
+    }
+    journal
+        .emit(
+            "2026-08-07T12:00:10.000Z",
+            "pipeline",
+            "node-settled",
+            json!({ "run_id": run, "node": MIXED_AWAITING_NODE_ID }),
+            held(json!([
+                { "producer": "", "target": "crate" },
+                { "target": "npm" },
+                "github.com/example/engine",
+                { "producer": AWAITED_PRODUCER, "target": "crate" },
+                { "producer": AWAITED_SECOND_PRODUCER, "target": "   " },
+            ])),
+        )
+        .emit(
+            "2026-08-07T12:00:11.000Z",
+            "pipeline",
+            "node-settled",
+            json!({ "run_id": run, "node": UNREADABLE_AWAITING_NODE_ID }),
+            held(json!([{ "producer": AWAITED_PRODUCER }, 7])),
+        )
+        .emit(
+            "2026-08-07T12:00:12.000Z",
+            "pipeline",
+            "node-settled",
+            json!({ "run_id": run, "node": LISTLESS_AWAITING_NODE_ID }),
+            held(json!({ "producer": AWAITED_PRODUCER, "target": "crate" })),
+        );
+    fs::write(dir.join("events.jsonl"), journal.text()).expect("the journal");
+    declare_graph(root, &journal.stream, &["worker"]);
+    dir
+}
+
 /// The run id of the review-draft fixture below.
 pub const REVIEW_DRAFT_RUN_ID: &str = "run-20260807-5d4c3b";
 /// That run's node whose green change was kept a draft for its user's review.
@@ -7373,10 +7761,16 @@ pub fn review_loop() -> Value {
 /// Write the review-loop corpus under `root` as the engine records a run: its
 /// launch record, the plan its `run-started` carried, and its journal.
 pub fn write_review_loop(root: &Path) -> PathBuf {
-    let dir = write_review_loop_unjournaled(root);
+    write_review_loop_corpus(root, &review_loop())
+}
+
+/// Write `corpus` — the review-loop corpus, or a copy of it a journey has edited
+/// — under `root` exactly as [`write_review_loop`] writes the original.
+pub fn write_review_loop_corpus(root: &Path, corpus: &Value) -> PathBuf {
+    let dir = write_review_loop_unjournaled_corpus(root, corpus);
     fs::write(
         dir.join("events.jsonl"),
-        format!("{}\n", review_loop_lines().join("\n")),
+        format!("{}\n", review_loop_lines_of(corpus).join("\n")),
     )
     .expect("the journal");
     dir
@@ -7386,7 +7780,10 @@ pub fn write_review_loop(root: &Path) -> PathBuf {
 /// and a journal that is still empty, for a journey that appends the records
 /// one at a time as the driver wrote them.
 pub fn write_review_loop_unjournaled(root: &Path) -> PathBuf {
-    let corpus = review_loop();
+    write_review_loop_unjournaled_corpus(root, &review_loop())
+}
+
+fn write_review_loop_unjournaled_corpus(root: &Path, corpus: &Value) -> PathBuf {
     let run = corpus["run_id"].as_str().expect("the corpus names its run");
     let dir = root.join(run);
     fs::create_dir_all(&dir).expect("the run directory");
@@ -7400,7 +7797,10 @@ pub fn write_review_loop_unjournaled(root: &Path) -> PathBuf {
 /// The review-loop corpus's journal, one envelope a line in the order it was
 /// written: one record a second from [`START`] on the corpus's one stream.
 pub fn review_loop_lines() -> Vec<String> {
-    let corpus = review_loop();
+    review_loop_lines_of(&review_loop())
+}
+
+fn review_loop_lines_of(corpus: &Value) -> Vec<String> {
     let run = corpus["run_id"].as_str().expect("the corpus names its run");
     let start = time::OffsetDateTime::parse(START, &time::format_description::well_known::Rfc3339)
         .expect("the fixture's start");
@@ -7425,4 +7825,87 @@ pub fn review_loop_lines() -> Vec<String> {
         );
     }
     journal.lines
+}
+
+/// A public-repository worker and its change-request drafter recorded on this
+/// host. The corpus retains producer timestamps and identities, including relays.
+pub fn recorded_timeline() -> Value {
+    serde_json::from_str(include_str!(
+        "../../apps/dag-ui-e2e/fixtures/timeline-recorded.json"
+    ))
+    .expect("the recorded timeline corpus")
+}
+
+/// Write the recorded corpus without restamping or renumbering its journal.
+pub fn write_recorded_timeline(root: &Path) -> PathBuf {
+    let corpus = recorded_timeline();
+    write_recorded_timeline_corpus(root, &corpus)
+}
+
+/// Serve a variant of the same recording without restamping its original records.
+pub fn write_recorded_timeline_corpus(root: &Path, corpus: &Value) -> PathBuf {
+    let dir = root.join(corpus["run_id"].as_str().expect("run id"));
+    fs::create_dir_all(&dir).expect("run directory");
+    for name in ["launch", "plan"] {
+        fs::write(dir.join(format!("{name}.json")), pretty(&corpus[name])).expect("record");
+    }
+    let mut lines = String::new();
+    for record in corpus["records"].as_array().expect("records") {
+        lines.push_str(&record.to_string());
+        lines.push('\n');
+        if record["kind"] == "member-started" {
+            declare_graph(
+                root,
+                record["stream"].as_str().expect("stream"),
+                &[record["labels"]["member"].as_str().expect("member")],
+            );
+        }
+    }
+    fs::write(dir.join("events.jsonl"), lines).expect("journal");
+    dir
+}
+
+/// The same unfinished work stopped by each terminal boundary, with commands
+/// recorded afterwards. The termination payloads are held to the linked SDK.
+pub fn recorded_termination(kind: &str) -> Value {
+    let mut corpus = recorded_timeline();
+    let run = format!("{}-{kind}", corpus["run_id"].as_str().expect("run"));
+    corpus["run_id"] = json!(run);
+    corpus["launch"]["run_id"] = json!(run);
+    let terminal = corpus["terminations"]
+        .as_array()
+        .expect("terminations")
+        .iter()
+        .find(|t| t["kind"] == kind)
+        .expect("termination")
+        .clone();
+    let late = corpus["late_records"]
+        .as_array()
+        .expect("late records")
+        .clone();
+    let records = corpus["records"].as_array_mut().expect("records");
+    let end = records
+        .iter()
+        .find(|e| e["kind"] == "node-settled")
+        .expect("settlement")["ts"]
+        .clone();
+    records.retain(|e| {
+        !matches!(
+            e["kind"].as_str(),
+            Some("node-settled" | "member-settled" | "graph-settled" | "session-closed")
+        )
+    });
+    records.push(json!({ "v": 2, "ts": end, "stream": "recorded-termination", "seq": 0,
+        "source": "pipeline", "kind": terminal["kind"], "labels": {"run_id":run}, "payload": terminal["payload"], "artifacts": [] }));
+    for (seq, record) in (1..).zip(late) {
+        records.push(json!({ "v":2, "ts":"2026-10-15T10:25:01.000Z", "stream":"recorded-termination", "seq":seq,
+            "source":"pipeline", "kind":record["kind"], "labels":{"run_id":run}, "payload":record["payload"], "artifacts":[] }));
+    }
+    for record in records {
+        record["labels"]["onepipeline.run_id"] = json!(run);
+        if record["source"] == "pipeline" || record["source"] == "vcs" {
+            record["labels"]["run_id"] = json!(run);
+        }
+    }
+    corpus
 }

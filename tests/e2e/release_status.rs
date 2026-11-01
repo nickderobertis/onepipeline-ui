@@ -30,10 +30,11 @@ const NOTES: &str = "### Fixed\n\n- build the read API before the browser tier (
 const TAG: &str = "v0.3.1";
 
 /// Every job and step the workflow reports, in the order it reports them: the
-/// three platform jobs, then the publish job's own steps. A test names only the
+/// four platform jobs, then the publish job's own steps. A test names only the
 /// ones it is bending, so a new one here does not rewrite every case.
 const REPORTED_JOBS: &[&str] = &[
     "build-linux",
+    "build-linux-arm64",
     "build-macos",
     "build-windows",
     "check",
@@ -259,7 +260,7 @@ fn a_failed_platform_job_that_skips_every_publish_demotes_the_release() {
         .map(|job| {
             let result = match *job {
                 "build-linux" | "check" => "failure",
-                "build-macos" | "build-windows" => "success",
+                "build-linux-arm64" | "build-macos" | "build-windows" => "success",
                 _ => "skipped",
             };
             (*job, result)
@@ -755,7 +756,12 @@ fn the_stand_in_is_what_the_script_calls() {
 /// some platform cannot install, which the Release must not claim it shipped.
 #[test]
 fn a_platform_job_that_did_not_succeed_demotes_the_release() {
-    for job in ["build-linux", "build-macos", "build-windows"] {
+    for job in [
+        "build-linux",
+        "build-linux-arm64",
+        "build-macos",
+        "build-windows",
+    ] {
         for result in ["failure", "cancelled", "skipped"] {
             let fixture = Fixture::fresh();
             let output = fixture.run(&[(job, result)], &ALL_ON);

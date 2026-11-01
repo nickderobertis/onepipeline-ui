@@ -2,8 +2,8 @@ import { Badge, Button, Card, CardContent, Skeleton } from "@oneharness/ui";
 import type { AgentSession } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { useState } from "react";
+import { HarnessConversation } from "../../lib/HarnessConversation";
 import { Outcome } from "../../lib/Outcome";
-import { StoredArtifact } from "../../lib/StoredArtifact";
 import { Timestamp } from "../../lib/Timestamp";
 import type { Read } from "../../lib/useRead";
 import {
@@ -163,14 +163,10 @@ function AgentSessionCard({
                   )}
                 </div>
                 {open && runId !== undefined && (
-                  <StoredArtifact
+                  <HarnessConversation
                     artifactId={run.history_id}
                     client={client}
-                    heading="Oneharness conversation"
-                    missing="This run named no conversation."
-                    noun="conversation"
                     runId={runId}
-                    unreadable="The history store holds no readable copy of that conversation."
                   />
                 )}
               </li>

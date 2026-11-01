@@ -97,8 +97,15 @@ fn docker_double(dir: &Path, status: i32) {
 /// with the `-e` environment it was given — except that the image's tools are
 /// stand-ins that record each call to `container.log` and succeed, bar the one
 /// whose call begins with `fail_at`, which exits 1. Nothing on the host's PATH is
-/// reachable from it, so no real `rustup` or `yum` can answer instead.
+/// reachable from it, so no real `rustup` or `yum` can answer instead. It
+/// stands in for the x86_64 image; [`container_double_for`] names another.
 fn container_double(dir: &Path, fail_at: Option<&str>) {
+    container_double_for(dir, fail_at, "x86_64");
+}
+
+/// [`container_double`], for the manylinux image of `arch`, whose repository
+/// files are that image's own copies.
+fn container_double_for(dir: &Path, fail_at: Option<&str>, arch: &str) {
     let bash = which("bash");
     let bash = bash.display();
     let fail_at = fail_at.unwrap_or("no call begins with this");
@@ -115,6 +122,34 @@ fn container_double(dir: &Path, fail_at: Option<&str>) {
     for tool in ["yum", "chmod", "rustup", "python3.12", "chown"] {
         executable(&dir.join("container-bin").join(tool), record(tool));
     }
+    // `sed` is the host's own, run over a copy of the image's repository files:
+    // the script's `/etc/yum.repos.d/*.repo` is read as that copy, so what the
+    // build leaves yum to read is there afterwards to be read back
+    // ([`configured_repositories`]). The glob is expanded here rather than taken
+    // as given, because the host's bash expands it against the host's own
+    // `/etc`, which is not the image's. The copies are held to each image itself
+    // by tests/release/journeys.test.mjs.
+    let repos = dir.join("image/etc/yum.repos.d");
+    fs::create_dir_all(&repos).expect("the image's repository directory");
+    for entry in
+        fs::read_dir(repo_root().join(format!("tests/fixtures/manylinux2014_{arch}-yum.repos.d")))
+            .expect("the image's repository files are checked in")
+    {
+        let entry = entry.expect("a repository file");
+        fs::copy(entry.path(), repos.join(entry.file_name()))
+            .expect("the repository file is copied");
+    }
+    executable(
+        &dir.join("container-bin/sed"),
+        format!(
+            "{}args=()\nrepos=0\nfor arg in \"$@\"; do\n  case \"$arg\" in\n\
+             /etc/yum.repos.d/*) repos=1 ;;\n  *) args+=(\"$arg\") ;;\n  esac\ndone\n\
+             [ \"$repos\" = 0 ] || args+=('{}'/*.repo)\nexec '{}' \"${{args[@]}}\"\n",
+            record("sed"),
+            repos.display(),
+            which("sed").display()
+        ),
+    );
     // The script pipes the pinned checksum into `sha256sum -c -` under
     // pipefail, so a stand-in that exits without reading it can kill the `echo`
     // with SIGPIPE and fail a step no test asked to fail. This one drains its
@@ -161,6 +196,49 @@ fn which(tool: &str) -> PathBuf {
         .map(|candidate| candidate.join(tool))
         .find(|candidate| candidate.is_file())
         .unwrap_or_else(|| panic!("{tool} is on this host's PATH"))
+}
+
+/// Each repository yum would read after the build — every section of the
+/// image's repository files that is enabled, which yum takes a section to be
+/// unless it says `enabled=0` — as its id, its `baseurl`, and whether it still
+/// says `gpgcheck=1`.
+fn configured_repositories(dir: &Path) -> Vec<(String, String, bool)> {
+    let mut repositories = Vec::new();
+    let mut files: Vec<PathBuf> = fs::read_dir(dir.join("image/etc/yum.repos.d"))
+        .expect("the image's repository directory")
+        .map(|entry| entry.expect("a repository file").path())
+        .collect();
+    files.sort();
+    for file in files {
+        let text = fs::read_to_string(&file).expect("a repository file reads");
+        let mut section: Option<(String, Option<String>, bool, bool)> = None;
+        let mut close = |section: Option<(String, Option<String>, bool, bool)>| {
+            if let Some((id, baseurl, enabled, gpgcheck)) = section {
+                if enabled {
+                    repositories.push((
+                        id.clone(),
+                        baseurl.unwrap_or_else(|| panic!("{id} names a baseurl")),
+                        gpgcheck,
+                    ));
+                }
+            }
+        };
+        for line in text.lines().map(str::trim) {
+            if let Some(id) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+                close(section.take());
+                section = Some((id.to_string(), None, true, false));
+            } else if let Some((_, baseurl, enabled, gpgcheck)) = section.as_mut() {
+                match line.split_once('=') {
+                    Some(("baseurl", value)) => *baseurl = Some(value.to_string()),
+                    Some(("enabled", value)) => *enabled = value != "0",
+                    Some(("gpgcheck", value)) => *gpgcheck = value == "1",
+                    _ => {}
+                }
+            }
+        }
+        close(section.take());
+    }
+    repositories
 }
 
 fn container_calls(dir: &Path) -> Vec<String> {
@@ -240,28 +318,28 @@ fn matrix_legs(block: &str) -> Vec<(String, String)> {
 }
 
 /// Each Linux target the release builds, with the runner its job runs on — read
-/// from the recipe's own plan (`just release-linux plan`).
+/// from the Linux recipes' own plans (`just release-linux plan` and `just
+/// release-linux-arm64 plan`).
 fn release_linux_legs() -> Vec<(String, String)> {
-    let output = Command::new("node")
-        .args(["scripts/release.mjs", "linux", "plan"])
-        .current_dir(repo_root())
-        .output()
-        .expect("node is on PATH");
-    assert!(output.status.success(), "the Linux release plan reads");
-    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).expect("a JSON plan");
-    let runner = plan["runner"].as_str().expect("a runner").to_owned();
-    let legs: Vec<(String, String)> = plan["targets"]
-        .as_array()
-        .expect("targets")
-        .iter()
-        .map(|target| {
+    let mut legs = Vec::new();
+    for job in ["linux", "linux-arm64"] {
+        let output = Command::new("node")
+            .args(["scripts/release.mjs", job, "plan"])
+            .current_dir(repo_root())
+            .output()
+            .expect("node is on PATH");
+        assert!(output.status.success(), "the {job} release plan reads");
+        let plan: serde_json::Value = serde_json::from_slice(&output.stdout).expect("a JSON plan");
+        let runner = plan["runner"].as_str().expect("a runner").to_owned();
+        let targets = plan["targets"].as_array().expect("targets");
+        assert!(!targets.is_empty(), "the {job} job builds a Linux target");
+        legs.extend(targets.iter().map(|target| {
             (
                 target.as_str().expect("a triple").to_owned(),
                 runner.clone(),
             )
-        })
-        .collect();
-    assert!(!legs.is_empty(), "the release builds a Linux target");
+        }));
+    }
     legs
 }
 
@@ -278,25 +356,31 @@ fn release_maturin_version() -> String {
 
 #[test]
 fn every_linux_target_the_release_builds_is_handed_to_its_own_manylinux_image() {
-    let targets: Vec<String> = release_linux_legs()
-        .into_iter()
-        .map(|(target, _)| target)
-        .collect();
     assert_eq!(
-        targets,
-        ["x86_64-unknown-linux-gnu"],
-        "the release's Linux targets"
+        release_linux_legs(),
+        [
+            ("x86_64-unknown-linux-gnu", "ubuntu-latest"),
+            ("aarch64-unknown-linux-gnu", "ubuntu-24.04-arm"),
+        ]
+        .map(|(target, runner)| (target.to_string(), runner.to_string())),
+        "the release's Linux targets, each on a runner of its own architecture"
     );
     let maturin = release_maturin_version();
-    for target in &targets {
+    for (target, _) in &release_linux_legs() {
+        let arch = target.split('-').next().expect("a triple names its arch");
         let (_scratch, dir) = scratch(target);
-        container_double(&dir, None);
+        container_double_for(&dir, None, arch);
         let out = out_arg(&dir);
         let output = run(&dir, &path_with_double(&dir), &[target, &out]);
         assert!(output.status.success(), "{target}: the build succeeds");
         let invocation = fs::read_to_string(dir.join("docker.log")).expect("docker was run");
-        let arch = target.split('-').next().expect("a triple names its arch");
-        let platform = "linux/amd64";
+        // Each image on its own architecture's platform, which the release's
+        // runner for that target is natively.
+        let platform = match arch {
+            "x86_64" => "linux/amd64",
+            "aarch64" => "linux/arm64",
+            other => panic!("{target}: no platform is expected for {other}"),
+        };
         let args: Vec<&str> = invocation.lines().collect();
         for expected in [
             platform,
@@ -331,6 +415,38 @@ fn every_linux_target_the_release_builds_is_handed_to_its_own_manylinux_image() 
                 "{target}: the container ran `{expected}`; it ran {calls:?}"
             );
         }
+        // vault.centos.org refused the repositories' metadata, so every
+        // repository yum reads — the SCLo one the image installs its compilers
+        // from included — is kernel.org's copy of the same 7.9.2009 tree,
+        // still signature-checked, and set before yum installs anything. The
+        // aarch64 image reads the vault's `altarch` tree, which kernel.org
+        // mirrors under the same name.
+        let mirror = match arch {
+            "x86_64" => "https://archive.kernel.org/centos-vault/7.9.2009/",
+            _ => "https://archive.kernel.org/centos-vault/altarch/7.9.2009/",
+        };
+        assert_eq!(
+            configured_repositories(&dir),
+            [
+                ("base", "os/$basearch/"),
+                ("updates", "updates/$basearch/"),
+                ("extras", "extras/$basearch/"),
+                ("centos-sclo-rh", "sclo/$basearch/rh/"),
+            ]
+            .map(|(id, path)| (id.to_string(), format!("{mirror}{path}"), true)),
+            "{target}: the repositories yum reads"
+        );
+        let sed = calls
+            .iter()
+            .position(|call| call.starts_with("sed "))
+            .unwrap_or_else(|| {
+                panic!("{target}: the repositories were rewritten; it ran {calls:?}")
+            });
+        let yum = calls
+            .iter()
+            .position(|call| call.starts_with("yum install"))
+            .expect("yum ran");
+        assert!(sed < yum, "{target}: the mirror is set before yum installs");
         assert!(
             String::from_utf8_lossy(&output.stdout).contains(&format!("built the {target} wheel")),
             "{target}: success names the wheel it built"
@@ -349,9 +465,15 @@ fn a_container_step_that_fails_is_named_with_its_action_and_its_files_are_still_
     );
     for (fail_at, step, action) in [
         (
+            "sed",
+            "pointing yum at the CentOS 7 vault mirror",
+            "check that the image still names vault.centos.org in /etc/yum.repos.d",
+        ),
+        (
             "yum",
             "installing OpenSSL's Perl prerequisites with yum",
-            "check that the image's yum repositories answer",
+            "check that https://archive.kernel.org/centos-vault/ serves the os, updates, \
+             extras and sclo/<arch>/rh repositories for 7.9.2009 (under altarch/ for aarch64)",
         ),
         ("curl", "installing rustup 1.29.1", rustup),
         ("sha256sum", "installing rustup 1.29.1", rustup),
@@ -410,9 +532,9 @@ fn a_hand_back_that_fails_fails_a_build_that_compiled() {
 #[test]
 fn the_pull_request_check_builds_the_release_x86_64_linux_leg_through_the_recipe() {
     let block = job_block("ci.yml", "wheel");
-    // Linux arm64 is dropped from pull-request CI by the user's decision, so the
+    // Linux arm64 is left out of pull-request CI by the user's decision, so the
     // pull request builds the release's x86_64 Linux leg alone; release.yml's
-    // legs are the release workflows' to reshape.
+    // `build-linux-arm64` job builds the arm64 one on every release.
     let x86_64: Vec<(String, String)> = release_linux_legs()
         .into_iter()
         .filter(|(target, _)| target == "x86_64-unknown-linux-gnu")
@@ -457,11 +579,16 @@ fn the_pull_request_check_builds_the_release_x86_64_linux_leg_through_the_recipe
         block.contains("--expect-version \"$version\""),
         "the smoke test holds the installed binary to this tree's version"
     );
-    // The release reaches the same script through its own recipe's build phase.
+    // The release reaches the same script through its own recipes' build phase.
     let release = job_block("release.yml", "build-linux");
     assert!(
         release.contains("run: just release-linux build"),
         "release.yml's build-linux job builds through its recipe"
+    );
+    let release_arm64 = job_block("release.yml", "build-linux-arm64");
+    assert!(
+        release_arm64.contains("run: just release-linux-arm64 build"),
+        "release.yml's build-linux-arm64 job builds through its recipe"
     );
     let phase = fs::read_to_string(repo_root().join("scripts/release.mjs")).expect("release.mjs");
     assert!(
@@ -475,6 +602,11 @@ fn the_pull_request_check_builds_the_release_x86_64_linux_leg_through_the_recipe
             "release.yml build-linux",
             &release,
             "just release-linux build",
+        ),
+        (
+            "release.yml build-linux-arm64",
+            &release_arm64,
+            "just release-linux-arm64 build",
         ),
     ] {
         let built = block.find("run: just build").expect("the view is built");

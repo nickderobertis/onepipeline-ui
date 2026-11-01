@@ -13,21 +13,25 @@
 //! Everything here is a pure function of a [`RunView`], the run directory, and
 //! that document, so a payload can be built and asserted without a server.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
 
-use oneharness_core::domain::history::HistoryShowEntry;
+use oneharness_core::domain::history::{HistoryRecord, HistoryShowEntry};
 use oneharness_core::io::history;
-use onepipeline::agents::{AgentScope, AgentSession, Agents, RUN_ID_LABEL};
+use onepipeline::agents::{
+    AgentScope, AgentSession, Agents, ATTEMPT_LABEL, NODE_LABEL, RUN_ID_LABEL, SCOPE_LABEL,
+};
 // Under the name of the library that writes them. Three vocabularies here are
 // spelled alike and mean different things: `judge::Role` is who wrote a message,
 // `judge::TelemetryRole` is which side ran, and this module's `Party` is what a
 // member is to the pipeline.
 use onejudge as judge;
 use onepipeline::event::{Envelope, PipelineKind, Source};
+use onepipeline::note::NoteTurn;
 use onepipeline::plan::{Node, Plan};
-use onepipeline::views::{liveness_word, RunPaths, RunSummary, RunView};
+use onepipeline::views::{liveness_word, DriverLiveness, RunPaths, RunSummary, RunView};
+use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -42,6 +46,78 @@ use crate::filter::EventFilter;
 // also has a `Party`, and the two answer different questions — which side of a
 // conversation produced a record, and whose tokens a run spent.
 use crate::telemetry::{BucketName, Party as Spender, RunTelemetry};
+
+/// One reading of a run: the view's paths, launch record and fold, over the
+/// records a payload is built from.
+///
+/// Usually the whole merged store, exactly as [`RunView`] holds it. A timeline
+/// over a run that relayed one producer record twice reads its canonical store
+/// instead, and a live subscription rebuilding one owner's share of a payload
+/// reads that owner's records — neither of which `RunView` can hold: the engine's
+/// view is built only by reading a run, never from records a reader chose.
+#[derive(Clone, Copy)]
+pub struct Run<'a> {
+    /// Where the run's state lives.
+    pub paths: &'a RunPaths,
+    /// The records this reading is built over, in merge order.
+    pub events: &'a [Envelope],
+    /// Each of `events`' position in the merged store, where `events` is one
+    /// owner's share of it rather than the store itself.
+    positions: Option<&'a [usize]>,
+    /// The view itself: its launch record and its fold of the whole journal,
+    /// whatever `events` holds, and what only the engine can answer about the
+    /// whole run.
+    pub whole: &'a RunView,
+}
+
+impl<'a> Run<'a> {
+    /// The whole of what `view` read.
+    #[must_use]
+    pub fn of(view: &'a RunView) -> Self {
+        Self {
+            paths: &view.paths,
+            events: &view.events,
+            positions: None,
+            whole: view,
+        }
+    }
+
+    /// The same run, read over `events` instead.
+    #[must_use]
+    pub fn over(self, events: &'a [Envelope]) -> Self {
+        Self {
+            events,
+            positions: None,
+            ..self
+        }
+    }
+
+    /// The same run, read over one owner's share of its merged store: `events`,
+    /// each at the merged-store position `positions` names, so every address a
+    /// payload serves for one of them — its `journal_order`, its `e{index}` id —
+    /// is the one a reading of the whole store serves.
+    #[must_use]
+    pub(crate) fn share(self, events: &'a [Envelope], positions: &'a [usize]) -> Self {
+        Self {
+            events,
+            positions: Some(positions),
+            ..self
+        }
+    }
+
+    /// How the run is being driven: the engine's answer about the whole run.
+    fn liveness(&self) -> DriverLiveness {
+        self.whole.liveness()
+    }
+
+    /// The surfaces nobody has read, off the run's own channel.
+    fn unread_surfaces(&self) -> (usize, Option<u64>) {
+        self.whole.unread_surfaces()
+    }
+}
+
+pub(crate) mod live;
+pub(crate) mod transcript;
 
 /// The bound on an artifact body served in one response.
 ///
@@ -433,6 +509,11 @@ pub mod vcs {
     /// `{change_url, restored_base, at}` — a closed change request was reopened
     /// over the base branch restored on the origin at commit `at`.
     pub const CHANGE_REOPENED: &str = "change-reopened";
+    /// `{branch, head, base, change_url}` — a publication found its change
+    /// request open at the boundary its verification passed and resumed it at its
+    /// hosted checks, pushing nothing. Precedes that publication's
+    /// [`CHANGE_OPENED`]; not a [`PUSH`], because nothing was pushed.
+    pub const PUBLICATION_RESUMED: &str = "publication-resumed";
 
     /// The relayed kinds that do not, on their own, say a publication began.
     ///
@@ -761,7 +842,7 @@ mod edits {
     /// `context` op recorded it. Nothing writes this any more; runs that hold
     /// one are still read.
     pub const CONTEXT_ADDED: &str = "context-added";
-    /// `{node, addressee, text, criterion?, reached, completion_reason?}` — a
+    /// `{node, addressee, text, criterion?, reached, turn?, completion_reason?}` — a
     /// manager's note was delivered into a node's live conversation, or carried
     /// to that node's next dispatch because no turn of it took the note.
     pub const NOTE_DELIVERED: &str = "note-delivered";
@@ -786,6 +867,11 @@ mod edits {
     /// Closed, as the enum is: a word outside it is a record this build cannot
     /// read and is dropped rather than relayed for a client to fail on.
     pub const REACHED_WORDS: [&str; 5] = ["queued", "worker", "supervisor", "judged-with", CARRIED];
+    /// How the live turn that took a delivered note took it — the tag
+    /// `onepipeline::note::NoteTurn` is written under beside a `worker` or
+    /// `supervisor` [`REACHED`], and read back as that public enum. Absent from a
+    /// record written before the field existed, which says nothing about it.
+    pub const TURN: &str = "turn";
 }
 
 /// The party a record names as its own, when it names one this crate serves.
@@ -904,8 +990,9 @@ fn launcher_word(launcher: &str) -> &'static str {
 /// Closed because a client switches on it exhaustively: a word outside this set
 /// has no rendering, and the run's recorded result can hold any word at all.
 // llmlint: ignore-block[invalid_states_unrepresentable] the same filter, over a field the run's own result can hold any word at all in: `status_word` maps what the run wrote onto exactly this set, and `node_counts` still reports the raw word, which an enum would have destroyed.
-const NODE_STATUSES: [&str; 11] = [
+const NODE_STATUSES: [&str; 14] = [
     "pending",
+    "ready",
     "running",
     "waiting",
     "blocked",
@@ -915,22 +1002,23 @@ const NODE_STATUSES: [&str; 11] = [
     "failed",
     "parked",
     "cancelled",
+    // Finished work waiting on a release before it may land: held as a draft
+    // change request, or held unlanded on its origin where its publication opens
+    // none. The engine's words since 0.95.0, served as themselves.
+    "complete-but-draft",
+    "complete-but-held",
     "unknown",
 ];
 // llmlint: ignore-end[invalid_states_unrepresentable]
 
 /// The status word a client renders, from whatever the run recorded.
 ///
-/// One translation: the SDK's `ready` — eligible now, nothing dispatched — has
-/// no member in the client's vocabulary, and `pending` is what that vocabulary
-/// calls a node that has not started. Anything else the vocabulary does not hold
-/// is `unknown`, rather than passed through for a client to fail on or mapped
-/// onto a neighbouring meaning it does not have. The word itself is not lost:
-/// `node_counts` reports what the run actually wrote.
+/// The engine's own words pass through unchanged — `ready` among them, since
+/// schema 24. Anything else the vocabulary does not hold is `unknown`, rather
+/// than passed through for a client to fail on or mapped onto a neighbouring
+/// meaning it does not have. The word itself is not lost: `node_counts` reports
+/// what the engine said.
 fn status_word(status: &str) -> &str {
-    if status == "ready" {
-        return "pending";
-    }
     if NODE_STATUSES.contains(&status) {
         status
     } else {
@@ -943,7 +1031,14 @@ fn status_word(status: &str) -> &str {
 fn is_recorded_state(status: &str) -> bool {
     matches!(
         status,
-        "running" | "done" | "failed" | "waiting" | "parked" | "cancelled"
+        "running"
+            | "done"
+            | "failed"
+            | "waiting"
+            | "parked"
+            | "cancelled"
+            | "complete-but-draft"
+            | "complete-but-held"
     )
 }
 
@@ -992,9 +1087,9 @@ fn read_json(path: &Path) -> Option<Value> {
 /// could not be asked — in which case every timing the row carries is absent,
 /// which is what an unknown clock is.
 #[must_use]
-pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
+pub(crate) fn run_summary_over(view: &Run<'_>, telemetry: Option<&RunTelemetry>) -> Value {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for recorded in recorded_statuses(view).values() {
+    for recorded in node_statuses(view).values() {
         *counts.entry(recorded.status.clone()).or_insert(0) += 1;
     }
     let mut summary = Map::new();
@@ -1002,24 +1097,30 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     summary.insert("state".into(), json!(state_word(view)));
     summary.insert("phase".into(), json!(phase_word(view)));
     summary.insert("last_event".into(), last_event(view));
-    if let Some(at) = view.state.last_write_at {
+    if let Some(at) = view.whole.state.last_write_at {
         summary.insert("last_progress_at".into(), json!(at / 1_000));
     }
     summary.insert("timing_quality".into(), json!(timing_quality(view)));
     summary.insert("linkage_quality".into(), json!("labelled"));
-    summary.insert("timing".into(), timing(telemetry, &measured(&view.events)));
+    summary.insert("timing".into(), timing(telemetry, &measured(view.events)));
     summary.insert("node_counts".into(), json!(counts));
     summary.insert("launch".into(), launch(view));
+    if !view.whole.launch.labels.is_empty() {
+        summary.insert("labels".into(), json!(view.whole.launch.labels));
+    }
+    if let Some(group) = &view.whole.launch.group {
+        summary.insert("group".into(), json!(group));
+    }
     // Schema 18: where the run belongs and whether anything waits on it, read
     // off the fold exactly as `run_row` reads them off the summary — the launch
     // record's project, the launched plan's name through the SDK's own loader
     // (which is where the summary reads it, so a run whose journal holds no
     // plan to fold still names it), the SDK's own liveness word, and the
     // channel's unread count.
-    if !view.launch.project.is_empty() {
-        summary.insert("project".into(), json!(view.launch.project));
+    if !view.whole.launch.project.is_empty() {
+        summary.insert("project".into(), json!(view.whole.launch.project));
     }
-    if let Some(name) = onepipeline::views::plan_of(&view.paths)
+    if let Some(name) = onepipeline::views::plan_of(view.paths)
         .ok()
         .and_then(|plan| plan.name)
     {
@@ -1028,6 +1129,12 @@ pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
     summary.insert("liveness".into(), json!(view.liveness().as_str()));
     summary.insert("unread_surfaces".into(), json!(view.unread_surfaces().0));
     Value::Object(summary)
+}
+
+/// `run_summary`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn run_summary(view: &RunView, telemetry: Option<&RunTelemetry>) -> Value {
+    run_summary_over(&Run::of(view), telemetry)
 }
 
 /// The same row, read from the run's **bounded summary** rather than from a fold
@@ -1088,6 +1195,12 @@ pub fn run_row(
         json!(summary_node_counts(summary, paths)),
     );
     row.insert("launch".into(), summary_launch(run, summary));
+    if !summary.labels.is_empty() {
+        row.insert("labels".into(), json!(summary.labels));
+    }
+    if let Some(group) = &summary.group {
+        row.insert("group".into(), json!(group));
+    }
     // Schema 18, off the document and the two bounded reads beside it: the
     // project and name the summary records, the SDK's listing liveness over the
     // document, and the channel's unread count — `verbs::channel` over the
@@ -1103,6 +1216,71 @@ pub fn run_row(
         json!(crate::liveness::driver(summary).as_str()),
     );
     row.insert("unread_surfaces".into(), json!(unread_surfaces(paths)));
+    Value::Object(row)
+}
+
+/// One run as the sidebar shows it, and nothing it does not: the run's
+/// displayed name, the project group it sits under, its kind, its state, its
+/// node counts, when it last recorded activity and when it was launched.
+///
+/// The trimmed row a subscription pushes for every run that moves, read off the
+/// same bounded summary [`run_row`] is — never a fold of the journal — so a
+/// change anywhere on the host costs one small document and one small frame.
+/// `name` is the run's id, which is what the sidebar names a run by; the group's
+/// `name` is the plan name the run recorded, and its id where it recorded none.
+/// `started_at` is omitted for a launch that recorded no time, and `kind` is
+/// `null` for a run with no `kind` label.
+#[must_use]
+pub fn sidebar_row(run: &RunId, summary: &RunSummary, paths: &RunPaths) -> Value {
+    let counts = summary_node_counts(summary, paths);
+    let count = |word: &str| counts.get(word).copied().unwrap_or(0);
+    let mut row = Map::new();
+    row.insert("id".into(), json!(run));
+    row.insert("name".into(), json!(run));
+    row.insert(
+        "group".into(),
+        summary.group.as_ref().map_or(Value::Null, |group| {
+            // The engine's own name for a group: the launch's recorded name,
+            // else the project's native id — the part after its source.
+            let native = group
+                .split_once(':')
+                .map_or(group.as_str(), |(_, native)| native);
+            json!({
+                "project": group,
+                "name": summary.name.as_deref().filter(|name| !name.is_empty()).unwrap_or(native),
+            })
+        }),
+    );
+    row.insert(
+        "kind".into(),
+        summary
+            .labels
+            .get("kind")
+            .map_or(Value::Null, |kind| json!(kind)),
+    );
+    row.insert("state".into(), json!(summary_state_word(summary)));
+    row.insert(
+        "nodes".into(),
+        json!({
+            "total": counts.values().sum::<u64>(),
+            "done": count("done"),
+            "failed": count("failed"),
+            "running": count("running"),
+        }),
+    );
+    let started = summary
+        .started_at
+        .as_deref()
+        .filter(|at| OffsetDateTime::parse(at, &Rfc3339).is_ok());
+    let updated = summary
+        .last_write_at
+        .and_then(|at| rfc3339_of(i128::from(at)))
+        .or_else(|| started.map(str::to_owned))
+        .unwrap_or_else(|| rfc3339_of(0).unwrap_or_default());
+    row.insert("updated_at".into(), json!(updated));
+    if let Some(started) = started {
+        row.insert("started_at".into(), json!(started));
+    }
     Value::Object(row)
 }
 
@@ -1185,7 +1363,7 @@ fn summary_timing_quality(summary: &RunSummary) -> &'static str {
 /// **The run's own recorded result is the whole account for a run whose graph
 /// nothing folded** — a run this host cannot read a journal for records its
 /// nodes nowhere else — so an empty count falls back to it, exactly as
-/// [`recorded_statuses`] does for a node the graph does not name. A run whose
+/// [`node_statuses`] does for a node the graph does not name. A run whose
 /// graph the summary counted is counted from the summary alone: those counts are
 /// the projection's own statuses, which is what the graph payload renders from,
 /// so a row and the graph it opens cannot describe different graphs.
@@ -1205,58 +1383,65 @@ fn summary_launch(run: &RunId, summary: &RunSummary) -> Value {
     let mut record = Map::new();
     record.insert("launch_id".into(), json!(run));
     record.insert("launcher".into(), json!(launcher_word(&summary.launcher)));
+    if let Some(at) = &summary.started_at {
+        record.insert("started_at".into(), json!(at));
+    }
     if !summary.session.is_empty() {
         record.insert("session_key".into(), json!(session_key(&summary.session)));
     }
     Value::Object(record)
 }
 
-/// Every node's status as the run itself last wrote it, in the run's own words.
+/// Every node's status in the engine's own word, beside the outcome the run
+/// recorded for it.
 ///
 /// The same derivation the graph payload renders from, so a list row and the
-/// graph it opens cannot describe different graphs — the disagreement an
-/// operator would otherwise see between the two.
+/// graph it opens cannot describe different graphs — and the same word
+/// `onepipeline status` and `results` print, because those are the engine's
+/// `statuses()` too. Two views showing a node two different words is the failure
+/// this exists to rule out, and the engine's reading is the authoritative one:
+/// it is what decides what the run does next.
 ///
-/// Three accounts, in the order they are worth: **what the journal settled for
-/// that node**, then **what the run's own recorded result held for it**, then
-/// **what the graph derives for it**. Rounds are gone, and with them the reason
-/// this used to prefer a recorded document wholesale — a closed round's result
-/// was the only account of it that survived the *next* round starting, and
-/// nothing overwrites the fold now.
+/// What the run *recorded* for a node is not lost. The outcome is the
+/// settlement's own word where the fold kept one, and the recorded result's
+/// where that holds one; a node whose recorded status differs from the engine's
+/// (`not-completed`, `improvised`, a `blocked` the graph has since read as
+/// `skipped`) carries that recorded word as its outcome when nothing else does.
+/// `result.json` stays the whole account for a node the graph does not carry —
+/// a run whose plan this host cannot read.
 ///
-/// The order is what the three *are*. The first two are records of the node; the
-/// third is a gate recomputed from its dependencies on every read, so it is what
-/// a node nothing has recorded reads as and never an overrule of something that
-/// did. `result.json` — which the SDK rewrites whenever a driver closes out —
-/// holds words no settlement carried, and is the whole account for a run whose
-/// journal this host cannot fold.
-///
-/// It is the same precedence [`node_result`] keeps, so a node's status and its
+/// It is the same reading [`node_result`] keeps, so a node's status and its
 /// result can never come from two different accounts of it.
 ///
-/// The words are unmapped on purpose: a count reports what the run wrote, where
-/// a status a client switches on cannot.
-fn recorded_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
+/// The words are unmapped on purpose: a count reports what the engine said,
+/// where a status a client switches on cannot.
+fn node_statuses(view: &Run<'_>) -> BTreeMap<String, Recorded> {
     let document: BTreeMap<String, Recorded> = recorded_result(view).into_iter().collect();
     let mut statuses: BTreeMap<String, Recorded> = view
+        .whole
         .state
         .statuses()
         .into_iter()
         .map(|(node, derived)| {
-            let outcome = || view.state.outcomes.get(&node).cloned();
-            // What the journal settled for this node, which is an account of the
-            // node itself rather than of the graph around it.
-            let settled = view.state.recorded.get(&node).map(|status| Recorded {
-                status: status.status().as_str().to_owned(),
-                outcome: outcome(),
-            });
-            let recorded = settled
-                .or_else(|| document.get(&node).cloned())
-                .unwrap_or_else(|| Recorded {
-                    status: derived.as_str().to_owned(),
-                    outcome: outcome(),
-                });
-            (node, recorded)
+            let status = derived.as_str().to_owned();
+            // What the run itself recorded for the node: the journal's settlement
+            // first, then the document a driver wrote as it closed out.
+            let recorded = view
+                .whole
+                .state
+                .recorded
+                .get(&node)
+                .map(|settled| settled.status().as_str().to_owned())
+                .or_else(|| document.get(&node).map(|entry| entry.status.clone()));
+            let outcome = view
+                .whole
+                .state
+                .outcomes
+                .get(&node)
+                .cloned()
+                .or_else(|| document.get(&node).and_then(|entry| entry.outcome.clone()))
+                .or_else(|| recorded.filter(|word| *word != status));
+            (node, Recorded { status, outcome })
         })
         .collect();
     // A node the document names and the graph does not: a run whose plan this
@@ -1268,8 +1453,8 @@ fn recorded_statuses(view: &RunView) -> BTreeMap<String, Recorded> {
 }
 
 /// Every node the run's own recorded result has an entry for, in its words.
-fn recorded_result(view: &RunView) -> Vec<(String, Recorded)> {
-    recorded_result_at(&view.paths)
+fn recorded_result(view: &Run<'_>) -> Vec<(String, Recorded)> {
+    recorded_result_at(view.paths)
 }
 
 /// The same, located by the run's paths alone.
@@ -1310,25 +1495,28 @@ struct Recorded {
 // llmlint: ignore-end[invalid_states_unrepresentable]
 
 /// The run's own attribution to the session that launched it.
-fn launch(view: &RunView) -> Value {
+fn launch(view: &Run<'_>) -> Value {
     let mut record = Map::new();
     record.insert("launch_id".into(), json!(view.paths.run));
     record.insert(
         "launcher".into(),
-        json!(launcher_word(&view.launch.launcher)),
+        json!(launcher_word(&view.whole.launch.launcher)),
     );
-    if !view.launch.session.is_empty() {
+    if let Some(at) = view.whole.launch.launched_at() {
+        record.insert("started_at".into(), json!(at));
+    }
+    if !view.whole.launch.session.is_empty() {
         record.insert(
             "session_key".into(),
-            json!(session_key(&view.launch.session)),
+            json!(session_key(&view.whole.launch.session)),
         );
     }
     Value::Object(record)
 }
 
 /// How the run is being driven, as one lowercase word.
-fn state_word(view: &RunView) -> String {
-    liveness_word(view).to_lowercase().replace(' ', "-")
+fn state_word(view: &Run<'_>) -> String {
+    liveness_word(view.whole).to_lowercase().replace(' ', "-")
 }
 
 /// Which part of its loop the run is in, derived from what it recorded.
@@ -1343,11 +1531,11 @@ fn state_word(view: &RunView) -> String {
 /// right now, which under rounds was a run between them and is now a run whose
 /// frontier is empty. `starting` is the run that has no graph to converge on
 /// yet, which is what a launch that has recorded nothing since really is.
-fn phase_word(view: &RunView) -> &'static str {
-    if view.state.stop_recorded() {
+fn phase_word(view: &Run<'_>) -> &'static str {
+    if view.whole.state.stop_recorded() {
         return "finished";
     }
-    let statuses = view.state.statuses();
+    let statuses = view.whole.state.statuses();
     // A run with no graph yet has not begun converging on anything: a launch that
     // has recorded nothing since, or one whose plan this host cannot read.
     if statuses.is_empty() {
@@ -1356,10 +1544,10 @@ fn phase_word(view: &RunView) -> &'static str {
     if statuses.values().all(|status| status.as_str() == "done") {
         return "settled";
     }
-    if !view.state.decisions_pending.is_empty() || view.state.awaiting_human_action() {
+    if !view.whole.state.decisions_pending.is_empty() || view.whole.state.awaiting_human_action() {
         return "deciding";
     }
-    if view.state.surfaces_queued > view.state.surfaces_read {
+    if view.whole.state.surfaces_queued > view.whole.state.surfaces_read {
         return "surfacing";
     }
     if statuses.values().any(|status| status.as_str() == "running") {
@@ -1370,7 +1558,7 @@ fn phase_word(view: &RunView) -> &'static str {
 
 /// The kind of the run's most recent event, or `null` for a run that has
 /// recorded none — which is how a just-launched run reads on disk.
-fn last_event(view: &RunView) -> Value {
+fn last_event(view: &Run<'_>) -> Value {
     view.events
         .last()
         .map_or(Value::Null, |event| json!(event.kind.0))
@@ -1381,10 +1569,10 @@ fn last_event(view: &RunView) -> Value {
 /// A run still being driven is `partial` and one that has stopped driving is
 /// `complete`, which is the same distinction the round-open flag used to draw:
 /// what a run has not finished doing it has not finished measuring.
-fn timing_quality(view: &RunView) -> &'static str {
+fn timing_quality(view: &Run<'_>) -> &'static str {
     if view.events.is_empty() {
         "legacy"
-    } else if view.state.stop_recorded() || graph_complete(view) {
+    } else if view.whole.state.stop_recorded() || graph_complete(view) {
         "complete"
     } else {
         "partial"
@@ -1392,8 +1580,8 @@ fn timing_quality(view: &RunView) -> &'static str {
 }
 
 /// Whether every node the run recorded has settled `done`.
-fn graph_complete(view: &RunView) -> bool {
-    let statuses = view.state.statuses();
+fn graph_complete(view: &Run<'_>) -> bool {
+    let statuses = view.whole.state.statuses();
     !statuses.is_empty() && statuses.values().all(|status| status.as_str() == "done")
 }
 
@@ -1575,9 +1763,9 @@ fn timing_presence(measured: &Measured) -> Value {
 /// A relayed agent-graph envelope carries the session it came from in its
 /// labels; that is the whole of what the journal links, so a session appears
 /// here exactly when one is recorded and never inferred from anything else.
-fn sessions_of(view: &RunView, node: &str, declared: &DeclaredMembers) -> Vec<Value> {
+fn sessions_of(view: &Run<'_>, node: &str, declared: &DeclaredMembers) -> Vec<Value> {
     let mut seen: BTreeMap<String, Vec<&Envelope>> = BTreeMap::new();
-    for event in &view.events {
+    for event in view.events {
         if event.source != Source::Agentgraph || event.labels.node.as_deref() != Some(node) {
             continue;
         }
@@ -1632,7 +1820,7 @@ fn is_lost(status: &str) -> bool {
 ///
 /// This is one of the computations AGENTS.md proposes moving into the SDK: the
 /// agent reading the CLI sees the outcome word and not the class.
-fn failure_class(view: &RunView, node: &str, recorded: &Recorded) -> Option<&'static str> {
+fn failure_class(view: &Run<'_>, node: &str, recorded: &Recorded) -> Option<&'static str> {
     if !is_lost(status_word(&recorded.status)) {
         return None;
     }
@@ -1641,7 +1829,7 @@ fn failure_class(view: &RunView, node: &str, recorded: &Recorded) -> Option<&'st
         Some("checks-failed") => "checks",
         Some("publication-failed") => "publication",
         Some("timed-out") => "timeout",
-        _ if view.state.dispatched_at.contains_key(node) => "agent",
+        _ if view.whole.state.dispatched_at.contains_key(node) => "agent",
         _ => "unknown",
     })
 }
@@ -1724,7 +1912,7 @@ fn session_label(event: &Envelope) -> Option<&str> {
 }
 
 /// The events one node recorded, whichever library produced them.
-fn events_of<'a>(view: &'a RunView, node: &str) -> Vec<&'a Envelope> {
+fn events_of<'a>(view: &Run<'a>, node: &str) -> Vec<&'a Envelope> {
     view.events
         .iter()
         .filter(|event| event.labels.node.as_deref() == Some(node))
@@ -1733,7 +1921,7 @@ fn events_of<'a>(view: &'a RunView, node: &str) -> Vec<&'a Envelope> {
 
 /// One node's telemetry row.
 fn node_telemetry(
-    view: &RunView,
+    view: &Run<'_>,
     node: &str,
     recorded: &Recorded,
     transcripts: &Transcripts<'_>,
@@ -1745,7 +1933,7 @@ fn node_telemetry(
     if let Some(outcome) = &recorded.outcome {
         row.insert("outcome".into(), json!(outcome));
     }
-    if let Some(branch) = view.state.branches.get(node) {
+    if let Some(branch) = view.whole.state.branches.get(node) {
         row.insert("branch".into(), json!(branch));
     }
     if let Some(class) = failure_class(view, node, recorded) {
@@ -1774,16 +1962,16 @@ fn node_telemetry(
 
 /// The run's own telemetry document, as `GET /api/v2/runs/{run}` serves it.
 fn run_telemetry(
-    view: &RunView,
+    view: &Run<'_>,
     telemetry: Option<&RunTelemetry>,
     transcripts: &Transcripts<'_>,
 ) -> Value {
-    let statuses = recorded_statuses(view);
+    let statuses = node_statuses(view);
     let nodes: Vec<Value> = statuses
         .iter()
         .map(|(node, recorded)| node_telemetry(view, node, recorded, transcripts))
         .collect();
-    let measurements = measured(&view.events);
+    let measurements = measured(view.events);
     // What the run measured at a node, rather than across its whole clock: the
     // same records, filtered to the ones a node's own work produced.
     let at_nodes = measured(
@@ -1796,7 +1984,7 @@ fn run_telemetry(
     run.insert("state".into(), json!(state_word(view)));
     run.insert("phase".into(), json!(phase_word(view)));
     run.insert("last_event".into(), last_event(view));
-    if let Some(at) = view.state.last_write_at {
+    if let Some(at) = view.whole.state.last_write_at {
         run.insert("last_progress_at".into(), json!(at / 1_000));
     }
     run.insert("timing".into(), timing(telemetry, &measurements));
@@ -1959,9 +2147,9 @@ fn kind_word(node: &Node) -> &'static str {
 /// writes and `Plan` is still the published shape of it — so the deserialization
 /// is this crate's while the *schema* stays the SDK's, which is the same terms
 /// every other record here is read on.
-fn plan_of(view: &RunView) -> Option<Plan> {
-    if let Some(source) = view.state.plan.as_ref() {
-        return Some(view.state.graph.to_plan(source));
+fn plan_of(view: &Run<'_>) -> Option<Plan> {
+    if let Some(source) = view.whole.state.plan.as_ref() {
+        return Some(view.whole.state.graph.to_plan(source));
     }
     let text = std::fs::read_to_string(view.paths.plan()).ok()?;
     serde_json::from_str(&text).ok()
@@ -2008,7 +2196,7 @@ enum TurnState {
 /// record is provisional for every member whatever its harness, and the control
 /// protocol's only verb is `interrupt`, which costs the turn. `src/AGENTS.md`
 /// walks each closed route and names the upstream change that opens one.
-fn member_turn_states<'a>(view: &'a RunView, node: &str) -> Vec<(&'a str, TurnState)> {
+fn member_turn_states<'a>(view: &Run<'a>, node: &str) -> Vec<(&'a str, TurnState)> {
     let mut order: Vec<&str> = Vec::new();
     let mut states: BTreeMap<&str, TurnState> = BTreeMap::new();
     let relayed = view.events.iter().filter(|event| {
@@ -2091,7 +2279,7 @@ fn member_turn_states<'a>(view: &'a RunView, node: &str) -> Vec<(&'a str, TurnSt
 /// take the redirection is onejudge's `control`, which no published component
 /// exposes for a turn in flight; naming the field for the answer we cannot get
 /// would be the overclaim a planner acts on.
-fn node_control(view: &RunView, node: &str) -> Value {
+fn node_control(view: &Run<'_>, node: &str) -> Value {
     let states = member_turn_states(view, node);
     // The latest member to have spoken wins, exactly as the engine's address does:
     // that is the turn a note aimed at this node now would be correcting.
@@ -2123,7 +2311,7 @@ fn node_control(view: &RunView, node: &str) -> Value {
 /// account of it — nothing overwrites the fold now that no next round starts —
 /// and the recorded result is the fallback for a run whose journal folded to
 /// nothing.
-fn graph_state(view: &RunView) -> Option<Value> {
+fn graph_state(view: &Run<'_>) -> Option<Value> {
     let plan = plan_of(view)?;
     let task_ids: BTreeSet<&str> = plan.tasks.iter().map(|node| node.id.as_str()).collect();
     let result = read_json(&view.paths.result());
@@ -2131,7 +2319,7 @@ fn graph_state(view: &RunView) -> Option<Value> {
     // The same derivation the list row renders from — the fold per node, with the
     // recorded result filling the gaps — so a row and the graph it opens cannot
     // describe different graphs.
-    let statuses: BTreeMap<String, String> = recorded_statuses(view)
+    let statuses: BTreeMap<String, String> = node_statuses(view)
         .into_iter()
         .map(|(node, recorded)| (node, status_word(&recorded.status).to_owned()))
         .collect();
@@ -2170,10 +2358,11 @@ fn graph_state(view: &RunView) -> Option<Value> {
         .filter(|(_, blockers)| !blockers.as_array().is_some_and(Vec::is_empty))
         .collect();
 
+    let engine = engine_words(view);
     let node_results: Map<String, Value> = plan
         .tasks
         .iter()
-        .filter_map(|node| node_result(view, node, result.as_ref()))
+        .filter_map(|node| node_result(view, &engine, node, result.as_ref()))
         .collect();
 
     // Only work in flight has a turn to redirect, so this is one entry per node
@@ -2196,7 +2385,7 @@ fn graph_state(view: &RunView) -> Option<Value> {
     out.insert("decisions".into(), Value::Array(decisions(view)));
     out.insert(
         "attestations".into(),
-        json!(view.state.attestations.iter().collect::<Vec<_>>()),
+        json!(view.whole.state.attestations.iter().collect::<Vec<_>>()),
     );
     out.insert("result".into(), run_result(result.as_ref()));
     out.insert("last_seq".into(), json!(last_seq(view)));
@@ -2204,10 +2393,11 @@ fn graph_state(view: &RunView) -> Option<Value> {
     // accepted `set-run-node-sets`, which replaces the launch's list — an empty
     // replacement included — and the launch's where no edit has.
     let run_node_sets = view
+        .whole
         .state
         .run_node_sets
         .as_ref()
-        .unwrap_or(&view.launch.node_sets);
+        .unwrap_or(&view.whole.launch.node_sets);
     if !run_node_sets.is_empty() {
         out.insert("run_node_sets".into(), json!(run_node_sets));
     }
@@ -2226,8 +2416,9 @@ fn graph_state(view: &RunView) -> Option<Value> {
 /// Each entry is the decision's own kind and the nodes it unblocks when it is
 /// cleared, which is exactly what `decision-pending` carries and what
 /// `decision-cleared` will release.
-fn decisions(view: &RunView) -> Vec<Value> {
-    view.state
+fn decisions(view: &Run<'_>) -> Vec<Value> {
+    view.whole
+        .state
         .decisions_pending
         .iter()
         .map(|(id, pending)| {
@@ -2288,7 +2479,7 @@ const RESULT_FIELDS: &[&str] = &[
 ///
 /// The last one wins: a node that settled more than once is a node that was
 /// retried or replaced, and the latest settlement is what happened.
-fn settlement(view: &RunView, node: &str) -> Option<Map<String, Value>> {
+fn settlement(view: &Run<'_>, node: &str) -> Option<Map<String, Value>> {
     view.events
         .iter()
         .rev()
@@ -2300,18 +2491,41 @@ fn settlement(view: &RunView, node: &str) -> Option<Map<String, Value>> {
         .map(|event| event.payload.clone())
 }
 
+/// A node's status as the engine's `statuses()` words it.
+///
+/// The SDK keeps its status enum private, so the word is what crosses; the field
+/// is private to this module, and [`engine_words`] is the one place a value is
+/// made, so nothing but an engine word can reach a node's served status.
+#[derive(Clone, Copy)]
+struct EngineWord(&'static str);
+
+/// Every node's [`EngineWord`], from the derivation every view serves.
+fn engine_words(view: &Run<'_>) -> BTreeMap<String, EngineWord> {
+    view.whole
+        .state
+        .statuses()
+        .into_iter()
+        .map(|(node, status)| (node, EngineWord(status.as_str())))
+        .collect()
+}
+
 /// One node's result: what the live fold says, or — for a node the fold has
 /// nothing for — what the run's own recorded result document held.
 ///
-/// The fold leads, in the same order [`recorded_statuses`] reads them. There is
+/// The fold leads, in the same order [`node_statuses`] reads them. There is
 /// no closed round whose fold has moved on, so the fold is always the current
 /// account; the recorded document is what a run whose journal this host cannot
 /// fold still has, and it holds words no settlement carried. A node in neither is
 /// a node the run has nothing to say about, and it is served no entry at all.
-fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(String, Value)> {
+fn node_result(
+    view: &Run<'_>,
+    engine: &BTreeMap<String, EngineWord>,
+    node: &Node,
+    result: Option<&Value>,
+) -> Option<(String, Value)> {
     let mut item = Map::new();
     item.insert("kind".into(), json!(kind_word(node)));
-    if let Some(status) = view.state.recorded.get(&node.id) {
+    if let Some(status) = view.whole.state.recorded.get(&node.id) {
         let word = status_word(status.status().as_str());
         item.insert("status".into(), json!(word));
         item.insert("completed".into(), json!(word == "done"));
@@ -2328,14 +2542,17 @@ fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(S
                     item.insert((*field).to_owned(), value.clone());
                 }
             }
+            if let Some(awaiting) = settled_awaiting(&settled) {
+                item.insert("awaiting".into(), awaiting);
+            }
         }
-        if let Some(outcome) = view.state.outcomes.get(&node.id) {
+        if let Some(outcome) = view.whole.state.outcomes.get(&node.id) {
             item.insert("outcome".into(), json!(outcome));
         }
-        if let Some(branch) = view.state.branches.get(&node.id) {
+        if let Some(branch) = view.whole.state.branches.get(&node.id) {
             item.insert("branch".into(), json!(branch));
         }
-        if let Some(url) = view.state.change_urls.get(&node.id) {
+        if let Some(url) = view.whole.state.change_urls.get(&node.id) {
             item.insert("pr".into(), json!(url));
         }
     } else {
@@ -2361,6 +2578,30 @@ fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(S
             item.insert("status".into(), json!(word));
         }
     }
+    // The engine's word for the node, which every other view of it serves too;
+    // the word the run recorded, where it differs and no outcome was recorded,
+    // rides as the outcome rather than being lost — see [`node_statuses`].
+    if let Some(EngineWord(word)) = engine.get(&node.id).copied() {
+        let recorded = view
+            .whole
+            .state
+            .recorded
+            .get(&node.id)
+            .map(|settled| settled.status().as_str().to_owned())
+            .or_else(|| {
+                result
+                    .and_then(|r| r["nodes"].as_array())
+                    .and_then(|nodes| nodes.iter().find(|entry| entry["id"] == json!(node.id)))
+                    .and_then(|entry| entry["status"].as_str())
+                    .map(str::to_owned)
+            })
+            .filter(|recorded| recorded != word);
+        if let Some(recorded) = recorded.filter(|_| !item.contains_key("outcome")) {
+            item.insert("outcome".into(), json!(recorded));
+        }
+        item.insert("status".into(), json!(status_word(word)));
+        item.insert("completed".into(), json!(word == "done"));
+    }
     // The release that carried this node's work, beside the change request that
     // opened it — and absent, never null, for a node the run recorded no release
     // for, exactly as `pr` is absent for a node that opened no change request.
@@ -2374,7 +2615,7 @@ fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(S
     if let Some(release) = landing_commit(&mine).and_then(|commit| release_of(view, commit)) {
         item.insert("release".into(), release);
     }
-    if let Some(finished) = view.state.completed_steps.get(&node.id) {
+    if let Some(finished) = view.whole.state.completed_steps.get(&node.id) {
         let steps: Vec<Value> = node
             .steps
             .iter()
@@ -2393,6 +2634,29 @@ fn node_result(view: &RunView, node: &Node, result: Option<&Value>) -> Option<(S
         }
     }
     Some((node.id.clone(), Value::Object(item)))
+}
+
+/// The releases a settlement says its node still awaits, as the engine's
+/// `node-settled` record lists them: `[{producer, target}]`, one per release, in
+/// its order.
+///
+/// Read off the record rather than out of its `detail`, which is a sentence for a
+/// person and names at most the first. An entry without both a producer and a
+/// target names no release and is not served as one; a record with no readable
+/// entry is served **no `awaiting` at all**, never an empty list that would read
+/// as a node waiting on nothing.
+fn settled_awaiting(settled: &Map<String, Value>) -> Option<Value> {
+    let entries: Vec<Value> = settled
+        .get("awaiting")?
+        .as_array()?
+        .iter()
+        .filter_map(|entry| {
+            let producer = non_empty(entry.get("producer").and_then(Value::as_str))?;
+            let target = non_empty(entry.get("target").and_then(Value::as_str))?;
+            Some(json!({ "producer": producer, "target": target }))
+        })
+        .collect();
+    (!entries.is_empty()).then_some(Value::Array(entries))
 }
 
 fn kind_word_of_step(step: &onepipeline::plan::Step) -> &'static str {
@@ -2432,7 +2696,7 @@ fn run_result(result: Option<&Value>) -> Value {
 }
 
 /// The highest per-stream sequence number the run recorded.
-fn last_seq(view: &RunView) -> u64 {
+fn last_seq(view: &Run<'_>) -> u64 {
     view.events.iter().map(|event| event.seq).max().unwrap_or(0)
 }
 
@@ -2442,11 +2706,34 @@ fn last_seq(view: &RunView) -> u64 {
 /// and a client that used to index `rounds` is reading a schema this no longer
 /// serves.
 #[must_use]
-pub fn run_detail(
-    view: &RunView,
+pub(crate) fn run_detail_over(
+    view: &Run<'_>,
     declared: &DeclaredMembers,
     include_conversations: bool,
     telemetry: Option<&RunTelemetry>,
+    agents: Option<usize>,
+    filter: &EventFilter,
+) -> Value {
+    detail_document(
+        view,
+        declared,
+        include_conversations,
+        telemetry,
+        json!(onepipeline::telemetry::of_run(view.paths, view.events)),
+        agents,
+        filter,
+    )
+}
+
+/// The detail, with the SDK's telemetry document already folded: the one part
+/// of it that reads the whole journal however few records moved, which a live
+/// reading folds on its own clock rather than on every change.
+fn detail_document(
+    view: &Run<'_>,
+    declared: &DeclaredMembers,
+    include_conversations: bool,
+    telemetry: Option<&RunTelemetry>,
+    sdk_telemetry: Value,
     agents: Option<usize>,
     filter: &EventFilter,
 ) -> Value {
@@ -2470,7 +2757,11 @@ pub fn run_detail(
     if let Some(count) = agents {
         run["agent_count"] = json!(count);
     }
+    // What each node was last seen doing, over the whole journal whatever the
+    // filter said: it is a fact about the run, which a filter never shapes.
+    run["live_activity"] = json!(live_activity_over(view, &EventFilter::default()));
     payload.insert("run".into(), run);
+    payload.insert("telemetry".into(), sdk_telemetry);
     payload.insert("graph".into(), graph_state(view).unwrap_or(Value::Null));
     payload.insert(
         "conversations".into(),
@@ -2483,6 +2774,26 @@ pub fn run_detail(
     payload.insert("node_details".into(), node_details(view));
     payload.insert("launch".into(), launch(view));
     Value::Object(payload)
+}
+
+/// `run_detail`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn run_detail(
+    view: &RunView,
+    declared: &DeclaredMembers,
+    include_conversations: bool,
+    telemetry: Option<&RunTelemetry>,
+    agents: Option<usize>,
+    filter: &EventFilter,
+) -> Value {
+    run_detail_over(
+        &Run::of(view),
+        declared,
+        include_conversations,
+        telemetry,
+        agents,
+        filter,
+    )
 }
 
 /// One piece of evidence a node's work stored beside the stream.
@@ -2542,7 +2853,7 @@ fn verdict_of(event: &Envelope) -> bool {
 }
 
 /// Every artifact one node's events stored, oldest first.
-fn evidence<'a>(view: &'a RunView, node: &str) -> Vec<Evidence<'a>> {
+fn evidence<'a>(view: &Run<'a>, node: &str) -> Vec<Evidence<'a>> {
     let mine: Vec<&Envelope> = view
         .events
         .iter()
@@ -2585,10 +2896,10 @@ fn evidence<'a>(view: &'a RunView, node: &str) -> Vec<Evidence<'a>> {
 /// `onevcs` reports every transition of every check it waits on — a check that
 /// queued, started and finished is three records of the same name — so what is
 /// served is the last account of each, in the order the run first saw them.
-/// `state` is the check's conclusion once it reached one and its host status
-/// while it has not, which is the one word a reader is asking for; the word it
-/// moved from is beside it, and the log the settled check stored is named so a
-/// failed one can be read rather than only counted.
+/// `state` keeps the combined conclusion-or-status reading for existing clients.
+/// Remote progress is served separately as `status` and `conclusion`, with the
+/// check's own URL and producer timestamps where recorded. Its retained log is
+/// still named so a failed check can be read rather than only counted.
 fn observed_checks(events: &[&Envelope]) -> Vec<Value> {
     let mut order: Vec<&str> = Vec::new();
     let mut latest: BTreeMap<&str, Value> = BTreeMap::new();
@@ -2620,6 +2931,25 @@ fn observed_checks(events: &[&Envelope]) -> Vec<Value> {
         }
         if let Some(status) = status {
             check.insert("status".into(), json!(status));
+        }
+        // The conclusion/time keys follow onevcs's change-check-times golden. The
+        // existing optional check-address slot reads url only when a record has it;
+        // absent/null/empty metadata stays absent. Host Check is not an event writer.
+        // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 (Cargo.lock) declares no change-check payload schema, so there is no producer declaration for a drift gate; the producer-schema contract test explicitly skips VCS for that reason.
+        for key in ["conclusion", "url", "started_at", "completed_at"] {
+            if let Some(value) = event
+                .payload
+                .get(key)
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .filter(|value| match key {
+                    "url" => url::Url::parse(value).is_ok(),
+                    "started_at" | "completed_at" => OffsetDateTime::parse(value, &Rfc3339).is_ok(),
+                    _ => true,
+                })
+            {
+                check.insert(key.into(), json!(value));
+            }
         }
         if let Some(artifact) = event.artifacts.first() {
             check.insert("artifact_id".into(), json!(artifact.id));
@@ -2686,7 +3016,7 @@ fn landing_commit<'a>(events: &[&'a Envelope]) -> Option<&'a str> {
 /// inventing the rest is worse than serving none. `style` is the one optional
 /// field: an envelope written before that field existed carries none, and the
 /// schema the browser holds this to says so.
-fn release_of(view: &RunView, commit: &str) -> Option<Value> {
+fn release_of(view: &Run<'_>, commit: &str) -> Option<Value> {
     let observed = view.events.iter().rev().find(|event| {
         event.source == Source::Vcs
             && event.kind.0 == vcs::RELEASE_OBSERVED
@@ -2708,9 +3038,10 @@ fn release_of(view: &RunView, commit: &str) -> Option<Value> {
 /// `None` when the run recorded neither a branch for the node nor a publication
 /// record of any kind: an absent publication is a node that published nothing,
 /// where an empty one would read as a publication that reached nowhere.
-fn publication_of(view: &RunView, node: &str, events: &[&Envelope]) -> Option<Value> {
+fn publication_of(view: &Run<'_>, node: &str, events: &[&Envelope]) -> Option<Value> {
     const OPENED: [&str; 2] = [vcs::CHANGE_OPENED, vcs::CHANGE_MERGED];
     let branch = view
+        .whole
         .state
         .branches
         .get(node)
@@ -2718,6 +3049,7 @@ fn publication_of(view: &RunView, node: &str, events: &[&Envelope]) -> Option<Va
         .or_else(|| last_recorded(events, &[vcs::SESSION_OPENED], "branch"));
     let merged = recorded_any(events, &MERGED)
         || view
+            .whole
             .state
             .outcomes
             .get(node)
@@ -2731,6 +3063,7 @@ fn publication_of(view: &RunView, node: &str, events: &[&Envelope]) -> Option<Va
     }
     publication.insert("merged".into(), json!(merged));
     if let Some(url) = view
+        .whole
         .state
         .change_urls
         .get(node)
@@ -2754,9 +3087,10 @@ fn publication_of(view: &RunView, node: &str, events: &[&Envelope]) -> Option<Va
 }
 
 /// The publication and verification evidence each node left behind.
-fn node_details(view: &RunView) -> Value {
+fn node_details(view: &Run<'_>) -> Value {
     let mut details: Map<String, Value> = Map::new();
     let mut nodes: BTreeSet<&str> = view
+        .whole
         .state
         .branches
         .keys()
@@ -2831,12 +3165,18 @@ fn node_details(view: &RunView) -> Value {
 /// settled member's stored report where the run holds one, and out of the
 /// session's own records where it does not.
 #[must_use]
-pub fn conversations(view: &RunView, declared: &DeclaredMembers) -> Vec<Value> {
+pub(crate) fn conversations_over(view: &Run<'_>, declared: &DeclaredMembers) -> Vec<Value> {
     conversations_under(
         view,
         &Transcripts::of(view, declared),
         &EventFilter::default(),
     )
+}
+
+/// `conversations`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn conversations(view: &RunView, declared: &DeclaredMembers) -> Vec<Value> {
+    conversations_over(&Run::of(view), declared)
 }
 
 /// The transcripts a reader's filter admits, each as the whole session it is.
@@ -2845,7 +3185,7 @@ pub fn conversations(view: &RunView, declared: &DeclaredMembers) -> Vec<Value> {
 /// empty transcript would say the session recorded nothing, which is a different
 /// fact from "this reading is not about it".
 fn conversations_under(
-    view: &RunView,
+    view: &Run<'_>,
     transcripts: &Transcripts<'_>,
     filter: &EventFilter,
 ) -> Vec<Value> {
@@ -2936,10 +3276,10 @@ struct StoredReport<'a> {
 
 impl<'a> Transcripts<'a> {
     /// Fold every session the run relayed, in the order it first relayed them.
-    fn of(view: &'a RunView, declared: &'a DeclaredMembers) -> Self {
+    fn of(view: &Run<'a>, declared: &'a DeclaredMembers) -> Self {
         let mut order: Vec<&'a str> = Vec::new();
         let mut grouped: BTreeMap<&'a str, Vec<&'a Envelope>> = BTreeMap::new();
-        for event in &view.events {
+        for event in view.events {
             if event.source != Source::Agentgraph {
                 continue;
             }
@@ -3127,7 +3467,7 @@ struct ReportedTurn {
 ///
 /// Returned rather than consumed here because it is also the moment the report
 /// was written, which is the only stamp [`judge_conclusion`] can carry.
-fn settlement_of<'a>(view: &'a RunView, session: &str) -> Option<&'a Envelope> {
+fn settlement_of<'a>(view: &Run<'a>, session: &str) -> Option<&'a Envelope> {
     view.events
         .iter()
         .find(|event| event.kind.0 == graph::MEMBER_SETTLED && spells_session(event, session))
@@ -3152,7 +3492,7 @@ fn spells_session(event: &Envelope, session: &str) -> bool {
 /// is not a decision this crate can state, so it is dropped rather than served
 /// with a hole. Either way the order is the one recorded, which is the panel's.
 fn judge_decisions(
-    view: &RunView,
+    view: &Run<'_>,
     session: &str,
     report: Option<&judge::Report>,
 ) -> BTreeMap<u64, Vec<Value>> {
@@ -3209,7 +3549,7 @@ fn judge_decisions(
 /// reading below takes what it says as fact. So the values are checked here and
 /// nowhere else — a caller holding a `judge::Report` is holding one whose stamps
 /// parse.
-fn read_report(view: &RunView, settlement: &Envelope) -> Option<judge::Report> {
+fn read_report(view: &Run<'_>, settlement: &Envelope) -> Option<judge::Report> {
     let bytes = fs::read(report_path(view, settlement)).ok()?;
     let report: judge::Report = serde_json::from_slice(&bytes).ok()?;
     (report.schema_version <= judge::SCHEMA_VERSION && well_stamped(&report)).then_some(report)
@@ -3416,13 +3756,15 @@ struct Words {
 }
 
 impl Words {
-    /// The words among one turn's relayed `turn-activity` summaries.
-    fn of(summaries: &[&Envelope]) -> Self {
+    /// The words among one turn's relayed `turn-activity` summaries, each read
+    /// whole through [`transcript::read`] — `reads` is that reading of
+    /// `summaries`, position for position.
+    fn of(summaries: &[&Envelope], reads: &[Option<transcript::Read>]) -> Self {
         let mut words = Self::default();
-        for event in summaries {
-            let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
-            if let Some(kind) = field(graph::KIND) {
-                words.took(kind, field(graph::OUTPUT));
+        for (event, read) in summaries.iter().zip(reads) {
+            if let Some(kind) = event.payload.get(graph::KIND).and_then(Value::as_str) {
+                let said = read.as_ref().map(transcript::Read::words);
+                words.took(kind, said.as_deref());
             }
         }
         words
@@ -3486,13 +3828,13 @@ impl Words {
 /// published is served as an entry of its own rather than dropped: it is a thing
 /// the run recorded, and the whole point of reading a live turn is that nothing
 /// else holds it yet.
-fn live_tools(summaries: &[&Envelope]) -> Vec<Value> {
+fn live_tools(summaries: &[&Envelope], reads: &[Option<transcript::Read>]) -> Vec<Value> {
     let mut served: Vec<Value> = Vec::new();
     // Where each unanswered call landed in `served`, with the two things an
     // observation is joined by. Only calls are registered here: an observation
     // answers a call and is never answered itself.
     let mut open: Vec<(usize, Option<String>, Option<u64>)> = Vec::new();
-    for (position, event) in summaries.iter().enumerate() {
+    for (position, (event, read)) in summaries.iter().zip(reads).enumerate() {
         let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
         // The agent's own words are not a call and answer none: they are the
         // turn's `assistant` and `reasoning`, read by [`Words::of`]. Skipped in
@@ -3502,6 +3844,21 @@ fn live_tools(summaries: &[&Envelope]) -> Vec<Value> {
         }
         let recorded = event.payload.get(graph::INDEX).and_then(Value::as_u64);
         let identity = field(graph::TOOL_CALL_ID);
+        // What the entry holds, read whole: the call's input as the harness
+        // recorded it and what the tool returned, or — for a reference that
+        // resolved to nothing — the line saying so, in the output's place.
+        let (input, output) = match read {
+            Some(read) => match read.tool() {
+                Some((input, output)) => (input.unwrap_or(Value::Null), json!(output)),
+                None => (Value::Null, json!(read.words())),
+            },
+            None => (Value::Null, Value::Null),
+        };
+        // The recorder's own flags, served only on a copy it cut that nothing
+        // whole could be found for — never on text read out of a history file.
+        let cut = read.as_ref().is_some_and(transcript::Read::cut);
+        let output_cut = cut && truthy(event, graph::OUTPUT_TRUNCATED);
+        let input_cut = cut && truthy(event, graph::TRUNCATED);
         // `tool_result` is the one word the producer closes: it declares the
         // observation and leaves a *call's* kind open, because that word is the
         // harness's own (`tool_use` on one, `tool_call` on the next) and this
@@ -3515,8 +3872,8 @@ fn live_tools(summaries: &[&Envelope]) -> Vec<Value> {
         if field(graph::KIND) == Some(graph::TOOL_RESULT) {
             if let Some(at) = answered(&open, identity, recorded) {
                 let entry = open.remove(at).0;
-                served[entry][graph::OUTPUT] = json!(field(graph::OUTPUT));
-                if truthy(event, graph::OUTPUT_TRUNCATED) {
+                served[entry][graph::OUTPUT] = output;
+                if output_cut {
                     served[entry][graph::OUTPUT_TRUNCATED] = json!(true);
                 }
                 continue;
@@ -3528,16 +3885,27 @@ fn live_tools(summaries: &[&Envelope]) -> Vec<Value> {
             "index": recorded.map_or_else(|| json!(position), |index| json!(index)),
             "kind": field(graph::KIND).unwrap_or_default(),
             "name": field(graph::NAME),
-            "input": field(graph::DETAIL),
-            "output": field(graph::OUTPUT),
+            "input": input,
+            "output": output,
         });
-        if truthy(event, graph::OUTPUT_TRUNCATED) {
+        if let Some(identity) = identity {
+            entry["toolCallId"] = json!(identity);
+        }
+        if output_cut {
             entry[graph::OUTPUT_TRUNCATED] = json!(true);
+        }
+        if input_cut {
+            entry[INPUT_TRUNCATED] = json!(true);
         }
         served.push(entry);
     }
     served
 }
+
+/// Whether the recorder cut a call's input summary, on a copy nothing whole could
+/// be found for: the producer's own `truncated`, which on an activity is about
+/// its `detail`, served beside the `input` that detail became.
+const INPUT_TRUNCATED: &str = "input_truncated";
 
 /// Which unanswered call one observation answers, as a position in `open`.
 ///
@@ -3827,39 +4195,6 @@ struct LiveTurn<'a> {
 }
 
 impl LiveTurn<'_> {
-    /// The message this turn was given to answer, or `None` where the record that
-    /// opened it never reached the journal.
-    fn instruction(&self) -> Option<&str> {
-        self.started?
-            .payload
-            .get(graph::INSTRUCTION)
-            .and_then(Value::as_str)
-    }
-
-    /// This party's own words for this turn, or `None` where it published none.
-    ///
-    /// `None` rather than an empty string on purpose: a session that captured no
-    /// text still has to read as having captured none, and a single-sided member
-    /// publishes no `turn-message` at all — its words are in the report it leaves
-    /// when it settles, and nowhere else while it runs.
-    ///
-    /// Both member kinds publish at most one of these per turn per party. A
-    /// producer that published several wrote one reply in parts, so they are
-    /// joined in the order it published them: serving one part would drop the
-    /// rest, which is the one thing a transcript may not do.
-    fn text(&self) -> Option<String> {
-        if self.said.is_empty() {
-            return None;
-        }
-        Some(
-            self.said
-                .iter()
-                .filter_map(|event| event.payload.get(graph::TEXT).and_then(Value::as_str))
-                .collect::<Vec<_>>()
-                .join("\n\n"),
-        )
-    }
-
     /// When this turn began: the instant the producer stamped, from whichever of
     /// its two records carries one this crate can order.
     ///
@@ -3886,32 +4221,6 @@ impl LiveTurn<'_> {
         let started = millis_of(self.started_at()?)?;
         let finished = millis_of(self.finished_at()?)?;
         u64::try_from(finished.checked_sub(started)?).ok()
-    }
-
-    /// The producer's own flags for the two texts this turn serves, exactly where
-    /// it flagged one.
-    ///
-    /// They ride the `unknown` map every turn has always carried, because the
-    /// turn shape declares no field for them and this reading adds none. A text
-    /// the producer cut is served cut — the rest of it is in the report the member
-    /// stores when it settles — and a reader has to be able to tell that from a
-    /// reply that was simply short.
-    fn cut(&self) -> Map<String, Value> {
-        let mut flags = Map::new();
-        if self
-            .started
-            .is_some_and(|event| truthy(event, graph::INSTRUCTION_TRUNCATED))
-        {
-            flags.insert(graph::INSTRUCTION_TRUNCATED.into(), json!(true));
-        }
-        if self
-            .said
-            .iter()
-            .any(|event| truthy(event, graph::TRUNCATED))
-        {
-            flags.insert(graph::TRUNCATED.into(), json!(true));
-        }
-        flags
     }
 }
 
@@ -3945,6 +4254,41 @@ fn live_transcript<'a>(events: &[&'a Envelope]) -> BTreeMap<(u64, String), LiveT
         }
     }
     turns
+}
+
+/// This party's own words for one turn, in the order it published them.
+///
+/// Both member kinds publish at most one `turn-message` per turn per party. A
+/// producer that published several wrote one reply in parts, so they are joined
+/// in that order: serving one part would drop the rest, which is the one thing a
+/// transcript may not do.
+fn said_text(said: &[transcript::Read]) -> String {
+    said.iter()
+        .map(transcript::Read::words)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// The recorder's own flags for the two texts a turn serves, exactly where it
+/// cut one and nothing whole of it could be found.
+///
+/// They ride the `unknown` map every turn has always carried. A turn read out of
+/// its history file carries neither — the file holds the text whole — so they
+/// appear only on a run recorded before turn records pointed at their transcript,
+/// where neither the member's report nor a history file the run names holds the
+/// whole text, and a reader has to be told that the copy is all there is.
+fn recorder_cut(
+    instruction: Option<&transcript::Read>,
+    said: &[transcript::Read],
+) -> Map<String, Value> {
+    let mut flags = Map::new();
+    if instruction.is_some_and(transcript::Read::cut) {
+        flags.insert(graph::INSTRUCTION_TRUNCATED.into(), json!(true));
+    }
+    if said.iter().any(transcript::Read::cut) {
+        flags.insert(graph::TRUNCATED.into(), json!(true));
+    }
+    flags
 }
 
 /// Whether one turn record is a turn of this transcript — the agent's own.
@@ -4016,7 +4360,7 @@ fn turn_key(event: &Envelope) -> Option<(u64, String)> {
 ///
 /// `docs/contract.md` states the same precedence for a reader of the wire.
 fn conversation_document(
-    view: &RunView,
+    view: &Run<'_>,
     declared: &DeclaredMembers,
     transcript: &SessionTranscript<'_>,
     events: &[&Envelope],
@@ -4032,6 +4376,9 @@ fn conversation_document(
         Some(_) => BTreeMap::new(),
         None => live_transcript(&transcript.records),
     };
+    // Where a cut copy of a run recorded before references is recovered whole
+    // from, read only if one asks.
+    let sources = transcript::Sources::of(view.paths, view.events, session, node.as_deref());
     // What each judge of a stacked panel decided, over the whole store rather than
     // the reader's listing, for the reason every other figure on a row is.
     let decided = judge_decisions(view, session, reported);
@@ -4090,7 +4437,33 @@ fn conversation_document(
                 .zip(reported)
                 .and_then(|(turn, report)| agent_session(report, turn));
             let summaries = turn.map_or(&[][..], |turn| &turn.summaries[..]);
-            let live_words = Words::of(summaries);
+            // Every record of this turn read whole, for a session no report
+            // holds; a report is the whole of the reading where there is one.
+            // A prompt is recovered from whichever invocation it is the head
+            // of; what the turn said and did, only from that invocation.
+            let ran_as =
+                transcript::TurnSources::of(&sources, relayed.and_then(|live| live.started));
+            let reads: Vec<Option<transcript::Read>> = match recorded {
+                Some(_) => Vec::new(),
+                None => summaries
+                    .iter()
+                    .map(|event| transcript::read(event, Some(&ran_as)))
+                    .collect(),
+            };
+            let instruction = relayed
+                .filter(|_| recorded.is_none())
+                .and_then(|live| live.started)
+                .and_then(|event| transcript::read(event, Some(&sources)));
+            let said: Vec<transcript::Read> = relayed
+                .filter(|_| recorded.is_none())
+                .map(|live| {
+                    live.said
+                        .iter()
+                        .filter_map(|event| transcript::read(event, Some(&ran_as)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let live_words = Words::of(summaries, &reads);
             let mut served = json!({
                 "assistant": match recorded {
                     // Explicitly absent rather than empty: the report holds this
@@ -4101,7 +4474,9 @@ fn conversation_document(
                     // supervisor's reach a reader as the next turn's prompt,
                     // which is what it was asked rather than what it said.
                     None => json!(live_words.assistant(
-                        relayed.filter(|_| event.is_some_and(agent_turn)).and_then(LiveTurn::text),
+                        relayed
+                            .filter(|_| event.is_some_and(agent_turn) && !said.is_empty())
+                            .map(|_| said_text(&said)),
                     )),
                 },
                 "durationMs": match ran {
@@ -4159,10 +4534,10 @@ fn conversation_document(
                 },
                 "tools": match recorded {
                     Some(turn) => Value::Array(turn.tools.clone()),
-                    None => Value::Array(live_tools(summaries)),
+                    None => Value::Array(live_tools(summaries, &reads)),
                 },
                 "unknown": with_attribution(
-                    relayed.map(LiveTurn::cut).unwrap_or_default(),
+                    recorder_cut(instruction.as_ref(), &said),
                     numbered
                         .and_then(|turn| u32::try_from(turn).ok())
                         .zip(reported)
@@ -4193,10 +4568,10 @@ fn conversation_document(
                 // asked and not what they were asked.
                 "user": match recorded {
                     Some(turn) => turn.user.clone(),
-                    None => relayed
-                        .and_then(LiveTurn::instruction)
-                        .unwrap_or_default()
-                        .to_owned(),
+                    None => instruction
+                        .as_ref()
+                        .map(transcript::Read::words)
+                        .unwrap_or_default(),
                 },
             });
             // The decisions on the turn they judged, and no key at all on a turn
@@ -4227,7 +4602,7 @@ fn conversation_document(
     attribution.insert("launchId".into(), json!(view.paths.run));
     attribution.insert(
         "launcher".into(),
-        json!(launcher_word(&view.launch.launcher)),
+        json!(launcher_word(&view.whole.launch.launcher)),
     );
     attribution.insert(
         "transportRole".into(),
@@ -4321,7 +4696,7 @@ fn judge_interval(report: &judge::Report) -> Option<(Moment, Option<Moment>)> {
 /// Why the report is the only source, and why that gate rather than another:
 /// `src/AGENTS.md`, under the report a settled member left.
 fn judge_conversation(
-    view: &RunView,
+    view: &Run<'_>,
     declared: &DeclaredMembers,
     session: &str,
     events: &[&Envelope],
@@ -4373,7 +4748,7 @@ fn judge_conversation(
     attribution.insert("launchId".into(), json!(view.paths.run));
     attribution.insert(
         "launcher".into(),
-        json!(launcher_word(&view.launch.launcher)),
+        json!(launcher_word(&view.whole.launch.launcher)),
     );
     attribution.insert("transportRole".into(), json!(transport.as_str()));
     // The member it supervised, read off the same record the agent side's role
@@ -4512,14 +4887,24 @@ fn judge_conclusion(
 
 /// One conversation by id, or `None` when the run records none by that name.
 #[must_use]
+pub(crate) fn conversation_over(
+    view: &Run<'_>,
+    declared: &DeclaredMembers,
+    id: &ConversationId,
+) -> Option<Value> {
+    conversations_over(view, declared)
+        .into_iter()
+        .find(|document| document["conversation"]["id"] == json!(id.as_str()))
+}
+
+/// `conversation`, over everything `view` read: the whole merged store.
+#[must_use]
 pub fn conversation(
     view: &RunView,
     declared: &DeclaredMembers,
     id: &ConversationId,
 ) -> Option<Value> {
-    conversations(view, declared)
-        .into_iter()
-        .find(|document| document["conversation"]["id"] == json!(id.as_str()))
+    conversation_over(&Run::of(view), declared, id)
 }
 
 /// One recorded artifact's bounded tail, or `None` when the run records none.
@@ -4530,7 +4915,7 @@ pub fn conversation(
 /// pointer file names — so a well-formed id naming a file the run never
 /// produced reads nothing.
 #[must_use]
-pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
+pub(crate) fn artifact_over(view: &Run<'_>, id: &ArtifactId) -> Option<Value> {
     let recorded = view.events.iter().find_map(|event| {
         event
             .artifacts
@@ -4539,6 +4924,14 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
             .map(|artifact| (event, artifact))
     });
     let (kind, bytes) = match recorded {
+        // A oneharness session is not bytes this crate tails: it is one
+        // invocation read whole, entry by entry, through the engine's resolver,
+        // and served as the conversation turn it was.
+        Some((event, recorded))
+            if ReferenceKind::of(&recorded.kind) == ReferenceKind::OneharnessSession =>
+        {
+            return harness_session(relayed_location(event)?, id, &event.ts);
+        }
         Some((event, recorded)) => {
             let kind = ReferenceKind::of(&recorded.kind);
             (kind, artifact_bytes(view, event, id, kind)?)
@@ -4548,19 +4941,35 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
         // agents routes serve an entry for and this resolves on the same terms
         // as a relayed one, through the three fields the pointer line spells
         // exactly as the `oneharness-session` record does.
-        None => (
-            ReferenceKind::OneharnessSession,
-            pointed_session(&view.paths, id)?,
-        ),
+        None => {
+            let (location, started) = pointed_location(view.paths, id)?;
+            return harness_session(location, id, &started);
+        }
     };
-    let truncated = bytes.len() > ARTIFACT_TAIL_BYTES;
-    let tail = &bytes[bytes.len().saturating_sub(ARTIFACT_TAIL_BYTES)..];
+    // A transcript and a report are served whole; a log is served as its end,
+    // because a producer promises no size for one.
+    let whole = matches!(
+        kind,
+        ReferenceKind::Conversation | ReferenceKind::WorkerReport
+    );
+    let truncated = !whole && bytes.len() > ARTIFACT_TAIL_BYTES;
+    let tail = if whole {
+        &bytes[..]
+    } else {
+        &bytes[bytes.len().saturating_sub(ARTIFACT_TAIL_BYTES)..]
+    };
     Some(json!({
         "id": id.as_str(),
         "kind": kind.as_str(),
         "content": String::from_utf8_lossy(tail),
         "truncated": truncated,
     }))
+}
+
+/// `artifact`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
+    artifact_over(&Run::of(view), id)
 }
 
 /// One recorded artifact's bytes, read from wherever the producing library said
@@ -4584,7 +4993,7 @@ pub fn artifact(view: &RunView, id: &ArtifactId) -> Option<Value> {
 ///
 /// [`RunPaths::report_for`]: onepipeline::views::RunPaths::report_for
 fn artifact_bytes(
-    view: &RunView,
+    view: &Run<'_>,
     event: &Envelope,
     id: &ArtifactId,
     kind: ReferenceKind,
@@ -4594,7 +5003,8 @@ fn artifact_bytes(
     // inheriting an answer that happens to compile.
     let path = match kind {
         ReferenceKind::WorkerReport => report_path(view, event),
-        ReferenceKind::OneharnessSession => return harness_session(event, id),
+        // Read whole by `artifact_over` before it asks for bytes.
+        ReferenceKind::OneharnessSession => return None,
         ReferenceKind::Conversation | ReferenceKind::GateLog | ReferenceKind::Pr => {
             view.paths.dir.join("artifacts").join(id.as_str())
         }
@@ -4610,104 +5020,142 @@ fn artifact_bytes(
 /// behind the name is private to `onepipeline` on purpose. One function because
 /// two readers want it — the artifact route serves its bytes, and a transcript
 /// reads the document inside it.
-fn report_path(view: &RunView, settlement: &Envelope) -> std::path::PathBuf {
+fn report_path(view: &Run<'_>, settlement: &Envelope) -> std::path::PathBuf {
     view.paths.report_for(&settlement.stream, settlement.seq)
 }
 
-/// The oneharness conversation one `oneharness_session` artifact names, rendered
-/// as the reader reads it.
-///
-/// The one artifact resolved outside the run directory: `oneagentgraph` publishes
-/// a pointer and nothing is copied. `src/AGENTS.md` holds why the record alone
-/// names the store, why this reads without locking, and why every component is
-/// checked; [`Confined`] holds what each outcome of the check means.
-///
-// llmlint: ignore[comments_earn_their_place] the paragraph the rule objects to is the one the manager required survive: the checks are on how a record *spelled* a path, and a bare name that climbs nowhere still lands anywhere if a component is a symlink, so the resolved path is proved under a `StoreRoot` before it is opened. That sentence is what stops a future reader relaxing the confinement this change exists to add. The design it links to is in `src/AGENTS.md` and is not repeated here.
-/// **The one thing that must not be relaxed here:** those checks are on how a
-/// record *spelled* a path, and a bare name that climbs nowhere still lands
-/// anywhere if a component of it is a symlink, so the resolved path is proved
-/// under a [`StoreRoot`] before it is opened.
-///
-/// What is served is [`history::read_session_display`]'s record rather than the
-/// file's bytes, which is what `docs/contract.md` names this artifact as.
-// llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated server acting as one session, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes or the run's own pointer file recorded, and the store, project and session are read off that record — and what the record names is confined below before it is opened.
-fn harness_session(event: &Envelope, id: &ArtifactId) -> Option<Vec<u8>> {
+/// Where one relayed `oneharness-session` record says its invocation was recorded.
+fn relayed_location(event: &Envelope) -> Option<Located> {
     let field = |name: &str| event.payload.get(name).and_then(Value::as_str);
-    session_record(
+    Located::of(
         field("history_dir"),
         field("history_project")?,
         field("history_session")?,
-        id,
+        field("history_id")?,
     )
 }
 
-/// The session a run's pointer file names for `id`, resolved exactly as a
-/// relayed `oneharness-session` record is.
+/// Where the run's pointer file says the invocation `id` was recorded, and when it
+/// began.
 ///
 /// The pointer line carries `history_dir`, `history_project` and
-/// `history_session` in the same spelling as that record, so the one resolver
-/// serves both; the file is read through the SDK's own `verbs::agents`, which
-/// opens the pointer file and nothing else. A run with no pointer file names
-/// nothing, and so does a file this build cannot read: an artifact route
+/// `history_session` in the same spelling as the relayed record, so the one
+/// reading serves both; the file is read through the SDK's own `verbs::agents`,
+/// which opens the pointer file and nothing else. A run with no pointer file
+/// names nothing, and so does a file this build cannot read: an artifact route
 /// answers a session that is there or `404`, never the file's own refusal.
-fn pointed_session(paths: &RunPaths, id: &ArtifactId) -> Option<Vec<u8>> {
+fn pointed_location(paths: &RunPaths, id: &ArtifactId) -> Option<(Located, String)> {
     let agents = onepipeline::verbs::agents(paths, AgentScope::Run).ok()?;
-    let session = agents.sessions.iter().find(|session| {
-        session
+    agents.sessions.iter().find_map(|session| {
+        let run = session
             .runs
             .iter()
-            .any(|run| run.history_id.to_string() == id.as_str())
-    })?;
-    session_record(
-        Some(&session.history_dir),
-        &session.history_project,
-        &session.history_session,
-        id,
-    )
+            .find(|run| run.history_id.to_string() == id.as_str())?;
+        let located = Located::of(
+            Some(&session.history_dir),
+            &session.history_project,
+            &session.history_session,
+            id.as_str(),
+        )?;
+        Some((located, run.started.to_string()))
+    })
 }
 
-/// One record of a oneharness session file, found through the three fields
-/// every pointer at one carries, and read only once its path is proved to
-/// land under the store the pointer named.
-fn session_record(
+/// A history location a record named, proved readable before anything reads it.
+///
+/// `history_project` and `history_session` come off a record, which is external
+/// input exactly as a URL is: each is held to a bare name, and the file they name
+/// is proved to land under the store the record named — a bare name still lands
+/// anywhere if a component of it is a symlink — before the resolver opens it.
+/// `src/AGENTS.md` holds why the record alone names the store and why this reads
+/// without locking.
+struct Located(oneagentgraph::event::Transcript);
+
+impl Located {
+    // llmlint: ignore-block[authorization_enforced_server_side] there is no principal to authorize: `docs/contract.md` defines an unauthenticated server acting as one session, so a check here would be an access model this crate invented for itself. Nothing a reader sends reaches this path — the id must be one the run's own envelopes or the run's own pointer file recorded, and the store, project and session are read off that record — and what the record names is confined below before it is opened.
+    // llmlint: ignore[comments_earn_their_place] the sentence the rule objects to is the one the manager required survive: the checks are on how a record *spelled* a path, and a bare name that climbs nowhere still lands anywhere if a component is a symlink, so the resolved path is proved under a `StoreRoot` before it is opened. That sentence is what stops a future reader relaxing the confinement.
+    /// **The one thing that must not be relaxed here:** the checks are on how a
+    /// record *spelled* a path, and a bare name that climbs nowhere still lands
+    /// anywhere if a component of it is a symlink, so the resolved path is proved
+    /// under a [`StoreRoot`] before it is opened.
+    fn of(
+        history_dir: Option<&str>,
+        history_project: &str,
+        history_session: &str,
+        history_id: &str,
+    ) -> Option<Self> {
+        // Checked first: it is what the refusal below is logged under, and a
+        // record's bytes must not reach the operator's log unchecked.
+        let history_id = ArtifactId::try_from(history_id).ok()?;
+        // An empty value names no store, which is what oneharness itself reads
+        // `history_dir = ""` as, so it falls back rather than being refused.
+        let named = match history_dir.filter(|value| !value.is_empty()) {
+            Some(named) => Some(NamedStore::try_from(named).ok()?),
+            None => None,
+        };
+        let dir = history::resolve_dir(named.as_ref().map(NamedStore::as_str))?;
+        let project = PathSegment::try_from(history_project).ok()?;
+        let session = PathSegment::try_from(history_session).ok()?;
+        if let Some(store) = StoreRoot::read(&dir) {
+            if let Some(listed) =
+                history::find_session_path(&dir, Some(project.as_str()), session.as_str())
+                    .ok()
+                    .flatten()
+            {
+                // Where it landed is deliberately absent — an operator needs to
+                // know their journal carries a pointer that escapes, and a reader
+                // must not be told what is on the host by reading the answer.
+                if let Confined::Escaped = store.confine(&listed) {
+                    eprintln!(
+                        "onepipeline-api: artifact {}: refusing a oneharness session that resolves outside the store its record named",
+                        history_id.as_str()
+                    );
+                    return None;
+                }
+            }
+        }
+        serde_json::from_value(json!({
+            "history_dir": dir.to_string_lossy(),
+            "history_project": project.as_str(),
+            "history_session": session.as_str(),
+            "history_id": history_id.as_str(),
+        }))
+        .ok()
+        .map(Self)
+    }
+    // llmlint: ignore-end[authorization_enforced_server_side]
+}
+
+/// What one oneharness invocation's closing record says *about* it — when it
+/// began and finished, the harness and model that ran it, how it ended and what
+/// it spent — and `None` for an invocation that has not closed.
+///
+/// Facts only: what the invocation *said* is read through the engine's resolver
+/// ([`harness_session`]), which carries none of these. Read through the same
+/// confinement every history read here is, and through
+/// [`history::read_session_display`], which takes no lock.
+fn closing_record(
     history_dir: Option<&str>,
     history_project: &str,
     history_session: &str,
     id: &ArtifactId,
-) -> Option<Vec<u8>> {
-    // An empty value names no store, which is what oneharness itself reads
-    // `history_dir = ""` as, so it falls back rather than being refused.
-    let named = match history_dir.filter(|value| !value.is_empty()) {
-        Some(named) => Some(NamedStore::try_from(named).ok()?),
-        None => None,
-    };
-    let dir = history::resolve_dir(named.as_ref().map(NamedStore::as_str))?;
-    let store = StoreRoot::read(&dir)?;
-    let project = PathSegment::try_from(history_project).ok()?;
-    let session = PathSegment::try_from(history_session).ok()?;
-    let listed = history::find_session_path(&dir, Some(project.as_str()), session.as_str())
-        .ok()
-        .flatten()?;
-    let path = match store.confine(&listed) {
-        Confined::Under(path) => path,
-        // The artifact id and not the pointer: an id has crossed the identifier
-        // boundary and is safe to print, where every field of the pointer is a
-        // record's own bytes and one of them could otherwise write a line of
-        // this log itself. Where it landed is deliberately absent — an operator
-        // needs to know their journal carries a pointer that escapes, and a
-        // reader must not be told what is on the host by reading the answer.
-        Confined::Escaped => {
-            eprintln!(
-                "onepipeline-api: artifact {}: refusing a oneharness session that resolves outside the store its record named",
-                id.as_str()
-            );
-            return None;
-        }
-        Confined::Missing => return None,
+) -> Option<HistoryRecord> {
+    let located = Located::of(history_dir, history_project, history_session, id.as_str())?;
+    let location = located.0;
+    let store = StoreRoot::read(Path::new(&location.history_dir))?;
+    let listed = history::find_session_path(
+        Path::new(&location.history_dir),
+        Some(&location.history_project),
+        &location.history_session,
+    )
+    .ok()
+    .flatten()?;
+    let Confined::Under(path) = store.confine(&listed) else {
+        return None;
     };
     // Only a finished run carries a `history_id`: an entry still in flight is
-    // keyed by its `run_id` and is not an artifact this route serves.
-    let record = history::read_session_display(path.as_path())
+    // keyed by its `run_id` and has no closing stamps to read.
+    history::read_session_display(path.as_path())
         .ok()?
         .into_iter()
         .find_map(|entry| match entry {
@@ -4715,10 +5163,135 @@ fn session_record(
                 Some(record)
             }
             _ => None,
-        })?;
-    serde_json::to_vec_pretty(&record).ok()
+        })
 }
-// llmlint: ignore-end[authorization_enforced_server_side]
+
+/// The oneharness invocation one `oneharness_session` artifact names, read whole
+/// through the engine's resolver and served as the one conversation turn it was:
+/// the prompt it was given, every event it recorded, and what it closed with.
+///
+/// `turns` is that turn, structured and whole. `content` is the invocation's own
+/// closing record — its harness, model, status, timings and usage — as JSON,
+/// whole and never tailed, with its prompt and reply the resolver's and its
+/// events left to `turns`. A pointer at a file or an entry the store no longer holds is
+/// served, not refused: its turn says `transcript unavailable: <path>: <why>` in
+/// the prompt's place, which is the resolver's own line, so a reader is told what
+/// is gone rather than shown nothing. `None` only for a pointer this API will not
+/// follow — one that climbs, carries a separator or resolves out of its store.
+fn harness_session(located: Located, id: &ArtifactId, at: &str) -> Option<Value> {
+    let location = &located.0;
+    let read = transcript::session(location);
+    let record = closing_record(
+        Some(&location.history_dir),
+        &location.history_project,
+        &location.history_session,
+        id,
+    );
+    let unavailable = match (&read.instruction, &read.closed) {
+        (transcript::Read::Unavailable(_), None | Some(transcript::Read::Unavailable(_)))
+            if read.events.is_empty() =>
+        {
+            Some(read.instruction.description())
+        }
+        _ => None,
+    };
+    let mut words = Words::default();
+    let mut tools = Vec::new();
+    for (index, event) in &read.events {
+        match event.text() {
+            Some(text) => match transcript::tool_kind(text) {
+                Some(kind) => {
+                    let (input, output) = event.tool().unwrap_or_default();
+                    tools.push(json!({
+                        "index": index,
+                        "kind": transcript::kind_word(kind),
+                        "name": transcript::tool_name(text),
+                        "input": input,
+                        "output": output,
+                    }));
+                }
+                None => {
+                    words.took(transcript::words_kind(text), Some(&event.words()));
+                }
+            },
+            None => tools.push(json!({
+                "index": index,
+                "kind": graph::TOOL_RESULT,
+                "name": null,
+                "input": null,
+                "output": event.description(),
+            })),
+        }
+    }
+    let prompt = read.instruction.words();
+    let said = read.closed.as_ref().map(transcript::Read::words);
+    let fact = |name: &str| {
+        record
+            .as_ref()
+            .and_then(|record| serde_json::to_value(record).ok())
+            .and_then(|record| record.get(name).cloned())
+            .unwrap_or(Value::Null)
+    };
+    let turn = json!({
+        "assistant": words.assistant(said.clone().filter(|said| !said.is_empty())),
+        "durationMs": fact("duration_ms"),
+        "failureKind": fact("failure_kind"),
+        "finishedAt": fact("finished_at"),
+        "harness": record.as_ref().map_or("oneharness", |record| record.harness_id.as_str()),
+        "id": id.as_str(),
+        "model": fact("model"),
+        "reasoning": words.reasoning(),
+        "startedAt": fact("started_at"),
+        "status": match &record {
+            Some(_) => fact("status"),
+            None if read.closed.is_none() => json!("running"),
+            None => json!("unknown"),
+        },
+        "timestamp": record.as_ref().map_or(at, |record| record.timestamp.as_str()),
+        "tools": tools,
+        "unknown": {},
+        "usage": record.as_ref().map_or_else(|| json!({}), |record| json!({
+            "inputTokens": record.usage.input_tokens,
+            "outputTokens": record.usage.output_tokens,
+            "cacheReadTokens": record.usage.cache_read_tokens,
+            "cacheWriteTokens": record.usage.cache_write_tokens,
+            "costUsd": record.usage.cost_usd,
+        })),
+        "user": prompt,
+    });
+    // The invocation's own record of itself, whole: its facts as oneharness
+    // closed it, and its prompt and reply as the resolver reads them — its
+    // events are the turn's, structured, rather than a second copy here.
+    let mut content = match &record {
+        Some(record) => serde_json::to_value(record).ok()?,
+        None => json!({ "history_id": id.as_str(), "status": "running" }),
+    };
+    if let Value::Object(fields) = &mut content {
+        fields.shift_remove("events");
+        fields.insert("prompt".into(), json!(prompt));
+        // A run that closed saying nothing recorded no text, which the resolver
+        // reads as an empty one; the record's own `null` is the truer answer.
+        let silent = record.as_ref().is_some_and(|record| record.text.is_none());
+        fields.insert(
+            "text".into(),
+            match said {
+                Some(said) if !(silent && said.is_empty()) => json!(said),
+                _ => Value::Null,
+            },
+        );
+    }
+    let mut served = json!({
+        "id": id.as_str(),
+        "kind": ReferenceKind::OneharnessSession.as_str(),
+        "content": serde_json::to_string_pretty(&content).ok()?,
+        "truncated": false,
+        "turns": [turn],
+    });
+    if let Some(unavailable) = unavailable {
+        served["unavailable"] = json!(unavailable);
+    }
+    Some(served)
+}
 
 /// The scope a timeline request asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4748,38 +5321,91 @@ struct Lens<'a> {
     /// The run's transcripts, folded once: the judge lane is drawn over the same
     /// stored report the turns beside it were read from.
     transcripts: &'a Transcripts<'a>,
+    /// Where each record of the reading sits in the merged store, when the
+    /// reading is one owner's share of it.
+    positions: Option<&'a [usize]>,
+    /// The entries a live reading has already rendered, by merged-store
+    /// position: a record is rendered into an entry once, when it arrives, and
+    /// again only when the turn it belongs to is renumbered.
+    rendered: Option<&'a std::cell::RefCell<Rendered>>,
+}
+
+/// Timeline entries a live reading has rendered, by merged-store position,
+/// with the turn each was rendered under.
+#[derive(Debug, Default)]
+pub(crate) struct Rendered {
+    pub(crate) entries: std::collections::HashMap<usize, (Option<String>, Value)>,
+    /// How many entries were rendered rather than reused, since this was made.
+    pub(crate) fresh: usize,
 }
 
 impl Lens<'_> {
     /// The events of one span, as the reader asked for them.
     fn items(&self, events: &[(usize, &Envelope)]) -> Vec<Value> {
-        events
+        let mut ordered = events.to_vec();
+        ordered.sort_by_key(|(index, event)| (millis_of(&event.ts), *index));
+        ordered
             .iter()
             .filter(|(_, event)| self.filter.allows(event))
-            .map(|(index, event)| timeline_event(*index, event, self.turns))
+            .map(|(index, event)| {
+                let position = self
+                    .positions
+                    .and_then(|positions| positions.get(*index).copied())
+                    .unwrap_or(*index);
+                let Some(rendered) = self.rendered else {
+                    return timeline_event(*index, position, event, self.turns);
+                };
+                let turn = self
+                    .turns
+                    .get(*index)
+                    .and_then(Option::as_ref)
+                    .map(|turn| turn.id.clone());
+                let mut rendered = rendered.borrow_mut();
+                if let Some((held, entry)) = rendered.entries.get(&position) {
+                    if *held == turn {
+                        return entry.clone();
+                    }
+                }
+                let entry = timeline_event(*index, position, event, self.turns);
+                rendered.fresh += 1;
+                rendered.entries.insert(position, (turn, entry.clone()));
+                entry
+            })
             .collect()
     }
 }
 
 /// The whole of `GET /api/v2/runs/{run}/timeline`'s payload.
 #[must_use]
-pub fn timeline(
-    view: &RunView,
+pub(crate) fn timeline_over(
+    view: &Run<'_>,
     declared: &DeclaredMembers,
     scope: &Scope<'_>,
     filter: &EventFilter,
 ) -> Value {
-    let transcripts = Transcripts::of(view, declared);
-    let turns = turn_ids(view, &transcripts);
-    let lens = Lens {
-        turns: &turns,
-        filter,
-        transcripts: &transcripts,
-    };
-    let spans = match scope {
-        Scope::Run => run_spans(view, &lens),
-        Scope::Node(node) => node_spans(view, node.as_str(), &lens),
-    };
+    // Continued sessions can relay one producer record repeatedly. Canonicalize
+    // before transcript numbering and all span folds, so duplicate journal lines
+    // affect neither event addresses nor counts nor intervals.
+    let mut seen = BTreeSet::new();
+    let repeated = view
+        .events
+        .iter()
+        .any(|event| !seen.insert((&event.stream, event.seq)));
+    let canonical: Option<Vec<Envelope>> = repeated.then(|| {
+        let mut identities = BTreeSet::new();
+        view.events
+            .iter()
+            .filter(|event| identities.insert((&event.stream, event.seq)))
+            .cloned()
+            .collect()
+    });
+    let canonical_run = canonical.as_deref().map(|events| view.over(events));
+    let view = canonical_run.as_ref().unwrap_or(view);
+    let ends = Ends::of(view);
+    let mut spans = timeline_spans(view, declared, scope, filter, &ends);
+    for span in &mut spans {
+        ends.close(span);
+    }
     json!({
         "timeline_schema_version": TIMELINE_SCHEMA_VERSION,
         "run_id": view.paths.run,
@@ -4787,10 +5413,571 @@ pub fn timeline(
     })
 }
 
+/// The spans one timeline scope draws over `view`, before the run's end closes
+/// any of them.
+///
+/// `view` is the whole canonical store, or one owner's share of it: the run's
+/// unattached records for the run-level spans, or one node's records for its
+/// spans at either scope. The transcripts every turn is numbered by are folded
+/// over the same records, which hold every record of the sessions they number.
+fn timeline_spans(
+    view: &Run<'_>,
+    declared: &DeclaredMembers,
+    scope: &Scope<'_>,
+    filter: &EventFilter,
+    ends: &Ends,
+) -> Vec<Value> {
+    let transcripts = Transcripts::of(view, declared);
+    let turns = turn_ids(view, &transcripts);
+    let lens = Lens {
+        turns: &turns,
+        filter,
+        transcripts: &transcripts,
+        positions: view.positions,
+        rendered: None,
+    };
+    match scope {
+        Scope::Run => run_spans(view, &lens, ends),
+        Scope::Node(node) => node_spans(view, node.as_str(), &lens),
+    }
+}
+
+/// Which share of a run a live timeline rebuilds, and the spans it draws.
+pub(crate) enum Share<'a> {
+    /// The run's own span and its unattached sessions, over the records that
+    /// name no node; `first` is the first record of the whole store.
+    RunLevel {
+        /// Where the run started.
+        first: &'a Envelope,
+    },
+    /// One node's spans on the run timeline.
+    NodeLevel(&'a str),
+    /// One node's own timeline.
+    NodeScope(&'a NodeId),
+}
+
+/// The spans one share of a run draws, before the run's end closes any of them:
+/// the same spans [`timeline_over`] draws for those records.
+pub(crate) fn share_spans(
+    view: &Run<'_>,
+    declared: &DeclaredMembers,
+    share: &Share<'_>,
+    filter: &EventFilter,
+    ends: &Ends,
+    rendered: &std::cell::RefCell<Rendered>,
+) -> Vec<Value> {
+    let transcripts = Transcripts::of(view, declared);
+    let turns = turn_ids(view, &transcripts);
+    let lens = Lens {
+        turns: &turns,
+        filter,
+        transcripts: &transcripts,
+        positions: view.positions,
+        rendered: Some(rendered),
+    };
+    match share {
+        Share::RunLevel { first } => run_level_spans(view, &lens, first, ends),
+        Share::NodeLevel(node) => {
+            node_level_spans(view, node, &format!("run.{}", view.paths.run), &lens)
+        }
+        Share::NodeScope(node) => node_spans(view, node.as_str(), &lens),
+    }
+}
+
+/// How the run's end reaches a timeline: where it stopped, if it has, and
+/// whether anything still drives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Ends {
+    /// The execution boundary's stamp, once there is one.
+    pub(crate) end: Option<String>,
+    /// Whether a driver is driving the run, or parked on it.
+    pub(crate) driven: bool,
+}
+
+impl Ends {
+    /// The run's end over its whole store.
+    fn of(view: &Run<'_>) -> Self {
+        Self {
+            end: timeline_end(view).map(|end| end.ts),
+            driven: matches!(
+                view.liveness(),
+                onepipeline::views::DriverLiveness::Driving
+                    | onepipeline::views::DriverLiveness::Parked
+            ),
+        }
+    }
+
+    /// The run's end, from the facts a live reading keeps without re-reading
+    /// the store: the latest settlement, and the last record of the kinds that
+    /// decide whether a historical exit still holds.
+    pub(crate) fn from_parts(
+        view: &Run<'_>,
+        latest_settlement: Option<(i128, &str)>,
+        last_boundary: Option<&Envelope>,
+    ) -> Self {
+        let statuses = view.whole.state.statuses();
+        let settled = !statuses.is_empty()
+            && statuses.values().all(|status| {
+                matches!(status.as_str(), "done" | "failed" | "cancelled" | "skipped")
+            });
+        let end = if settled {
+            latest_settlement.map(|(_, ts)| ts.to_owned())
+        } else {
+            last_boundary
+                .filter(|event| {
+                    matches!(
+                        event.kind.0.as_str(),
+                        "run-stopped" | "host-shutdown" | "driver-exited"
+                    )
+                })
+                .and_then(Moment::of)
+                .map(|end| end.ts)
+        };
+        Self {
+            end,
+            driven: matches!(
+                view.liveness(),
+                onepipeline::views::DriverLiveness::Driving
+                    | onepipeline::views::DriverLiveness::Parked
+            ),
+        }
+    }
+
+    /// Close one span the way the run's end closes it: an open span ends where
+    /// the run did, a running one that the end cut off was stopped, and a
+    /// running one nothing drives any more is undriven.
+    pub(crate) fn close(&self, span: &mut Value) {
+        if let Some(end) = &self.end {
+            if span["ended_at"].is_null() {
+                span["ended_at"] = json!(end);
+                if span["status"] == "running" {
+                    span["status"] = json!("stopped");
+                }
+            }
+        }
+        if !self.driven && span["ended_at"].is_null() && span["status"] == "running" {
+            span["status"] = json!("undriven");
+        }
+    }
+}
+
+/// Whether a record is one [`timeline_end`] reads as the last word on whether a
+/// historical exit still holds.
+pub(crate) fn is_end_boundary(event: &Envelope) -> bool {
+    event.source == Source::Pipeline
+        && matches!(
+            event.kind.0.as_str(),
+            "run-stopped"
+                | "host-shutdown"
+                | "driver-exited"
+                | "driver-adopted"
+                | "driver-taken-over"
+                | "node-dispatched"
+        )
+}
+
+/// Whether a record is a node's settlement, which bounds a settled run's end.
+pub(crate) fn is_settlement(event: &Envelope) -> bool {
+    event.source == Source::Pipeline && event.kind.0 == "node-settled"
+}
+
+/// The epoch milliseconds a record orders by, where it can be ordered.
+pub(crate) fn moment_of(event: &Envelope) -> Option<i128> {
+    Moment::of(event).map(|moment| moment.at)
+}
+
+/// `timeline`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn timeline(
+    view: &RunView,
+    declared: &DeclaredMembers,
+    scope: &Scope<'_>,
+    filter: &EventFilter,
+) -> Value {
+    timeline_over(&Run::of(view), declared, scope, filter)
+}
+
+/// Add the harness sessions the SDK's pointer-file listing knows about, including
+/// sessions no graph envelope relayed. Transcript references use the same bounded
+/// artifact route as the former Agents tabs.
+#[must_use]
+pub(crate) fn timeline_harnesses_over(
+    mut payload: Value,
+    view: &Run<'_>,
+    scope: &Scope<'_>,
+    agents: &Agents,
+) -> Value {
+    let Some(spans) = payload["spans"].as_array_mut() else {
+        return payload;
+    };
+    for session in &agents.sessions {
+        let labels = session.labels.as_map();
+        let node = labels.get(NODE_LABEL);
+        if let Scope::Node(wanted) = scope {
+            if node.map(String::as_str) != Some(wanted.as_str()) {
+                continue;
+            }
+        }
+        let launch_scope = labels.get(SCOPE_LABEL).map_or("observer", String::as_str);
+        for run in &session.runs {
+            let recorded = ArtifactId::try_from(run.history_id.to_string().as_str())
+                .ok()
+                .and_then(|id| {
+                    closing_record(
+                        Some(&session.history_dir),
+                        &session.history_project,
+                        &session.history_session,
+                        &id,
+                    )
+                });
+            let valid_time = |stamp: &&str| OffsetDateTime::parse(stamp, &Rfc3339).is_ok();
+            let stated_start = recorded.as_ref().and_then(|record| {
+                record
+                    .started_at
+                    .as_deref()
+                    .filter(valid_time)
+                    .or_else(|| Some(record.timestamp.as_str()).filter(valid_time))
+            });
+            let started = stated_start.map_or_else(
+                || serde_json::to_value(&run.started).unwrap_or(Value::Null),
+                |stamp| json!(stamp),
+            );
+            let ended = recorded
+                .as_ref()
+                .and_then(|record| record.finished_at.as_deref())
+                .filter(valid_time)
+                .filter(|end| millis_of(end) >= started.as_str().and_then(millis_of));
+            let no_recorded_end = ended.is_none();
+            let parent = node.map_or_else(
+                || format!("run.{}", view.paths.run),
+                |node| {
+                    spans
+                        .iter()
+                        .filter(|span| {
+                            span["node_id"] == *node
+                                && span["kind"] == "dispatch"
+                                && span.get("harness_scope").is_none()
+                                && span["started_at"].as_str() <= started.as_str()
+                                && match launch_scope {
+                                    "pr-author" | "review-reply" => {
+                                        span["agent_role"] == launch_scope
+                                    }
+                                    _ => {
+                                        span["agent_role"] != "pr-author"
+                                            && span["agent_role"] != "review-reply"
+                                    }
+                                }
+                        })
+                        .max_by_key(|span| span["started_at"].as_str())
+                        .and_then(|span| span["id"].as_str())
+                        .map_or_else(|| format!("node.{node}"), str::to_owned)
+                },
+            );
+            let mut span = json!({
+                "id": format!("harness.{}", run.history_id), "kind": "dispatch",
+                "label": if no_recorded_end { format!("{} · no recorded end", session.name) } else { session.name.clone() }, "started_at": started,
+                "ended_at": ended.map_or_else(|| started.clone(), |stamp| json!(stamp)),
+                "status": if no_recorded_end { "no-recorded-end" } else { "done" },
+                "parent_id": parent, "harness_scope": launch_scope,
+                "reference": { "kind": "oneharness_session", "value": run.history_id }, "events": [],
+            });
+            if let Some(attempt) = labels.get(ATTEMPT_LABEL) {
+                span["dispatch_attempt"] = json!(attempt);
+            }
+            if let Some(node) = node {
+                span["node_id"] = json!(node);
+                span["dispatch_id"] = json!(dispatch_key(&view.paths.run, node));
+            }
+            spans.push(span);
+        }
+    }
+    if let Scope::Node(node) = scope {
+        stamp_dispatch_groups(view, node.as_str(), &mut payload);
+    }
+    payload
+}
+
+/// `timeline_harnesses`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn timeline_harnesses(
+    payload: Value,
+    view: &RunView,
+    scope: &Scope<'_>,
+    agents: &Agents,
+) -> Value {
+    timeline_harnesses_over(payload, &Run::of(view), scope, agents)
+}
+
+/// The three owners of records within one node dispatch.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum DispatchRole {
+    Worker,
+    ChangeRequest,
+    ReviewReply,
+}
+
+impl DispatchRole {
+    fn of(persona: &str) -> Self {
+        match persona {
+            "pr-author" => Self::ChangeRequest,
+            "review-reply" => Self::ReviewReply,
+            _ => Self::Worker,
+        }
+    }
+
+    fn is_drafter(self) -> bool {
+        self != Self::Worker
+    }
+
+    fn order(self) -> usize {
+        match self {
+            Self::Worker => 0,
+            Self::ChangeRequest => 1,
+            Self::ReviewReply => 2,
+        }
+    }
+}
+
+/// Group identity is folded before filtering; a reading can hide records without
+/// changing which dispatch or drafter owns the sessions that remain.
+fn stamp_dispatch_groups(view: &Run<'_>, node: &str, payload: &mut Value) {
+    let Some(key) = dispatch_key(&view.paths.run, node) else {
+        return;
+    };
+    let Some(spans) = payload["spans"].as_array_mut() else {
+        return;
+    };
+    let mut identities = BTreeSet::new();
+    let mut events: Vec<_> = view
+        .events
+        .iter()
+        .filter(|event| identities.insert((&event.stream, event.seq)))
+        .enumerate()
+        // The canonical store's position, whichever reading this is: a group's
+        // order is where its opening sits in the whole run, not in a share of it.
+        .map(|(index, event)| {
+            let position = view
+                .positions
+                .and_then(|positions| positions.get(index).copied())
+                .unwrap_or(index);
+            (position, event)
+        })
+        .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
+        .collect();
+    let event_key = |index: usize, event: &Envelope| (millis_of(&event.ts), index);
+    events.sort_by_key(|(index, event)| event_key(*index, event));
+    let openings: Vec<_> = events
+        .iter()
+        .copied()
+        .filter(|(_, event)| {
+            event.source == Source::Pipeline
+                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched)
+        })
+        .collect();
+    if openings.is_empty() {
+        return;
+    }
+    let opening_keys: Vec<_> = openings
+        .iter()
+        .map(|(index, event)| event_key(*index, event))
+        .collect();
+    let settlements: Vec<_> = events
+        .iter()
+        .filter(|(_, event)| {
+            event.source == Source::Pipeline
+                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
+        })
+        .map(|(index, event)| event_key(*index, event))
+        .collect();
+    let closings: Vec<_> = opening_keys
+        .iter()
+        .map(|opened| {
+            settlements
+                .get(settlements.partition_point(|settled| settled <= opened))
+                .copied()
+        })
+        .collect();
+    let owner = |at: (Option<i128>, usize), drafting: bool| {
+        let group = opening_keys
+            .partition_point(|opened| *opened <= at)
+            .checked_sub(1)?;
+        (drafting || closings[group].is_none_or(|end| at <= end)).then_some(group)
+    };
+    let rank = DispatchRole::of;
+    let roles: BTreeMap<String, String> = spans
+        .iter()
+        .filter(|span| span["kind"] == "dispatch" && span.get("harness_scope").is_none())
+        .filter_map(|span| {
+            Some((
+                span["reference"]["value"].as_str()?.to_owned(),
+                span["agent_role"].as_str()?.to_owned(),
+            ))
+        })
+        .collect();
+    let event_rank = |event: &Envelope| {
+        if let Some(persona) = event
+            .labels
+            .extra
+            .get("onepipeline.persona")
+            .and_then(Value::as_str)
+            .or(event.labels.persona.as_deref())
+        {
+            return rank(persona);
+        }
+        session_label(event)
+            .and_then(|session| roles.get(session).map(String::as_str))
+            .or_else(|| member_label(event))
+            .map_or(DispatchRole::Worker, rank)
+    };
+    let mut sessions = BTreeMap::new();
+    let mut streams: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
+    let mut stream_ranks: BTreeMap<String, BTreeSet<DispatchRole>> = BTreeMap::new();
+    let mut primaries: BTreeMap<usize, ((Option<i128>, usize), String)> = BTreeMap::new();
+    for (session, records) in relayed_sessions(&events) {
+        let Some((index, first)) = records
+            .iter()
+            .min_by_key(|(index, event)| event_key(*index, event))
+        else {
+            continue;
+        };
+        let role = records
+            .iter()
+            .map(|(_, event)| event_rank(event))
+            .find(|role| role.is_drafter())
+            .unwrap_or_else(|| {
+                roles
+                    .get(session)
+                    .map_or(DispatchRole::Worker, |role| rank(role))
+            });
+        let at = event_key(*index, first);
+        let Some(group) = owner(at, role.is_drafter()) else {
+            continue;
+        };
+        sessions.insert(session.to_owned(), (group, role));
+        for (_, event) in &records {
+            streams
+                .entry(event.stream.clone())
+                .or_default()
+                .insert(group);
+            stream_ranks
+                .entry(event.stream.clone())
+                .or_default()
+                .insert(role);
+        }
+        if role == DispatchRole::Worker
+            && primaries.get(&group).is_none_or(|(known, _)| at < *known)
+        {
+            primaries.insert(group, (at, first.stream.clone()));
+        }
+    }
+    let presentation = |group: usize, role: DispatchRole| {
+        let (opening_index, opening) = openings[group];
+        let stream = primaries
+            .get(&group)
+            .map_or(opening.stream.as_str(), |(_, stream)| stream.as_str());
+        let base = format!("{key}:{stream}:{}:{}", opening.stream, opening.seq);
+        let (id, label) = match role {
+            DispatchRole::ChangeRequest => (
+                format!("{base}:pr-author"),
+                "Change request drafter".to_owned(),
+            ),
+            DispatchRole::ReviewReply => (
+                format!("{base}:review-reply"),
+                "Review reply drafter".to_owned(),
+            ),
+            DispatchRole::Worker => (base, format!("Dispatch {}", group + 1)),
+        };
+        json!({ "id": id, "label": label, "order": opening_index * 3 + role.order(), "started_at": opening.ts })
+    };
+    let mut record_groups = BTreeMap::new();
+    for (index, event) in &events {
+        let mut role = event_rank(event);
+        if role == DispatchRole::Worker {
+            if let Some(ranks) = stream_ranks
+                .get(&event.stream)
+                .filter(|ranks| ranks.len() == 1)
+            {
+                role = *ranks.first().expect("one rank");
+            }
+        }
+        let Some(mut group) = owner(event_key(*index, event), role.is_drafter()) else {
+            continue;
+        };
+        if event.source == Source::Agentgraph {
+            if let Some(owners) = streams
+                .get(&event.stream)
+                .filter(|owners| owners.len() == 1)
+            {
+                group = *owners.first().expect("one owner");
+            }
+        }
+        record_groups.insert(
+            format!("{}.{}", event.stream, event.seq),
+            presentation(group, role),
+        );
+    }
+    for span in spans {
+        for event in span["events"].as_array_mut().into_iter().flatten() {
+            if let Some(group) = event["record_id"]
+                .as_str()
+                .and_then(|id| record_groups.get(id))
+            {
+                event["dispatch_group"] = group.clone();
+            }
+        }
+        if span["kind"] == "node" {
+            continue;
+        }
+        let role = span["harness_scope"]
+            .as_str()
+            .or_else(|| span["agent_role"].as_str())
+            .map_or(DispatchRole::Worker, rank);
+        let named = span["reference"]["value"]
+            .as_str()
+            .and_then(|session| sessions.get(session))
+            .copied();
+        let attempted = span["dispatch_attempt"].as_str().and_then(|attempt| {
+            openings
+                .iter()
+                .enumerate()
+                .position(|(index, (_, opening))| {
+                    opening
+                        .payload
+                        .get("attempt")
+                        .map_or_else(|| (index + 1).to_string(), Value::to_string)
+                        .trim_matches('"')
+                        == attempt
+                })
+        });
+        let at = (span["started_at"].as_str().and_then(millis_of), usize::MAX);
+        if let Some((group, role)) = named.or_else(|| {
+            attempted
+                .or_else(|| owner(at, role.is_drafter()))
+                .map(|group| (group, role))
+        }) {
+            span["dispatch_group"] = presentation(group, role);
+        }
+    }
+}
+
 /// The transcript turn one relayed envelope became.
 struct Turn {
     session: ConversationId,
     id: String,
+    /// How the record belongs to the turn.
+    held: Held,
+}
+
+/// How one record belongs to the turn it is numbered under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Held {
+    /// One of the two records that describe the turn: its event *is* the turn,
+    /// and is served under the turn's id.
+    Describes,
+    /// Published from inside the turn — a `turn-activity`. It names the turn it
+    /// sits in and the conversation it belongs to, and keeps an id of its own: it
+    /// is one event of the turn and not the turn.
+    Inside,
 }
 
 /// The turn each envelope of the run became, indexed by its place in the merged
@@ -4801,30 +5988,39 @@ struct Turn {
 /// pairing is the whole of how a client opens a plotted moment and finds the turn
 /// behind it. Computed once per timeline rather than per event, because the
 /// number is a position in the run and not a property of the envelope.
-fn turn_ids(view: &RunView, transcripts: &Transcripts<'_>) -> Vec<Option<Turn>> {
+fn turn_ids(view: &Run<'_>, transcripts: &Transcripts<'_>) -> Vec<Option<Turn>> {
     // The turn each of a session's records belongs to, taken from the fold
     // [`conversations`] serves: **both** records of one turn name the same turn,
     // so a reader who opened the moment the turn closed and one who opened the
     // moment it began are handed the same transcript row — and a row the stored
     // report alone holds shifts the ones after it here exactly as it does there.
-    let mut named: BTreeMap<(&str, u64), String> = BTreeMap::new();
+    let mut named: BTreeMap<(&str, u64), (String, Held)> = BTreeMap::new();
     for session in &transcripts.sessions {
         for (index, row) in session.rows.iter().enumerate() {
+            let id = format!("{}.{index}", session.session);
             for record in row.records() {
                 named.insert(
                     (record.stream.as_str(), record.seq),
-                    format!("{}.{index}", session.session),
+                    (id.clone(), Held::Describes),
                 );
+            }
+            // What the turn published from inside it, which a reader opens to
+            // that turn of the conversation, at that call.
+            for summary in row.relayed().map_or(&[][..], |turn| &turn.summaries[..]) {
+                named
+                    .entry((summary.stream.as_str(), summary.seq))
+                    .or_insert_with(|| (id.clone(), Held::Inside));
             }
         }
     }
     view.events
         .iter()
         .map(|event| {
-            let id = named.get(&(event.stream.as_str(), event.seq))?;
+            let (id, held) = named.get(&(event.stream.as_str(), event.seq))?;
             Some(Turn {
                 session: ConversationId::try_from(session_label(event)?).ok()?,
                 id: id.clone(),
+                held: *held,
             })
         })
         .collect()
@@ -4918,6 +6114,13 @@ fn redirection(event: &Envelope) -> Option<Value> {
                         .and_then(Value::as_str)
                         .filter(|word| edits::REACHED_WORDS.contains(word))?;
                     record.insert("reached".into(), json!(reached));
+                    // Optional on the sibling's type, and closed there: absent is a
+                    // record that does not say, and a word its enum does not spell
+                    // is one this build cannot read.
+                    if let Some(turn) = note.get(edits::TURN) {
+                        let turn = NoteTurn::deserialize(turn).ok()?;
+                        record.insert("turn".into(), json!(turn.as_str()));
+                    }
                     if reached == edits::CARRIED {
                         edits::DEFERRED
                     } else {
@@ -5210,14 +6413,217 @@ fn note_operation(event: &Envelope) -> Option<(&'static str, &Map<String, Value>
         })
 }
 
+/// The fields a reader needs for each record kind. Wire keys are selected here
+/// so neither arbitrary payloads nor session credentials reach a detail panel.
+pub const TIMELINE_RECORD_FIELDS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "edit-committed",
+        &[
+            ("author", "Author"),
+            ("operations", "Operations"),
+            ("operation_kinds", "Operation kinds"),
+        ],
+    ),
+    (
+        "planner-replied",
+        &[
+            ("author", "Author"),
+            ("completion", "Completion"),
+            ("reason", "Reason"),
+        ],
+    ),
+    (
+        "node-dispatched",
+        &[
+            ("attempt", "Attempt"),
+            ("persona", "Persona"),
+            ("reason", "Reason"),
+        ],
+    ),
+    (
+        "gate-run",
+        &[
+            ("gate", "Gate"),
+            ("verdict", "Result"),
+            ("seconds", "Duration (seconds)"),
+            ("log", "Log"),
+        ],
+    ),
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 publishes event kinds but no payload schema for session-closed; the recorded-run route/panel journeys hold the historical keys. Follow-up drafts:dag-ui-project-centric/drafts/20261021T211850Z-publish-onevcs-event-payload-schemas-for-timelin publishes that producer boundary and retires this row exception.
+    (
+        "session-closed",
+        &[
+            ("outcome", "Outcome"),
+            ("branch", "Branch"),
+            ("head", "Head"),
+        ],
+    ),
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 publishes event kinds but no payload schema for session-opened; the recorded-run route/panel journeys hold the historical keys. Follow-up drafts:dag-ui-project-centric/drafts/20261021T211850Z-publish-onevcs-event-payload-schemas-for-timelin publishes that producer boundary and retires this row exception.
+    ("session-opened", &[("branch", "Branch"), ("base", "Base")]),
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] oneagentgraph 0.7.0 omits graph-started from its payload registry; the recorded-run journeys cover its historical facts (heartbeat carries none). Follow-up drafts:dag-ui-project-centric/drafts/20261021T211851Z-publish-agentgraph-lifecycle-payload-schemas-and publishes these lifecycle declarations and retires this row exception.
+    ("graph-started", &[("name", "Name"), ("graph", "Graph")]),
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] oneagentgraph 0.7.0 omits graph-settled from its payload registry; the recorded-run journeys cover its historical facts (heartbeat carries none). Follow-up drafts:dag-ui-project-centric/drafts/20261021T211851Z-publish-agentgraph-lifecycle-payload-schemas-and publishes these lifecycle declarations and retires this row exception.
+    ("graph-settled", &[("exit_code", "Exit code")]),
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    (
+        "member-started",
+        &[("runner", "Runner"), ("engine", "Engine")],
+    ),
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] oneagentgraph 0.7.0 omits member-heartbeat from its payload registry; the recorded-run journeys cover its historical facts (heartbeat carries none). Follow-up drafts:dag-ui-project-centric/drafts/20261021T211851Z-publish-agentgraph-lifecycle-payload-schemas-and publishes these lifecycle declarations and retires this row exception.
+    ("member-heartbeat", &[]),
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] oneagentgraph 0.7.0 omits member-settled from its payload registry; the recorded-run journeys cover its historical facts (heartbeat carries none). Follow-up drafts:dag-ui-project-centric/drafts/20261021T211851Z-publish-agentgraph-lifecycle-payload-schemas-and publishes these lifecycle declarations and retires this row exception.
+    (
+        "member-settled",
+        &[("verdict", "Verdict"), ("completion_reason", "Reason")],
+    ),
+    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    (
+        "member-died",
+        &[
+            ("rule", "Rule"),
+            ("cause", "Cause"),
+            ("detail", "Detail"),
+            ("reason", "Reason"),
+        ],
+    ),
+    ("turn-started", &[("turn", "Turn"), ("role", "Role")]),
+    (
+        "turn-activity",
+        &[("name", "Tool"), ("detail", "Detail"), ("output", "Output")],
+    ),
+    (
+        "turn-completed",
+        &[("turn", "Turn"), ("role", "Role"), ("usage", "Usage")],
+    ),
+    (
+        "turn-message",
+        &[("turn", "Turn"), ("role", "Role"), ("text", "Message")],
+    ),
+    (
+        "node-settled",
+        &[
+            ("status", "Status"),
+            ("outcome", "Outcome"),
+            ("detail", "Detail"),
+        ],
+    ),
+    ("completion-requested", &[("reason", "Reason")]),
+    (
+        "run-stopped",
+        &[
+            ("owner", "Owner"),
+            ("forced", "Forced"),
+            ("teardown", "Teardown"),
+        ],
+    ),
+    (
+        "host-shutdown",
+        &[
+            ("scope", "Scope"),
+            ("owner", "Owner"),
+            ("teardown", "Teardown"),
+        ],
+    ),
+    (
+        "driver-exited",
+        &[("reason", "Reason"), ("settlement", "Settlement")],
+    ),
+];
+
+fn record_fields(event: &Envelope) -> Map<String, Value> {
+    TIMELINE_RECORD_FIELDS
+        .iter()
+        .find(|(kind, _)| *kind == event.kind.0)
+        .map(|(_, fields)| {
+            fields
+                .iter()
+                .filter_map(|(key, label)| {
+                    event
+                        .payload
+                        .get(*key)
+                        .filter(|v| {
+                            !v.is_null() && **v != json!("") && **v != json!([]) && **v != json!({})
+                        })
+                        .map(|value| ((*label).to_owned(), value.clone()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// One journal envelope as a timeline event.
-fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Value {
+fn timeline_event(
+    index: usize,
+    position: usize,
+    event: &Envelope,
+    turns: &[Option<Turn>],
+) -> Value {
     let turn = turns.get(index).and_then(Option::as_ref);
     let mut item = Map::new();
     item.insert(
         "id".into(),
-        json!(turn.map_or_else(|| format!("e{index}"), |turn| turn.id.clone())),
+        json!(turn
+            .filter(|turn| turn.held == Held::Describes)
+            .map_or_else(|| format!("e{position}"), |turn| turn.id.clone())),
     );
+    item.insert(
+        "record_id".into(),
+        json!(format!("{}.{}", event.stream, event.seq)),
+    );
+    item.insert("stream".into(), json!(event.stream));
+    item.insert("seq".into(), json!(event.seq));
+    item.insert("journal_order".into(), json!(position));
+    if let Some(persona) = &event.labels.persona {
+        item.insert("persona".into(), json!(persona));
+    }
+    if let Some(node) = event.labels.node.as_deref() {
+        if let Some(run) = event
+            .labels
+            .extra
+            .get("onepipeline.run_id")
+            .and_then(Value::as_str)
+            .or(event.labels.run_id.as_deref())
+        {
+            if let Some(key) = dispatch_key(run, node) {
+                item.insert("dispatch_id".into(), json!(key));
+            }
+        }
+    }
+    let fields = record_fields(event);
+    if !fields.is_empty() {
+        item.insert("fields".into(), Value::Object(fields));
+    }
+    // A turn record's one line, as the engine's resolver describes the entry it
+    // points at — a shell call's command, a file tool's verb and path, a search's
+    // pattern, a message's first line — or its `transcript unavailable` line. The
+    // browser shows this and never derives its own.
+    if let Some(read) = transcript::read(event, None) {
+        item.insert("description".into(), json!(read.description()));
+    }
+    // Where a tool event sits in the conversation it is a turn of: the producer's
+    // own index and, where the harness minted one, the call's identity — what a
+    // reader opening the row is focused on.
+    if event.kind.0 == graph::TURN_ACTIVITY {
+        if let Some(index) = event.payload.get(graph::INDEX).and_then(Value::as_u64) {
+            let mut tool = Map::new();
+            tool.insert("index".into(), json!(index));
+            if let Some(turn) = turn.filter(|turn| turn.held == Held::Inside) {
+                tool.insert("turn".into(), json!(turn.id));
+            }
+            if let Some(identity) = event
+                .payload
+                .get(graph::TOOL_CALL_ID)
+                .and_then(Value::as_str)
+            {
+                tool.insert("tool_call_id".into(), json!(identity));
+            }
+            item.insert("tool".into(), Value::Object(tool));
+        }
+    }
     item.insert("kind".into(), json!(event.kind.0));
     item.insert("at".into(), json!(event.ts));
     if let Some(node) = &event.labels.node {
@@ -5282,6 +6688,46 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
     Value::Object(item)
 }
 
+/// The execution boundary, independently of commands recorded after execution.
+fn timeline_end(view: &Run<'_>) -> Option<Moment> {
+    let statuses = view.whole.state.statuses();
+    let settled = !statuses.is_empty()
+        && statuses
+            .values()
+            .all(|status| matches!(status.as_str(), "done" | "failed" | "cancelled" | "skipped"));
+    if settled {
+        return view
+            .events
+            .iter()
+            .filter(|e| e.source == Source::Pipeline && e.kind.0 == "node-settled")
+            .filter_map(Moment::of)
+            .max_by_key(|m| m.at);
+    }
+    // A historical exit does not close a later adoption or redispatch.
+    view.events
+        .iter()
+        .rev()
+        .find(|e| {
+            e.source == Source::Pipeline
+                && matches!(
+                    e.kind.0.as_str(),
+                    "run-stopped"
+                        | "host-shutdown"
+                        | "driver-exited"
+                        | "driver-adopted"
+                        | "driver-taken-over"
+                        | "node-dispatched"
+                )
+        })
+        .filter(|e| {
+            matches!(
+                e.kind.0.as_str(),
+                "run-stopped" | "host-shutdown" | "driver-exited"
+            )
+        })
+        .and_then(Moment::of)
+}
+
 /// The run, with the nodes it is executing beneath it.
 ///
 /// One root span, not one per round. Execution is continuous, so what the run is
@@ -5290,22 +6736,40 @@ fn timeline_event(index: usize, event: &Envelope, turns: &[Option<Turn>]) -> Val
 /// settle and independent branches proceed beside a decision that is holding
 /// another subtree back. Under rounds the top of this list was a stack of
 /// batches, which is a shape nothing in the engine has any more.
-fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
+fn run_spans(view: &Run<'_>, lens: &Lens<'_>, ends: &Ends) -> Vec<Value> {
+    let Some(first) = view.events.first() else {
+        return Vec::new();
+    };
+    let run_id = format!("run.{}", view.paths.run);
+    let mut spans = run_level_spans(view, lens, first, ends);
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for node in view
+        .events
+        .iter()
+        .filter_map(|event| event.labels.node.as_deref())
+    {
+        if seen.insert(node) {
+            spans.extend(node_level_spans(view, node, &run_id, lens));
+        }
+    }
+    spans
+}
+
+/// The run's own span and the sessions it relayed at no node: everything a run
+/// timeline draws above the nodes.
+///
+/// Read over the records that name no node — the whole store, or that share of
+/// it — and `first`, the first record of the whole store, which is where the run
+/// started whichever share this is read over.
+fn run_level_spans(view: &Run<'_>, lens: &Lens<'_>, first: &Envelope, ends: &Ends) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
     let events: Vec<(usize, &Envelope)> = view.events.iter().enumerate().collect();
-    let Some((_, first)) = events.first() else {
-        return spans;
-    };
     let run_id = format!("run.{}", view.paths.run);
     // A run ends when it stops being driven, and only then. A graph that has
     // completed and a run that recorded a stop are both over; anything else is
     // still open, however quiet it has gone.
-    let closed = view.state.stop_recorded() || graph_complete(view);
-    let ended = if closed {
-        events.last().map_or(Value::Null, |(_, e)| json!(e.ts))
-    } else {
-        Value::Null
-    };
+    let closed = ends.end.is_some();
+    let ended = ends.end.as_ref().map_or(Value::Null, |end| json!(end));
     spans.push(json!({
         "id": run_id,
         "kind": "run",
@@ -5365,10 +6829,14 @@ fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
             "transport_role".into(),
             json!(relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()),
         );
-        if let Some(role) = relayed
+        // A graph-started record can precede this session's member records
+        // without stamping any member itself. Read the session's stamp across
+        // its records; an undeclared member still rules out a persona fallback.
+        let member = relayed.iter().find_map(|(_, event)| member_label(event));
+        let persona = relayed
             .first()
-            .and_then(|(_, event)| lens.transcripts.declared.role_of(event))
-        {
+            .and_then(|(_, event)| event.labels.persona.as_deref());
+        if let Some(role) = lens.transcripts.declared.agent_role(member, persona) {
             span.insert("agent_role".into(), json!(role));
         }
         span.insert(
@@ -5378,43 +6846,41 @@ fn run_spans(view: &RunView, lens: &Lens<'_>) -> Vec<Value> {
         span.insert("events".into(), json!(lens.items(&relayed)));
         spans.push(Value::Object(span));
     }
+    spans
+}
 
-    let mut seen: BTreeSet<&str> = BTreeSet::new();
-    for node in events
+/// One node's spans on the run timeline: the node itself, then what it did as
+/// categories rather than as records — the graph draws one lane per category and
+/// opens the node for the rest.
+///
+/// Read over the node's own records alone, whichever reading holds them.
+fn node_level_spans(view: &Run<'_>, node: &str, run_id: &str, lens: &Lens<'_>) -> Vec<Value> {
+    let mut spans = vec![node_span(view, node, Some(run_id), lens)];
+    let node_id = format!("node.{node}");
+    let mine: Vec<(usize, &Envelope)> = view
+        .events
         .iter()
-        .filter_map(|(_, event)| event.labels.node.as_deref())
-    {
-        if !seen.insert(node) {
-            continue;
-        }
-        spans.push(node_span(view, node, Some(&run_id), lens));
-        // What that node did, as categories rather than as records: the graph
-        // draws one lane per category and opens the node for the rest.
-        let node_id = format!("node.{node}");
-        let mine: Vec<(usize, &Envelope)> = events
-            .iter()
-            .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
-            .copied()
-            .collect();
-        let settled = mine.iter().find(|(_, event)| {
-            event.source == Source::Pipeline
-                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
-        });
-        spans.extend(waiting_span(view, settled, &node_id, node));
-        spans.extend(queued_spans(&mine, &node_id, node));
-        spans.extend(role_rollups(
-            &mine,
-            &node_id,
-            node,
-            lens.transcripts.declared,
-        ));
-        spans.extend(kept_spans(view, &mine, &node_id, node));
-    }
+        .enumerate()
+        .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
+        .collect();
+    let settled = mine.iter().find(|(_, event)| {
+        event.source == Source::Pipeline
+            && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
+    });
+    spans.extend(waiting_span(view, settled, &node_id, node));
+    spans.extend(queued_spans(&mine, &node_id, node));
+    spans.extend(role_rollups(
+        &mine,
+        &node_id,
+        node,
+        lens.transcripts.declared,
+    ));
+    spans.extend(kept_spans(view, &mine, &node_id, node));
     spans
 }
 
 /// One node's span.
-fn node_span(view: &RunView, node: &str, parent: Option<&str>, lens: &Lens<'_>) -> Value {
+fn node_span(view: &Run<'_>, node: &str, parent: Option<&str>, lens: &Lens<'_>) -> Value {
     let events: Vec<(usize, &Envelope)> = view
         .events
         .iter()
@@ -5468,13 +6934,27 @@ fn relayed_sessions<'a>(
         if event.source != Source::Agentgraph {
             continue;
         }
-        let Some(session) = event
+        let session = event
             .labels
             .extra
             .get("session")
             .and_then(Value::as_str)
-            .filter(|session| ConversationId::try_from(*session).is_ok())
-        else {
+            .or_else(|| {
+                events.iter().find_map(|(_, candidate)| {
+                    (candidate.stream == event.stream
+                        && (member_label(event).is_none()
+                            || member_label(event) == member_label(candidate)))
+                    .then(|| {
+                        candidate
+                            .labels
+                            .extra
+                            .get("session")
+                            .and_then(Value::as_str)
+                    })
+                    .flatten()
+                })
+            });
+        let Some(session) = session.filter(|s| ConversationId::try_from(*s).is_ok()) else {
             continue;
         };
         match sessions.iter_mut().find(|(name, _)| *name == session) {
@@ -5531,111 +7011,34 @@ fn ordered(events: &[(usize, &Envelope)], matching: &dyn Fn(&Envelope) -> bool) 
     found
 }
 
-fn dispatches(events: &[(usize, &Envelope)]) -> Vec<Moment> {
-    ordered(events, &|event| {
-        event.source == Source::Pipeline
-            && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeDispatched)
-    })
-}
-
-/// Where the run said one session began, and where it said nothing, where the
-/// session first spoke.
-fn session_appeared(
-    events: &[(usize, &Envelope)],
-    session: &str,
-    relayed: &[(usize, &Envelope)],
-) -> Option<Moment> {
-    ordered(events, &|event| {
-        event.source == Source::Agentgraph
-            && event.kind.0 == graph::MEMBER_STARTED
-            && belongs_to(event, session)
-    })
-    .into_iter()
-    .next()
-    .or_else(|| {
-        relayed
-            .iter()
-            .filter_map(|(_, event)| Moment::of(event))
-            .min_by_key(|moment| moment.at)
-    })
-}
-
-/// The attempt at a node that ran a session appearing at one moment: the latest
-/// `node-dispatched` at or before it, or the node's first where the session
-/// appeared before any of them.
-fn attempt_of<'a>(dispatched: &'a [Moment], appeared: Option<&Moment>) -> Option<&'a Moment> {
-    appeared
-        .and_then(|appeared| {
-            dispatched
-                .iter()
-                .rev()
-                .find(|moment| moment.at <= appeared.at)
-        })
-        .or_else(|| dispatched.first())
-}
-
-/// When one dispatched session ran, inside the attempt of its node that ran it.
-///
-/// `src/AGENTS.md` states the bracketing rule and why a node's own window cannot
-/// stand in for it. Nothing here may close a session before the last thing it
-/// said, and one nothing has ended yet is returned open.
+/// A session's own first and last records bound its lane. External closure
+/// proves it ended, but does not add the time another session spent to its work.
 fn session_interval(
     events: &[(usize, &Envelope)],
     session: &str,
     relayed: &[(usize, &Envelope)],
 ) -> (Moment, Option<Moment>) {
-    let dispatched = dispatches(events);
-    let appeared = session_appeared(events, session, relayed);
-    let started = attempt_of(&dispatched, appeared.as_ref())
-        // Never after the session's own first word: a node that relayed
-        // something before it was ever dispatched has no attempt to hand this
-        // one, and a span that does not contain its own events is one no pointer
-        // into it can reach.
-        .filter(|dispatch| {
-            appeared
-                .as_ref()
-                .is_none_or(|appeared| dispatch.at <= appeared.at)
-        })
-        .or(appeared.as_ref())
-        .cloned()
-        .or_else(|| relayed.first().and_then(|(_, event)| Moment::of(event)))
-        .unwrap_or_else(|| Moment {
-            at: 0,
-            ts: now_rfc3339(),
-        });
-    // The last thing the session said, which nothing may close it before: a
-    // session that spoke again after a record that would have ended it outlived
-    // that record, and a span that does not contain its own events is one no
-    // pointer into it can reach.
-    let last_said = relayed
-        .iter()
-        .filter_map(|(_, event)| millis_of(&event.ts))
-        .max()
-        .unwrap_or(started.at);
-    let after = |moments: Vec<Moment>| {
-        moments
-            .into_iter()
-            .find(|moment| moment.at > started.at && moment.at >= last_said)
-    };
-    let ended = [
-        after(dispatched),
-        after(ordered(events, &|event| {
-            event.source == Source::Pipeline
-                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
-        })),
-        after(ordered(events, &|event| {
-            event.source == Source::Vcs && event.kind.0 == vcs::SESSION_CLOSED
-        })),
-        after(ordered(events, &|event| {
-            event.source == Source::Agentgraph
-                && [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&event.kind.0.as_str())
-                && belongs_to(event, session)
-        })),
-    ]
-    .into_iter()
-    .flatten()
-    .min_by_key(|moment| moment.at);
-    (started, ended)
+    let own = ordered(events, &|event| {
+        belongs_to(event, session) || relayed.iter().any(|(_, own)| std::ptr::eq(*own, event))
+    });
+    let started = own.first().cloned().unwrap_or_else(|| Moment {
+        at: 0,
+        ts: now_rfc3339(),
+    });
+    let last = own.last().cloned().unwrap_or_else(|| started.clone());
+    let closed = events.iter().any(|(_, event)| {
+        millis_of(&event.ts).is_some_and(|at| at >= last.at)
+            && (event.source == Source::Pipeline
+                && matches!(event.kind.0.as_str(), "node-settled" | "node-dispatched")
+                || event.source == Source::Vcs && event.kind.0 == vcs::SESSION_CLOSED
+                || event.source == Source::Agentgraph
+                    && belongs_to(event, session)
+                    && [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&event.kind.0.as_str())
+                || event.source == Source::Agentgraph
+                    && relayed.iter().any(|(_, own)| own.stream == event.stream)
+                    && event.kind.0 == "graph-settled")
+    });
+    (started, closed.then_some(last))
 }
 
 /// The branch a node opened and what became of it, from the records `onevcs`
@@ -5780,7 +7183,7 @@ fn lock_wait_rollup(events: &[(usize, &Envelope)], parent: &str, node: &str) -> 
 /// for a human action, which is never dispatched at all and would otherwise
 /// contribute no span but its own settlement.
 fn waiting_span(
-    view: &RunView,
+    view: &Run<'_>,
     settled: Option<&(usize, &Envelope)>,
     parent: &str,
     node: &str,
@@ -5942,7 +7345,7 @@ fn hold_reason(entry: &Value) -> Option<Value> {
 
 /// What a node kept: one span per artifact it stored, and the branch it published.
 fn kept_spans(
-    view: &RunView,
+    view: &Run<'_>,
     events: &[(usize, &Envelope)],
     parent: &str,
     node: &str,
@@ -6010,9 +7413,14 @@ fn role_rollups(
     });
     let mut counted: Vec<Category> = Vec::new();
     for (session, relayed) in relayed_sessions(events) {
-        let Some(role) =
-            declared.role_of_dispatched(relayed.first().map(|(_, event)| *event), start)
-        else {
+        let Some(role) = declared.role_of_dispatched(
+            relayed
+                .iter()
+                .find(|(_, e)| e.labels.extra.get("session").is_some())
+                .or_else(|| relayed.first())
+                .map(|(_, event)| *event),
+            start,
+        ) else {
             continue;
         };
         let pair = (
@@ -6130,7 +7538,7 @@ impl<'r> Category<'r> {
 /// produced nothing, and every attempt is the same node doing the same work, so
 /// the node has one span and the sessions under it are all of the sessions it
 /// ran.
-fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
+fn node_spans(view: &Run<'_>, node: &str, lens: &Lens<'_>) -> Vec<Value> {
     let mut spans: Vec<Value> = Vec::new();
     let events: Vec<(usize, &Envelope)> = view
         .events
@@ -6263,11 +7671,14 @@ fn node_spans(view: &RunView, node: &str, lens: &Lens<'_>) -> Vec<Value> {
                 relayed_transport_role(relayed.iter().map(|(_, event)| *event)).as_str()
             }),
         );
-        if let Some(role) = lens
-            .transcripts
-            .declared
-            .role_of_dispatched(relayed.first().map(|(_, event)| *event), start)
-        {
+        if let Some(role) = lens.transcripts.declared.role_of_dispatched(
+            relayed
+                .iter()
+                .find(|(_, e)| e.labels.extra.get("session").is_some())
+                .or_else(|| relayed.first())
+                .map(|(_, event)| *event),
+            start,
+        ) {
             span.insert("agent_role".into(), json!(role));
         }
         span.insert("status".into(), json!(status));
@@ -6344,15 +7755,36 @@ fn judge_span(
 /// crate must not offer. Neither is one the reader's filter excluded: an activity
 /// summary is a record like any other, and this is the listing of them.
 #[must_use]
-pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
-    let mut order: Vec<String> = Vec::new();
-    let mut latest: BTreeMap<String, (i128, Value)> = BTreeMap::new();
-    for event in &view.events {
+pub(crate) fn live_activity_over(view: &Run<'_>, filter: &EventFilter) -> Vec<Value> {
+    let mut fold = ActivityFold::default();
+    for event in view.events {
+        fold.absorb(event, filter);
+    }
+    fold.entries()
+}
+
+/// The fold behind [`live_activity_over`], one record at a time, so a live
+/// reading keeps it current from the records a refresh appended alone.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct ActivityFold {
+    order: Vec<String>,
+    latest: BTreeMap<String, (i128, Value)>,
+    identities: HashSet<(String, u64)>,
+}
+
+impl ActivityFold {
+    /// Take one record into the fold: a repeated producer identity is counted
+    /// once, and anything but a node's `turn-activity` the filter admits is
+    /// passed over.
+    pub(crate) fn absorb(&mut self, event: &Envelope, filter: &EventFilter) {
+        if !self.identities.insert((event.stream.clone(), event.seq)) {
+            return;
+        }
         if event.source != Source::Agentgraph
             || event.kind.0 != graph::TURN_ACTIVITY
             || !filter.allows(event)
         {
-            continue;
+            return;
         }
         // One entry per node, keyed by the node alone: a node is dispatched once
         // per readiness and re-asked in place, so what it is doing now is one
@@ -6365,10 +7797,11 @@ pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
                 .and_then(|node| NodeId::try_from(node).ok()),
             millis_of(&event.ts),
         ) else {
-            continue;
+            return;
         };
         let node = node.as_str().to_owned();
-        let counted = latest
+        let counted = self
+            .latest
             .get(&node)
             .and_then(|(_, seen)| seen["events"].as_u64())
             .unwrap_or(0);
@@ -6378,6 +7811,10 @@ pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
         let stamp = at as f64;
         let mut entry = Map::new();
         entry.insert("node".into(), json!(node));
+        entry.insert(
+            "event_id".into(),
+            json!(format!("{}.{}", event.stream, event.seq)),
+        );
         // The step within a lifecycle node, when the record names one: the node
         // runs several in sequence on one branch, and which of them is talking is
         // what a reader watching it needs.
@@ -6385,6 +7822,13 @@ pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
             entry.insert("step".into(), json!(step));
         }
         entry.insert("at".into(), json!(stamp));
+        // The call in one line, as the engine's resolver describes it.
+        entry.insert(
+            "description".into(),
+            json!(transcript::read(event, None)
+                .map(|read| read.description())
+                .unwrap_or_default()),
+        );
         for field in ["kind", "name", "detail"] {
             entry.insert(
                 field.into(),
@@ -6396,19 +7840,34 @@ pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
             );
         }
         entry.insert("events".into(), json!(counted + 1));
-        if latest
+        if self
+            .latest
             .insert(node.clone(), (at, Value::Object(entry)))
             .is_none()
         {
-            order.push(node);
+            self.order.push(node);
         }
     }
-    let mut activity: Vec<(i128, Value)> = order
-        .into_iter()
-        .filter_map(|key| latest.remove(&key))
-        .collect();
-    activity.sort_by_key(|(at, _)| *at);
-    activity.into_iter().map(|(_, entry)| entry).collect()
+
+    /// One entry per node, oldest first.
+    pub(crate) fn entries(&self) -> Vec<Value> {
+        let mut activity: Vec<&(i128, Value)> = self
+            .order
+            .iter()
+            .filter_map(|key| self.latest.get(key))
+            .collect();
+        activity.sort_by_key(|(at, _)| *at);
+        activity
+            .into_iter()
+            .map(|(_, entry)| entry.clone())
+            .collect()
+    }
+}
+
+/// `live_activity`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
+    live_activity_over(&Run::of(view), filter)
 }
 
 /// A change token for one run, as one connection sees it.
@@ -6430,9 +7889,12 @@ pub fn live_activity(view: &RunView, filter: &EventFilter) -> Vec<Value> {
 /// movement anyway. A filtered connection is therefore keyed on how many records
 /// it admitted and when the last of them was stamped.
 #[must_use]
-pub fn signature(view: &RunView, filter: &EventFilter) -> Signature {
+pub(crate) fn signature_over(view: &Run<'_>, filter: &EventFilter) -> Signature {
     if filter.admits_everything() {
-        return (view.events.len(), view.state.last_write_at.unwrap_or(0));
+        return (
+            view.events.len(),
+            view.whole.state.last_write_at.unwrap_or(0),
+        );
     }
     let admitted: Vec<&Envelope> = view
         .events
@@ -6445,6 +7907,12 @@ pub fn signature(view: &RunView, filter: &EventFilter) -> Signature {
         .and_then(|at| u64::try_from(at).ok())
         .unwrap_or(0);
     (admitted.len(), last)
+}
+
+/// `signature`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn signature(view: &RunView, filter: &EventFilter) -> Signature {
+    signature_over(&Run::of(view), filter)
 }
 
 /// What [`signature`] compares: how much the run has recorded, and when it last
@@ -6460,8 +7928,8 @@ pub type Signature = (usize, u64);
 /// anything it is watching — and a digest over the whole store would wake it on
 /// every tool call the filter exists to keep out of its way.
 #[must_use]
-pub fn conversation_signature(
-    view: &RunView,
+pub(crate) fn conversation_signature_over(
+    view: &Run<'_>,
     declared: &DeclaredMembers,
     filter: &EventFilter,
 ) -> String {
@@ -6477,6 +7945,16 @@ pub fn conversation_signature(
             out.push_str(&format!("{byte:02x}"));
             out
         })
+}
+
+/// `conversation_signature`, over everything `view` read: the whole merged store.
+#[must_use]
+pub fn conversation_signature(
+    view: &RunView,
+    declared: &DeclaredMembers,
+    filter: &EventFilter,
+) -> String {
+    conversation_signature_over(&Run::of(view), declared, filter)
 }
 
 /// The grouped listing `verbs::runs` answers, projected: one entry per group in
@@ -6625,7 +8103,16 @@ pub fn status(run: &RunId, status: &onepipeline::verbs::RunStatus, rendered: Str
         "run_id": run,
         "liveness": status.view.liveness().as_str(),
         "unread_surfaces": { "count": count, "oldest_seconds": oldest_seconds },
-        "node_status": status.view.state.statuses(),
+        // Each node's word as the engine writes and renders it. Not the status's
+        // own serialization, which lowercases a variant's name and so spells
+        // `complete-but-held` as `completeheld`: a word no other view serves.
+        "node_status": status
+            .view
+            .state
+            .statuses()
+            .into_iter()
+            .map(|(node, status)| (node, status.as_str()))
+            .collect::<BTreeMap<_, _>>(),
         "summary": status.view.summary(),
         "rendered": rendered,
     })

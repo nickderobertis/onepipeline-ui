@@ -438,6 +438,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc32fast"
+version = "1.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ba106e844045ddc02c20768ac4b0b7cb45f2cc2ecbd833ac9f5dacb183c2055"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "crypto-common"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -601,6 +610,17 @@ name = "find-msvc-tools"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26b73573e6edcd2af0cdf47bd6cb58f0b3839491263c314eaad1ccf24430e1de"
+
+[[package]]
+name = "flate2"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb"
+dependencies = [
+ "crc32fast",
+ "miniz_oxide",
+ "zlib-rs",
+]
 
 [[package]]
 name = "float-cmp"
@@ -1340,9 +1360,9 @@ dependencies = [
 
 [[package]]
 name = "libz-sys"
-version = "1.1.29"
+version = "1.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85bc9657773828b90eeb625adff10eeac83cc21bbfd8e23a03eaa8a33c9e28d9"
+checksum = "ff20308ecabd635a2dc1dd5834a86c462cca20efba1d5d3ddab1f8aea3455cb2"
 dependencies = [
  "cc",
  "libc",
@@ -1427,6 +1447,7 @@ checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
 dependencies = [
  "adler2",
  "serde",
+ "simd-adler32",
 ]
 
 [[package]]
@@ -1573,9 +1594,9 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "oneagentgraph"
-version = "0.5.13"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b563d4aca094275ba44006c0d7b664a8f7ece7e7f2bbc41a61f69241fa4d3d8"
+checksum = "22a84d2b435f00db085cc68caf12f9bf99c685f5bfe4a40629585601317b6b03"
 dependencies = [
  "clap",
  "libc",
@@ -1595,9 +1616,9 @@ dependencies = [
 
 [[package]]
 name = "oneharness-core"
-version = "0.28.2"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12a22a5103816b9102f85eedab0c397a68591472074388919cd51c7d6ee9967e"
+checksum = "dab297bd0e5ee942c14b0aa99050d1e95d3ae7e93f187db1c47c81698eb69823"
 dependencies = [
  "fs2",
  "jsonschema 0.33.0",
@@ -1616,9 +1637,9 @@ dependencies = [
 
 [[package]]
 name = "onejudge"
-version = "0.19.5"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14b557991e27288656dbcb174b53d1719df475942baa909b1a4b332b5048fc50"
+checksum = "04fa448faccc8b6f088e5b954d9c6e2581f3a9faef24cfa613673d09fe85af94"
 dependencies = [
  "clap",
  "oneharness-core",
@@ -1633,12 +1654,13 @@ dependencies = [
 
 [[package]]
 name = "onemessagebus"
-version = "0.9.1"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ae7dfd47a38b52451c6b00288604d0c4c3f640a0192a302fd00732f805d3729"
+checksum = "37765a19a871ae7e89e87441dc70a3c7df312917b8fed9397529b2050571613a"
 dependencies = [
  "getrandom 0.3.4",
  "jsonschema 0.56.0",
+ "rustix",
  "rustls",
  "rustls-native-certs",
  "schemars",
@@ -1649,13 +1671,14 @@ dependencies = [
  "thiserror 2.0.21",
  "time",
  "ureq",
+ "winapi-util",
 ]
 
 [[package]]
 name = "onepipeline"
-version = "0.78.0"
+version = "0.97.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18cc7e0cf976b010f84541ed35e003a3a93ffa93d97235b567227bd233133145"
+checksum = "6b868205a7ab56e26ea705b7537a1218f0bbf6a367b7da886c10d0952ca8b0ab"
 dependencies = [
  "async-trait",
  "clap",
@@ -1666,6 +1689,7 @@ dependencies = [
  "onejudge",
  "onemessagebus",
  "onetaskgraph-core",
+ "onetaskgraph-local-md",
  "onetaskgraph-plugin-api",
  "onevcs",
  "schemars",
@@ -1681,12 +1705,13 @@ dependencies = [
 
 [[package]]
 name = "onepipeline-ui"
-version = "0.40.0"
+version = "0.64.0"
 dependencies = [
  "assert_cmd",
  "auditable-info",
  "axum",
  "clap",
+ "flate2",
  "futures-core",
  "libc",
  "oneagentgraph",
@@ -1709,13 +1734,15 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml",
+ "url",
+ "uuid",
 ]
 
 [[package]]
 name = "onetaskgraph-core"
-version = "0.7.3"
+version = "0.12.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3a73bdafe561abeee4be822a55ab8e8e4efbfe137778e58d7b9ac8dda36128e"
+checksum = "59d61155e7f185ac3ad37229c9e038f4440d6c2f470d2fee8af47d04ed57ae6d"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1726,6 +1753,7 @@ dependencies = [
  "onetaskgraph-linear",
  "onetaskgraph-local-md",
  "onetaskgraph-plugin-api",
+ "pulldown-cmark",
  "schemars",
  "secrecy",
  "serde",
@@ -1735,13 +1763,15 @@ dependencies = [
  "sha2",
  "thiserror 2.0.21",
  "tokio",
+ "url",
+ "uuid",
 ]
 
 [[package]]
 name = "onetaskgraph-github-projects"
-version = "0.7.3"
+version = "0.12.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "289a04a825903fcf756fa8f136ff12c8fec867c5c27fa4f124541b357cb942e3"
+checksum = "3d3a9212334757006ecb9d528028c308efa7853906f7e3cf53c9c0ea03ae64c6"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1757,9 +1787,9 @@ dependencies = [
 
 [[package]]
 name = "onetaskgraph-in-memory"
-version = "0.7.3"
+version = "0.12.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23e1ba7c30fd28a31b1f1d8a1617c5e3adf2e55b0bf884dd81a1bd49398f2fc4"
+checksum = "e8b553a1040c90d63e2b12ac5615c323042ce688498ec07a13547f7d56813302"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1771,9 +1801,9 @@ dependencies = [
 
 [[package]]
 name = "onetaskgraph-linear"
-version = "0.7.3"
+version = "0.12.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ced062ad9b5dc074920c1da6ac73f108085170d848f7e93b60e7b70e384663b"
+checksum = "126d3c6c024245e1eca93d140b8a56ca2db6ee70f98dc1b52de51adf376c170a"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1787,9 +1817,9 @@ dependencies = [
 
 [[package]]
 name = "onetaskgraph-local-md"
-version = "0.7.3"
+version = "0.12.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0fc7d122d0e0037bcd666e3ed360edfa809c31d4941a6dcf2c9974f469fcb9c"
+checksum = "49b99852a3e5619230fe0fe85874a802557810eff7cb78bb849ab982f7f742c2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1804,9 +1834,9 @@ dependencies = [
 
 [[package]]
 name = "onetaskgraph-plugin-api"
-version = "0.7.3"
+version = "0.12.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2eefe759ec32b79e6aaba72995dee09fbc4ae62730a95d48b14d7c5c8ef781c7"
+checksum = "2209cef0ca27d277c14c78622abf9af5ac914809552a0e573b45ea8663edd820"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1823,9 +1853,9 @@ dependencies = [
 
 [[package]]
 name = "onevcs"
-version = "0.52.1"
+version = "0.57.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f974b2127926f70739fb60d97ad02835f91c9d04ad08b75b0e1c0e6b90096739"
+checksum = "3ac7bb4fba94f981f9364709e8dbb806b9ad15a96d6aba963dc9e08784cf8740"
 dependencies = [
  "aho-corasick",
  "clap",
@@ -2009,9 +2039,9 @@ dependencies = [
 
 [[package]]
 name = "pulldown-cmark"
-version = "0.13.4"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
+checksum = "278e9268c93b9e498a2da46c34d90ba93a3255eb99009646398f34bc73ab36eb"
 dependencies = [
  "bitflags",
  "memchr",
@@ -2282,9 +2312,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -2533,6 +2563,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "simd-adler32"
+version = "0.3.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
+
+[[package]]
 name = "simd_cesu8"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2752,9 +2788,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "bytes",
  "libc",
@@ -3041,9 +3077,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.24.0"
+version = "1.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
+checksum = "4a0e2d11620c50695fe12bbbfde96b3477fe606e7284c22d505c12ce51214514"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
@@ -3200,18 +3236,18 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
+checksum = "58ec80e73fd8baf57bf0d9615554c75348bda990d6d5bbeab964dd068319fecb"
 dependencies = [
  "rustls-pki-types",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
+checksum = "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -3550,6 +3586,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "zlib-rs"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112"
 
 [[package]]
 name = "zmij"

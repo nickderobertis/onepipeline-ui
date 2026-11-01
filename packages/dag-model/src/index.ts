@@ -60,13 +60,8 @@ export const API_V2_PATHS = {
     `/api/v2/runs/${encodeURIComponent(runId)}/channel/surface`,
   attest: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/attest`,
   stop: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/stop`,
-  adopt: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/adopt`,
-  /** The engine's host shutdown over one run, as the acting session. */
-  runShutdown: (runId: string) =>
-    `/api/v2/runs/${encodeURIComponent(runId)}/shutdown`,
-  /** The engine's host shutdown over every run the session owns, or the host. */
+  /** Shut down every run on the host. */
   shutdown: "/api/v2/shutdown",
-  watch: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/watch`,
   unwatched: "/api/v2/unwatched",
   host: "/api/v2/host",
   status: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/status`,
@@ -89,6 +84,14 @@ export const API_V2_PATHS = {
     `/api/v2/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/agents`,
   projectAgents: (projectId: string) =>
     `/api/v2/projects/${encodeURIComponent(projectId)}/agents`,
+  /**
+   * A tab's subscription: `POST` creates one for the sidebar and at most one
+   * visible run view and answers its initial snapshot; `DELETE` of one retires
+   * it, so a view the tab no longer shows is no longer read.
+   */
+  subscriptions: "/api/v2/subscriptions",
+  subscription: (subscriptionId: string) =>
+    `/api/v2/subscriptions/${encodeURIComponent(subscriptionId)}`,
 } as const;
 export const API_V2_QUERY = {
   includeSettled: "include_settled",
@@ -143,6 +146,8 @@ export const API_V2_QUERY = {
   until: "until",
   /** How long a watch waits: whole seconds, `0` to read once, `none` to never give up. */
   timeout: "timeout",
+  /** Which subscription an event stream carries the changes of. */
+  subscription: "subscription",
   /** The heartbeat interval of a watch in whole seconds, `0` to turn it off. */
   tick: "tick",
 } as const;
@@ -247,8 +252,27 @@ export const API_V2_FILTER_PROFILES = {
  * field `18` served is served with the same meaning; the literal moves because a
  * client that has never seen the field shows a run a dozen agents ran under as
  * one nothing was launched for.
+ *
+ * `25` is pushed changes: the subscription routes and frames below, and the
+ * detail's `run.live_activity`. Every field `24` served is served with the same
+ * meaning; the literal moves because a client written against `24` re-reads
+ * whole payloads on every change and has never seen `live_activity`.
+ *
+ * `26` reads every turn whole from its transcript: a conversation's prompts,
+ * replies and tool calls come out of the history file each record points at,
+ * with no cut flag on a run recorded with references and `transcript
+ * unavailable: <path>: <why>` where a reference resolves to nothing; a live tool
+ * event gains `toolCallId`, a live-activity entry `description`, and an
+ * `oneharness_session` artifact `turns` and `unavailable`. The literal moves
+ * because a client written against `25` shows a cut prompt as the whole of one.
+ *
+ * `27` is finished work held for a release: the node-status vocabulary gains
+ * `complete-but-draft` and `complete-but-held`, and a node's result gains
+ * `awaiting`, the releases its settlement still awaits. Every field `26` served is
+ * served with the same meaning; the literal moves because a client written against
+ * `26` switches on a vocabulary that holds neither word.
  */
-export const TELEMETRY_SCHEMA_VERSION = 21;
+export const TELEMETRY_SCHEMA_VERSION = 27;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -256,6 +280,12 @@ export const TELEMETRY_SCHEMA_VERSION = 21;
  * `3` is where a `rollup` span stopped implying a dispatch: one may now carry no
  * roles and stand for the waits a publication spent blocked on a lock, named by
  * the kind it summarizes.
+ *
+ * `12` is where a redirection began saying how a live turn took a note. A server
+ * on `11` serves a note a running turn was left to end for exactly as it serves
+ * one that interrupted the turn, so a planner who asked for `turn-end` cannot read
+ * whether that is what happened; under `12` the record's `turn` is served beside
+ * its `reached`, and a record that never said serves none.
  *
  * `10` is where a span's `agent_role` became the member name the run's own graphs
  * declared, as telemetry `17` is for the same field elsewhere. A server on `9`
@@ -315,8 +345,13 @@ export const TELEMETRY_SCHEMA_VERSION = 21;
  * planner changed what a running turn was doing is indistinguishable from any
  * other journal record — and the turn after it reads as a worker inexplicably
  * switching tasks.
+ *
+ * `14` describes every turn record in one line: a turn event gains
+ * `description`, the server's (the engine resolver's) one line for the entry it
+ * points at, and a `turn-activity` event `tool`, where it sits in its
+ * conversation. The browser shows the line and never derives its own.
  */
-export const TIMELINE_SCHEMA_VERSION = 11;
+export const TIMELINE_SCHEMA_VERSION = 14;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -577,6 +612,8 @@ export const providerHealthSchema = openObject({
  * no `session_key`.
  */
 export const runLaunchSchema = openObject({
+  /** The engine’s recorded launch time, absent for older launch records. */
+  started_at: timestamp.optional(),
   launch_id: z.string().min(1),
   launcher: z.enum(["claude-code", "codex", "unknown"]),
   session_key: z.string().min(1).optional(),
@@ -608,6 +645,10 @@ export const RUN_LIVENESS_NOTHING_DRIVING: readonly string[] = [
 ];
 
 export const runSummarySchema = openObject({
+  /** Effective engine labels, including label overlays. Absent when empty. */
+  labels: z.record(z.string(), z.string()).optional(),
+  /** Resolved group: explicit group, copy origin, then launched project. */
+  group: z.string().min(1).optional(),
   run_id: z.string().min(1),
   state: z.string().min(1),
   phase: z.string().min(1),
@@ -822,6 +863,16 @@ export const nodeReleaseSchema = openObject({
   style: z.string().min(1).optional(),
   version: z.string().min(1),
 });
+/**
+ * One release a node holding finished work still awaits (schema 27), as the engine's
+ * `node-settled` record lists it: `producer` is the producing repository's
+ * normalized origin and `target` the release target's name. Open strings, for the
+ * reason a {@link nodeReleaseSchema}'s `target` is one.
+ */
+export const awaitedReleaseSchema = openObject({
+  producer: z.string().min(1),
+  target: z.string().min(1),
+});
 export const graphResultItemSchema = openObject({
   kind: z.string().optional(),
   status: z.string().optional(),
@@ -855,6 +906,12 @@ export const graphResultItemSchema = openObject({
    * served an absent key rather than an empty object.
    */
   release: nodeReleaseSchema.nullable().optional(),
+  /**
+   * The releases a `complete-but-draft` or `complete-but-held` node still awaits,
+   * one per release in the record's order; absent, never empty, for a node whose
+   * settlement named none.
+   */
+  awaiting: z.array(awaitedReleaseSchema).min(1).optional(),
   detail: z.string().optional(),
   follow_ups: z.string().nullable().optional(),
   steps: z.array(stepResultSchema).optional(),
@@ -879,6 +936,8 @@ export const nodeStateSchema = z.enum([
   "waiting",
   "parked",
   "cancelled",
+  "complete-but-draft",
+  "complete-but-held",
 ]);
 /**
  * The one authoritative per-node status. `src/payload.rs`'s `NODE_STATUSES` maps
@@ -893,6 +952,8 @@ export const nodeStateSchema = z.enum([
  */
 export const nodeStatusSchema = z.enum([
   "pending",
+  // The engine's word for a node eligible now with nothing dispatched (schema 24).
+  "ready",
   "running",
   "waiting",
   "blocked",
@@ -902,6 +963,11 @@ export const nodeStatusSchema = z.enum([
   "failed",
   "parked",
   "cancelled",
+  // Finished work waiting on a release before it may land (schema 27): held as a
+  // draft change request, or held unlanded on its origin where its publication
+  // opens none. `GraphResultItem.awaiting` names what each waits on.
+  "complete-but-draft",
+  "complete-but-held",
   "unknown",
 ]);
 /**
@@ -1042,12 +1108,22 @@ export const conversationUsageSchema = openObject({
   inputTokens: usageValue.optional(),
   outputTokens: usageValue.optional(),
 });
+/**
+ * One tool event of a turn, read whole from the transcript (schema 26):
+ * `toolCallId` is the harness's identity for the call where it minted one, and
+ * `output_truncated` / `input_truncated` appear only on a run recorded before
+ * turn records pointed at their transcript, where the recorder cut the copy and
+ * no whole copy exists.
+ */
 export const conversationToolEventSchema = openObject({
   index: counter,
   input: z.unknown().optional(),
   kind: z.string(),
   name: z.string().nullable().optional(),
   output: z.string().nullable().optional(),
+  toolCallId: z.string().min(1).optional(),
+  output_truncated: z.literal(true).optional(),
+  input_truncated: z.literal(true).optional(),
 });
 /**
  * What one judge of a stacked panel decided on the turn it is served on: its label
@@ -1142,6 +1218,10 @@ export const runConversationsSchema = z.union([
 const verificationCheckSchema = openObject({
   name: z.string(),
   state: z.string(),
+  status: z.string().optional(),
+  conclusion: z.string().optional(),
+  started_at: timestamp.optional(),
+  completed_at: timestamp.optional(),
   required: z.boolean(),
   url: z.string().url().optional(),
 });
@@ -1169,11 +1249,49 @@ export const nodeDetailSchema = openObject({
     commit_url: z.string().url().optional(),
   }).optional(),
 });
+export interface LiveActivity {
+  event_id: string;
+  node: string;
+  step?: string;
+  at: number;
+  kind: string;
+  name: string;
+  detail: string;
+  /**
+   * The call in one line, as the server's transcript resolver describes it
+   * (schema 26) — the line a reader is shown, never derived here. Absent from a
+   * server on `25`, which this client refuses anyway.
+   */
+  description: string;
+  events: number;
+}
+export const liveActivitySchema: z.ZodType<LiveActivity> = z.object({
+  event_id: z.string().min(1),
+  node: z.string().min(1),
+  step: z.string().min(1).optional(),
+  at: z.number().finite(),
+  kind: z.string(),
+  name: z.string(),
+  detail: z.string(),
+  description: z.string(),
+  events: z.number().int().nonnegative(),
+});
+export const liveActivityListSchema = z.array(liveActivitySchema);
+
 export const runDetailSchema = openObject({
+  /** The exact SDK telemetry document, including counters and millisecond buckets. */
+  telemetry: openObject({ schema_version: counter }).optional(),
   api_version: z.literal(2),
   telemetry_schema_version: z.literal(TELEMETRY_SCHEMA_VERSION),
   observed_at: timestamp,
-  run: runTelemetrySchema,
+  /**
+   * `live_activity` (schema 25): what each node was last seen doing from inside
+   * a turn, oldest first — the header's activity line, patched with the rest of
+   * the detail rather than pushed on a stream of its own.
+   */
+  run: runTelemetrySchema.extend({
+    live_activity: liveActivityListSchema.optional(),
+  }),
   graph: graphStateSchema.nullable(),
   conversations: runConversationsSchema,
   node_details: z.record(z.string(), nodeDetailSchema).optional().default({}),
@@ -1232,7 +1350,9 @@ export const timelineReferenceSchema = openObject({
  * offered, and — exactly when the turn did not take them — why; `onepipeline`'s
  * `edit-committed` adds `delivery`, its own word for where the note ended up, and the
  * node it was for — and, where the engine recorded which party of the running
- * conversation took the note, `reached`, whose one word for nobody is `carried`.
+ * conversation took the note, `reached`, whose one word for nobody is `carried` —
+ * and, where the record says how a live turn took it, `turn`: `interrupted`, its
+ * replacement opened on the note, or `turn-end`, left to end and reached then.
  * `reason` is never carried beside a delivered redirection, so one can never be
  * read as having had a reason it failed.
  */
@@ -1242,6 +1362,7 @@ export const redirectionSchema = openObject({
   reached: z
     .enum(["queued", "worker", "supervisor", "judged-with", "carried"])
     .optional(),
+  turn: z.enum(["interrupted", "turn-end"]).optional(),
   member: z.string().min(1).optional(),
   input_bytes: counter.optional(),
   reason: z.string().min(1).optional(),
@@ -1403,6 +1524,14 @@ export const timelineReleaseSchema = openObject({
     });
   }
 });
+/** Unfiltered dispatch ownership, shared by a record and the session lane. */
+export const timelineDispatchGroupSchema = openObject({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  order: counter,
+  started_at: timestamp,
+});
+
 /**
  * `kind` is an open string on purpose: it is the journal event kind that produced
  * the item, or `conversation-turn` for a turn, and the journal owns that vocabulary.
@@ -1414,6 +1543,14 @@ export const timelineReleaseSchema = openObject({
 // llmlint: ignore[boundary_inputs_validated] the pairing of `redirection` with a `kind` is not a constraint this parser may enforce: `kind` is the journal event kind and the journal owns that vocabulary, so a conforming server relaying another producer's interrupt record under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `redirection` itself carries is fully validated above, which is the part this contract does own.
 export const timelineEventSchema = openObject({
   id: z.string().min(1),
+  stream: z.string().min(1).optional(),
+  seq: counter.optional(),
+  journal_order: counter.optional(),
+  record_id: z.string().min(1).optional(),
+  persona: z.string().min(1).optional(),
+  dispatch_id: z.string().min(1).optional(),
+  dispatch_group: timelineDispatchGroupSchema.optional(),
+  fields: z.record(z.string().min(1), z.json()).optional(),
   kind: z.string().min(1),
   at: timestamp,
   node_id: z.string().min(1).optional(),
@@ -1449,6 +1586,24 @@ export const timelineEventSchema = openObject({
   // llmlint: ignore[boundary_inputs_validated] the pairing of `review` with a `kind` is the same constraint this parser may not enforce as the `surface` pairing above, and for the same reason: the review kinds are `onevcs`'s, released on its own schedule, so a conforming server relaying one under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `review` itself carries is validated above, down to refusing one that carries nothing.
   review: timelineReviewSchema.optional(),
   reference: timelineReferenceSchema.optional(),
+  /**
+   * A turn record's one line (timeline schema 14): the server's transcript
+   * resolver's description of the entry the record points at, or its
+   * `transcript unavailable: <path>: <why>`. Shown as served, never derived here.
+   */
+  description: z.string().optional(),
+  /**
+   * Where a `turn-activity` sits in the conversation its `reference` names: the
+   * producer's index, the call's identity where the harness minted one, and the
+   * turn it was published inside — what opening the row focuses that
+   * conversation on.
+   */
+  tool: openObject({
+    index: counter,
+    tool_call_id: z.string().min(1).optional(),
+    /** The id of the conversation turn the event was published inside. */
+    turn: z.string().min(1).optional(),
+  }).optional(),
 });
 /**
  * One discrete wait a `rollup` span absorbed, so a client can draw the stalls a run
@@ -1503,9 +1658,12 @@ export const timelineSpanSchema = openObject({
   count: counter.optional(),
   total_duration_ms: counter.optional(),
   intervals: z.array(timelineIntervalSchema).optional(),
+  harness_scope: z.string().min(1).optional(),
+  dispatch_attempt: z.string().min(1).optional(),
   agent_role: agentRoleSchema.optional(),
   transport_role: transportRoleSchema.optional(),
   dispatch_id: z.string().min(1).optional(),
+  dispatch_group: timelineDispatchGroupSchema.optional(),
   reference: timelineReferenceSchema.optional(),
   detail: openObject({
     ok: z.boolean().optional(),
@@ -1534,11 +1692,20 @@ export const timelineSpanSchema = openObject({
     });
   }
 });
+/**
+ * One stored artifact. A log is served as its end, with `truncated` saying so; a
+ * transcript or a report is served whole. An `oneharness_session` (schema 26)
+ * also carries `turns` — the invocation read whole from its history file as the
+ * one conversation turn it was — and `unavailable`, the resolver's own
+ * `transcript unavailable: <path>: <why>`, where none of it could be read.
+ */
 export const artifactContentSchema = openObject({
   id: z.string().min(1),
   kind: timelineReferenceKindSchema,
   content: z.string(),
   truncated: z.boolean(),
+  turns: z.array(conversationTurnSchema).optional(),
+  unavailable: z.string().optional(),
 });
 /**
  * The timeline envelope, which carries a version of its own beside the API's.
@@ -1583,26 +1750,6 @@ export const sseEventNameSchema = z.enum([
   "run.removed",
 ]);
 export const sseEventDataSchema = arbitraryRecord;
-
-export interface LiveActivity {
-  node: string;
-  step?: string;
-  at: number;
-  kind: string;
-  name: string;
-  detail: string;
-  events: number;
-}
-export const liveActivitySchema: z.ZodType<LiveActivity> = z.object({
-  node: z.string().min(1),
-  step: z.string().min(1).optional(),
-  at: z.number().finite(),
-  kind: z.string(),
-  name: z.string(),
-  detail: z.string(),
-  events: z.number().int().nonnegative(),
-});
-export const liveActivityListSchema = z.array(liveActivitySchema);
 
 /**
  * Whether a string is a qualified project id: `<source>:<native>`, the source
@@ -1695,6 +1842,7 @@ const verbEnvelope = {
  */
 export const channelSurfaceSchema = openObject({
   id: counter,
+  correlation: z.string().min(1).optional(),
   kind: z.string().min(1),
   message: z.string(),
   source: z.string().min(1),
@@ -1818,6 +1966,18 @@ export const replyCommandSchema = z.discriminatedUnion("op", [
       criterion: z.string().min(1).optional(),
       deliver: noteDeliverSchema.optional(),
       persist: z.boolean().optional(),
+      delivery_timeout_seconds: z.number().int().positive().optional(),
+    })
+    .strict(),
+  // Take back a note an earlier envelope sent, named by that envelope's id and
+  // the note's 0-based position among its commands.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this command; this entry restates it for the browser's reply grammar, and `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` regenerates `reply-commands.json` from the linked onepipeline's Command schema, which `e2e/model.e2e.test.ts` holds this union to op for op, so the copy cannot drift and the pin move fails without it.
+  z
+    .object({
+      op: z.literal("withdraw-note"),
+      envelope: z.string().min(1),
+      index: z.number().int().nonnegative(),
+      reason: z.string().min(1),
     })
     .strict(),
   z
@@ -2039,13 +2199,6 @@ export const stoppedSchema = openObject({
   teardown: z.string().min(1),
 });
 
-/** `POST /api/v2/runs/{run}/adopt`: the retained driver's pid. */
-export const adoptedSchema = openObject({
-  ...verbEnvelope,
-  run_id: z.string().min(1),
-  pid: counter.positive(),
-});
-
 /**
  * The grace the engine gives a dispatch to end itself when a shutdown names
  * none, in seconds: the default its own binary takes without `--grace`. A client
@@ -2054,11 +2207,11 @@ export const adoptedSchema = openObject({
  */
 export const SHUTDOWN_DEFAULT_GRACE_SECONDS = 600;
 
-/** Which runs a shutdown acts on: one run, the session's own, or the host's. */
-export const shutdownScopeSchema = z.enum(["run", "mine", "host"]);
+/** The API shuts down the entire host. */
+export const shutdownScopeSchema = z.enum(["host"]);
 
-/** The two scopes `POST /api/v2/shutdown` takes; one run is the run route's. */
-export const hostShutdownScopeSchema = z.enum(["mine", "host"]);
+/** The sole scope `POST /api/v2/shutdown` accepts. */
+export const hostShutdownScopeSchema = z.enum(["host"]);
 
 /**
  * What a dispatch's interrupt was answered with. None is a failure of the
@@ -2088,7 +2241,7 @@ export const branchPreservedSchema = z.enum([
 ]);
 
 /**
- * `POST /api/v2/runs/{run}/shutdown` and `POST /api/v2/shutdown`: the engine's
+ * `POST /api/v2/shutdown`: the engine's
  * report of a shutdown it performed, whatever it found.
  *
  * `complete` is false when a dispatch was killed at the deadline, a teardown was
@@ -2138,47 +2291,6 @@ export const shutdownReportSchema = openObject({
 });
 
 /**
- * The three frames `GET /api/v2/runs/{run}/watch` streams, by their SSE `event`
- * name: one meaningful event, a heartbeat, and the ending that closes the stream.
- */
-export const watchEventNameSchema = z.enum(["event", "tick", "returned"]);
-
-/**
- * A run's unread accounting as a watch frame carries it: how many surfaces nobody
- * has read, the age of the oldest in seconds — `null` rather than zero where
- * there is none — and the count per kind.
- */
-export const watchUnreadSchema = openObject({
-  count: counter,
-  oldest_seconds: nonnegative.nullable(),
-  kinds: z.array(openObject({ kind: z.string().min(1), count: counter })),
-});
-
-/**
- * The data of each frame, discriminated on the engine's own `watch` tag — the
- * record `onepipeline watch` prints on standard output for that frame, rendered
- * by the SDK, so a client of this stream and a script reading that verb read one
- * shape. The event under an `event` frame is the engine's machine record, open.
- */
-export const watchFrameDataSchema = z.discriminatedUnion("watch", [
-  openObject({ watch: z.literal("event"), event: arbitraryRecord }),
-  openObject({
-    watch: z.literal("heartbeat"),
-    run_id: z.string().min(1),
-    unread: watchUnreadSchema,
-  }),
-  openObject({
-    watch: z.literal("return"),
-    run_id: z.string().min(1),
-    condition: z.string().min(1),
-    exit: z.number().int(),
-    node: z.string().min(1).optional(),
-    cursor: z.string().min(1),
-    unread: watchUnreadSchema,
-  }),
-]);
-
-/**
  * `GET /api/v2/unwatched`: one entry per run the acting session owns that the
  * engine's `unwatched` verb reports as owed and not watched, by that verb's own
  * rule, and what could not be resolved in the engine's words. An unattributed
@@ -2208,8 +2320,45 @@ export const unwatchedSchema = openObject({
  * SDK's own text, byte for byte what the binary prints, with the roots it refused
  * beside it on the terms the run list names one.
  */
+/** The engine's versioned host reading, projected without renaming its fields. */
+export const hostReadingSchema = openObject({
+  schema_version: z.literal(1),
+  host: z.string(),
+  root: z.string(),
+  root_error: z.string().nullable(),
+  free_space: z.array(
+    openObject({
+      roots: z.array(
+        openObject({
+          role: z.string(),
+          path: z.string().nullable(),
+          measured_at: z.string().nullable(),
+        }),
+      ),
+      free_bytes: counter.nullable(),
+      total_bytes: counter.nullable(),
+      error: z.string().nullable(),
+    }),
+  ),
+  dispatches: z.array(
+    openObject({
+      run: z.string(),
+      node: z.string(),
+      launcher: z.string(),
+      age_ms: nonnegative.nullable(),
+      proof: z.enum(["held", "unproven"]),
+      unproven: z.string().nullable(),
+    }),
+  ),
+  gone: z.array(
+    openObject({ run: z.string(), node: z.string(), reason: z.string() }),
+  ),
+  skipped: z.array(openObject({ path: z.string(), reason: z.string() })),
+});
+
 export const renderedRootSchema = openObject({
   ...verbEnvelope,
+  reading: hostReadingSchema.optional(),
   rendered: z.string(),
   unreadable: z.array(unreadableRunRootSchema).optional(),
 });
@@ -2361,6 +2510,299 @@ export const projectAgentsSchema = openObject({
   project: z.string().min(1),
 });
 
+/**
+ * The pushed-changes protocol `docs/contract.md` states under "Subscriptions":
+ * a tab subscribes to the sidebar and at most one visible run view, is answered
+ * with the state it shows at one publication boundary, and is then pushed only
+ * what changed — a trimmed row per run that moved, and a patch of the visible
+ * payload. Every object here is strict: a field the contract does not name is a
+ * frame this client does not understand, never one it reads past.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+export const subscriptionIdSchema = z.string().regex(UUID);
+/** `<epoch UUID>:<unsigned decimal sequence>`, written one way only. */
+export const eventIdSchema = z
+  .string()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(0|[1-9][0-9]*)$/u,
+  );
+
+/** What a tab shows besides the sidebar: nothing, or one run view. */
+export const subscriptionViewSchema = z.union([
+  z.strictObject({ type: z.literal("sidebar") }),
+  z.strictObject({
+    type: z.literal("detail"),
+    run_id: z.string().min(1),
+    filter: z.string().min(1).optional(),
+  }),
+  z.strictObject({
+    type: z.literal("timeline"),
+    run_id: z.string().min(1),
+    scope: z.literal("run"),
+    filter: z.string().min(1).optional(),
+  }),
+  z.strictObject({
+    type: z.literal("timeline"),
+    run_id: z.string().min(1),
+    scope: z.literal("node"),
+    node: z.string().min(1),
+    filter: z.string().min(1).optional(),
+  }),
+  z.strictObject({ type: z.literal("channel"), run_id: z.string().min(1) }),
+]);
+
+/**
+ * One run as the sidebar renders it, and nothing more: its displayed identity,
+ * project, kind, state, node counts, last activity and launch time.
+ */
+export const sidebarRowSchema = z.strictObject({
+  id: z.string().min(1),
+  name: z.string(),
+  group: z.strictObject({ project: z.string(), name: z.string() }).nullable(),
+  kind: z.string().nullable(),
+  state: z.string().min(1),
+  nodes: z.strictObject({
+    total: counter,
+    done: counter,
+    failed: counter,
+    running: counter,
+  }),
+  updated_at: timestamp,
+  started_at: timestamp.optional(),
+});
+/** The fields a sidebar row carries, in the order the contract lists them. */
+export const SIDEBAR_ROW_FIELDS = Object.keys(sidebarRowSchema.shape);
+
+export const visibleStateSchema = z.union([
+  z.strictObject({ type: z.literal("sidebar") }),
+  z.strictObject({
+    type: z.literal("detail"),
+    run_id: z.string().min(1),
+    detail: runDetailSchema,
+  }),
+  z.strictObject({
+    type: z.literal("timeline"),
+    run_id: z.string().min(1),
+    scope: z.literal("run"),
+    detail: runDetailSchema,
+    timeline: runTimelineSchema,
+  }),
+  z.strictObject({
+    type: z.literal("timeline"),
+    run_id: z.string().min(1),
+    scope: z.literal("node"),
+    node: z.string().min(1),
+    detail: runDetailSchema,
+    timeline: runTimelineSchema,
+  }),
+  z.strictObject({
+    type: z.literal("channel"),
+    run_id: z.string().min(1),
+    detail: runDetailSchema,
+    channel: channelQueueSchema,
+  }),
+]);
+
+export const subscriptionSnapshotSchema = z.strictObject({
+  id: eventIdSchema,
+  sidebar: z.array(sidebarRowSchema),
+  visible: visibleStateSchema,
+});
+
+/** One step of a patch path: an object key or a non-negative array index. */
+const pathSchema = z.array(z.union([z.string(), counter]));
+export const patchOpSchema = z.union([
+  z.strictObject({ p: pathSchema, v: z.unknown() }),
+  z.strictObject({ p: pathSchema, a: z.array(z.unknown()) }),
+  z.strictObject({ p: pathSchema, d: z.literal(true) }),
+]);
+
+const frameCommon = {
+  id: eventIdSchema,
+  base: eventIdSchema,
+  subscription: subscriptionIdSchema,
+};
+export const resetReasonSchema = z.enum([
+  "unknown-cursor",
+  "stale-cursor",
+  "server-restarted",
+]);
+export const resetFrameSchema = z.strictObject({
+  ...frameCommon,
+  type: z.literal("reset"),
+  reason: resetReasonSchema,
+  snapshot: subscriptionSnapshotSchema,
+});
+export const subscriptionFrameSchema = z.union([
+  resetFrameSchema,
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("run.changed"),
+    row: sidebarRowSchema,
+  }),
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("run.removed"),
+    run_id: z.string().min(1),
+  }),
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("detail.patch"),
+    run_id: z.string().min(1),
+    ops: z.array(patchOpSchema),
+  }),
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("timeline.patch"),
+    run_id: z.string().min(1),
+    scope: z.literal("run"),
+    ops: z.array(patchOpSchema),
+  }),
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("timeline.patch"),
+    run_id: z.string().min(1),
+    scope: z.literal("node"),
+    node: z.string().min(1),
+    ops: z.array(patchOpSchema),
+  }),
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("channel.patch"),
+    run_id: z.string().min(1),
+    ops: z.array(patchOpSchema),
+  }),
+]);
+/** Every frame type a subscription stream carries, as its SSE event name. */
+export const SUBSCRIPTION_FRAME_TYPES = [
+  "reset",
+  "run.changed",
+  "run.removed",
+  "detail.patch",
+  "timeline.patch",
+  "channel.patch",
+] as const;
+
+/** `201` to `POST /api/v2/subscriptions`. */
+export const subscribedSchema = z.strictObject({
+  subscription: subscriptionIdSchema,
+  view: subscriptionViewSchema,
+  initial: z.union([
+    z.strictObject({
+      type: z.literal("snapshot"),
+      snapshot: subscriptionSnapshotSchema,
+    }),
+    resetFrameSchema,
+  ]),
+});
+
+/** `410` to a stream asked for a subscription this server cannot serve. */
+export const subscriptionUnavailableSchema = z.strictObject({
+  code: z.literal("subscription-unavailable"),
+  reason: z.enum(["expired", "server-restarted", "unknown"]),
+});
+
+export type SubscriptionView = z.infer<typeof subscriptionViewSchema>;
+export type SidebarRow = z.infer<typeof sidebarRowSchema>;
+export type VisibleState = z.infer<typeof visibleStateSchema>;
+export type SubscriptionSnapshot = z.infer<typeof subscriptionSnapshotSchema>;
+export type PatchOp = z.infer<typeof patchOpSchema>;
+export type ResetFrame = z.infer<typeof resetFrameSchema>;
+export type SubscriptionFrame = z.infer<typeof subscriptionFrameSchema>;
+export type Subscribed = z.infer<typeof subscribedSchema>;
+export type SubscriptionUnavailable = z.infer<
+  typeof subscriptionUnavailableSchema
+>;
+
+/** Why a patch could not be applied: the protocol error a client shows. */
+export class PatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PatchError";
+  }
+}
+
+/**
+ * Apply `ops` to `target` atomically, returning the patched copy and leaving
+ * `target` untouched — or throwing {@link PatchError} for any operation the
+ * contract does not allow: replacing or deleting the root, a parent that does
+ * not exist, an index past its array's end, an append to a non-array, or a
+ * deletion inside an array. Only what a path walks through is copied, so a
+ * patch costs what it changes rather than the payload.
+ */
+export function applyPatch<T>(target: T, ops: readonly PatchOp[]): T {
+  let root: unknown = target;
+  for (const op of ops) root = applyOne(root, op);
+  // The payload the operations were written against, patched: the server diffs
+  // one envelope into the next of the same schema, and a reader that must hold
+  // the result to that schema parses it, as the client's activity line does.
+  return root as T;
+}
+
+type Json = unknown;
+function applyOne(root: Json, op: PatchOp): Json {
+  const path = op.p;
+  if ("a" in op) {
+    return update(root, path, (array) => {
+      if (!Array.isArray(array))
+        throw new PatchError("an append's path names an array");
+      return [...array, ...op.a];
+    });
+  }
+  const last = path.at(-1);
+  if (last === undefined)
+    throw new PatchError("the root is never replaced or deleted");
+  return update(root, path.slice(0, -1), (parent) => {
+    if ("v" in op) {
+      if (Array.isArray(parent) && typeof last === "number") {
+        if (last >= parent.length)
+          throw new PatchError("a set replaces an existing element");
+        const next = [...parent];
+        next[last] = op.v;
+        return next;
+      }
+      if (isObject(parent) && typeof last === "string")
+        return { ...parent, [last]: op.v };
+      throw new PatchError("a set's path does not match its parent");
+    }
+    if (isObject(parent) && typeof last === "string") {
+      if (!Object.hasOwn(parent, last))
+        throw new PatchError("a deletion names an existing member");
+      const rest = { ...parent };
+      delete rest[last];
+      return rest;
+    }
+    throw new PatchError("a deletion names an object member");
+  });
+}
+
+function isObject(value: Json): value is Record<string, Json> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Replace the value at `path` with `change(it)`, copying only the spine. */
+function update(
+  value: Json,
+  path: readonly (string | number)[],
+  change: (value: Json) => Json,
+): Json {
+  const [step, ...rest] = path;
+  if (step === undefined) return change(value);
+  if (Array.isArray(value) && typeof step === "number") {
+    if (step >= value.length)
+      throw new PatchError("an index on the path does not exist");
+    const next = [...value];
+    next[step] = update(value[step], rest, change);
+    return next;
+  }
+  if (isObject(value) && typeof step === "string") {
+    if (!Object.hasOwn(value, step))
+      throw new PatchError("a parent on the path does not exist");
+    return { ...value, [step]: update(value[step], rest, change) };
+  }
+  throw new PatchError("a path step does not match its parent");
+}
+
 export type Timing = z.infer<typeof timingSchema>;
 export type FailureClass = z.infer<typeof failureClassSchema>;
 export type Failure = z.infer<typeof failureSchema>;
@@ -2394,6 +2836,7 @@ export type NodeControl = z.infer<typeof nodeControlSchema>;
 export type Redirection = z.infer<typeof redirectionSchema>;
 /** The release that carried one node's landed work. */
 export type NodeRelease = z.infer<typeof nodeReleaseSchema>;
+export type AwaitedRelease = z.infer<typeof awaitedReleaseSchema>;
 /** One thing a node is being held on until a release is out. */
 export type ReleaseAwaited = z.infer<typeof releaseAwaitedSchema>;
 /** What one release record said about itself. */
@@ -2439,13 +2882,9 @@ export type ChannelNext = z.infer<typeof channelNextSchema>;
 export type ReplyReceipt = z.infer<typeof replyReceiptSchema>;
 export type Surfaced = z.infer<typeof surfacedSchema>;
 export type Stopped = z.infer<typeof stoppedSchema>;
-export type Adopted = z.infer<typeof adoptedSchema>;
 export type ShutdownScope = z.infer<typeof shutdownScopeSchema>;
 export type HostShutdownScope = z.infer<typeof hostShutdownScopeSchema>;
 export type ShutdownReport = z.infer<typeof shutdownReportSchema>;
-export type WatchEventName = z.infer<typeof watchEventNameSchema>;
-export type WatchFrameData = z.infer<typeof watchFrameDataSchema>;
-export type WatchUnread = z.infer<typeof watchUnreadSchema>;
 export type Unwatched = z.infer<typeof unwatchedSchema>;
 export type RenderedRoot = z.infer<typeof renderedRootSchema>;
 export type RenderedRun = z.infer<typeof renderedRunSchema>;
@@ -2465,3 +2904,5 @@ export const parseRunDetail = (value: unknown): RunDetail =>
   runDetailSchema.parse(value);
 export const parseRunTimeline = (value: unknown): RunTimeline =>
   runTimelineSchema.parse(value);
+// llmlint: ignore[code_lands_in_the_domain_that_owns_it] this repository keeps every read-API record's parser in `@onepipeline-ui/dag-model` — the runs, channel, host, agents and subscription records are exported from this same barrel — and `docs/dag-ui.md` holds the app to declaring no schema or API path of its own; the plan names this package as one this change touches.
+export * from "./human-items.js";

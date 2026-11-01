@@ -36,15 +36,9 @@ anything new here is a proposal to make upstream first.
   its answer partly out of the process environment**: the channel — the half
   of the answer no summary carries, whether a *blocking* surface is
   outstanding — is opened under the runs root `ONEPIPELINE_RUNS_DIR` names
-  rather than under one the caller hands it, and `verbs::adopt` judges
-  ownership by `ONEPIPELINE_LAUNCHER_SESSION` rather than by a session passed
-  in the way `verbs::stop` takes one; the driver an adoption retains resolves
-  its run through the same variable. So the binary exports both from
-  `--runs-root` and `--session` before it serves anything (`src/main.rs`), and
-  an in-process reader of the store — the contract suite — sets both for the
-  length of an adoption. Each exists because the 0.39.0 SDK answers out of the
-  environment there; an SDK that takes `liveness_of(root, &RunSummary)` and an
-  `Adopt` carrying the acting session removes them.
+  rather than under one the caller hands it. The binary exports that root
+  from `--runs-root` before serving requests (`src/main.rs`). An SDK that
+  takes `liveness_of(root, &RunSummary)` would remove this environment coupling.
 - **A queue read that makes no directory.** `verbs::channel` is the whole
   `channel queue` verb, and opening the queues it reports creates the run's
   `channel/` directory when there is none — so a listing that reached for it on
@@ -62,16 +56,15 @@ anything new here is a proposal to make upstream first.
   own renderer as its presentation — `status`, `results`, `goals`,
   `transcript`, `host` — the route answers that **rendered** text beside a few
   typed facts, because a typed projection of a `RunView` would be this crate
-  inventing the record the CLI does not print. The one thing this crate adds
-  beside a verb is process hygiene the SDK cannot do for a caller that lives
-  on: `store::Reaper` waits on the drivers `adopt` retained, because a child
-  nobody waits on is a zombie and a zombie answers the SDK's own liveness probe
-  as alive.
+  inventing the record the CLI does not print.
 - **A dispatch id.** The journal stamps a dispatch with its run and node but
   mints no id for it; schema 10 serves one, so `payload::dispatch_key` derives it
-  from the pair. Execution is continuous, so the pair is the whole of what
-  identifies a dispatch — the round that used to be its third part is not a thing
-  any run has.
+  from the pair. That pair addresses the node's dispatch endpoint across retries;
+  the round that used to be its third part is not a thing any run has.
+  Schema 13's `dispatch_group` additionally distinguishes the graph stream and
+  opening producer identity. `stamp_dispatch_groups` folds ownership, labels and
+  ordering over the unfiltered journal so a reading cannot renumber dispatches
+  or lose their drafter groups.
 - **An opaque session key.** The raw launching session id may be sensitive and is
   never served, so runs are grouped by a digest of it.
 - **The run list's order.** `RunStore::page` serves the SDK's own `Listing`
@@ -89,17 +82,11 @@ anything new here is a proposal to make upstream first.
   a reading rather than a download: a node that dispatched two hundred of them is
   two hundred spans at `scope=node` and one per category at `scope=run`. The SDK
   counts neither.
-- **The interval one dispatched session ran over.** The journal brackets a
-  *node*, not a session: `payload::session_interval` reads one from the attempt
-  that ran it — the `node-dispatched` it appeared after, closed by the next
-  dispatch, the settlement, the `session-closed` or the session's own
-  `member-settled`, joined by the `{stream}.{member}` rule schema 14 already
-  resolves a report by. Every session of one attempt opens at that attempt's
-  dispatch, including one the attempt reached only later: the run records no
-  boundary between the members inside an attempt, and a session opened from its
-  own first word is not bracketed by anything the run said. A node re-asked in
-  place otherwise reads as having run its attempts over one window, which cannot
-  say what was running at a given moment.
+- **The interval one dispatched session ran over.** `payload::session_interval`
+  uses the session's own first and last records, joining member records by
+  `{stream}.{member}` and graph records through their stream. A settlement or
+  external closure proves the session ended without extending its work into
+  another session's time. Both timeline scopes use this reading.
 - **The party a record's session ran under.** `transportRoleSchema` is a pair
   with `agentRoleSchema`, and nothing stamps the transport half as such;
   `payload::transport_role` reads it off the record — the `role` `oneagentgraph`
@@ -136,12 +123,12 @@ anything new here is a proposal to make upstream first.
   each with the state it moved from. The transitions themselves are still served,
   as the node's own records.
 - **Which of three accounts of a node's status is the one to serve.**
-  `payload::recorded_statuses` orders them — what the journal settled for that
-  node, then what the run's own `result.json` held for it, then what the graph
-  derives for it — because the SDK exposes the fold and the document separately
-  and nothing in it rules on which speaks for a node they disagree about. The
-  ordering is what the three *are*: the first two are records of the node, the
-  third is a gate recomputed on every read.
+  `payload::node_statuses` serves the engine's `statuses()` word, the one
+  `onepipeline status` and `results` print, so no two views can show a node two
+  words. What the journal settled for the node, then what the run's own
+  `result.json` held, is kept as the node's outcome where it differs, and is the
+  whole account for a node the graph does not carry. The SDK exposes those
+  accounts separately and rules on none of them, so the ordering lives here.
 - **Whether an in-flight node's turn can be redirected.** `payload::node_control`
   answers, per node the run has in flight, what `onepipeline`'s reconciler answers
   by pulling the lever — which a read surface must not do, because serving a run
@@ -198,21 +185,11 @@ anything new here is a proposal to make upstream first.
 ## The server acts as one launching session, and writes to runs
 
 `onepipeline-api serve --session ID` (else `ONEPIPELINE_LAUNCHER_SESSION`, else
-unattributed) is the identity every stop and adoption is judged by, and
-`POST .../adopt` retains **this binary** at its own hidden `drive-run RUN
---adopt` verb as the run's driver — so an adopted run is driven by the engine
-this crate links, and a host pinning the engine CLI and this reader separately
-has one pin that governs a dispatch. Two SDK calls answer out of the process
-environment rather than out of their arguments — the listing's liveness reads a
-run's channel under `ONEPIPELINE_RUNS_DIR`, and an adoption is judged by
-`ONEPIPELINE_LAUNCHER_SESSION` — so `serve` exports both, from `--runs-root`
-and the resolved session, before it serves anything, and a retained driver
-inherits them. A driver the server retains is its child: `store::Reaper` waits
-on its exit status, because a child nobody waits on is a zombie and a zombie
-answers the engine's liveness probe as alive. The two hidden verbs, `drive-run`
-and `drive`, are the engine's own argument shapes run through the engine's own
-entry point, which is where the engine records that this executable answers
-its command line and gives each dispatch a process of its own.
+unattributed) is the identity every stop and channel write is judged by.
+The SDK's listing reads a run's channel under `ONEPIPELINE_RUNS_DIR`, and its
+advice reads `ONEPIPELINE_LAUNCHER_SESSION`, so `serve` exports both from
+`--runs-root` and the resolved session before serving requests. Run driving
+belongs to the engine CLI; this server retains no driver process.
 
 ## Where a reader's filter may reach, and where it may not
 
@@ -476,16 +453,29 @@ turn is served as it always was. Both shapes are in `write_lanes`.
 
 ## The one store this crate opens that no run owns
 
-A `oneharness_session` artifact's bytes are the only ones this API serves from
-outside the runs root: `oneagentgraph` publishes a pointer and nothing is copied,
-so `payload::session_record` opens another tool's directory. Two records name
-one, in one spelling — the `oneharness-session` envelope a member's turn relays,
-and a line of the run's own **pointer file**, which the engine has every
-oneharness under any of its launches append (`onepipeline::agents`), so a nested
-turn no envelope relays is still named. `verbs::agents` reads that file and
-nothing else, and `payload::pointed_session` is the artifact route's second way
-in for an id no envelope recorded. Four constraints on both, each because the
-obvious alternative is worse:
+Every turn's words are read from outside the runs root: `oneagentgraph` 0.8
+publishes a `transcript` reference on each `turn-started`, `turn-message` and
+`turn-activity` and copies nothing, and a `oneharness_session` artifact is a
+pointer at one invocation. **All of it is read through the linked engine's
+`views::transcript` resolver, in `payload::transcript`, and through nothing
+else** — the CLI's `transcript`, `monitor` and `watch` read the same entries by
+the same rules, so the browser and the agent describe one call in the same
+words. A reference that resolves to nothing is served as the resolver's own
+`transcript unavailable: <path>: <why>`, never as a blank. The one other read of
+that store is `payload::closing_record`, which takes a closed invocation's
+*facts* — harness, model, status, timings, usage — off its closing record for a
+harness span's bounds and the artifact's `content`; the resolver carries none of
+them. Two records name an invocation, in one spelling — the
+`oneharness-session` envelope a member's turn relays, and a line of the run's own
+**pointer file**, which the engine has every oneharness under any of its
+launches append (`onepipeline::agents`), so a nested turn no envelope relays is
+still named; `verbs::agents` reads that file and nothing else. A run recorded
+before references keeps its bounded copies, and `payload::transcript::Sources`
+recovers a cut one whole from either of those two only where the whole entry
+begins (or, for a tool's output, ends) with the copy — and a turn's reply and
+outputs only from the invocation whose prompt that turn's own instruction copy
+begins (`TurnSources`), because two turns can return one output. The constraints, each
+because the obvious alternative is worse:
 
 - **Link `oneharness-core`; never spawn the `oneharness` CLI.** A process is a
   second contract — arguments, output shape, version — that nothing here pins.
@@ -513,7 +503,13 @@ obvious alternative is worse:
   that resolved *outside* and a path that resolved *nowhere* are different facts
   about the host: the first is said to the operator's log, naming the artifact
   and never where it went, and the second is a transcript that was rotated away
-  and is a plain `404`. The wire cannot tell them apart on purpose.
+  and is served as the resolver's `missing-file`. Every reference a turn record
+  carries is confined the same way before the resolver opens it
+  (`payload::transcript::resolve`), and one that escapes is `unreadable`.
+- **Remember what resolved, and only that.** A history file is append-only, so a
+  resolved entry never changes; `payload::transcript` keeps a bounded memory of
+  them so a live view does not rescan a turn's file for every record of it on
+  every patch. An entry not written yet is looked for again on the next read.
 
 ## What the wire asks for and no record fills
 

@@ -17,8 +17,11 @@
       "{workspaceRoot}/scripts/release-package.py",
       "{workspaceRoot}/scripts/verify-staged-release.mjs",
       "{workspaceRoot}/scripts/npm-build.mjs",
+      "{workspaceRoot}/scripts/sbom.mjs",
       "{workspaceRoot}/scripts/ci-job.sh",
       "{workspaceRoot}/scripts/ci-cache-verdict.sh",
+      "{workspaceRoot}/scripts/measure-cold-linux.sh",
+      "{workspaceRoot}/scripts/measure-cold-linux.d/**/*",
       "{workspaceRoot}/justfile"
     ]
   },

@@ -91,7 +91,8 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "review-reply-not-drafted": "publication",
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // A manager landing's lifecycle, a draft's change request landing, being
-  // absorbed, closed or reopened, and the readjustment that follows a landing.
+  // absorbed, closed or reopened, the store's closure of the issues a landing
+  // closed, and the readjustment that follows a landing.
   // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly these kinds when the pin moved to 0.72.
   "landing-registered": "publication",
   "landing-drafting": "publication",
@@ -99,6 +100,7 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "landing-finished": "publication",
   "landing-refused": "failure",
   "landing-died": "failure",
+  "landing-closures": "publication",
   "node-landed": "publication",
   "node-absorbed": "publication",
   "stack-landed-out-of-order": "publication",
@@ -113,6 +115,10 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "run-hook-fired": "lifecycle",
   "run-hook-finished": "lifecycle",
   "run-hook-withheld": "lifecycle",
+  // The run's home marked `done` through the store at its success close-out:
+  // the run's own ending reaching its plan, like a run-end hook, and no node's work.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this kind and this package owns its category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly this kind when the pin moved to 0.80.1.
+  "home-status": "lifecycle",
   // The driver's own sweep over the harness identity pool — housekeeping of the
   // run's driving, like an adoption, and no node's work.
   "pool-maintenance": "lifecycle",
@@ -141,6 +147,12 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "turn-activity": "session",
   "judge-decided": "verification",
   "turn-interrupted": "recovery",
+  // A manager's note offered to a running conversation, and one taken back
+  // before any turn read it: the planner and the run talking.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] `oneagentgraph` owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` matches `oneagentgraph::event::EventKind` with no wildcard, and it failed naming exactly these two kinds when the engine pin moved to 0.80.1, which links `oneagentgraph` 0.6.0.
+  "note-admitted": "planning",
+  "note-withdrawn": "planning",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   "fallback-advanced": "recovery",
   "cron-fired": "recovery",
   "cron-reset": "recovery",
@@ -158,6 +170,9 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "merge-queued": "publication",
   "merge-completed": "publication",
   "change-opened": "publication",
+  // A publication that found its change request open and resumed it at its checks.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] `onevcs` owns this kind and this package owns the category it reads under.
+  "publication-resumed": "publication",
   "change-check": "verification",
   "change-merged": "publication",
   "sync-conflict": "failure",

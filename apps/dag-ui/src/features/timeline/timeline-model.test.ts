@@ -225,18 +225,20 @@ describe("one node's slice of the run timeline", () => {
   test("collapses hundreds of sessions into rows a reader can scan", () => {
     const busy = nodeTimeline(parseRunTimeline(busyTimeline(200)), "dashboard");
     // Two hundred conversations arrive as one row, not two hundred; the run they
-    // stand for — every consecutive dispatch, including the four the fixture's own
-    // node recorded — is still reachable inside it, in the order it happened.
+    // stand for remains reachable inside it; sessions in other role lanes stay
+    // separate so filtering cannot replace the worker with a generic dispatch.
     const group = busy.rows.find(({ rowKind }) => rowKind === "group");
-    expect(group?.label).toBe("203 × dispatch");
-    expect(group?.children).toHaveLength(203);
-    // What the reader is handed where those two hundred and three stood is three
+    expect(group?.label).toBe("200 × dispatch");
+    expect(group?.children).toHaveLength(200);
+    // What the reader is handed where those two hundred stood is three
     // things: the first, one control naming the rest, and the last.
     const reading = transcriptEntries(busy.rows, new Set());
     expect(
       reading.find(({ entryKind }) => entryKind === "collapse"),
-    ).toMatchObject({ hidden: 201, expanded: false });
-    expect(reading.length).toBeLessThan(20);
+    ).toMatchObject({ hidden: 198, expanded: false });
+    // The other three role sessions retain their own rows beside the collapsed
+    // worker run; they must not disappear into its lane when activity is filtered.
+    expect(reading).toHaveLength(20);
     expect(busy.total).toBeGreaterThan(200);
   });
 
@@ -552,8 +554,8 @@ describe("one node's slice of the run timeline", () => {
     );
     expect(compacted.map(({ id }) => id)).toEqual([
       first.id,
-      worker.id,
       "last",
+      worker.id,
     ]);
   });
 

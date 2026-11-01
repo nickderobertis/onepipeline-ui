@@ -1,10 +1,8 @@
 import {
-  type Adopted,
   API_V2_PATHS,
   API_V2_QUERY,
   API_V2_TIMELINE_SCOPES,
   type ArtifactContent,
-  adoptedSchema,
   apiErrorSchema,
   artifactContentSchema,
   type ChannelNext,
@@ -14,6 +12,14 @@ import {
   type DagConversation,
   dagConversationSchema,
   type HostShutdownScope,
+  HUMAN_ITEM_PATHS,
+  type HumanItemDetail,
+  type HumanItemFilter,
+  type HumanItemList,
+  type HumanItemReceipt,
+  humanItemDetailSchema,
+  humanItemListSchema,
+  humanItemReceiptSchema,
   type ProjectAgents,
   type ProjectDetail,
   type ProjectList,
@@ -21,41 +27,43 @@ import {
   projectDetailSchema,
   projectListSchema,
   type RenderedRoot,
-  type RenderedRun,
   type ReplyReceipt,
   type RunAgents,
   type RunDetail,
   type RunList,
   type RunStatus,
-  type RunTelemetryDocument,
   type RunTimeline,
-  type RunTranscript,
   renderedRootSchema,
-  renderedRunSchema,
   replyReceiptSchema,
   runAgentsSchema,
   runDetailSchema,
   runListSchema,
   runStatusSchema,
-  runTelemetryDocumentSchema,
   runTimelineSchema,
-  runTranscriptSchema,
   type ShutdownReport,
   type SseEventName,
   type Stopped,
+  type Subscribed,
+  type SubscriptionView,
   type Surfaced,
   shutdownReportSchema,
   sseEventDataSchema,
   sseEventNameSchema,
   stoppedSchema,
+  subscribedSchema,
   surfacedSchema,
   type Unwatched,
   unwatchedSchema,
-  type WatchEventName,
-  type WatchFrameData,
-  watchEventNameSchema,
-  watchFrameDataSchema,
 } from "@onepipeline-ui/dag-model";
+
+import { LiveView, type LiveViewOptions } from "./subscription.js";
+
+export type {
+  LiveCause,
+  LiveState,
+  LiveViewOptions,
+} from "./subscription.js";
+export { LiveView } from "./subscription.js";
 
 // llmlint: ignore-file[changed_behavior_has_e2e] client.e2e.test.ts crosses a real loopback HTTP
 // boundary through the package export. Bun has no native browser EventSource implementation, so
@@ -94,35 +102,6 @@ export interface SubscribeOptions {
    */
   readonly filter?: string;
   readonly onEvent: (event: TelemetryEvent) => void;
-  readonly onError?: (error: unknown) => void;
-}
-
-/**
- * One frame of a held watch: the server's cursor within the connection, which of
- * the three frames it is, and the engine's own record for it.
- */
-export interface WatchFrame {
-  readonly id: string;
-  readonly event: WatchEventName;
-  readonly data: WatchFrameData;
-}
-
-export interface WatchOptions {
-  readonly runId: string;
-  /**
-   * What ends the wait — the CLI's own conditions, repeatable — beside the run
-   * finishing and nothing driving it. Omitted, the server defaults to `surface`.
-   */
-  readonly until?: readonly string[];
-  /** Whole seconds, `0` to read once and return, or `"none"` to never give up. */
-  readonly timeout?: number | "none";
-  /** The heartbeat interval in whole seconds, `0` to turn it off. */
-  readonly tick?: number;
-  /** Which events the stream reports, as a profile name or an inline spec. */
-  readonly filter?: string;
-  /** Resume from the cursor an earlier watch returned. */
-  readonly cursor?: string;
-  readonly onFrame: (frame: WatchFrame) => void;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -335,6 +314,65 @@ export class TelemetryClient {
   }
 
   /**
+   * Subscribe to the sidebar and one visible run view, kept current by what the
+   * server pushes (`docs/contract.md`, "Subscriptions"). The returned view is
+   * changed in place when the tab moves to another view, and closed when it
+   * shows none.
+   */
+  live(options: LiveViewOptions): LiveView {
+    return new LiveView(
+      {
+        subscribe: (body) => this.createSubscription(body),
+        retire: (subscription, keepalive) =>
+          this.retireSubscription(subscription, keepalive),
+        open: (url) => this.#open(url),
+        url: (path) => this.#url(path),
+      },
+      options,
+    );
+  }
+
+  /** `POST /api/v2/subscriptions`: the subscription and its initial state. */
+  async createSubscription(body: {
+    readonly view: SubscriptionView;
+    readonly replaces?: string;
+    readonly resume?: string;
+  }): Promise<Subscribed> {
+    return this.#request(
+      this.#url(API_V2_PATHS.subscriptions),
+      subscribedSchema.parse,
+      json("POST", body),
+    );
+  }
+
+  /** `DELETE /api/v2/subscriptions/{subscription}`: idempotent. */
+  async retireSubscription(
+    subscription: string,
+    keepalive = false,
+  ): Promise<void> {
+    requireOpaqueId(subscription, "subscription ID");
+    let response: Response;
+    try {
+      response = await this.#fetch(
+        this.#url(API_V2_PATHS.subscription(subscription)),
+        { method: "DELETE", ...(keepalive ? { keepalive } : {}) },
+      );
+    } catch (error) {
+      throw new TelemetryClientError(
+        "Telemetry request failed",
+        undefined,
+        undefined,
+        { cause: error },
+      );
+    }
+    if (!response.ok && response.status !== 204)
+      throw new TelemetryClientError(
+        `Retiring a subscription failed with status ${response.status}`,
+        response.status,
+      );
+  }
+
+  /**
    * The grouped listing: every project the root holds, newest activity first,
    * each with its runs newest first — the SDK's own order, never recomputed.
    */
@@ -436,33 +474,69 @@ export class TelemetryClient {
     );
   }
 
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] this repository keeps every read-API record's parser in `@onepipeline-ui/dag-model` and every route call in `@onepipeline-ui/telemetry-client` — the runs, channel, host, agents and subscription records live here the same way, and `docs/dag-ui.md` holds the app to declaring no schema or API path of its own — and the plan names these two packages as the ones this change touches. A human-item package of its own would be the only API domain split out of that layout.
   /**
-   * The engine's host shutdown over one run, as the acting session: each live
-   * dispatch asked to stop and given `grace` seconds, the run torn down, and every
-   * branch its records name pushed. A run another session owns is refused
-   * `409 not_owner` before anything is signalled.
+   * The host-wide action items the server's session owns, in the engine's order.
    *
-   * The answer is the engine's report whatever it found — read `complete`, never
-   * the status, for whether it all went as asked. The request is held for as long
-   * as the grace runs, which is minutes by default.
+   * Every selector is the engine's `HumanItemFilter` on the wire's vocabulary —
+   * `priority` is `urgent`, never the label Critical — and an omitted one is not
+   * sent, so an omitted `state` is the engine's default of open items.
    */
-  async shutdownRun(
-    runId: string,
-    options: ShutdownOptions = {},
-  ): Promise<ShutdownReport> {
-    requireOpaqueId(runId, "run ID");
+  async listHumanItems(filter: HumanItemFilter = {}): Promise<HumanItemList> {
+    const url = this.#url(HUMAN_ITEM_PATHS.list);
+    for (const [name, value] of Object.entries(filter))
+      if (value !== undefined && value !== null)
+        url.searchParams.set(name, String(value));
+    return this.#request(url, humanItemListSchema.parse);
+  }
+
+  /** One action item and every step it blocks. */
+  async getHumanItem(id: string): Promise<HumanItemDetail> {
+    requireOpaqueId(id, "human-item ID");
     return this.#request(
-      this.#url(API_V2_PATHS.runShutdown(runId)),
-      shutdownReportSchema.parse,
-      json("POST", shutdownBody(options)),
+      this.#url(HUMAN_ITEM_PATHS.item(id)),
+      humanItemDetailSchema.parse,
+    );
+  }
+
+  /** Answer an open question; the engine's receipt, or its refusal. */
+  async answerHumanItem(id: string, text: string): Promise<HumanItemReceipt> {
+    requireOpaqueId(id, "human-item ID");
+    return this.#request(
+      this.#url(HUMAN_ITEM_PATHS.answer(id)),
+      humanItemReceiptSchema.parse,
+      json("POST", { text }),
     );
   }
 
   /**
-   * The engine's host shutdown over every run the acting session owns (`mine`),
-   * or over every run on the host whoever owns it (`host`), on the terms
-   * {@link shutdownRun} states.
+   * Complete an open task. A design review completes the same way: the engine
+   * uses the approval reference the task stored when it was raised.
    */
+  async completeHumanItem(id: string): Promise<HumanItemReceipt> {
+    requireOpaqueId(id, "human-item ID");
+    return this.#request(
+      this.#url(HUMAN_ITEM_PATHS.complete(id)),
+      humanItemReceiptSchema.parse,
+      json("POST", {}),
+    );
+  }
+
+  /** Dismiss an open item; a blank or omitted reason is none. */
+  async dismissHumanItem(
+    id: string,
+    reason?: string,
+  ): Promise<HumanItemReceipt> {
+    requireOpaqueId(id, "human-item ID");
+    return this.#request(
+      this.#url(HUMAN_ITEM_PATHS.dismiss(id)),
+      humanItemReceiptSchema.parse,
+      json("POST", reason?.trim() ? { reason } : {}),
+    );
+  }
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
+
+  /** Shut down the entire host and read its report, including incomplete teardown. */
   async shutdown(
     scope: HostShutdownScope,
     options: ShutdownOptions = {},
@@ -472,55 +546,6 @@ export class TelemetryClient {
       shutdownReportSchema.parse,
       json("POST", { scope, ...shutdownBody(options) }),
     );
-  }
-
-  /** Adopt a run nothing is driving; the answer names the retained driver's pid. */
-  async adopt(runId: string): Promise<Adopted> {
-    requireOpaqueId(runId, "run ID");
-    return this.#request(
-      this.#url(API_V2_PATHS.adopt(runId)),
-      adoptedSchema.parse,
-      {
-        method: "POST",
-      },
-    );
-  }
-
-  /**
-   * Hold `GET .../watch` as a server-sent stream. While it is held the server is
-   * the run's registered watcher; the `returned` frame ends the wait and this
-   * closes the source on it, so the browser does not reopen a wait that is over.
-   */
-  watch(options: WatchOptions): TelemetrySubscription {
-    requireOpaqueId(options.runId, "run ID");
-    const url = this.#url(API_V2_PATHS.watch(options.runId));
-    for (const condition of options.until ?? [])
-      url.searchParams.append(API_V2_QUERY.until, condition);
-    if (options.timeout !== undefined)
-      url.searchParams.set(API_V2_QUERY.timeout, String(options.timeout));
-    if (options.tick !== undefined)
-      url.searchParams.set(API_V2_QUERY.tick, String(options.tick));
-    if (options.filter !== undefined)
-      url.searchParams.set(API_V2_QUERY.filter, options.filter);
-    if (options.cursor !== undefined)
-      url.searchParams.set(API_V2_QUERY.cursor, options.cursor);
-    const source = this.#open(url);
-    for (const eventName of watchEventNameSchema.options) {
-      source.addEventListener(eventName, (rawEvent) => {
-        try {
-          // DOM's EventListener callback erases the MessageEvent subtype even though
-          // EventSource listeners for named server events always receive one.
-          const event = rawEvent as MessageEvent<string>;
-          const data = watchFrameDataSchema.parse(JSON.parse(event.data));
-          if (eventName === "returned") source.close();
-          options.onFrame({ id: event.lastEventId, event: eventName, data });
-        } catch (error) {
-          options.onError?.(error);
-        }
-      });
-    }
-    source.onerror = (error) => options.onError?.(error);
-    return { close: () => source.close() };
   }
 
   /** The runs the acting session owns that nothing is watching. */
@@ -544,46 +569,6 @@ export class TelemetryClient {
     return this.#request(
       this.#url(API_V2_PATHS.status(runId)),
       runStatusSchema.parse,
-    );
-  }
-
-  async getResults(runId: string): Promise<RenderedRun> {
-    requireOpaqueId(runId, "run ID");
-    return this.#request(
-      this.#url(API_V2_PATHS.results(runId)),
-      renderedRunSchema.parse,
-    );
-  }
-
-  async getGoals(): Promise<RenderedRoot> {
-    return this.#request(
-      this.#url(API_V2_PATHS.goals),
-      renderedRootSchema.parse,
-    );
-  }
-
-  async getRunGoals(runId: string): Promise<RenderedRun> {
-    requireOpaqueId(runId, "run ID");
-    return this.#request(
-      this.#url(API_V2_PATHS.runGoals(runId)),
-      renderedRunSchema.parse,
-    );
-  }
-
-  /** The CLI's rendering of a node's transcript, or the whole run's when `node` is omitted. */
-  async getTranscript(runId: string, node?: string): Promise<RunTranscript> {
-    requireOpaqueId(runId, "run ID");
-    const url = this.#url(API_V2_PATHS.transcript(runId));
-    if (node !== undefined) url.searchParams.set(API_V2_QUERY.node, node);
-    return this.#request(url, runTranscriptSchema.parse);
-  }
-
-  /** The SDK's own telemetry document for the run. */
-  async getTelemetryDocument(runId: string): Promise<RunTelemetryDocument> {
-    requireOpaqueId(runId, "run ID");
-    return this.#request(
-      this.#url(API_V2_PATHS.telemetry(runId)),
-      runTelemetryDocumentSchema.parse,
     );
   }
 

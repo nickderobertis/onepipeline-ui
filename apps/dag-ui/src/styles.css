@@ -340,9 +340,12 @@ p {
   background: var(--background);
 }
 
+/* Sized by the layout: React Flow's node wrapper carries the width and height
+   `layoutDag` gave the card, which is the standard 200×72 unless the card carries
+   lines beneath its status word. */
 .dag-node {
   width: 200px;
-  height: 72px;
+  height: 100%;
   padding: 10px 13px;
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -395,6 +398,15 @@ p {
   overflow: hidden;
   font-size: 9px;
   color: var(--muted-foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-awaits {
+  display: block;
+  overflow: hidden;
+  font-size: 9px;
+  color: var(--warning);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -599,17 +611,9 @@ p {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  /* The share is what the collapsed line needs at the narrowest width the layout
-     supports, where the ten lane names wrap the legend onto a second row: this is the
-     view an operator lands on, so it is the one view that has to be whole. Being
-     `fit-content`, a plot that needs less than its share still takes only what it
-     needs, and the reading keeps the rest — so raising it costs the reading nothing
-     at any width where the plot already fits.
-     It is a share of what the header leaves, which is why it moved from 60%: the
-     header gained the reading that says whether the node can be corrected, that
-     reading takes a line of its own at the phone, and 60% of what was left there was
-     17px short of the collapsed line. */
-  grid-template-rows: fit-content(64%) minmax(0, 1fr);
+  /* The collapsed plot takes its content height: adding harness lane names must
+     not put its clock below a percentage ceiling. The transcript gets the rest. */
+  grid-template-rows: max-content minmax(0, 1fr);
   height: 100%;
   min-width: 0;
   min-height: 0;
@@ -1060,6 +1064,18 @@ pre {
   background: var(--border);
 }
 
+/* One term above the next, for a list read in order: what a held node awaits, and
+   then the settlement's own sentence about it. */
+.facts.facts-stacked {
+  grid-template-columns: 1fr;
+}
+
+.awaited-releases {
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
 .facts div {
   min-width: 0;
   padding: 12px;
@@ -1227,9 +1243,12 @@ button.graph-row-name {
  *
  * Reached through the tooltip id the upstream plot derives from each item's own id,
  * because that is the only mark an idle segment carries into the DOM;
- * `IDLE_ID_PREFIX` in `graph-timeline.ts` is the one source of the prefix below.
+ * `IDLE_ID_PREFIX` in `graph-timeline.ts` is the one source of the prefix below. The
+ * plot puts its own instance id between `timeline-detail-` and the item's, so the
+ * item's prefix is matched where it follows that instance id's closing `-`.
  */
-.graph-timeline button[aria-describedby^="timeline-detail-idle-"] {
+.graph-timeline
+button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   border-color: var(--border);
   background-color: transparent;
   background-image: repeating-linear-gradient(
@@ -1422,6 +1441,87 @@ button.graph-row-name {
   display: grid;
   gap: 22px;
   padding: 20px 28px 32px;
+}
+
+/*
+ * The Host page holds absolute paths, dispatch proofs and a five-column table, none
+ * of which has a natural break. A grid track's default minimum is its content's, so
+ * without these the column grew past a phone's width and clipped the page.
+ */
+.host-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.host-page :where(h2, dd, p, td) {
+  overflow-wrap: anywhere;
+}
+
+/* Five columns need about 40rem before their headers run together. A narrower
+   column, a phone's, stacks each dispatch instead: one line per field, each led by
+   its column's name, so nothing is clipped and the page never scrolls sideways. */
+.host-table {
+  container-type: inline-size;
+}
+
+.host-page table {
+  width: 100%;
+}
+
+.host-page :where(th, td) {
+  padding: 4px 16px 4px 0;
+  text-align: start;
+  vertical-align: top;
+}
+
+.host-page th {
+  white-space: nowrap;
+}
+
+@container (max-width: 40rem) {
+  .host-table thead {
+    display: none;
+  }
+
+  .host-table :where(table, tbody, tr, td) {
+    display: block;
+  }
+
+  .host-table tr {
+    padding-block: 8px;
+    border-top: 1px solid var(--border);
+  }
+
+  .host-table td {
+    padding: 2px 0;
+  }
+
+  .host-table td::before {
+    content: attr(data-label) ": ";
+    color: var(--muted-foreground);
+  }
+}
+
+.host-page .host-shutdown {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.host-page .host-shutdown-actions > button {
+  flex-shrink: 1;
+  max-width: 100%;
+  height: auto;
+  min-height: 2rem;
+  white-space: normal;
+  text-align: start;
+}
+
+/* A host name is an identifier, and a fixed-width face also gives one of a given
+   length the same width wherever it is read. */
+.host-page .host-name {
+  font-family: var(--font-mono);
+}
+
+.host-page .host-age {
+  font-variant-numeric: tabular-nums;
 }
 
 .channel-section h3 {
@@ -1872,20 +1972,8 @@ button.graph-row-name {
     padding: 5px 14px 6px;
   }
 
-  /* The collapsed line is the view a node opens on, and at this width its legend
-     needs five rows of the region before a single bar is drawn — more than the share
-     that holds the whole plot on a laptop. It takes four fifths here so the line
-     and its clock are whole on arrival; the reading below keeps the rest and scrolls,
-     which is what a reading does anyway.
-     It was three quarters until the header gained the reading that says whether the
-     node can be corrected. Two badges and the node's own facts do not share one row
-     at 390px, so the header takes a row more here than anywhere else — and three
-     quarters of what it then left was 17px short of the collapsed line. Four fifths
-     was 20px short of it once the queue a ready node sat in became a lane of its
-     own: eleven names take a sixth row here where ten took five. Both states take
-     the same share at this width, because expanding must never make the plot's
-     ceiling *lower* than the line it opens from. */
-  .node-execution,
+  /* Expanded lanes can exceed the phone's height. Bound their scroll region
+     while the collapsed plot continues to take its intrinsic height. */
   .node-execution[data-expanded="true"] {
     grid-template-rows: fit-content(86%) minmax(0, 1fr);
   }
@@ -1934,4 +2022,496 @@ button.graph-row-name {
   .run-link > svg {
     display: none;
   }
+}
+
+/* A run's identity, liveness, Stop and activity share one bounded header row. */
+.run-topbar {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  gap: 10px;
+  min-height: 56px;
+}
+.run-topbar .topbar-title {
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+.run-topbar h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.run-topbar .eyebrow,
+.run-topbar .topbar-actions > .connection:not(.last-activity) {
+  display: none;
+}
+.run-topbar .topbar-actions {
+  flex: 1;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.run-topbar .run-actions {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+.run-topbar .run-actions-badge {
+  display: inline-flex;
+}
+.last-activity {
+  max-width: 32rem;
+  display: block;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+@media (max-width: 700px) {
+  .run-topbar .topbar-title {
+    max-width: 35%;
+  }
+  .run-topbar h2 {
+    font-size: 10px;
+  }
+  .run-topbar .run-actions-badge {
+    padding-inline: 4px;
+    font-size: 9px;
+  }
+  .run-topbar .run-actions,
+  .run-topbar .topbar-actions {
+    gap: 4px;
+  }
+  .run-topbar .topbar-actions > button:last-child:not(.last-activity) {
+    display: none;
+  }
+}
+
+.channel-message-details {
+  min-width: 0;
+}
+.channel-message-details > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.channel-message-details > summary::before {
+  content: "▸";
+}
+.channel-message-details[open] > summary::before {
+  content: "▾";
+}
+.channel-message-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.channel-message-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.channel-message-details[open] .channel-message-meta {
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
+.remote-checks {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.remote-checks th,
+.remote-checks td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.facts > .remote-check-facts {
+  grid-column: 1 / -1;
+  overflow-x: auto;
+}
+
+.remote-checks a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 600px) {
+  .channel-message-details:not([open])
+    .channel-message-meta
+    > :not(:first-child) {
+    display: none;
+  }
+}
+
+.kind-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 16px 0;
+  font-size: 12px;
+}
+.kind-filter legend {
+  margin-bottom: 8px;
+  color: var(--muted-foreground);
+}
+.kind-filter label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.project-group {
+  margin-top: 14px;
+}
+.project-group summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+}
+.project-group .project-link {
+  max-width: 100%;
+  white-space: normal;
+  height: auto;
+  text-align: left;
+}
+.run-header-details {
+  padding: 8px 24px;
+  font-size: 12px;
+}
+.run-header-details summary {
+  cursor: pointer;
+}
+.structured-fields fieldset {
+  min-width: 0;
+  margin: 8px 0;
+  padding: 4px 0 4px 12px;
+  border-left: 1px solid var(--border);
+}
+.structured-fields legend {
+  font-weight: 600;
+  font-size: 12px;
+}
+.structured-fields ol {
+  margin-left: 16px;
+}
+.run-header-details {
+  flex-shrink: 0;
+  max-height: min(40vh, 320px);
+  overflow: auto;
+}
+.shutdown-status {
+  flex-shrink: 0;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+/*
+ * The action-items page. Dense rows occupy the full width until a selection opens
+ * the detail pane beside them; the list and the pane each scroll on their own, so
+ * reading a long body never moves the list. At 1440×900 the unselected list shows
+ * six complete cards — three tasks and three open questions with 80–160 character
+ * bodies — with every control in view (docs/human-items.md states the target).
+ */
+.human-items-page {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.human-items-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0;
+  padding: 8px 20px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.human-items-filters label {
+  color: var(--muted-foreground);
+}
+
+.human-items-filters :where(select, input) {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  font-size: 12px;
+}
+
+.human-items-outcome {
+  margin: 0;
+  padding: 4px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.human-items-outcome[data-failed="true"],
+.human-item-status[data-failed="true"] {
+  color: var(--destructive);
+}
+
+.human-items-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.human-items-page[data-detail-open="true"] .human-items-body {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 42%);
+}
+
+.human-items-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 20px 12px;
+}
+
+.human-items-list > ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.human-item-card {
+  display: grid;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  cursor: pointer;
+}
+
+.human-item-card[data-selected="true"] {
+  border-color: var(--primary);
+  box-shadow: inset 2px 0 var(--primary);
+}
+
+.human-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+/* A title takes the row's room and wraps rather than clipping when the detail
+   pane narrows the list; the actions then wrap below it. */
+.human-item-title {
+  flex: 1 1 16ch;
+  min-width: 0;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.human-item-priority,
+.human-item-kind {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.human-item-priority[data-priority="urgent"] {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+
+.human-item-priority[data-priority="high"] {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.human-item-kind {
+  color: var(--muted-foreground);
+}
+
+.human-item-actions {
+  margin-left: auto;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.human-item-action,
+.human-item-tracker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.human-item-tracker {
+  color: var(--primary);
+}
+
+.human-item-meta {
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* At most four lines of a body on a card, ending in an ellipsis when there is more;
+   the detail pane carries the whole of it. */
+.human-item-body {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 17px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow-wrap: anywhere;
+}
+
+/* An answer box rests one line tall and grows with what is written. */
+.human-item-answer {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 26px;
+  max-height: 136px;
+  margin-top: 2px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 18px;
+  resize: none;
+  field-sizing: content;
+}
+
+.human-item-answer[aria-busy="true"] {
+  opacity: 0.7;
+}
+
+.human-item-status {
+  margin: 0;
+  font-size: 11.5px;
+}
+
+.card-actions-entry {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.card-actions-entry:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  margin-top: 8px;
+  clip-path: none;
+}
+
+.human-item-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px 20px;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+}
+
+.human-item-detail-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 2px 8px;
+}
+
+.human-item-detail-head h2 {
+  grid-column: 1;
+  margin: 0;
+  font-size: 16px;
+}
+
+.human-item-detail-head .human-item-meta {
+  grid-column: 1;
+}
+
+.human-item-detail-head button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.human-item-detail .human-item-meta {
+  white-space: normal;
+}
+
+.human-item-steps {
+  flex: none;
+  max-height: 30%;
+  overflow: auto;
+  font-size: 12px;
+}
+
+.human-item-steps h3 {
+  margin: 4px 0 2px;
+  font-size: 12px;
+}
+
+.human-item-steps ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+/* The whole body, scrolling within the pane when it is taller than the room left. */
+.human-item-detail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 19px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.human-item-detail-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }

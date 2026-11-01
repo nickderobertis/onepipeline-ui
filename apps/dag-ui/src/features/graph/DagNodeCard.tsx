@@ -18,6 +18,11 @@ export interface DagNodeData extends Record<string, unknown> {
    * for a node with nothing to report.
    */
   readonly reason?: string;
+  /**
+   * What a node holding finished work waits on, in one short line built from the
+   * releases it awaits — `awaits crate of engine +1`. Absent for every other node.
+   */
+  readonly awaits?: string;
 }
 
 export type DagFlowNode = Node<DagNodeData, "dagNode">;
@@ -60,6 +65,11 @@ export function DagNodeCard({ data }: NodeProps<DagFlowNode>) {
       {data.reason !== undefined && (
         <span className="node-reason" title={data.reason}>
           {data.reason}
+        </span>
+      )}
+      {data.awaits !== undefined && (
+        <span className="node-awaits" title={data.awaits}>
+          {data.awaits}
         </span>
       )}
       <Handle type="source" position={Position.Right} />

@@ -14,6 +14,7 @@
         "{projectRoot}/project.json",
         "{workspaceRoot}/nx.json",
         "{workspaceRoot}/project.json",
+        "{workspaceRoot}/judged-diff/project.json",
         "{workspaceRoot}/justfile",
         "{workspaceRoot}/scripts/nx.sh",
         "{workspaceRoot}/scripts/workspace-install.sh",
