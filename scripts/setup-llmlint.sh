@@ -47,13 +47,13 @@ set -uo pipefail
 # llmlint: ignore[changed_behavior_has_e2e] this dependency floor selects the llmlint release the judged tier runs, and `tests/e2e/judged_tier.rs` drives that tier through the release this installs; installer control flow and its user-visible contract are unchanged.
 readonly LLMLINT_MIN="0.4.11"
 # The oneharness release the judge drives, exact rather than whatever llmlint-cli's
-# open requirement resolves to: 0.25.6 falls through to the next harness in
+# open requirement resolves to: 0.26.1 falls through to the next harness in
 # `oneharness.toml` when Codex refuses the configured model for the account it is
 # signed in with (HTTP 400, "not supported when using Codex with a ChatGPT
 # account"), so the committed fallback chain reaches a verdict through claude-code
 # on such a host with no `ONEHARNESS_*` override. `.github/tests/judge-fallthrough.test.mjs`
 # installs through this script and holds the version it reports to this pin.
-readonly ONEHARNESS_VERSION="0.25.6"
+readonly ONEHARNESS_VERSION="0.26.1"
 readonly BIN_DIR="$HOME/.local/bin"
 
 log() { printf 'setup-llmlint: %s\n' "$*" >&2; }

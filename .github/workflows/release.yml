@@ -380,7 +380,7 @@ jobs:
         if: always()
         run: |
           bash scripts/workspace-install.sh
-          npm install --prefix "$RUNNER_TEMP/onevcs" --no-audit --no-fund onevcs-cli@0.56.3
+          npm install --prefix "$RUNNER_TEMP/onevcs" --no-audit --no-fund onevcs-cli@0.57.4
           echo "$RUNNER_TEMP/onevcs/node_modules/.bin" >> "$GITHUB_PATH"
           echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
       # Reporting only, and last: an over-budget figure turns this step red with
