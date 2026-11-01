@@ -19,10 +19,25 @@
       "{workspaceRoot}/scripts/npm-build.mjs",
       "{workspaceRoot}/scripts/sbom.mjs",
       "{workspaceRoot}/scripts/ci-job.sh",
-      "{workspaceRoot}/scripts/ci-cache-verdict.sh",
       "{workspaceRoot}/scripts/measure-cold-linux.sh",
       "{workspaceRoot}/scripts/measure-cold-linux.d/**/*",
-      "{workspaceRoot}/justfile"
+      "{workspaceRoot}/scripts/ci-warm.sh",
+      "{workspaceRoot}/budgets.yaml",
+      "{workspaceRoot}/scripts/actions-budget-figures.sh",
+      "{workspaceRoot}/scripts/gate-time.sh",
+      "{workspaceRoot}/scripts/gate-time-budget.mjs",
+      "{workspaceRoot}/scripts/setup-llmlint.sh",
+      "{workspaceRoot}/oneharness.toml",
+      "{workspaceRoot}/llmlint.yml",
+      "{workspaceRoot}/judged-diff/project.json",
+      "{workspaceRoot}/nx.json",
+      "{workspaceRoot}/package.json",
+      "{workspaceRoot}/bun.lock",
+      "{workspaceRoot}/**/project.json",
+      "{workspaceRoot}/scripts/workspace-install.sh",
+      "{workspaceRoot}/scripts/nx.sh",
+      "{workspaceRoot}/tests/e2e/linked_report.rs",
+      "{workspaceRoot}/Cargo.toml"
     ]
   },
   "targets": {

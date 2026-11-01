@@ -6,12 +6,12 @@
 //! and every other build runs the affected tier. The script is the one place a
 //! build is told which side it is on; these journeys run it with the event a
 //! release pull request, an ordinary pull request and a push to `main` each set,
-//! and read the workflow for the jobs that act on what it said. A sweep wired to
-//! nothing, or wired into the verdict branch protection reads, would both look
-//! fine from inside a single run.
+//! and read the workflow for the job that acts on what it said: `test-linux`,
+//! which sweeps every project on the broader tier. A sweep wired to nothing
+//! would look fine from inside a single run.
 //!
-//! The suppressions review comment is held here too: it is the other workflow
-//! that must stay out of that verdict.
+//! The suppressions review comment is held here too: a step of `lint` that
+//! comments and decides nothing.
 #![cfg(unix)]
 
 use std::fs;
@@ -168,95 +168,90 @@ fn release_plz_names_its_branch_the_way_the_script_expects() {
 }
 
 #[test]
-fn the_sweep_runs_on_what_the_script_answers_and_feeds_no_verdict() {
-    let changes = job_block("ci.yml", "changes");
+fn the_sweep_runs_on_what_the_script_answers_inside_test_linux() {
+    let job = job_block("ci.yml", "test-linux");
+    let tier = job
+        .find("run: echo \"tier=$(bash scripts/ci-tier.sh)\" >> \"$GITHUB_OUTPUT\"")
+        .unwrap_or_else(|| panic!("test-linux does not ask the script for its tier:\n{job}"));
+    let sweep = job
+        .find("run: just ci-test-linux --tier \"${{ steps.tier.outputs.tier }}\"")
+        .unwrap_or_else(|| {
+            panic!("test-linux does not run its recipe on the script's answer:\n{job}")
+        });
     assert!(
-        changes.contains("tier: ${{ steps.tier.outputs.tier }}")
-            && changes.contains("echo \"tier=$(bash scripts/ci-tier.sh)\" >> \"$GITHUB_OUTPUT\""),
-        "the changes job does not publish the script's answer:\n{changes}"
+        tier < sweep,
+        "test-linux runs its recipe before asking its tier"
     );
-
-    let sweep = job_block("ci.yml", "sweep");
+    // The broader tier is the sweep: `just check`'s tiers over every project.
+    let script = fs::read_to_string(repo_root().join("scripts/ci-job.sh")).expect("ci-job.sh");
     assert!(
-        sweep.contains("needs: changes")
-            && sweep.contains("if: needs.changes.outputs.tier == 'broader'"),
-        "the sweep does not run on the broader tier's answer:\n{sweep}"
+        script.contains("bash scripts/nx.sh run-many -t \"$targets\""),
+        "the broader tier no longer runs every project"
     );
-    assert!(
-        sweep.lines().any(|line| line.trim() == "run: just check"),
-        "the sweep does not run the full gate:\n{sweep}"
-    );
-
-    // The verdict branch protection reads is `gate`'s, ruled on by
-    // scripts/gate-verdict.sh over the jobs it needs. The sweep is in neither.
-    let gate = job_block("ci.yml", "gate");
-    assert!(
-        gate.contains("needs: [changes, quality, wheel, browser-windows]"),
-        "the gate must require changes, quality, Linux wheels and the Windows browser build:\n{gate}"
-    );
-    assert!(
-        !gate.contains("sweep"),
-        "the release pull request's sweep feeds the gate:\n{gate}"
-    );
-
-    // Every other pull request and every push runs the affected tier, and only
-    // that: no step of `quality` is conditional on the event any more.
-    let quality = job_block("ci.yml", "quality");
-    assert!(
-        quality.contains("run: just check-affected") && !quality.contains("if:"),
-        "the quality job no longer runs the affected tier on every build:\n{quality}"
-    );
-}
-
-#[test]
-fn a_push_build_hands_the_affected_tier_the_commit_before_the_push() {
+    // The four jobs are the whole of ci.yml: no separate sweep, and no verdict
+    // job ruling on others for branch protection to read.
     let workflow =
         fs::read_to_string(repo_root().join(".github/workflows/ci.yml")).expect("ci.yml reads");
-    assert!(
-        workflow.contains(
-            "ONEPIPELINE_UI_NX_BASE_SHA: ${{ github.event_name == 'push' && github.event.before || '' }}"
-        ),
-        "ci.yml does not hand a push build its base commit, so a push to main runs \
-         every project or none"
+    let jobs: Vec<&str> = workflow
+        .lines()
+        .skip_while(|line| *line != "jobs:")
+        .skip(1)
+        .filter_map(|line| line.strip_prefix("  "))
+        .filter(|inner| !inner.starts_with([' ', '#']) && inner.ends_with(':'))
+        .map(|inner| inner.trim_end_matches(':'))
+        .collect();
+    assert_eq!(jobs, ["lint", "test-linux", "test-windows", "test-macos"]);
+}
+
+#[test]
+fn no_push_re_runs_the_pull_request_checks() {
+    let workflow =
+        fs::read_to_string(repo_root().join(".github/workflows/ci.yml")).expect("ci.yml reads");
+    let triggers: Vec<&str> = workflow
+        .lines()
+        .skip_while(|line| *line != "on:")
+        .skip(1)
+        .take_while(|line| line.starts_with(' ') || line.is_empty() || line.starts_with('#'))
+        .filter(|line| {
+            line.starts_with("  ")
+                && !line.starts_with("   ")
+                && !line.trim_start().starts_with('#')
+        })
+        .map(str::trim)
+        .collect();
+    assert_eq!(
+        triggers,
+        ["pull_request:"],
+        "ci.yml runs on more than pull requests: the warmer, not a push re-run, catches a merge that breaks main"
     );
     assert!(
-        workflow.contains("cancel-in-progress: ${{ github.event_name == 'pull_request' }}"),
-        "a push build can be cancelled by the next push, leaving the commits it was \
-         gating gated by nothing"
+        workflow.contains("cancel-in-progress: true"),
+        "a pull request's superseded run is not cancelled"
     );
 }
 
 #[test]
-fn the_suppressions_comment_is_its_own_workflow_and_gates_nothing() {
-    let path = repo_root().join(".github/workflows/notignored.yml");
-    let workflow = fs::read_to_string(&path).expect("notignored.yml reads");
-    for (line, what) in [
-        ("  pull_request:", "runs on pull requests"),
-        ("  contents: read", "reads the tree"),
-        ("  pull-requests: write", "can write its comment"),
-        (
-            "    if: github.event.pull_request.head.repo.full_name == github.repository",
-            "skips a fork's pull request, whose token cannot comment",
-        ),
-        (
-            "      - uses: nickderobertis/notignored@v0",
-            "runs notignored",
-        ),
-        (
-            "          fetch-depth: 0",
-            "has the base branch to diff against",
-        ),
-    ] {
-        assert!(
-            workflow.lines().any(|candidate| candidate == line),
-            "notignored.yml no longer {what} (`{}`)",
-            line.trim()
-        );
-    }
-    let gate = job_block("ci.yml", "gate");
+fn the_suppressions_comment_is_a_step_of_lint_and_gates_nothing() {
+    let lint = job_block("ci.yml", "lint");
+    let step = lint
+        .split("\n      - ")
+        .find(|step| step.contains("uses: nickderobertis/notignored@v0"))
+        .unwrap_or_else(|| panic!("lint does not run notignored:\n{lint}"));
     assert!(
-        !gate.contains("suppressions") && !gate.contains("notignored"),
-        "the suppressions comment feeds the gate:\n{gate}"
+        step.contains(
+            "if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !cancelled()"
+        ),
+        "the suppressions comment does not skip a fork's pull request, whose token cannot comment:\n{step}"
+    );
+    assert!(
+        lint.contains("pull-requests: write") && lint.contains("fetch-depth: 0"),
+        "lint cannot write the comment or diff against the base branch:\n{lint}"
+    );
+    assert!(
+        !repo_root()
+            .join(".github/workflows/notignored.yml")
+            .exists(),
+        "notignored.yml is back, running a second job on every pull request"
     );
 }
 
@@ -265,7 +260,9 @@ fn lifting_a_draft_does_not_rerun_the_required_checks() {
     // A draft's runs report on its head commit, and lifting it changes no
     // commit, so those runs are the ones the merge path reads. Triggering on
     // `ready_for_review` would only run every required check a second time.
-    for file in ["ci.yml", "visual-docs.yml"] {
+    // visual-docs.yml runs on a pull request only once it closes, to delete its
+    // preview; ci.yml carries every check a pull request owes.
+    for file in ["ci.yml"] {
         let workflow = fs::read_to_string(repo_root().join(".github/workflows").join(file))
             .expect("workflow reads");
         let types = workflow

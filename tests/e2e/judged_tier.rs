@@ -21,7 +21,7 @@
 
 // The tier runs bash recipes under Nx, and the scratch workspace borrows this
 // checkout's `node_modules` through a symlink. The lanes that run these journeys
-// — `ci.yml`'s `quality` and `sweep`, `release.yml`'s `test` — are ubuntu, and
+// — `ci.yml`'s `test-linux`, on both its tiers — are ubuntu, and
 // `check-cross` reaches no tier without a `test-quick` target, which this has not.
 #![cfg(unix)]
 

@@ -27,6 +27,11 @@ files:
     # it, so it is an input the repo is judged *against*, not repo-authored prose
     # to judge — and editing it to satisfy a rule would move the goalposts.
     - "docs/contract.md"
+    # GitHub's own responses, recorded byte for byte from this repository's runs
+    # for the release-tail replay (each `.json` sidecar beside them names its API
+    # path and source, and is judged). They are what the test is judged against,
+    # and reconcile.mjs holds them to what GitHub serves.
+    - ".github/fixtures/release-tail/*/*.http"
 rationales: true
 # No `agents` block: the harness/model are NOT pinned here. `oneharness.toml`
 # (composed alongside this file) selects them in fallback mode — codex + gpt-6.1-sol

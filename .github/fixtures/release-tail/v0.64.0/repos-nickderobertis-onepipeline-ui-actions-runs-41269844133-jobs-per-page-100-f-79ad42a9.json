@@ -1,0 +1,20 @@
+{
+  "path": "repos/nickderobertis/onepipeline-ui/actions/runs/41269844133/jobs?per_page=100&filter=latest",
+  "fetched_from": {
+    "repository": "nickderobertis/onepipeline-ui",
+    "release": "v0.64.0",
+    "run": 41269844133,
+    "release_commit": "23f0ccda44425ed295c7b5265e8007caa53badc5"
+  },
+  "fetched_at": "2026-11-01T20:25:55.710Z",
+  "served_with": {
+    "reason": "The release-tail step runs inside publish, so it sees its own job still running: the recorded publish job (124744287660) is served in progress, with no completed_at and no conclusion yet. This is the one change to any recording.",
+    "jobs": {
+      "124744287660": {
+        "status": "in_progress",
+        "conclusion": null,
+        "completed_at": null
+      }
+    }
+  }
+}
