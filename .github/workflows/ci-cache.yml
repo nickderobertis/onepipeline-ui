@@ -155,7 +155,7 @@ jobs:
   # changes the version and the changelog alone, and a Mac job there is one more
   # Mac run a release would start (.github/budgets.yaml).
   warm-macos:
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore: release v') }}
+    if: "!startsWith(github.event.head_commit.message, 'chore: release v')"
     runs-on: macos-latest
     timeout-minutes: 60
     defaults:
