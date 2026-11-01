@@ -229,14 +229,23 @@ test("with codex refusing the configured model, the committed chain judges throu
   const printed = `${run.stdout}\n${run.stderr}`;
   assert.equal(run.status, 0, printed);
   const made = readdirSync(calls);
-  const codex = made.filter((name) => name.startsWith("codex."));
-  const claude = made.filter((name) => name.startsWith("claude."));
-  // codex was asked first, with the committed model, and refused; claude-code
-  // then gave the verdict.
-  assert.ok(codex.length > 0, `codex was never asked:\n${printed}`);
-  assert.match(readFileSync(join(calls, codex[0]), "utf8"), /gpt-6\.1-sol/);
-  assert.ok(claude.length > 0, `claude-code was never asked:\n${printed}`);
-  assert.match(readFileSync(join(calls, claude[0]), "utf8"), /claude-opus-4-8/);
+  const asked = (prefix) =>
+    made
+      .filter((name) => name.startsWith(prefix))
+      .map((name) => readFileSync(join(calls, name), "utf8"));
+  // codex was asked to judge with the committed model, and refused; claude-code
+  // then gave the verdict. oneharness may also ask codex for its model catalog
+  // (`codex app-server`) first, which is not the judge call.
+  assert.ok(
+    asked("codex.").some(
+      (call) => /^exec\b/.test(call) && /--model gpt-6\.1-sol\b/.test(call),
+    ),
+    `codex was never asked to judge with gpt-6.1-sol:\n${asked("codex.").join("")}\n${printed}`,
+  );
+  assert.ok(
+    asked("claude.").some((call) => /--model claude-opus-4-8\b/.test(call)),
+    `claude-code was never asked to judge:\n${printed}`,
+  );
   assert.match(printed, /^1 rules: 1 passed, 0 failed, 0 skipped$/m);
   // Only the doubles answered: a real codex or claude leaves its state here.
   for (const state of [".codex", ".claude.json", ".claude"])

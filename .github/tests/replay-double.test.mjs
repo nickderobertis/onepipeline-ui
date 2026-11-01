@@ -256,7 +256,7 @@ GH_REPLAY_FIXTURES="$RAW_RECORDINGS" exec node "$RAW_DOUBLE" "$@"
   assert.match(replayed.stderr, /has no HTTP status line/);
   const status = spawnSync(
     "node",
-    [DOUBLE, "api", "--include", "--method", "GET", "repos/x"],
+    [DOUBLE, "api", "--include", "--method", "GET", "repos/o/n/actions/runs"],
     {
       encoding: "utf8",
       env: { ...process.env, GH_REPLAY_STATUS: "oops" },
@@ -379,4 +379,22 @@ test("a recorded error status is served as gh serves one, and a sidecar naming n
     run.stderr,
     /its sidecar names no repos\/OWNER\/NAME\/ API path/,
   );
+});
+
+test("the double serves only an API path, never an option gh would read", () => {
+  for (const request of ["--paginate", "repos/x", "user", "repos/a/b/x y"]) {
+    const run = spawnSync(
+      "node",
+      [DOUBLE, "api", "--include", "--method", "GET", request],
+      {
+        encoding: "utf8",
+        env: { ...process.env, GH_REPLAY_FIXTURES: RECORDINGS },
+      },
+    );
+    assert.equal(run.status, 2, request);
+    assert.match(
+      run.stderr,
+      /only 'api --include --method GET <API path>' is served/,
+    );
+  }
 });

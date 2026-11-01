@@ -54,10 +54,15 @@ if (
   args[0] !== "api" ||
   args[1] !== "--include" ||
   args[2] !== "--method" ||
-  args[3] !== "GET"
+  args[3] !== "GET" ||
+  // An API path, as onevcs asks for one, or a `Link` URL back into the API:
+  // never an option or anything else gh would read as one.
+  !/^(repos\/[\w.-]+\/[\w.-]+\/|repositories\/\d+\/|https:\/\/api\.github\.com\/)[^\s]*$/.test(
+    request ?? "",
+  )
 ) {
   err(
-    `gh-replay: only 'api --include --method GET <request>' is served, got: ${args.join(" ")}\n`,
+    `gh-replay: only 'api --include --method GET <API path>' is served, got: ${args.join(" ")}\n`,
   );
   process.exit(2);
 }
