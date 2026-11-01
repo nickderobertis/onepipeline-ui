@@ -202,7 +202,27 @@ test("a response that is not what gh prints is refused by name, by reconcile and
   const text = readFileSync(file, "utf8");
   // The body alone, as if the headers and the blank line after them were lost.
   writeFileSync(file, text.slice(text.search(/\r?\n\r?\n/)).trim());
-  const run = reconcile(served);
+  // A gh that printed it so, for reconcile: the replay double refuses to.
+  const raw = mkdtempSync(join(scratch, "raw-gh-"));
+  writeFileSync(
+    join(raw, "gh"),
+    `#!/usr/bin/env bash
+if [ "\${!#}" = "$RAW_PATH" ]; then cat "$RAW_FILE"; exit 0; fi
+GH_REPLAY_FIXTURES="$RAW_RECORDINGS" exec node "$RAW_DOUBLE" "$@"
+`,
+  );
+  chmodSync(join(raw, "gh"), 0o755);
+  const run = spawnSync("node", [RECONCILE, RECORDINGS], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${raw}:${process.env.PATH}`,
+      RAW_PATH: sidecar.path,
+      RAW_FILE: file,
+      RAW_RECORDINGS: RECORDINGS,
+      RAW_DOUBLE: DOUBLE,
+    },
+  });
   assert.equal(run.status, 1, run.stdout);
   assert.match(
     run.stderr,
@@ -233,7 +253,7 @@ test("a response that is not what gh prints is refused by name, by reconcile and
     },
   );
   assert.notEqual(replayed.status, 0);
-  assert.match(replayed.stderr, /has no header\/body separator/);
+  assert.match(replayed.stderr, /has no HTTP status line/);
   const status = spawnSync(
     "node",
     [DOUBLE, "api", "--include", "--method", "GET", "repos/x"],
@@ -257,5 +277,106 @@ test("reconcile refuses a directory with no recording rather than passing it", (
   assert.match(
     run.stderr,
     /no recording under .*empty-release, so nothing was reconciled/,
+  );
+});
+
+test("reconcile reports an item that left a page without failing, and compares a response that is no listing whole", () => {
+  const served = join(scratch, "shrunk");
+  mkdirSync(served);
+  cpSync(RECORDINGS, served, { recursive: true });
+  const file = join(served, plain.replace(/\.json$/, ".http"));
+  const text = readFileSync(file, "utf8");
+  const split = text.search(/\r?\n\r?\n/);
+  const body = JSON.parse(text.slice(split).trim());
+  body.jobs.pop();
+  writeFileSync(file, `${text.slice(0, split)}\r\n\r\n${JSON.stringify(body)}`);
+  const shrunk = reconcile(served);
+  assert.equal(shrunk.status, 0, shrunk.stderr);
+  assert.match(
+    shrunk.stdout,
+    /0 item\(s\) entered and 1 left the page since it was recorded/,
+  );
+
+  // One release directory whose one recording is an object, not a listing:
+  // the comparison's own head, made from the recorded comparison.
+  const compare = readdirSync(RECORDINGS).find((name) =>
+    /-compare-.*\.json$/.test(name),
+  );
+  const recordedText = readFileSync(
+    join(RECORDINGS, compare.replace(/\.json$/, ".http")),
+    "utf8",
+  );
+  const at = recordedText.search(/\r?\n\r?\n/);
+  const {
+    commits: _commits,
+    files: _files,
+    ...head
+  } = JSON.parse(recordedText.slice(at).trim());
+  const single = (dir, object) => {
+    mkdirSync(dir);
+    writeFileSync(join(dir, compare), readFileSync(join(RECORDINGS, compare)));
+    writeFileSync(
+      join(dir, compare.replace(/\.json$/, ".http")),
+      `${recordedText.slice(0, at)}\r\n\r\n${JSON.stringify(object)}`,
+    );
+  };
+  const release = join(scratch, "object-release");
+  const same = join(scratch, "object-same");
+  const changed = join(scratch, "object-changed");
+  single(release, head);
+  single(same, head);
+  single(changed, { ...head, status: "diverged" });
+  const run = (servedDir) =>
+    spawnSync("node", [RECONCILE, release], {
+      encoding: "utf8",
+      env: { ...process.env, ...ghServing(servedDir).env },
+    });
+  assert.equal(run(same).status, 0);
+  const differs = run(changed);
+  assert.equal(differs.status, 1);
+  assert.match(differs.stderr, /the response differs from its recording/);
+});
+
+test("a recorded error status is served as gh serves one, and a sidecar naming no API path is refused", () => {
+  const served = join(scratch, "errored");
+  mkdirSync(served);
+  cpSync(RECORDINGS, served, { recursive: true });
+  const file = join(served, plain.replace(/\.json$/, ".http"));
+  writeFileSync(
+    file,
+    readFileSync(file, "utf8").replace(
+      /^HTTP\/2\.0 200 OK/,
+      "HTTP/2.0 502 Bad Gateway",
+    ),
+  );
+  const replayed = spawnSync(
+    "node",
+    [DOUBLE, "api", "--include", "--method", "GET", sidecar.path],
+    {
+      encoding: "utf8",
+      env: { ...process.env, GH_REPLAY_FIXTURES: served },
+    },
+  );
+  assert.equal(replayed.status, 1);
+  assert.match(replayed.stdout, /^HTTP\/2\.0 502/);
+
+  const odd = join(scratch, "odd-path");
+  mkdirSync(odd);
+  writeFileSync(
+    join(odd, plain),
+    JSON.stringify({ ...sidecar, path: "--paginate" }),
+  );
+  writeFileSync(
+    join(odd, plain.replace(/\.json$/, ".http")),
+    readFileSync(join(RECORDINGS, plain.replace(/\.json$/, ".http"))),
+  );
+  const run = spawnSync("node", [RECONCILE, odd], {
+    encoding: "utf8",
+    env: { ...process.env, ...ghServing(RECORDINGS).env },
+  });
+  assert.equal(run.status, 1);
+  assert.match(
+    run.stderr,
+    /its sidecar names no repos\/OWNER\/NAME\/ API path/,
   );
 });

@@ -149,8 +149,26 @@ const recorded = readFileSync(
   join(fixtures, sidecar.file.replace(/\.json$/, ".http")),
   "utf8",
 );
+// Every recording is checked as gh's output before it is served — a status
+// line, headers, a blank line and a JSON body — and one recording an error
+// status is answered as gh answers one: printed, with exit 1.
 try {
+  const status = Number(recorded.match(/^HTTP\/[\d.]+ (\d{3})\b/)?.[1]);
+  if (!status)
+    throw new Error(
+      `gh-replay: the recording of ${request} has no HTTP status line`,
+    );
+  const framing = recorded.match(/\r?\n\r?\n/);
+  if (!framing)
+    throw new Error(
+      `gh-replay: the recording of ${request} has no header/body separator`,
+    );
+  JSON.parse(recorded.slice(framing.index + framing[0].length));
   out(servedWith(recorded, sidecar.served_with));
+  if (status >= 400) {
+    err(`gh: HTTP ${status} (recorded for ${request})\n`);
+    process.exit(1);
+  }
 } catch (error) {
   err(`${error.message}\n`);
   process.exit(1);

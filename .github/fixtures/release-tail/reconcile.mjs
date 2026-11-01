@@ -83,6 +83,17 @@ for (const dir of dirs)
   )) {
     const sidecar = JSON.parse(readFileSync(join(dir, file), "utf8"));
     checked += 1;
+    // What reaches gh is an API path of this kind, never an option or a URL.
+    if (
+      typeof sidecar?.path !== "string" ||
+      !/^repos\/[\w.-]+\/[\w.-]+\//.test(sidecar.path)
+    ) {
+      differs += 1;
+      console.error(
+        `reconcile: ${file}: its sidecar names no repos/OWNER/NAME/ API path`,
+      );
+      continue;
+    }
     // A recording or an answer that is not what gh prints is a difference,
     // named, rather than a crash that leaves the others unchecked.
     try {
