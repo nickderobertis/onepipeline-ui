@@ -705,6 +705,16 @@ requirements move to 0.12.13; onevcs, oneagentgraph, onejudge, onemessagebus and
 oneharness-core are unchanged, the human-item schemas are unchanged, and no MSRV
 changes. This changes the engine types carried by ApiError::from_engine and the
 other engine-typed public items.
+0.97.2 is the engine that links onetaskgraph 0.12.14, whose store makes creates
+safe to retry and guards its writes. A host holds this reader and its engine to
+one linked engine and one plan store, so the browser view keeps parsing the
+records the dispatching engine writes only once this crate links it. The
+plan-store family and its test-only exact requirements move to 0.12.14, and
+uuid to the 1.29.0 that onetaskgraph-core 0.12.14 requires; onevcs,
+oneagentgraph, onejudge, onemessagebus and oneharness-core are unchanged, and no
+route, payload or MSRV changes beyond the release `/healthz` reports. This
+changes the engine types carried by ApiError::from_engine and the other
+engine-typed public items.
 
 The test-only `onevcs` requirement, which the `EventKind` drift gate in
 `tests/contract.rs` reads, has followed the release each linked engine resolves:
@@ -713,4 +723,4 @@ declares the stacking, review and landing kinds that engine relays; 0.56.3 for
 0.79.0 (^0.56.2), which declares `publication-resumed`, which `payload::vcs`
 copies, and for 0.79.1, 0.82.0, 0.84.0, 0.84.1 and 0.85.0; 0.56.9 for 0.89.0,
 which relays each check's times; 0.56.11 for 0.90.0; 0.57.0 for 0.95.5; and
-0.57.4 for 0.96.0 (^0.57.4), 0.96.1, 0.96.2 and 0.97.0.
+0.57.4 for 0.96.0 (^0.57.4), 0.96.1, 0.96.2, 0.97.0 and 0.97.2.

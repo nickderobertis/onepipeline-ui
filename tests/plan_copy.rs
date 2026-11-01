@@ -1,5 +1,7 @@
 //! The linked plan store's copy boundary, over real Markdown records on disk.
-use onetaskgraph_core::{CopyItems, CopyRequest, CopyScope, GlobalId, StatusPolicy};
+use onetaskgraph_core::{
+    CopyConditions, CopyItems, CopyRequest, CopyScope, GlobalId, StatusPolicy,
+};
 use std::fs;
 
 #[tokio::test]
@@ -66,6 +68,7 @@ async fn a_copied_project_document_keeps_its_budget_fragment_at_the_destination(
         expect: None,
         no_link: false,
         statuses: Vec::new(),
+        conditions: CopyConditions::default(),
     };
     let plan = engine
         .copy(&request(
