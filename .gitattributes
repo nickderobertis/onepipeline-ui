@@ -1,1 +1,4 @@
 * text=auto eol=lf
+# GitHub responses recorded byte for byte, CRLF header lines included: the
+# release-tail replay serves them exactly as gh printed them.
+.github/fixtures/release-tail/*/*.http -text
