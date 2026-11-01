@@ -273,3 +273,35 @@ test("the gate recipe runs its whole body inside the wrapper", () => {
   );
   assert.ok(existsSync(WRAPPER));
 });
+
+test("a budgets file or a record the wrapper cannot reach fails the gate, saying which", () => {
+  const dir = fresh();
+  const good = join(dir, "good.json");
+  writeFileSync(good, `${JSON.stringify(record(10))}\n`);
+  const missing = gate(["--check"], {
+    ONEPIPELINE_UI_GATE_TIME_RECORD: good,
+    ONEPIPELINE_UI_GATE_TIME_BUDGETS: join(dir, "no-such-dir", "budgets.yaml"),
+  });
+  assert.equal(missing.status, 2, missing.stdout + missing.stderr);
+  assert.match(
+    missing.stderr,
+    /no budgets file at .*no-such-dir\/budgets\.yaml/,
+  );
+  assert.doesNotMatch(missing.stderr, /warning/);
+
+  // A record whose directory is a file: nothing can be written there.
+  const blocker = join(dir, "blocker");
+  writeFileSync(blocker, "");
+  const unwritable = gate(["--", "bash", "-c", "true"], {
+    ONEPIPELINE_UI_GATE_TIME_RECORD: join(blocker, "record.json"),
+  });
+  assert.equal(unwritable.status, 1);
+  assert.match(
+    unwritable.stderr,
+    /cannot create the directory of the gate record at .*blocker\/record\.json/,
+  );
+  assert.match(
+    unwritable.stderr,
+    /ACTION: make .*blocker a writable directory/,
+  );
+});

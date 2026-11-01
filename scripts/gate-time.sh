@@ -35,6 +35,12 @@ budgets="${ONEPIPELINE_UI_GATE_TIME_BUDGETS:-$ROOT/budgets.yaml}"
 # but within or over is the gate's failure.
 check_budget() {
   local budget_status=0 output over
+  # A budgets file that is not there is a setup error, never an overrun.
+  [ -f "$budgets" ] || {
+    echo "gate-time: no budgets file at $budgets, so the gate's time cannot be held to its budget" >&2
+    echo "ACTION: point ONEPIPELINE_UI_GATE_TIME_BUDGETS at a budgets.yaml registering onepipeline-ui-gate-time, or unset it to use the root's" >&2
+    exit 2
+  }
   output="$(cd "$(dirname "$budgets")" && ONEPIPELINE_UI_GATE_TIME_RECORD="$record" \
     "$ROOT/node_modules/.bin/onebudgetspec" check "$(basename "$budgets")" --label host-variable)" || budget_status=$?
   # A report is the gate's output; a check that could not measure is its error.
@@ -85,8 +91,13 @@ now_ms() {
   node -e 'process.stdout.write(String(Date.now()))'
 }
 
-mkdir -p "$(dirname "$record")"
-rm -f "$record"
+record_unwritable() {
+  echo "gate-time: cannot $1 the gate record at $record" >&2
+  echo "ACTION: make $(dirname "$record") a writable directory (or point ONEPIPELINE_UI_GATE_TIME_RECORD elsewhere), then re-run 'just gate'" >&2
+  exit 1
+}
+mkdir -p "$(dirname "$record")" 2>/dev/null || record_unwritable "create the directory of"
+rm -f "$record" 2>/dev/null || record_unwritable "replace"
 started="$(now_ms)"
 invocation="$$-$started"
 
@@ -107,7 +118,7 @@ node -e '
   };
   require("node:fs").writeFileSync(`${path}.tmp`, `${JSON.stringify(record)}\n`);
   require("node:fs").renameSync(`${path}.tmp`, path);
-' "$record" "$invocation" "$started" "$ended" "$status" "$@"
+' "$record" "$invocation" "$started" "$ended" "$status" "$@" 2>/dev/null || record_unwritable "write"
 
 if [ "$status" -ne 0 ]; then
   exit "$status"
