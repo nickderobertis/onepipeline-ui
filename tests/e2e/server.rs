@@ -16739,6 +16739,7 @@ fn launch_copied_from_plan_task_renderings(
                 no_link: false,
                 expect: None,
                 statuses: Vec::new(),
+                conditions: onetaskgraph_core::CopyConditions::default(),
             }),
         )
         .expect("the store copies the plan");
