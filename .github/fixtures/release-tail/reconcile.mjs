@@ -48,6 +48,10 @@ const strip = (value) => {
 };
 // gh's output: a status line and headers, a blank line, then a JSON body.
 function bodyOf(text, what) {
+  const status = Number(text.match(/^HTTP\/[\d.]+ (\d{3})\b/)?.[1]);
+  if (!status) throw new Error(`${what} has no HTTP status line`);
+  if (status >= 300)
+    throw new Error(`${what} is HTTP ${status}, not a served page`);
   const framing = text.match(/\r?\n\r?\n/);
   if (!framing) throw new Error(`${what} has no header/body separator`);
   return JSON.parse(text.slice(framing.index + framing[0].length));
@@ -103,9 +107,17 @@ for (const dir of dirs)
         readFileSync(join(dir, file.replace(/\.json$/, ".http")), "utf8"),
         `the recording of ${sidecar.path}`,
       );
-      for (const [id, fields] of Object.entries(change?.jobs ?? {}))
-        for (const name of Object.keys(fields))
-          delete recorded.jobs?.find((job) => String(job.id) === id)?.[name];
+      for (const [id, fields] of Object.entries(change?.jobs ?? {})) {
+        // A change naming a job the recording lacks is one replay refuses.
+        const job = Array.isArray(recorded.jobs)
+          ? recorded.jobs.find((candidate) => String(candidate.id) === id)
+          : undefined;
+        if (!job)
+          throw new Error(
+            `its served_with names job ${id}, which the recording lacks`,
+          );
+        for (const name of Object.keys(fields)) delete job[name];
+      }
       const fetched = spawnSync(
         "gh",
         ["api", "--include", "--method", "GET", sidecar.path],

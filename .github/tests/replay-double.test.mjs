@@ -204,8 +204,9 @@ test("a response that is not what gh prints is refused by name, by reconcile and
   cpSync(RECORDINGS, served, { recursive: true });
   const file = join(served, plain.replace(/\.json$/, ".http"));
   const text = readFileSync(file, "utf8");
-  // The body alone, as if the headers and the blank line after them were lost.
-  writeFileSync(file, text.slice(text.search(/\r?\n\r?\n/)).trim());
+  // The status line and headers run straight into the body: the blank line
+  // between them is lost.
+  writeFileSync(file, text.replace(/\r?\n\r?\n/, "\r\n"));
   // A gh that printed it so, for reconcile: the replay double refuses to.
   const raw = mkdtempSync(join(scratch, "raw-gh-"));
   writeFileSync(
@@ -521,4 +522,52 @@ test("reconcile names a listing that is not a list of objects and still checks t
     /GitHub's answer to .*41269793170\/jobs.* carries a listing that is not a list of objects/,
   );
   assert.match(run.stderr, /reconcile: 1 difference\(s\)/);
+});
+
+test("reconcile refuses an answer with no status line and a change naming a job the recording lacks", () => {
+  const absent = withChange("reconcile-absent", {
+    reason: "test",
+    jobs: { 1: { status: "x" } },
+  });
+  const run = spawnSync("node", [RECONCILE, absent.dir], {
+    encoding: "utf8",
+    env: { ...process.env, ...ghServing(RECORDINGS).env },
+  });
+  assert.equal(run.status, 1);
+  assert.match(
+    run.stderr,
+    /its served_with names job 1, which the recording lacks/,
+  );
+
+  const raw = mkdtempSync(join(scratch, "statusless-gh-"));
+  const statusless = join(raw, "answer");
+  const text = readFileSync(
+    join(RECORDINGS, plain.replace(/\.json$/, ".http")),
+    "utf8",
+  );
+  writeFileSync(statusless, text.replace(/^HTTP\/2\.0 200 OK\r?\n/, ""));
+  writeFileSync(
+    join(raw, "gh"),
+    `#!/usr/bin/env bash
+if [ "\${!#}" = "$RAW_PATH" ]; then cat "$RAW_FILE"; exit 0; fi
+GH_REPLAY_FIXTURES="$RAW_RECORDINGS" exec node "$RAW_DOUBLE" "$@"
+`,
+  );
+  chmodSync(join(raw, "gh"), 0o755);
+  const answered = spawnSync("node", [RECONCILE, RECORDINGS], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${raw}:${process.env.PATH}`,
+      RAW_PATH: sidecar.path,
+      RAW_FILE: statusless,
+      RAW_RECORDINGS: RECORDINGS,
+      RAW_DOUBLE: DOUBLE,
+    },
+  });
+  assert.equal(answered.status, 1);
+  assert.match(
+    answered.stderr,
+    /GitHub's answer to .*41269793170\/jobs.* has no HTTP status line/,
+  );
 });
