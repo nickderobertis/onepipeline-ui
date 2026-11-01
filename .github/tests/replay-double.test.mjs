@@ -33,20 +33,31 @@ const scratch = mkdtempSync(
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
 // A `gh` serving `served` (a directory of recordings), noting whether it was
-// handed a token, and answering `status` instead when one is given.
+// handed a token, and answering `status` instead when one is given. What it is
+// told arrives in its environment, never spliced into its source: `env` holds
+// it, with PATH, for whatever runs it.
 function ghServing(served, status = "") {
   const dir = mkdtempSync(join(scratch, "gh-"));
   const tokens = join(dir, "tokens");
   writeFileSync(
     join(dir, "gh"),
     `#!/usr/bin/env bash
-env | grep -c '^\\(GH_TOKEN\\|GITHUB_TOKEN\\)=' >> ${JSON.stringify(tokens)} || true
+env | grep -c '^\\(GH_TOKEN\\|GITHUB_TOKEN\\)=' >> "$SHIM_TOKENS" || true
 unset GH_REPLAY_RECORD GH_REPLAY_LOG GH_TOKEN GITHUB_TOKEN
-GH_REPLAY_FIXTURES=${JSON.stringify(served)} GH_REPLAY_STATUS=${JSON.stringify(status)} exec node ${JSON.stringify(DOUBLE)} "$@"
+GH_REPLAY_FIXTURES="$SHIM_SERVED" GH_REPLAY_STATUS="$SHIM_STATUS" exec node "$SHIM_DOUBLE" "$@"
 `,
   );
   chmodSync(join(dir, "gh"), 0o755);
-  return { path: `${dir}:${process.env.PATH}`, tokens };
+  return {
+    env: {
+      PATH: `${dir}:${process.env.PATH}`,
+      SHIM_TOKENS: tokens,
+      SHIM_SERVED: served,
+      SHIM_STATUS: status,
+      SHIM_DOUBLE: DOUBLE,
+    },
+    tokens,
+  };
 }
 
 // The Release run's jobs, which replay serves with its sidecar's one change, for
@@ -72,7 +83,7 @@ test("record mode saves gh's answer byte for byte with its sidecar, and hands gh
       encoding: "buffer",
       env: {
         ...process.env,
-        PATH: gh.path,
+        ...gh.env,
         GH_REPLAY_RECORD: into,
         GH_REPLAY_SOURCE: JSON.stringify({
           repository: "nickderobertis/onepipeline-ui",
@@ -116,7 +127,7 @@ test("record mode saves nothing when gh's read fails, and fails with it", () => 
       encoding: "utf8",
       env: {
         ...process.env,
-        PATH: ghServing(RECORDINGS, "502").path,
+        ...ghServing(RECORDINGS, "502").env,
         GH_REPLAY_RECORD: into,
       },
     },
@@ -129,7 +140,7 @@ test("record mode saves nothing when gh's read fails, and fails with it", () => 
 const reconcile = (served, status) =>
   spawnSync("node", [RECONCILE, RECORDINGS], {
     encoding: "utf8",
-    env: { ...process.env, PATH: ghServing(served, status).path },
+    env: { ...process.env, ...ghServing(served, status).env },
   });
 
 test("reconcile passes when GitHub serves what was recorded", () => {
@@ -240,7 +251,7 @@ test("reconcile refuses a directory with no recording rather than passing it", (
   mkdirSync(empty);
   const run = spawnSync("node", [RECONCILE, empty], {
     encoding: "utf8",
-    env: { ...process.env, PATH: ghServing(RECORDINGS).path },
+    env: { ...process.env, ...ghServing(RECORDINGS).env },
   });
   assert.equal(run.status, 1);
   assert.match(
