@@ -114,8 +114,8 @@ build`, and `tests/packaging.rs` reads each of those jobs for both halves.
 
 **`just check` needs one tool no lockfile can pin: `strace`, on Linux.** The
 cost journeys count what the server asks the kernel for, and fail rather than
-skip without it; a bare `just test` does not need it. `ci.yml`'s `quality` and
-`sweep` jobs install it.
+skip without it; a bare `just test` does not need it. `ci.yml`'s `test-linux`
+installs it.
 The judged tier's journeys likewise need the real `llmlint`, which `just
 setup-llmlint` installs; every CI job that can run them calls that recipe.
 
@@ -134,11 +134,26 @@ compiled from that exact commit and never fetched, because the commit still
 reports the last release's version: the binary is stamped with the lock's source
 and its own digest, and a same-version build from anywhere else is replaced.
 
-**Pull-request CI is four jobs, each one recipe.** `lint`, `test-linux`,
-`test-windows` and `test-macos`, and their caps (36 minutes for Linux, 30 for the others), are an interface other
-work builds against (`.github/tests/ci-jobs.test.mjs`); speed a job up by
-cutting its work, never by splitting one suite across more jobs. `docs/release-sweep-timing.md` records the measurements and margin behind
-Linux’s cap.
+**Pull-request CI is four jobs, each one recipe, and they are all of it.**
+`lint`, `test-linux`, `test-windows` and `test-macos`, and their caps (36 minutes
+for Linux, 30 for the others), are an interface other work builds against
+(`.github/tests/ci-jobs.test.mjs`); speed a job up by cutting its work, never by
+splitting one suite across more jobs. `docs/release-sweep-timing.md` records the
+measurements and margin behind Linux’s cap. No other workflow runs on a pull
+request's `opened`, `synchronize` or `reopened` — `visual-docs.yml` runs on its
+`closed` only, to delete its preview — and `.github/tests/ci-shape.test.mjs`
+resolves every workflow to hold that, and what a push to `main` and the release
+commit start.
+
+**The four jobs restore `main`'s Rust build and save none.** `ci-cache.yml` is
+the producer: on every push to `main` one build-only job per OS
+(`scripts/ci-warm.sh`, `just ci-warm-<os>`) compiles what that OS's jobs compile
+and saves it under the key they restore, with the sibling CLI and the base
+server. Its compile list is held to the tasks the four jobs reach in the real Nx
+graph (`.github/tests/ci-warm.test.mjs`), so a recipe whose cargo arguments or
+target directory change must change its warm line too. Its macOS job skips the
+commit merging release-plz's pull request, which is why the macOS
+runs-per-change budget (`.github/budgets.yaml`) is 3.
 
 **`.tools/` holds a second clone-local binary, and it is the server this branch
 forked from.** `tests/e2e/baseline.rs` asks whether every field the base commit
@@ -186,14 +201,18 @@ fans one uniformly-named target across all of them.
   protected: merge and rebase merging are off, so one PR is one squash commit
   whose subject is the PR title. Queue with `gh pr merge --auto --squash`. Admins
   may bypass in a break-glass.
-- **All gating checks are required**, including the `gate` job and the separate
-  `llmlint` job. `gate` rules on `quality` (the deterministic affected tier) and
-  on the Linux `wheel` leg through `scripts/gate-verdict.sh`, so a job that must
-  block a merge joins it there rather than as a context protection would also have to
-  list — v0.16.0's wheels failed with every required check green. Nothing follows
-  a release on `workflow_run`: what a published artifact does when installed is
-  proven inside the release job that published it (below), whose failure demotes
-  the Release rather than going unread.
+- **Branch protection requires exactly the four jobs** — `lint`, `test-linux`,
+  `test-windows`, `test-macos` (`.github/required-contexts.mjs`) — and does not
+  require a branch to be up to date (the user's decision of 2026-10-18). There is
+  no verdict job ruling on others: a check that must block a merge is a step of
+  one of the four, which is why `test-linux` builds the release's x86_64 wheel
+  (v0.16.0's wheels failed with every required check green). The trade is that
+  nothing re-runs the tests on a push to `main`, so two merges that pass apart
+  can break together; `ci-cache.yml`'s warm jobs, which fail when `main` does not
+  build, are what catch a merge that breaks the build. Nothing follows a release
+  on `workflow_run`: what a published artifact does when installed is proven
+  inside the release job that published it (below), whose failure demotes the
+  Release rather than going unread.
 - **Releases are fully automated; the only human action is merging a PR.**
   release-plz is the single version driver — it computes the version, writes
   `CHANGELOG.md` and the manifests, tags `vX.Y.Z`, and cuts the Release, which
@@ -202,15 +221,31 @@ fans one uniformly-named target across all of them.
   release.
 - **Releases batch, so the full sweep runs on the release pull request.**
   release-plz keeps one release PR open and every merge to `main` adds to it, so
-  the commit that ships is that PR's head, which no merge job swept. A push to
-  `main` therefore runs the affected tier, against the commit before the push
-  (`github.event.before` as `ONEPIPELINE_UI_NX_BASE_SHA`), and `ci.yml`'s `sweep`
-  job runs `just check` over every project on the release PR alone —
-  `scripts/ci-tier.sh` tells the two apart. `sweep` stays out of `gate`, which
-  rules on what every PR owes. It is the last whole-gate run a release gets:
-  `release.yml` re-runs no tests. A Release made by hand naming a commit no sweep
-  covered therefore gets only the artifact proofs below — every file installed
-  and run before it publishes, and read back from its registry after.
+  the commit that ships is that PR's head. On that pull request alone
+  `test-linux` runs the broader tier — `just check`'s tiers over every project,
+  with the host-labelled budgets — and on every other the affected one;
+  `scripts/ci-tier.sh` tells the two apart. It is the last whole-gate run a
+  release gets: `release.yml` re-runs no tests. A Release made by hand naming a
+  commit no sweep covered therefore gets only the artifact proofs below — every
+  file installed and run before it publishes, and read back from its registry
+  after.
+- **Eight budgets hold CI, CD and the local gate to their lines** (root
+  `budgets.yaml`, read from telemetry, never measured fresh). Seven are labelled
+  `release-tail` and are reported by `publish`'s last step, after the Release is
+  settled: each CI job's and each of the six CD jobs' longest time (1800 s), a
+  change's checks plus merge to release (5400 s), the jobs a pull request's last
+  commit runs (4) and a release's CD runs (6), and the GitHub reads the tail
+  makes for the release (6) and per pull request (2). An over figure turns that
+  step red with its breakdown and nothing reads its result — it never blocks,
+  demotes or reverts a release. They read GitHub only through `onevcs host` at
+  the release `publish` installs, via `scripts/actions-budget-figures.sh`, a copy
+  of dero-skills' create-repo source edited only there; the CD figures leave out
+  `CI cache`, which delivers nothing. `onepipeline-ui-gate-time` (1800 s,
+  `host-variable`) is `just gate`'s wall clock: the recipe runs its whole body
+  inside `scripts/gate-time.sh`, which records the run and checks that label —
+  over is a warning, an unmeasurable budget fails the gate. At pull-request time
+  `timeout-minutes` is what fails a job that runs over. Any other check of the
+  root file excludes both labels.
 - **Each release job's work is one recipe, and two rules hold the release
   together** (`scripts/release.mjs` says what each phase does): every target is
   compiled **once**, and the archive, wheel and npm package are packed from that
