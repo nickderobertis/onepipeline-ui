@@ -679,8 +679,18 @@ test("the detail enumerates every blocked step the engine derived, and an open h
   await host
     .getByRole("button", { name: "Details: Restore the build service" })
     .click();
+  // The detail says it twice by design: once in the item's meta line, and once
+  // as the heading over the steps that hold enumerates.
   await expect(
-    detailPane(page).getByText("blocks all work on this host", { exact: true }),
+    detailPane(page)
+      .getByRole("paragraph")
+      .filter({ hasText: /^blocks all work on this host$/ }),
+  ).toBeVisible();
+  await expect(
+    steps.getByRole("heading", {
+      name: "blocks all work on this host",
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(
     detailPane(page).getByText("Critical", { exact: true }),
