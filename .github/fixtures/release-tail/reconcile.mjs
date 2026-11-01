@@ -45,15 +45,29 @@ const strip = (value) => {
     );
   return value;
 };
-const bodyOf = (text) =>
-  JSON.parse(text.slice(text.search(/\r?\n\r?\n/)).trim());
-// The list a listing page carries, under whichever key GitHub names it.
-const listOf = (body) =>
-  Array.isArray(body)
+// gh's output: a status line and headers, a blank line, then a JSON body.
+function bodyOf(text, what) {
+  const framing = text.match(/\r?\n\r?\n/);
+  if (!framing) throw new Error(`${what} has no header/body separator`);
+  return JSON.parse(text.slice(framing.index + framing[0].length));
+}
+// The list a listing page carries, under whichever key GitHub names it, or
+// null for a response that is not a listing. A list that holds anything but
+// objects is not one GitHub serves.
+function listOf(body, what) {
+  const list = Array.isArray(body)
     ? body
-    : (body.workflow_runs ??
-      body.jobs ??
-      (Array.isArray(body.commits) ? body.commits : null));
+    : (body?.workflow_runs ??
+      body?.jobs ??
+      (Array.isArray(body?.commits) ? body.commits : null));
+  if (list === null || list === undefined) return null;
+  if (
+    !Array.isArray(list) ||
+    !list.every((item) => item && typeof item === "object")
+  )
+    throw new Error(`${what} carries a listing that is not a list of objects`);
+  return list;
+}
 const key = (item) => item.id ?? item.sha ?? JSON.stringify(item);
 
 const dirs = process.argv[2]
@@ -67,63 +81,82 @@ for (const dir of dirs)
     name.endsWith(".json"),
   )) {
     const sidecar = JSON.parse(readFileSync(join(dir, file), "utf8"));
-    const recorded = bodyOf(
-      readFileSync(join(dir, file.replace(/\.json$/, ".http")), "utf8"),
-    );
-    for (const [id, fields] of Object.entries(sidecar.served_with?.jobs ?? {}))
-      for (const name of Object.keys(fields))
-        delete recorded.jobs.find((job) => String(job.id) === id)?.[name];
-    const fetched = spawnSync(
-      "gh",
-      ["api", "--include", "--method", "GET", sidecar.path],
-      {
-        encoding: "utf8",
-        maxBuffer: 256 * 1024 * 1024,
-      },
-    );
-    if (fetched.status !== 0) {
-      differs += 1;
-      console.error(
-        `reconcile: ${sidecar.path}: gh failed: ${fetched.stderr.trim()}`,
+    // A recording or an answer that is not what gh prints is a difference,
+    // named, rather than a crash that leaves the others unchecked.
+    try {
+      const recorded = bodyOf(
+        readFileSync(join(dir, file.replace(/\.json$/, ".http")), "utf8"),
+        `the recording of ${sidecar.path}`,
       );
-      continue;
-    }
-    const fresh = bodyOf(fetched.stdout);
-    for (const [id, fields] of Object.entries(sidecar.served_with?.jobs ?? {}))
-      for (const name of Object.keys(fields))
-        delete fresh.jobs?.find((job) => String(job.id) === id)?.[name];
-    const [was, now] = [listOf(recorded), listOf(fresh)];
-    if (was && now) {
-      const current = new Map(now.map((item) => [key(item), item]));
-      const changed = was.filter(
-        (item) =>
-          current.has(key(item)) &&
-          JSON.stringify(strip(item)) !==
-            JSON.stringify(strip(current.get(key(item)))),
+      for (const [id, fields] of Object.entries(
+        sidecar.served_with?.jobs ?? {},
+      ))
+        for (const name of Object.keys(fields))
+          delete recorded.jobs?.find((job) => String(job.id) === id)?.[name];
+      const fetched = spawnSync(
+        "gh",
+        ["api", "--include", "--method", "GET", sidecar.path],
+        {
+          encoding: "utf8",
+          maxBuffer: 256 * 1024 * 1024,
+        },
       );
-      const gone = was.filter((item) => !current.has(key(item))).length;
-      const added = now.filter(
-        (item) => !was.some((old) => key(old) === key(item)),
-      ).length;
-      if (gone || added)
-        console.log(
-          `reconcile: ${sidecar.path}: ${added} item(s) entered and ${gone} left the page since it was recorded`,
-        );
-      for (const item of changed) {
+      if (fetched.status !== 0) {
         differs += 1;
         console.error(
-          `reconcile: ${sidecar.path}: item ${key(item)} differs from its recording`,
+          `reconcile: ${sidecar.path}: gh failed: ${fetched.stderr.trim()}`,
+        );
+        continue;
+      }
+      const fresh = bodyOf(
+        fetched.stdout,
+        `GitHub's answer to ${sidecar.path}`,
+      );
+      for (const [id, fields] of Object.entries(
+        sidecar.served_with?.jobs ?? {},
+      ))
+        for (const name of Object.keys(fields))
+          delete fresh.jobs?.find((job) => String(job.id) === id)?.[name];
+      const [was, now] = [
+        listOf(recorded, `the recording of ${sidecar.path}`),
+        listOf(fresh, `GitHub's answer to ${sidecar.path}`),
+      ];
+      if (was && now) {
+        const current = new Map(now.map((item) => [key(item), item]));
+        const changed = was.filter(
+          (item) =>
+            current.has(key(item)) &&
+            JSON.stringify(strip(item)) !==
+              JSON.stringify(strip(current.get(key(item)))),
+        );
+        const gone = was.filter((item) => !current.has(key(item))).length;
+        const added = now.filter(
+          (item) => !was.some((old) => key(old) === key(item)),
+        ).length;
+        if (gone || added)
+          console.log(
+            `reconcile: ${sidecar.path}: ${added} item(s) entered and ${gone} left the page since it was recorded`,
+          );
+        for (const item of changed) {
+          differs += 1;
+          console.error(
+            `reconcile: ${sidecar.path}: item ${key(item)} differs from its recording`,
+          );
+        }
+      } else if (
+        JSON.stringify(strip(recorded)) !== JSON.stringify(strip(fresh))
+      ) {
+        differs += 1;
+        console.error(
+          `reconcile: ${sidecar.path}: the response differs from its recording`,
         );
       }
-    } else if (
-      JSON.stringify(strip(recorded)) !== JSON.stringify(strip(fresh))
-    ) {
+    } catch (error) {
       differs += 1;
-      console.error(
-        `reconcile: ${sidecar.path}: the response differs from its recording`,
-      );
+      console.error(`reconcile: ${sidecar.path}: ${error.message}`);
     }
   }
+
 if (differs) {
   console.error(`reconcile: ${differs} difference(s)`);
   console.error(

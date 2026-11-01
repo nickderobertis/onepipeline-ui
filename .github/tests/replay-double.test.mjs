@@ -182,3 +182,55 @@ test("reconcile reports items that entered or left a page without failing", () =
     /1 item\(s\) entered and 0 left the page since it was recorded/,
   );
 });
+
+test("a response that is not what gh prints is refused by name, by reconcile and by replay", () => {
+  const served = join(scratch, "unframed");
+  mkdirSync(served);
+  cpSync(RECORDINGS, served, { recursive: true });
+  const file = join(served, plain.replace(/\.json$/, ".http"));
+  const text = readFileSync(file, "utf8");
+  // The body alone, as if the headers and the blank line after them were lost.
+  writeFileSync(file, text.slice(text.search(/\r?\n\r?\n/)).trim());
+  const run = reconcile(served);
+  assert.equal(run.status, 1, run.stdout);
+  assert.match(
+    run.stderr,
+    /GitHub's answer to .*41269793170\/jobs.* has no header\/body separator/,
+  );
+  // Every other recording was still checked.
+  assert.match(run.stderr, /reconcile: 1 difference\(s\)/);
+
+  const changed = join(served, listing.replace(/\.json$/, ".http"));
+  const recordedChanged = readFileSync(changed, "utf8");
+  writeFileSync(
+    changed,
+    recordedChanged.slice(recordedChanged.search(/\r?\n\r?\n/)).trim(),
+  );
+  const replayed = spawnSync(
+    "node",
+    [
+      DOUBLE,
+      "api",
+      "--include",
+      "--method",
+      "GET",
+      JSON.parse(readFileSync(join(served, listing), "utf8")).path,
+    ],
+    {
+      encoding: "utf8",
+      env: { ...process.env, GH_REPLAY_FIXTURES: served },
+    },
+  );
+  assert.notEqual(replayed.status, 0);
+  assert.match(replayed.stderr, /has no header\/body separator/);
+  const status = spawnSync(
+    "node",
+    [DOUBLE, "api", "--include", "--method", "GET", "repos/x"],
+    {
+      encoding: "utf8",
+      env: { ...process.env, GH_REPLAY_STATUS: "oops" },
+    },
+  );
+  assert.equal(status.status, 2);
+  assert.match(status.stderr, /must be an HTTP error status/);
+});

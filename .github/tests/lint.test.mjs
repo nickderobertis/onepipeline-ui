@@ -33,7 +33,11 @@ test("the production lint gate includes newly added tooling and test files", () 
       });
     const accepted = run();
     assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr);
-    for (const directory of [".github", ".github/tests"]) {
+    for (const directory of [
+      ".github",
+      ".github/tests",
+      ".github/tests/installs",
+    ]) {
       const file = join(scratch, directory, "new-invalid.mjs");
       writeFileSync(file, "const = ;\n");
       const refused = run();

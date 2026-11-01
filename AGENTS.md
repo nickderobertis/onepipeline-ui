@@ -228,6 +228,7 @@ fans one uniformly-named target across all of them.
   commit no sweep covered therefore gets only the artifact proofs below — every
   file installed and run before it publishes, and read back from its registry
   after.
+<!-- llmlint: ignore-block[agents_md_durable_and_terse] the budgets' ids and labels are named here on purpose: this is where a maintainer learns which label decides where each budget is checked (publish's last step or the gate) and that the release-tail ones block nothing, which budgets.yaml's entries cannot say about each other. -->
 - **Eight budgets hold CI, CD and the local gate to their lines** (root
   `budgets.yaml`, read from telemetry). The seven `release-tail` ones —
   `onepipeline-ui-ci-check-time`, `-cd-job-time`, `-release-cycle-time`,
@@ -241,6 +242,7 @@ fans one uniformly-named target across all of them.
   labels. The figures reach GitHub only through `onevcs host`, via
   `scripts/actions-budget-figures.sh`, a copy of dero-skills' create-repo source
   that is edited only there.
+<!-- llmlint: ignore-end[agents_md_durable_and_terse] -->
 - **Each release job's work is one recipe, and two rules hold the release
   together** (`scripts/release.mjs` says what each phase does): every target is
   compiled **once**, and the archive, wheel and npm package are packed from that

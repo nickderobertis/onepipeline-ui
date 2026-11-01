@@ -37,7 +37,11 @@ check_budget() {
   local budget_status=0 output over
   output="$(cd "$(dirname "$budgets")" && ONEPIPELINE_UI_GATE_TIME_RECORD="$record" \
     "$ROOT/node_modules/.bin/onebudgetspec" check "$(basename "$budgets")" --label host-variable)" || budget_status=$?
-  printf '%s\n' "$output"
+  # A report is the gate's output; a check that could not measure is its error.
+  case "$budget_status" in
+    0 | 1) printf '%s\n' "$output" ;;
+    *) printf '%s\n' "$output" >&2 ;;
+  esac
   case "$budget_status" in
     0) ;;
     1)

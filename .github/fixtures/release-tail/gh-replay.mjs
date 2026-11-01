@@ -146,18 +146,36 @@ const recorded = readFileSync(
   join(fixtures, sidecar.file.replace(/\.json$/, ".http")),
   "utf8",
 );
-out(servedWith(recorded, sidecar.served_with));
+try {
+  out(servedWith(recorded, sidecar.served_with));
+} catch (error) {
+  err(`${error.message}\n`);
+  process.exit(1);
+}
 
 // A recording is served as it was recorded, but for the one change its sidecar
 // names: `served_with.jobs` rewrites the named jobs' fields in a jobs listing.
 export function servedWith(response, change) {
   if (!change) return response;
-  const split = response.search(/\r?\n\r?\n/);
-  const head = response.slice(0, split);
-  const separator = response.slice(split).match(/^\r?\n\r?\n/)[0];
-  const body = JSON.parse(response.slice(split + separator.length));
+  // A recording is gh's output: a status line and headers, a blank line, then
+  // a JSON body. One that is not cannot be served changed.
+  const framing = response.match(/\r?\n\r?\n/);
+  if (!framing)
+    throw new Error(
+      `gh-replay: the recording of ${request} has no header/body separator`,
+    );
+  const head = response.slice(0, framing.index);
+  const separator = framing[0];
+  const body = JSON.parse(response.slice(framing.index + separator.length));
+  if (
+    !Array.isArray(body?.jobs) ||
+    !body.jobs.every((job) => job && typeof job === "object")
+  )
+    throw new Error(
+      `gh-replay: the recording of ${request} is not a jobs listing, so it has no job to change`,
+    );
   for (const [id, fields] of Object.entries(change.jobs ?? {})) {
-    const job = body.jobs?.find((candidate) => String(candidate.id) === id);
+    const job = body.jobs.find((candidate) => String(candidate.id) === id);
     if (!job)
       throw new Error(`gh-replay: no job ${id} in ${request} to change`);
     Object.assign(job, fields);

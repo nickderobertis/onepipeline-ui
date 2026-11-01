@@ -50,6 +50,33 @@
       "inputs": ["workflowPolicy"],
       "cache": false
     },
+    "test-installs": {
+      "//": "The journeys that install from a registry — the judged-lint toolchain from PyPI through scripts/setup-llmlint.sh, and publish's onevcs from npm — behind an edge of their own, so a change elsewhere in the workflow policy does not pay for the installs. `check` reaches them.",
+      "command": "node --test .github/tests/installs/*.test.mjs",
+      "dependsOn": ["bootstrap"],
+      "inputs": [
+        "{projectRoot}/tests/installs/**/*",
+        "{projectRoot}/fixtures/release-tail/**/*",
+        "{projectRoot}/fixtures/judge/**/*",
+        "{projectRoot}/workflows/release.yml",
+        "{projectRoot}/package.json",
+        "{workspaceRoot}/budgets.yaml",
+        "{workspaceRoot}/scripts/actions-budget-figures.sh",
+        "{workspaceRoot}/scripts/workspace-install.sh",
+        "{workspaceRoot}/scripts/setup-llmlint.sh",
+        "{workspaceRoot}/scripts/nx.sh",
+        "{workspaceRoot}/oneharness.toml",
+        "{workspaceRoot}/llmlint.yml",
+        "{workspaceRoot}/justfile",
+        "{workspaceRoot}/nx.json",
+        "{workspaceRoot}/project.json",
+        "{workspaceRoot}/judged-diff/project.json",
+        "{workspaceRoot}/package.json",
+        "{workspaceRoot}/bun.lock",
+        "{workspaceRoot}/.gitignore"
+      ],
+      "cache": false
+    },
     "test-ci-jobs": {
       "command": "node --test .github/tests/ci-jobs.test.mjs",
       "dependsOn": ["bootstrap"],
@@ -67,7 +94,7 @@
     },
     "check": {
       "executor": "nx:noop",
-      "dependsOn": ["lint", "budgets", "test-ci-jobs"]
+      "dependsOn": ["lint", "budgets", "test-ci-jobs", "test-installs"]
     }
   }
 }

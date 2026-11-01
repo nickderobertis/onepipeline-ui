@@ -126,7 +126,8 @@ test("a missing or failed record, or an invalid budgets file, fails the gate", (
     ONEPIPELINE_UI_GATE_TIME_RECORD: join(dir, "absent.json"),
   });
   assert.equal(missing.status, 3);
-  assert.match(missing.stdout, /no readable gate record/);
+  assert.match(missing.stderr, /no readable gate record/);
+  assert.equal(missing.stdout, "");
   assert.match(
     missing.stderr,
     /could not be held to its budget: onebudgetspec exited 3/,
@@ -138,7 +139,7 @@ test("a missing or failed record, or an invalid budgets file, fails the gate", (
     ONEPIPELINE_UI_GATE_TIME_RECORD: failed,
   });
   assert.equal(refused.status, 3);
-  assert.match(refused.stdout, /records a gate that failed/);
+  assert.match(refused.stderr, /records a gate that failed/);
 
   // A copy of budgets.yaml whose gate-time budget lost its threshold, beside
   // the real scripts it runs, as a budgets file is checked from its directory.
@@ -160,6 +161,36 @@ test("a missing or failed record, or an invalid budgets file, fails the gate", (
   });
   assert.equal(rejected.status, 2);
   assert.match(rejected.stderr, /onebudgetspec exited 2/);
+});
+
+test("a record gate-time.sh did not write is refused, never read as a time", () => {
+  const dir = fresh();
+  const cases = [
+    ["not JSON", "{ half a record"],
+    ["a wrong schema", JSON.stringify(record(10, { schema_version: 2 }))],
+    ["no invocation", JSON.stringify(record(10, { invocation: 7 }))],
+    ["a fractional start", JSON.stringify(record(10, { started_at_ms: 1.5 }))],
+    ["an end before its start", JSON.stringify(record(10, { ended_at_ms: 0 }))],
+    [
+      "dates no clock can show",
+      JSON.stringify(
+        record(10, { started_at_ms: 9e15, ended_at_ms: 9e15 + 1000 }),
+      ),
+    ],
+  ];
+  for (const [what, text] of cases) {
+    const path = join(dir, `${what.replaceAll(" ", "-")}.json`);
+    writeFileSync(path, `${text}\n`);
+    const run = gate(["--check"], { ONEPIPELINE_UI_GATE_TIME_RECORD: path });
+    assert.equal(run.status, 3, `${what}: ${run.stdout}${run.stderr}`);
+    assert.match(
+      run.stderr,
+      what === "not JSON"
+        ? /no readable gate record/
+        : /is not a gate record scripts\/gate-time\.sh wrote/,
+      what,
+    );
+  }
 });
 
 test("the wrapper refuses a call that names no body", () => {
