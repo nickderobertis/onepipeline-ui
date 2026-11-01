@@ -1,5 +1,3 @@
-# llmlint: ignore-file[budgets_track_product_owner_outcomes] The brief requires a 30-minute line per CI check and per CD job beside the 90-minute release cycle that contains them, job counts per PR push and per release, and GitHub reads per release and per pull request; each is the unit the user acts on and is enforced or reported at a different moment.
-#
 # The repository's CI, CD and local-gate budgets. Every figure is read from
 # telemetry rather than measured fresh, so none carries a `host` label; each
 # carries the label of the one place it is checked:
