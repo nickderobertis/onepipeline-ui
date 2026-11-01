@@ -91,13 +91,14 @@ now_ms() {
   node -e 'process.stdout.write(String(Date.now()))'
 }
 
+# The cause the failing command printed is kept: it is the actual reason.
 record_unwritable() {
-  echo "gate-time: cannot $1 the gate record at $record" >&2
+  echo "gate-time: cannot $1 the gate record at $record: ${2:-see above}" >&2
   echo "ACTION: make $(dirname "$record") a writable directory (or point ONEPIPELINE_UI_GATE_TIME_RECORD elsewhere), then re-run 'just gate'" >&2
   exit 1
 }
-mkdir -p "$(dirname "$record")" 2>/dev/null || record_unwritable "create the directory of"
-rm -f "$record" 2>/dev/null || record_unwritable "replace"
+why="$(mkdir -p "$(dirname "$record")" 2>&1)" || record_unwritable "create the directory of" "$why"
+why="$(rm -f "$record" 2>&1)" || record_unwritable "replace" "$why"
 started="$(now_ms)"
 invocation="$$-$started"
 
@@ -106,6 +107,7 @@ status=0
 ended="$(now_ms)"
 
 # Written whole, then moved into place, so a reader never sees half a record.
+why_file="$(mktemp)"
 node -e '
   const [path, invocation, started, ended, status, ...command] = process.argv.slice(1);
   const record = {
@@ -116,9 +118,16 @@ node -e '
     ended_at_ms: Number(ended),
     exit_code: Number(status),
   };
-  require("node:fs").writeFileSync(`${path}.tmp`, `${JSON.stringify(record)}\n`);
-  require("node:fs").renameSync(`${path}.tmp`, path);
-' "$record" "$invocation" "$started" "$ended" "$status" "$@" 2>/dev/null || record_unwritable "write"
+  try {
+    require("node:fs").writeFileSync(`${path}.tmp`, `${JSON.stringify(record)}\n`);
+    require("node:fs").renameSync(`${path}.tmp`, path);
+  } catch (error) {
+    process.stderr.write(error.message);
+    process.exit(1);
+  }
+' "$record" "$invocation" "$started" "$ended" "$status" "$@" 2>"$why_file" \
+  || { why="$(cat "$why_file")"; rm -f "$why_file"; record_unwritable "write" "$why"; }
+rm -f "$why_file"
 
 if [ "$status" -ne 0 ]; then
   exit "$status"

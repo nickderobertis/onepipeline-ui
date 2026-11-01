@@ -29,6 +29,7 @@ import {
   writeSync,
 } from "node:fs";
 import { join } from "node:path";
+import { fetchedFrom, servedWithChange } from "./sidecar.mjs";
 
 // Written synchronously: `process.exit` drops whatever an asynchronous write to
 // a pipe has not flushed yet, which cut a 1.8 MB listing at 64 KiB.
@@ -97,6 +98,13 @@ const name = (path) =>
 
 const record = process.env.GH_REPLAY_RECORD;
 if (record) {
+  let source;
+  try {
+    source = fetchedFrom(process.env.GH_REPLAY_SOURCE);
+  } catch (error) {
+    err(`gh-replay: ${error.message}\n`);
+    process.exit(2);
+  }
   mkdirSync(record, { recursive: true });
   // The real `gh` reads with its own login: the token onevcs hands it is the
   // recording session's placeholder, never a credential this script holds.
@@ -114,7 +122,7 @@ if (record) {
       `${JSON.stringify(
         {
           path: request,
-          fetched_from: JSON.parse(process.env.GH_REPLAY_SOURCE ?? "{}"),
+          fetched_from: source,
           fetched_at: new Date().toISOString(),
           served_with: null,
         },
@@ -169,7 +177,7 @@ try {
       `gh-replay: the recording of ${request} has no header/body separator`,
     );
   JSON.parse(recorded.slice(framing.index + framing[0].length));
-  out(servedWith(recorded, sidecar.served_with));
+  out(servedWith(recorded, servedWithChange(sidecar, sidecar.file)));
   if (status >= 400) {
     err(`gh: HTTP ${status} (recorded for ${request})\n`);
     process.exit(1);
@@ -200,7 +208,7 @@ export function servedWith(response, change) {
     throw new Error(
       `gh-replay: the recording of ${request} is not a jobs listing, so it has no job to change`,
     );
-  for (const [id, fields] of Object.entries(change.jobs ?? {})) {
+  for (const [id, fields] of Object.entries(change.jobs)) {
     const job = body.jobs.find((candidate) => String(candidate.id) === id);
     if (!job)
       throw new Error(`gh-replay: no job ${id} in ${request} to change`);

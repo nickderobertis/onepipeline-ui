@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -304,4 +305,38 @@ test("a budgets file or a record the wrapper cannot reach fails the gate, saying
     unwritable.stderr,
     /ACTION: make .*blocker a writable directory/,
   );
+});
+
+test("a stale record the wrapper cannot replace, or a record it cannot write, fails the gate with the cause", () => {
+  const dir = fresh();
+  // A directory where the record goes: rm -f cannot replace it.
+  const occupied = join(dir, "occupied.json");
+  mkdirSync(join(occupied, "inside"), { recursive: true });
+  const replace = gate(["--", "bash", "-c", "true"], {
+    ONEPIPELINE_UI_GATE_TIME_RECORD: occupied,
+  });
+  assert.equal(replace.status, 1);
+  assert.match(
+    replace.stderr,
+    /cannot replace the gate record at .*occupied\.json: .*[Ii]s a directory/,
+  );
+
+  // A directory the body can run beside but nothing can be written in.
+  const locked = join(dir, "locked");
+  mkdirSync(locked);
+  chmodSync(locked, 0o555);
+  try {
+    const write = gate(["--", "bash", "-c", "echo body ran"], {
+      ONEPIPELINE_UI_GATE_TIME_RECORD: join(locked, "record.json"),
+    });
+    assert.equal(write.status, 1);
+    assert.match(write.stdout, /body ran/);
+    assert.match(
+      write.stderr,
+      /cannot write the gate record at .*locked\/record\.json: .*EACCES/,
+    );
+    assert.match(write.stderr, /ACTION: make .*locked a writable directory/);
+  } finally {
+    chmodSync(locked, 0o755);
+  }
 });

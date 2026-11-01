@@ -22,6 +22,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { servedWithChange } from "./sidecar.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const VOLATILE = new Set([
@@ -97,13 +98,12 @@ for (const dir of dirs)
     // A recording or an answer that is not what gh prints is a difference,
     // named, rather than a crash that leaves the others unchecked.
     try {
+      const change = servedWithChange(sidecar, file);
       const recorded = bodyOf(
         readFileSync(join(dir, file.replace(/\.json$/, ".http")), "utf8"),
         `the recording of ${sidecar.path}`,
       );
-      for (const [id, fields] of Object.entries(
-        sidecar.served_with?.jobs ?? {},
-      ))
+      for (const [id, fields] of Object.entries(change?.jobs ?? {}))
         for (const name of Object.keys(fields))
           delete recorded.jobs?.find((job) => String(job.id) === id)?.[name];
       const fetched = spawnSync(
@@ -125,9 +125,7 @@ for (const dir of dirs)
         fetched.stdout,
         `GitHub's answer to ${sidecar.path}`,
       );
-      for (const [id, fields] of Object.entries(
-        sidecar.served_with?.jobs ?? {},
-      ))
+      for (const [id, fields] of Object.entries(change?.jobs ?? {}))
         for (const name of Object.keys(fields))
           delete fresh.jobs?.find((job) => String(job.id) === id)?.[name];
       const [was, now] = [

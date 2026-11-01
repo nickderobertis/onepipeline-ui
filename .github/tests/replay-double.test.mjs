@@ -129,6 +129,10 @@ test("record mode saves nothing when gh's read fails, and fails with it", () => 
         ...process.env,
         ...ghServing(RECORDINGS, "502").env,
         GH_REPLAY_RECORD: into,
+        GH_REPLAY_SOURCE: JSON.stringify({
+          repository: "nickderobertis/onepipeline-ui",
+          release: "v0.64.0",
+        }),
       },
     },
   );
@@ -397,4 +401,124 @@ test("the double serves only an API path, never an option gh would read", () => 
       /only 'api --include --method GET <API path>' is served/,
     );
   }
+});
+
+// A copy of the recordings whose one changed sidecar is `served_with`.
+function withChange(name, servedWith) {
+  const dir = mkdtempSync(join(scratch, `${name}-`));
+  cpSync(RECORDINGS, dir, { recursive: true });
+  const changed = JSON.parse(readFileSync(join(dir, listing), "utf8"));
+  writeFileSync(
+    join(dir, listing),
+    JSON.stringify({ ...changed, served_with: servedWith }),
+  );
+  return { dir, path: changed.path };
+}
+const serve = (dir, path, env = {}) =>
+  spawnSync("node", [DOUBLE, "api", "--include", "--method", "GET", path], {
+    encoding: "utf8",
+    env: { ...process.env, GH_REPLAY_FIXTURES: dir, ...env },
+  });
+
+test("a path with no recording is answered 404, as GitHub answers one", () => {
+  const run = serve(
+    RECORDINGS,
+    "repos/nickderobertis/onepipeline-ui/actions/runs/1/jobs",
+  );
+  assert.equal(run.status, 1);
+  assert.match(run.stdout, /^HTTP\/2\.0 404 Not Found/);
+  assert.match(
+    run.stderr,
+    /no recording of repos\/nickderobertis\/onepipeline-ui\/actions\/runs\/1\/jobs/,
+  );
+});
+
+test("a served_with change the recording cannot take, or that is malformed, is refused by both tools", () => {
+  const absent = withChange("absent-job", {
+    reason: "test",
+    jobs: { 1: { status: "in_progress" } },
+  });
+  const missing = serve(absent.dir, absent.path);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /no job 1 in .* to change/);
+
+  const malformed = withChange("malformed", {
+    reason: "test",
+    jobs: ["publish"],
+  });
+  const refused = serve(malformed.dir, malformed.path);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /has a served_with that is not \{reason, jobs/);
+  const reconciled = spawnSync("node", [RECONCILE, malformed.dir], {
+    encoding: "utf8",
+    env: { ...process.env, ...ghServing(RECORDINGS).env },
+  });
+  assert.equal(reconciled.status, 1);
+  assert.match(
+    reconciled.stderr,
+    /has a served_with that is not \{reason, jobs/,
+  );
+  assert.match(reconciled.stderr, /reconcile: 1 difference\(s\)/);
+
+  // A change on a recording that is no jobs listing: the comparison.
+  const compare = readdirSync(RECORDINGS).find((n) =>
+    /-compare-.*\.json$/.test(n),
+  );
+  const dir = mkdtempSync(join(scratch, "not-jobs-"));
+  cpSync(RECORDINGS, dir, { recursive: true });
+  const sidecarOf = JSON.parse(readFileSync(join(dir, compare), "utf8"));
+  writeFileSync(
+    join(dir, compare),
+    JSON.stringify({
+      ...sidecarOf,
+      served_with: { reason: "test", jobs: { 1: { status: "x" } } },
+    }),
+  );
+  const notJobs = serve(dir, sidecarOf.path);
+  assert.equal(notJobs.status, 1);
+  assert.match(
+    notJobs.stderr,
+    /is not a jobs listing, so it has no job to change/,
+  );
+});
+
+test("record mode refuses a source that does not name what it records", () => {
+  for (const source of [undefined, "null", '"v0.64.0"', '{"repository":"x"}']) {
+    const into = mkdtempSync(join(scratch, "unsourced-"));
+    const run = spawnSync(
+      "node",
+      [DOUBLE, "api", "--include", "--method", "GET", sidecar.path],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ...ghServing(RECORDINGS).env,
+          GH_REPLAY_RECORD: into,
+          ...(source === undefined ? {} : { GH_REPLAY_SOURCE: source }),
+        },
+      },
+    );
+    assert.equal(run.status, 2, String(source));
+    assert.match(run.stderr, /GH_REPLAY_SOURCE must name what is recorded/);
+    assert.deepEqual(readdirSync(into), []);
+  }
+});
+
+test("reconcile names a listing that is not a list of objects and still checks the rest", () => {
+  const served = mkdtempSync(join(scratch, "bad-listing-"));
+  cpSync(RECORDINGS, served, { recursive: true });
+  const file = join(served, plain.replace(/\.json$/, ".http"));
+  const text = readFileSync(file, "utf8");
+  const at = text.search(/\r?\n\r?\n/);
+  writeFileSync(
+    file,
+    `${text.slice(0, at)}\r\n\r\n${JSON.stringify({ total_count: 1, jobs: [1, 2] })}`,
+  );
+  const run = reconcile(served);
+  assert.equal(run.status, 1);
+  assert.match(
+    run.stderr,
+    /GitHub's answer to .*41269793170\/jobs.* carries a listing that is not a list of objects/,
+  );
+  assert.match(run.stderr, /reconcile: 1 difference\(s\)/);
 });
