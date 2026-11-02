@@ -78,7 +78,8 @@ esac
 # pointed. A path is read as written up to its deepest component that exists, that
 # component is resolved physically — which is what catches a symlink out of the tree,
 # or onto the other destination — and the components still to be made are appended.
-# A `..` is refused outright rather than resolved, because after a symlink it climbs
+# A `.` or an empty component is dropped first, so `a/./b` and `a//b` are `a/b`; a
+# `..` is refused outright rather than resolved, because after a symlink it climbs
 # out of wherever the link went, not out of the path as it reads.
 
 # refuse NAME NAMED WHY: exit 2 naming the destination and why it is not one.
@@ -96,9 +97,18 @@ resolve() {
     /*) named="$2" ;;
     *) named="$repo_root/$2" ;;
   esac
-  case "/$named/" in
-    */../*) refuse "$name" "$2" "it climbs with '..'" ;;
-  esac
+  # Written out component by component, without the `.` and empty ones, so two
+  # spellings of one directory compare equal even where none of it exists yet.
+  local part normal="" parts
+  IFS=/ read -r -a parts <<<"$named"
+  for part in "${parts[@]}"; do
+    case "$part" in
+      "" | .) ;;
+      ..) refuse "$name" "$2" "it climbs with '..'" ;;
+      *) normal="$normal/$part" ;;
+    esac
+  done
+  named="${normal:-/}"
   local existing="$named" rest=""
   while [ ! -e "$existing" ] && [ ! -L "$existing" ]; do
     rest="/$(basename -- "$existing")$rest"
@@ -214,6 +224,9 @@ cleanup() {
     # this host, and a container matched by name or image could be somebody's.
     docker rm --force "$(cat "$cid_file")" >/dev/null 2>&1 || true
   done
+  # And then the renders themselves, each of which returns once its container is
+  # gone: a run that reported itself stopped leaves nothing of it running.
+  wait 2>/dev/null || true
   rm -rf "$scratch"
 }
 # Asked to stop, the run takes its containers down and then stops with the status a

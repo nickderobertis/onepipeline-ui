@@ -42,10 +42,18 @@ function scratch(under: string, prefix: string): string {
   return dir;
 }
 
+/**
+ * The script in place, where every refusal under test happens before it asks for
+ * Docker. Docker is answered as unavailable, so a destination the script wrongly
+ * accepts fails here at once, with exit 1, rather than going on to build.
+ */
 function captureInPlace(env: Record<string, string>) {
+  const bin = scratch(tmpdir(), "visual-capture-bin-");
+  writeFileSync(join(bin, "docker"), "#!/usr/bin/env bash\nexit 1\n");
+  chmodSync(join(bin, "docker"), 0o755);
   return spawnSync("bash", [repoPath("scripts/visual-capture.sh")], {
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env },
   });
 }
 
@@ -103,6 +111,24 @@ describe("where a capture may write, decided before anything is made", () => {
     expect(result.stderr).toContain(
       "SHOTS_VERIFY names the same directory as SHOTS_OUT",
     );
+  });
+
+  it("refuses a second destination that differs from the first only by '.' or '/' components, making neither", () => {
+    // Literal strings, not path.join, which would normalize away the very
+    // components under test; `new` does not exist, so nothing on disk can
+    // resolve them.
+    const root = scratch(repoPath("shots/local"), "dot-");
+    const cases: [string, string, string][] = [
+      [`${root}/new/./same`, `${root}/new/same`, "names the same directory"],
+      [`${root}/new/same`, `${root}/./new//same/.`, "names the same directory"],
+      [`${root}//new/same/`, `${root}/new/same/./verify`, "nest"],
+    ];
+    for (const [out, verify, refusal] of cases) {
+      const result = captureInPlace({ SHOTS_OUT: out, SHOTS_VERIFY: verify });
+      expect(result.status, result.stderr).toBe(2);
+      expect(result.stderr).toContain(refusal);
+      expect(readdirSync(root)).toEqual([]);
+    }
   });
 
   it("refuses a second destination inside the first, making neither", () => {
@@ -192,7 +218,10 @@ case "$1" in
         # Held until removed, for a minute at most: a script that never removes
         # it leaves no process behind once the journey has failed.
         for _ in $(seq 600); do
-          [ -f "$DOCKER_DOUBLE_DIR/$id.removed" ] && exit 137
+          if [ -f "$DOCKER_DOUBLE_DIR/$id.removed" ]; then
+            echo "exited $id" >> "$log"
+            exit 137
+          fi
           sleep 0.1
         done
         exit 124 ;;
@@ -239,6 +268,14 @@ function layout() {
           .filter((line) => line.startsWith("run "))
           .map((line) => line.split(" ")[1] ?? "")
       : [];
+  const exited = () =>
+    existsSync(join(root, "docker/log"))
+      ? readFileSync(join(root, "docker/log"), "utf8")
+          .split("\n")
+          .filter((line) => line.startsWith("exited "))
+          .map((line) => line.split(" ")[1] ?? "")
+          .sort()
+      : [];
   const removed = () =>
     readdirSync(join(root, "docker"))
       .filter((name) => name.endsWith(".removed"))
@@ -248,6 +285,7 @@ function layout() {
     root,
     env,
     runs,
+    exited,
     removed,
     script: join(root, "scripts/visual-capture.sh"),
   };
@@ -328,6 +366,9 @@ describe("two renders side by side", () => {
       const child = spawn("bash", [capture.script], {
         env: capture.env("hold"),
         stdio: "ignore",
+        // Its own process group, so a script that will not stop is taken down
+        // with both renders and their doubles rather than leaving them behind.
+        detached: true,
       });
       const exited = new Promise<number | null>((resolve) =>
         child.on("exit", (code) => resolve(code)),
@@ -345,9 +386,13 @@ describe("two renders side by side", () => {
           setTimeout(() => resolve("still running"), 20_000),
         ),
       ]);
-      if (code === "still running") child.kill("SIGKILL");
+      if (code === "still running" && child.pid !== undefined)
+        process.kill(-child.pid, "SIGKILL");
       expect(code).toBe(status);
       expect(capture.removed()).toEqual(started);
+      // Every render has returned by the time the script has: nothing of a
+      // stopped run is left running.
+      expect(capture.exited()).toEqual(started);
       expect(readdirSync(join(capture.root, "tmp"))).toEqual([]);
     },
     60_000,
