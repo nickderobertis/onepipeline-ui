@@ -242,9 +242,11 @@ jobs:
       # The release journeys' release-plz and cargo-cyclonedx, at the justfile's
       # pins, from their checksummed release archives: `just release-tools`
       # copies these into `.tools` rather than compiling them on every run.
+      # cargo-deny and cargo-machete are what `tests/e2e/deps_audit.rs` audits
+      # its fixture crates with; those journeys fail rather than skip without them.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable,release-plz@0.3.158,cargo-cyclonedx@0.5.7
+          tool: just,nextest,cargo-llvm-cov,cargo-auditable,cargo-deny,cargo-machete,release-plz@0.3.158,cargo-cyclonedx@0.5.7
       # What `tests/e2e/cost.rs` counts with. Those journeys hold the bounds on
       # what a read may do to a runs root, counted from the kernel's own record
       # of the server rather than from a clock; they are Linux-only, this is the

@@ -620,18 +620,32 @@ semver-check baseline ref:
 
 # Separate from `check`: `cargo deny` needs a network-fetched advisory DB, so the
 # `onepipeline-ui:deps-check` target is one no `check` depends on.
-# Advisory + license audit and unused-dependency check.
+# Blocking supply-chain audit: bans, licenses, sources, yanked, unused deps, introduced advisories.
 deps-check:
     @bash scripts/nx.sh run onepipeline-ui:deps-check
 
-# The crate's supply-chain audit (the `onepipeline-ui:deps-check` target).
-_crate-deps-check:
+# The crate's blocking supply-chain audit (the `onepipeline-ui:deps-check`
+# target, run by the required `lint` job). An advisory against a version the
+# base already resolves does not fail it — that is `advisories-report`'s; one
+# against a version this change brings in does. `scripts/deps-audit.mjs` says why.
+_crate-deps-check: _deps-audit-tools
+    @node "{{justfile_directory()}}/scripts/deps-audit.mjs" check
+
+# Informational: never a required check, and nothing that blocks a change or a
+# release may run it or wait on it (`.github/required-contexts.mjs`).
+# Every advisory matching the resolved graph, pre-existing or not; fails while any remains.
+advisories-report: _deps-audit-tools
+    @node "{{justfile_directory()}}/scripts/deps-audit.mjs" report
+
+# The non-required check `lint` posts on a pull request's head.
+# Publish `advisories-report` as the `advisories` commit status on a commit.
+[positional-arguments]
+advisories-status sha: _deps-audit-tools
+    @node "{{justfile_directory()}}/scripts/deps-audit.mjs" status --sha "$1"
+
+_deps-audit-tools:
     @command -v cargo-deny >/dev/null || { echo "cargo-deny not installed: cargo install cargo-deny --locked" >&2; exit 1; }
     @command -v cargo-machete >/dev/null || { echo "cargo-machete not installed: cargo install cargo-machete --locked" >&2; exit 1; }
-    @cargo deny --log-level error check
-    @# machete prints the unused deps it finds on stdout, so keep it: hiding
-    @# them would leave a failing gate with no actionable detail.
-    @cargo machete
 
 # Upgrade dependencies, then re-run the full deterministic gate.
 upgrade:
