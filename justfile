@@ -637,11 +637,13 @@ _crate-deps-check: _deps-audit-tools
 advisories-report: _deps-audit-tools
     @node "{{justfile_directory()}}/scripts/deps-audit.mjs" report
 
-# The non-required check `lint` posts on a pull request's head.
+# The non-required check `lint` posts on a pull request's head. `head-repo` is
+# the repository that head lives in: a fork's pull request gets the report in the
+# step summary and log, because its token cannot post a status.
 # Publish `advisories-report` as the `advisories` commit status on a commit.
 [positional-arguments]
-advisories-status sha: _deps-audit-tools
-    @node "{{justfile_directory()}}/scripts/deps-audit.mjs" status --sha "$1"
+advisories-status sha head-repo: _deps-audit-tools
+    @node "{{justfile_directory()}}/scripts/deps-audit.mjs" status --sha "$1" --head-repo "$2"
 
 _deps-audit-tools:
     @command -v cargo-deny >/dev/null || { echo "cargo-deny not installed: cargo install cargo-deny --locked" >&2; exit 1; }

@@ -112,15 +112,17 @@ jobs:
       # it. Informational and never required (.github/required-contexts.mjs):
       # `continue-on-error` keeps its result out of this job's, `!cancelled()`
       # posts it whatever the steps before it did, and no step reads its outcome.
-      # A fork's token cannot post a status, so there the step fails and the job
-      # does not.
+      # Every run writes the report to this step's log and the job's summary. A
+      # fork's pull request gets it there and no status: its token is read-only,
+      # so the recipe, told the head's repository, skips posting.
       - name: Advisories report (informational, posts the advisories status)
         if: ${{ !cancelled() }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: just advisories-status "$HEAD_SHA"
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: just advisories-status "$HEAD_SHA" "$HEAD_REPO"
       - uses: astral-sh/setup-uv@v6
         if: github.event_name == 'pull_request' && !cancelled()
       # The judged tier, a blocking part of this check. Its harnesses are pinned

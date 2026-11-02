@@ -20,10 +20,15 @@
 //           there. Exits non-zero while any remains. Informational: no check that
 //           blocks a change or a release may run it or wait on it
 //           (.github/required-contexts.mjs).
-//   status  `report`, published as the `advisories` commit status on --sha (the
-//           pull request's head) through `gh`, so it reads as a red check of its
-//           own on the change request without being one of the four jobs. Exits
-//           non-zero when advisories remain or the status could not be posted.
+//   status  `report`, written to the job's step summary and log, and published
+//           as the `advisories` commit status on --sha (the pull request's head)
+//           through `gh`, so it reads as a red check of its own on the change
+//           request without being one of the four jobs. --head-repo is the
+//           repository the pull request's head lives in: when it is not
+//           GITHUB_REPOSITORY the change request is a fork's, whose token cannot
+//           post a status, so posting is skipped and the summary and log are where
+//           the report is read. Exits non-zero when advisories remain or a status
+//           this repository's token should have posted was refused.
 //
 // No advisory is ignored or downgraded in deny.toml to get there: the
 // configuration still treats every advisory and yanked crate as a finding, and
@@ -35,17 +40,19 @@
 // A base the script cannot resolve is a refusal, never "nothing was there".
 //
 // Usage: deps-audit.mjs check|report [--base <rev>]
-//        deps-audit.mjs status --sha <commit> [--base <rev>]
+//        deps-audit.mjs status --sha <commit> --head-repo <owner/name> [--base <rev>]
 // Exit 0: nothing to report. 1: a finding (or a tool that did not run). 2: usage.
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync } from "node:fs";
 
 const CONTEXT = "advisories";
+const FLAGS = { "--base": "base", "--sha": "sha", "--head-repo": "headRepo" };
+const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 function usage(message) {
   console.error(`deps-audit: ${message}`);
   console.error(
-    "ACTION: run 'deps-audit.mjs check|report [--base <rev>]' or 'deps-audit.mjs status --sha <commit> [--base <rev>]'",
+    "ACTION: run 'deps-audit.mjs check|report [--base <rev>]' or 'deps-audit.mjs status --sha <commit> --head-repo <owner/name> [--base <rev>]'",
   );
   process.exit(2);
 }
@@ -57,14 +64,21 @@ function parseArgs(argv) {
   const options = { mode };
   while (rest.length > 0) {
     const flag = rest.shift();
-    if (flag !== "--base" && flag !== "--sha")
-      usage(`unknown argument '${flag}'`);
+    if (!Object.hasOwn(FLAGS, flag)) usage(`unknown argument '${flag}'`);
+    const key = FLAGS[flag];
     const value = rest.shift();
     if (!value) usage(`${flag} needs a value`);
-    options[flag.slice(2)] = value;
+    options[key] = value;
   }
-  if (mode === "status" && !options.sha) usage("status needs --sha <commit>");
-  if (mode !== "status" && options.sha) usage("only status takes --sha");
+  if (mode === "status") {
+    if (!options.sha) usage("status needs --sha <commit>");
+    if (!/^[0-9a-f]{40}$/.test(options.sha))
+      usage(`'${options.sha}' is not a full commit id`);
+    if (!options.headRepo) usage("status needs --head-repo <owner/name>");
+    if (!REPOSITORY.test(options.headRepo))
+      usage(`'${options.headRepo}' is not an owner/name repository`);
+  } else if (options.sha || options.headRepo)
+    usage("only status takes --sha and --head-repo");
   return options;
 }
 
@@ -289,11 +303,15 @@ function status(options) {
   // GitHub refuses a description over 140 characters; the job log and its step
   // summary carry the whole list.
   if (description.length > 140) description = `${description.slice(0, 137)}...`;
+  const fork = options.headRepo.toLowerCase() !== repository.toLowerCase();
+  const where = fork
+    ? `\n\nThis pull request comes from the fork ${options.headRepo}, whose token cannot post the \`${CONTEXT}\` status: this summary is the report.`
+    : "";
   const summary = process.env.GITHUB_STEP_SUMMARY;
   if (summary)
     appendFileSync(
       summary,
-      `### Advisories (informational, never required)\n\n${
+      `### Advisories (informational, never required)${where}\n\n${
         advisories.length > 0
           ? advisories
               .map((a) => `- \`${a.id}\` ${a.name} ${a.version}: ${a.title}`)
@@ -306,6 +324,12 @@ function status(options) {
       console.log(
         `::warning title=${a.id} in ${a.name} ${a.version}::${a.title}`,
       );
+  if (fork) {
+    console.log(
+      `deps-audit: ${options.headRepo} is a fork of ${repository}; its token cannot post the ${CONTEXT} status, so the report above and the step summary are where it is read`,
+    );
+    return code;
+  }
   const server = process.env.GITHUB_SERVER_URL ?? "https://github.com";
   const runId = process.env.GITHUB_RUN_ID;
   const args = [
@@ -328,9 +352,7 @@ function status(options) {
     console.error(
       `deps-audit: could not post the ${CONTEXT} status on ${options.sha}`,
     );
-    console.error(
-      "ACTION: give the job's token 'statuses: write' (a fork's pull request has none)",
-    );
+    console.error("ACTION: give the job's token 'statuses: write'");
     return 1;
   }
   console.log(

@@ -26,6 +26,10 @@ const CONTEXT = "advisories";
 const REPORT =
   /\bjust advisories-(report|status)\b|deps-audit\.mjs"? (report|status)\b/;
 const PR_HEAD = "github.event.pull_request.head.sha";
+const PR_HEAD_REPO = "github.event.pull_request.head.repo.full_name";
+// The step's one command: the head, and the repository it lives in, which is how
+// the recipe tells a fork's pull request (summary and log, no status) apart.
+const STATUS_RUN = 'just advisories-status "$HEAD_SHA" "$HEAD_REPO"';
 // A workflow expression, spelled without a literal `${` in this file.
 const expression = (inner) => `$${"{{"} ${inner} }}`;
 
@@ -44,6 +48,7 @@ function load() {
     contract: {
       required: [...REQUIRED_CONTEXTS],
       informational: [...INFORMATIONAL_CONTEXTS],
+      text: readFileSync(".github/required-contexts.mjs", "utf8"),
     },
   };
 }
@@ -100,6 +105,15 @@ export function advisoriesProblems({ workflows, justfile, contract }) {
       problems.push(
         `lint's step ${label} does not post on the pull request's head`,
       );
+    // A fork's pull request runs this step too and reads the report in its
+    // summary and log: the step names the head's repository rather than being
+    // skipped there.
+    if (step.env?.HEAD_REPO !== expression(PR_HEAD_REPO))
+      problems.push(
+        `lint's step ${label} does not name the repository the head lives in`,
+      );
+    if (step.run.trim() !== STATUS_RUN)
+      problems.push(`lint's step ${label} does not run '${STATUS_RUN}'`);
     if (step.id) {
       const reads = new RegExp(`steps\\.${step.id}\\.`);
       for (const other of steps)
@@ -111,6 +125,16 @@ export function advisoriesProblems({ workflows, justfile, contract }) {
   }
   if (lint?.permissions?.statuses !== "write")
     problems.push(`lint's token cannot post the ${CONTEXT} status`);
+
+  // The recipe hands the head's repository to the script, which skips posting
+  // for a fork; the contract says where a fork's pull request reads the report.
+  const posting = recipe(justfile, "advisories-status");
+  if (!posting || !/status --sha "\$1" --head-repo "\$2"/.test(posting))
+    problems.push("advisories-status does not pass the head's repository on");
+  if (!/fork[\s\S]*no status[\s\S]*step summary and log/.test(contract.text))
+    problems.push(
+      "the check contract does not say a fork's pull request gets the report in lint's step summary and log, not a status",
+    );
 
   // The blocking audit `lint` runs is the split check, never the report.
   const blocking = recipe(justfile, "_crate-deps-check");
@@ -210,6 +234,39 @@ test("a report that can block, waits, hides or goes missing is refused", () => {
         reportStep(f).env.HEAD_SHA = expression("github.sha");
       },
       /^lint's step .* does not post on the pull request's head$/,
+    ],
+    [
+      (f) => {
+        delete reportStep(f).env.HEAD_REPO;
+      },
+      /^lint's step .* does not name the repository the head lives in$/,
+    ],
+    [
+      (f) => {
+        reportStep(f).run =
+          'just advisories-status "$HEAD_SHA" "$GITHUB_REPOSITORY"';
+      },
+      /^lint's step .* does not run 'just advisories-status "\$HEAD_SHA" "\$HEAD_REPO"'$/,
+    ],
+    [
+      (f) => {
+        reportStep(f).if = expression(
+          "!cancelled() && github.event.pull_request.head.repo.full_name == github.repository",
+        );
+      },
+      /^lint's step .* is not posted whatever the steps before it did$/,
+    ],
+    [
+      (f) => {
+        f.justfile = f.justfile.replace(' --head-repo "$2"', "");
+      },
+      "advisories-status does not pass the head's repository on",
+    ],
+    [
+      (f) => {
+        f.contract.text = f.contract.text.replace(/fork/g, "branch");
+      },
+      /^the check contract does not say a fork's pull request/,
     ],
     [
       (f) => {

@@ -548,10 +548,22 @@ fn a_base_it_cannot_resolve_is_refused_rather_than_read_as_empty() {
 /// The pull request head the status is posted on.
 const HEAD_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
-/// `just advisories-status` with a `gh` that records each argument on a line of
-/// its own and answers with `code`, as Actions runs it: with the repository named
-/// and a step summary to write.
-fn status(project: &Project, code: i32) -> (Run, String, String) {
+/// The repository the workflow runs in, and a fork of it.
+const REPOSITORY: &str = "nickderobertis/onepipeline-ui";
+const FORK: &str = "contributor/onepipeline-ui";
+
+/// The fixture change that leaves both fixture advisories in the head.
+const VULNERABLE_LIB_2_1: Side = Side {
+    lock: "vulnerable-lib-2.1",
+    version: "0.1.0",
+    deps: &[("fixture-lib", "2.1.0"), ("fixture-vuln", "1.0.0")],
+    unused: &[],
+};
+
+/// `just advisories-status` for a head living in `head_repo`, with a `gh` that
+/// records each argument on a line of its own and answers with `code`, as
+/// Actions runs it: in [`REPOSITORY`], with a step summary to write.
+fn status(project: &Project, code: i32, head_repo: &str) -> (Run, String, String) {
     let scratch = project.repo.parent().expect("the repository has a parent");
     let calls = scratch.join("gh-calls");
     let summary = scratch.join("step-summary");
@@ -567,13 +579,11 @@ fn status(project: &Project, code: i32) -> (Run, String, String) {
     );
     let run = just(
         project,
-        &["advisories-status", HEAD_SHA],
+        &["advisories-status", HEAD_SHA, head_repo],
         &[
             ("PATH", path.as_os_str()),
-            (
-                "GITHUB_REPOSITORY",
-                OsStr::new("nickderobertis/onepipeline-ui"),
-            ),
+            ("GITHUB_ACTIONS", OsStr::new("true")),
+            ("GITHUB_REPOSITORY", OsStr::new(REPOSITORY)),
             ("GITHUB_STEP_SUMMARY", summary.as_os_str()),
         ],
     );
@@ -583,16 +593,8 @@ fn status(project: &Project, code: i32) -> (Run, String, String) {
 
 #[test]
 fn the_status_is_posted_red_naming_every_advisory() {
-    let project = project(
-        &VULNERABLE,
-        &Side {
-            lock: "vulnerable-lib-2.1",
-            version: "0.1.0",
-            deps: &[("fixture-lib", "2.1.0"), ("fixture-vuln", "1.0.0")],
-            unused: &[],
-        },
-    );
-    let (run, calls, summary) = status(&project, 0);
+    let project = project(&VULNERABLE, &VULNERABLE_LIB_2_1);
+    let (run, calls, summary) = status(&project, 0, REPOSITORY);
     assert_ne!(run.code, Some(0), "the status step passed:\n{}", run.all());
     let args: Vec<&str> = calls.lines().collect();
     for expected in [
@@ -628,7 +630,8 @@ fn the_status_is_posted_red_naming_every_advisory() {
 #[test]
 fn the_status_is_posted_green_when_nothing_matches() {
     let project = project(&CLEAN, &CLEAN);
-    let (run, calls, _) = status(&project, 0);
+    // GitHub names repositories case-insensitively: this is the same one.
+    let (run, calls, _) = status(&project, 0, "NickDeRobertis/onepipeline-ui");
     assert_eq!(run.code, Some(0), "the status step failed:\n{}", run.all());
     let args: Vec<&str> = calls.lines().collect();
     assert!(args.contains(&"state=success"), "{args:?}");
@@ -637,9 +640,9 @@ fn the_status_is_posted_green_when_nothing_matches() {
 
 #[test]
 fn a_status_github_refuses_fails_the_step_saying_why() {
-    // A fork's pull request: its token cannot write a status.
+    // This repository's own pull request, with a token lacking `statuses: write`.
     let project = project(&CLEAN, &CLEAN);
-    let (run, calls, _) = status(&project, 1);
+    let (run, calls, _) = status(&project, 1, REPOSITORY);
     assert_ne!(run.code, Some(0), "the status step passed:\n{}", run.all());
     assert!(
         calls.contains("context=advisories"),
@@ -648,6 +651,85 @@ fn a_status_github_refuses_fails_the_step_saying_why() {
     assert!(
         run.stderr.contains("could not post the advisories status")
             && run.stderr.contains("HTTP 403"),
+        "the refusal did not say why:\n{}",
+        run.all()
+    );
+}
+
+#[test]
+fn a_forks_pull_request_reads_every_advisory_in_the_summary_and_log_and_posts_nothing() {
+    let project = project(&VULNERABLE, &VULNERABLE_LIB_2_1);
+    // A `gh` that would post: the fork path must not ask it to.
+    let (run, calls, summary) = status(&project, 0, FORK);
+    assert_ne!(run.code, Some(0), "the status step passed:\n{}", run.all());
+    assert!(
+        calls.is_empty(),
+        "a fork's pull request asked gh for: {calls}"
+    );
+    for named in [VULN, LIB_2_1] {
+        assert!(
+            run.stdout.contains(&format!("advisory {named}")),
+            "the log omits {named}:\n{}",
+            run.all()
+        );
+    }
+    for annotation in [
+        "::warning title=RUSTSEC-2099-0001 in fixture-vuln 1.0.0::",
+        "::warning title=RUSTSEC-2099-0002 in fixture-lib 2.1.0::",
+    ] {
+        assert!(
+            run.stdout.contains(annotation),
+            "the log carries no {annotation} annotation:\n{}",
+            run.all()
+        );
+    }
+    for named in [
+        "RUSTSEC-2099-0001` fixture-vuln 1.0.0",
+        "RUSTSEC-2099-0002` fixture-lib 2.1.0",
+        &format!("fork {FORK}"),
+    ] {
+        assert!(
+            summary.contains(named),
+            "the step summary omits {named}:\n{summary}"
+        );
+    }
+    assert!(
+        run.stdout
+            .contains(&format!("{FORK} is a fork of {REPOSITORY}")),
+        "the log does not say why nothing was posted:\n{}",
+        run.all()
+    );
+}
+
+#[test]
+fn a_clean_forks_pull_request_passes_and_posts_nothing() {
+    let project = project(&CLEAN, &CLEAN);
+    let (run, calls, summary) = status(&project, 0, FORK);
+    assert_eq!(run.code, Some(0), "the status step failed:\n{}", run.all());
+    assert!(
+        calls.is_empty(),
+        "a fork's pull request asked gh for: {calls}"
+    );
+    assert!(
+        summary.contains("no advisory matches the resolved graph"),
+        "{summary}"
+    );
+}
+
+#[test]
+fn a_head_repository_that_is_not_one_is_refused_before_anything_is_posted() {
+    let project = project(&CLEAN, &CLEAN);
+    let (run, calls, summary) = status(&project, 0, "not a repository");
+    assert_eq!(
+        run.code,
+        Some(2),
+        "the step was not refused:\n{}",
+        run.all()
+    );
+    assert!(calls.is_empty(), "gh was asked for: {calls}");
+    assert!(summary.is_empty(), "a summary was written: {summary}");
+    assert!(
+        run.stderr.contains("is not an owner/name repository"),
         "the refusal did not say why:\n{}",
         run.all()
     );

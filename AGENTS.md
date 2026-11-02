@@ -157,7 +157,10 @@ licenses, sources, yanked crates, unused dependencies and an advisory matching a
 version the base's `Cargo.lock` does not resolve; `just advisories-report` names
 every advisory in the head's lockfile and is informational — a
 `continue-on-error` step of `lint` posts it as the `advisories` commit status on
-each pull request, and `ci-cache.yml`'s `advisories` job runs it on `main`. Both
+each pull request from this repository and writes it to `lint`'s step summary
+and log on every one (a fork's read-only token gets only those: no status, by
+the manager's ruling against a privileged `workflow_run` job for forks), and
+`ci-cache.yml`'s `advisories` job runs it on `main`. Both
 are red until the advisory is fixed. `.github/required-contexts.mjs` is the check
 contract: what blocks, and that `advisories` is never required, needed or waited
 on (`.github/tests/advisories.test.mjs`). Never ignore an advisory in

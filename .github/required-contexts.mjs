@@ -19,10 +19,13 @@
 //               posted as a commit status by a `continue-on-error` step of ci.yml's
 //               `lint` on each pull request's head, and run as ci-cache.yml's
 //               `advisories` job on each push to `main`. Red until someone fixes
-//               the advisory. An advisory a change *introduces* is blocked by
-//               `lint`'s own audit (`just deps-check`), so making this required
-//               would only let a newly published advisory against a version
-//               `main` already resolves block every unrelated change and release.
+//               the advisory. A pull request from a fork gets no status — its
+//               token cannot post one — and reads the same report in `lint`'s
+//               step summary and log instead, which every pull request also gets.
+//               An advisory a change *introduces* is blocked by `lint`'s own
+//               audit (`just deps-check`), so making this required would only let
+//               a newly published advisory against a version `main` already
+//               resolves block every unrelated change and release.
 //
 // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the source is the repository's branch protection, which a person changes and only an authenticated API call reads; the offline gate cannot ask it. This is the one copy in the tree, and it changes in the same change that moves protection.
 export const REQUIRED_CONTEXTS = [
