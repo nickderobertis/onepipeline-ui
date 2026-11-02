@@ -15,7 +15,9 @@ on:
 permissions:
   contents: read
 
-# A pull request's superseded run is cancelled.
+# Branch protection rules on a pull request's head alone, so a run its next push
+# superseded decides nothing and would only hold one of the account's shared
+# job slots.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
