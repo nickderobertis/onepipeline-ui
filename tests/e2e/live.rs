@@ -853,14 +853,10 @@ fn hold_a_look_on(live: &Live, run: &str) -> (PathBuf, fs::File) {
 
 /// A stream is answered while the sidebar is still reading a run.
 ///
-/// Reading a moved run's row is the SDK folding its summary and writing the
-/// cache back, which a host with slow syncs takes seconds over per run — so a
-/// sidebar of many moving runs can take longer to read than a client waits for
-/// a status line. Windows did: `a_cursor_older_than_the_retained_frames_is_answered_stale`
-/// timed out reading one there. This makes that read take as long as the
-/// journey wants, deterministically: the run's summary is replaced by a FIFO,
-/// so the server's look at it blocks opening and reading it until this side
-/// writes, and the requests a tab makes meanwhile are held to being answered.
+/// A sidebar of many moving runs can take longer to read than a client waits
+/// for a status line: on Windows `a_cursor_older_than_the_retained_frames_is_answered_stale`
+/// timed out reading one. With a look held mid-read, the requests a tab makes
+/// are held to being answered.
 #[cfg(unix)]
 #[test]
 fn a_stream_and_a_subscription_are_answered_while_the_sidebar_is_reading_a_run() {
