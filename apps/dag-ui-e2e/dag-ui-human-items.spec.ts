@@ -1614,10 +1614,30 @@ test("an item whose body is longer than four lines shows four on its card and al
         Math.abs(box.top - (boxes[index - 1]?.bottom ?? 0) - 6),
       ).toBeLessThan(1);
 
+  // The pane is drawn from the list's entry at once and again when the item's
+  // own read lands, which adds the steps it blocks above the body and so
+  // shortens it. A keyboard scroll is animated, and that re-layout landing
+  // while it runs stops it short of the end. The read is held until the pane
+  // has been drawn without it, so both drawings happen on every run, and the
+  // reader scrolls the body the pane settles on.
+  const longId = idOf(served, "long");
+  let releaseDetail: () => void = () => {};
+  const detailHeld = new Promise<void>((resolve) => {
+    releaseDetail = resolve;
+  });
+  await page.route(`**/api/human-items/${longId}`, async (route) => {
+    await detailHeld;
+    await route.continue();
+  });
   await long.getByRole("button", { name: `Details: ${longTitle}` }).click();
   const pane = detailPane(page);
   const full = pane.getByRole("region", { name: "Full body" });
   await expect(full).toHaveText(longText);
+  const steps = pane.getByRole("region", { name: "Blocked steps" });
+  await expect(steps).toHaveCount(0);
+  releaseDetail();
+  await expect(steps).toBeVisible();
+  await page.unroute(`**/api/human-items/${longId}`);
   const region = listRegion(page);
   const positions = () =>
     list
