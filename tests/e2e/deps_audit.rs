@@ -181,6 +181,26 @@ fn project(base: &Side, head: &Side) -> Project {
         &db,
         &["commit", "-qm", "the fixture advisory database"],
     );
+    // The database's `origin` is a local copy of it, so a cargo-deny that fetches
+    // before every check (0.20 does; 0.19 skipped a fresh FETCH_HEAD) fetches
+    // the fixture back, offline, rather than failing to reach RustSec.
+    let origin = dir.path().join("advisory-db-origin.git");
+    git(
+        &gitconfig,
+        dir.path(),
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            &db.to_string_lossy(),
+            &origin.to_string_lossy(),
+        ],
+    );
+    git(
+        &gitconfig,
+        &db,
+        &["remote", "add", "origin", &origin.to_string_lossy()],
+    );
     // cargo-deny reads when the database was last fetched from FETCH_HEAD.
     let fetched = git(&gitconfig, &db, &["rev-parse", "HEAD"]);
     fs::write(db.join(".git/FETCH_HEAD"), format!("{fetched}\n")).expect("write FETCH_HEAD");
