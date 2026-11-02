@@ -734,6 +734,7 @@ if (args.stall) {
             args["review-corpus"] === true,
             // The checks link to this server's own origin, which a server
             // asked for any free port does not have until it has bound.
+            // llmlint: ignore[changed_behavior_has_e2e] only a journey's own server (`fixture-server.ts`) is asked for port 0, and no journey reads or follows a check's address on one: the journeys that assert checks drive the shared fixture, which is still given its port and still links to itself. A port-0 server cannot name its port before the corpus it serves is written, so its checks keep `buildRuns`' default address rather than a `:0` no host serves.
             port === 0 ? undefined : `http://127.0.0.1:${port}`,
           ),
         facts: () => facts(workspace),

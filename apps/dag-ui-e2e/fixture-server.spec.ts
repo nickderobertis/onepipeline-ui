@@ -1,4 +1,4 @@
-import { type AddressInfo, Server } from "node:net";
+import { Server } from "node:net";
 import { expect, test } from "@playwright/test";
 import { runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
@@ -21,6 +21,7 @@ test("a fixture server starts and serves its view though every port a probe rele
 }) => {
   const squatters = new Set<Server>();
   const close = Server.prototype.close;
+  // llmlint: ignore-block[e2e_not_mocked] nothing is substituted: every close still runs Node's own, and the squatter is a real listener on the real port. Wrapping close is the one place the neighbour can act between a probe's release and the prober learning of it, which is what makes this race deterministic rather than a bet on the host's timing; a separate process cannot see that instant. The fixture server, its child, the read API and the browser are all real.
   Server.prototype.close = function squatOnClose(
     this: Server,
     done?: (err?: Error) => void,
@@ -28,7 +29,7 @@ test("a fixture server starts and serves its view though every port a probe rele
     const address = this.address();
     if (squatters.has(this) || address === null || typeof address !== "object")
       return close.call(this, done);
-    const { port, address: host } = address as AddressInfo;
+    const { port, address: host } = address;
     return close.call(this, (err?: Error) => {
       const squatter = new Server();
       squatters.add(squatter);
@@ -36,6 +37,7 @@ test("a fixture server starts and serves its view though every port a probe rele
       squatter.listen(port, host, () => done?.(err));
     });
   };
+  // llmlint: ignore-end[e2e_not_mocked]
   try {
     const server = await startFixtureServer("port-held", []);
     try {

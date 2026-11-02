@@ -835,10 +835,12 @@ fn a_stream_and_a_subscription_are_answered_while_the_sidebar_is_reading_a_run()
         .to_owned();
     let summary = live.serving.run_dir(run).join("summary.json");
     assert!(summary.is_file(), "the first look cached the run's summary");
+    // llmlint: ignore-block[tests_mirror_real_usage] the condition under test is storage that answers slower than a client waits — what a Windows host's syncs did to this server's look — and no request a client can make produces that on demand: a genuinely slow fold is the host's timing, which this journey must not depend on. The FIFO is that storage at the filesystem boundary the server reads the runs root through; the server is the real binary, nothing in it is stubbed, and every request this journey holds to an answer is the HTTP one a tab makes.
     fs::remove_file(&summary).expect("remove the cached summary");
     let path = std::ffi::CString::new(summary.as_os_str().as_bytes()).expect("a path");
     // SAFETY: `path` is a NUL-terminated path this test owns.
     assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0, "mkfifo");
+    // llmlint: ignore-end[tests_mirror_real_usage]
     // The summary's stamp moved, so the next look reads the run again and
     // blocks opening the FIFO; a writer can open it once that reader has, and
     // from then on the look blocks reading it until the writer closes.
