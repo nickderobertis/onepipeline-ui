@@ -148,6 +148,21 @@ block) — and `.github/tests/ci-shape.test.mjs`
 resolves every workflow to hold that, and what a push to `main` and the release
 commit start.
 
+**A security advisory blocks only the change that brings it in.** A database
+update publishes advisories against versions `main` already resolves, and an
+audit that failed on any of them held every change and release until someone
+merged past it by hand (RUSTSEC-2026-0433, pulldown-cmark 0.13.5). So
+`scripts/deps-audit.mjs` splits it: `lint`'s `deps-check` blocks on bans,
+licenses, sources, yanked crates, unused dependencies and an advisory matching a
+version the base's `Cargo.lock` does not resolve; `just advisories-report` names
+every advisory in the head's lockfile and is informational — a
+`continue-on-error` step of `lint` posts it as the `advisories` commit status on
+each pull request, and `ci-cache.yml`'s `advisories` job runs it on `main`. Both
+are red until the advisory is fixed. `.github/required-contexts.mjs` is the check
+contract: what blocks, and that `advisories` is never required, needed or waited
+on (`.github/tests/advisories.test.mjs`). Never ignore an advisory in
+`deny.toml` to get a change through.
+
 **The four jobs restore `main`'s Rust build and save none.** `ci-cache.yml` is
 the producer: on every push to `main` one build-only job per OS
 (`scripts/ci-warm.sh`, `just ci-warm-<os>`) compiles what that OS's jobs compile
@@ -204,7 +219,8 @@ fans one uniformly-named target across all of them.
   whose subject is the PR title. Queue with `gh pr merge --auto --squash`. Admins
   may bypass in a break-glass.
 - **Branch protection requires exactly the four jobs** — `lint`, `test-linux`,
-  `test-windows`, `test-macos` (`.github/required-contexts.mjs`) — and does not
+  `test-windows`, `test-macos` (`.github/required-contexts.mjs`, which also names
+  the informational `advisories` status that must never be required) — and does not
   require a branch to be up to date (the user's decision of 2026-10-18). There is
   no verdict job ruling on others: a check that must block a merge is a step of
   one of the four, which is why `test-linux` builds the release's x86_64 wheel

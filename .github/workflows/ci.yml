@@ -43,7 +43,8 @@ jobs:
   # never a pull request's.
   # What does not depend on the platform it runs on: the PR title, the
   # suppressions comment, formatting, lints and type checks, the MSRV floor, the
-  # dependency audit, the judged lint and the visual docs.
+  # dependency audit, the judged lint and the visual docs — and the advisories
+  # report, which posts a status of its own and never fails this job.
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -53,6 +54,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # The `advisories` commit status the advisories report step posts.
+      statuses: write
     env:
       # The one switch for the visual docs' side effects: the sticky comment and
       # the /pr-<n>/ preview deploy. Off because this job must finish inside its
@@ -102,6 +105,22 @@ jobs:
       - name: Formatting, lints, type checks, MSRV and audit (affected projects)
         if: ${{ !cancelled() }}
         run: just ci-lint
+      # The advisories report: every advisory matching the head's Cargo.lock,
+      # whether or not this change brought it in (the audit above blocks only on
+      # one it did), posted as the `advisories` commit status on the pull
+      # request's head — red, naming each advisory and crate, until someone fixes
+      # it. Informational and never required (.github/required-contexts.mjs):
+      # `continue-on-error` keeps its result out of this job's, `!cancelled()`
+      # posts it whatever the steps before it did, and no step reads its outcome.
+      # A fork's token cannot post a status, so there the step fails and the job
+      # does not.
+      - name: Advisories report (informational, posts the advisories status)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: just advisories-status "$HEAD_SHA"
       - uses: astral-sh/setup-uv@v6
         if: github.event_name == 'pull_request' && !cancelled()
       # The judged tier, a blocking part of this check. Its harnesses are pinned
