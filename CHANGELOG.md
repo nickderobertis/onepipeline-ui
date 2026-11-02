@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.65.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.64.0...v0.65.0) - 2026-11-02
+
+### Fixed
+
+- *(deps)* [**breaking**] announce that the crate's surface follows the onepipeline 0.98 engine ([#572](https://github.com/nickderobertis/onepipeline-ui/pull/572))
+- *(deps)* link the engine that projects plan items and summarizes the item report ([#570](https://github.com/nickderobertis/onepipeline-ui/pull/570))
+
 ## [0.64.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.63.0...v0.64.0) - 2026-11-01
 
 ### Added
