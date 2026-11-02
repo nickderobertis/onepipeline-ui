@@ -13,7 +13,8 @@
  * removes, so a browser run never reads or writes the operator's own runs.
  *
  * Usage:
- *   serve-fixture.mjs --workspace DIR --port N [--ui]
+ *   serve-fixture.mjs --workspace DIR --port N [--ui]   (N may be 0: the
+ *                                                  read API names the port it took)
  *                     [--shutdown-corpus [--live-dispatch-pid PID]
  *                      | --preserved-corpus | --review-corpus
  *                      | --review-loop-corpus | --transcripts-corpus
@@ -583,27 +584,34 @@ if (asked.length > 1) {
     "run this once per change, so each one is the change the caller asked for",
   );
 }
-/** One port option, checked before anything binds or connects to it. */
-function portOf(value, name) {
+/**
+ * One port option, checked before anything binds or connects to it. `0` only
+ * where `anyFree`: the read API binds it and names the port the kernel gave it,
+ * which is the one choice nothing else can take before the server holds it.
+ */
+function portOf(value, name, anyFree = false) {
   const port = Number(value);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  const lowest = anyFree ? 0 : 1;
+  if (!Number.isInteger(port) || port < lowest || port > 65535) {
     die(
       `'${value}' is not a port`,
-      `pass ${name} a number between 1 and 65535`,
+      `pass ${name} a number between ${lowest} and 65535`,
     );
   }
   return port;
 }
 
-const port = portOf(args.port ?? 8765, "--port");
-
 if (args.stall) {
+  // The stall server prints the port it was given rather than the one it took,
+  // and Playwright waits for that line by number, so it is always given one.
+  const port = portOf(args.port ?? 8765, "--port");
   const refuse =
     args["refuse-port"] === undefined
       ? undefined
       : portOf(args["refuse-port"], "--refuse-port");
   await stall(port, refuse);
 } else {
+  const port = portOf(args.port ?? 8765, "--port", true);
   if (args.workspace === undefined) {
     die(
       "--workspace is required",
@@ -724,7 +732,9 @@ if (args.stall) {
             runsRoot,
             workspace,
             args["review-corpus"] === true,
-            `http://127.0.0.1:${port}`,
+            // The checks link to this server's own origin, which a server
+            // asked for any free port does not have until it has bound.
+            port === 0 ? undefined : `http://127.0.0.1:${port}`,
           ),
         facts: () => facts(workspace),
       };

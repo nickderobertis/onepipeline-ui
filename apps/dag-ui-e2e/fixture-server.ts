@@ -1,6 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FIXTURE_FACTS_NAME } from "./fixtures/facts-file";
@@ -17,7 +16,6 @@ import { FIXTURE_WORKSPACE } from "./playwright.config";
  */
 
 const FIXTURE_COMMAND = join(import.meta.dirname, "fixtures/serve-fixture.mjs");
-const LOOPBACK = "127.0.0.1";
 
 export interface FixtureServer {
   readonly origin: string;
@@ -35,19 +33,42 @@ export interface FixtureServer {
   readonly serveRebuilt: () => Promise<void>;
 }
 
-/** A port the kernel says is free now. */
-function freePort(): Promise<number> {
+/**
+ * What `onepipeline-api serve` prints once it holds its port, ending in the
+ * address the kernel gave it — so a server asked for port `0` names the port it
+ * took, and a caller that reads this line never chooses one another process
+ * could take first.
+ */
+const ANNOUNCED =
+  /^onepipeline-api: serving .* on http:\/\/(127\.0\.0\.1:\d+)$/;
+
+/**
+ * Forward `child`'s stdout to this process's and resolve with the address it
+ * announces, or reject once it exits without announcing one.
+ */
+function announced(child: ChildProcess, name: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.once("error", reject);
-    probe.listen(0, LOOPBACK, () => {
-      const address = probe.address();
-      probe.close(() =>
-        typeof address === "object" && address !== null
-          ? resolve(address.port)
-          : reject(new Error("the kernel named no port")),
-      );
+    const stdout = child.stdout;
+    if (stdout === null) {
+      reject(new Error(`the ${name} fixture server has no stdout to read`));
+      return;
+    }
+    let pending = "";
+    stdout.setEncoding("utf8");
+    stdout.on("data", (text: string) => {
+      process.stdout.write(text);
+      pending += text;
+      for (;;) {
+        const end = pending.indexOf("\n");
+        if (end < 0) break;
+        const address = ANNOUNCED.exec(pending.slice(0, end).trimEnd())?.[1];
+        pending = pending.slice(end + 1);
+        if (address !== undefined) resolve(address);
+      }
     });
+    child.once("exit", (code) =>
+      reject(new Error(`the ${name} fixture server exited ${code}`)),
+    );
   });
 }
 
@@ -69,9 +90,12 @@ export async function startFixtureServer(
   // `dag-ui-e2e-…` directly under the temp root: the one shape
   // `serve-fixture.mjs` agrees to remove and rebuild.
   const workspace = mkdtempSync(join(tmpdir(), `dag-ui-e2e-${name}-`));
-  const port = await freePort();
-  const origin = `http://${LOOPBACK}:${port}`;
-  const serve = async (): Promise<ChildProcess> => {
+  // The first start asks for any free port and is told which one it took: the
+  // server binds it before it says so, so nothing else can take it in between.
+  // A restart asks for that port again, because the journey's page is on it.
+  const serve = async (
+    port: number,
+  ): Promise<{ child: ChildProcess; origin: string }> => {
     const child = spawn(
       process.execPath,
       [
@@ -84,12 +108,13 @@ export async function startFixtureServer(
         ...corpusArgs,
       ],
       {
-        stdio: ["ignore", "inherit", "inherit"],
+        stdio: ["ignore", "pipe", "inherit"],
         // The main fixture retained the built server before any journeys started.
         // Cargo install can move its output away while this tier is still running.
         env: { ...process.env, CARGO_TARGET_DIR: FIXTURE_WORKSPACE },
       },
     );
+    const origin = `http://${await announced(child, name)}`;
     const deadline = Date.now() + 60_000;
     for (;;) {
       if (child.exitCode !== null)
@@ -98,7 +123,7 @@ export async function startFixtureServer(
         (response) => response.ok,
         () => false,
       );
-      if (ready) return child;
+      if (ready) return { child, origin };
       if (Date.now() > deadline)
         throw new Error(
           `the ${name} fixture server never answered on ${origin}`,
@@ -106,7 +131,10 @@ export async function startFixtureServer(
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   };
-  let child: ChildProcess | undefined = await serve();
+  const first = await serve(0);
+  const { origin } = first;
+  const port = Number(new URL(origin).port);
+  let child: ChildProcess | undefined = first.child;
   const halt = async (): Promise<void> => {
     const running = child;
     child = undefined;
@@ -126,7 +154,7 @@ export async function startFixtureServer(
     },
     stopServing: halt,
     serveRebuilt: async () => {
-      if (child === undefined) child = await serve();
+      if (child === undefined) child = (await serve(port)).child;
     },
   };
 }
