@@ -43,7 +43,8 @@
 set -euo pipefail
 
 script_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-repo_root="$(dirname -- "$script_dir")"
+# Physical, because every destination is held to it as it resolves on disk.
+repo_root="$(CDPATH='' cd -P -- "$(dirname -- "$script_dir")" && pwd -P)"
 cd "$repo_root"
 
 # The browser image, derived rather than written down: the container has to carry the
@@ -67,11 +68,72 @@ esac
 
 # Where this capture lands. Inside the tree either way, because the tree is what the
 # container has mounted — a destination outside it would need a mount of its own and a
-# second thing to keep in step between here and CI.
+# second thing to keep in step between here and CI. Absolute, because the spec is
+# handed this path and a relative one would scatter images wherever the process
+# happened to start — and then said again the way the container sees it, since the
+# tree is mounted at /work and a host path means nothing inside it.
+#
+# Each named destination is held to the tree as it resolves on disk, and before
+# anything is made: a refused destination leaves no directory behind, wherever it
+# pointed. A path is read as written up to its deepest component that exists, that
+# component is resolved physically — which is what catches a symlink out of the tree,
+# or onto the other destination — and the components still to be made are appended.
+# A `..` is refused outright rather than resolved, because after a symlink it climbs
+# out of wherever the link went, not out of the path as it reads.
+
+# refuse NAME NAMED WHY: exit 2 naming the destination and why it is not one.
+refuse() {
+  echo "visual-capture: $1 must name a directory inside $repo_root, not $2; $3" >&2
+  echo "ACTION: set $1 to a directory under $repo_root, such as shots/local/<name>; the container mounts only the tree" >&2
+  exit 2
+}
+
+# resolve NAME PATH: PATH, absolute and resolved on disk, on stdout; refuses one that
+# climbs with `..` or resolves outside the tree. Makes nothing.
+resolve() {
+  local name="$1" named
+  case "$2" in
+    /*) named="$2" ;;
+    *) named="$repo_root/$2" ;;
+  esac
+  case "/$named/" in
+    */../*) refuse "$name" "$2" "it climbs with '..'" ;;
+  esac
+  local existing="$named" rest=""
+  while [ ! -e "$existing" ] && [ ! -L "$existing" ]; do
+    rest="/$(basename -- "$existing")$rest"
+    existing="$(dirname -- "$existing")"
+  done
+  local physical
+  if ! physical="$(CDPATH='' cd -P -- "$existing" 2>/dev/null && pwd -P)"; then
+    echo "visual-capture: cannot create $name's directory $named: $existing is not a directory this capture can enter" >&2
+    echo "ACTION: make $existing a directory the invoking user can enter so $named is creatable, or set $name to another directory under $repo_root" >&2
+    exit 1
+  fi
+  local resolved="${physical%/}$rest"
+  case "$resolved" in
+    "$repo_root"/*) printf '%s' "$resolved" ;;
+    *) refuse "$name" "$2" "it resolves to $resolved" ;;
+  esac
+}
+
+# make_destination NAME DIR: create a resolved destination, or say why it could not be.
+make_destination() {
+  mkdir -p -- "$2" 2>/dev/null && return 0
+  echo "visual-capture: cannot create $1's directory $2" >&2
+  echo "ACTION: make the nearest existing directory above $2 writable by the invoking user so it is creatable, or set $1 to another directory under $repo_root" >&2
+  exit 1
+}
+
+# inside A B: whether directory A is B or lies under it.
+inside() {
+  case "$1/" in "$2"/*) return 0 ;; esac
+  return 1
+}
+
 if [ -n "${SHOTS_OUT:-}" ]; then
-  shots_out="$SHOTS_OUT"
+  shots_out="$(resolve SHOTS_OUT "$SHOTS_OUT")"
   minted=""
-  mkdir -p "$shots_out"
 else
   mkdir -p shots/local
   shots_out="$(mktemp -d "$repo_root/shots/local/capture-XXXXXXXX")"
@@ -81,50 +143,27 @@ else
   # caller's, empty or not.
   minted="$shots_out"
 fi
-# Absolute, because the spec is handed this path and a relative one would scatter
-# images wherever the process happened to start — and then said again the way the
-# container sees it, since the tree is mounted at /work and a host path means nothing
-# inside it. The destination has to be under the tree for that reason: it is the one
-# mount the capture writes through, and a directory outside it would need a second.
-# in_container NAME DIR: DIR as the container sees it, refusing one outside the tree.
-in_container() {
-  case "$2" in
-    "$repo_root"/*) printf '/work/%s' "${2#"$repo_root"/}" ;;
-    *)
-      echo "visual-capture: $1 must name a directory inside $repo_root, not $2" >&2
-      echo "ACTION: set $1 to a directory under $repo_root, such as shots/local/<name>; the container mounts only the tree" >&2
-      exit 2
-      ;;
-  esac
-}
-shots_out="$(CDPATH='' cd -- "$shots_out" && pwd)"
-shots_in_container="$(in_container SHOTS_OUT "$shots_out")"
 verify_out=""
 if [ -n "${SHOTS_VERIFY:-}" ]; then
-  # Held to the tree before anything is made, so a refused destination leaves no
-  # directory behind: as written (relative to the root this script entered, and
-  # with no `..` to climb out by), then as it resolves once made, which is what
-  # catches a symlink out of the tree.
-  case "$SHOTS_VERIFY" in
-    /*) verify_named="$SHOTS_VERIFY" ;;
-    *) verify_named="$repo_root/$SHOTS_VERIFY" ;;
-  esac
-  case "/$verify_named/" in
-    */../*)
-      echo "visual-capture: SHOTS_VERIFY must name a directory inside $repo_root without '..', not $SHOTS_VERIFY" >&2
-      echo "ACTION: set SHOTS_VERIFY to a path under $repo_root with no '..' component, such as shots/verify/$arch" >&2
-      exit 2
-      ;;
-  esac
-  in_container SHOTS_VERIFY "$verify_named" >/dev/null
-  mkdir -p "$verify_named"
-  verify_out="$(CDPATH='' cd -- "$verify_named" && pwd)"
-  verify_in_container="$(in_container SHOTS_VERIFY "$verify_out")"
+  # A second, independent capture for the reproducibility gate, so it may be neither
+  # the first destination under another name nor a directory inside it, nor hold it.
+  verify_out="$(resolve SHOTS_VERIFY "$SHOTS_VERIFY")"
   if [ "$verify_out" = "$shots_out" ]; then
     echo "visual-capture: SHOTS_VERIFY names the same directory as SHOTS_OUT ($shots_out); the gate compares two captures, so they need two" >&2
     echo "ACTION: set SHOTS_VERIFY to a directory other than SHOTS_OUT, such as shots/verify/$arch" >&2
     exit 2
   fi
+  if inside "$verify_out" "$shots_out" || inside "$shots_out" "$verify_out"; then
+    echo "visual-capture: SHOTS_VERIFY ($verify_out) and SHOTS_OUT ($shots_out) nest, so one capture would be written into the other's gallery" >&2
+    echo "ACTION: set SHOTS_VERIFY to a directory beside SHOTS_OUT rather than in or above it, such as shots/verify/$arch" >&2
+    exit 2
+  fi
+fi
+[ -n "$minted" ] || make_destination SHOTS_OUT "$shots_out"
+shots_in_container="/work/${shots_out#"$repo_root"/}"
+if [ -n "$verify_out" ]; then
+  make_destination SHOTS_VERIFY "$verify_out"
+  verify_in_container="/work/${verify_out#"$repo_root"/}"
 fi
 
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
@@ -164,8 +203,8 @@ bash "$script_dir/nx.sh" run dag-ui:build-api-server
 #   * the container is recorded by id as it starts, so an interrupted run takes it
 #     down with it instead of leaving it holding the tree.
 scratch="$(mktemp -d)"
-# shellcheck disable=SC2317  # reached through the `trap` below, which shellcheck
-# does not follow; every line of this function is live on each of those exits.
+# shellcheck disable=SC2317,SC2329  # reached through the `trap`s below, which
+# (shellcheck does not follow them); every line of this function is live on each.
 cleanup() {
   local cid_file
   for cid_file in "$scratch"/*/container.id; do
@@ -176,7 +215,14 @@ cleanup() {
   done
   rm -rf "$scratch"
 }
-trap cleanup EXIT INT TERM
+# Asked to stop, the run takes its containers down and then stops with the status a
+# signal's own death would give, rather than resuming where the signal found it. The
+# renders are waited on rather than run in the foreground for the same reason: bash
+# runs no trap until a foreground command returns, and a render returns only once its
+# container is gone.
+trap cleanup EXIT
+trap 'cleanup; trap - EXIT; exit 130' INT
+trap 'cleanup; trap - EXIT; exit 143' TERM
 
 # render NAME DEST_IN_CONTAINER [docker args...] -- [playwright args...]: one capture,
 # in one container, whose home and recorded id live under the scratch's NAME.
@@ -227,7 +273,9 @@ if [ -n "$verify_out" ]; then
 fi
 
 status=0
-render current "$shots_in_container" -- "$@" || status=$?
+render current "$shots_in_container" -- "$@" &
+current_pid=$!
+wait "$current_pid" || status=$?
 
 if [ -n "$verify_out" ]; then
   wait "$verify_pid" || verify_status=$?
