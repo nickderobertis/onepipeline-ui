@@ -2,43 +2,41 @@
   "name": "github-workflows-installs",
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
-  "tags": ["scope:tooling", "type:test", "lang:javascript"],
-  "//": "The workflow journeys that install from a registry — the judged-lint toolchain from PyPI through scripts/setup-llmlint.sh, and publish's onevcs from npm — as a project of their own with its own bootstrap, so a change to the rest of the workflow policy does not select them. Its inputs name what the journeys read, which is what makes it affected, and then the pull request's affected tier runs them.",
+  "tags": [
+    "scope:tooling",
+    "type:test",
+    "lang:javascript"
+  ],
+  "//": "The release-tail journey, which installs publish's onevcs from npm, as a project of its own with its own bootstrap, so a change to the rest of the workflow policy, or to the judged-lint toolchain, does not select it. Its inputs name what the journey reads, which is what makes it affected, and then the pull request's affected tier runs it.",
   "targets": {
     "bootstrap": {
       "command": "bash scripts/workspace-install.sh"
     },
     "test": {
-      "//registry": "llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] these journeys read public registries with no credential — PyPI for the judged-lint toolchain and npm for publish's onevcs, as `just bootstrap` and the gate already reach crates.io and npm — and they are the coverage the base ran on every pull request their inputs reach: moving them to a promoted or credential-gated tier would cut that coverage, which the planner's ruling forbids. Their own project and inputs are what keep any other change from selecting them.",
+      "//registry": "llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] this journey reads a public registry with no credential — npm for publish's onevcs, as `just bootstrap` and the gate already reach npm — and it is coverage the base ran on every pull request its inputs reach: moving it to a promoted or credential-gated tier would cut that coverage, which the planner's ruling forbids. Its own project and inputs are what keep any other change from selecting it.",
       "command": "node --test .github/tests/installs/*.test.mjs",
-      "dependsOn": ["bootstrap"],
+      "dependsOn": [
+        "bootstrap"
+      ],
       "inputs": [
         "{projectRoot}/**/*",
         "{workspaceRoot}/.github/fixtures/release-tail/**/*",
-        "{workspaceRoot}/.github/fixtures/judge/**/*",
-        "{workspaceRoot}/.github/workflows/release.yml",
+        "{workspaceRoot}/.github/workflows/**/*",
         "{workspaceRoot}/.github/package.json",
         "{workspaceRoot}/budgets.yaml",
         "{workspaceRoot}/scripts/actions-budget-figures.sh",
         "{workspaceRoot}/scripts/workspace-install.sh",
-        "{workspaceRoot}/scripts/setup-llmlint.sh",
-        "{workspaceRoot}/scripts/nx.sh",
-        "{workspaceRoot}/oneharness.toml",
-        "{workspaceRoot}/llmlint.yml",
-        "{workspaceRoot}/justfile",
-        "{workspaceRoot}/nx.json",
-        "{workspaceRoot}/project.json",
-        "{workspaceRoot}/judged-diff/project.json",
         "{workspaceRoot}/package.json",
-        "{workspaceRoot}/bun.lock",
-        "{workspaceRoot}/.gitignore"
+        "{workspaceRoot}/bun.lock"
       ],
       "cache": false,
       "//registry-end": "llmlint: ignore-end[external_service_suite_stays_out_of_the_affected_tier]"
     },
     "check": {
       "executor": "nx:noop",
-      "dependsOn": ["test"]
+      "dependsOn": [
+        "test"
+      ]
     }
   }
 }

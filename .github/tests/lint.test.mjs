@@ -37,6 +37,7 @@ test("the production lint gate includes newly added tooling and test files", () 
       ".github",
       ".github/tests",
       ".github/tests/installs",
+      ".github/tests/judge-install",
     ]) {
       const file = join(scratch, directory, "new-invalid.mjs");
       writeFileSync(file, "const = ;\n");

@@ -3,11 +3,15 @@ import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
-const modules = [".github", ".github/tests", ".github/tests/installs"].flatMap(
-  (directory) =>
-    readdirSync(directory)
-      .filter((file) => file.endsWith(".mjs"))
-      .map((file) => `${directory}/${file}`),
+const modules = [
+  ".github",
+  ".github/tests",
+  ".github/tests/installs",
+  ".github/tests/judge-install",
+].flatMap((directory) =>
+  readdirSync(directory)
+    .filter((file) => file.endsWith(".mjs"))
+    .map((file) => `${directory}/${file}`),
 );
 for (const file of modules)
   execFileSync(process.execPath, ["--check", file], { stdio: "inherit" });
