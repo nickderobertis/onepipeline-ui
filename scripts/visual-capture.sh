@@ -31,10 +31,20 @@
 # and CI point it at `shots/current/<arch>`; with none named, one is made per
 # invocation so two operators — or two agents — capturing at the same time neither
 # overwrite each other's images nor dirty the tree.
+#
+# `SHOTS_VERIFY`, when named, is a second destination for screencomp's reproducibility
+# gate: the same build is photographed a second time, by a container of its own, into
+# that directory. The two renders run side by side rather than one after the other,
+# because a capture's time is almost all waiting — every shot waits for a second of
+# quiet, three times over — and the two share nothing a render reads: each container
+# has its own loopback, its own `/tmp` and so its own fixture workspace and ports, its
+# own Playwright output directory, and its own browser. What they share is the build,
+# which is made once, before either starts: a render may not build anything.
 set -euo pipefail
 
 script_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-repo_root="$(dirname -- "$script_dir")"
+# Physical, because every destination is held to it as it resolves on disk.
+repo_root="$(CDPATH='' cd -P -- "$(dirname -- "$script_dir")" && pwd -P)"
 cd "$repo_root"
 
 # The browser image, derived rather than written down: the container has to carry the
@@ -58,11 +68,83 @@ esac
 
 # Where this capture lands. Inside the tree either way, because the tree is what the
 # container has mounted — a destination outside it would need a mount of its own and a
-# second thing to keep in step between here and CI.
+# second thing to keep in step between here and CI. Absolute, because the spec is
+# handed this path and a relative one would scatter images wherever the process
+# happened to start — and then said again the way the container sees it, since the
+# tree is mounted at /work and a host path means nothing inside it.
+#
+# Each named destination is held to the tree as it resolves on disk, and before
+# anything is made: a refused destination leaves no directory behind, wherever it
+# pointed. A path is read as written up to its deepest component that exists, that
+# component is resolved physically — which is what catches a symlink out of the tree,
+# or onto the other destination — and the components still to be made are appended.
+# A `.` or an empty component is dropped first, so `a/./b` and `a//b` are `a/b`; a
+# `..` is refused outright rather than resolved, because after a symlink it climbs
+# out of wherever the link went, not out of the path as it reads.
+
+# refuse NAME NAMED WHY: exit 2 naming the destination and why it is not one.
+refuse() {
+  echo "visual-capture: $1 must name a directory inside $repo_root, not $2; $3" >&2
+  echo "ACTION: set $1 to a directory under $repo_root, such as shots/local/<name>; the container mounts only the tree" >&2
+  exit 2
+}
+
+# resolve NAME PATH: PATH, absolute and resolved on disk, on stdout; refuses one that
+# climbs with `..` or resolves outside the tree. Makes nothing.
+resolve() {
+  local name="$1" named
+  case "$2" in
+    /*) named="$2" ;;
+    *) named="$repo_root/$2" ;;
+  esac
+  # Written out component by component, without the `.` and empty ones, so two
+  # spellings of one directory compare equal even where none of it exists yet.
+  local part normal="" parts
+  IFS=/ read -r -a parts <<<"$named"
+  for part in "${parts[@]}"; do
+    case "$part" in
+      "" | .) ;;
+      ..) refuse "$name" "$2" "it climbs with '..'" ;;
+      *) normal="$normal/$part" ;;
+    esac
+  done
+  named="${normal:-/}"
+  local existing="$named" rest=""
+  while [ ! -e "$existing" ] && [ ! -L "$existing" ]; do
+    rest="/$(basename -- "$existing")$rest"
+    existing="$(dirname -- "$existing")"
+  done
+  local physical
+  if ! physical="$(CDPATH='' cd -P -- "$existing" 2>/dev/null && pwd -P)"; then
+    echo "visual-capture: cannot create $name's directory $named: $existing is not a directory this capture can enter" >&2
+    echo "ACTION: make $existing a directory the invoking user can enter so $named is creatable, or set $name to another directory under $repo_root" >&2
+    exit 1
+  fi
+  local resolved="${physical%/}$rest"
+  case "$resolved" in
+    "$repo_root"/*) printf '%s' "$resolved" ;;
+    *) refuse "$name" "$2" "it resolves to $resolved" ;;
+  esac
+}
+
+# make_destination NAME DIR: create a resolved destination, or say why it could not be.
+make_destination() {
+  local why
+  why="$(mkdir -p -- "$2" 2>&1)" && return 0
+  echo "visual-capture: cannot create $1's directory $2: $why" >&2
+  echo "ACTION: make the nearest existing directory above $2 writable by the invoking user so it is creatable, or set $1 to another directory under $repo_root" >&2
+  exit 1
+}
+
+# inside A B: whether directory A is B or lies under it.
+inside() {
+  case "$1/" in "$2"/*) return 0 ;; esac
+  return 1
+}
+
 if [ -n "${SHOTS_OUT:-}" ]; then
-  shots_out="$SHOTS_OUT"
+  shots_out="$(resolve SHOTS_OUT "$SHOTS_OUT")"
   minted=""
-  mkdir -p "$shots_out"
 else
   mkdir -p shots/local
   shots_out="$(mktemp -d "$repo_root/shots/local/capture-XXXXXXXX")"
@@ -72,19 +154,28 @@ else
   # caller's, empty or not.
   minted="$shots_out"
 fi
-# Absolute, because the spec is handed this path and a relative one would scatter
-# images wherever the process happened to start — and then said again the way the
-# container sees it, since the tree is mounted at /work and a host path means nothing
-# inside it. The destination has to be under the tree for that reason: it is the one
-# mount the capture writes through, and a directory outside it would need a second.
-shots_out="$(CDPATH='' cd -- "$shots_out" && pwd)"
-case "$shots_out" in
-  "$repo_root"/*) shots_in_container="/work/${shots_out#"$repo_root"/}" ;;
-  *)
-    echo "visual-capture: SHOTS_OUT must name a directory inside $repo_root, not $shots_out" >&2
+verify_out=""
+if [ -n "${SHOTS_VERIFY:-}" ]; then
+  # A second, independent capture for the reproducibility gate, so it may be neither
+  # the first destination under another name nor a directory inside it, nor hold it.
+  verify_out="$(resolve SHOTS_VERIFY "$SHOTS_VERIFY")"
+  if [ "$verify_out" = "$shots_out" ]; then
+    echo "visual-capture: SHOTS_VERIFY names the same directory as SHOTS_OUT ($shots_out); the gate compares two captures, so they need two" >&2
+    echo "ACTION: set SHOTS_VERIFY to a directory other than SHOTS_OUT, such as shots/verify/$arch" >&2
     exit 2
-    ;;
-esac
+  fi
+  if inside "$verify_out" "$shots_out" || inside "$shots_out" "$verify_out"; then
+    echo "visual-capture: SHOTS_VERIFY ($verify_out) and SHOTS_OUT ($shots_out) nest, so one capture would be written into the other's gallery" >&2
+    echo "ACTION: set SHOTS_VERIFY to a directory beside SHOTS_OUT rather than in or above it, such as shots/verify/$arch" >&2
+    exit 2
+  fi
+fi
+[ -n "$minted" ] || make_destination SHOTS_OUT "$shots_out"
+shots_in_container="/work/${shots_out#"$repo_root"/}"
+if [ -n "$verify_out" ]; then
+  make_destination SHOTS_VERIFY "$verify_out"
+  verify_in_container="/work/${verify_out#"$repo_root"/}"
+fi
 
 if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   echo "visual-capture: Docker is unavailable, and the capture renders in $image" >&2
@@ -123,40 +214,104 @@ bash "$script_dir/nx.sh" run dag-ui:build-api-server
 #   * the container is recorded by id as it starts, so an interrupted run takes it
 #     down with it instead of leaving it holding the tree.
 scratch="$(mktemp -d)"
-cid_file="$scratch/container.id"
-# shellcheck disable=SC2317  # reached through the `trap` below, which shellcheck
-# does not follow; every line of this function is live on each of those exits.
+# shellcheck disable=SC2317,SC2329  # reached through the `trap`s below, which
+# (shellcheck does not follow them); every line of this function is live on each.
 cleanup() {
-  if [ -s "$cid_file" ]; then
+  local cid_file
+  for cid_file in "$scratch"/*/container.id; do
+    [ -s "$cid_file" ] || continue
     # By the id this invocation started and nothing else: several dispatches share
     # this host, and a container matched by name or image could be somebody's.
     docker rm --force "$(cat "$cid_file")" >/dev/null 2>&1 || true
-  fi
+  done
+  # And then the renders themselves, each of which returns once its container is
+  # gone: a run that reported itself stopped leaves nothing of it running.
+  wait 2>/dev/null || true
   rm -rf "$scratch"
 }
-trap cleanup EXIT INT TERM
-mkdir -p "$scratch/home"
+# Asked to stop, the run takes its containers down and then stops with the status a
+# signal's own death would give, rather than resuming where the signal found it. The
+# renders are waited on rather than run in the foreground for the same reason: bash
+# runs no trap until a foreground command returns, and a render returns only once its
+# container is gone.
+trap cleanup EXIT
+trap 'cleanup; trap - EXIT; exit 130' INT
+trap 'cleanup; trap - EXIT; exit 143' TERM
+
+# render NAME DEST_IN_CONTAINER [docker args...] -- [playwright args...]: one capture,
+# in one container, whose home and recorded id live under the scratch's NAME.
+render() {
+  local name="$1" dest="$2"
+  shift 2
+  local docker_args=()
+  while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+    docker_args+=("$1")
+    shift
+  done
+  [ "$#" -gt 0 ] && shift
+  mkdir -p "$scratch/$name/home"
+  # `--ipc=host` and a 2 GiB /dev/shm keep Chromium from running out of shared memory
+  # part way through a page, which it reports as a renderer crash. Neither changes a
+  # byte of output; the flags that do are in `apps/dag-ui-e2e/screenshots.config.ts`.
+  docker run --rm \
+    --cidfile "$scratch/$name/container.id" \
+    --platform "$platform" \
+    --ipc=host --shm-size=2g \
+    --user "$(id -u):$(id -g)" \
+    --volume "$repo_root:/work" \
+    --volume "$scratch/$name:/scratch" \
+    "${docker_args[@]}" \
+    --env HOME=/scratch/home \
+    --env "SHOTS_OUT=$dest" \
+    --workdir /work \
+    "$image" \
+    npx playwright test --config apps/dag-ui-e2e/screenshots.config.ts "$@"
+}
+
+verify_status=0
+if [ -n "$verify_out" ]; then
+  # The second render's Playwright output directory, which is the one path under the
+  # tree both renders would otherwise write: the gallery's fixture workspace has a
+  # fixed name, so does the output directory named after it, and Playwright empties
+  # its output directory as a run starts. A host directory this script made is
+  # mounted over the e2e package's `test-results/` for this container alone — made
+  # here rather than left to Docker, which would create the mount point as root — so
+  # a failed render's traces still land in the tree, under `test-results/verify/`.
+  verify_results="$repo_root/apps/dag-ui-e2e/test-results/verify"
+  if ! why="$(mkdir -p -- "$verify_results" 2>&1)"; then
+    echo "visual-capture: cannot create the verify render's results directory $verify_results: $why" >&2
+    echo "ACTION: make $repo_root/apps/dag-ui-e2e writable by the invoking user, or remove a root-owned test-results/ left by an earlier container, then rerun" >&2
+    exit 1
+  fi
+  verify_log="$scratch/verify.log"
+  render verify "$verify_in_container" \
+    --volume "$verify_results:/work/apps/dag-ui-e2e/test-results" \
+    -- "$@" >"$verify_log" 2>&1 &
+  verify_pid=$!
+fi
 
 status=0
-# `--ipc=host` and a 2 GiB /dev/shm keep Chromium from running out of shared memory
-# part way through a page, which it reports as a renderer crash. Neither changes a
-# byte of output; the flags that do are in `apps/dag-ui-e2e/screenshots.config.ts`.
-docker run --rm \
-  --cidfile "$cid_file" \
-  --platform "$platform" \
-  --ipc=host --shm-size=2g \
-  --user "$(id -u):$(id -g)" \
-  --volume "$repo_root:/work" \
-  --volume "$scratch:/scratch" \
-  --env HOME=/scratch/home \
-  --env "SHOTS_OUT=$shots_in_container" \
-  --workdir /work \
-  "$image" \
-  npx playwright test --config apps/dag-ui-e2e/screenshots.config.ts "$@" || status=$?
+render current "$shots_in_container" -- "$@" &
+current_pid=$!
+wait "$current_pid" || status=$?
 
-if [ "$status" -eq 0 ]; then
-  echo "visual-capture: $arch capture in $shots_out"
+if [ -n "$verify_out" ]; then
+  wait "$verify_pid" || verify_status=$?
+  # After the first render's own output rather than through it, so each reads as one
+  # run; prefixed, so a line is never mistaken for the other capture's.
+  sed 's/^/[verify] /' "$verify_log"
+  if [ "$verify_status" -ne 0 ]; then
+    echo "visual-capture: the verify capture's playwright exited $verify_status; whatever it captured is in $verify_out" >&2
+    echo "ACTION: read the failing surface in the [verify] output above and its trace under $verify_results, then rerun" >&2
+  fi
+fi
+
+if [ "$status" -eq 0 ] && [ "$verify_status" -eq 0 ]; then
+  echo "visual-capture: $arch capture in $shots_out${verify_out:+, verify capture in $verify_out}"
   exit 0
+fi
+if [ "$status" -eq 0 ]; then
+  exit 1
 fi
 if [ -n "$minted" ] && [ -z "$(ls -A "$minted")" ]; then
   rmdir "$minted"

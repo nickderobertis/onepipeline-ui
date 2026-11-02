@@ -2,6 +2,8 @@
 # The sibling CLI `just _ensure-sibling` provisions, pinned by the lock.
 /.tools
 /.dev
+# The start and end `just gate` records for its time budget (scripts/gate-time.sh).
+/.gate-time
 # The Nx orchestrator's own install and computation cache. `scripts/nx.sh`
 # re-creates node_modules from the committed lockfile whenever it is missing.
 /node_modules

@@ -1,0 +1,400 @@
+import { spawn, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { repoPath } from "./repo-file";
+
+/**
+ * `scripts/visual-capture.sh` driven as lint's capture step drives it: two
+ * destinations, two renders side by side, one exit status.
+ *
+ * Where a capture may write is decided before anything is built, so those journeys run
+ * the script in place. The renders need Docker and the capture build, so those journeys
+ * run the real script from a scratch copy of the layout it reads, the way a checkout
+ * holds it, with Docker the one boundary stood in for: a `docker` on PATH that records
+ * each container it is asked to run and remove, and holds or fails a render on request.
+ * The two build steps the script calls first are stood in for too, since what they
+ * build is the photograph's subject and no part of how the script runs the renders.
+ */
+
+const scratchDirs: string[] = [];
+afterEach(() => {
+  for (const dir of scratchDirs.splice(0))
+    rmSync(dir, { recursive: true, force: true });
+});
+function scratch(under: string, prefix: string): string {
+  mkdirSync(under, { recursive: true });
+  const dir = realpathSync(mkdtempSync(join(under, prefix)));
+  scratchDirs.push(dir);
+  return dir;
+}
+
+/**
+ * The script in place, where every refusal under test happens before it asks for
+ * Docker. Docker is answered as unavailable, so a destination the script wrongly
+ * accepts fails here at once, with exit 1, rather than going on to build.
+ */
+function captureInPlace(env: Record<string, string>) {
+  const bin = scratch(tmpdir(), "visual-capture-bin-");
+  writeFileSync(join(bin, "docker"), "#!/usr/bin/env bash\nexit 1\n");
+  chmodSync(join(bin, "docker"), 0o755);
+  return spawnSync("bash", [repoPath("scripts/visual-capture.sh")], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env },
+  });
+}
+
+describe("where a capture may write, decided before anything is made", () => {
+  it("refuses a destination a symlink carries out of the tree, writing nothing there", () => {
+    const outside = scratch(tmpdir(), "visual-capture-outside-");
+    const root = scratch(repoPath("shots/local"), "symlink-");
+    symlinkSync(outside, join(root, "out"));
+    for (const name of ["SHOTS_OUT", "SHOTS_VERIFY"]) {
+      const result = captureInPlace({
+        SHOTS_OUT: join(root, "current/x86_64"),
+        [name]: join(root, "out/deeper/x86_64"),
+      });
+      expect(result.status, result.stderr).toBe(2);
+      expect(result.stderr).toContain(`visual-capture: ${name} must name`);
+      expect(result.stderr).toContain(
+        `it resolves to ${outside}/deeper/x86_64`,
+      );
+      expect(result.stderr).toMatch(/^ACTION: set /m);
+      expect(readdirSync(outside)).toEqual([]);
+    }
+  });
+
+  it("refuses a destination outside the tree the container mounts, making nothing there", () => {
+    const outside = scratch(tmpdir(), "visual-capture-outside-");
+    const root = scratch(repoPath("shots/local"), "outside-");
+    const absent = join(outside, "never-made");
+    for (const name of ["SHOTS_OUT", "SHOTS_VERIFY"]) {
+      const result = captureInPlace({
+        SHOTS_OUT: join(root, "current"),
+        [name]: absent,
+      });
+      expect(result.status, result.stderr).toBe(2);
+      expect(result.stderr).toContain(`visual-capture: ${name} must name`);
+      expect(result.stderr).toContain(`it resolves to ${absent}`);
+      expect(existsSync(absent)).toBe(false);
+    }
+  });
+
+  it("refuses a destination that climbs out of the tree with ..", () => {
+    const root = scratch(repoPath("shots/local"), "climb-");
+    const result = captureInPlace({
+      SHOTS_OUT: join(root, "current"),
+      SHOTS_VERIFY: "shots/../../visual-capture-escape",
+    });
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stderr).toContain("it climbs with '..'");
+    expect(existsSync(repoPath("../visual-capture-escape"))).toBe(false);
+  });
+
+  it("refuses a second destination that is the first one", () => {
+    const root = scratch(repoPath("shots/local"), "same-");
+    const result = captureInPlace({ SHOTS_OUT: root, SHOTS_VERIFY: root });
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stderr).toContain(
+      "SHOTS_VERIFY names the same directory as SHOTS_OUT",
+    );
+  });
+
+  it("refuses a second destination that differs from the first only by '.' or '/' components, making neither", () => {
+    // Literal strings, not path.join, which would normalize away the very
+    // components under test; `new` does not exist, so nothing on disk can
+    // resolve them.
+    const root = scratch(repoPath("shots/local"), "dot-");
+    const cases: [string, string, string][] = [
+      [`${root}/new/./same`, `${root}/new/same`, "names the same directory"],
+      [`${root}/new/same`, `${root}/./new//same/.`, "names the same directory"],
+      [`${root}//new/same/`, `${root}/new/same/./verify`, "nest"],
+    ];
+    for (const [out, verify, refusal] of cases) {
+      const result = captureInPlace({ SHOTS_OUT: out, SHOTS_VERIFY: verify });
+      expect(result.status, result.stderr).toBe(2);
+      expect(result.stderr).toContain(refusal);
+      expect(readdirSync(root)).toEqual([]);
+    }
+  });
+
+  it("refuses a second destination inside the first, making neither", () => {
+    const root = scratch(repoPath("shots/local"), "nested-");
+    const result = captureInPlace({
+      SHOTS_OUT: join(root, "current"),
+      SHOTS_VERIFY: join(root, "current/verify"),
+    });
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stderr).toContain("nest, so one capture would be written");
+    expect(readdirSync(root)).toEqual([]);
+  });
+
+  it("refuses a second destination that is the first one under another name", () => {
+    const root = scratch(repoPath("shots/local"), "alias-");
+    mkdirSync(join(root, "current"));
+    symlinkSync(join(root, "current"), join(root, "alias"));
+    const result = captureInPlace({
+      SHOTS_OUT: join(root, "current"),
+      SHOTS_VERIFY: join(root, "alias"),
+    });
+    expect(result.status, result.stderr).toBe(2);
+    expect(result.stderr).toContain(
+      "SHOTS_VERIFY names the same directory as SHOTS_OUT",
+    );
+  });
+
+  it("says what to do when a destination cannot be created", () => {
+    const root = scratch(repoPath("shots/local"), "blocked-");
+    mkdirSync(join(root, "sealed"));
+    chmodSync(join(root, "sealed"), 0o555);
+    try {
+      const result = captureInPlace({
+        SHOTS_OUT: join(root, "current"),
+        SHOTS_VERIFY: join(root, "sealed/verify"),
+      });
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).toContain(
+        `cannot create SHOTS_VERIFY's directory ${join(root, "sealed/verify")}: mkdir:`,
+      );
+      expect(result.stderr).toContain("Permission denied");
+      expect(result.stderr).toMatch(/^ACTION: make .* creatable/m);
+    } finally {
+      chmodSync(join(root, "sealed"), 0o755);
+    }
+  });
+});
+
+const DOCKER_DOUBLE = `#!/usr/bin/env bash
+# docker, as the capture script uses it: info, run --cidfile ... and rm --force ID.
+log="$DOCKER_DOUBLE_DIR/log"
+case "$1" in
+  info) exit 0 ;;
+  rm)
+    id="\${!#}"
+    echo "rm $id" >> "$log"
+    touch "$DOCKER_DOUBLE_DIR/$id.removed"
+    exit 0 ;;
+  run)
+    shift
+    cid=""; dest=""; work=""; results=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --cidfile) cid="$2"; shift 2 ;;
+        --env) case "$2" in SHOTS_OUT=*) dest="\${2#SHOTS_OUT=}" ;; esac; shift 2 ;;
+        --volume)
+          case "$2" in
+            *:/work) work="\${2%:/work}" ;;
+            *:/work/apps/dag-ui-e2e/test-results) results="\${2%:*}" ;;
+          esac
+          shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    id="container-$$"
+    echo "$id" > "$cid"
+    echo "run $id $dest" >> "$log"
+    # Playwright's output directory, through whatever the container has mounted:
+    # emptied as the run starts, then given this render's trace, under the one
+    # fixed name the gallery's fixture workspace gives it in every container.
+    out="\${results:-$work/apps/dag-ui-e2e/test-results}/gallery"
+    rm -rf "$out"; mkdir -p "$out"
+    echo "trace of the render into $dest" > "$out/trace.txt"
+    case "$DOCKER_DOUBLE_MODE:$dest" in
+      fail-verify:*/verify/*) echo "render failed into $dest"; exit 1 ;;
+      hold:*)
+        # Held until removed, for a minute at most: a script that never removes
+        # it leaves no process behind once the journey has failed.
+        for _ in $(seq 600); do
+          if [ -f "$DOCKER_DOUBLE_DIR/$id.removed" ]; then
+            echo "exited $id" >> "$log"
+            exit 137
+          fi
+          sleep 0.1
+        done
+        exit 124 ;;
+      *) echo "rendered into $dest"; exit 0 ;;
+    esac ;;
+esac
+echo "docker double: not a call the capture makes: $*" >&2
+exit 64
+`;
+
+/** A checkout's worth of what the script reads, with Docker and the build stood in for. */
+function layout() {
+  const root = scratch(tmpdir(), "visual-capture-layout-");
+  mkdirSync(join(root, "scripts"));
+  mkdirSync(join(root, "apps/dag-ui-e2e"), { recursive: true });
+  mkdirSync(join(root, "bin"));
+  mkdirSync(join(root, "docker"));
+  mkdirSync(join(root, "tmp"));
+  copyFileSync(
+    repoPath("scripts/visual-capture.sh"),
+    join(root, "scripts/visual-capture.sh"),
+  );
+  copyFileSync(
+    repoPath("apps/dag-ui-e2e/package.json"),
+    join(root, "apps/dag-ui-e2e/package.json"),
+  );
+  for (const step of ["workspace-install.sh", "nx.sh"])
+    writeFileSync(join(root, "scripts", step), `echo "built by ${step}"\n`);
+  writeFileSync(join(root, "bin/docker"), DOCKER_DOUBLE);
+  chmodSync(join(root, "bin/docker"), 0o755);
+  const env = (mode: string) => ({
+    ...process.env,
+    PATH: `${join(root, "bin")}:${process.env.PATH}`,
+    TMPDIR: join(root, "tmp"),
+    DOCKER_DOUBLE_DIR: join(root, "docker"),
+    DOCKER_DOUBLE_MODE: mode,
+    SHOTS_OUT: "shots/current/x86_64",
+    SHOTS_VERIFY: "shots/verify/x86_64",
+  });
+  const runs = () =>
+    existsSync(join(root, "docker/log"))
+      ? readFileSync(join(root, "docker/log"), "utf8")
+          .split("\n")
+          .filter((line) => line.startsWith("run "))
+          .map((line) => line.split(" ")[1] ?? "")
+      : [];
+  const exited = () =>
+    existsSync(join(root, "docker/log"))
+      ? readFileSync(join(root, "docker/log"), "utf8")
+          .split("\n")
+          .filter((line) => line.startsWith("exited "))
+          .map((line) => line.split(" ")[1] ?? "")
+          .sort()
+      : [];
+  const removed = () =>
+    readdirSync(join(root, "docker"))
+      .filter((name) => name.endsWith(".removed"))
+      .map((name) => name.replace(/\.removed$/, ""))
+      .sort();
+  return {
+    root,
+    env,
+    runs,
+    exited,
+    removed,
+    script: join(root, "scripts/visual-capture.sh"),
+  };
+}
+
+describe("two renders side by side", () => {
+  it("renders both destinations and reports them in one line", () => {
+    const capture = layout();
+    const result = spawnSync("bash", [capture.script], {
+      encoding: "utf8",
+      env: capture.env("succeed"),
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(capture.runs()).toHaveLength(2);
+    expect(result.stdout).toContain(
+      "[verify] rendered into /work/shots/verify/x86_64",
+    );
+    expect(result.stdout).toMatch(
+      /capture in .*\/shots\/current\/x86_64, verify capture in .*\/shots\/verify\/x86_64$/m,
+    );
+  });
+
+  it("fails when only the second render fails, naming it and what to do", () => {
+    const capture = layout();
+    const result = spawnSync("bash", [capture.script], {
+      encoding: "utf8",
+      env: capture.env("fail-verify"),
+    });
+    expect(result.status, result.stdout).toBe(1);
+    expect(result.stdout).toContain("rendered into /work/shots/current/x86_64");
+    expect(result.stdout).toContain(
+      "[verify] render failed into /work/shots/verify/x86_64",
+    );
+    expect(result.stderr).toContain("the verify capture's playwright exited 1");
+    expect(result.stderr).toMatch(/^ACTION: read the failing surface/m);
+    expect(result.stdout).not.toContain("verify capture in");
+    // Each render's traces outlive the other's run, under the directory the
+    // refusal names for the failing one.
+    const results = join(capture.root, "apps/dag-ui-e2e/test-results");
+    expect(
+      readFileSync(join(results, "verify/gallery/trace.txt"), "utf8"),
+    ).toBe("trace of the render into /work/shots/verify/x86_64\n");
+    expect(readFileSync(join(results, "gallery/trace.txt"), "utf8")).toBe(
+      "trace of the render into /work/shots/current/x86_64\n",
+    );
+    expect(result.stderr).toContain(
+      `its trace under ${join(results, "verify")}`,
+    );
+  });
+
+  it("refuses to render when the verify render's results directory cannot be made", () => {
+    const capture = layout();
+    const e2e = join(capture.root, "apps/dag-ui-e2e");
+    chmodSync(e2e, 0o555);
+    try {
+      const result = spawnSync("bash", [capture.script], {
+        encoding: "utf8",
+        env: capture.env("succeed"),
+      });
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).toContain(
+        `cannot create the verify render's results directory ${e2e}/test-results/verify: mkdir:`,
+      );
+      expect(result.stderr).toMatch(/^ACTION: make .* writable/m);
+      expect(capture.runs()).toEqual([]);
+    } finally {
+      chmodSync(e2e, 0o755);
+    }
+  });
+
+  it.each([
+    ["SIGTERM", 143],
+    ["SIGINT", 130],
+  ] as const)(
+    "asked to stop mid-render by %s, removes both containers and its scratch, and exits %i",
+    async (signal, status) => {
+      const capture = layout();
+      const child = spawn("bash", [capture.script], {
+        env: capture.env("hold"),
+        stdio: "ignore",
+        // Its own process group, so a script that will not stop is taken down
+        // with both renders and their doubles rather than leaving them behind.
+        detached: true,
+      });
+      const exited = new Promise<number | null>((resolve) =>
+        child.on("exit", (code) => resolve(code)),
+      );
+      const deadline = Date.now() + 30_000;
+      while (capture.runs().length < 2 && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      const started = capture.runs().sort();
+      expect(started).toHaveLength(2);
+      expect(capture.removed()).toEqual([]);
+      child.kill(signal);
+      const code = await Promise.race([
+        exited,
+        new Promise<"still running">((resolve) =>
+          setTimeout(() => resolve("still running"), 20_000),
+        ),
+      ]);
+      if (code === "still running" && child.pid !== undefined)
+        process.kill(-child.pid, "SIGKILL");
+      expect(code).toBe(status);
+      expect(capture.removed()).toEqual(started);
+      // Every render has returned by the time the script has: nothing of a
+      // stopped run is left running.
+      expect(capture.exited()).toEqual(started);
+      expect(readdirSync(join(capture.root, "tmp"))).toEqual([]);
+    },
+    60_000,
+  );
+});

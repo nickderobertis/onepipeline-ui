@@ -1,6 +1,6 @@
 // The four pull-request jobs other work builds against — `lint`, `test-linux`,
-// `test-windows`, `test-macos` — the jobs behind today's required contexts, and
-// the keys of every cache a workflow restores.
+// `test-windows`, `test-macos` — which are also the contexts branch protection
+// requires, and the keys of every cache a workflow restores or saves.
 //
 // Reads `.github/workflows` and nothing outside `.github/`, which is what lets
 // `github-workflows:test-ci-jobs` key on this directory alone. Each rule is a
@@ -8,12 +8,10 @@
 // the real workflows with exactly the defect it names, as well as passing on the
 // real ones.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { parse } from "yaml";
 import { REQUIRED_CONTEXTS } from "../required-contexts.mjs";
-import { evaluate } from "../workflow-graph.mjs";
 
 function load() {
   return Object.fromEntries(
@@ -150,38 +148,11 @@ export function jobProblems(workflows) {
   return problems;
 }
 
-// Each context branch protection requires today (../required-contexts.mjs),
-// and the job that reports it:
-// a job id with no name override reports under its id, a matrix leg as
-// `id (value)`, and the visual-docs context as the caller job's id, then the
-// reusable workflow's `report` leg, named from the defaults it is not passed.
-const REQUIRED = {
-  gate: { file: "ci.yml", job: "gate" },
-  deny: { file: "ci.yml", job: "deny" },
-  "pr-title": { file: "ci.yml", job: "pr-title" },
-  llmlint: { file: "ci.yml", job: "llmlint" },
-  msrv: { file: "ci.yml", job: "msrv" },
-  "cross (windows-latest)": {
-    file: "ci.yml",
-    job: "cross",
-    os: "windows-latest",
-  },
-  "install (ubuntu-latest)": {
-    file: "ci.yml",
-    job: "install",
-    os: "ubuntu-latest",
-  },
-  "install (windows-latest)": {
-    file: "ci.yml",
-    job: "install",
-    os: "windows-latest",
-  },
-  "visual-docs / report (x86_64, shots/current, shots/verify, Visual docs)": {
-    file: "visual-docs.yml",
-    job: "visual-docs",
-    reusable: true,
-  },
-};
+// Each context branch protection requires (../required-contexts.mjs), and the
+// job that reports it: a job id with no name override reports under its id.
+const REQUIRED = Object.fromEntries(
+  Object.keys(FOUR).map((job) => [job, { file: "ci.yml", job }]),
+);
 
 export function requiredContextProblems(workflows) {
   const problems = [];
@@ -195,23 +166,6 @@ export function requiredContextProblems(workflows) {
     }
     if ("name" in job)
       problems.push(`${context}: job ${where.job} overrides its name`);
-    if (where.os && !(job.strategy?.matrix?.os ?? []).includes(where.os))
-      problems.push(`${context}: job ${where.job} has no ${where.os} leg`);
-    if (where.reusable) {
-      if (!(job.uses ?? "").startsWith(`${REUSABLE}@`))
-        problems.push(
-          `${context}: job ${where.job} no longer calls the reusable workflow`,
-        );
-      for (const input of ["gallery-title", "projects", "arches"])
-        if (job.with && input in job.with)
-          problems.push(
-            `${context}: job ${where.job} passes ${input}, which renames the context`,
-          );
-      if (!("pull_request" in (workflows[where.file]?.on ?? {})))
-        problems.push(
-          `${context}: ${where.file} no longer runs on pull_request`,
-        );
-    }
   }
   return problems;
 }
@@ -308,8 +262,8 @@ export function cacheProblems(workflows) {
 
 // Linux arm64 stays out of pull-request CI: ci.yml builds, installs and
 // smoke-tests no aarch64-unknown-linux-gnu wheel and names no arm64 Linux
-// runner, and `wheel` keeps only its x86_64 leg. The release builds arm64 Linux
-// in its own `build-linux-arm64` job (.github/tests/release.test.mjs).
+// runner; `test-linux` builds the x86_64 wheel alone. The release builds arm64
+// Linux in its own `build-linux-arm64` job (.github/tests/release.test.mjs).
 const ARM_LINUX_RUNNER = /^ubuntu-[\w.]+-arm$/;
 export function linuxArm64Problems(workflows) {
   const problems = [];
@@ -326,211 +280,79 @@ export function linuxArm64Problems(workflows) {
       if (typeof runner === "string" && ARM_LINUX_RUNNER.test(runner))
         problems.push(`job ${id} runs on the arm64 Linux runner ${runner}`);
   }
-  const legs = (ci?.jobs?.wheel?.strategy?.matrix?.include ?? []).map(
-    (leg) => leg.target,
-  );
-  if (JSON.stringify(legs) !== JSON.stringify(["x86_64-unknown-linux-gnu"]))
-    problems.push(`wheel's legs are ${JSON.stringify(legs)}, not x86_64 alone`);
   return problems;
 }
 
-// A Rust build the four jobs save on failure is saved from a cancelled run only
-// when that run reached its cap: each job takes its start time first, and after
-// its recipe stops what a cancelled run left building and asks
-// scripts/ci-cache-verdict.sh, at the job's own cap, whether to keep the save.
-//
-// The verdict is executed as each job runs it in cache-verdict.test.mjs. The stop
-// step is held here by its shape alone, deliberately: it kills every build tool
-// and container on the machine it runs on, which on a job's own runner is the
-// job's work and on any machine a test could run it on is somebody else's.
-const VERDICT =
-  'bash scripts/ci-cache-verdict.sh --started "$JOB_STARTED_AT" --cap-minutes ';
-export function cancelledCacheProblems(workflows) {
+// What lint's visual docs do on a pull request: photograph the build twice,
+// gate the two captures against each other (the reproducibility gate) and
+// against the committed baseline (the drift gate), with either failing the job,
+// and publish nothing — publishing is off so the job fits its 30-minute cap.
+const PR_STEP = "github.event_name == 'pull_request' && !cancelled()";
+// The expression a step reads the switch through, spelled as the workflow does.
+const SWITCH = ["${{", "env.VISUAL_DOCS_PUBLISH", "}}"].join(" ");
+
+export function lintVisualDocsProblems(workflows) {
   const problems = [];
-  for (const id of Object.keys(FOUR)) {
-    const job = workflows["ci.yml"]?.jobs?.[id];
-    if (!job) continue;
-    const steps = job.steps ?? [];
-    const rust = steps.findIndex(
-      (s) =>
-        (s.uses ?? "").startsWith("Swatinem/rust-cache@") &&
-        s.with?.["cache-on-failure"],
-    );
-    if (rust < 0) continue;
-    if (!/JOB_STARTED_AT=\$\(date \+%s\)/.test(steps[0]?.run ?? ""))
-      problems.push(`job ${id} does not take its start time first`);
-    const at = (pattern) =>
-      steps.findIndex(
-        (s) => s.if === "cancelled()" && pattern.test(s.run ?? ""),
-      );
-    const stop = at(/pkill -KILL|taskkill \/\/F/);
-    const verdict = steps.findIndex(
-      (s) => s.if === "cancelled()" && (s.run ?? "").startsWith(VERDICT),
-    );
-    const recipe = steps.findIndex((s) =>
-      (s.run ?? "").startsWith(`just ci-${id}`),
-    );
-    if (stop < 0)
-      problems.push(`job ${id} leaves a cancelled run's builds running`);
-    if (verdict < 0) {
-      problems.push(`job ${id} saves a superseded run's build`);
-      continue;
+  const lint = workflows["ci.yml"]?.jobs?.lint;
+  const steps = lint?.steps ?? [];
+  const publish = String(lint?.env?.VISUAL_DOCS_PUBLISH);
+  if (publish !== "false")
+    problems.push(`lint's VISUAL_DOCS_PUBLISH is ${publish}, not false`);
+  const permissions = lint?.permissions ?? {};
+  if (permissions.contents === "write" || "pages" in permissions)
+    problems.push("lint's token can deploy the gallery");
+  for (const step of steps) {
+    const uses = step.uses ?? "";
+    const label = step.name ?? uses;
+    if (step.with && "publish" in step.with) {
+      const value = String(step.with.publish);
+      if ((value === SWITCH ? publish : value) !== "false")
+        problems.push(`lint's step ${label} publishes`);
     }
-    if (steps[verdict].run !== `${VERDICT}${job["timeout-minutes"]}`)
-      problems.push(`job ${id} reads its cap as other than its timeout`);
-    if (!(recipe < stop && stop < verdict))
-      problems.push(
-        `job ${id} does not stop its builds and then decide, after its recipe`,
-      );
-  }
-  return problems;
-}
-
-// The switch the verdict sets is rust-cache's own: its post step runs when
-// `success() || env.CACHE_ON_FAILURE == 'true'`. That is held to the release the
-// four jobs pin, through a verbatim snapshot of its action.yml whose bytes are
-// the Git blob the lock names, so a move to a release that reads anything else
-// fails here rather than saving every superseded run again.
-// The snapshot's first line, which marks it as upstream bytes; split here so
-// this file does not carry the directive it spells.
-const SNAPSHOT_ANNOTATION = [
-  "# llmlint",
-  ": ignore-file[comments_earn_their_place] Verbatim upstream action snapshot: every upstream byte is verified against its pinned Git blob; its comments are not repository-authored prose.\n",
-].join("");
-export function rustCacheSnapshot() {
-  return {
-    text: readFileSync(".github/fixtures/rust-cache-v2.9.2-action.yml", "utf8"),
-    lock: JSON.parse(
-      readFileSync(".github/fixtures/rust-cache-lock.json", "utf8"),
-    ),
-  };
-}
-export function rustCacheSwitchProblems(workflows, snapshot) {
-  const problems = [];
-  for (const id of Object.keys(FOUR))
-    for (const step of workflows["ci.yml"]?.jobs?.[id]?.steps ?? [])
-      if (
-        (step.uses ?? "").startsWith("Swatinem/rust-cache@") &&
-        step.uses !== snapshot.lock.uses
+    if (
+      uses.startsWith("nickderobertis/screencomp/visual-docs-pages@") &&
+      !(
+        publish === "false" &&
+        /env\.VISUAL_DOCS_PUBLISH == 'true'/.test(step.if ?? "")
       )
-        problems.push(
-          `job ${id} uses ${step.uses}, not the snapshotted ${snapshot.lock.uses}`,
-        );
-  if (!snapshot.text.startsWith(SNAPSHOT_ANNOTATION)) {
-    problems.push("the rust-cache snapshot lost its annotation");
-    return problems;
-  }
-  const source = Buffer.from(snapshot.text.slice(SNAPSHOT_ANNOTATION.length));
-  const blob = createHash("sha1")
-    .update(`blob ${source.length}\0`)
-    .update(source)
-    .digest("hex");
-  if (blob !== snapshot.lock.blob)
-    problems.push(`the rust-cache snapshot is not blob ${snapshot.lock.blob}`);
-  const postIf = parse(source.toString())?.runs?.["post-if"];
-  const saves = (value) =>
-    typeof postIf === "string" &&
-    evaluate(postIf, {
-      env: { CACHE_ON_FAILURE: value },
-      needs: { job: { result: "cancelled" } },
-    }).value;
-  if (saves("false") || !saves("true"))
-    problems.push(
-      "rust-cache's post step does not obey CACHE_ON_FAILURE on a cancelled job",
-    );
-  return problems;
-}
-
-// Each of the four jobs restores main's build first, where a main run builds on
-// its OS: the key a main run of an old job saves for the same toolchain, named by
-// that job, which has no shared-key of its own and runs on the same OS, and never
-// saved from here. Then its own build, restored over it and saved, pull requests
-// included, until the main-branch warm job replacing the old jobs saves what
-// these build. Every other cache the four save, they save on main only.
-const SHARED = {
-  lint: "msrv",
-  "test-linux": "quality",
-  "test-windows": "cross",
-};
-export function cacheRestoreProblems(workflows) {
-  const problems = [];
-  const jobs = workflows["ci.yml"]?.jobs ?? {};
-  const rustCaches = (job) =>
-    (job?.steps ?? []).filter((s) =>
-      (s.uses ?? "").startsWith("Swatinem/rust-cache@"),
-    );
-  const os = (runner) => String(runner).split("-")[0];
-  for (const id of Object.keys(FOUR)) {
-    const job = jobs[id];
-    if (!job) continue;
-    const caches = rustCaches(job);
-    const own = caches.at(-1);
-    if (!own || own.with?.["shared-key"] || own.with?.["save-if"] === false)
-      problems.push(`job ${id} does not restore and save its own build last`);
-    const borrowed = caches.slice(0, -1);
-    if (!SHARED[id]) {
-      if (borrowed.length)
-        problems.push(`job ${id} restores a build no main run of its OS saves`);
-    } else if (
-      borrowed.length !== 1 ||
-      borrowed[0].with?.["shared-key"] !== SHARED[id] ||
-      borrowed[0].with?.["save-if"] !== false
     )
-      problems.push(
-        `job ${id} does not restore ${SHARED[id]}'s main build first, unsaved`,
-      );
-    else {
-      const lender = jobs[SHARED[id]];
-      const lent = rustCaches(lender)[0];
-      const runners = [
-        lender?.["runs-on"],
-        ...(lender?.strategy?.matrix?.os ?? []),
-      ];
-      if (
-        !lent ||
-        lent.with?.["shared-key"] ||
-        !runners.some((r) => os(r) === os(job["runs-on"]))
-      )
-        problems.push(
-          `job ${id} restores ${SHARED[id]}'s key, which no ${os(job["runs-on"])} job of ci.yml saves`,
-        );
-    }
-    for (const step of job.steps ?? [])
-      if (
-        (step.uses ?? "").startsWith("actions/cache/save@") &&
-        !/(^|&& )github\.ref == 'refs\/heads\/main' &&/.test(step.if ?? "")
-      )
-        problems.push(
-          `job ${id} saves ${String(step.with?.path ?? "")
-            .split("\n")
-            .map((path) => path.trim())
-            .filter(Boolean)
-            .join(", ")} off main`,
-        );
+      problems.push("lint deploys the gallery on a pull request");
   }
-  return problems;
-}
-
-// `lint` runs the judged tier as the `llmlint` job does, so the harnesses it
-// installs are that job's, pin for pin: each harness step of either job has the
-// same-named step in the other, running the same command.
-export function judgeHarnessProblems(workflows) {
-  const problems = [];
-  const harnesses = (id) =>
-    new Map(
-      (workflows["ci.yml"]?.jobs?.[id]?.steps ?? [])
-        .filter((s) => /^Install the .* harness/.test(s.name ?? ""))
-        .map((s) => [s.name, s.run]),
-    );
-  const lint = harnesses("lint");
-  const judge = harnesses("llmlint");
-  if (judge.size === 0) problems.push("the llmlint job installs no harness");
-  for (const [name, run] of judge)
-    if (lint.get(name) !== run)
-      problems.push(`lint's "${name}" is not the llmlint job's: ${run}`);
-  for (const name of lint.keys())
-    if (!judge.has(name))
-      problems.push(`lint installs "${name}", which the llmlint job does not`);
+  const classify = steps.find((step) =>
+    (step.uses ?? "").startsWith("nickderobertis/screencomp/visual-docs@"),
+  );
+  const capture = steps.find((step) =>
+    /^just dag-ui-screens\b/.test((step.run ?? "").trim()),
+  );
+  const arch = classify?.with?.arch;
+  const current = classify?.with?.current;
+  const verify = classify?.with?.["verify-second"];
+  if (!capture) problems.push("lint captures no visual docs");
+  if (!classify) problems.push("lint does not gate its captures");
+  if (capture && classify) {
+    if (capture.env?.SHOTS_OUT !== `${current}/${arch}`)
+      problems.push(
+        `lint's capture writes ${capture.env?.SHOTS_OUT}, not the ${current}/${arch} the gates read`,
+      );
+    if (!verify)
+      problems.push("lint's reproducibility gate has no second capture");
+    else if (capture.env?.SHOTS_VERIFY !== `${verify}/${arch}`)
+      problems.push(
+        `lint's capture writes no second capture into the ${verify}/${arch} the reproducibility gate reads`,
+      );
+    if (String(classify.with?.["fail-on-drift"]) !== "true")
+      problems.push("lint's drift gate does not fail the job");
+  }
+  for (const [what, step] of [
+    ["capture", capture],
+    ["gates", classify],
+  ]) {
+    if (!step) continue;
+    if (step["continue-on-error"] !== undefined)
+      problems.push(`lint's ${what} cannot fail the job`);
+    if (step.if !== PR_STEP)
+      problems.push(`lint's ${what} does not run on every pull request`);
+  }
   return problems;
 }
 
@@ -659,7 +481,96 @@ test("the visual docs capture leaving lint, or running through the reusable work
   );
 });
 
-test("every job behind today's required contexts is still in place", () => {
+test("lint captures twice and gates both ways on a pull request, and publishes nothing", () => {
+  assert.deepEqual(lintVisualDocsProblems(load()), []);
+});
+
+test("lint publishing, or losing a capture or either gate, is refused", () => {
+  const lintOf = (w) => w["ci.yml"].jobs.lint;
+  const stepOf = (w, uses) =>
+    lintOf(w).steps.find((s) => (s.uses ?? "").startsWith(uses));
+  const captureOf = (w) =>
+    lintOf(w).steps.find((s) => /^just dag-ui-screens\b/.test(s.run ?? ""));
+  const classify = "nickderobertis/screencomp/visual-docs@";
+  const cases = [
+    [
+      (w) => {
+        lintOf(w).env.VISUAL_DOCS_PUBLISH = "true";
+      },
+      "lint's VISUAL_DOCS_PUBLISH is true, not false",
+    ],
+    [
+      (w) => {
+        stepOf(w, classify).with.publish = "true";
+      },
+      "lint's step Classify, gate and build the gallery publishes",
+    ],
+    [
+      (w) => {
+        delete stepOf(w, "nickderobertis/screencomp/visual-docs-pages@").if;
+      },
+      "lint deploys the gallery on a pull request",
+    ],
+    [
+      (w) => {
+        lintOf(w).permissions.contents = "write";
+      },
+      "lint's token can deploy the gallery",
+    ],
+    [
+      (w) => {
+        lintOf(w).steps = lintOf(w).steps.filter((s) => s !== captureOf(w));
+      },
+      "lint captures no visual docs",
+    ],
+    [
+      (w) => {
+        delete captureOf(w).env.SHOTS_VERIFY;
+      },
+      "lint's capture writes no second capture into the shots/verify/x86_64 the reproducibility gate reads",
+    ],
+    [
+      (w) => {
+        delete stepOf(w, classify).with["verify-second"];
+      },
+      "lint's reproducibility gate has no second capture",
+    ],
+    [
+      (w) => {
+        stepOf(w, classify).with["fail-on-drift"] = "false";
+      },
+      "lint's drift gate does not fail the job",
+    ],
+    [
+      (w) => {
+        stepOf(w, classify)["continue-on-error"] = true;
+      },
+      "lint's gates cannot fail the job",
+    ],
+    [
+      (w) => {
+        captureOf(w).if = "false";
+      },
+      "lint's capture does not run on every pull request",
+    ],
+    [
+      (w) => {
+        lintOf(w).steps = lintOf(w).steps.filter(
+          (s) => s !== stepOf(w, classify),
+        );
+      },
+      "lint does not gate its captures",
+    ],
+  ];
+  for (const [mutate, expected] of cases) {
+    const workflows = clone(load());
+    mutate(workflows);
+    const problems = lintVisualDocsProblems(workflows);
+    assert.ok(problems.includes(expected), `${expected}: ${problems}`);
+  }
+});
+
+test("every job behind the required contexts is still in place", () => {
   assert.deepEqual(Object.keys(REQUIRED).sort(), [...REQUIRED_CONTEXTS].sort());
   assert.deepEqual(requiredContextProblems(load()), []);
   for (const [context, where] of Object.entries(REQUIRED)) {
@@ -672,50 +583,40 @@ test("every job behind today's required contexts is still in place", () => {
       context,
     );
   }
-  const workflows = clone(load());
-  workflows["ci.yml"].jobs.install.strategy.matrix.os = ["ubuntu-latest"];
-  workflows["visual-docs.yml"].jobs["visual-docs"].with["gallery-title"] =
-    "Docs";
-  const problems = requiredContextProblems(workflows);
+  const renamed = clone(load());
+  renamed["ci.yml"].jobs["test-windows"].name = "Windows";
   assert.ok(
-    problems.includes(
-      "install (windows-latest): job install has no windows-latest leg",
+    requiredContextProblems(renamed).includes(
+      "test-windows: job test-windows overrides its name",
     ),
-    problems,
-  );
-  assert.ok(
-    problems.some((p) =>
-      p.endsWith("passes gallery-title, which renames the context"),
-    ),
-    problems,
   );
 });
 
 test("every restored cache is keyed on what produced it", () => {
   const workflows = load();
   assert.deepEqual(cacheProblems(workflows), []);
-  const steps = (pick) =>
-    Object.entries(workflows["ci.yml"].jobs)
-      .filter(([id]) => pick(id))
-      .flatMap(([, job]) => job.steps ?? []);
-  const of = (prefix, pick) =>
-    steps(pick)
-      .filter((s) => (s.uses ?? "").startsWith(prefix))
-      .map((s) => [s.with.path, s.with.key])
+  // Per OS, as each workflow's own pins step reads it: the sibling on all three
+  // and the base server on Linux, restored by the pull-request jobs and saved,
+  // under exactly those keys and paths, by the main-push warmer alone.
+  const runnerOs = { ubuntu: "Linux", windows: "Windows", macos: "macOS" };
+  const of = (file, prefix) =>
+    Object.values(workflows[file].jobs)
+      .flatMap((job) =>
+        (job.steps ?? [])
+          .filter((s) => (s.uses ?? "").startsWith(prefix))
+          .map((s) => [
+            runnerOs[job["runs-on"].split("-")[0]],
+            s.with.path,
+            s.with.key,
+          ]),
+      )
+      .map((row) => JSON.stringify(row))
       .sort();
-  // The sibling on all three platforms and the baseline server on Linux, each
-  // saved under exactly the key and paths it is restored by — by a job a main
-  // run reaches. test-macos runs on pull requests only, so it restores what a
-  // main-branch warm job saves and saves nothing itself.
-  assert.equal(of("actions/cache/restore@", () => true).length, 4);
-  assert.deepEqual(
-    of("actions/cache/save@", (id) => id === "test-macos"),
-    [],
-  );
-  assert.deepEqual(
-    of("actions/cache/save@", () => true),
-    of("actions/cache/restore@", (id) => id !== "test-macos"),
-  );
+  const restored = of("ci.yml", "actions/cache/restore@");
+  assert.equal(restored.length, 4);
+  assert.deepEqual(of("ci.yml", "actions/cache/save@"), []);
+  assert.deepEqual(of("ci-cache.yml", "actions/cache/save@"), restored);
+  assert.deepEqual(of("ci-cache.yml", "actions/cache/restore@"), restored);
 });
 
 test("a cache key that omits the lockfile pin or a pinned tool is refused", () => {
@@ -819,32 +720,21 @@ test("ci.yml builds no Linux arm64 wheel and names no arm64 Linux runner", () =>
   assert.deepEqual(linuxArm64Problems(load()), []);
 });
 
-test("a Linux arm64 wheel leg or runner coming back is refused", () => {
+test("a Linux arm64 wheel or runner coming back is refused", () => {
   const cases = [
     [
       (w) => {
-        w["ci.yml"].jobs.wheel.strategy.matrix.include.push({
-          target: "aarch64-unknown-linux-gnu",
-          os: "ubuntu-24.04-arm",
+        w["ci.yml"].jobs["test-linux"].steps.push({
+          run: "just wheel-linux aarch64-unknown-linux-gnu",
         });
       },
-      [
-        "ci.yml names aarch64-unknown-linux-gnu",
-        "job wheel runs on the arm64 Linux runner ubuntu-24.04-arm",
-        'wheel\'s legs are ["x86_64-unknown-linux-gnu","aarch64-unknown-linux-gnu"], not x86_64 alone',
-      ],
+      ["ci.yml names aarch64-unknown-linux-gnu"],
     ],
     [
       (w) => {
         w["ci.yml"].jobs["test-linux"]["runs-on"] = "ubuntu-24.04-arm";
       },
       ["job test-linux runs on the arm64 Linux runner ubuntu-24.04-arm"],
-    ],
-    [
-      (w) => {
-        w["ci.yml"].jobs.wheel.strategy.matrix.include = [];
-      },
-      ["wheel's legs are [], not x86_64 alone"],
     ],
   ];
   for (const [mutate, expected] of cases) {
@@ -854,191 +744,4 @@ test("a Linux arm64 wheel leg or runner coming back is refused", () => {
     for (const problem of expected)
       assert.ok(problems.includes(problem), `${problem}: ${problems}`);
   }
-});
-
-test("a cancelled run's build is saved only when it reached the cap", () => {
-  assert.deepEqual(cancelledCacheProblems(load()), []);
-});
-
-test("a job that would save a superseded run's build is refused", () => {
-  const steps = (w, id) => w["ci.yml"].jobs[id].steps;
-  const without = (w, id, pattern) => {
-    w["ci.yml"].jobs[id].steps = steps(w, id).filter(
-      (s) => !pattern.test(s.run ?? ""),
-    );
-  };
-  const cases = [
-    [
-      (w) => without(w, "test-linux", /JOB_STARTED_AT=/),
-      "job test-linux does not take its start time first",
-    ],
-    [
-      (w) => without(w, "test-windows", /taskkill/),
-      "job test-windows leaves a cancelled run's builds running",
-    ],
-    [
-      (w) => without(w, "lint", /ci-cache-verdict/),
-      "job lint saves a superseded run's build",
-    ],
-    [
-      (w) => {
-        steps(w, "test-macos").find((s) =>
-          (s.run ?? "").includes("ci-cache-verdict"),
-        ).run = `${VERDICT}45`;
-      },
-      "job test-macos reads its cap as other than its timeout",
-    ],
-    [
-      (w) => {
-        const list = steps(w, "test-linux");
-        const stop = list.findIndex((s) => /pkill/.test(s.run ?? ""));
-        const [moved] = list.splice(stop, 1);
-        list.push(moved);
-      },
-      "job test-linux does not stop its builds and then decide, after its recipe",
-    ],
-  ];
-  for (const [mutate, problem] of cases) {
-    const workflows = clone(load());
-    mutate(workflows);
-    assert.ok(
-      cancelledCacheProblems(workflows).includes(problem),
-      `${problem}: ${cancelledCacheProblems(workflows)}`,
-    );
-  }
-});
-
-test("the save switch the verdict sets is the one the pinned rust-cache reads", () => {
-  assert.deepEqual(rustCacheSwitchProblems(load(), rustCacheSnapshot()), []);
-});
-
-test("a rust-cache pin or snapshot that parts from the switch is refused", () => {
-  const snapshot = rustCacheSnapshot();
-  const moved = clone(load());
-  moved["ci.yml"].jobs["test-windows"].steps.find((s) =>
-    (s.uses ?? "").startsWith("Swatinem/rust-cache@"),
-  ).uses = "Swatinem/rust-cache@v2";
-  assert.ok(
-    rustCacheSwitchProblems(moved, snapshot).includes(
-      "job test-windows uses Swatinem/rust-cache@v2, not the snapshotted Swatinem/rust-cache@v2.9.2",
-    ),
-  );
-  const edited = {
-    ...snapshot,
-    text: snapshot.text.replace("Defaults to false.", "Defaults to true."),
-  };
-  assert.ok(
-    rustCacheSwitchProblems(load(), edited).includes(
-      `the rust-cache snapshot is not blob ${snapshot.lock.blob}`,
-    ),
-  );
-  // A release whose post step ignored the switch, with a lock that vouches for
-  // it, is refused on what it says rather than on its digest.
-  const text = snapshot.text.replace(
-    "post-if: \"success() || env.CACHE_ON_FAILURE == 'true'\"",
-    'post-if: "always()"',
-  );
-  const source = Buffer.from(text.slice(SNAPSHOT_ANNOTATION.length));
-  const blob = createHash("sha1")
-    .update(`blob ${source.length}\0`)
-    .update(source)
-    .digest("hex");
-  assert.deepEqual(
-    rustCacheSwitchProblems(load(), { text, lock: { ...snapshot.lock, blob } }),
-    [
-      "rust-cache's post step does not obey CACHE_ON_FAILURE on a cancelled job",
-    ],
-  );
-});
-
-test("the four jobs restore main's builds, then their own", () => {
-  assert.deepEqual(cacheRestoreProblems(load()), []);
-});
-
-test("a borrowed build saved from here, or one no main job saves, is refused", () => {
-  const rust = (w, id) =>
-    w["ci.yml"].jobs[id].steps.filter((s) =>
-      (s.uses ?? "").startsWith("Swatinem/rust-cache@"),
-    );
-  const cases = [
-    [
-      (w) => {
-        delete rust(w, "test-linux")[0].with["save-if"];
-      },
-      "job test-linux does not restore quality's main build first, unsaved",
-    ],
-    [
-      (w) => {
-        rust(w, "test-windows")[0].with["shared-key"] = "quality";
-      },
-      "job test-windows does not restore cross's main build first, unsaved",
-    ],
-    [
-      (w) => {
-        rust(w, "lint")[1].with["save-if"] = false;
-      },
-      "job lint does not restore and save its own build last",
-    ],
-    [
-      (w) => {
-        delete w["ci.yml"].jobs.msrv;
-      },
-      "job lint restores msrv's key, which no ubuntu job of ci.yml saves",
-    ],
-    [
-      (w) => {
-        w["ci.yml"].jobs["test-macos"].steps.unshift({
-          uses: "Swatinem/rust-cache@v2.9.2",
-          with: { "shared-key": "quality", "save-if": false },
-        });
-      },
-      "job test-macos restores a build no main run of its OS saves",
-    ],
-    [
-      (w) => {
-        w["ci.yml"].jobs["test-linux"].steps.find(
-          (s) => s.name === "Save the sibling CLI",
-        ).if = "steps.sibling.outputs.cache-hit != 'true'";
-      },
-      "job test-linux saves .tools/bin/onepipeline, .tools/bin/onepipeline.source off main",
-    ],
-  ];
-  for (const [mutate, problem] of cases) {
-    const workflows = clone(load());
-    mutate(workflows);
-    assert.ok(
-      cacheRestoreProblems(workflows).includes(problem),
-      `${problem}: ${cacheRestoreProblems(workflows)}`,
-    );
-  }
-});
-
-test("lint's judge harnesses are the llmlint job's, pin for pin", () => {
-  assert.deepEqual(judgeHarnessProblems(load()), []);
-});
-
-test("a judge harness pin that parts from the llmlint job's is refused", () => {
-  const workflows = clone(load());
-  const step = workflows["ci.yml"].jobs.lint.steps.find(
-    (s) => s.name === "Install the Codex harness",
-  );
-  step.run = "npm install -g @openai/codex@0.0.1";
-  assert.ok(
-    judgeHarnessProblems(workflows).some((p) =>
-      p.startsWith(
-        "lint's \"Install the Codex harness\" is not the llmlint job's",
-      ),
-    ),
-    `${judgeHarnessProblems(workflows)}`,
-  );
-  const extra = clone(load());
-  extra["ci.yml"].jobs.lint.steps.push({
-    name: "Install the Gemini harness",
-    run: "npm install -g gemini",
-  });
-  assert.ok(
-    judgeHarnessProblems(extra).includes(
-      'lint installs "Install the Gemini harness", which the llmlint job does not',
-    ),
-  );
 });

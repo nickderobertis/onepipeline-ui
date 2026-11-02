@@ -68,6 +68,8 @@
 
 # Workflow scheduling, its private tooling and telemetry budgets.
 /.github/project.json @nickderobertis
+/.github/tests/installs/ @nickderobertis
+/.github/tests/judge-install/ @nickderobertis
 
 # The pool maintenance `onevcs.toml` declares, and the budget timing one pass.
 /onevcs.toml             @nickderobertis

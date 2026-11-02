@@ -1,0 +1,29 @@
+HTTP/2.0 200 OK
+Access-Control-Allow-Origin: *
+Access-Control-Expose-Headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset, Warning
+Cache-Control: private, max-age=60, s-maxage=60
+Content-Security-Policy: default-src 'none'
+Content-Type: application/json; charset=utf-8
+Date: Sun, 01 Nov 2026 20:25:43 GMT
+Etag: W/"20e3fe797bcb49eb49d02062cf38133a433ac7d8de7a3eb58b4359942141eae3"
+Referrer-Policy: origin-when-cross-origin, strict-origin-when-cross-origin
+Server: github.com
+Strict-Transport-Security: max-age=31536000; includeSubdomains; preload
+Vary: Accept, Authorization, Cookie, X-GitHub-OTP,Accept-Encoding, Accept, X-Requested-With
+X-Accepted-Oauth-Scopes: 
+X-Content-Type-Options: nosniff
+X-Frame-Options: deny
+X-Github-Api-Version-Selected: 2022-11-28
+X-Github-Edge-Region: iad
+X-Github-Media-Type: github.v3; format=json
+X-Github-Request-Id: 9BE4:1732B2:2BB6EB5:93786C5:6AE7A046
+X-Oauth-Client-Id: 178c6fc778ccc68e1d6a
+X-Oauth-Scopes: gist, read:org, repo, workflow
+X-Ratelimit-Limit: 5000
+X-Ratelimit-Remaining: 4521
+X-Ratelimit-Reset: 1793565194
+X-Ratelimit-Resource: core
+X-Ratelimit-Used: 479
+X-Xss-Protection: 0
+
+{"total_count":1,"jobs":[{"id":124729249776,"run_id":41266147301,"workflow_name":"notignored","head_branch":"nick/follow-up-sync-in-store/ui-host-item-journey","run_url":"https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/41266147301","run_attempt":1,"node_id":"CR_kwDOTx3Fc88AAAAdCnFP8A","head_sha":"0b01748b1de05e5783caf75823c69f17933111ea","url":"https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/jobs/124729249776","html_url":"https://github.com/nickderobertis/onepipeline-ui/actions/runs/41266147301/job/124729249776","status":"completed","conclusion":"success","created_at":"2026-11-01T02:40:15Z","started_at":"2026-11-01T02:40:17Z","completed_at":"2026-11-01T02:40:30Z","name":"suppressions","steps":[{"name":"Set up job","status":"completed","conclusion":"success","number":1,"started_at":"2026-11-01T02:40:18Z","completed_at":"2026-11-01T02:40:19Z"},{"name":"Run actions/checkout@v4","status":"completed","conclusion":"success","number":2,"started_at":"2026-11-01T02:40:19Z","completed_at":"2026-11-01T02:40:27Z"},{"name":"Run nickderobertis/notignored@v0","status":"completed","conclusion":"success","number":3,"started_at":"2026-11-01T02:40:27Z","completed_at":"2026-11-01T02:40:28Z"},{"name":"Post Run actions/checkout@v4","status":"completed","conclusion":"success","number":6,"started_at":"2026-11-01T02:40:28Z","completed_at":"2026-11-01T02:40:28Z"},{"name":"Complete job","status":"completed","conclusion":"success","number":7,"started_at":"2026-11-01T02:40:28Z","completed_at":"2026-11-01T02:40:28Z"}],"check_run_url":"https://api.github.com/repos/nickderobertis/onepipeline-ui/check-runs/124729249776","labels":["ubuntu-latest"],"runner_id":1000291693,"runner_name":"GitHub Actions 1000291693","runner_group_id":0,"runner_group_name":"GitHub Actions"}]}

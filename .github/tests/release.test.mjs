@@ -459,7 +459,7 @@ test("the tools the release recipes reach are pinned once for the workflows and 
   // The CI jobs that run the release journeys install both prebuilt, at these
   // pins, for `just release-tools` to copy rather than compile: a version that
   // drifted from the justfile's would be passed over and compiled again.
-  for (const job of ["test-linux", "quality", "sweep"]) {
+  for (const job of ["test-linux"]) {
     const tools = workflow("ci.yml")
       .jobs[job].steps.filter((s) => s.uses === "taiki-e/install-action@v2")
       .flatMap((s) => s.with.tool.split(/[,\s]+/));

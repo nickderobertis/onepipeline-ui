@@ -227,6 +227,22 @@ ci-test-windows *args:
 ci-test-macos *args:
     @bash scripts/ci-job.sh test-macos "$@"
 
+# The main-branch cache warmer's jobs (`.github/workflows/ci-cache.yml`), one per
+# OS: compile everything that OS's pull-request jobs compile and run nothing, so
+# the build saved from `main` is the one those jobs restore. `scripts/ci-warm.sh`
+# holds the list and why each line is there.
+# Compile what Linux's `lint` and `test-linux` compile, running no test.
+ci-warm-linux:
+    @bash scripts/ci-warm.sh linux
+
+# Compile what `test-windows` compiles, running no test.
+ci-warm-windows:
+    @bash scripts/ci-warm.sh windows
+
+# Compile what `test-macos` compiles, running no test.
+ci-warm-macos:
+    @bash scripts/ci-warm.sh macos
+
 # The documented install path, `cargo install --path .`, into a root under
 # `target/` rather than the user's own, smoke-tested as every published artifact
 # is. The dev profile shares the units `dag-ui:build-api-server` compiles. The
@@ -248,12 +264,16 @@ ci-test-macos *args:
 # next tier's `cargo test --no-run` re-links `target/debug/onepipeline-api.exe`
 # while the e2e tier is executing it, which Windows refuses ("Access is denied",
 # CI run 40115634774). There the install builds in a directory of its own.
-# Install this revision the documented way and smoke-test the installed binary.
 # llmlint: ignore-block[diagnostics_error_or_absent] `_crate-lint` denies all compiler warnings over this same dev build with `clippy --all-targets -- -D warnings` in every CI selection that runs this install. RUSTFLAGS here would rebuild its shared units under another flag set; the install adds no source or feature clippy did not check.
-_crate-install-smoke:
+# Build the documented install into target/install-smoke, smoke-testing nothing.
+_crate-install-build:
     @{{packaging-priority}} cargo install --path . --locked --debug --quiet --root target/install-smoke \
       --target-dir target/install-smoke/target \
       --config 'build.build-dir="{{ if os() == "linux" { "target" } else { "target/install-smoke/build" } }}"'
+
+# Install this revision the documented way and smoke-test the installed binary.
+_crate-install-smoke:
+    @just _crate-install-build
     @bin="$(cd target/install-smoke/bin && pwd)" \
       || { echo "cargo install wrote no target/install-smoke/bin: $(ls target/install-smoke 2>&1)" >&2; exit 1; }; \
       PATH="$bin:$PATH" bash scripts/smoke-published.sh --command "$bin/onepipeline-api" \
@@ -286,9 +306,22 @@ packaging-priority := `command -v nice >/dev/null 2>&1 && echo "nice -n 10" || t
 # The complete pre-push bar: the deterministic gate, then the LLM-judge tier
 # scoped to this branch's diff. `check` stays deterministic and credential-free
 # on its own; this is where the non-deterministic tier joins it.
-# Full gate: `check` plus the diff-scoped llmlint tier.
-gate base="origin/main": check
-    @just lint-llm-diff {{base}}
+#
+# The whole of it runs inside `scripts/gate-time.sh`, which records when it
+# started and ended and then holds that to `onepipeline-ui-gate-time`
+# (budgets.yaml, `host-variable`) as a warning: over the line prints one and the
+# gate still passes; a budget that cannot be measured fails it. So the body has
+# no dependency of its own outside the wrapper — `check` is its first line.
+# Full gate: `check` plus the diff-scoped llmlint tier, timed against its budget.
+[positional-arguments]
+gate base="origin/main":
+    @bash scripts/gate-time.sh -- just _gate-body "$1"
+
+# What `just gate` times: `check`, then the judged tier over the diff from `base`.
+[positional-arguments]
+_gate-body base:
+    @just check
+    @just lint-llm-diff "$1"
     @echo "gate: ok"
 
 # `true` when this branch's diff can reach the crate, so CI can skip the

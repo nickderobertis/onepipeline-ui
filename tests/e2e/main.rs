@@ -51,15 +51,15 @@ mod linked_report;
 mod live;
 // llmlint: ignore-block[e2e_not_mocked] the real `docker run` is a manylinux
 // image compiling the whole release binary, minutes per target, which ci.yml's
-// `wheel` legs run for real — then install and smoke-test — on every pull request
-// that reaches the crate. The module stands in for `docker` and the image's tools
+// `test-linux` runs for real (its `wheel-smoke` target) — then installs and
+// smoke-tests — on every pull request that reaches the crate. The module stands in for `docker` and the image's tools
 // at the PATH boundary only, and drives the real recipe and script.
 // llmlint: ignore-block[tests_mirror_real_usage] the same substitution read by
 // the other rule that names it: with the runtime stood in for, what the script
 // asked it to run is the only place the image and prerequisites can be read, and
 // every journey still drives `just wheel-linux` and asserts on its exit and
 // stderr. The module header states both reasons in full.
-// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] nothing in this suite is expensive: it never starts Docker or compiles anything, and all of it runs in well under a second (17 journeys, 0.11s under nextest). The expensive half — the real build in the manylinux image — is already behind an edge of its own: `just wheel-linux`, run by ci.yml's `wheel` job and never by `test`.
+// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] nothing in this suite is expensive: it never starts Docker or compiles anything, and all of it runs in well under a second (17 journeys, 0.11s under nextest). The expensive half — the real build in the manylinux image — is already behind an edge of its own: `just wheel-linux`, run by the crate's `wheel-smoke` target (ci.yml's `test-linux`) and never by `test`.
 mod linux_wheel;
 // llmlint: ignore-end[tests_mirror_real_usage]
 // llmlint: ignore-end[e2e_not_mocked]
@@ -97,6 +97,7 @@ mod sibling;
 mod stub_bin;
 #[path = "../support/timeline_schema.rs"]
 mod timeline_schema;
+#[cfg(target_os = "linux")]
 #[path = "../support/workflow.rs"]
 mod workflow;
 #[cfg(unix)]
