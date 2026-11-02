@@ -148,19 +148,48 @@ impl Tab {
     /// Read until the stream goes quiet, applying each frame in order.
     fn drain(&mut self) -> Vec<Value> {
         let mut read = Vec::new();
-        while let Some(frame) = self.stream.frame_within(QUIET) {
-            let data = frame.json();
-            assert_eq!(frame.id, data["id"], "the SSE id is the frame's id");
-            assert_eq!(
-                frame.event, data["type"],
-                "the SSE event is the frame's type"
-            );
-            assert_eq!(data["subscription"], self.subscription.as_str());
-            self.apply(&data);
+        while let Some(data) = self.receive(QUIET) {
             read.push(data);
         }
-        self.frames.extend(read.iter().cloned());
         read
+    }
+
+    /// Read until a frame `wanted` names arrives, applying each in order, and
+    /// return every frame read up to and including it. Only a stream that
+    /// never sends one within [`PATIENCE`] fails: how long the server takes
+    /// is not what a journey holds it to.
+    fn until(&mut self, what: &str, wanted: impl Fn(&Value) -> bool) -> Vec<Value> {
+        let deadline = Instant::now() + PATIENCE;
+        let mut read = Vec::new();
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.receive(left) {
+                Some(data) => {
+                    let done = wanted(&data);
+                    read.push(data);
+                    if done {
+                        return read;
+                    }
+                }
+                None => panic!("the stream never sent {what}: it sent {read:#?}"),
+            }
+        }
+    }
+
+    /// The next frame within `patience`, checked against its SSE framing and
+    /// applied.
+    fn receive(&mut self, patience: Duration) -> Option<Value> {
+        let frame = self.stream.frame_within(patience)?;
+        let data = frame.json();
+        assert_eq!(frame.id, data["id"], "the SSE id is the frame's id");
+        assert_eq!(
+            frame.event, data["type"],
+            "the SSE event is the frame's type"
+        );
+        assert_eq!(data["subscription"], self.subscription.as_str());
+        self.apply(&data);
+        self.frames.push(data.clone());
+        Some(data)
     }
 
     fn apply(&mut self, frame: &Value) {
@@ -951,13 +980,10 @@ fn a_run_no_look_has_listed_yet_is_in_the_snapshot_of_a_subscription_to_it() {
         .expect("the row")
         .clone();
     // The sidebar tab already open is sent that row, as a look would send it.
-    let frames = sidebar.drain();
-    assert!(
-        frames
-            .iter()
-            .any(|frame| frame["type"] == "run.changed" && frame["row"]["id"] == fresh),
-        "the open sidebar was not told of {fresh}: {frames:#?}"
-    );
+    // The look is still held, so nothing but the subscription can send it.
+    sidebar.until(&format!("{fresh}'s row"), |frame| {
+        frame["type"] == "run.changed" && frame["row"]["id"] == fresh
+    });
     assert!(sidebar.state["sidebar"]
         .as_array()
         .expect("rows")
