@@ -174,7 +174,9 @@ onemessagebus = "0.9.1"
 # it cannot notice, because both sides' rustdoc still spells the path
 # `onepipeline::Error` while the type behind it changed identity, so
 # `scripts/semver-check.sh` refuses a release that moved this line while the
-# commits release-plz versions from announce no break.
+# commits release-plz versions from announce no break. At `=0.98.0` this crate's
+# surface follows onepipeline 0.98's: `error::ApiError::from_engine` takes that
+# release's `onepipeline::Error`, which 0.97's is not.
 #
 # The engine pin also fixes the linked plan-store, onevcs, oneagentgraph and
 # onejudge families. A host holds its engine and this reader to one linked
