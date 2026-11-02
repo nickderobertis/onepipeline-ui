@@ -1254,6 +1254,12 @@ fn a_step_summary_it_cannot_write_fails_the_step_after_posting() {
 /// `just <recipe>` with a `cargo` on PATH that answers `cargo deny check
 /// advisories` with `output` and `code`, and runs the real cargo for the rest.
 fn with_advisories_output(project: &Project, recipe: &str, output: &str, code: i32) -> Run {
+    let path = advisories_stand_in(project, output, code);
+    just(project, &[recipe], &[("PATH", path.as_os_str())])
+}
+
+/// PATH with the `cargo` stand-in [`with_advisories_output`] runs under in front.
+fn advisories_stand_in(project: &Project, output: &str, code: i32) -> OsString {
     let scratch = project.repo.parent().expect("the repository has a parent");
     let answer = scratch.join("advisories-output");
     fs::write(&answer, output).expect("write the advisories output");
@@ -1262,7 +1268,7 @@ fn with_advisories_output(project: &Project, recipe: &str, output: &str, code: i
         .output()
         .expect("find cargo");
     let cargo = String::from_utf8(cargo.stdout).expect("a UTF-8 path");
-    let path = stub_bin::install(
+    stub_bin::install(
         &scratch.join("cargo-bin"),
         "cargo",
         &format!(
@@ -1271,8 +1277,7 @@ fn with_advisories_output(project: &Project, recipe: &str, output: &str, code: i
             answer.display(),
             cargo.trim()
         ),
-    );
-    just(project, &[recipe], &[("PATH", path.as_os_str())])
+    )
 }
 
 #[test]
@@ -1446,5 +1451,31 @@ fn a_status_whose_tools_cannot_launch_is_still_posted_red() {
         "no red status was posted: {calls}"
     );
     assert!(calls.contains("context=advisories"), "{calls}");
+}
+
+#[test]
+fn an_annotation_title_escapes_the_delimiters_actions_splits_properties_on() {
+    // No crate name or version cargo accepts holds `:` or `,`, so only output
+    // real cargo-deny never prints can carry them into a title property.
+    let project = project(&CLEAN, &CLEAN);
+    let advisory = r#"{"type":"diagnostic","fields":{"severity":"error","code":"vulnerability","message":"m","advisory":{"id":"RUSTSEC-2099-0001","title":"a title"},"graphs":[{"Krate":{"name":"fixture-vuln","version":"1.0.0+a,b:c"}}]}}"#;
+    let summary = r#"{"type":"summary","fields":{"advisories":{"errors":1,"helps":0,"notes":0,"warnings":0}}}"#;
+    let cargo_first = advisories_stand_in(&project, &format!("{advisory}\n{summary}\n"), 1);
+    // `status_in` puts its `gh` in front of PATH; this puts the stand-in `cargo`
+    // in front of that.
+    let scratch = project.repo.parent().expect("the repository has a parent");
+    let mut entries = vec![scratch.join("stub-bin")];
+    entries.extend(std::env::split_paths(&cargo_first));
+    let path = std::env::join_paths(entries).expect("join PATH");
+    let path = path.to_str().expect("a UTF-8 PATH").to_owned();
+    let mut actions = ACTIONS.to_vec();
+    actions.push(("PATH", &path));
+    let (run, _, _) = status_in(&project, 0, FORK, &actions);
+    let annotation = "::warning title=RUSTSEC-2099-0001 in fixture-vuln 1.0.0+a%2Cb%3Ac::a title\n";
+    assert!(
+        run.stdout.contains(annotation),
+        "no escaped {annotation}:\n{}",
+        run.all()
+    );
 }
 // llmlint: ignore-end[e2e_not_mocked]

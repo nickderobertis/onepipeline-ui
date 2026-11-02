@@ -425,8 +425,8 @@ function statusDescription(advisories, errors) {
 }
 
 // A workflow command's property and message, escaped as Actions reads them.
-const escapeData = (value) =>
-  value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+// Neither can hold a line break: `text` and `token` already refused or folded it.
+const escapeData = (value) => value.replace(/%/g, "%25");
 const escapeProperty = (value) =>
   escapeData(value).replace(/:/g, "%3A").replace(/,/g, "%2C");
 
