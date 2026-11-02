@@ -265,7 +265,11 @@ if [ -n "$verify_out" ]; then
   # here rather than left to Docker, which would create the mount point as root — so
   # a failed render's traces still land in the tree, under `test-results/verify/`.
   verify_results="$repo_root/apps/dag-ui-e2e/test-results/verify"
-  mkdir -p "$verify_results"
+  if ! why="$(mkdir -p -- "$verify_results" 2>&1)"; then
+    echo "visual-capture: cannot create the verify render's results directory $verify_results: $why" >&2
+    echo "ACTION: make $repo_root/apps/dag-ui-e2e writable by the invoking user, or remove a root-owned test-results/ left by an earlier container, then rerun" >&2
+    exit 1
+  fi
   verify_log="$scratch/verify.log"
   render verify "$verify_in_container" \
     --volume "$verify_results:/work/apps/dag-ui-e2e/test-results" \

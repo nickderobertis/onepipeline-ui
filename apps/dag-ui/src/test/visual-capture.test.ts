@@ -298,6 +298,26 @@ describe("two renders side by side", () => {
     );
   });
 
+  it("refuses to render when the verify render's results directory cannot be made", () => {
+    const capture = layout();
+    const e2e = join(capture.root, "apps/dag-ui-e2e");
+    chmodSync(e2e, 0o555);
+    try {
+      const result = spawnSync("bash", [capture.script], {
+        encoding: "utf8",
+        env: capture.env("succeed"),
+      });
+      expect(result.status, result.stderr).toBe(1);
+      expect(result.stderr).toContain(
+        `cannot create the verify render's results directory ${e2e}/test-results/verify: mkdir:`,
+      );
+      expect(result.stderr).toMatch(/^ACTION: make .* writable/m);
+      expect(capture.runs()).toEqual([]);
+    } finally {
+      chmodSync(e2e, 0o755);
+    }
+  });
+
   it.each([
     ["SIGTERM", 143],
     ["SIGINT", 130],
