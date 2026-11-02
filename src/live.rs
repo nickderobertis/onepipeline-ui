@@ -88,8 +88,13 @@ struct Shared {
     stopping: Arc<AtomicBool>,
     /// Subscriptions and their frames. Taken last, after a sidebar or a run.
     state: Mutex<State>,
-    /// The sidebar's rows. Taken before a run or the state.
+    /// The sidebar's rows. Taken before a run or the state, and held only to
+    /// read or change them — never across a [`Look`].
     sidebar: Mutex<Sidebar>,
+    /// Held across one whole [`Look`] and the change it makes to the sidebar,
+    /// so two looks never read against the same rows. Taken before the
+    /// sidebar, and by nothing that answers a stream.
+    looking: Mutex<()>,
     /// Each subscribed run's reading. The map is held only to look one up.
     runs: Mutex<HashMap<RunId, Arc<Mutex<LiveRun>>>>,
     polling: AtomicBool,
@@ -393,19 +398,31 @@ enum RowChange {
     Removed(RunId),
 }
 
-impl Sidebar {
-    /// The rows that moved since the last look, and the runs that went away.
-    ///
+/// What one look at the runs root read: each run whose row was read again,
+/// and every run the root holds.
+///
+/// Read with no lock but [`Shared::looking`] held, because reading a moved run's
+/// summary is the SDK folding it and writing its cache back, which a host with
+/// slow syncs takes seconds over per run — and a stream or a subscription that
+/// waited on the sidebar for the whole of that would be a request left
+/// unanswered for as long as the slowest look takes.
+struct Look {
+    read: Vec<(RunId, Stamps, Arc<str>)>,
+    seen: std::collections::BTreeSet<RunId>,
+}
+
+impl Look {
     /// One listing of the root and four metadata lookups per run; a run is read
-    /// — its bounded summary, never its journal — only when one of them moved,
-    /// and announced only when the row the sidebar shows came out different.
-    fn poll(&mut self, store: &RunStore) -> Vec<RowChange> {
+    /// — its bounded summary, never its journal — only when one of them moved
+    /// since `held` says it was last read, and at most once a reread interval.
+    /// `None` when the root cannot be listed.
+    fn of(store: &RunStore, read: bool, held: &BTreeMap<RunId, (Stamps, Instant)>) -> Option<Self> {
         let reread = store.poll() * ROW_POLLS_PER_READ;
-        let mut changes = Vec::new();
-        let mut seen = std::collections::BTreeSet::new();
-        let Ok(entries) = std::fs::read_dir(store.root()) else {
-            return changes;
+        let mut look = Self {
+            read: Vec::new(),
+            seen: std::collections::BTreeSet::new(),
         };
+        let entries = std::fs::read_dir(store.root()).ok()?;
         for entry in entries.flatten() {
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
@@ -418,12 +435,12 @@ impl Sidebar {
             if stamps.0[0].is_none() {
                 continue;
             }
-            seen.insert(run.clone());
-            match self.rows.get(&run) {
-                Some((held, _, _)) if *held == stamps => continue,
+            look.seen.insert(run.clone());
+            match held.get(&run) {
+                Some((was, _)) if *was == stamps => continue,
                 // Moved, but read too recently: read once the interval is up,
                 // to what the run then holds.
-                Some((_, _, read_at)) if self.read && read_at.elapsed() < reread => continue,
+                Some((_, read_at)) if read && read_at.elapsed() < reread => continue,
                 _ => {}
             }
             let Ok(summary) = RunSummary::of(&paths) else {
@@ -432,6 +449,28 @@ impl Sidebar {
             let row: Arc<str> = payload::sidebar_row(&run, &summary, &paths)
                 .to_string()
                 .into();
+            look.read.push((run, stamps, row));
+        }
+        Some(look)
+    }
+}
+
+impl Sidebar {
+    /// What each row was read from and when: all a [`Look`] needs to decide
+    /// what to read again.
+    fn held(&self) -> BTreeMap<RunId, (Stamps, Instant)> {
+        self.rows
+            .iter()
+            .map(|(run, (stamps, _, read_at))| (run.clone(), (stamps.clone(), *read_at)))
+            .collect()
+    }
+
+    /// Take what `look` read: the rows that moved since the last look, and the
+    /// runs that went away. Announced only once the sidebar has been read, and
+    /// only where the row the sidebar shows came out different.
+    fn apply(&mut self, look: Look) -> Vec<RowChange> {
+        let mut changes = Vec::new();
+        for (run, stamps, row) in look.read {
             let moved = self.rows.get(&run).is_none_or(|(_, held, _)| *held != row);
             self.rows
                 .insert(run, (stamps, Arc::clone(&row), Instant::now()));
@@ -442,7 +481,7 @@ impl Sidebar {
         let gone: Vec<RunId> = self
             .rows
             .keys()
-            .filter(|run| !seen.contains(*run))
+            .filter(|run| !look.seen.contains(*run))
             .cloned()
             .collect();
         for run in gone {
@@ -766,6 +805,7 @@ impl Hub {
                 retired: VecDeque::new(),
             }),
             sidebar: Mutex::new(Sidebar::default()),
+            looking: Mutex::new(()),
             runs: Mutex::new(HashMap::new()),
             polling: AtomicBool::new(false),
             trace: std::env::var_os(TRACE_ENV).map(PathBuf::from),
@@ -818,10 +858,8 @@ impl Hub {
         // Then the publication boundary: the sidebar, the run and the
         // subscriptions locked together, so every change after the snapshot is
         // one this subscription is sent and none before it is.
-        let mut sidebar = lock(&shared.sidebar);
-        if !sidebar.read {
-            sidebar.poll(&shared.store);
-        }
+        self.first_look();
+        let sidebar = lock(&shared.sidebar);
         let mut run = live.as_ref().map(|live| lock(live));
         let visible_state = match run.as_mut() {
             Some(run) => run.ensure(&shared.store, &visible, spec)?,
@@ -1000,6 +1038,41 @@ impl Hub {
         Ok(Stream { replay, frames })
     }
 
+    /// Read the sidebar's rows the first time anything asks for them. A
+    /// subscription made once they are read waits on no look.
+    fn first_look(&self) {
+        let shared = &self.0;
+        if lock(&shared.sidebar).read {
+            return;
+        }
+        let _looking = lock(&shared.looking);
+        // Read by a look that finished while this one waited for its turn.
+        if lock(&shared.sidebar).read {
+            return;
+        }
+        if let Some(look) = Look::of(&shared.store, false, &BTreeMap::new()) {
+            lock(&shared.sidebar).apply(look);
+        }
+    }
+
+    /// One look at the runs root, read without the sidebar's lock and then
+    /// taken into it: the sidebar, locked, and what moved — which the caller
+    /// sends with the sidebar still locked, so a subscription made in between
+    /// is either in the snapshot or sent the change. `None` when the root
+    /// cannot be listed.
+    fn look(&self) -> Option<(MutexGuard<'_, Sidebar>, Vec<RowChange>)> {
+        let shared = &self.0;
+        let _looking = lock(&shared.looking);
+        let (read, held) = {
+            let sidebar = lock(&shared.sidebar);
+            (sidebar.read, sidebar.held())
+        };
+        let look = Look::of(&shared.store, read, &held)?;
+        let mut sidebar = lock(&shared.sidebar);
+        let changes = sidebar.apply(look);
+        Some((sidebar, changes))
+    }
+
     /// The reading of `run`, opened if no subscription holds it yet.
     fn live_run(&self, run: &RunId) -> Result<Arc<Mutex<LiveRun>>, ApiError> {
         if let Some(live) = lock(&self.0.runs).get(run) {
@@ -1056,9 +1129,7 @@ impl Hub {
         if wanted.is_empty() {
             return;
         }
-        {
-            let mut sidebar = lock(&shared.sidebar);
-            let changes = sidebar.poll(&shared.store);
+        if let Some((_sidebar, changes)) = self.look() {
             if !changes.is_empty() {
                 let mut state = lock(&shared.state);
                 let ids: Vec<SubscriptionId> = state.subscriptions.keys().copied().collect();

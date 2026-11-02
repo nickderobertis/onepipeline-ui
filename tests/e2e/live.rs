@@ -804,6 +804,100 @@ fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
     assert_eq!(reset["reason"], "stale-cursor");
 }
 
+/// A stream is answered while the sidebar is still reading a run.
+///
+/// Reading a moved run's row is the SDK folding its summary and writing the
+/// cache back, which a host with slow syncs takes seconds over per run — so a
+/// sidebar of many moving runs can take longer to read than a client waits for
+/// a status line. Windows did: `a_cursor_older_than_the_retained_frames_is_answered_stale`
+/// timed out reading one there. This makes that read take as long as the
+/// journey wants, deterministically: the run's summary is replaced by a FIFO,
+/// so the server's look at it blocks opening and reading it until this side
+/// writes, and the requests a tab makes meanwhile are held to being answered.
+#[cfg(unix)]
+#[test]
+fn a_stream_and_a_subscription_are_answered_while_the_sidebar_is_reading_a_run() {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    // The first subscription reads every row, so the run's summary is now the
+    // cache the SDK wrote for it.
+    let subscribed = live.subscribe(&json!({ "view": { "type": "sidebar" } }));
+    let subscription = subscribed["subscription"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    let snapshot_id = subscribed["initial"]["snapshot"]["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    let summary = live.serving.run_dir(run).join("summary.json");
+    assert!(summary.is_file(), "the first look cached the run's summary");
+    fs::remove_file(&summary).expect("remove the cached summary");
+    let path = std::ffi::CString::new(summary.as_os_str().as_bytes()).expect("a path");
+    // SAFETY: `path` is a NUL-terminated path this test owns.
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0, "mkfifo");
+    // The summary's stamp moved, so the next look reads the run again and
+    // blocks opening the FIFO; a writer can open it once that reader has, and
+    // from then on the look blocks reading it until the writer closes.
+    let deadline = Instant::now() + PATIENCE;
+    let writer = loop {
+        match fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&summary)
+        {
+            Ok(writer) => break writer,
+            Err(err) if err.raw_os_error() == Some(libc::ENXIO) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "the server never looked at the run's summary again"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(err) => panic!("open the summary FIFO: {err}"),
+        }
+    };
+
+    // The look is reading now, and stays reading until `writer` closes.
+    let stream = http::stream(
+        live.address(),
+        &format!("/api/v2/events?subscription={subscription}&after={snapshot_id}"),
+        None,
+    );
+    assert_eq!(stream.status, 200, "the stream is answered mid-look");
+    let (epoch, _) = snapshot_id.split_once(':').expect("epoch:seq");
+    let mut reset = http::stream(
+        live.address(),
+        &format!("/api/v2/events?subscription={subscription}&after={epoch}:999999"),
+        None,
+    );
+    let frame = reset.frame_within(PATIENCE).expect("a reset").json();
+    assert_eq!(frame["type"], "reset");
+    assert_eq!(frame["reason"], "unknown-cursor");
+    assert_eq!(
+        frame["snapshot"]["sidebar"][0]["id"], run,
+        "the reset carries the rows the sidebar holds"
+    );
+    let another = live.subscribe(&json!({ "view": { "type": "sidebar" } }));
+    assert_eq!(another["initial"]["snapshot"]["sidebar"][0]["id"], run);
+
+    // Let the look finish: an empty summary is no cache, so the run is folded
+    // and its cache written again in the FIFO's place.
+    drop(writer);
+    let deadline = Instant::now() + PATIENCE;
+    while !summary.is_file() {
+        assert!(
+            Instant::now() < deadline,
+            "the look never finished once the summary could be read"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(stream);
+}
+
 #[test]
 fn a_retired_or_replaced_subscription_is_gone_and_its_stream_says_so() {
     let run = fixture_run::RUN_ID;
