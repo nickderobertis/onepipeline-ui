@@ -804,6 +804,53 @@ fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
     assert_eq!(reset["reason"], "stale-cursor");
 }
 
+/// Hold the server's next look at the runs root inside its read of `run`, and
+/// hand back that run's summary path and what releases the look: drop the
+/// writer, and the look reads an empty summary, folds the run and finishes.
+///
+/// Reading a moved run's row is the SDK folding its summary and writing the
+/// cache back, which a host with slow syncs takes seconds over — longer, on
+/// Windows, than a client waits. This makes that read take exactly as long as
+/// a journey wants: the run's cached summary is replaced by a FIFO, so the
+/// look blocks opening it until a writer does and then reading it until the
+/// writer closes. The summary must already be cached — a subscription's first
+/// look caches every run's.
+#[cfg(unix)]
+fn hold_a_look_on(live: &Live, run: &str) -> (PathBuf, fs::File) {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let summary = live.serving.run_dir(run).join("summary.json");
+    assert!(summary.is_file(), "the first look cached the run's summary");
+    // llmlint: ignore-block[tests_mirror_real_usage] the condition under test is storage that answers slower than a client waits — what a Windows host's syncs did to this server's look — and no request a client can make produces that on demand: a genuinely slow fold is the host's timing, which these journeys must not depend on. The FIFO is that storage at the filesystem boundary the server reads the runs root through; the server is the real binary, nothing in it is stubbed, and every request these journeys hold to an answer is the HTTP one a tab makes.
+    fs::remove_file(&summary).expect("remove the cached summary");
+    let path = std::ffi::CString::new(summary.as_os_str().as_bytes()).expect("a path");
+    // SAFETY: `path` is a NUL-terminated path this test owns.
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0, "mkfifo");
+    // llmlint: ignore-end[tests_mirror_real_usage]
+    // The summary's stamp moved, so the next look reads the run again and
+    // blocks opening the FIFO; a writer can open it once that reader has, and
+    // from then on the look blocks reading it until the writer closes.
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        match fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&summary)
+        {
+            Ok(writer) => return (summary, writer),
+            Err(err) if err.raw_os_error() == Some(libc::ENXIO) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "the server never looked at the run's summary again"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(err) => panic!("open the summary FIFO: {err}"),
+        }
+    }
+}
+
 /// A stream is answered while the sidebar is still reading a run.
 ///
 /// Reading a moved run's row is the SDK folding its summary and writing the
@@ -817,9 +864,6 @@ fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
 #[cfg(unix)]
 #[test]
 fn a_stream_and_a_subscription_are_answered_while_the_sidebar_is_reading_a_run() {
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::OpenOptionsExt;
-
     let run = fixture_run::RUN_ID;
     let live = Live::start(|root| growing_run(root, run));
     // The first subscription reads every row, so the run's summary is now the
@@ -833,35 +877,7 @@ fn a_stream_and_a_subscription_are_answered_while_the_sidebar_is_reading_a_run()
         .as_str()
         .expect("an id")
         .to_owned();
-    let summary = live.serving.run_dir(run).join("summary.json");
-    assert!(summary.is_file(), "the first look cached the run's summary");
-    // llmlint: ignore-block[tests_mirror_real_usage] the condition under test is storage that answers slower than a client waits — what a Windows host's syncs did to this server's look — and no request a client can make produces that on demand: a genuinely slow fold is the host's timing, which this journey must not depend on. The FIFO is that storage at the filesystem boundary the server reads the runs root through; the server is the real binary, nothing in it is stubbed, and every request this journey holds to an answer is the HTTP one a tab makes.
-    fs::remove_file(&summary).expect("remove the cached summary");
-    let path = std::ffi::CString::new(summary.as_os_str().as_bytes()).expect("a path");
-    // SAFETY: `path` is a NUL-terminated path this test owns.
-    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0, "mkfifo");
-    // llmlint: ignore-end[tests_mirror_real_usage]
-    // The summary's stamp moved, so the next look reads the run again and
-    // blocks opening the FIFO; a writer can open it once that reader has, and
-    // from then on the look blocks reading it until the writer closes.
-    let deadline = Instant::now() + PATIENCE;
-    let writer = loop {
-        match fs::OpenOptions::new()
-            .write(true)
-            .custom_flags(libc::O_NONBLOCK)
-            .open(&summary)
-        {
-            Ok(writer) => break writer,
-            Err(err) if err.raw_os_error() == Some(libc::ENXIO) => {
-                assert!(
-                    Instant::now() < deadline,
-                    "the server never looked at the run's summary again"
-                );
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Err(err) => panic!("open the summary FIFO: {err}"),
-        }
-    };
+    let (summary, writer) = hold_a_look_on(&live, run);
 
     // The look is reading now, and stays reading until `writer` closes.
     let stream = http::stream(
@@ -898,6 +914,75 @@ fn a_stream_and_a_subscription_are_answered_while_the_sidebar_is_reading_a_run()
         std::thread::sleep(Duration::from_millis(20));
     }
     drop(stream);
+}
+
+/// A subscription to a run no look has listed yet lists it in its snapshot,
+/// and every subscription already made is sent its row.
+///
+/// The sidebar's rows are only as current as the poller's last look, and a tab
+/// reads them as the runs that are served: a run whose detail a snapshot
+/// carried but whose row it did not was one the browser took for unserved, and
+/// it opened the newest run instead — the header journey that wrote a run and
+/// opened it at once watched another run's Stop button. The look is held here
+/// for as long as the journey runs, so no look can list the run first.
+#[cfg(unix)]
+#[test]
+fn a_run_no_look_has_listed_yet_is_in_the_snapshot_of_a_subscription_to_it() {
+    let quiet = fixture_run::RUN_ID;
+    let fresh = "written-after-the-look";
+    let live = Live::start(|root| growing_run(root, quiet));
+    let mut sidebar = Tab::open(&live, &json!({ "type": "sidebar" }));
+    let (summary, writer) = hold_a_look_on(&live, quiet);
+    // Written while the look is held, so no look has seen it.
+    growing_run(&live.serving.runs_root(), fresh);
+
+    let subscribed = live.subscribe(&json!({ "view": { "type": "detail", "run_id": fresh } }));
+    let snapshot = &subscribed["initial"]["snapshot"];
+    assert_eq!(snapshot["visible"]["run_id"], fresh);
+    let listed: Vec<&str> = snapshot["sidebar"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .filter_map(|row| row["id"].as_str())
+        .collect();
+    assert!(
+        listed.contains(&fresh),
+        "the snapshot serves {fresh}'s detail but lists only {listed:?}"
+    );
+    let row = snapshot["sidebar"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|row| row["id"] == fresh))
+        .expect("the row")
+        .clone();
+    // The sidebar tab already open is sent that row, as a look would send it.
+    let frames = sidebar.drain();
+    assert!(
+        frames
+            .iter()
+            .any(|frame| frame["type"] == "run.changed" && frame["row"]["id"] == fresh),
+        "the open sidebar was not told of {fresh}: {frames:#?}"
+    );
+    assert!(sidebar.state["sidebar"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .any(|held| held["id"] == fresh));
+
+    // Released, the look finishes and its rows are the sidebar's: the row the
+    // snapshot carried is the one a look reads.
+    drop(writer);
+    let deadline = Instant::now() + PATIENCE;
+    while !summary.is_file() {
+        assert!(Instant::now() < deadline, "the look never finished");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let after = live.subscribe(&json!({ "view": { "type": "sidebar" } }));
+    let looked = after["initial"]["snapshot"]["sidebar"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|held| held["id"] == fresh))
+        .expect("the look lists the run")
+        .clone();
+    assert_eq!(row, looked, "the row is the one a look reads");
 }
 
 #[test]

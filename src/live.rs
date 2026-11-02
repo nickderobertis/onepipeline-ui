@@ -409,6 +409,10 @@ enum RowChange {
 struct Look {
     read: Vec<(RunId, Stamps, Arc<str>)>,
     seen: std::collections::BTreeSet<RunId>,
+    /// The runs the sidebar held when the look began: the only ones its
+    /// listing can say went away. A row a subscription took in the meantime
+    /// is one this listing may have been made too early to see.
+    known: std::collections::BTreeSet<RunId>,
 }
 
 impl Look {
@@ -421,6 +425,7 @@ impl Look {
         let mut look = Self {
             read: Vec::new(),
             seen: std::collections::BTreeSet::new(),
+            known: held.keys().cloned().collect(),
         };
         let entries = std::fs::read_dir(store.root()).ok()?;
         for entry in entries.flatten() {
@@ -443,19 +448,54 @@ impl Look {
                 Some((_, read_at)) if read && read_at.elapsed() < reread => continue,
                 _ => {}
             }
-            let Ok(summary) = RunSummary::of(&paths) else {
+            let Some(row) = row_of(&paths, &run) else {
                 continue;
             };
-            let row: Arc<str> = payload::sidebar_row(&run, &summary, &paths)
-                .to_string()
-                .into();
             look.read.push((run, stamps, row));
         }
         Some(look)
     }
 }
 
+/// `run`'s sidebar row, read from its bounded summary; `None` where the
+/// summary cannot be read.
+fn row_of(paths: &RunPaths, run: &RunId) -> Option<Arc<str>> {
+    let summary = RunSummary::of(paths).ok()?;
+    Some(
+        payload::sidebar_row(run, &summary, paths)
+            .to_string()
+            .into(),
+    )
+}
+
+/// The row of `run` the sidebar does not hold yet, read with no lock held:
+/// what a subscription naming that run carries in its snapshot rather than
+/// leave it to the next look. `None` once the sidebar holds it, or where the
+/// run has no journal or no readable summary.
+fn missing_row(shared: &Shared, run: &RunId) -> Option<(RunId, Stamps, Arc<str>)> {
+    if lock(&shared.sidebar).rows.contains_key(run) {
+        return None;
+    }
+    let paths = shared.store.paths_of(run);
+    let stamps = Stamps::of(&paths);
+    stamps.0[0]?;
+    let row = row_of(&paths, run)?;
+    Some((run.clone(), stamps, row))
+}
+
 impl Sidebar {
+    /// Take `run`'s row where no look has yet: the change every subscription
+    /// already made is sent, or `None` where a look took it first or the
+    /// sidebar has not been read.
+    fn add(&mut self, run: RunId, stamps: Stamps, row: Arc<str>) -> Option<RowChange> {
+        if self.rows.contains_key(&run) {
+            return None;
+        }
+        self.rows
+            .insert(run, (stamps, Arc::clone(&row), Instant::now()));
+        self.read.then_some(RowChange::Changed(row))
+    }
+
     /// What each row was read from and when: all a [`Look`] needs to decide
     /// what to read again.
     fn held(&self) -> BTreeMap<RunId, (Stamps, Instant)> {
@@ -481,7 +521,7 @@ impl Sidebar {
         let gone: Vec<RunId> = self
             .rows
             .keys()
-            .filter(|run| !look.seen.contains(*run))
+            .filter(|run| look.known.contains(*run) && !look.seen.contains(*run))
             .cloned()
             .collect();
         for run in gone {
@@ -859,7 +899,13 @@ impl Hub {
         // subscriptions locked together, so every change after the snapshot is
         // one this subscription is sent and none before it is.
         self.first_look();
-        let sidebar = lock(&shared.sidebar);
+        // The run this subscription shows is under the root — it was opened
+        // above — so its snapshot lists it, however long ago the last look
+        // was: a tab told a run's detail but not that the run is served would
+        // open another one.
+        let missing = visible.run_id().and_then(|run| missing_row(shared, run));
+        let mut sidebar = lock(&shared.sidebar);
+        let added = missing.and_then(|(run, stamps, row)| sidebar.add(run, stamps, row));
         let mut run = live.as_ref().map(|live| lock(live));
         let visible_state = match run.as_mut() {
             Some(run) => run.ensure(&shared.store, &visible, spec)?,
@@ -880,6 +926,15 @@ impl Hub {
         let subscription = SubscriptionId::mint();
         if let SubscribeOrigin::Replaces(replaced) = request.origin {
             state.retire(replaced, Retired::Retired);
+        }
+        // Every subscription already made is sent the row this one's snapshot
+        // carries, as a look would have sent it.
+        if let Some(RowChange::Changed(row)) = &added {
+            let change = Change::Row(Arc::clone(row));
+            let ids: Vec<SubscriptionId> = state.subscriptions.keys().copied().collect();
+            for id in ids {
+                self.emit(&mut state, id, &change);
+            }
         }
         state.subscriptions.insert(
             subscription,
