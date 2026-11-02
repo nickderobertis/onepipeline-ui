@@ -158,6 +158,10 @@ impl Tab {
     /// return every frame read up to and including it. Only a stream that
     /// never sends one within [`PATIENCE`] fails: how long the server takes
     /// is not what a journey holds it to.
+    ///
+    /// Compiled only where a journey that calls it is: every caller so far
+    /// holds a run open with a unix-only lock.
+    #[cfg(unix)]
     fn until(&mut self, what: &str, wanted: impl Fn(&Value) -> bool) -> Vec<Value> {
         let deadline = Instant::now() + PATIENCE;
         let mut read = Vec::new();
