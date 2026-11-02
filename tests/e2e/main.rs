@@ -44,6 +44,7 @@ mod ci_jobs;
 mod ci_tier;
 mod cli;
 mod cost;
+// llmlint: ignore[expensive_tests_stay_behind_their_own_edge] measured, not assumed: 30 journeys in 4.5 s under nextest (10.2 s on one thread), the slowest 3.8 s, offline over a fixture advisory database and vendored crates, against 11.5 s for `nx_affected` already in this tier. Everything they exercise (`scripts/deps-audit.mjs`, the justfile's recipes, `deny.toml`, their fixtures) is keyed to the repo-tooling tier already, so an edge of their own would be a tier project for one script.
 mod deps_audit;
 mod ensure_baseline;
 mod ensure_node_without_execve;
