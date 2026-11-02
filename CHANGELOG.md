@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.65.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.65.0...v0.65.1) - 2026-11-02
+
+### Fixed
+
+- *(deps)* update pulldown-cmark to 0.13.6 for RUSTSEC-2026-0433 ([#576](https://github.com/nickderobertis/onepipeline-ui/pull/576))
+
 ## [0.65.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.64.0...v0.65.0) - 2026-11-02
 
 ### Fixed
