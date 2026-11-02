@@ -1,8 +1,10 @@
 name: CI
 
+# Pull requests only. A push to `main` re-runs none of these: branch protection
+# requires the four jobs below without requiring a branch to be up to date, so a
+# merge that breaks `main` is caught by `ci-cache.yml`'s warm jobs, which fail
+# when `main` does not build (AGENTS.md, "Commits, releases, and merging").
 on:
-  push:
-    branches: [main]
   pull_request:
     # GitHub's default three, without `ready_for_review`: a draft's runs already
     # report on its head commit, and lifting it changes no commit, so a run on
@@ -13,20 +15,15 @@ on:
 permissions:
   contents: read
 
-# A pull request's superseded run is cancelled; a push to `main` never is. Each
-# push is gated against the commit before it (`ONEPIPELINE_UI_NX_BASE_SHA` below),
-# so a cancelled push run would leave the commits it covered gated by nothing.
+# A pull request's superseded run is cancelled.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
+# The one variable rust-cache hashes into its key that these jobs set, and
+# `ci-cache.yml` sets it alike, so the key it saves is the key these restore.
 env:
   CARGO_TERM_COLOR: always
-  # The base a push build's affected selection diffs from: the commit `main` stood
-  # at before this push. Empty on a pull request, which is scoped against its merge
-  # base instead. `scripts/nx-affected.sh` refuses a value that does not resolve —
-  # a force-push's vanished commit, or the all-zero one — and runs everything.
-  ONEPIPELINE_UI_NX_BASE_SHA: ${{ github.event_name == 'push' && github.event.before || '' }}
 
 jobs:
   # One lint job and one test job per platform. Each of the four runs its checks through one recipe of its own — `just
@@ -36,35 +33,35 @@ jobs:
   # a pull request touching nothing a platform tests finishes that job quickly.
   # None waits on another: a pull request's wait is its slowest job, and each
   # job's runner slot is one of the account-wide limit every repository shares.
+  # They are the whole of a pull request's CI, and the four contexts branch
+  # protection requires.
   #
-  # The jobs below the four are what branch protection still names; they stay,
-  # passing, until protection moves to these.
-
+  # Each restores the Rust build `ci-cache.yml` saves on `main` for its OS and
+  # saves none of its own: the repository's Actions cache holds main's builds,
+  # never a pull request's.
   # What does not depend on the platform it runs on: the PR title, the
   # suppressions comment, formatting, lints and type checks, the MSRV floor, the
   # dependency audit, the judged lint and the visual docs.
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # What this job writes while VISUAL_DOCS_PUBLISH is off: notignored's comment
-    # and the PR-title read. Turning publishing on adds `contents: write` (the
-    # gallery deploy) and `pages: read` (the Pages build screencomp gates on).
+    # What this job writes while VISUAL_DOCS_PUBLISH is off: the suppressions
+    # comment and the PR-title read. Turning publishing on adds `contents: write`
+    # (the gallery deploy) and `pages: read` (the Pages build screencomp gates on).
     permissions:
       contents: read
       pull-requests: write
     env:
       # The one switch for the visual docs' side effects: the sticky comment and
-      # the /pr-<n>/ preview deploy. Off while visual-docs.yml still captures,
-      # comments and deploys on pull requests, because two deploys per push race
-      # the Pages build screencomp gates on, and a required check must not go red
-      # on that race. The change that removes visual-docs.yml's pull_request
-      # trigger turns it on, with the two grants above. The capture, the
-      # reproducibility gate, classify and the gallery build run either way.
+      # the /pr-<n>/ preview deploy. Off because this job must finish inside its
+      # 30-minute cap: on the base it already ran 20-27 minutes without them, and
+      # the deploy adds about 2.5 more, most of it screencomp waiting on the Pages
+      # build (run 41372259287 was cancelled at the cap inside that wait). So pull
+      # requests get no gallery preview, and visual-docs.yml's `closed` cleanup
+      # has none to delete. The capture, the reproducibility gate, classify and
+      # the gallery build run and block either way.
       VISUAL_DOCS_PUBLISH: "false"
     steps:
-      # When the job started, for the cache verdict a cancelled run takes below.
-      - name: When this job started
-        run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           # The merge base for affected selection, notignored's scan and the
@@ -73,6 +70,15 @@ jobs:
           # This job's token can write, and the judge below runs harness agents
           # over the checkout: no credential is left in it for them to find.
           persist-credentials: false
+      # Main's Linux build, which `ci-cache.yml`'s `warm-linux` saves for this job
+      # and `test-linux` alike: restored, never saved from here. Ahead of the MSRV
+      # toolchain, because rust-cache hashes every installed toolchain and the
+      # CARGO_* variables dtolnay exports into its key: placed after it, this job
+      # would look for a key neither the warm job nor `test-linux` shares.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: test-linux
+          save-if: false
       - name: Read the MSRV from Cargo.toml
         id: msrv
         run: |
@@ -82,24 +88,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
-      # Two restores, one save. First the build a main run of the old `msrv` job
-      # saves for this toolchain, never saved from here, so a pull request's first
-      # run starts from main's build rather than cold. Then this job's own build,
-      # restored over it and saved — on pull requests too, because no main cache
-      # holds what these jobs build beyond the old jobs' (the release-profile
-      # builds, the wheel's) until the main-branch warm job that replaces them
-      # saves under keys of its own. A run saves even when it fails or hits its
-      # cap, so a first run cancelled at 30 minutes does not leave the next one
-      # cold; never one a newer push superseded, whose save the job's last steps
-      # withdraw through the switch this release's post step reads
-      # (.github/fixtures/rust-cache-v2.9.2-action.yml).
-      - uses: Swatinem/rust-cache@v2.9.2
-        with:
-          shared-key: msrv
-          save-if: false
-      - uses: Swatinem/rust-cache@v2.9.2
-        with:
-          cache-on-failure: true
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -114,9 +102,14 @@ jobs:
         run: just ci-lint
       - uses: astral-sh/setup-uv@v6
         if: github.event_name == 'pull_request' && !cancelled()
-      # The judged tier, as the `llmlint` job below runs it and for its reasons:
-      # pinned harnesses, the fallback installed and credentialled, and a missing
-      # credential failing rather than reporting unlinted files as clean.
+      # The judged tier, a blocking part of this check. Its harnesses are pinned
+      # rather than floating, because an upstream release has taken this check
+      # down for every pull request before: bump one deliberately, once a newer
+      # one is shown green here. oneharness falls through only to a harness it
+      # can spawn, so the claude-code fallback is installed and credentialled
+      # too, and a missing credential fails rather than reporting unlinted files
+      # as clean. Fork pull requests are gated by the repository's
+      # require-approval-for-fork-workflows setting.
       - name: Install the Codex harness
         if: github.event_name == 'pull_request' && !cancelled()
         run: npm install -g @openai/codex@0.145.0
@@ -150,19 +143,19 @@ jobs:
       # (scripts/visual-capture.sh): the bundle and the server it photographs are
       # built on this host, and the rendering runs in the Playwright image that
       # script derives from apps/dag-ui-e2e/package.json — the pin the committed
-      # baseline was captured under. Twice, for the reproducibility gate.
+      # baseline was captured under. Twice, for the reproducibility gate: two
+      # containers rendering one build side by side, each its own stack, because
+      # a capture is almost all waiting for each page to settle and one after the
+      # other they took 16 of this job's 30 minutes (run 41381681315: 10m29s with
+      # the build, then 8m02s and cancelled at the cap).
       - name: Log runner CPU (cross-CPU anti-aliasing drift diagnostics)
         if: github.event_name == 'pull_request' && !cancelled()
         run: grep -m1 'model name' /proc/cpuinfo || true
-      - name: Capture the visual docs
+      - name: Capture the visual docs twice, for the reproducibility gate
         if: github.event_name == 'pull_request' && !cancelled()
         env:
           SHOTS_OUT: shots/current/x86_64
-        run: just dag-ui-screens
-      - name: Capture again for the reproducibility gate
-        if: github.event_name == 'pull_request' && !cancelled()
-        env:
-          SHOTS_OUT: shots/verify/x86_64
+          SHOTS_VERIFY: shots/verify/x86_64
         run: just dag-ui-screens
       - uses: nickderobertis/screencomp@v0
         if: github.event_name == 'pull_request' && !cancelled()
@@ -209,22 +202,14 @@ jobs:
         uses: amannn/action-semantic-pull-request@v5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # notignored.yml's comment, for the reason that file gives. A fork's token
-      # cannot upsert a comment, so a fork's pull request skips it there and here.
+      # One sticky comment listing the lint and type-check suppressions this
+      # change adds — each with its rule, its stated reason and a link — so a
+      # reviewer sees every bypass without reading the diff line by line. A
+      # review artifact rather than a verdict. A fork's token cannot upsert a
+      # comment, so a fork's pull request skips it.
       - name: Comment the suppressions this change adds
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !cancelled()
         uses: nickderobertis/notignored@v0
-      # A cancelled run: stop its leftover builds and keep its build only if it
-      # was stopped at the cap, as in `test-linux`.
-      - name: Stop the builds a cancelled run left running
-        if: cancelled()
-        run: |
-          if command -v docker >/dev/null; then docker ps -q | xargs docker kill >/dev/null 2>&1 || true; fi
-          pkill -KILL -x 'cargo|rustc|cargo-nextest|cargo-llvm-cov|cargo-auditable|maturin' || true
-          pkill -KILL -f "$GITHUB_WORKSPACE/target/" || true
-      - name: Keep a cancelled run's build only when it reached the cap
-        if: cancelled()
-        run: bash scripts/ci-cache-verdict.sh --started "$JOB_STARTED_AT" --cap-minutes 30
 
   # The deterministic gate on Linux: `check`'s tiers over the affected projects
   # (every test tier, the Playwright browser tier, the coverage floor, docs —
@@ -238,21 +223,14 @@ jobs:
     # 29.8 min upper estimate / 0.85, rounded up: docs/release-sweep-timing.md.
     timeout-minutes: 36
     steps:
-      # When the job started, for the cache verdict a cancelled run takes below.
-      - name: When this job started
-        run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # Main's build of the old `quality` job's key, then this job's own, saved:
-      # as in `lint`.
+      # Main's Linux build, restored and never saved from here, as in `lint`.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          shared-key: quality
+          shared-key: test-linux
           save-if: false
-      - uses: Swatinem/rust-cache@v2.9.2
-        with:
-          cache-on-failure: true
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -265,11 +243,14 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just,nextest,cargo-llvm-cov,cargo-auditable,release-plz@0.3.158,cargo-cyclonedx@0.5.7
-      # What `tests/e2e/cost.rs` counts with, as in `quality` below.
+      # What `tests/e2e/cost.rs` counts with. Those journeys hold the bounds on
+      # what a read may do to a runs root, counted from the kernel's own record
+      # of the server rather than from a clock; they are Linux-only, this is the
+      # job that runs them, and they fail rather than skip without the tracer.
       - name: Install the syscall tracer the cost journeys count with
         run: sudo apt-get update && sudo apt-get install -y strace
-      # The judged tier's journeys drive the real installed llmlint, as in
-      # `quality` below.
+      # The judged tier's journeys drive the real installed llmlint, with only
+      # the paid model call stood in for, and fail rather than skip without it.
       - uses: astral-sh/setup-uv@v6
       - name: Install llmlint for the judged tier's journeys
         run: just setup-llmlint
@@ -277,7 +258,8 @@ jobs:
       # recipes read it, so a cache key cannot name one thing while the recipe
       # provisions another: the release the lock pins the SDK to, with the source
       # it resolves it from, and the commit this branch forked from
-      # (scripts/ensure-baseline-api.sh's resolution).
+      # (scripts/ensure-baseline-api.sh's resolution). `ci-cache.yml` saves both
+      # on `main`; a miss provisions them here.
       - name: What the provisioned binaries are built from
         id: pins
         run: |
@@ -301,48 +283,11 @@ jobs:
           key: onepipeline-api-baseline-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.base }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-baseline-api.sh') }}
       - name: Bootstrap
         run: just bootstrap
-      # Saved on main only, as the build is, and as soon as bootstrap has
-      # provisioned it, so a run that fails or hits its cap still leaves it.
-      - name: Save the sibling CLI
-        if: github.ref == 'refs/heads/main' && steps.sibling.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            .tools/bin/onepipeline
-            .tools/bin/onepipeline.source
-          key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Which tier of the gate this build owes
         id: tier
         run: echo "tier=$(bash scripts/ci-tier.sh)" >> "$GITHUB_OUTPUT"
-      # llmlint: ignore-block[no_second_broader_sweep_over_an_already_gated_commit] transitional by the plan's sequencing: this job takes over `sweep` below, which stays only until branch protection moves to the four jobs, and removing it then is the CI-budgets change's work, not this one's — the two sweep the release pull request side by side for that window only, and neither feeds `gate`.
       - name: Gate, install and wheel (affected projects; every project on the release PR)
         run: just ci-test-linux --tier "${{ steps.tier.outputs.tier }}"
-      # llmlint: ignore-end[no_second_broader_sweep_over_an_already_gated_commit]
-      # A cancelled run: stop the builds it left writing `target/` (rust-cache's
-      # archive fails on a file that changes as it is read, and saves nothing),
-      # then keep its build only if it was stopped at the cap rather than
-      # superseded (scripts/ci-cache-verdict.sh). This runner is the job's own.
-      - name: Stop the builds a cancelled run left running
-        if: cancelled()
-        run: |
-          if command -v docker >/dev/null; then docker ps -q | xargs docker kill >/dev/null 2>&1 || true; fi
-          pkill -KILL -x 'cargo|rustc|cargo-nextest|cargo-llvm-cov|cargo-auditable|maturin' || true
-          pkill -KILL -f "$GITHUB_WORKSPACE/target/" || true
-      - name: Keep a cancelled run's build only when it reached the cap
-        if: cancelled()
-        run: bash scripts/ci-cache-verdict.sh --started "$JOB_STARTED_AT" --cap-minutes 36
-      # The gate provisions the base commit's server itself, when a tier needs
-      # it, so it is saved after the gate — whatever the gate's verdict — and
-      # only when one was built; on main only, where the commit it was built from
-      # is the one the next pull requests fork from.
-      - name: Save the base commit's server
-        if: always() && github.ref == 'refs/heads/main' && steps.baseline.outputs.cache-hit != 'true' && hashFiles('.tools/bin/onepipeline-api-baseline.commit') != ''
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            .tools/bin/onepipeline-api-baseline
-            .tools/bin/onepipeline-api-baseline.commit
-          key: onepipeline-api-baseline-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.base }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-baseline-api.sh') }}
 
   # The platform-sensitive tiers on Windows (`check-cross`: formatting, lints and
   # the suite against a real binary, without the Linux-only coverage floor), the
@@ -354,23 +299,17 @@ jobs:
       run:
         shell: bash
     steps:
-      # When the job started, for the cache verdict a cancelled run takes below.
-      - name: When this job started
-        run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           # The `ensure_baseline::` journeys resolve the commit this branch forked
           # from, which a shallow checkout does not have.
           fetch-depth: 0
-      # Main's build of the old `cross` job's key, then this job's own, saved:
-      # as in `lint`.
+      # Main's Windows build, which `ci-cache.yml`'s `warm-windows` saves:
+      # restored, never saved from here.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          shared-key: cross
+          shared-key: test-windows
           save-if: false
-      - uses: Swatinem/rust-cache@v2.9.2
-        with:
-          cache-on-failure: true
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -393,25 +332,8 @@ jobs:
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Bootstrap
         run: just bootstrap
-      - name: Save the sibling CLI
-        if: github.ref == 'refs/heads/main' && steps.sibling.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            .tools/bin/onepipeline.exe
-            .tools/bin/onepipeline.exe.source
-          key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Platform tiers, browser build and install (affected projects)
         run: just ci-test-windows
-      # A cancelled run: stop its leftover builds and keep its build only if it
-      # was stopped at the cap, as in `test-linux`.
-      - name: Stop the builds a cancelled run left running
-        if: cancelled()
-        run: |
-          taskkill //F //IM cargo.exe //IM rustc.exe //IM cargo-nextest.exe //IM cargo-llvm-cov.exe //IM cargo-auditable.exe //IM "e2e-*" //IM "packaging-*" >/dev/null 2>&1 || true
-      - name: Keep a cancelled run's build only when it reached the cap
-        if: cancelled()
-        run: bash scripts/ci-cache-verdict.sh --started "$JOB_STARTED_AT" --cap-minutes 30
 
   # The platform-sensitive tiers and the documented install on macOS: the one
   # Mac job a run may start (.github/budgets.yaml). Pull requests only, and never
@@ -426,9 +348,6 @@ jobs:
       run:
         shell: bash
     steps:
-      # When the job started, for the cache verdict a cancelled run takes below.
-      - name: When this job started
-        run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           # The classifier diffs base and head; the `ensure_baseline::` journeys
@@ -456,12 +375,13 @@ jobs:
             process.stdout.write(String(macosRequired));
           ' "$result")"
           echo "required=$required" >> "$GITHUB_OUTPUT"
-      # This job's own build, saved as in `lint`; no main run builds on macOS to
-      # restore from first.
+      # Main's macOS build, which `ci-cache.yml`'s `warm-macos` saves: restored,
+      # never saved from here.
       - uses: Swatinem/rust-cache@v2.9.2
         if: steps.macos.outputs.required == 'true'
         with:
-          cache-on-failure: true
+          shared-key: test-macos
+          save-if: false
       - uses: oven-sh/setup-bun@v2
         if: steps.macos.outputs.required == 'true'
         with:
@@ -489,495 +409,3 @@ jobs:
       - name: Platform tiers and install (affected projects)
         if: steps.macos.outputs.required == 'true'
         run: just ci-test-macos
-      # A cancelled run: stop its leftover builds and keep its build only if it
-      # was stopped at the cap, as in `test-linux`.
-      - name: Stop the builds a cancelled run left running
-        if: cancelled()
-        run: |
-          if command -v docker >/dev/null; then docker ps -q | xargs docker kill >/dev/null 2>&1 || true; fi
-          pkill -KILL -x 'cargo|rustc|cargo-nextest|cargo-llvm-cov|cargo-auditable|maturin' || true
-          pkill -KILL -f "$GITHUB_WORKSPACE/target/" || true
-      - name: Keep a cancelled run's build only when it reached the cap
-        if: cancelled()
-        run: bash scripts/ci-cache-verdict.sh --started "$JOB_STARTED_AT" --cap-minutes 30
-
-  # Which projects this build's diff can reach, derived once so every
-  # Rust-artifact job below can skip on a change that cannot reach the crate —
-  # any of the `lang:rust` projects the one Cargo package is split into — instead
-  # of paying the full matrix, and which tier of the gate the build owes.
-  #
-  # `just affected-crate` fails closed: with no derivable base — a shallow clone,
-  # a missing base branch, a push whose `before` does not resolve — it says a Rust
-  # project is affected and the matrices run. Affected selection is a speed
-  # optimisation, and one that can silently skip a check is a correctness hole.
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      crate: ${{ steps.affected.outputs.crate }}
-      tier: ${{ steps.tier.outputs.tier }}
-      macos: ${{ steps.macos.outputs.required }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # `nx affected` needs the merge base, which a shallow checkout does not
-          # have.
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      # bun installs the workspace (scripts/workspace-install.sh, through every
-      # recipe) at the version package.json's `packageManager` pins — the one pin,
-      # read here and by that script alike. Node still runs what it installs.
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      - uses: extractions/setup-just@v3
-      - name: Which projects the diff reaches
-        id: affected
-        run: echo "crate=$(just affected-crate)" >> "$GITHUB_OUTPUT"
-      # `broader` on the release pull request alone, which is what `sweep` below
-      # runs on. `scripts/ci-tier.sh` holds why.
-      - name: Which tier of the gate this build owes
-        id: tier
-        run: echo "tier=$(bash scripts/ci-tier.sh)" >> "$GITHUB_OUTPUT"
-
-      - name: Classify the Mac lane from the semantic diff
-        id: macos
-        env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          result="$(node .github/macos-policy.mjs classify --event "$GITHUB_EVENT_PATH" --base "$BASE" --head "$HEAD")"
-          echo "$result"
-          echo "required=$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).macosRequired))' "$result")" >> "$GITHUB_OUTPUT"
-
-  # The affected tier on a clean checkout: bootstrap from scratch, then the
-  # quality gate (format, clippy, the crate's test tiers with the coverage floor,
-  # docs) over the projects this build's diff can reach — a pull request's against
-  # its merge base, a push to main's against the commit before the push. Releases
-  # are batched through release-plz's release pull request, so the full sweep
-  # over every project runs there (`sweep` below) rather than after every merge.
-  # Linux-only because coverage is measured here; macOS/Windows prove the
-  # artifact via the `cross` job below. Its verdict reaches branch protection
-  # through `gate` at the end of this file, not a context of its own.
-  quality:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      # The release journeys' release-plz and cargo-cyclonedx, at the justfile's
-      # pins, from their checksummed release archives: `just release-tools`
-      # copies these into `.tools` rather than compiling them on every run.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable,release-plz@0.3.158,cargo-cyclonedx@0.5.7
-      # What `tests/e2e/cost.rs` counts with. Those journeys hold the bounds on
-      # what a read may do to a runs root — the bug that made one open subscriber
-      # cost a core — and they count operations from the kernel's own record of
-      # the server rather than from a clock, because a CPU figure taken on a
-      # loaded runner is a property of the runner. They are Linux-only and this
-      # is the leg that runs them; they fail with this instruction rather than
-      # skipping, because a cost bound nothing measured is a bound nobody has.
-      - name: Install the syscall tracer the cost journeys count with
-        run: sudo apt-get update && sudo apt-get install -y strace
-      # The judged tier's journeys drive the real installed llmlint, with only
-      # the paid model call stood in for, and fail rather than skip without it.
-      - uses: astral-sh/setup-uv@v6
-      - name: Install llmlint for the judged tier's journeys
-        run: just setup-llmlint
-      - name: Bootstrap
-        run: just bootstrap
-      # The browser tier is in this sweep, and has to be: it is the only proof the
-      # served UI works, and `release.yml` publishes the view it serves, so a
-      # pull request it skips can only redden main after the merge.
-      # `apps/dag-ui/project.json` is what puts it here — it declares `check`, and
-      # names the crate a dependency because `dag-ui:test` serves the UI through
-      # the compiled read API, so a change under `src/` selects that tier just as
-      # one under `apps/dag-ui` does.
-      - name: Quality gate (affected projects)
-        run: just check-affected
-      # A committed lockfile that `just bootstrap`/`just check` had to change is
-      # a stale generated file; fail rather than let it drift.
-      - name: Committed generated files are up to date
-        run: git diff --exit-code -- Cargo.lock bun.lock
-
-  # The broader tier: one full sweep of every project's `check`, on the release
-  # pull request alone. That pull request's head is the commit that ships, and no
-  # merge job swept it — every merge to `main` runs the affected tier above — so
-  # this is the one point each released tree meets the whole graph, catching what
-  # affected selection could miss. It is deliberately not an input to `gate`:
-  # `gate` rules on what every pull request owes, and this runs on one kind of
-  # pull request only. Whether branch protection lists it is the repository
-  # settings' call, not this file's. It is also the last whole-gate run a release
-  # gets: release.yml re-runs no tests, and proves the artifacts instead, by
-  # installing and running each one before and after it publishes.
-  sweep:
-    needs: changes
-    if: needs.changes.outputs.tier == 'broader'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      # The release journeys' release-plz and cargo-cyclonedx, at the justfile's
-      # pins, from their checksummed release archives: `just release-tools`
-      # copies these into `.tools` rather than compiling them on every run.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable,release-plz@0.3.158,cargo-cyclonedx@0.5.7
-      # The cost journeys count with it, as in `quality` above.
-      - name: Install the syscall tracer the cost journeys count with
-        run: sudo apt-get update && sudo apt-get install -y strace
-      # The judged tier's journeys need it, as in `quality` above.
-      - uses: astral-sh/setup-uv@v6
-      - name: Install llmlint for the judged tier's journeys
-        run: just setup-llmlint
-      - name: Bootstrap
-        run: just bootstrap
-      - name: Quality gate (every project)
-        run: just check
-      # The host-labelled budgets no per-change run reaches, after the gate they
-      # are no part of: `pool-maintenance`'s builds the crate twice to time one
-      # pass of the pool maintenance `onevcs.toml` declares.
-      - name: Budgets, host-labelled included
-        run: just budgets
-
-  # Prove the artifact builds and its tests pass on macOS and Windows (without
-  # the coverage threshold, which is enforced on Linux).
-  cross:
-    needs: changes
-    if: needs.changes.outputs.crate == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # `check-cross` runs the `ensure_baseline::` journeys, which resolve
-          # the commit this branch forked from out of version control. A shallow
-          # checkout has neither `origin/main` nor `main`, so that resolution
-          # fails here for want of history rather than for anything this leg is
-          # asked to prove.
-          fetch-depth: 0
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just,nextest,cargo-auditable
-      - name: Bootstrap
-        run: just bootstrap
-      - name: Quality gate (platform-sensitive tiers)
-        run: just check-cross
-
-  # The two carriers below keep the Mac display names and report what
-  # `test-macos` proved, or the omission the classifier authorized.
-  cross-macos:
-    name: cross (macos-latest)
-    needs: [changes, quality, test-macos]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - name: Report Mac proof or authorized omission
-        env:
-          CHANGES: ${{ needs.changes.result }}
-          QUALITY: ${{ needs.quality.result }}
-          MACOS: ${{ needs.test-macos.result }}
-          CRATE: ${{ needs.changes.outputs.crate }}
-          MACOS_REQUIRED: ${{ needs.changes.outputs.macos }}
-        run: node .github/macos-verdict.mjs
-
-  install-macos:
-    name: install (macos-latest)
-    needs: [changes, quality, test-macos]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - name: Report Mac proof or authorized omission
-        env:
-          CHANGES: ${{ needs.changes.result }}
-          QUALITY: ${{ needs.quality.result }}
-          MACOS: ${{ needs.test-macos.result }}
-          CRATE: ${{ needs.changes.outputs.crate }}
-          MACOS_REQUIRED: ${{ needs.changes.outputs.macos }}
-        run: node .github/macos-verdict.mjs
-
-  # Run the release's browser build on Windows on every pull request. This
-  # catches workspace compiler resolution failures before any artifact ships.
-  browser-windows:
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-      - name: Build the browser view (shared with release.yml)
-        # llmlint: ignore[no_second_broader_sweep_over_an_already_gated_commit] This only builds the release artifact, which the rule explicitly exempts; Linux quality cannot prove Windows compiler resolution after bun installs the workspace.
-        run: just build
-
-  # The declared MSRV is a promise to consumers, so prove it rather than
-  # document it: a floor that only lives in Cargo.toml drifts the first time a
-  # dependency raises its own.
-  msrv:
-    needs: changes
-    if: needs.changes.outputs.crate == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Read the MSRV from Cargo.toml
-        id: msrv
-        run: |
-          version="$(sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml)"
-          [ -n "$version" ] || { echo "::error::Cargo.toml declares no rust-version"; exit 1; }
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ steps.msrv.outputs.version }}
-      - uses: Swatinem/rust-cache@v2
-      # `just msrv` runs the `onepipeline-ui:msrv` Nx target, and Nx is a Node
-      # program the recipe installs from the committed lockfile.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      - uses: extractions/setup-just@v3
-      # `just msrv` reads the same `rust-version` field, so the recipe and the
-      # job can never disagree about which floor was proven.
-      - run: just msrv
-
-  # Advisory + license audit and unused-dependency check. Its own Linux-only job:
-  # it needs a network advisory DB and must not be duplicated across the matrix.
-  deny:
-    needs: changes
-    if: needs.changes.outputs.crate == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # `just deps-check` runs the `onepipeline-ui:deps-check` Nx target.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just,cargo-deny,cargo-machete
-      - run: just deps-check
-
-  # Prove the end-user install path on every platform: install the binary the
-  # documented way and smoke-test the real artifact. `cargo install --path .` is
-  # the same code path as the documented `cargo install onepipeline-ui`, minus
-  # the registry fetch — so the path users take is exercised on every PR, not
-  # only after a release.
-  install:
-    needs: [changes, quality]
-    if: needs.changes.outputs.crate == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-      # On a PR, the change is not on the remote yet, so `--path .` is the only
-      # way to install *this* revision.
-      - name: Install (this revision)
-        # Denied here for the same reason release.yml denies them on every build
-        # it does: this is a release-profile compile of the whole crate on three
-        # platforms, and the gate's own build is a debug one on Linux — so a
-        # warning that only appears this way has no other job to surface it.
-        env:
-          RUSTFLAGS: "-D warnings"
-        run: cargo install --path . --locked
-      - name: Smoke-test the installed binary
-        run: |
-          version="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
-          bash scripts/smoke-published.sh \
-            --expect-version "$version" \
-            --label "cargo install onepipeline-ui on $RUNNER_OS/$RUNNER_ARCH"
-
-  # Build the Linux wheels the way the release does, then install and smoke-test
-  # the one built. v0.16.0 is why this exists: every required check passed on the
-  # change that linked onetaskgraph's HTTP stores, whose vendored OpenSSL could
-  # not configure in the manylinux image, and the release was the first place
-  # anything compiled there — so it published no wheel. `just wheel-linux` is the
-  # one definition release.yml's `build-linux` job also builds through, on the
-  # same runner, and tests/e2e/linux_wheel.rs holds the two target sets equal.
-  wheel:
-    needs: changes
-    if: needs.changes.outputs.crate == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-    name: wheel (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-      - name: Build the browser view
-        run: just build
-      # llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] this is not a suite exercising an external service: it is the release's own Linux build, and what it reaches over the network is its pinned image, toolchain and maturin, as `gate` reaches crates.io and npm. It sits in the pull-request tier on purpose — v0.16.0 published no wheel because the release was the first place anything compiled in this image, with every required check green — so moving it to a credential-gated or promoted tier would reinstate exactly that gap. It needs no credential.
-      - name: Build wheel (shared with the build-linux job in release.yml)
-        env:
-          TARGET: ${{ matrix.target }}
-        run: just wheel-linux "$TARGET"
-      # llmlint: ignore-end[external_service_suite_stays_out_of_the_affected_tier]
-      - name: Install the wheel and smoke-test its binary
-        run: |
-          version="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
-          python3 -m venv "$RUNNER_TEMP/wheel-venv"
-          "$RUNNER_TEMP/wheel-venv/bin/pip" install --no-index dist/*.whl
-          PATH="$RUNNER_TEMP/wheel-venv/bin:$PATH" bash scripts/smoke-published.sh \
-            --expect-version "$version" \
-            --label "onepipeline-api-cli wheel on $RUNNER_OS/$RUNNER_ARCH"
-
-  # The `gate` context branch protection requires: the quality gate and the
-  # Linux wheel plus the Windows browser build, ruled on by scripts/gate-verdict.sh. v0.16.0 is why the
-  # wheels are in it — `wheel` was not a required context, so a wheel that could
-  # not build in the release's image left every required check green. Aggregated
-  # here rather than by making the quality gate wait on `wheel`, so the two still
-  # run side by side. `always()` because a job whose needs failed is otherwise
-  # skipped, and protection reads a skipped required check as passing. `wheel`
-  # may be skipped only on a change `changes` found cannot reach the crate, which
-  # is why `changes` has to have succeeded too.
-  gate:
-    needs: [changes, quality, wheel, browser-windows]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: The quality gate, Linux wheel and Windows browser build passed
-        env:
-          CHANGES: ${{ needs.changes.result }}
-          QUALITY: ${{ needs.quality.result }}
-          WHEEL: ${{ needs.wheel.result }}
-          BROWSER_WINDOWS: ${{ needs.browser-windows.result }}
-        run: >-
-          bash scripts/gate-verdict.sh --may-skip wheel
-          "changes=$CHANGES" "quality=$QUALITY" "wheel=$WHEEL"
-          "browser-windows=$BROWSER_WINDOWS"
-
-  # Lint the PR title: under squash-merge it becomes the release-driving commit.
-  pr-title:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: read
-    steps:
-      - uses: amannn/action-semantic-pull-request@v5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # The LLM-judge tier: a blocking PR check, separate from the deterministic
-  # `check` gate. It requires its harness credential and fails fast without it —
-  # a credential-less no-op would report unlinted files as clean. Fork PRs are
-  # gated by the repo's require-approval-for-fork-workflows setting.
-  llmlint:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: extractions/setup-just@v3
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      # oneharness.toml's primary harness. Without a harness binary on PATH,
-      # llmlint has nothing to drive and the job would fail with no findings —
-      # which reads like a clean run. Pinned rather than floating: an upstream
-      # release has taken this required check down for every pull request
-      # before. Bump deliberately, once a newer one is shown green here.
-      - name: Install the Codex harness
-        run: npm install -g @openai/codex@0.145.0
-      # oneharness only falls through to a harness it can actually spawn, so the
-      # secondary in the chain is a resilience claim the runner cannot honour
-      # unless `claude` is on PATH too. With it installed, an exhausted or broken
-      # codex degrades to claude-code instead of failing the check.
-      - name: Install the Claude Code harness (oneharness fallback)
-        run: npm install -g @anthropic-ai/claude-code@2.1.220
-      - name: Install llmlint toolchain
-        run: just setup-llmlint
-      - name: Validate llmlint config
-        run: just lint-llm-validate --diff-base origin/main
-      - name: Lint changed files
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        run: |
-          if [ -z "${OPENAI_API_KEY:-}" ]; then
-            echo "::error::llmlint needs OPENAI_API_KEY for the Codex harness" >&2
-            exit 1
-          fi
-          # The fallback is only real if its credential arrived too: without it
-          # claude-code is rejected at auth and falls through, leaving the chain
-          # nowhere to degrade to — silently, because an installed-yet-
-          # uncredentialled harness looks fine.
-          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-            echo "::error::llmlint needs CLAUDE_CODE_OAUTH_TOKEN for the claude-code fallback harness" >&2
-            exit 1
-          fi
-          just lint-llm-diff origin/main

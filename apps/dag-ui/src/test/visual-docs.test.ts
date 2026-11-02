@@ -1,5 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { repoFile, repoPath } from "./repo-file";
 
@@ -156,6 +159,69 @@ describe("the visual-docs capture's pinned versions", () => {
     for (const shot of baseline.shots) {
       expect(Object.keys(shot.toggles)).toEqual(["viewport"]);
       expect(declared).toContain(shot.toggles.viewport);
+    }
+  });
+});
+
+/**
+ * The second destination the reproducibility gate reads, refused before anything is
+ * built or rendered when it cannot be a second, independent capture.
+ *
+ * Driven through the real script: both refusals happen before it asks for Docker, so
+ * they run anywhere this suite does. The concurrent render itself is what lint's
+ * capture step runs on every pull request, where screencomp's `verify` then holds the
+ * two captures byte for byte.
+ */
+describe("the capture's second destination", () => {
+  function capture(env: Record<string, string>) {
+    return spawnSync("bash", [repoPath("scripts/visual-capture.sh")], {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    });
+  }
+
+  it("refuses a second capture into the first one's directory", () => {
+    const root = mkdtempSync(join(repoPath("shots"), "local-refusal-"));
+    try {
+      const result = capture({ SHOTS_OUT: root, SHOTS_VERIFY: root });
+      expect(result.status, result.stderr).toBe(2);
+      expect(result.stderr).toContain(
+        "SHOTS_VERIFY names the same directory as SHOTS_OUT",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a second capture outside the tree the container mounts, making nothing there", () => {
+    const root = mkdtempSync(join(repoPath("shots"), "local-refusal-"));
+    const outside = mkdtempSync(join(tmpdir(), "visual-capture-verify-"));
+    const absent = join(outside, "never-made");
+    try {
+      const result = capture({ SHOTS_OUT: root, SHOTS_VERIFY: absent });
+      expect(result.status, result.stderr).toBe(2);
+      expect(result.stderr).toContain(
+        `SHOTS_VERIFY must name a directory inside`,
+      );
+      expect(existsSync(absent)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a second capture that climbs out of the tree with ..", () => {
+    const root = mkdtempSync(join(repoPath("shots"), "local-refusal-"));
+    try {
+      const result = capture({
+        SHOTS_OUT: root,
+        SHOTS_VERIFY: "shots/../../visual-capture-escape",
+      });
+      expect(result.status, result.stderr).toBe(2);
+      expect(result.stderr).toContain("without '..'");
+      expect(existsSync(repoPath("../visual-capture-escape"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

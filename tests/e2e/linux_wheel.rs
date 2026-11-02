@@ -298,25 +298,6 @@ fn out_arg(dir: &Path) -> String {
         .to_string()
 }
 
-/// Each `- target:` in a job's matrix, with the `os:` beside it.
-fn matrix_legs(block: &str) -> Vec<(String, String)> {
-    let mut legs = Vec::new();
-    let mut target = None;
-    for line in block.lines().map(str::trim) {
-        let line = line.trim_start_matches("- ");
-        if let Some(value) = line.strip_prefix("target: ") {
-            if !value.contains("${{") {
-                target = Some(value.to_string());
-            }
-        } else if let Some(os) = line.strip_prefix("os: ") {
-            if let Some(target) = target.take() {
-                legs.push((target, os.to_string()));
-            }
-        }
-    }
-    legs
-}
-
 /// Each Linux target the release builds, with the runner its job runs on — read
 /// from the Linux recipes' own plans (`just release-linux plan` and `just
 /// release-linux-arm64 plan`).
@@ -528,10 +509,9 @@ fn a_hand_back_that_fails_fails_a_build_that_compiled() {
 }
 
 /// The acceptance this module exists for: a pull request builds the release's
-/// Linux wheels through the one definition the release uses, on its runners.
+/// Linux wheel through the one definition the release uses, on its runner.
 #[test]
 fn the_pull_request_check_builds_the_release_x86_64_linux_leg_through_the_recipe() {
-    let block = job_block("ci.yml", "wheel");
     // Linux arm64 is left out of pull-request CI by the user's decision, so the
     // pull request builds the release's x86_64 Linux leg alone; release.yml's
     // `build-linux-arm64` job builds the arm64 one on every release.
@@ -540,43 +520,59 @@ fn the_pull_request_check_builds_the_release_x86_64_linux_leg_through_the_recipe
         .filter(|(target, _)| target == "x86_64-unknown-linux-gnu")
         .collect();
     assert_eq!(
-        x86_64.len(),
-        1,
-        "release.yml builds one x86_64 Linux wheel leg"
-    );
-    assert_eq!(
-        matrix_legs(&block),
         x86_64,
-        "ci.yml's wheel builds the release's x86_64 Linux target on the release's runner, and no other"
+        vec![(
+            "x86_64-unknown-linux-gnu".to_owned(),
+            "ubuntu-latest".to_owned()
+        )],
+        "release.yml builds one x86_64 Linux wheel leg, on ubuntu-latest"
+    );
+    // `test-linux` runs on the release's runner and reaches the wheel through
+    // its recipe's `wheel-smoke` target (scripts/ci-job.sh).
+    let block = job_block("ci.yml", "test-linux");
+    assert!(
+        block.contains("runs-on: ubuntu-latest"),
+        "ci.yml's test-linux runs on the release's x86_64 runner:\n{block}"
     );
     assert!(
-        block.contains("run: just wheel-linux \"$TARGET\""),
-        "ci.yml's wheel builds through the recipe"
+        block.contains("run: just ci-test-linux"),
+        "ci.yml's test-linux runs its recipe:\n{block}"
     );
+    let job = fs::read_to_string(repo_root().join("scripts/ci-job.sh")).expect("ci-job.sh");
+    let affected = job
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("targets=\"build,test,"))
+        .expect("test-linux's affected targets");
     assert!(
-        block.contains("if: needs.changes.outputs.crate == 'true'"),
-        "ci.yml's wheel runs on every pull request that reaches the crate"
+        affected
+            .split([',', '"'])
+            .any(|target| target == "wheel-smoke"),
+        "test-linux's affected tier builds the wheel: {affected}"
     );
-    // What the leg built is installed and smoke-tested, from the directory the
-    // recipe writes to by default — the call above passes no `out`.
+    // What the leg built is installed and smoke-tested, from the directory it
+    // built into.
     let justfile = fs::read_to_string(repo_root().join("justfile")).expect("the justfile");
-    assert!(
-        justfile.contains("wheel-linux target out=\"dist\":"),
-        "`just wheel-linux` writes to dist/ by default"
-    );
-    let built = block.find("just wheel-linux").expect("the wheel is built");
-    let installed = block
-        .find("bin/pip\" install --no-index dist/*.whl")
-        .expect("ci.yml's wheel installs the wheel it built, and only that");
-    let smoked = block
+    let recipe = justfile
+        .split("\n_crate-wheel-smoke:\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("the justfile's _crate-wheel-smoke recipe");
+    let built = recipe
+        .find("just wheel-linux x86_64-unknown-linux-gnu target/wheel-smoke")
+        .expect("the wheel is built through the recipe");
+    let installed = recipe
+        .find("pip install --quiet --no-index target/wheel-smoke/*.whl")
+        .expect("the wheel-smoke installs the wheel it built, and only that");
+    let smoked = recipe
         .find("bash scripts/smoke-published.sh")
-        .expect("ci.yml's wheel smoke-tests the installed binary");
+        .expect("the wheel-smoke smoke-tests the installed binary");
     assert!(
         built < installed && installed < smoked,
-        "ci.yml's wheel builds, then installs, then smoke-tests"
+        "the wheel-smoke builds, then installs, then smoke-tests"
     );
     assert!(
-        block.contains("--expect-version \"$version\""),
+        recipe.contains("--expect-version"),
         "the smoke test holds the installed binary to this tree's version"
     );
     // The release reaches the same script through its own recipes' build phase.
@@ -595,9 +591,9 @@ fn the_pull_request_check_builds_the_release_x86_64_linux_leg_through_the_recipe
         phase.contains("\"wheel-linux\""),
         "the release's Linux build phase compiles through `just wheel-linux`"
     );
-    // Every step of both that builds the browser view comes before the wheel.
+    // Both release jobs build the browser view before the wheel; in the pull
+    // request, `dag-ui:build` is a dependency of the wheel-smoke target.
     for (name, block, wheel) in [
-        ("ci.yml wheel", &block, "just wheel-linux"),
         (
             "release.yml build-linux",
             &release,
@@ -902,177 +898,4 @@ fn a_build_directory_that_cannot_be_created_is_named() {
         "{stderr}"
     );
     assert!(!dir.join("docker.log").exists(), "docker was not run");
-}
-
-/// ci.yml's `gate` job's verdict command, as the runner assembles it from the
-/// folded `run: >-` scalar: its lines joined by single spaces.
-fn gate_command() -> String {
-    let block = job_block("ci.yml", "gate");
-    let mut lines = block.lines().skip_while(|line| line.trim() != "run: >-");
-    lines
-        .next()
-        .expect("ci.yml's gate rules through a folded `run: >-` step");
-    lines
-        .map(str::trim)
-        .take_while(|line| !line.is_empty() && !line.starts_with('-'))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Runs ci.yml's own `gate` command, with the job results the runner
-/// would hand it.
-fn gate(changes: &str, quality: &str, wheel: &str) -> Output {
-    let output = Command::new("bash")
-        .current_dir(repo_root())
-        .args(["-c", &gate_command()])
-        .env("CHANGES", changes)
-        .env("QUALITY", quality)
-        .env("WHEEL", wheel)
-        .env("BROWSER_WINDOWS", "success")
-        .output()
-        .expect("bash runs");
-    eprintln!(
-        "[gate {changes} {quality} {wheel}] exit {:?}\nstdout:\n{}\nstderr:\n{}",
-        output.status.code(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    output
-}
-
-/// The acceptance the review asked for: a Linux wheel that cannot build fails the
-/// `gate` context branch protection requires, without the quality sweep having to
-/// wait on it.
-#[test]
-fn the_required_gate_context_rules_on_quality_wheels_and_the_windows_browser_build() {
-    let block = job_block("ci.yml", "gate");
-    assert!(
-        block.contains("needs: [changes, quality, wheel, browser-windows]"),
-        "ci.yml's gate waits on changes, quality, wheels and the Windows browser build:\n{block}"
-    );
-    assert!(
-        block.contains("if: always()"),
-        "ci.yml's gate runs when a job it needs failed, rather than being skipped — \
-         which protection reads as passing:\n{block}"
-    );
-    for result in [
-        "CHANGES: ${{ needs.changes.result }}",
-        "QUALITY: ${{ needs.quality.result }}",
-        "WHEEL: ${{ needs.wheel.result }}",
-        "BROWSER_WINDOWS: ${{ needs.browser-windows.result }}",
-    ] {
-        assert!(
-            block.contains(result),
-            "ci.yml's gate reads {result}:\n{block}"
-        );
-    }
-    let quality = job_block("ci.yml", "quality");
-    assert!(
-        quality.contains("run: just check") && !quality.contains("needs:"),
-        "the quality sweep runs `just check` and waits on nothing, so it runs beside the wheels"
-    );
-    assert!(
-        job_block("ci.yml", "install").contains("needs: [changes, quality]"),
-        "install still waits on the quality sweep it smoke-tests after"
-    );
-}
-
-#[test]
-fn a_wheel_that_did_not_build_fails_the_gate_and_is_named() {
-    for wheel in ["failure", "cancelled"] {
-        let output = gate("success", "success", wheel);
-        assert_eq!(output.status.code(), Some(1), "{wheel}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains(&format!("gate: `wheel` reported {wheel}")),
-            "{stderr}"
-        );
-        assert!(
-            stderr.contains("ACTION: open the jobs named above"),
-            "{stderr}"
-        );
-    }
-}
-
-#[test]
-fn the_gate_passes_only_when_every_job_it_needs_passed() {
-    let passed = gate("success", "success", "success");
-    assert!(passed.status.success());
-    assert!(String::from_utf8_lossy(&passed.stdout).contains("gate: every required job passed"));
-    // A change that cannot reach the crate skips the wheels, and that is a pass.
-    assert!(gate("success", "success", "skipped").status.success());
-    // Anything else is not: a skipped sweep proves nothing, and a `changes` that
-    // failed is what would otherwise have let a skipped wheel through.
-    for (changes, quality, wheel, named) in [
-        (
-            "success",
-            "failure",
-            "success",
-            "`quality` reported failure",
-        ),
-        (
-            "success",
-            "skipped",
-            "success",
-            "`quality` reported skipped",
-        ),
-        (
-            "failure",
-            "success",
-            "skipped",
-            "`changes` reported failure",
-        ),
-    ] {
-        let output = gate(changes, quality, wheel);
-        assert_eq!(output.status.code(), Some(1), "{changes} {quality} {wheel}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains(named), "{stderr}");
-    }
-}
-
-#[test]
-fn a_malformed_gate_verdict_invocation_is_refused_with_the_usage() {
-    for (args, says) in [
-        (&[][..], "no job results to rule on"),
-        (&["--may-skip"][..], "--may-skip needs a job name"),
-        (&["--bogus", "a=success"][..], "unknown option: --bogus"),
-        (&["quality"][..], "not JOB=RESULT: 'quality'"),
-        (&["quality="][..], "not JOB=RESULT: 'quality='"),
-    ] {
-        let output = Command::new("bash")
-            .current_dir(repo_root())
-            .arg("scripts/gate-verdict.sh")
-            .args(args)
-            .output()
-            .expect("the script runs");
-        assert_eq!(output.status.code(), Some(2), "{args:?}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains(says), "{args:?}: {stderr}");
-        assert!(stderr.contains("ACTION: run 'gate-verdict.sh"), "{stderr}");
-    }
-}
-
-#[test]
-fn windows_browser_build_is_required_and_failure_blocks_the_gate() {
-    let block = job_block("ci.yml", "browser-windows");
-    assert!(block.contains("runs-on: windows-latest"));
-    assert!(block.contains("run: just build"));
-    assert!(block.contains("bun-version-file: package.json"));
-    assert!(!block.contains("if:"), "the browser build must always run");
-    for result in ["success", "failure", "cancelled", "skipped"] {
-        let output = Command::new("bash")
-            .current_dir(repo_root())
-            .args(["-c", &gate_command()])
-            .env("CHANGES", "success")
-            .env("QUALITY", "success")
-            .env("WHEEL", "success")
-            .env("BROWSER_WINDOWS", result)
-            .output()
-            .expect("bash runs the required gate command");
-        assert_eq!(output.status.success(), result == "success");
-        if result != "success" {
-            assert!(String::from_utf8_lossy(&output.stderr)
-                .contains(&format!("`browser-windows` reported {result}")));
-        }
-    }
 }

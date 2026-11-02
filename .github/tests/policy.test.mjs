@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
 import { test } from "node:test";
 
 import { history, prEvent } from "./histories.mjs";
@@ -107,34 +105,4 @@ test("release-prefix forgeries and unrecognised events route to macOS; known non
   } finally {
     h.close();
   }
-});
-test("real carrier command accepts only successful work or authorized omissions", () => {
-  const command = resolve(".github/macos-verdict.mjs");
-  for (const CHANGES of ["success", "failure", "cancelled", "skipped", ""])
-    for (const MACOS of ["success", "failure", "cancelled", "skipped", ""])
-      for (const MACOS_REQUIRED of ["true", "false", ""]) {
-        const result = spawnSync("node", [command], {
-          env: {
-            ...process.env,
-            CHANGES,
-            MACOS,
-            MACOS_REQUIRED,
-            CRATE: "true",
-            QUALITY: "success",
-          },
-          encoding: "utf8",
-        });
-        const accepted =
-          CHANGES === "success" &&
-          ["true", "false"].includes(MACOS_REQUIRED) &&
-          (MACOS === "success" ||
-            (MACOS === "skipped" && MACOS_REQUIRED === "false"));
-        assert.equal(
-          result.status === 0,
-          accepted,
-          JSON.stringify({ CHANGES, MACOS, MACOS_REQUIRED }),
-        );
-        if (accepted && MACOS === "skipped")
-          assert.match(result.stdout, /no Mac tests ran/);
-      }
 });

@@ -3,7 +3,12 @@ import { execFileSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
-const modules = [".github", ".github/tests"].flatMap((directory) =>
+const modules = [
+  ".github",
+  ".github/tests",
+  ".github/tests/installs",
+  ".github/tests/judge-install",
+].flatMap((directory) =>
   readdirSync(directory)
     .filter((file) => file.endsWith(".mjs"))
     .map((file) => `${directory}/${file}`),

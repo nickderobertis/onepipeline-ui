@@ -1,0 +1,723 @@
+// The two tools that keep the release-tail recordings honest, driven as a
+// maintainer runs them: gh-replay.mjs's record mode, which asks the real `gh`
+// and saves its answer, and reconcile.mjs, which asks `gh` again and diffs.
+//
+// Both reach GitHub only through the `gh` on PATH, so that is the one thing
+// stood in for: a `gh` that serves this repository's own recordings through
+// gh-replay.mjs's replay mode, from a directory the test may edit — the way
+// GitHub's answer would differ from a recording, or fail.
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, resolve } from "node:path";
+import { after, test } from "node:test";
+import {
+  EMAIL_PLACEHOLDER,
+  EMAIL_REDACTION,
+  emailsIn,
+} from "../fixtures/release-tail/sidecar.mjs";
+
+const ROOT = resolve(".");
+const FIXTURES = join(ROOT, ".github/fixtures");
+const RECORDINGS = join(ROOT, ".github/fixtures/release-tail/v0.64.0");
+const DOUBLE = join(ROOT, ".github/fixtures/release-tail/gh-replay.mjs");
+const RECONCILE = join(ROOT, ".github/fixtures/release-tail/reconcile.mjs");
+const scratch = mkdtempSync(
+  join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(), "replay-double-"),
+);
+after(() => rmSync(scratch, { recursive: true, force: true }));
+
+// A `gh` serving `served` (a directory of recordings), noting whether it was
+// handed a token, and answering `status` instead when one is given. What it is
+// told arrives in its environment, never spliced into its source: `env` holds
+// it, with PATH, for whatever runs it.
+function ghServing(served, status = "") {
+  const dir = mkdtempSync(join(scratch, "gh-"));
+  const tokens = join(dir, "tokens");
+  writeFileSync(
+    join(dir, "gh"),
+    `#!/usr/bin/env bash
+env | grep -c '^\\(GH_TOKEN\\|GITHUB_TOKEN\\)=' >> "$SHIM_TOKENS" || true
+unset GH_REPLAY_RECORD GH_REPLAY_LOG GH_TOKEN GITHUB_TOKEN
+GH_REPLAY_FIXTURES="$SHIM_SERVED" GH_REPLAY_STATUS="$SHIM_STATUS" exec node "$SHIM_DOUBLE" "$@"
+`,
+  );
+  chmodSync(join(dir, "gh"), 0o755);
+  return {
+    env: {
+      PATH: `${dir}:${process.env.PATH}`,
+      SHIM_TOKENS: tokens,
+      SHIM_SERVED: served,
+      SHIM_STATUS: status,
+      SHIM_DOUBLE: DOUBLE,
+    },
+    tokens,
+  };
+}
+
+// The Release run's jobs, which replay serves with its sidecar's one change, for
+// reconcile; and release-plz's run's, served exactly as recorded, for record mode.
+const listing = readdirSync(RECORDINGS).find((file) =>
+  /runs-41269844133-jobs.*\.json$/.test(file),
+);
+const plain = readdirSync(RECORDINGS).find((file) =>
+  /runs-41269793170-jobs.*\.json$/.test(file),
+);
+const sidecar = JSON.parse(readFileSync(join(RECORDINGS, plain), "utf8"));
+const recorded = readFileSync(
+  join(RECORDINGS, plain.replace(/\.json$/, ".http")),
+);
+
+// An address other than the placeholder, assembled so that no committed line
+// carries one: the publication boundary refuses any added line that does.
+const OTHER_ADDRESS = ["someone", "mail.example.org"].join("@");
+
+test("record mode saves gh's answer byte for byte with its sidecar, and hands gh no token", () => {
+  const into = join(scratch, "recorded");
+  const gh = ghServing(RECORDINGS);
+  const run = spawnSync(
+    "node",
+    [DOUBLE, "api", "--include", "--method", "GET", sidecar.path],
+    {
+      encoding: "buffer",
+      env: {
+        ...process.env,
+        ...gh.env,
+        GH_REPLAY_RECORD: into,
+        GH_REPLAY_SOURCE: JSON.stringify({
+          repository: "nickderobertis/onepipeline-ui",
+          release: "v0.64.0",
+        }),
+        GH_TOKEN: "placeholder-onevcs-hands-over",
+        GITHUB_TOKEN: "placeholder-onevcs-hands-over",
+      },
+    },
+  );
+  assert.equal(run.status, 0, run.stderr.toString());
+  assert.deepEqual(run.stdout, recorded);
+  const saved = readdirSync(into);
+  assert.equal(saved.length, 2, saved);
+  const http = saved.find((file) => file.endsWith(".http"));
+  assert.deepEqual(readFileSync(join(into, http)), recorded);
+  const written = JSON.parse(
+    readFileSync(join(into, http.replace(/\.http$/, ".json")), "utf8"),
+  );
+  assert.equal(written.path, sidecar.path);
+  assert.deepEqual(written.fetched_from, {
+    repository: "nickderobertis/onepipeline-ui",
+    release: "v0.64.0",
+  });
+  assert.equal(written.served_with, null);
+  assert.ok(!Number.isNaN(Date.parse(written.fetched_at)));
+  assert.equal(
+    readFileSync(gh.tokens, "utf8").trim(),
+    "0",
+    "gh was handed a token",
+  );
+});
+
+test("record mode saves nothing when gh's read fails, and fails with it", () => {
+  const into = join(scratch, "failed");
+  const run = spawnSync(
+    "node",
+    [DOUBLE, "api", "--include", "--method", "GET", sidecar.path],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...ghServing(RECORDINGS, "502").env,
+        GH_REPLAY_RECORD: into,
+        GH_REPLAY_SOURCE: JSON.stringify({
+          repository: "nickderobertis/onepipeline-ui",
+          release: "v0.64.0",
+        }),
+      },
+    },
+  );
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /HTTP 502/);
+  assert.deepEqual(existsSync(into) ? readdirSync(into) : [], []);
+});
+
+const reconcile = (served, status) =>
+  spawnSync("node", [RECONCILE, RECORDINGS], {
+    encoding: "utf8",
+    env: { ...process.env, ...ghServing(served, status).env },
+  });
+
+test("reconcile passes when GitHub serves what was recorded", () => {
+  const run = reconcile(RECORDINGS);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /every recording matches what GitHub serves/);
+});
+
+test("reconcile fails, naming it, when a recorded item differs or a read fails", () => {
+  const served = join(scratch, "drifted");
+  mkdirSync(served);
+  cpSync(RECORDINGS, served, { recursive: true });
+  const file = join(served, listing.replace(/\.json$/, ".http"));
+  const text = readFileSync(file, "utf8");
+  const split = text.search(/\r?\n\r?\n/);
+  const body = JSON.parse(text.slice(split).trim());
+  const job = body.jobs.find((candidate) => candidate.name === "build-linux");
+  job.conclusion = "failure";
+  // A field GitHub rewrites is not a difference.
+  body.jobs.find((candidate) => candidate.name === "build-macos").updated_at =
+    "2027-01-01T00:00:00Z";
+  writeFileSync(file, `${text.slice(0, split)}\r\n\r\n${JSON.stringify(body)}`);
+  const drifted = reconcile(served);
+  assert.equal(drifted.status, 1, drifted.stdout);
+  assert.match(
+    drifted.stderr,
+    new RegExp(`item ${job.id} differs from its recording`),
+  );
+  assert.match(drifted.stderr, /reconcile: 1 difference\(s\)/);
+
+  const failed = reconcile(RECORDINGS, "502");
+  assert.equal(failed.status, 1);
+  assert.match(failed.stderr, /gh failed/);
+});
+
+test("reconcile reports items that entered or left a page without failing", () => {
+  const served = join(scratch, "grown");
+  mkdirSync(served);
+  cpSync(RECORDINGS, served, { recursive: true });
+  const file = join(served, listing.replace(/\.json$/, ".http"));
+  const text = readFileSync(file, "utf8");
+  const split = text.search(/\r?\n\r?\n/);
+  const body = JSON.parse(text.slice(split).trim());
+  body.jobs.push({ ...body.jobs[0], id: 1 });
+  writeFileSync(file, `${text.slice(0, split)}\r\n\r\n${JSON.stringify(body)}`);
+  const run = reconcile(served);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(
+    run.stdout,
+    /1 item\(s\) entered and 0 left the page since it was recorded/,
+  );
+});
+
+test("a response that is not what gh prints is refused by name, by reconcile and by replay", () => {
+  const served = join(scratch, "unframed");
+  mkdirSync(served);
+  cpSync(RECORDINGS, served, { recursive: true });
+  const file = join(served, plain.replace(/\.json$/, ".http"));
+  const text = readFileSync(file, "utf8");
+  // The status line and headers run straight into the body: the blank line
+  // between them is lost.
+  writeFileSync(file, text.replace(/\r?\n\r?\n/, "\r\n"));
+  // A gh that printed it so, for reconcile: the replay double refuses to.
+  const raw = mkdtempSync(join(scratch, "raw-gh-"));
+  writeFileSync(
+    join(raw, "gh"),
+    `#!/usr/bin/env bash
+if [ "\${!#}" = "$RAW_PATH" ]; then cat "$RAW_FILE"; exit 0; fi
+GH_REPLAY_FIXTURES="$RAW_RECORDINGS" exec node "$RAW_DOUBLE" "$@"
+`,
+  );
+  chmodSync(join(raw, "gh"), 0o755);
+  const run = spawnSync("node", [RECONCILE, RECORDINGS], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${raw}:${process.env.PATH}`,
+      RAW_PATH: sidecar.path,
+      RAW_FILE: file,
+      RAW_RECORDINGS: RECORDINGS,
+      RAW_DOUBLE: DOUBLE,
+    },
+  });
+  assert.equal(run.status, 1, run.stdout);
+  assert.match(
+    run.stderr,
+    /GitHub's answer to .*41269793170\/jobs.* has no header\/body separator/,
+  );
+  // Every other recording was still checked.
+  assert.match(run.stderr, /reconcile: 1 difference\(s\)/);
+
+  const changed = join(served, listing.replace(/\.json$/, ".http"));
+  const recordedChanged = readFileSync(changed, "utf8");
+  writeFileSync(
+    changed,
+    recordedChanged.slice(recordedChanged.search(/\r?\n\r?\n/)).trim(),
+  );
+  const replayed = spawnSync(
+    "node",
+    [
+      DOUBLE,
+      "api",
+      "--include",
+      "--method",
+      "GET",
+      JSON.parse(readFileSync(join(served, listing), "utf8")).path,
+    ],
+    {
+      encoding: "utf8",
+      env: { ...process.env, GH_REPLAY_FIXTURES: served },
+    },
+  );
+  assert.notEqual(replayed.status, 0);
+  assert.match(replayed.stderr, /has no HTTP status line/);
+  const status = spawnSync(
+    "node",
+    [DOUBLE, "api", "--include", "--method", "GET", "repos/o/n/actions/runs"],
+    {
+      encoding: "utf8",
+      env: { ...process.env, GH_REPLAY_STATUS: "oops" },
+    },
+  );
+  assert.equal(status.status, 2);
+  assert.match(status.stderr, /must be an HTTP error status/);
+});
+
+test("reconcile refuses a directory with no recording rather than passing it", () => {
+  const empty = join(scratch, "empty-release");
+  mkdirSync(empty);
+  const run = spawnSync("node", [RECONCILE, empty], {
+    encoding: "utf8",
+    env: { ...process.env, ...ghServing(RECORDINGS).env },
+  });
+  assert.equal(run.status, 1);
+  assert.match(
+    run.stderr,
+    /no recording under .*empty-release, so nothing was reconciled/,
+  );
+});
+
+test("reconcile reports an item that left a page without failing, and compares a response that is no listing whole", () => {
+  const served = join(scratch, "shrunk");
+  mkdirSync(served);
+  cpSync(RECORDINGS, served, { recursive: true });
+  const file = join(served, plain.replace(/\.json$/, ".http"));
+  const text = readFileSync(file, "utf8");
+  const split = text.search(/\r?\n\r?\n/);
+  const body = JSON.parse(text.slice(split).trim());
+  body.jobs.pop();
+  writeFileSync(file, `${text.slice(0, split)}\r\n\r\n${JSON.stringify(body)}`);
+  const shrunk = reconcile(served);
+  assert.equal(shrunk.status, 0, shrunk.stderr);
+  assert.match(
+    shrunk.stdout,
+    /0 item\(s\) entered and 1 left the page since it was recorded/,
+  );
+
+  // One release directory whose one recording is an object, not a listing:
+  // the comparison's own head, made from the recorded comparison.
+  const compare = readdirSync(RECORDINGS).find((name) =>
+    /-compare-.*\.json$/.test(name),
+  );
+  const recordedText = readFileSync(
+    join(RECORDINGS, compare.replace(/\.json$/, ".http")),
+    "utf8",
+  );
+  const at = recordedText.search(/\r?\n\r?\n/);
+  const {
+    commits: _commits,
+    files: _files,
+    ...head
+  } = JSON.parse(recordedText.slice(at).trim());
+  const single = (dir, object) => {
+    mkdirSync(dir);
+    writeFileSync(join(dir, compare), readFileSync(join(RECORDINGS, compare)));
+    writeFileSync(
+      join(dir, compare.replace(/\.json$/, ".http")),
+      `${recordedText.slice(0, at)}\r\n\r\n${JSON.stringify(object)}`,
+    );
+  };
+  const release = join(scratch, "object-release");
+  const same = join(scratch, "object-same");
+  const changed = join(scratch, "object-changed");
+  single(release, head);
+  single(same, head);
+  single(changed, { ...head, status: "diverged" });
+  const run = (servedDir) =>
+    spawnSync("node", [RECONCILE, release], {
+      encoding: "utf8",
+      env: { ...process.env, ...ghServing(servedDir).env },
+    });
+  assert.equal(run(same).status, 0);
+  const differs = run(changed);
+  assert.equal(differs.status, 1);
+  assert.match(differs.stderr, /the response differs from its recording/);
+});
+
+test("a recorded error status is served as gh serves one, and a sidecar naming no API path is refused", () => {
+  const served = join(scratch, "errored");
+  mkdirSync(served);
+  cpSync(RECORDINGS, served, { recursive: true });
+  const file = join(served, plain.replace(/\.json$/, ".http"));
+  writeFileSync(
+    file,
+    readFileSync(file, "utf8").replace(
+      /^HTTP\/2\.0 200 OK/,
+      "HTTP/2.0 502 Bad Gateway",
+    ),
+  );
+  const replayed = spawnSync(
+    "node",
+    [DOUBLE, "api", "--include", "--method", "GET", sidecar.path],
+    {
+      encoding: "utf8",
+      env: { ...process.env, GH_REPLAY_FIXTURES: served },
+    },
+  );
+  assert.equal(replayed.status, 1);
+  assert.match(replayed.stdout, /^HTTP\/2\.0 502/);
+
+  const odd = join(scratch, "odd-path");
+  mkdirSync(odd);
+  writeFileSync(
+    join(odd, plain),
+    JSON.stringify({ ...sidecar, path: "--paginate" }),
+  );
+  writeFileSync(
+    join(odd, plain.replace(/\.json$/, ".http")),
+    readFileSync(join(RECORDINGS, plain.replace(/\.json$/, ".http"))),
+  );
+  const run = spawnSync("node", [RECONCILE, odd], {
+    encoding: "utf8",
+    env: { ...process.env, ...ghServing(RECORDINGS).env },
+  });
+  assert.equal(run.status, 1);
+  assert.match(
+    run.stderr,
+    /its sidecar names no repos\/OWNER\/NAME\/ API path/,
+  );
+});
+
+test("the double serves only an API path, never an option gh would read", () => {
+  for (const request of ["--paginate", "repos/x", "user", "repos/a/b/x y"]) {
+    const run = spawnSync(
+      "node",
+      [DOUBLE, "api", "--include", "--method", "GET", request],
+      {
+        encoding: "utf8",
+        env: { ...process.env, GH_REPLAY_FIXTURES: RECORDINGS },
+      },
+    );
+    assert.equal(run.status, 2, request);
+    assert.match(
+      run.stderr,
+      /only 'api --include --method GET <API path>' is served/,
+    );
+  }
+});
+
+// A copy of the recordings whose one changed sidecar is `served_with`.
+function withChange(name, servedWith) {
+  const dir = mkdtempSync(join(scratch, `${name}-`));
+  cpSync(RECORDINGS, dir, { recursive: true });
+  const changed = JSON.parse(readFileSync(join(dir, listing), "utf8"));
+  writeFileSync(
+    join(dir, listing),
+    JSON.stringify({ ...changed, served_with: servedWith }),
+  );
+  return { dir, path: changed.path };
+}
+const serve = (dir, path, env = {}) =>
+  spawnSync("node", [DOUBLE, "api", "--include", "--method", "GET", path], {
+    encoding: "utf8",
+    env: { ...process.env, GH_REPLAY_FIXTURES: dir, ...env },
+  });
+
+test("a path with no recording is answered 404, as GitHub answers one", () => {
+  const run = serve(
+    RECORDINGS,
+    "repos/nickderobertis/onepipeline-ui/actions/runs/1/jobs",
+  );
+  assert.equal(run.status, 1);
+  assert.match(run.stdout, /^HTTP\/2\.0 404 Not Found/);
+  assert.match(
+    run.stderr,
+    /no recording of repos\/nickderobertis\/onepipeline-ui\/actions\/runs\/1\/jobs/,
+  );
+});
+
+test("a served_with change the recording cannot take, or that is malformed, is refused by both tools", () => {
+  const absent = withChange("absent-job", {
+    reason: "test",
+    jobs: { 1: { status: "in_progress" } },
+  });
+  const missing = serve(absent.dir, absent.path);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /no job 1 in .* to change/);
+
+  const malformed = withChange("malformed", {
+    reason: "test",
+    jobs: ["publish"],
+  });
+  const refused = serve(malformed.dir, malformed.path);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /has a served_with that is not \{reason, jobs/);
+  const reconciled = spawnSync("node", [RECONCILE, malformed.dir], {
+    encoding: "utf8",
+    env: { ...process.env, ...ghServing(RECORDINGS).env },
+  });
+  assert.equal(reconciled.status, 1);
+  assert.match(
+    reconciled.stderr,
+    /has a served_with that is not \{reason, jobs/,
+  );
+  assert.match(reconciled.stderr, /reconcile: 1 difference\(s\)/);
+
+  // A change on a recording that is no jobs listing: the comparison.
+  const compare = readdirSync(RECORDINGS).find((n) =>
+    /-compare-.*\.json$/.test(n),
+  );
+  const dir = mkdtempSync(join(scratch, "not-jobs-"));
+  cpSync(RECORDINGS, dir, { recursive: true });
+  const sidecarOf = JSON.parse(readFileSync(join(dir, compare), "utf8"));
+  writeFileSync(
+    join(dir, compare),
+    JSON.stringify({
+      ...sidecarOf,
+      served_with: { reason: "test", jobs: { 1: { status: "x" } } },
+    }),
+  );
+  const notJobs = serve(dir, sidecarOf.path);
+  assert.equal(notJobs.status, 1);
+  assert.match(
+    notJobs.stderr,
+    /is not a jobs listing, so it has no job to change/,
+  );
+});
+
+test("record mode refuses a source that does not name what it records", () => {
+  for (const source of [undefined, "null", '"v0.64.0"', '{"repository":"x"}']) {
+    const into = mkdtempSync(join(scratch, "unsourced-"));
+    const run = spawnSync(
+      "node",
+      [DOUBLE, "api", "--include", "--method", "GET", sidecar.path],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ...ghServing(RECORDINGS).env,
+          GH_REPLAY_RECORD: into,
+          ...(source === undefined ? {} : { GH_REPLAY_SOURCE: source }),
+        },
+      },
+    );
+    assert.equal(run.status, 2, String(source));
+    assert.match(run.stderr, /GH_REPLAY_SOURCE must name what is recorded/);
+    assert.deepEqual(readdirSync(into), []);
+  }
+});
+
+test("reconcile names a listing that is not a list of objects and still checks the rest", () => {
+  const served = mkdtempSync(join(scratch, "bad-listing-"));
+  cpSync(RECORDINGS, served, { recursive: true });
+  const file = join(served, plain.replace(/\.json$/, ".http"));
+  const text = readFileSync(file, "utf8");
+  const at = text.search(/\r?\n\r?\n/);
+  writeFileSync(
+    file,
+    `${text.slice(0, at)}\r\n\r\n${JSON.stringify({ total_count: 1, jobs: [1, 2] })}`,
+  );
+  const run = reconcile(served);
+  assert.equal(run.status, 1);
+  assert.match(
+    run.stderr,
+    /GitHub's answer to .*41269793170\/jobs.* carries a listing that is not a list of objects/,
+  );
+  assert.match(run.stderr, /reconcile: 1 difference\(s\)/);
+});
+
+test("reconcile refuses an answer with no status line and a change naming a job the recording lacks", () => {
+  const absent = withChange("reconcile-absent", {
+    reason: "test",
+    jobs: { 1: { status: "x" } },
+  });
+  const run = spawnSync("node", [RECONCILE, absent.dir], {
+    encoding: "utf8",
+    env: { ...process.env, ...ghServing(RECORDINGS).env },
+  });
+  assert.equal(run.status, 1);
+  assert.match(
+    run.stderr,
+    /its served_with names job 1, which the recording lacks/,
+  );
+
+  const raw = mkdtempSync(join(scratch, "statusless-gh-"));
+  const statusless = join(raw, "answer");
+  const text = readFileSync(
+    join(RECORDINGS, plain.replace(/\.json$/, ".http")),
+    "utf8",
+  );
+  writeFileSync(statusless, text.replace(/^HTTP\/2\.0 200 OK\r?\n/, ""));
+  writeFileSync(
+    join(raw, "gh"),
+    `#!/usr/bin/env bash
+if [ "\${!#}" = "$RAW_PATH" ]; then cat "$RAW_FILE"; exit 0; fi
+GH_REPLAY_FIXTURES="$RAW_RECORDINGS" exec node "$RAW_DOUBLE" "$@"
+`,
+  );
+  chmodSync(join(raw, "gh"), 0o755);
+  const answered = spawnSync("node", [RECONCILE, RECORDINGS], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${raw}:${process.env.PATH}`,
+      RAW_PATH: sidecar.path,
+      RAW_FILE: statusless,
+      RAW_RECORDINGS: RECORDINGS,
+      RAW_DOUBLE: DOUBLE,
+    },
+  });
+  assert.equal(answered.status, 1);
+  assert.match(
+    answered.stderr,
+    /GitHub's answer to .*41269793170\/jobs.* has no HTTP status line/,
+  );
+});
+
+const filesUnder = (dir) =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+    entry.isDirectory()
+      ? filesUnder(join(dir, entry.name))
+      : [join(dir, entry.name)],
+  );
+
+// What the recordings under `root` say about email addresses: none carries one
+// but the placeholder, and a recording carries the placeholder exactly when its
+// sidecar says it was redacted. The scripts beside them are code, not recordings.
+export function emailProblems(root) {
+  const problems = [];
+  for (const file of filesUnder(root).filter((f) => !f.endsWith(".mjs"))) {
+    const text = readFileSync(file, "utf8");
+    const others = emailsIn(text).filter(
+      (email) => email !== EMAIL_PLACEHOLDER,
+    );
+    if (others.length)
+      problems.push(
+        `${relative(root, file)} carries ${others.length} email address(es) other than ${EMAIL_PLACEHOLDER}`,
+      );
+    if (!file.endsWith(".http")) continue;
+    const sidecarFile = file.replace(/\.http$/, ".json");
+    const note = existsSync(sidecarFile)
+      ? JSON.parse(readFileSync(sidecarFile, "utf8")).redacted
+      : undefined;
+    const placeholder = text.includes(EMAIL_PLACEHOLDER);
+    if (placeholder && note !== EMAIL_REDACTION)
+      problems.push(
+        `${relative(root, file)} carries ${EMAIL_PLACEHOLDER} but its sidecar does not say it was redacted`,
+      );
+    if (!placeholder && note !== undefined)
+      problems.push(
+        `${relative(root, sidecarFile)} says its recording was redacted, which carries no ${EMAIL_PLACEHOLDER}`,
+      );
+  }
+  return problems;
+}
+
+test("no recording carries an email address but the placeholder, and each redacted one says so", () => {
+  assert.deepEqual(emailProblems(FIXTURES), []);
+});
+
+test("a recording carrying an email address, or a redaction its sidecar does not name, is refused", () => {
+  const copy = join(scratch, "fixtures-copy");
+  cpSync(FIXTURES, copy, { recursive: true });
+  const compare = readdirSync(join(copy, "release-tail/v0.64.0")).find((name) =>
+    /-compare-.*\.http$/.test(name),
+  );
+  const file = join(copy, "release-tail/v0.64.0", compare);
+  writeFileSync(
+    file,
+    readFileSync(file, "utf8").replace(
+      EMAIL_PLACEHOLDER,
+      OTHER_ADDRESS,
+    ),
+  );
+  const sidecarFile = file.replace(/\.http$/, ".json");
+  const note = JSON.parse(readFileSync(sidecarFile, "utf8"));
+  delete note.redacted;
+  writeFileSync(sidecarFile, JSON.stringify(note));
+  const problems = emailProblems(copy);
+  const at = `release-tail/v0.64.0/${compare}`;
+  assert.ok(
+    problems.includes(
+      `${at} carries 1 email address(es) other than ${EMAIL_PLACEHOLDER}`,
+    ),
+    problems,
+  );
+  assert.ok(
+    problems.includes(
+      `${at} carries ${EMAIL_PLACEHOLDER} but its sidecar does not say it was redacted`,
+    ),
+    problems,
+  );
+});
+
+test("record mode saves no email address, and its sidecar says what it replaced", () => {
+  // A gh whose answer carries one: release-plz's run's jobs, with an address in
+  // its first job's name.
+  const served = join(scratch, "addressed");
+  mkdirSync(served);
+  cpSync(RECORDINGS, served, { recursive: true });
+  const file = join(served, plain.replace(/\.json$/, ".http"));
+  const text = readFileSync(file, "utf8");
+  const split = text.search(/\r?\n\r?\n/);
+  const body = JSON.parse(text.slice(split).trim());
+  body.jobs[0].name = `release-plz for ${OTHER_ADDRESS}`;
+  writeFileSync(file, `${text.slice(0, split)}\r\n\r\n${JSON.stringify(body)}`);
+  const into = join(scratch, "recorded-redacted");
+  const run = spawnSync(
+    "node",
+    [DOUBLE, "api", "--include", "--method", "GET", sidecar.path],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...ghServing(served).env,
+        GH_REPLAY_RECORD: into,
+        GH_REPLAY_SOURCE: JSON.stringify({
+          repository: "nickderobertis/onepipeline-ui",
+          release: "v0.64.0",
+        }),
+      },
+    },
+  );
+  assert.equal(run.status, 0, run.stderr);
+  const http = readdirSync(into).find((name) => name.endsWith(".http"));
+  const saved = readFileSync(join(into, http), "utf8");
+  assert.deepEqual(emailsIn(saved), [EMAIL_PLACEHOLDER]);
+  assert.match(saved, /"release-plz for user@example\.invalid"/);
+  assert.equal(
+    JSON.parse(
+      readFileSync(join(into, http.replace(/\.http$/, ".json")), "utf8"),
+    ).redacted,
+    EMAIL_REDACTION,
+  );
+});
+
+test("reconcile matches a recording whose addresses GitHub still serves", () => {
+  // GitHub's answer carries real addresses where every recording has the
+  // placeholder; reconcile redacts them the same way before it compares.
+  const served = join(scratch, "unredacted");
+  mkdirSync(served);
+  cpSync(RECORDINGS, served, { recursive: true });
+  let restored = 0;
+  for (const name of readdirSync(served).filter((n) => n.endsWith(".http"))) {
+    const text = readFileSync(join(served, name), "utf8");
+    if (!text.includes(EMAIL_PLACEHOLDER)) continue;
+    restored += 1;
+    writeFileSync(
+      join(served, name),
+      text.replaceAll(EMAIL_PLACEHOLDER, OTHER_ADDRESS),
+    );
+  }
+  assert.ok(restored > 0, "no recording carries the placeholder");
+  const run = reconcile(served);
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /every recording matches what GitHub serves/);
+});

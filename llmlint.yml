@@ -27,6 +27,15 @@ files:
     # it, so it is an input the repo is judged *against*, not repo-authored prose
     # to judge — and editing it to satisfy a rule would move the goalposts.
     - "docs/contract.md"
+    # GitHub's own responses, recorded byte for byte from this repository's runs
+    # for the release-tail replay: a snapshot of one finished release, not a copy
+    # kept in step with anything (each `.json` sidecar beside them names its API
+    # path and source, and is judged).
+    - ".github/fixtures/release-tail/*/*.http"
+    # Copied verbatim from dero-skills' create-repo and edited only there, as its
+    # own header says: create-repo's baseline check compares the copy with its
+    # source, and an edit here to satisfy a rule would fork it from that source.
+    - "scripts/actions-budget-figures.sh"
 rationales: true
 # No `agents` block: the harness/model are NOT pinned here. `oneharness.toml`
 # (composed alongside this file) selects them in fallback mode — codex + gpt-6.1-sol

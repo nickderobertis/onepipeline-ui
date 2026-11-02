@@ -140,11 +140,30 @@ function triggered(document, scenario) {
           : undefined
         : triggers?.[scenario.event];
   if (config === undefined) return false;
-  if (config?.types && !config.types.includes(scenario.action)) return false;
+  // GitHub's default activity types for a pull request, when none are named.
+  const types =
+    config?.types ??
+    (scenario.event === "pull_request"
+      ? ["opened", "synchronize", "reopened"]
+      : undefined);
+  if (types && !types.includes(scenario.action)) return false;
   if (config?.branches && !config.branches.includes(scenario.branch))
     return false;
   if (config?.workflows && !config.workflows.includes(scenario.upstream))
     return false;
+  // A push's path filters, over the files the scenario's commit changed: with
+  // `paths-ignore`, the run starts unless every changed file is ignored. The
+  // filters here are literal paths; a pattern is refused rather than misread.
+  const ignored = config?.["paths-ignore"];
+  if (ignored) {
+    if (config.paths || ignored.some((path) => /[*?[\]!]/.test(path)))
+      throw new Error("unresolved path filter: only literal paths-ignore");
+    if (!Array.isArray(scenario.changed))
+      throw new Error(
+        `unresolved path filter: scenario ${scenario.id} names no changed files`,
+      );
+    if (scenario.changed.every((path) => ignored.includes(path))) return false;
+  } else if (config?.paths) throw new Error("unresolved path filter: paths");
   return true;
 }
 let reusableCache;
@@ -174,6 +193,7 @@ export function resolveWorkflow(
       event_name: scenario.event,
       event: {
         action: scenario.action,
+        head_commit: { message: scenario.message ?? "" },
         pull_request: {
           number: 1,
           head: {
@@ -357,6 +377,7 @@ export function resolveWorkflow(
   }
   return rows;
 }
+export { triggered };
 export function resolveScenario(scenario, policy) {
   return workflows()
     .filter(({ document }) => triggered(document, scenario))

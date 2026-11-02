@@ -5,9 +5,10 @@
 //! the keys indented by exactly two spaces under the top-level `jobs:`, and what a
 //! journey asserts about a job is a line inside its block.
 //!
-//! Unix only because every journey reading it is: they run the scripts those
-//! workflows call, which are bash.
-#![cfg(unix)]
+//! Linux only because the one journey module reading it, `linux_wheel`, is: it
+//! runs the Linux wheel scripts those workflows call. Compiling it anywhere else
+//! leaves `job_block` unused, which `-D warnings` refuses on the macOS leg.
+#![cfg(target_os = "linux")]
 
 use std::fs;
 use std::path::Path;

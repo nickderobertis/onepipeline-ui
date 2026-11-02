@@ -23,12 +23,16 @@ budgets:
       merge, the automation version/changelog PR and merge, release build and
       downstream smoke fan-out. Explicit manual diagnostics are excluded.
       Telemetry covers 12 event classes, 3 diff classes, same-repository/fork
-      ownership, release architectures and publish switches. Design bound;
-      analysis reads recorded telemetry only, approximately 2 seconds excluding
-      tests/install; no queue-time claim.
+      ownership, release architectures and publish switches. Design bound of 3,
+      raised from 2 by the manager's ruling of 2026-10-19 for one cause: the
+      main-push cache warmer's macOS job (ci-cache.yml `warm-macos`) on the push
+      merging the ordinary pull request, which keeps test-macos's build warm;
+      the push merging the release-plz pull request runs none. Analysis reads
+      recorded telemetry only, approximately 2 seconds excluding tests/install;
+      no queue-time claim.
     measure: reported
     command: [node, macos-budget.mjs, --metric, runs-per-change, --telemetry, .github/.telemetry/macos-policy.json]
     unit: runs
     direction: max
-    threshold: 2
+    threshold: 3
     labels: [github-workflows]

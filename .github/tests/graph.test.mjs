@@ -35,13 +35,19 @@ const events = [
   ["manual-default", "workflow_dispatch", null],
   ["manual-opt-in", "workflow_dispatch", null],
 ];
-// What protection requires, and the two Mac carriers' names, which report
-// beside them on every pull request.
-const protectedNames = [
-  ...REQUIRED_CONTEXTS,
-  "cross (macos-latest)",
-  "install (macos-latest)",
-];
+// What protection requires: ci.yml's four jobs, by the names they report under.
+const protectedNames = [...REQUIRED_CONTEXTS];
+// What a push to main carries, which decides two conditions there: visual-docs.yml
+// skips a push changing only the release's manifests, and ci-cache.yml's macOS
+// warm job skips the commit that merges release-plz's release pull request.
+const PUSHES = {
+  "base-push": { message: "feat: a change (#1)", changed: ["src/lib.rs"] },
+  "release-merge": {
+    message: "chore: release v1.1.0 (#2)",
+    changed: ["CHANGELOG.md", "Cargo.toml", "Cargo.lock"],
+  },
+  "tag-push": { message: "chore: release v1.1.0 (#2)", changed: [] },
+};
 test("actual workflows, expressions and reusable calls record the complete lifecycle", () => {
   const h = history();
   const scenarios = [];
@@ -80,6 +86,7 @@ test("actual workflows, expressions and reusable calls record the complete lifec
                     diff,
                     fork,
                     releaseBranch,
+                    ...(PUSHES[id] ?? {}),
                   };
                   const rows = resolveScenario(scenario, policy);
                   if (event === "pull_request") {
@@ -102,14 +109,18 @@ test("actual workflows, expressions and reusable calls record the complete lifec
                       scenario.id,
                     );
                   }
+                  // Outside a pull request and the release, the one Mac job is
+                  // the cache warmer's, on an ordinary push to main.
                   if (
                     event !== "pull_request" &&
                     event !== "release" &&
                     id !== "manual-opt-in"
                   )
                     assert.deepEqual(
-                      rows.filter((row) => row.macos && row.requested),
-                      [],
+                      rows
+                        .filter((row) => row.macos && row.requested)
+                        .map((row) => `${row.workflow} ${row.job}`),
+                      id === "base-push" ? ["ci-cache.yml warm-macos"] : [],
                       scenario.id,
                     );
                   scenarios.push({ ...scenario, rows });
@@ -194,6 +205,28 @@ test("actual workflows, expressions and reusable calls record the complete lifec
                 macRuns: spending,
               });
             }
+    // The warmer's macOS job is the Mac run the ordinary merge adds, and the
+    // release-plz merge adds none: each lifecycle's runs are counted from the
+    // real graph, so this reads them rather than restating them.
+    for (const lifecycle of lifecycles) {
+      const merges = lifecycle.macRuns.filter(
+        (run) => run.event === "base-push",
+      );
+      assert.deepEqual(
+        merges.map((run) => [run.workflow, run.jobs.map((job) => job.job)]),
+        [["ci-cache.yml", ["warm-macos"]]],
+        `the ordinary merge's Mac runs in ${lifecycle.phases[0]}`,
+      );
+      assert.deepEqual(
+        lifecycle.macRuns.filter((run) => run.event === "release-merge"),
+        [],
+        `the release-plz merge's Mac runs in ${lifecycle.phases[0]}`,
+      );
+      assert.ok(
+        lifecycle.macRuns.length <= 3,
+        JSON.stringify(lifecycle.macRuns),
+      );
+    }
     const worst = lifecycles.reduce((a, b) =>
       a.macRuns.length >= b.macRuns.length ? a : b,
     );
@@ -262,21 +295,17 @@ test("Mac PR job contains the original cross and installed-binary proofs", () =>
     .join("\n");
   assert.match(commands, /just ci-test-macos/);
   // The recipe is `scripts/ci-job.sh test-macos`: `check-cross`'s tiers and the
-  // documented install, which `_crate-install-smoke` runs and smoke-tests.
+  // documented install, which `_crate-install-build` builds and
+  // `_crate-install-smoke` smoke-tests.
   const job = readFileSync("scripts/ci-job.sh", "utf8");
   assert.match(
     job,
     /test-macos\) targets="format-check,lint,test-quick,install-smoke" ;;/,
   );
   const justfile = readFileSync("justfile", "utf8");
-  const install = justfile.slice(justfile.indexOf("_crate-install-smoke:"));
+  const install = justfile.slice(justfile.indexOf("_crate-install-build:"));
   assert.match(install, /cargo install --path \. --locked/);
   assert.match(install, /scripts\/smoke-published.sh/);
-  for (const id of ["cross-macos", "install-macos"]) {
-    assert.equal(ci.jobs[id].if, "always()");
-    assert.ok(ci.jobs[id].needs.includes("test-macos"));
-    assert.match(ci.jobs[id].steps.at(-1).run, /macos-verdict.mjs/);
-  }
 });
 
 test("actual reusable deploy condition respects cancellation", () => {
