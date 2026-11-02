@@ -60,6 +60,7 @@ const DESCRIPTION_LIMIT = 140;
 // The records cargo-deny's JSON output is made of.
 const RECORDS = new Set(["diagnostic", "log", "summary"]);
 const SEVERITIES = new Set(["error", "warning", "note", "help"]);
+const LOG_LEVELS = new Set(["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]);
 // The tables cargo writes into a Cargo.lock.
 const LOCK_TABLES = new Set(["[[package]]", "[metadata]", "[[patch.unused]]"]);
 
@@ -68,6 +69,19 @@ const token = (value) =>
   typeof value === "string" && /^\S+$/.test(value) ? value : "";
 const text = (value, fallback) =>
   typeof value === "string" ? value.replace(/\s+/g, " ").trim() : fallback;
+
+// A run that cannot go on: what stopped it and what to do, printed once by
+// whoever catches it — `status` posts it as a red status first.
+class Refusal extends Error {
+  constructor(message, action) {
+    super(message);
+    this.action = action;
+  }
+  print() {
+    console.error(`deps-audit: ${this.message}`);
+    console.error(`ACTION: ${this.action}`);
+  }
+}
 
 function usage(message) {
   console.error(`deps-audit: ${message}`);
@@ -108,11 +122,11 @@ function run(command, args, { inherit = false } = {}) {
     stdio: inherit ? "inherit" : "pipe",
     maxBuffer: 256 * 1024 * 1024,
   });
-  if (result.error) {
-    console.error(`deps-audit: cannot run ${command}: ${result.error.message}`);
-    console.error(`ACTION: install ${command} and re-run`);
-    process.exit(1);
-  }
+  if (result.error)
+    throw new Refusal(
+      `cannot run ${command}: ${result.error.message}`,
+      `install ${command} and re-run`,
+    );
   return result;
 }
 
@@ -155,22 +169,19 @@ function basePackages(rev) {
     const merge = run("git", ["merge-base", "HEAD", "origin/main"]);
     if (merge.status !== 0) {
       console.error(merge.stderr.trim());
-      console.error(
-        "deps-audit: cannot resolve the base this change forks from (git merge-base HEAD origin/main)",
+      throw new Refusal(
+        "cannot resolve the base this change forks from (git merge-base HEAD origin/main)",
+        "fetch main with history ('git fetch origin main'), or pass --base <rev>",
       );
-      console.error(
-        "ACTION: fetch main with history ('git fetch origin main'), or pass --base <rev>",
-      );
-      process.exit(1);
     }
     commit = merge.stdout.trim();
   }
   const verified = run("git", ["rev-parse", "--verify", `${commit}^{commit}`]);
-  if (verified.status !== 0) {
-    console.error(`deps-audit: the base '${commit}' is not a commit here`);
-    console.error("ACTION: pass --base a commit this checkout has");
-    process.exit(1);
-  }
+  if (verified.status !== 0)
+    throw new Refusal(
+      `the base '${commit}' is not a commit here`,
+      "pass --base a commit this checkout has",
+    );
   commit = verified.stdout.trim();
   // A base with no Cargo.lock resolves nothing, so every advisory is the
   // change's; one it has and that cannot be read is a refusal.
@@ -188,15 +199,11 @@ function basePackages(rev) {
     shown.status === 0
       ? lockedPackages(shown.stdout)
       : { error: `${listed.stderr}${shown.stderr}`.trim() };
-  if (read.error) {
-    console.error(
-      `deps-audit: cannot read Cargo.lock at the base ${commit}: ${read.error}`,
+  if (read.error)
+    throw new Refusal(
+      `cannot read Cargo.lock at the base ${commit}: ${read.error}`,
+      "pass --base a commit whose Cargo.lock cargo wrote, or fix the git error above",
     );
-    console.error(
-      "ACTION: pass --base a commit whose Cargo.lock cargo wrote, or fix the git error above",
-    );
-    process.exit(1);
-  }
   return { commit, packages: read.packages };
 }
 
@@ -245,7 +252,10 @@ function advisoriesCheck() {
       continue;
     }
     if (entry.type === "log") {
-      if (fields.level === "ERROR") errors.push(text(fields.message, line));
+      if (!LOG_LEVELS.has(fields.level))
+        errors.push(`a log record with a level this cannot read: ${line}`);
+      else if (fields.level === "ERROR")
+        errors.push(text(fields.message, line));
       continue;
     }
     if (!SEVERITIES.has(fields.severity)) {
@@ -454,7 +464,17 @@ function actionsContext() {
 
 function status(options) {
   const { repository, server, runId } = actionsContext();
-  const { advisories, errors, code } = report(options, { quiet: true });
+  // A report that could not run is posted red too: an absent status would read
+  // as one still pending, and a stale one as the last commit's answer.
+  let outcome;
+  try {
+    outcome = report(options, { quiet: true });
+  } catch (error) {
+    if (!(error instanceof Refusal)) throw error;
+    error.print();
+    outcome = { advisories: [], errors: [error.message], code: 1 };
+  }
+  const { advisories, errors, code } = outcome;
   const description = statusDescription(advisories, errors);
   const fork = options.headRepo.toLowerCase() !== repository.toLowerCase();
   const where = fork
@@ -529,6 +549,12 @@ function status(options) {
 const options = parseArgs(process.argv.slice(2));
 if (!existsSync("Cargo.lock"))
   usage("no Cargo.lock in the working directory; run it from the crate root");
-if (options.mode === "check") process.exit(check(options));
-if (options.mode === "report") process.exit(report(options).code);
-process.exit(status(options));
+try {
+  if (options.mode === "check") process.exit(check(options));
+  if (options.mode === "report") process.exit(report(options).code);
+  process.exit(status(options));
+} catch (error) {
+  if (!(error instanceof Refusal)) throw error;
+  error.print();
+  process.exit(1);
+}

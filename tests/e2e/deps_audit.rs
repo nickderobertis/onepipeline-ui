@@ -715,21 +715,7 @@ fn a_base_lockfile_it_cannot_read_is_refused_rather_than_read_in_part() {
 #[test]
 fn a_tool_it_cannot_launch_is_named_with_what_to_install() {
     let project = project(&VULNERABLE, &VULNERABLE);
-    // A PATH holding node and git and nothing else, so `cargo` cannot launch.
-    let bin = project
-        .repo
-        .parent()
-        .expect("a parent")
-        .join("no-cargo-bin");
-    fs::create_dir_all(&bin).expect("create the PATH directory");
-    for tool in ["node", "git"] {
-        let found = Command::new("sh")
-            .args(["-c", &format!("command -v {tool}")])
-            .output()
-            .expect("find a tool");
-        let found = String::from_utf8(found.stdout).expect("a UTF-8 path");
-        std::os::unix::fs::symlink(found.trim(), bin.join(tool)).expect("link a tool");
-    }
+    let bin = without_cargo(&project);
     let mut command = Command::new(bin.join("node"));
     command
         .arg(Path::new(ROOT).join("scripts/deps-audit.mjs"))
@@ -744,6 +730,26 @@ fn a_tool_it_cannot_launch_is_named_with_what_to_install() {
         "{}",
         run.all()
     );
+}
+
+/// A directory holding node and git and nothing else: as PATH, `cargo` cannot
+/// launch.
+fn without_cargo(project: &Project) -> PathBuf {
+    let bin = project
+        .repo
+        .parent()
+        .expect("a parent")
+        .join("no-cargo-bin");
+    fs::create_dir_all(&bin).expect("create the PATH directory");
+    for tool in ["node", "git"] {
+        let found = Command::new("sh")
+            .args(["-c", &format!("command -v {tool}")])
+            .output()
+            .expect("find a tool");
+        let found = String::from_utf8(found.stdout).expect("a UTF-8 path");
+        std::os::unix::fs::symlink(found.trim(), bin.join(tool)).expect("link a tool");
+    }
+    bin
 }
 
 #[test]
@@ -1314,6 +1320,11 @@ fn advisories_output_it_cannot_read_fails_rather_than_passing_as_none() {
             "a summary without an advisories error count",
         ),
         (
+            "{\"type\":\"log\",\"fields\":{\"level\":\"LOUD\",\"message\":\"m\"}}\n".to_owned(),
+            1,
+            "a log record with a level this cannot read",
+        ),
+        (
             format!("{advisory}\nError: the index could not be read\n{}\n", summary(1)),
             1,
             "unparseable output: Error: the index could not be read",
@@ -1370,5 +1381,70 @@ fn a_yanked_crate_still_blocks() {
         "{}",
         run.all()
     );
+}
+
+#[test]
+fn a_report_that_cannot_run_is_still_posted_red() {
+    // No base to compare against: the report stops, and the status says so
+    // rather than being left absent, or at the last commit's answer.
+    let project = project(&VULNERABLE, &VULNERABLE);
+    git(
+        &project.gitconfig,
+        &project.repo,
+        &["update-ref", "-d", "refs/remotes/origin/main"],
+    );
+    let (run, calls, summary) = status(&project, 0, REPOSITORY);
+    assert_eq!(run.code, Some(1), "the status step passed:\n{}", run.all());
+    assert!(
+        run.stderr.contains("cannot resolve the base") && run.stderr.contains("ACTION:"),
+        "{}",
+        run.all()
+    );
+    let args: Vec<&str> = calls.lines().collect();
+    assert!(args.contains(&"state=failure"), "{args:?}");
+    assert!(
+        args.contains(&"description=the advisories check did not run; see the log"),
+        "{args:?}"
+    );
+    assert!(summary.contains("did not run"), "{summary}");
+}
+
+#[test]
+fn a_status_whose_tools_cannot_launch_is_still_posted_red() {
+    let project = project(&VULNERABLE, &VULNERABLE);
+    let bin = without_cargo(&project);
+    let calls = bin.join("gh-calls");
+    stub_bin::install(
+        &bin,
+        "gh",
+        &format!(
+            "#!/bin/sh\nfor arg in \"$@\"; do printf '%s\\n' \"$arg\"; done >> '{}'\n",
+            calls.display()
+        ),
+    );
+    let mut command = Command::new(bin.join("node"));
+    command
+        .arg(Path::new(ROOT).join("scripts/deps-audit.mjs"))
+        .args(["status", "--sha", HEAD_SHA, "--head-repo", REPOSITORY])
+        .current_dir(&project.repo)
+        .env("PATH", &bin);
+    let run = run_in(
+        &project,
+        command,
+        &[("GITHUB_REPOSITORY", OsStr::new(REPOSITORY))],
+    );
+    assert_eq!(run.code, Some(1), "{}", run.all());
+    assert!(
+        run.stderr.contains("deps-audit: cannot run cargo:")
+            && run.stderr.contains("ACTION: install cargo and re-run"),
+        "{}",
+        run.all()
+    );
+    let calls = fs::read_to_string(&calls).unwrap_or_default();
+    assert!(
+        calls.contains("state=failure"),
+        "no red status was posted: {calls}"
+    );
+    assert!(calls.contains("context=advisories"), "{calls}");
 }
 // llmlint: ignore-end[e2e_not_mocked]
