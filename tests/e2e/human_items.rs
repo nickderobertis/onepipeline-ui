@@ -1616,8 +1616,9 @@ fn priorities_are_words_in_text_and_the_wire_vocabulary_in_json() {
     assert_eq!(served, critical);
 }
 
-/// A long body is stored, served and printed whole: the CLI's list and report
-/// print every line of it, questions included.
+/// A long body is stored and served whole, and printed whole on asking: the
+/// CLI's list and report give its first line by default and every line of it
+/// under `--full`, questions included.
 #[test]
 fn a_long_body_is_served_and_printed_in_full() {
     let world = World::new();
@@ -1638,8 +1639,14 @@ fn a_long_body_is_served_and_printed_in_full() {
     let detail = http::get(server.address, &format!("/api/human-items/{id}")).json();
     assert_eq!(detail["item"]["body"], body.trim_end());
     for verb in ["list", "report"] {
-        let printed = world.ok(None, &["human-items", verb]);
-        assert!(printed.contains(body.trim_end()), "{verb}: {printed}");
+        let brief = world.ok(None, &["human-items", verb]);
+        assert!(brief.contains("Line 1 of"), "{verb}: {brief}");
+        assert!(!brief.contains("Line 2 of"), "{verb}: {brief}");
+        let printed = world.ok(None, &["human-items", verb, "--full"]);
+        assert!(
+            printed.contains(body.trim_end()),
+            "{verb} --full: {printed}"
+        );
     }
 }
 

@@ -1667,9 +1667,14 @@ test("an item whose body is longer than four lines shows four on its card and al
   expect((await pane.getByRole("heading", { level: 2 }).boundingBox())?.y).toBe(
     before.heading,
   );
-  // The CLI prints the same body whole, in its list and its report.
-  for (const verb of ["list", "report"])
-    expect(cli(served, ["human-items", verb])).toContain(longText);
+  // The CLI's list and report give a brief line by default and print the same
+  // body whole under `--full`.
+  for (const verb of ["list", "report"]) {
+    const brief = cli(served, ["human-items", verb]);
+    expect(brief).toContain(longTitle);
+    expect(brief).not.toContain(longText);
+    expect(cli(served, ["human-items", verb, "--full"])).toContain(longText);
+  }
 });
 
 test("an item raised in a plan alone or a run alone names it as its source, and its tracker link is the issue the engine filed", async ({

@@ -109,6 +109,15 @@ export type HumanItemEventPayload = {
   readonly item: HumanItem;
   readonly resolution: HumanItemResolution | null;
 };
+export type PhaseContext = {
+  readonly schema_version?: number | null;
+  readonly owner: HumanItemOwner;
+  readonly dedup_key: string;
+  readonly node?: string | null;
+  readonly vars?: { readonly [key: string]: string };
+  readonly approval?: HumanItemApproval | null;
+  readonly tickets?: readonly Ticket[];
+};
 export type HumanItemApproval = {
   readonly board_copy: string;
   readonly key: string;
@@ -157,6 +166,12 @@ export type HumanItemSampleApproval = {
 };
 export type HumanItemState = "open" | "answered" | "completed" | "dismissed";
 export type HumanItemTracker = { readonly task: string; readonly url: string };
+export type Ticket = {
+  readonly id: string;
+  readonly url: string;
+  readonly priority?: null | "none" | "urgent" | "high" | "medium" | "low";
+  readonly title?: string | null;
+};
 /** The wire priorities, most urgent first: the engine's declared order. */
 export const HUMAN_ITEM_PRIORITIES = [
   "urgent",

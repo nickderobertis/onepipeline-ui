@@ -38,6 +38,7 @@ const ANNOTATIONS = new Set([
   "minItems",
   "allOf",
   "$defs",
+  "default",
 ]);
 
 const RENDERED = new Set([
