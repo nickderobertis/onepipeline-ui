@@ -224,13 +224,8 @@ jobs:
       - name: Compile what test-macos compiles
         run: just ci-warm-macos
 
-  # The advisories report on `main`: every advisory matching the Cargo.lock this
-  # push leaves `main` at, red and naming each advisory and crate until someone
-  # fixes it — the same report ci.yml's `lint` posts on each pull request as the
-  # `advisories` status. Informational and never required
-  # (.github/required-contexts.mjs): no job needs it and nothing waits on its
-  # result, so a newly published advisory turns this red without holding a
-  # change or a release.
+  # The advisories report on `main` (.github/required-contexts.mjs). It stands
+  # alone: no job needs it, so its red never holds a warm job or a release.
   advisories:
     runs-on: ubuntu-latest
     timeout-minutes: 10

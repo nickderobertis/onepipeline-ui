@@ -105,16 +105,9 @@ jobs:
       - name: Formatting, lints, type checks, MSRV and audit (affected projects)
         if: ${{ !cancelled() }}
         run: just ci-lint
-      # The advisories report: every advisory matching the head's Cargo.lock,
-      # whether or not this change brought it in (the audit above blocks only on
-      # one it did), posted as the `advisories` commit status on the pull
-      # request's head — red, naming each advisory and crate, until someone fixes
-      # it. Informational and never required (.github/required-contexts.mjs):
-      # `continue-on-error` keeps its result out of this job's, `!cancelled()`
-      # posts it whatever the steps before it did, and no step reads its outcome.
-      # Every run writes the report to this step's log and the job's summary. A
-      # fork's pull request gets it there and no status: its token is read-only,
-      # so the recipe, told the head's repository, skips posting.
+      # The advisories report (.github/required-contexts.mjs). `!cancelled()`
+      # posts the status whatever the steps before it did; HEAD_REPO lets the
+      # recipe skip posting for a fork, whose token is read-only.
       #
       # llmlint: ignore-block[diagnostics_error_or_absent] no advisory becomes a warning here: every one still fails this step and turns the `advisories` status red until it is fixed. `continue-on-error` keeps only that report out of the required `lint` result, which the user ruled must not block on an advisory a change did not bring in; one it did bring in fails `lint` through the audit above.
       - name: Advisories report (informational, posts the advisories status)

@@ -1,15 +1,5 @@
-// The advisories report against the committed check contract
-// (../required-contexts.mjs): it reports on every pull request and on `main`,
-// and nothing that blocks a change or a release runs it, needs it, or waits on
-// its result.
-//
-//   - on a pull request it is one step of ci.yml's `lint`, posting the
-//     `advisories` commit status on the head: `continue-on-error`, so its result
-//     can never fail `lint`, and `!cancelled()`, so it posts whatever the steps
-//     before it did — and no other step reads its outcome;
-//   - on `main` it is ci-cache.yml's `advisories` job, which no job needs;
-//   - the blocking audit `lint` runs (`just deps-check`'s recipe) is `check`, not
-//     the report, and no informational context is required.
+// Holds the workflows and the justfile to the advisories report's part of the
+// committed check contract (../required-contexts.mjs), which says what that is.
 //
 // Reads `.github/`, the justfile's recipes and nothing else. Every rule is shown
 // failing on a copy of the real files with exactly the defect it names.
