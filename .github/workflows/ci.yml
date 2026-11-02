@@ -45,21 +45,22 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # What this job writes: the gallery preview deploy (`contents: write`, to
-    # gh-pages), the visual docs and notignored comments and the PR-title read
-    # (`pull-requests: write`), and the Pages build screencomp gates on (`pages:
-    # read`).
+    # What this job writes while VISUAL_DOCS_PUBLISH is off: the suppressions
+    # comment and the PR-title read. Turning publishing on adds `contents: write`
+    # (the gallery deploy) and `pages: read` (the Pages build screencomp gates on).
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
-      pages: read
     env:
       # The one switch for the visual docs' side effects: the sticky comment and
-      # the /pr-<n>/ preview deploy. On since visual-docs.yml stopped capturing
-      # on pull requests, so this is the one deploy per push; visual-docs.yml's
-      # `closed` run deletes the preview. The capture, the reproducibility gate,
-      # classify and the gallery build run either way.
-      VISUAL_DOCS_PUBLISH: "true"
+      # the /pr-<n>/ preview deploy. Off because this job must finish inside its
+      # 30-minute cap: on the base it already ran 20-27 minutes without them, and
+      # the deploy adds about 2.5 more, most of it screencomp waiting on the Pages
+      # build (run 41372259287 was cancelled at the cap inside that wait). So pull
+      # requests get no gallery preview, and visual-docs.yml's `closed` cleanup
+      # has none to delete. The capture, the reproducibility gate, classify and
+      # the gallery build run and block either way.
+      VISUAL_DOCS_PUBLISH: "false"
     steps:
       - uses: actions/checkout@v4
         with:

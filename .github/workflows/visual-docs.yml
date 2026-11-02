@@ -15,11 +15,12 @@
 name: Visual docs
 
 on:
-  # Pull requests capture, gate and preview their visual docs in ci.yml's `lint`
-  # job; this workflow runs on a pull request only once it closes, so screencomp
+  # Pull requests capture and gate their visual docs in ci.yml's `lint` job;
+  # this workflow runs on a pull request only once it closes, so screencomp
   # deletes that pull request's gh-pages preview and stale /pr-<n>/ galleries do
-  # not accumulate on the branch. On `closed` the reusable workflow's capture
-  # and its lanes skip.
+  # not accumulate on the branch. While ci.yml's VISUAL_DOCS_PUBLISH is off no
+  # pull request deploys a preview, so this run finds none to delete. On
+  # `closed` the reusable workflow's capture and its lanes skip.
   pull_request:
     types: [closed]
   # The canonical gallery, redeployed from `main` — but no run at all on the

@@ -141,7 +141,10 @@ for Linux, 30 for the others), are an interface other work builds against
 splitting one suite across more jobs. `docs/release-sweep-timing.md` records the
 measurements and margin behind Linux’s cap. No other workflow runs on a pull
 request's `opened`, `synchronize` or `reopened` — `visual-docs.yml` runs on its
-`closed` only, to delete its preview — and `.github/tests/ci-shape.test.mjs`
+`closed` only, to delete a preview (idle while `lint`'s `VISUAL_DOCS_PUBLISH`
+is off, which keeps that job inside its cap: no pull request gets a gallery
+preview or the visual-docs comment, though the capture and both gates still
+block) — and `.github/tests/ci-shape.test.mjs`
 resolves every workflow to hold that, and what a push to `main` and the release
 commit start.
 
