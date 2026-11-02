@@ -97,6 +97,7 @@ mod sibling;
 mod stub_bin;
 #[path = "../support/timeline_schema.rs"]
 mod timeline_schema;
+#[cfg(target_os = "linux")]
 #[path = "../support/workflow.rs"]
 mod workflow;
 #[cfg(unix)]
