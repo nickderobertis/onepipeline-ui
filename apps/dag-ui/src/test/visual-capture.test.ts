@@ -141,8 +141,9 @@ describe("where a capture may write, decided before anything is made", () => {
       });
       expect(result.status, result.stderr).toBe(1);
       expect(result.stderr).toContain(
-        `cannot create SHOTS_VERIFY's directory ${join(root, "sealed/verify")}`,
+        `cannot create SHOTS_VERIFY's directory ${join(root, "sealed/verify")}: mkdir:`,
       );
+      expect(result.stderr).toContain("Permission denied");
       expect(result.stderr).toMatch(/^ACTION: make .* creatable/m);
     } finally {
       chmodSync(join(root, "sealed"), 0o755);
@@ -162,17 +163,29 @@ case "$1" in
     exit 0 ;;
   run)
     shift
-    cid=""; dest=""
+    cid=""; dest=""; work=""; results=""
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --cidfile) cid="$2"; shift 2 ;;
         --env) case "$2" in SHOTS_OUT=*) dest="\${2#SHOTS_OUT=}" ;; esac; shift 2 ;;
+        --volume)
+          case "$2" in
+            *:/work) work="\${2%:/work}" ;;
+            *:/work/apps/dag-ui-e2e/test-results) results="\${2%:*}" ;;
+          esac
+          shift 2 ;;
         *) shift ;;
       esac
     done
     id="container-$$"
     echo "$id" > "$cid"
     echo "run $id $dest" >> "$log"
+    # Playwright's output directory, through whatever the container has mounted:
+    # emptied as the run starts, then given this render's trace, under the one
+    # fixed name the gallery's fixture workspace gives it in every container.
+    out="\${results:-$work/apps/dag-ui-e2e/test-results}/gallery"
+    rm -rf "$out"; mkdir -p "$out"
+    echo "trace of the render into $dest" > "$out/trace.txt"
     case "$DOCKER_DOUBLE_MODE:$dest" in
       fail-verify:*/verify/*) echo "render failed into $dest"; exit 1 ;;
       hold:*)
@@ -271,33 +284,52 @@ describe("two renders side by side", () => {
     expect(result.stderr).toContain("the verify capture's playwright exited 1");
     expect(result.stderr).toMatch(/^ACTION: read the failing surface/m);
     expect(result.stdout).not.toContain("verify capture in");
+    // Each render's traces outlive the other's run, under the directory the
+    // refusal names for the failing one.
+    const results = join(capture.root, "apps/dag-ui-e2e/test-results");
+    expect(
+      readFileSync(join(results, "verify/gallery/trace.txt"), "utf8"),
+    ).toBe("trace of the render into /work/shots/verify/x86_64\n");
+    expect(readFileSync(join(results, "gallery/trace.txt"), "utf8")).toBe(
+      "trace of the render into /work/shots/current/x86_64\n",
+    );
+    expect(result.stderr).toContain(
+      `its trace under ${join(results, "verify")}`,
+    );
   });
 
-  it("asked to stop mid-render, removes both containers and its scratch, and exits as stopped", async () => {
-    const capture = layout();
-    const child = spawn("bash", [capture.script], {
-      env: capture.env("hold"),
-      stdio: "ignore",
-    });
-    const exited = new Promise<number | null>((resolve) =>
-      child.on("exit", (code) => resolve(code)),
-    );
-    const deadline = Date.now() + 30_000;
-    while (capture.runs().length < 2 && Date.now() < deadline)
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    const started = capture.runs().sort();
-    expect(started).toHaveLength(2);
-    expect(capture.removed()).toEqual([]);
-    child.kill("SIGTERM");
-    const code = await Promise.race([
-      exited,
-      new Promise<"still running">((resolve) =>
-        setTimeout(() => resolve("still running"), 20_000),
-      ),
-    ]);
-    if (code === "still running") child.kill("SIGKILL");
-    expect(code).toBe(143);
-    expect(capture.removed()).toEqual(started);
-    expect(readdirSync(join(capture.root, "tmp"))).toEqual([]);
-  }, 60_000);
+  it.each([
+    ["SIGTERM", 143],
+    ["SIGINT", 130],
+  ] as const)(
+    "asked to stop mid-render by %s, removes both containers and its scratch, and exits %i",
+    async (signal, status) => {
+      const capture = layout();
+      const child = spawn("bash", [capture.script], {
+        env: capture.env("hold"),
+        stdio: "ignore",
+      });
+      const exited = new Promise<number | null>((resolve) =>
+        child.on("exit", (code) => resolve(code)),
+      );
+      const deadline = Date.now() + 30_000;
+      while (capture.runs().length < 2 && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      const started = capture.runs().sort();
+      expect(started).toHaveLength(2);
+      expect(capture.removed()).toEqual([]);
+      child.kill(signal);
+      const code = await Promise.race([
+        exited,
+        new Promise<"still running">((resolve) =>
+          setTimeout(() => resolve("still running"), 20_000),
+        ),
+      ]);
+      if (code === "still running") child.kill("SIGKILL");
+      expect(code).toBe(status);
+      expect(capture.removed()).toEqual(started);
+      expect(readdirSync(join(capture.root, "tmp"))).toEqual([]);
+    },
+    60_000,
+  );
 });

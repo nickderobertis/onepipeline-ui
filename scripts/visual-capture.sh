@@ -119,8 +119,9 @@ resolve() {
 
 # make_destination NAME DIR: create a resolved destination, or say why it could not be.
 make_destination() {
-  mkdir -p -- "$2" 2>/dev/null && return 0
-  echo "visual-capture: cannot create $1's directory $2" >&2
+  local why
+  why="$(mkdir -p -- "$2" 2>&1)" && return 0
+  echo "visual-capture: cannot create $1's directory $2: $why" >&2
   echo "ACTION: make the nearest existing directory above $2 writable by the invoking user so it is creatable, or set $1 to another directory under $repo_root" >&2
   exit 1
 }
