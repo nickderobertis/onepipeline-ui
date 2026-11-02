@@ -484,6 +484,127 @@ fn a_release_head_over_a_vulnerable_base_is_not_blocked() {
     );
 }
 
+/// A commit on `origin/main` that resolves `side` (or, with `None`, changes only
+/// a file no audit reads), leaving the checkout on the change.
+fn advance_main(project: &Project, side: Option<&Side>, message: &str) {
+    let git = |args: &[&str]| git(&project.gitconfig, &project.repo, args);
+    git(&["checkout", "-q", "--detach", "refs/remotes/origin/main"]);
+    match side {
+        Some(side) => write_side(&project.repo, side),
+        None => fs::write(project.repo.join("MAIN.md"), message).expect("write a main-only file"),
+    }
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", message]);
+    let commit = git(&["rev-parse", "HEAD"]);
+    git(&["update-ref", "refs/remotes/origin/main", &commit]);
+    git(&["checkout", "-q", "change"]);
+}
+
+/// What `lint` checks out on a pull request: GitHub's merge of the change onto
+/// the base's current tip, detached, base first. Returns that tip and the merge.
+fn check_out_merge(project: &Project) -> (String, String) {
+    let git = |args: &[&str]| git(&project.gitconfig, &project.repo, args);
+    let base = git(&["rev-parse", "refs/remotes/origin/main"]);
+    git(&["checkout", "-q", "--detach", &base]);
+    git(&["merge", "-q", "--no-ff", "--no-edit", "change"]);
+    (base, git(&["rev-parse", "HEAD"]))
+}
+
+#[test]
+fn an_advisory_the_base_fixed_after_the_change_forked_is_absent_from_the_merge() {
+    // The change forked from a vulnerable `main` and touches no dependency; `main`
+    // has since dropped fixture-vuln. The tree CI checks out is the merge, which
+    // resolves what the fix left.
+    let project = project(&VULNERABLE, &VULNERABLE);
+    fs::write(project.repo.join("CHANGE.md"), "an unrelated change\n").expect("write the change");
+    git(&project.gitconfig, &project.repo, &["add", "-A"]);
+    git(
+        &project.gitconfig,
+        &project.repo,
+        &["commit", "-qm", "an unrelated change"],
+    );
+    advance_main(&project, Some(&CLEAN), "drop fixture-vuln");
+
+    // The branch tip alone still resolves the vulnerable version, so a reading
+    // of the branch rather than the merge would name it.
+    let branch = report(&project);
+    assert!(
+        branch.stderr.contains(&format!("advisory {VULN}")),
+        "the branch tip did not carry the advisory the merge is to drop:\n{}",
+        branch.all()
+    );
+
+    check_out_merge(&project);
+    let check = blocking(&project);
+    assert_eq!(
+        check.code,
+        Some(0),
+        "the blocking audit failed on the merge:\n{}",
+        check.all()
+    );
+    let report = report(&project);
+    assert_eq!(
+        report.code,
+        Some(0),
+        "the report on the merge did not pass:\n{}",
+        report.all()
+    );
+    assert!(
+        !report.all().contains(VULN) && !check.all().contains(VULN),
+        "an advisory the base fixed was reported on the merge:\n{}\n{}",
+        check.all(),
+        report.all()
+    );
+}
+
+#[test]
+fn an_advisory_the_change_brings_into_the_merge_blocks_against_the_base_it_merged_onto() {
+    // `main` moves on without touching dependencies, the change moves fixture-lib
+    // onto its affected version, and the merge is built on that tip.
+    let project = project(
+        &VULNERABLE,
+        &Side {
+            lock: "vulnerable-lib-2.1",
+            version: "0.1.0",
+            deps: &[("fixture-lib", "2.1.0"), ("fixture-vuln", "1.0.0")],
+            unused: &[],
+        },
+    );
+    advance_main(&project, None, "an unrelated change on main");
+    let (merged_onto, merge) = check_out_merge(&project);
+    // `main` then drops fixture-vuln after the merge ref was built: the base is
+    // still the commit the merge sits on, which resolved it.
+    advance_main(&project, Some(&CLEAN), "drop fixture-vuln");
+    git(
+        &project.gitconfig,
+        &project.repo,
+        &["checkout", "-q", "--detach", &merge],
+    );
+
+    let check = blocking(&project);
+    assert_ne!(
+        check.code,
+        Some(0),
+        "the blocking audit passed the merge:\n{}",
+        check.all()
+    );
+    assert!(
+        check
+            .stderr
+            .contains(&format!("introduced by this change: {LIB_2_1}")),
+        "{}",
+        check.all()
+    );
+    assert!(
+        check
+            .stdout
+            .contains(&format!("pre-existing, not blocking: {VULN}")),
+        "the base read was not the one the merge was built on:\n{}",
+        check.all()
+    );
+    assert!(check.stdout.contains(&merged_onto[..12]), "{}", check.all());
+}
+
 #[test]
 fn a_license_violation_still_blocks() {
     let project = project(

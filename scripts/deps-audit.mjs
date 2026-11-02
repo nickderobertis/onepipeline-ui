@@ -37,8 +37,11 @@
 // configuration still treats every advisory and yanked crate as a finding, and
 // this script decides only which check owns it.
 //
-// The base is `git merge-base HEAD origin/main` — the commit a pull request's
-// merge ref forks from, which `lint` checks out with full history — or --base.
+// The head is the checked-out tree: on a pull request that is GitHub's merge of
+// the branch onto its base, so an advisory a fix on the base has since removed
+// is not in it; on `main` it is the pushed commit. The base is
+// `git merge-base HEAD origin/main` — the commit a pull request's merge ref is
+// built on, which `lint` checks out with full history — or --base.
 // Packages are matched by name and version, as read from both Cargo.lock files.
 // A base the script cannot resolve is a refusal, never "nothing was there".
 //
