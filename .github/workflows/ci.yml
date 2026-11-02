@@ -115,6 +115,8 @@ jobs:
       # Every run writes the report to this step's log and the job's summary. A
       # fork's pull request gets it there and no status: its token is read-only,
       # so the recipe, told the head's repository, skips posting.
+      #
+      # llmlint: ignore-block[diagnostics_error_or_absent] no advisory becomes a warning here: every one still fails this step and turns the `advisories` status red until it is fixed. `continue-on-error` keeps only that report out of the required `lint` result, which the user ruled must not block on an advisory a change did not bring in; one it did bring in fails `lint` through the audit above.
       - name: Advisories report (informational, posts the advisories status)
         if: ${{ !cancelled() }}
         continue-on-error: true
@@ -123,6 +125,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: just advisories-status "$HEAD_SHA" "$HEAD_REPO"
+      # llmlint: ignore-end[diagnostics_error_or_absent]
       - uses: astral-sh/setup-uv@v6
         if: github.event_name == 'pull_request' && !cancelled()
       # The judged tier, a blocking part of this check. Its harnesses are pinned

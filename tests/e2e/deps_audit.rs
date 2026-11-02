@@ -801,6 +801,17 @@ fn arguments_it_cannot_use_are_a_usage_error() {
             run.all()
         );
     }
+    // Run from anywhere but a crate root, there is no lockfile to audit.
+    fs::remove_file(project.repo.join("Cargo.lock")).expect("remove the lockfile");
+    let run = script(&project, &["check"]);
+    assert_eq!(run.code, Some(2), "{}", run.all());
+    assert!(
+        run.stderr
+            .contains("no Cargo.lock in the working directory; run it from the crate root")
+            && run.stderr.contains("ACTION:"),
+        "{}",
+        run.all()
+    );
 }
 
 #[test]
@@ -1309,6 +1320,18 @@ fn advisories_output_it_cannot_read_fails_rather_than_passing_as_none() {
             format!("{advisory}\n{}\n", summary(2)),
             1,
             "exited 1 counting 2 errors, where 1 were printed",
+        ),
+        (format!("{}\n", summary(0)), 1, "exited 1 having printed 0 errors"),
+        (
+            format!("{advisory}\n{}\n", summary(1)),
+            0,
+            "exited 0 having printed 1 errors",
+        ),
+        (String::new(), 0, "exited 0 without the summary it ends with"),
+        (
+            advisory.replace("\"severity\":\"error\"", "\"severity\":\"fatal\"") + "\n",
+            1,
+            "a diagnostic with a severity this cannot read",
         ),
     ];
     for (output, code, reason) in cases {

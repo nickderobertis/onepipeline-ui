@@ -59,6 +59,7 @@ const DESCRIPTION_LIMIT = 140;
 // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 // The records cargo-deny's JSON output is made of.
 const RECORDS = new Set(["diagnostic", "log", "summary"]);
+const SEVERITIES = new Set(["error", "warning", "note", "help"]);
 // The tables cargo writes into a Cargo.lock.
 const LOCK_TABLES = new Set(["[[package]]", "[metadata]", "[[patch.unused]]"]);
 
@@ -201,9 +202,10 @@ function basePackages(rev) {
 
 // cargo-deny's advisories check, read as JSON: every advisory it matched, and
 // every other error it raised (yanked crates, an unreadable database, ...).
-// Every line it prints must be one of its records, and a failed run must be
-// accounted for by the summary record it ends with: output this cannot read, or
-// a failure its own count does not explain, is an error, never nothing found.
+// Every line it prints must be one of its records, and every run must end with
+// the summary record whose error count matches the errors printed and the exit
+// status: output this cannot read, or a verdict its own count does not explain,
+// is an error, never nothing found.
 function advisoriesCheck() {
   const result = run("cargo", [
     "deny",
@@ -246,6 +248,10 @@ function advisoriesCheck() {
       if (fields.level === "ERROR") errors.push(text(fields.message, line));
       continue;
     }
+    if (!SEVERITIES.has(fields.severity)) {
+      errors.push(`a diagnostic with a severity this cannot read: ${line}`);
+      continue;
+    }
     if (fields.severity !== "error") continue;
     diagnosed += 1;
     const graph = Array.isArray(fields.graphs) ? fields.graphs[0] : undefined;
@@ -275,14 +281,15 @@ function advisoriesCheck() {
     }
   }
   const exited = `cargo deny check advisories exited ${result.status}`;
-  if (result.status !== 0 && errors.length === 0) {
+  if (errors.length === 0) {
     if (counted === undefined)
       errors.push(`${exited} without the summary it ends with`);
     else if (counted !== diagnosed)
       errors.push(
         `${exited} counting ${counted} errors, where ${diagnosed} were printed`,
       );
-    else if (diagnosed === 0) errors.push(`${exited} with no error it names`);
+    else if ((result.status !== 0) !== diagnosed > 0)
+      errors.push(`${exited} having printed ${diagnosed} errors`);
   }
   // In id order, so every listing of the same graph reads the same.
   advisories.sort((a, b) =>
