@@ -95,7 +95,6 @@ test("record mode saves gh's answer byte for byte with its sidecar, and hands gh
     },
   );
   assert.equal(run.status, 0, run.stderr.toString());
-  // What it answers is what gh answered, byte for byte.
   assert.deepEqual(run.stdout, recorded);
   const saved = readdirSync(into);
   assert.equal(saved.length, 2, saved);

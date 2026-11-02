@@ -108,7 +108,6 @@ for (const dir of dirs)
         `the recording of ${sidecar.path}`,
       );
       for (const [id, fields] of Object.entries(change?.jobs ?? {})) {
-        // A change naming a job the recording lacks is one replay refuses.
         const job = Array.isArray(recorded.jobs)
           ? recorded.jobs.find((candidate) => String(candidate.id) === id)
           : undefined;
