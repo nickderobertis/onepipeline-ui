@@ -72,10 +72,16 @@ interface Wire {
     readonly type: string;
     readonly frame: SubscriptionFrame | undefined;
   }[];
+  /**
+   * When each event stream the browser opened was cut. Read off the browser
+   * itself, because going offline only asks for the cut: frames already on
+   * their way are still delivered until it lands.
+   */
+  readonly drops: number[];
 }
 
 async function watch(page: Page): Promise<Wire> {
-  const wire: Wire = { requests: [], answers: [], frames: [] };
+  const wire: Wire = { requests: [], answers: [], frames: [], drops: [] };
   // Which request each response answers, by the request itself: two requests
   // can carry the same body.
   const index = new WeakMap<Request, number>();
@@ -107,6 +113,15 @@ async function watch(page: Page): Promise<Wire> {
   });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Network.enable");
+  const streams = new Set<string>();
+  cdp.on("Network.requestWillBeSent", (event) => {
+    if (event.type === "EventSource") streams.add(event.requestId);
+  });
+  // Delivered on the same session as the stream's frames and after the last of
+  // them, so once a drop is listed every frame that stream carried is too.
+  cdp.on("Network.loadingFailed", (event) => {
+    if (streams.delete(event.requestId)) wire.drops.push(Date.now());
+  });
   cdp.on("Network.eventSourceMessageReceived", (event) => {
     const parsed = subscriptionFrameSchema.safeParse(JSON.parse(event.data));
     wire.frames.push({
@@ -634,11 +649,27 @@ test("a dropped stream resumes from its last frame, and every change made meanwh
   await expect(rowOf(page, warm)).toHaveCount(1, {
     timeout: FRAME_PATIENCE,
   });
+  // A record's frames keep arriving after its row is drawn, so the frame the
+  // stream resumes from is the last one before the drop, not one read while
+  // the stream is still live. One more frame arrives after the row is drawn
+  // here, every time, rather than whenever the host is slow enough.
+  const drawn = Date.now();
+  recordActivity(server, run, node, `after the row ${drawn}`);
+  await frameArrives(wire, "frame after the row", () => true, drawn);
+
+  // The stream drops; records keep arriving while nothing is connected. Going
+  // offline only asks for the drop, and a record written before it lands is
+  // sent down the old stream, so nothing is written until it has.
+  const dropsBefore = wire.drops.length;
+  await page.context().setOffline(true);
+  await expect
+    .poll(() => wire.drops.length, {
+      message: "the stream never dropped",
+      timeout: FRAME_PATIENCE,
+    })
+    .toBeGreaterThan(dropsBefore);
   const lastFrame = wire.frames.at(-1)?.frame?.id;
   expect(lastFrame).toBeDefined();
-
-  // The stream drops; records keep arriving while nothing is connected.
-  await page.context().setOffline(true);
   const away = [1, 2, 3].map((n) =>
     recordActivity(server, run, node, `while away ${n} ${Date.now()}`),
   );
