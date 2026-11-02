@@ -18,10 +18,12 @@
 //! audit runs with `--locked`, so a manifest here that drifted from its lockfile
 //! fails rather than being resolved afresh.
 //!
-//! One thing is stood in for, in the `status` journeys only: `gh` on PATH, because
-//! the real one writes a commit status on a public repository. It is a recording
-//! stand-in (`support/stub_bin.rs`), so the script is the real script and the
-//! status it asked for is readable here.
+//! Two things are stood in for, on PATH and only in the journeys at the end of
+//! the file: `gh`, because the real one writes a commit status on a public
+//! repository, and `cargo deny check advisories`, for output a real advisory
+//! database cannot be made to produce (every other cargo command runs the real
+//! one). Both are stand-ins from `support/stub_bin.rs`, so the script is the real
+//! script and what it asked for, or was answered, is readable here.
 //!
 //! Linux only: the audit's one runner is the Linux `lint` job, and what it
 //! decides — which lockfile resolved which version — is not a property of the
