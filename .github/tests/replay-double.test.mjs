@@ -633,10 +633,7 @@ test("a recording carrying an email address, or a redaction its sidecar does not
   const file = join(copy, "release-tail/v0.64.0", compare);
   writeFileSync(
     file,
-    readFileSync(file, "utf8").replace(
-      EMAIL_PLACEHOLDER,
-      OTHER_ADDRESS,
-    ),
+    readFileSync(file, "utf8").replace(EMAIL_PLACEHOLDER, OTHER_ADDRESS),
   );
   const sidecarFile = file.replace(/\.http$/, ".json");
   const note = JSON.parse(readFileSync(sidecarFile, "utf8"));
