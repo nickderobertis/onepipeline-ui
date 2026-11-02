@@ -1258,16 +1258,58 @@ fn with_advisories_output(project: &Project, recipe: &str, output: &str, code: i
 
 #[test]
 fn advisories_output_it_cannot_read_fails_rather_than_passing_as_none() {
-    let project = project(&CLEAN, &CLEAN);
+    // The base already resolves fixture-vuln 1.0.0, so the one advisory the
+    // stand-in reports is pre-existing and, read alone, passes the blocking
+    // audit: what fails each case below is the output beside it.
+    let project = project(&VULNERABLE, &VULNERABLE);
+    let advisory = r#"{"type":"diagnostic","fields":{"severity":"error","code":"vulnerability","message":"Unbounded recursion in fixture-vuln","advisory":{"id":"RUSTSEC-2099-0001","title":"Unbounded recursion in fixture-vuln"},"graphs":[{"Krate":{"name":"fixture-vuln","version":"1.0.0"}}]}}"#;
+    let summary = |errors: u32| {
+        format!(
+            r#"{{"type":"summary","fields":{{"advisories":{{"errors":{errors},"helps":0,"notes":0,"warnings":0}}}}}}"#
+        )
+    };
+    let control = with_advisories_output(
+        &project,
+        "_crate-deps-check",
+        &format!("{advisory}\n{}\n", summary(1)),
+        1,
+    );
+    assert_eq!(
+        control.code,
+        Some(0),
+        "the stand-in's well-formed output did not pass:\n{}",
+        control.all()
+    );
     let unreadable_advisory = r#"{"type":"diagnostic","fields":{"severity":"error","code":"vulnerability","message":"m","advisory":{"id":"RUSTSEC-2099-0001"}}}"#;
     let cases = [
         ("{not json\n".to_owned(), 1, "unparseable output: {not json"),
+        ("[1, 2]\n".to_owned(), 1, "a record this cannot read: [1, 2]"),
         (
             format!("{unreadable_advisory}\n"),
             1,
             "an advisory diagnostic this cannot read",
         ),
-        (String::new(), 3, "exited 3 with nothing this script reads"),
+        (
+            "{\"type\":\"log\",\"fields\":{\"level\":\"ERROR\",\"message\":\"failed to open the advisory database\"}}\n".to_owned(),
+            1,
+            "advisories check: failed to open the advisory database",
+        ),
+        (String::new(), 3, "exited 3 without the summary it ends with"),
+        (
+            "{\"type\":\"summary\",\"fields\":{}}\n".to_owned(),
+            1,
+            "a summary without an advisories error count",
+        ),
+        (
+            format!("{advisory}\nError: the index could not be read\n{}\n", summary(1)),
+            1,
+            "unparseable output: Error: the index could not be read",
+        ),
+        (
+            format!("{advisory}\n{}\n", summary(2)),
+            1,
+            "exited 1 counting 2 errors, where 1 were printed",
+        ),
     ];
     for (output, code, reason) in cases {
         for recipe in ["_crate-deps-check", "advisories-report"] {

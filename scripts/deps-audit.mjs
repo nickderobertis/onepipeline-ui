@@ -57,6 +57,8 @@ const RUN_ID = /^[0-9]+$/;
 // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] GitHub's REST documentation for commit statuses is the one source of this limit and nothing machine-readable publishes it; only an authenticated POST tests it, which the offline gate cannot send. Drift is loud rather than silent: a description GitHub refuses fails the post, and the step prints gh's refusal.
 const DESCRIPTION_LIMIT = 140;
 // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+// The records cargo-deny's JSON output is made of.
+const RECORDS = new Set(["diagnostic", "log", "summary"]);
 // The tables cargo writes into a Cargo.lock.
 const LOCK_TABLES = new Set(["[[package]]", "[metadata]", "[[patch.unused]]"]);
 
@@ -199,6 +201,9 @@ function basePackages(rev) {
 
 // cargo-deny's advisories check, read as JSON: every advisory it matched, and
 // every other error it raised (yanked crates, an unreadable database, ...).
+// Every line it prints must be one of its records, and a failed run must be
+// accounted for by the summary record it ends with: output this cannot read, or
+// a failure its own count does not explain, is an error, never nothing found.
 function advisoriesCheck() {
   const result = run("cargo", [
     "deny",
@@ -210,22 +215,39 @@ function advisoriesCheck() {
   ]);
   const advisories = [];
   const errors = [];
-  for (const line of `${result.stdout}\n${result.stderr}`.split("\n")) {
-    if (!line.trim().startsWith("{")) continue;
+  let counted;
+  let diagnosed = 0;
+  for (const raw of `${result.stdout}\n${result.stderr}`.split("\n")) {
+    const line = raw.trim();
+    if (line === "") continue;
     let entry;
     try {
       entry = JSON.parse(line);
     } catch {
-      errors.push(`unparseable output: ${line.trim()}`);
+      errors.push(`unparseable output: ${line}`);
       continue;
     }
-    const fields =
-      isObject(entry) && isObject(entry.fields) ? entry.fields : {};
-    if (entry?.type === "log") {
+    if (
+      !isObject(entry) ||
+      !RECORDS.has(entry.type) ||
+      !isObject(entry.fields)
+    ) {
+      errors.push(`a record this cannot read: ${line}`);
+      continue;
+    }
+    const fields = entry.fields;
+    if (entry.type === "summary") {
+      counted = fields.advisories?.errors;
+      if (!Number.isInteger(counted))
+        errors.push(`a summary without an advisories error count: ${line}`);
+      continue;
+    }
+    if (entry.type === "log") {
       if (fields.level === "ERROR") errors.push(text(fields.message, line));
       continue;
     }
-    if (entry?.type !== "diagnostic" || fields.severity !== "error") continue;
+    if (fields.severity !== "error") continue;
+    diagnosed += 1;
     const graph = Array.isArray(fields.graphs) ? fields.graphs[0] : undefined;
     const krate = isObject(graph?.Krate) ? graph.Krate : undefined;
     // An advisory is classified only on fields that read as what they name:
@@ -252,11 +274,16 @@ function advisoriesCheck() {
       );
     }
   }
-  // A failed run this reading found nothing in is not a pass.
-  if (result.status !== 0 && advisories.length === 0 && errors.length === 0)
-    errors.push(
-      `cargo deny check advisories exited ${result.status} with nothing this script reads:\n${result.stderr.trim()}`,
-    );
+  const exited = `cargo deny check advisories exited ${result.status}`;
+  if (result.status !== 0 && errors.length === 0) {
+    if (counted === undefined)
+      errors.push(`${exited} without the summary it ends with`);
+    else if (counted !== diagnosed)
+      errors.push(
+        `${exited} counting ${counted} errors, where ${diagnosed} were printed`,
+      );
+    else if (diagnosed === 0) errors.push(`${exited} with no error it names`);
+  }
   // In id order, so every listing of the same graph reads the same.
   advisories.sort((a, b) =>
     `${a.id} ${a.name} ${a.version}`.localeCompare(
