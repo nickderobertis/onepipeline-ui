@@ -1617,27 +1617,39 @@ test("an item whose body is longer than four lines shows four on its card and al
   // The pane is drawn from the list's entry at once and again when the item's
   // own read lands, which adds the steps it blocks above the body and so
   // shortens it. A keyboard scroll is animated, and that re-layout landing
-  // while it runs stops it short of the end. The read is held until the pane
-  // has been drawn without it, so both drawings happen on every run, and the
-  // reader scrolls the body the pane settles on.
+  // while it runs stops it short of the end. The server's answer to the read
+  // is taken at once and held, and only two things let it land: the journey,
+  // once the pane has been drawn without it, or the body's first scrolled
+  // frame — so a journey that scrolled before the read landed would have it
+  // land inside the scroll, on every run, rather than whenever the host is
+  // slow enough.
   const longId = idOf(served, "long");
-  let releaseDetail: () => void = () => {};
+  let landDetail: () => void = () => {};
   const detailHeld = new Promise<void>((resolve) => {
-    releaseDetail = resolve;
+    landDetail = resolve;
   });
   await page.route(`**/api/human-items/${longId}`, async (route) => {
+    const response = await route.fetch();
     await detailHeld;
-    await route.continue();
+    await route.fulfill({ response });
   });
+  await page.exposeFunction("landDetail", () => landDetail());
   await long.getByRole("button", { name: `Details: ${longTitle}` }).click();
   const pane = detailPane(page);
   const full = pane.getByRole("region", { name: "Full body" });
   await expect(full).toHaveText(longText);
   const steps = pane.getByRole("region", { name: "Blocked steps" });
   await expect(steps).toHaveCount(0);
-  releaseDetail();
+  await full.evaluate((element) =>
+    element.addEventListener(
+      "scroll",
+      () => (window as unknown as { landDetail: () => void }).landDetail(),
+      { once: true },
+    ),
+  );
+  // The reader scrolls the body the pane settles on.
+  landDetail();
   await expect(steps).toBeVisible();
-  await page.unroute(`**/api/human-items/${longId}`);
   const region = listRegion(page);
   const positions = () =>
     list
