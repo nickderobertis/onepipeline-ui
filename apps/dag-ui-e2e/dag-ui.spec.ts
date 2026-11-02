@@ -4160,6 +4160,12 @@ test("refuses a change no recorded run could have held", () => {
     ],
     [["--remove-run", "../etc"], "is not a usable run id"],
     [["--stall", "--refuse-port", "no"], "is not a port"],
+    // A server told to take any port links its corpus to the origin it is
+    // reached on, so that origin is named, and is a port a host can serve.
+    [["--port", "0"], "--port 0 needs --origin-port"],
+    [["--port", "0", "--origin-port", "0"], "is not a port"],
+    // The stall server is waited for by the port it was given.
+    [["--stall", "--port", "0"], "is not a port"],
     // Two changes in one invocation: the dispatch is a chain, so the second
     // would be dropped by whichever branch matched first and the caller would
     // read a run that recorded only half of what they asked for.

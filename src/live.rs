@@ -88,8 +88,13 @@ struct Shared {
     stopping: Arc<AtomicBool>,
     /// Subscriptions and their frames. Taken last, after a sidebar or a run.
     state: Mutex<State>,
-    /// The sidebar's rows. Taken before a run or the state.
+    /// The sidebar's rows. Taken before a run or the state, and held only to
+    /// read or change them — never across a [`Look`].
     sidebar: Mutex<Sidebar>,
+    /// Held across one whole [`Look`] and the change it makes to the sidebar,
+    /// so two looks never read against the same rows. Taken before the
+    /// sidebar, and by nothing that answers a stream.
+    looking: Mutex<()>,
     /// Each subscribed run's reading. The map is held only to look one up.
     runs: Mutex<HashMap<RunId, Arc<Mutex<LiveRun>>>>,
     polling: AtomicBool,
@@ -393,19 +398,36 @@ enum RowChange {
     Removed(RunId),
 }
 
-impl Sidebar {
-    /// The rows that moved since the last look, and the runs that went away.
-    ///
+/// What one look at the runs root read: each run whose row was read again,
+/// and every run the root holds.
+///
+/// Read with no lock but [`Shared::looking`] held, because reading a moved run's
+/// summary is the SDK folding it and writing its cache back, which a host with
+/// slow syncs takes seconds over per run — and a stream or a subscription that
+/// waited on the sidebar for the whole of that would be a request left
+/// unanswered for as long as the slowest look takes.
+struct Look {
+    read: Vec<(RunId, Stamps, Arc<str>)>,
+    seen: std::collections::BTreeSet<RunId>,
+    /// The runs the sidebar held when the look began: the only ones its
+    /// listing can say went away. A row a subscription took in the meantime
+    /// is one this listing may have been made too early to see.
+    known: std::collections::BTreeSet<RunId>,
+}
+
+impl Look {
     /// One listing of the root and four metadata lookups per run; a run is read
-    /// — its bounded summary, never its journal — only when one of them moved,
-    /// and announced only when the row the sidebar shows came out different.
-    fn poll(&mut self, store: &RunStore) -> Vec<RowChange> {
+    /// — its bounded summary, never its journal — only when one of them moved
+    /// since `held` says it was last read, and at most once a reread interval.
+    /// `None` when the root cannot be listed.
+    fn of(store: &RunStore, read: bool, held: &BTreeMap<RunId, (Stamps, Instant)>) -> Option<Self> {
         let reread = store.poll() * ROW_POLLS_PER_READ;
-        let mut changes = Vec::new();
-        let mut seen = std::collections::BTreeSet::new();
-        let Ok(entries) = std::fs::read_dir(store.root()) else {
-            return changes;
+        let mut look = Self {
+            read: Vec::new(),
+            seen: std::collections::BTreeSet::new(),
+            known: held.keys().cloned().collect(),
         };
+        let entries = std::fs::read_dir(store.root()).ok()?;
         for entry in entries.flatten() {
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
@@ -418,20 +440,77 @@ impl Sidebar {
             if stamps.0[0].is_none() {
                 continue;
             }
-            seen.insert(run.clone());
-            match self.rows.get(&run) {
-                Some((held, _, _)) if *held == stamps => continue,
+            look.seen.insert(run.clone());
+            match held.get(&run) {
+                Some((was, _)) if *was == stamps => continue,
                 // Moved, but read too recently: read once the interval is up,
                 // to what the run then holds.
-                Some((_, _, read_at)) if self.read && read_at.elapsed() < reread => continue,
+                Some((_, read_at)) if read && read_at.elapsed() < reread => continue,
                 _ => {}
             }
-            let Ok(summary) = RunSummary::of(&paths) else {
+            let Some(row) = row_of(&paths, &run) else {
                 continue;
             };
-            let row: Arc<str> = payload::sidebar_row(&run, &summary, &paths)
-                .to_string()
-                .into();
+            look.read.push((run, stamps, row));
+        }
+        Some(look)
+    }
+}
+
+/// `run`'s sidebar row, read from its bounded summary; `None` where the
+/// summary cannot be read.
+fn row_of(paths: &RunPaths, run: &RunId) -> Option<Arc<str>> {
+    let summary = RunSummary::of(paths).ok()?;
+    Some(
+        payload::sidebar_row(run, &summary, paths)
+            .to_string()
+            .into(),
+    )
+}
+
+/// The row of `run` the sidebar does not hold yet, read with no lock held:
+/// what a subscription naming that run carries in its snapshot rather than
+/// leave it to the next look. `None` once the sidebar holds it, or where the
+/// run has no journal or no readable summary.
+fn missing_row(shared: &Shared, run: &RunId) -> Option<(RunId, Stamps, Arc<str>)> {
+    if lock(&shared.sidebar).rows.contains_key(run) {
+        return None;
+    }
+    let paths = shared.store.paths_of(run);
+    let stamps = Stamps::of(&paths);
+    stamps.0[0]?;
+    let row = row_of(&paths, run)?;
+    Some((run.clone(), stamps, row))
+}
+
+impl Sidebar {
+    /// Take `run`'s row where no look has yet: the change every subscription
+    /// already made is sent, or `None` where a look took it first or the
+    /// sidebar has not been read.
+    fn add(&mut self, run: RunId, stamps: Stamps, row: Arc<str>) -> Option<RowChange> {
+        if self.rows.contains_key(&run) {
+            return None;
+        }
+        self.rows
+            .insert(run, (stamps, Arc::clone(&row), Instant::now()));
+        self.read.then_some(RowChange::Changed(row))
+    }
+
+    /// What each row was read from and when: all a [`Look`] needs to decide
+    /// what to read again.
+    fn held(&self) -> BTreeMap<RunId, (Stamps, Instant)> {
+        self.rows
+            .iter()
+            .map(|(run, (stamps, _, read_at))| (run.clone(), (stamps.clone(), *read_at)))
+            .collect()
+    }
+
+    /// Take what `look` read: the rows that moved since the last look, and the
+    /// runs that went away. Announced only once the sidebar has been read, and
+    /// only where the row the sidebar shows came out different.
+    fn apply(&mut self, look: Look) -> Vec<RowChange> {
+        let mut changes = Vec::new();
+        for (run, stamps, row) in look.read {
             let moved = self.rows.get(&run).is_none_or(|(_, held, _)| *held != row);
             self.rows
                 .insert(run, (stamps, Arc::clone(&row), Instant::now()));
@@ -442,7 +521,7 @@ impl Sidebar {
         let gone: Vec<RunId> = self
             .rows
             .keys()
-            .filter(|run| !seen.contains(*run))
+            .filter(|run| look.known.contains(*run) && !look.seen.contains(*run))
             .cloned()
             .collect();
         for run in gone {
@@ -766,6 +845,7 @@ impl Hub {
                 retired: VecDeque::new(),
             }),
             sidebar: Mutex::new(Sidebar::default()),
+            looking: Mutex::new(()),
             runs: Mutex::new(HashMap::new()),
             polling: AtomicBool::new(false),
             trace: std::env::var_os(TRACE_ENV).map(PathBuf::from),
@@ -818,10 +898,14 @@ impl Hub {
         // Then the publication boundary: the sidebar, the run and the
         // subscriptions locked together, so every change after the snapshot is
         // one this subscription is sent and none before it is.
+        self.first_look();
+        // The run this subscription shows is under the root — it was opened
+        // above — so its snapshot lists it, however long ago the last look
+        // was: a tab told a run's detail but not that the run is served would
+        // open another one.
+        let missing = visible.run_id().and_then(|run| missing_row(shared, run));
         let mut sidebar = lock(&shared.sidebar);
-        if !sidebar.read {
-            sidebar.poll(&shared.store);
-        }
+        let added = missing.and_then(|(run, stamps, row)| sidebar.add(run, stamps, row));
         let mut run = live.as_ref().map(|live| lock(live));
         let visible_state = match run.as_mut() {
             Some(run) => run.ensure(&shared.store, &visible, spec)?,
@@ -842,6 +926,15 @@ impl Hub {
         let subscription = SubscriptionId::mint();
         if let SubscribeOrigin::Replaces(replaced) = request.origin {
             state.retire(replaced, Retired::Retired);
+        }
+        // Every subscription already made is sent the row this one's snapshot
+        // carries, as a look would have sent it.
+        if let Some(RowChange::Changed(row)) = &added {
+            let change = Change::Row(Arc::clone(row));
+            let ids: Vec<SubscriptionId> = state.subscriptions.keys().copied().collect();
+            for id in ids {
+                self.emit(&mut state, id, &change);
+            }
         }
         state.subscriptions.insert(
             subscription,
@@ -1000,6 +1093,41 @@ impl Hub {
         Ok(Stream { replay, frames })
     }
 
+    /// Read the sidebar's rows the first time anything asks for them. A
+    /// subscription made once they are read waits on no look.
+    fn first_look(&self) {
+        let shared = &self.0;
+        if lock(&shared.sidebar).read {
+            return;
+        }
+        let _looking = lock(&shared.looking);
+        // Read by a look that finished while this one waited for its turn.
+        if lock(&shared.sidebar).read {
+            return;
+        }
+        if let Some(look) = Look::of(&shared.store, false, &BTreeMap::new()) {
+            lock(&shared.sidebar).apply(look);
+        }
+    }
+
+    /// One look at the runs root, read without the sidebar's lock and then
+    /// taken into it: the sidebar, locked, and what moved — which the caller
+    /// sends with the sidebar still locked, so a subscription made in between
+    /// is either in the snapshot or sent the change. `None` when the root
+    /// cannot be listed.
+    fn look(&self) -> Option<(MutexGuard<'_, Sidebar>, Vec<RowChange>)> {
+        let shared = &self.0;
+        let _looking = lock(&shared.looking);
+        let (read, held) = {
+            let sidebar = lock(&shared.sidebar);
+            (sidebar.read, sidebar.held())
+        };
+        let look = Look::of(&shared.store, read, &held)?;
+        let mut sidebar = lock(&shared.sidebar);
+        let changes = sidebar.apply(look);
+        Some((sidebar, changes))
+    }
+
     /// The reading of `run`, opened if no subscription holds it yet.
     fn live_run(&self, run: &RunId) -> Result<Arc<Mutex<LiveRun>>, ApiError> {
         if let Some(live) = lock(&self.0.runs).get(run) {
@@ -1056,9 +1184,7 @@ impl Hub {
         if wanted.is_empty() {
             return;
         }
-        {
-            let mut sidebar = lock(&shared.sidebar);
-            let changes = sidebar.poll(&shared.store);
+        if let Some((_sidebar, changes)) = self.look() {
             if !changes.is_empty() {
                 let mut state = lock(&shared.state);
                 let ids: Vec<SubscriptionId> = state.subscriptions.keys().copied().collect();

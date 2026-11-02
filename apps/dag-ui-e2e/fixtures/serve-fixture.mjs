@@ -13,7 +13,10 @@
  * removes, so a browser run never reads or writes the operator's own runs.
  *
  * Usage:
- *   serve-fixture.mjs --workspace DIR --port N [--ui]
+ *   serve-fixture.mjs --workspace DIR --port N [--origin-port M] [--ui]
+ *                                                  (N may be 0 beside --origin-port:
+ *                                                  the read API names the port it
+ *                                                  took, and the corpus links to M)
  *                     [--shutdown-corpus [--live-dispatch-pid PID]
  *                      | --preserved-corpus | --review-corpus
  *                      | --review-loop-corpus | --transcripts-corpus
@@ -467,6 +470,7 @@ function parseArgs(argv) {
     "--record-words",
     "--words-text",
     "--refuse-port",
+    "--origin-port",
     "--live-dispatch-pid",
     "--human-items-world",
   ]);
@@ -583,27 +587,48 @@ if (asked.length > 1) {
     "run this once per change, so each one is the change the caller asked for",
   );
 }
-/** One port option, checked before anything binds or connects to it. */
-function portOf(value, name) {
+/**
+ * One port option, checked before anything binds or connects to it. `0` only
+ * where `anyFree`: the read API binds it and names the port the kernel gave it,
+ * which is the one choice nothing else can take before the server holds it.
+ */
+function portOf(value, name, anyFree = false) {
   const port = Number(value);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  const lowest = anyFree ? 0 : 1;
+  if (!Number.isInteger(port) || port < lowest || port > 65535) {
     die(
       `'${value}' is not a port`,
-      `pass ${name} a number between 1 and 65535`,
+      `pass ${name} a number between ${lowest} and 65535`,
     );
   }
   return port;
 }
 
-const port = portOf(args.port ?? 8765, "--port");
-
 if (args.stall) {
+  // The stall server prints the port it was given rather than the one it took,
+  // and Playwright waits for that line by number, so it is always given one.
+  const port = portOf(args.port ?? 8765, "--port");
   const refuse =
     args["refuse-port"] === undefined
       ? undefined
       : portOf(args["refuse-port"], "--refuse-port");
   await stall(port, refuse);
 } else {
+  const port = portOf(args.port ?? 8765, "--port", true);
+  // The port the server's origin is on, which the corpus links its checks to:
+  // its own, unless something in front of it holds the origin and relays to
+  // it — as `fixture-server.ts` does, so a restart never gives its port up.
+  // A server told to take any port has no origin to link to until it is told.
+  if (port === 0 && args["origin-port"] === undefined) {
+    die(
+      "--port 0 needs --origin-port",
+      "pass --origin-port the port the server will be reached on",
+    );
+  }
+  const originPort =
+    args["origin-port"] === undefined
+      ? port
+      : portOf(args["origin-port"], "--origin-port");
   if (args.workspace === undefined) {
     die(
       "--workspace is required",
@@ -724,7 +749,7 @@ if (args.stall) {
             runsRoot,
             workspace,
             args["review-corpus"] === true,
-            `http://127.0.0.1:${port}`,
+            `http://127.0.0.1:${originPort}`,
           ),
         facts: () => facts(workspace),
       };
