@@ -6,9 +6,10 @@
 //   - a pull request's `opened`, `synchronize` and `reopened`: ci.yml's four jobs
 //     and nothing else (a release-plz branch's skips `test-macos`);
 //   - a push to `main`: release-plz.yml, visual-docs.yml's canonical gallery and
-//     ci-cache.yml's warm jobs;
-//   - the release commit (the push merging release-plz's pull request): release-plz.yml
-//     and the warmer's Linux and Windows jobs, never visual-docs.yml or a Mac job;
+//     ci-cache.yml's warm jobs and informational advisories report;
+//   - the release commit (the push merging release-plz's pull request): release-plz.yml,
+//     the warmer's Linux and Windows jobs and the advisories report, never
+//     visual-docs.yml or a Mac job;
 //   - the Release: release.yml alone.
 //
 // It also holds visual-docs.yml to its remaining triggers, and the set of
@@ -110,6 +111,7 @@ export function shapeProblems(workflows) {
   )
     problems.push(`a push to main starts ${JSON.stringify(ordinary)}`);
   expect(push(RELEASE_MERGE), [
+    "ci-cache.yml advisories",
     "ci-cache.yml warm-linux",
     "ci-cache.yml warm-windows",
     "release-plz.yml release-plz",

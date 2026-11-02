@@ -43,7 +43,8 @@ jobs:
   # never a pull request's.
   # What does not depend on the platform it runs on: the PR title, the
   # suppressions comment, formatting, lints and type checks, the MSRV floor, the
-  # dependency audit, the judged lint and the visual docs.
+  # dependency audit, the judged lint and the visual docs — and the advisories
+  # report, which posts a status of its own and never fails this job.
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -53,6 +54,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # The `advisories` commit status the advisories report step posts.
+      statuses: write
     env:
       # The one switch for the visual docs' side effects: the sticky comment and
       # the /pr-<n>/ preview deploy. Off because this job must finish inside its
@@ -102,6 +105,20 @@ jobs:
       - name: Formatting, lints, type checks, MSRV and audit (affected projects)
         if: ${{ !cancelled() }}
         run: just ci-lint
+      # The advisories report (.github/required-contexts.mjs). `!cancelled()`
+      # posts the status whatever the steps before it did; HEAD_REPO lets the
+      # recipe skip posting for a fork, whose token is read-only.
+      #
+      # llmlint: ignore-block[diagnostics_error_or_absent] no advisory becomes a warning here: every one still fails this step and turns the `advisories` status red until it is fixed. `continue-on-error` keeps only that report out of the required `lint` result, which the user ruled must not block on an advisory a change did not bring in; one it did bring in fails `lint` through the audit above.
+      - name: Advisories report (informational, posts the advisories status)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: just advisories-status "$HEAD_SHA" "$HEAD_REPO"
+      # llmlint: ignore-end[diagnostics_error_or_absent]
       - uses: astral-sh/setup-uv@v6
         if: github.event_name == 'pull_request' && !cancelled()
       # The judged tier, a blocking part of this check. Its harnesses are pinned
@@ -242,9 +259,11 @@ jobs:
       # The release journeys' release-plz and cargo-cyclonedx, at the justfile's
       # pins, from their checksummed release archives: `just release-tools`
       # copies these into `.tools` rather than compiling them on every run.
+      # cargo-deny and cargo-machete are what `tests/e2e/deps_audit.rs` audits
+      # its fixture crates with; those journeys fail rather than skip without them.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable,release-plz@0.3.158,cargo-cyclonedx@0.5.7
+          tool: just,nextest,cargo-llvm-cov,cargo-auditable,cargo-deny,cargo-machete,release-plz@0.3.158,cargo-cyclonedx@0.5.7
       # What `tests/e2e/cost.rs` counts with. Those journeys hold the bounds on
       # what a read may do to a runs root, counted from the kernel's own record
       # of the server rather than from a clock; they are Linux-only, this is the

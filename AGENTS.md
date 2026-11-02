@@ -148,6 +148,18 @@ block) — and `.github/tests/ci-shape.test.mjs`
 resolves every workflow to hold that, and what a push to `main` and the release
 commit start.
 
+**A security advisory blocks only the change that brings it in.** A database
+update publishes advisories against versions `main` already resolves, and an
+audit that failed on any of them held every change and release until someone
+merged past it by hand (RUSTSEC-2026-0433, pulldown-cmark 0.13.5). So `lint`'s
+audit blocks on an advisory only when the base's `Cargo.lock` did not resolve
+that version, and every advisory is reported, red until fixed, as the
+informational `advisories` status that nothing may require or wait on.
+`scripts/deps-audit.mjs` says how and `.github/required-contexts.mjs` is the
+check contract. A fork's pull request gets the report only in `lint`'s summary
+and log: the manager ruled out a privileged `workflow_run` job to post it. Never
+ignore an advisory in `deny.toml` to get a change through.
+
 **The four jobs restore `main`'s Rust build and save none.** `ci-cache.yml` is
 the producer: on every push to `main` one build-only job per OS
 (`scripts/ci-warm.sh`, `just ci-warm-<os>`) compiles what that OS's jobs compile
@@ -204,7 +216,8 @@ fans one uniformly-named target across all of them.
   whose subject is the PR title. Queue with `gh pr merge --auto --squash`. Admins
   may bypass in a break-glass.
 - **Branch protection requires exactly the four jobs** — `lint`, `test-linux`,
-  `test-windows`, `test-macos` (`.github/required-contexts.mjs`) — and does not
+  `test-windows`, `test-macos` (`.github/required-contexts.mjs`, which also names
+  the informational `advisories` status that must never be required) — and does not
   require a branch to be up to date (the user's decision of 2026-10-18). There is
   no verdict job ruling on others: a check that must block a merge is a step of
   one of the four, which is why `test-linux` builds the release's x86_64 wheel

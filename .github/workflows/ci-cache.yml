@@ -22,6 +22,10 @@ name: CI cache
 # require a branch to be up to date and nothing re-runs the tests on a push, so a
 # job here fails when `main` does not compile. It is not a pull-request check.
 #
+# Beside the warm jobs, `advisories` runs the informational advisories report on
+# each push to `main` (.github/required-contexts.mjs); it builds nothing and no
+# job needs it.
+#
 # It saves the two clone-local binaries the jobs provision too — the sibling CLI
 # on every OS and, on Linux, the server of the commit pull requests fork from —
 # under the keys ci.yml restores them by.
@@ -219,3 +223,20 @@ jobs:
         run: just build
       - name: Compile what test-macos compiles
         run: just ci-warm-macos
+
+  # The advisories report on `main` (.github/required-contexts.mjs). It stands
+  # alone: no job needs it, so its red never holds a warm job or a release.
+  advisories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The report reads the base (`git merge-base HEAD origin/main`, here
+          # this commit) to say which advisories were already there.
+          fetch-depth: 0
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-deny,cargo-machete
+      - name: Advisories report (informational)
+        run: just advisories-report
