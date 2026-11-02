@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { connect, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FIXTURE_FACTS_NAME } from "./fixtures/facts-file";
@@ -90,12 +91,48 @@ export async function startFixtureServer(
   // `dag-ui-e2e-…` directly under the temp root: the one shape
   // `serve-fixture.mjs` agrees to remove and rebuild.
   const workspace = mkdtempSync(join(tmpdir(), `dag-ui-e2e-${name}-`));
-  // The first start asks for any free port and is told which one it took: the
-  // server binds it before it says so, so nothing else can take it in between.
-  // A restart asks for that port again, because the journey's page is on it.
-  const serve = async (
-    port: number,
-  ): Promise<{ child: ChildProcess; origin: string }> => {
+  // The journey's origin is a listener this process takes before anything is
+  // served and holds until `stop`, relaying each connection to the read API
+  // serving at the time. A restart is then a new child behind the same held
+  // port rather than a release and a rebind of it — which is the gap anything
+  // else on the host could take the port in, and the journey then reads
+  // somebody else's server or none. Each child binds a port of its own the
+  // kernel chooses, and names it once it holds it.
+  let upstream: string | undefined;
+  const relayed = new Set<Socket>();
+  const front = createServer((client) => {
+    relayed.add(client);
+    client.once("close", () => relayed.delete(client));
+    // Stopped: the connection closes on the caller, a read that fails, as an
+    // origin with nothing behind it answers.
+    if (upstream === undefined) {
+      client.destroy();
+      return;
+    }
+    const [host, port] = upstream.split(":");
+    const server = connect(Number(port), host);
+    relayed.add(server);
+    server.once("close", () => relayed.delete(server));
+    const sever = () => {
+      client.destroy();
+      server.destroy();
+    };
+    client.on("error", sever);
+    server.on("error", sever);
+    client.pipe(server);
+    server.pipe(client);
+  });
+  const origin = await new Promise<string>((resolve, reject) => {
+    front.once("error", reject);
+    front.listen(0, "127.0.0.1", () => {
+      const address = front.address();
+      if (address === null || typeof address !== "object")
+        reject(new Error(`the ${name} origin has no port`));
+      else resolve(`http://127.0.0.1:${address.port}`);
+    });
+  });
+  const originPort = new URL(origin).port;
+  const serve = async (): Promise<ChildProcess> => {
     const child = spawn(
       process.execPath,
       [
@@ -103,7 +140,9 @@ export async function startFixtureServer(
         "--workspace",
         workspace,
         "--port",
-        String(port),
+        "0",
+        "--origin-port",
+        originPort,
         "--ui",
         ...corpusArgs,
       ],
@@ -114,7 +153,8 @@ export async function startFixtureServer(
         env: { ...process.env, CARGO_TARGET_DIR: FIXTURE_WORKSPACE },
       },
     );
-    const origin = `http://${await announced(child, name)}`;
+    upstream = await announced(child, name);
+    // Ready once it answers through the origin the journey reads.
     const deadline = Date.now() + 60_000;
     for (;;) {
       if (child.exitCode !== null)
@@ -123,7 +163,7 @@ export async function startFixtureServer(
         (response) => response.ok,
         () => false,
       );
-      if (ready) return { child, origin };
+      if (ready) return child;
       if (Date.now() > deadline)
         throw new Error(
           `the ${name} fixture server never answered on ${origin}`,
@@ -131,16 +171,16 @@ export async function startFixtureServer(
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   };
-  const first = await serve(0);
-  const { origin } = first;
-  const port = Number(new URL(origin).port);
-  let child: ChildProcess | undefined = first.child;
+  let child: ChildProcess | undefined = await serve();
   const halt = async (): Promise<void> => {
     const running = child;
     child = undefined;
+    upstream = undefined;
     if (running === undefined) return;
     running.kill("SIGTERM");
     await exited(running);
+    // Whatever was still relayed to the stopped server ends with it.
+    for (const socket of relayed) socket.destroy();
   };
   return {
     origin,
@@ -150,11 +190,12 @@ export async function startFixtureServer(
     ),
     stop: async () => {
       await halt();
+      await new Promise<void>((resolve) => front.close(() => resolve()));
       rmSync(workspace, { recursive: true, force: true });
     },
     stopServing: halt,
     serveRebuilt: async () => {
-      if (child === undefined) child = (await serve(port)).child;
+      if (child === undefined) child = await serve();
     },
   };
 }

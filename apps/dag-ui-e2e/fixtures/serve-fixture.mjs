@@ -13,8 +13,10 @@
  * removes, so a browser run never reads or writes the operator's own runs.
  *
  * Usage:
- *   serve-fixture.mjs --workspace DIR --port N [--ui]   (N may be 0: the
- *                                                  read API names the port it took)
+ *   serve-fixture.mjs --workspace DIR --port N [--origin-port M] [--ui]
+ *                                                  (N may be 0 beside --origin-port:
+ *                                                  the read API names the port it
+ *                                                  took, and the corpus links to M)
  *                     [--shutdown-corpus [--live-dispatch-pid PID]
  *                      | --preserved-corpus | --review-corpus
  *                      | --review-loop-corpus | --transcripts-corpus
@@ -468,6 +470,7 @@ function parseArgs(argv) {
     "--record-words",
     "--words-text",
     "--refuse-port",
+    "--origin-port",
     "--live-dispatch-pid",
     "--human-items-world",
   ]);
@@ -612,6 +615,20 @@ if (args.stall) {
   await stall(port, refuse);
 } else {
   const port = portOf(args.port ?? 8765, "--port", true);
+  // The port the server's origin is on, which the corpus links its checks to:
+  // its own, unless something in front of it holds the origin and relays to
+  // it — as `fixture-server.ts` does, so a restart never gives its port up.
+  // A server told to take any port has no origin to link to until it is told.
+  if (port === 0 && args["origin-port"] === undefined) {
+    die(
+      "--port 0 needs --origin-port",
+      "pass --origin-port the port the server will be reached on",
+    );
+  }
+  const originPort =
+    args["origin-port"] === undefined
+      ? port
+      : portOf(args["origin-port"], "--origin-port");
   if (args.workspace === undefined) {
     die(
       "--workspace is required",
@@ -732,10 +749,7 @@ if (args.stall) {
             runsRoot,
             workspace,
             args["review-corpus"] === true,
-            // The checks link to this server's own origin, which a server
-            // asked for any free port does not have until it has bound.
-            // llmlint: ignore[changed_behavior_has_e2e] only a journey's own server (`fixture-server.ts`) is asked for port 0, and no journey reads or follows a check's address on one: the journeys that assert checks drive the shared fixture, which is still given its port and still links to itself. A port-0 server cannot name its port before the corpus it serves is written, so its checks keep `buildRuns`' default address rather than a `:0` no host serves.
-            port === 0 ? undefined : `http://127.0.0.1:${port}`,
+            `http://127.0.0.1:${originPort}`,
           ),
         facts: () => facts(workspace),
       };
