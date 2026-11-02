@@ -390,12 +390,12 @@ fn a_pre_existing_advisory_does_not_block_and_is_still_reported() {
     let report = report(&project);
     assert_ne!(report.code, Some(0), "the report passed:\n{}", report.all());
     assert!(
-        report.stdout.contains(&format!("advisory {VULN}")),
+        report.stderr.contains(&format!("advisory {VULN}")),
         "the report did not name the pre-existing advisory:\n{}",
         report.all()
     );
     assert!(
-        report.stdout.contains("already resolved at the base"),
+        report.stderr.contains("already resolved at the base"),
         "{}",
         report.all()
     );
@@ -443,7 +443,7 @@ fn an_introduced_advisory_blocks_naming_it() {
     assert_ne!(report.code, Some(0), "the report passed:\n{}", report.all());
     for named in [VULN, LIB_2_1] {
         assert!(
-            report.stdout.contains(&format!("advisory {named}")),
+            report.stderr.contains(&format!("advisory {named}")),
             "the report did not name {named}:\n{}",
             report.all()
         );
@@ -476,7 +476,7 @@ fn a_release_head_over_a_vulnerable_base_is_not_blocked() {
     let report = report(&project);
     assert_ne!(report.code, Some(0), "the report passed:\n{}", report.all());
     assert!(
-        report.stdout.contains(&format!("advisory {VULN}")),
+        report.stderr.contains(&format!("advisory {VULN}")),
         "{}",
         report.all()
     );
@@ -503,6 +503,13 @@ fn a_license_violation_still_blocks() {
     assert!(
         check.all().contains("GPL-3.0-only") && check.all().contains("fixture-gpl"),
         "the blocking audit did not name the rejected license:\n{}",
+        check.all()
+    );
+    assert!(
+        check
+            .stderr
+            .contains("ACTION: fix the bans, licenses or sources finding"),
+        "the blocking audit did not say what to do:\n{}",
         check.all()
     );
     // Licenses are not the report's: with no advisory in the graph it passes.
@@ -561,6 +568,13 @@ fn an_unused_dependency_still_blocks() {
         "the blocking audit did not name the unused dependency:\n{}",
         check.all()
     );
+    assert!(
+        check
+            .stderr
+            .contains("ACTION: remove the unused dependency cargo-machete named"),
+        "the blocking audit did not say what to do:\n{}",
+        check.all()
+    );
 }
 
 #[test]
@@ -600,6 +614,8 @@ fn odd_base(project: &Project, lock: Option<&str>) -> String {
     git(&["commit", "-qm", "an odd base", "--allow-empty"]);
     let commit = git(&["rev-parse", "HEAD"]);
     git(&["checkout", "-qf", "change"]);
+    // The commit outlives its branch, so another odd base can be cut the same way.
+    git(&["branch", "-qD", "odd-base"]);
     commit
 }
 
@@ -650,27 +666,82 @@ fn a_base_with_no_lockfile_resolved_nothing_so_every_advisory_is_introduced() {
 #[test]
 fn a_base_lockfile_it_cannot_read_is_refused_rather_than_read_in_part() {
     let project = project(&VULNERABLE, &VULNERABLE);
-    // The vulnerable base, with fixture-vuln's version dropped: read in part, it
-    // would resolve fixture-lib and nothing the advisory matches.
-    let lock = fixture_lock(VULNERABLE.lock).replace("version = \"1.0.0\"\n", "");
-    let base = odd_base(&project, Some(&lock));
-    for args in [["check", "--base", &base], ["report", "--base", &base]] {
-        let run = script(&project, &args);
-        assert_eq!(
-            run.code,
-            Some(1),
-            "{args:?} was not refused:\n{}",
-            run.all()
-        );
-        assert!(
-            run.stderr.contains("cannot read Cargo.lock at the base")
-                && run.stderr.contains("0 quoted version fields")
-                && run.stderr.contains("ACTION:"),
-            "{args:?} did not say why:\n{}",
-            run.all()
-        );
-        assert!(!run.all().contains("RUSTSEC-2099-0001"), "{}", run.all());
+    let vulnerable = fixture_lock(VULNERABLE.lock);
+    let cases = [
+        // fixture-vuln's version dropped: read in part, the base would resolve
+        // fixture-lib and nothing the advisory matches.
+        (
+            vulnerable.replace("version = \"1.0.0\"\n", ""),
+            "0 quoted version fields",
+        ),
+        // Not a lockfile at all.
+        (
+            "<html>a proxy's error page</html>\n".to_owned(),
+            "it lists no [[package]]",
+        ),
+        // A table cargo does not write, which could hold packages read as none.
+        (
+            vulnerable.replace(
+                "[[package]]\nname = \"fixture-vuln\"",
+                "[[packages]]\nname = \"fixture-vuln\"",
+            ),
+            "'[[packages]]' is not a table cargo writes there",
+        ),
+    ];
+    for (lock, reason) in cases {
+        let base = odd_base(&project, Some(&lock));
+        for args in [["check", "--base", &base], ["report", "--base", &base]] {
+            let run = script(&project, &args);
+            assert_eq!(
+                run.code,
+                Some(1),
+                "{args:?} was not refused:\n{}",
+                run.all()
+            );
+            assert!(
+                run.stderr.contains("cannot read Cargo.lock at the base")
+                    && run.stderr.contains(reason)
+                    && run.stderr.contains("ACTION:"),
+                "{args:?} did not say {reason}:\n{}",
+                run.all()
+            );
+            assert!(!run.all().contains("RUSTSEC-2099-0001"), "{}", run.all());
+        }
     }
+}
+
+#[test]
+fn a_tool_it_cannot_launch_is_named_with_what_to_install() {
+    let project = project(&VULNERABLE, &VULNERABLE);
+    // A PATH holding node and git and nothing else, so `cargo` cannot launch.
+    let bin = project
+        .repo
+        .parent()
+        .expect("a parent")
+        .join("no-cargo-bin");
+    fs::create_dir_all(&bin).expect("create the PATH directory");
+    for tool in ["node", "git"] {
+        let found = Command::new("sh")
+            .args(["-c", &format!("command -v {tool}")])
+            .output()
+            .expect("find a tool");
+        let found = String::from_utf8(found.stdout).expect("a UTF-8 path");
+        std::os::unix::fs::symlink(found.trim(), bin.join(tool)).expect("link a tool");
+    }
+    let mut command = Command::new(bin.join("node"));
+    command
+        .arg(Path::new(ROOT).join("scripts/deps-audit.mjs"))
+        .arg("report")
+        .current_dir(&project.repo)
+        .env("PATH", &bin);
+    let run = run_in(&project, command, &[]);
+    assert_eq!(run.code, Some(1), "{}", run.all());
+    assert!(
+        run.stderr.contains("deps-audit: cannot run cargo:")
+            && run.stderr.contains("ACTION: install cargo and re-run"),
+        "{}",
+        run.all()
+    );
 }
 
 #[test]
@@ -735,21 +806,7 @@ fn arguments_it_cannot_use_are_a_usage_error() {
 #[test]
 fn an_advisory_database_it_cannot_read_fails_both_halves_saying_what_to_do() {
     let project = project(&VULNERABLE, &VULNERABLE);
-    // A database entry the advisories check cannot parse, in both the database
-    // and the origin it fetches from.
-    let db = project.home.join("advisory-dbs").join(DEFAULT_DB_DIR);
-    fs::write(
-        db.join("crates/fixture-vuln/RUSTSEC-2099-0009.md"),
-        "not an advisory\n",
-    )
-    .expect("write a broken advisory");
-    let git = |args: &[&str]| git(&project.gitconfig, &db, args);
-    git(&["add", "-A"]);
-    git(&["commit", "-qm", "a broken advisory"]);
-    git(&["push", "-q", "origin", "HEAD"]);
-    let fetched = git(&["rev-parse", "HEAD"]);
-    fs::write(db.join(".git/FETCH_HEAD"), format!("{fetched}\n")).expect("write FETCH_HEAD");
-
+    break_database(&project);
     for run in [blocking(&project), report(&project)] {
         assert_eq!(
             run.code,
@@ -773,14 +830,37 @@ fn an_advisory_database_it_cannot_read_fails_both_halves_saying_what_to_do() {
     }
 }
 
+/// A database entry the advisories check cannot parse, in both the database
+/// and the origin it fetches from.
+fn break_database(project: &Project) {
+    let db = project.home.join("advisory-dbs").join(DEFAULT_DB_DIR);
+    fs::write(
+        db.join("crates/fixture-vuln/RUSTSEC-2099-0009.md"),
+        "not an advisory\n",
+    )
+    .expect("write a broken advisory");
+    let git = |args: &[&str]| git(&project.gitconfig, &db, args);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "a broken advisory"]);
+    git(&["push", "-q", "origin", "HEAD"]);
+    let fetched = git(&["rev-parse", "HEAD"]);
+    fs::write(db.join(".git/FETCH_HEAD"), format!("{fetched}\n")).expect("write FETCH_HEAD");
+}
+
 // llmlint: ignore-block[e2e_not_mocked] the journeys from here to the end of the
-// file stand in for `gh` at the PATH boundary, and nothing else: the real one
+// file stand in for `gh` at the PATH boundary, and one for `cargo deny check
+// advisories`: the real `gh`
 // would write a commit status on a public repository from every test run, needs
 // a token with `statuses: write`, and cannot be made to refuse with the 403 a
 // fork's read-only token gets. The script under test is the real script, run by
 // the real recipe over a real crate audited by the real cargo-deny; the stand-in
 // records the exact request it was asked to send. What GitHub does with that
 // request is exercised by `lint` on every pull request from this repository.
+// The `cargo` stand-in answers only the advisories check, and only with output a
+// real advisory database cannot be made to produce — a line that is not JSON, an
+// advisory without its crate, a failed run that says nothing, a yanked crate
+// (which needs the live crates.io index) — and hands every other cargo command
+// to the real one.
 /// The pull request head the status is posted on.
 const HEAD_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
@@ -940,7 +1020,7 @@ fn a_forks_pull_request_reads_every_advisory_in_the_summary_and_log_and_posts_no
     );
     for named in [VULN, LIB_2_1] {
         assert!(
-            run.stdout.contains(&format!("advisory {named}")),
+            run.stderr.contains(&format!("advisory {named}")),
             "the log omits {named}:\n{}",
             run.all()
         );
@@ -1023,12 +1103,12 @@ fn a_description_too_long_for_github_names_whole_advisories_and_how_many_more() 
     );
     assert_eq!(
         description,
-        format!("{VULN}, {LIB_2_1}, and 1 more in the run's summary")
+        format!("{VULN}, {LIB_2_1}, 1 more in the run's summary")
     );
     assert!(description.chars().count() <= 140);
     for named in [VULN, LIB_2_1, LONG] {
         assert!(
-            run.stdout.contains(&format!("advisory {named}")),
+            run.stderr.contains(&format!("advisory {named}")),
             "the log omits {named}:\n{}",
             run.all()
         );
@@ -1078,7 +1158,7 @@ fn a_status_without_its_actions_context_is_refused_before_anything_runs() {
         );
         assert!(calls.is_empty(), "gh was asked for: {calls}");
         assert!(summary.is_empty(), "a summary was written: {summary}");
-        assert!(!run.stdout.contains("RUSTSEC-2099-0001"), "{}", run.all());
+        assert!(!run.all().contains("RUSTSEC-2099-0001"), "{}", run.all());
     }
 }
 
@@ -1095,6 +1175,132 @@ fn an_annotation_escapes_what_actions_would_read_as_its_own_syntax() {
     assert!(
         run.stdout.contains(&annotation),
         "no escaped {annotation}:\n{}",
+        run.all()
+    );
+}
+#[test]
+fn a_status_whose_check_did_not_run_is_posted_red_saying_so() {
+    let project = project(&VULNERABLE, &VULNERABLE);
+    break_database(&project);
+    let (run, calls, _) = status(&project, 0, REPOSITORY);
+    assert_eq!(run.code, Some(1), "the status step passed:\n{}", run.all());
+    let args: Vec<&str> = calls.lines().collect();
+    assert!(args.contains(&"state=failure"), "{args:?}");
+    assert!(
+        args.contains(&"description=the advisories check did not run; see the log"),
+        "{args:?}"
+    );
+}
+
+#[test]
+fn a_status_outside_a_run_is_posted_without_a_run_link() {
+    let project = project(&CLEAN, &CLEAN);
+    let (run, calls, _) = status_in(
+        &project,
+        0,
+        REPOSITORY,
+        &[("GITHUB_REPOSITORY", REPOSITORY)],
+    );
+    assert_eq!(run.code, Some(0), "the status step failed:\n{}", run.all());
+    assert!(calls.contains("state=success"), "{calls}");
+    assert!(
+        !calls.contains("target_url="),
+        "a run link was invented: {calls}"
+    );
+}
+
+#[test]
+fn a_step_summary_it_cannot_write_fails_the_step_after_posting() {
+    let project = project(&CLEAN, &CLEAN);
+    // A directory, which cannot be appended to.
+    let directory = project.repo.to_str().expect("a UTF-8 path").to_owned();
+    let mut actions = ACTIONS.to_vec();
+    actions.push(("GITHUB_STEP_SUMMARY", &directory));
+    let (run, calls, _) = status_in(&project, 0, REPOSITORY, &actions);
+    assert_eq!(run.code, Some(1), "the status step passed:\n{}", run.all());
+    assert!(
+        calls.contains("state=success"),
+        "the status was not posted: {calls}"
+    );
+    assert!(
+        run.stderr.contains("cannot write the step summary")
+            && run
+                .stderr
+                .contains("ACTION: point GITHUB_STEP_SUMMARY at a writable file"),
+        "{}",
+        run.all()
+    );
+}
+
+/// `just <recipe>` with a `cargo` on PATH that answers `cargo deny check
+/// advisories` with `output` and `code`, and runs the real cargo for the rest.
+fn with_advisories_output(project: &Project, recipe: &str, output: &str, code: i32) -> Run {
+    let scratch = project.repo.parent().expect("the repository has a parent");
+    let answer = scratch.join("advisories-output");
+    fs::write(&answer, output).expect("write the advisories output");
+    let cargo = Command::new("sh")
+        .args(["-c", "command -v cargo"])
+        .output()
+        .expect("find cargo");
+    let cargo = String::from_utf8(cargo.stdout).expect("a UTF-8 path");
+    let path = stub_bin::install(
+        &scratch.join("cargo-bin"),
+        "cargo",
+        &format!(
+            "#!/bin/sh\ncase \"$*\" in *'check advisories'*) cat '{}'; exit {code};; esac\n\
+             exec '{}' \"$@\"\n",
+            answer.display(),
+            cargo.trim()
+        ),
+    );
+    just(project, &[recipe], &[("PATH", path.as_os_str())])
+}
+
+#[test]
+fn advisories_output_it_cannot_read_fails_rather_than_passing_as_none() {
+    let project = project(&CLEAN, &CLEAN);
+    let unreadable_advisory = r#"{"type":"diagnostic","fields":{"severity":"error","code":"vulnerability","message":"m","advisory":{"id":"RUSTSEC-2099-0001"}}}"#;
+    let cases = [
+        ("{not json\n".to_owned(), 1, "unparseable output: {not json"),
+        (
+            format!("{unreadable_advisory}\n"),
+            1,
+            "an advisory diagnostic this cannot read",
+        ),
+        (String::new(), 3, "exited 3 with nothing this script reads"),
+    ];
+    for (output, code, reason) in cases {
+        for recipe in ["_crate-deps-check", "advisories-report"] {
+            let run = with_advisories_output(&project, recipe, &output, code);
+            assert_ne!(
+                run.code,
+                Some(0),
+                "{recipe} passed over {output:?}:\n{}",
+                run.all()
+            );
+            assert!(
+                run.stderr.contains(reason)
+                    && run
+                        .stderr
+                        .contains("ACTION: fix the cargo-deny error above"),
+                "{recipe} did not say {reason}:\n{}",
+                run.all()
+            );
+        }
+    }
+}
+
+#[test]
+fn a_yanked_crate_still_blocks() {
+    let project = project(&CLEAN, &CLEAN);
+    let yanked = r#"{"type":"diagnostic","fields":{"severity":"error","code":"yanked","message":"detected yanked crate (try `cargo update -p fixture-lib`)","graphs":[{"Krate":{"name":"fixture-lib","version":"2.0.0"}}]}}"#;
+    let run = with_advisories_output(&project, "_crate-deps-check", &format!("{yanked}\n"), 1);
+    assert_ne!(run.code, Some(0), "a yanked crate passed:\n{}", run.all());
+    assert!(
+        run.stderr.contains(
+            "yanked: detected yanked crate (try `cargo update -p fixture-lib`) (fixture-lib 2.0.0)"
+        ),
+        "{}",
         run.all()
     );
 }

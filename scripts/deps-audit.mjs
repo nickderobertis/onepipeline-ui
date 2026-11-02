@@ -54,14 +54,15 @@ const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 // What Actions sets for the run link a status points at.
 const SERVER_URL = /^https:\/\/[A-Za-z0-9.-]+(:[0-9]+)?$/;
 const RUN_ID = /^[0-9]+$/;
-// GitHub refuses a status description longer than this.
+// llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] GitHub's REST documentation for commit statuses is the one source of this limit and nothing machine-readable publishes it; only an authenticated POST tests it, which the offline gate cannot send. Drift is loud rather than silent: a description GitHub refuses fails the post, and the step prints gh's refusal.
 const DESCRIPTION_LIMIT = 140;
+// llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+// The tables cargo writes into a Cargo.lock.
+const LOCK_TABLES = new Set(["[[package]]", "[metadata]", "[[patch.unused]]"]);
 
 const isObject = (value) => typeof value === "object" && value !== null;
-// A non-empty value with no whitespace (an id, a crate name, a version), or "".
 const token = (value) =>
   typeof value === "string" && /^\S+$/.test(value) ? value : "";
-// Free text on one line, or the fallback when it is not a string.
 const text = (value, fallback) =>
   typeof value === "string" ? value.replace(/\s+/g, " ").trim() : fallback;
 
@@ -113,12 +114,17 @@ function run(command, args, { inherit = false } = {}) {
 }
 
 // `name version` for every package a Cargo.lock resolves, or why it cannot be
-// read. Cargo writes the file in one fixed shape, so a `[[package]]` without
-// exactly one quoted name and one quoted version is a lockfile this cannot vouch
-// for, never one to read the rest of: a package dropped here would turn a
-// pre-existing advisory into an introduced one.
+// read. Cargo writes the file in one fixed shape, so a table cargo does not
+// write, no `[[package]]` at all (a lockfile always resolves its own crate), or
+// a package without exactly one quoted name and one quoted version is a
+// lockfile this cannot vouch for, never one to read the rest of: a package
+// dropped here would turn a pre-existing advisory into an introduced one.
 function lockedPackages(text) {
   const packages = new Set();
+  const tables = text.match(/^\[.*$/gm) ?? [];
+  const unknown = tables.find((table) => !LOCK_TABLES.has(table.trim()));
+  if (unknown !== undefined)
+    return { error: `'${unknown.trim()}' is not a table cargo writes there` };
   const blocks = text.split(/^\[\[package\]\][ \t]*\r?$/m).slice(1);
   for (const [index, block] of blocks.entries()) {
     const body = block.split(/^\[/m)[0];
@@ -136,10 +142,10 @@ function lockedPackages(text) {
       };
     packages.add(`${names[0]} ${versions[0]}`);
   }
+  if (packages.size === 0) return { error: "it lists no [[package]]" };
   return { packages };
 }
 
-// The base's Cargo.lock, as the set of what it resolves, and the commit read.
 function basePackages(rev) {
   let commit = rev;
   if (!commit) {
@@ -269,8 +275,6 @@ const ADVISORIES_CHECK_ACTION =
 
 function check(options) {
   let failed = false;
-  // Bans, licenses and sources, exactly as before: their own output, their own
-  // verdict.
   const policy = run(
     "cargo",
     [
@@ -285,7 +289,12 @@ function check(options) {
     ],
     { inherit: true },
   );
-  if (policy.status !== 0) failed = true;
+  if (policy.status !== 0) {
+    failed = true;
+    console.error(
+      "ACTION: fix the bans, licenses or sources finding cargo-deny printed above (deny.toml says what is allowed); if it printed none, run 'cargo deny check bans licenses sources' to see why it failed",
+    );
+  }
 
   const base = basePackages(options.base);
   const { advisories, errors } = advisoriesCheck();
@@ -317,7 +326,12 @@ function check(options) {
   // machete prints the unused deps it finds on stdout, so keep it: hiding them
   // would leave a failing gate with no actionable detail.
   const machete = run("cargo", ["machete"], { inherit: true });
-  if (machete.status !== 0) failed = true;
+  if (machete.status !== 0) {
+    failed = true;
+    console.error(
+      "ACTION: remove the unused dependency cargo-machete named above from Cargo.toml; if it named none, run 'cargo machete' to see why it failed",
+    );
+  }
   return failed ? 1 : 0;
 }
 
@@ -333,7 +347,7 @@ function report(options, { quiet = false } = {}) {
     const origin = base.packages.has(key(advisory))
       ? `already resolved at the base ${base.commit.slice(0, 12)}`
       : "introduced by this change";
-    console.log(`deps-audit: advisory ${describe(advisory)} — ${origin}`);
+    console.error(`deps-audit: advisory ${describe(advisory)} — ${origin}`);
   }
   if (advisories.length === 0 && errors.length === 0 && !quiet)
     console.log(`deps-audit: ${ALL_CLEAR}`);
@@ -348,20 +362,22 @@ function report(options, { quiet = false } = {}) {
   };
 }
 
-// The status description: every advisory that fits whole in GitHub's limit,
-// then how many more the run's summary and log name.
+// The status description: as many advisories as fit whole in GitHub's limit,
+// then how many more the run's summary names. Showing none always fits.
 function statusDescription(advisories, errors) {
   if (advisories.length === 0)
     return errors.length > 0
       ? "the advisories check did not run; see the log"
       : ALL_CLEAR;
   const names = advisories.map(named);
-  for (let shown = names.length; shown > 0; shown -= 1) {
+  let shown = names.length;
+  const fitting = () => {
     const rest = names.length - shown;
-    const description = `${names.slice(0, shown).join(", ")}${rest > 0 ? `, and ${rest} more in the run's summary` : ""}`;
-    if (description.length <= DESCRIPTION_LIMIT) return description;
-  }
-  return `${names.length} advisories; the run's summary names each`;
+    const more = rest > 0 ? [`${rest} more in the run's summary`] : [];
+    return [...names.slice(0, shown), ...more].join(", ");
+  };
+  while (fitting().length > DESCRIPTION_LIMIT) shown -= 1;
+  return fitting();
 }
 
 // A workflow command's property and message, escaped as Actions reads them.
@@ -370,7 +386,6 @@ const escapeData = (value) =>
 const escapeProperty = (value) =>
   escapeData(value).replace(/:/g, "%3A").replace(/,/g, "%2C");
 
-// The Actions context a status is posted with, validated before anything runs.
 function actionsContext() {
   const refuse = (message, action) => {
     console.error(`deps-audit: ${message}`);
@@ -411,18 +426,31 @@ function status(options) {
   const where = fork
     ? `\n\nThis pull request comes from the fork ${options.headRepo}, whose token cannot post the \`${CONTEXT}\` status: this summary is the report.`
     : "";
+  // A summary that cannot be written fails the step, after the status is
+  // posted: the log still carries the report.
+  let summaryFailed = false;
   const summary = process.env.GITHUB_STEP_SUMMARY;
   if (summary)
-    appendFileSync(
-      summary,
-      `### Advisories (informational, never required)${where}\n\n${
-        advisories.length > 0
-          ? advisories
-              .map((a) => `- \`${a.id}\` ${a.name} ${a.version}: ${a.title}`)
-              .join("\n")
-          : description
-      }\n`,
-    );
+    try {
+      appendFileSync(
+        summary,
+        `### Advisories (informational, never required)${where}\n\n${
+          advisories.length > 0
+            ? advisories
+                .map((a) => `- \`${a.id}\` ${a.name} ${a.version}: ${a.title}`)
+                .join("\n")
+            : description
+        }\n`,
+      );
+    } catch (error) {
+      summaryFailed = true;
+      console.error(
+        `deps-audit: cannot write the step summary GITHUB_STEP_SUMMARY names: ${error.message}`,
+      );
+      console.error(
+        "ACTION: point GITHUB_STEP_SUMMARY at a writable file, or unset it",
+      );
+    }
   if (process.env.GITHUB_ACTIONS)
     for (const a of advisories)
       console.log(
@@ -433,7 +461,7 @@ function status(options) {
     console.log(
       `deps-audit: ${verdict}; ${options.headRepo} is a fork of ${repository}, whose token cannot post the ${CONTEXT} status, so this log and the step summary are the report`,
     );
-    return code;
+    return summaryFailed ? 1 : code;
   }
   const args = [
     "api",
@@ -461,7 +489,7 @@ function status(options) {
   console.log(
     `deps-audit: posted ${CONTEXT}=${code === 0 ? "success" : "failure"} on ${options.sha}: ${verdict}`,
   );
-  return code;
+  return summaryFailed ? 1 : code;
 }
 
 const options = parseArgs(process.argv.slice(2));

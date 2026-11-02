@@ -628,8 +628,10 @@ deps-check:
 # target, run by the required `lint` job). An advisory against a version the
 # base already resolves does not fail it — that is `advisories-report`'s; one
 # against a version this change brings in does. `scripts/deps-audit.mjs` says why.
+# llmlint: ignore-block[diagnostics_error_or_absent] an advisory against a version the base already resolves is not suppressed but owned elsewhere: `advisories-report` below fails on every one, and posts it as the red `advisories` status until it is fixed. Failing this required audit on it too is what held every unrelated change and release behind RUSTSEC-2026-0433, and deny.toml still ignores nothing.
 _crate-deps-check: _deps-audit-tools
     @node "{{justfile_directory()}}/scripts/deps-audit.mjs" check
+# llmlint: ignore-end[diagnostics_error_or_absent]
 
 # Informational: never a required check, and nothing that blocks a change or a
 # release may run it or wait on it (`.github/required-contexts.mjs`).
