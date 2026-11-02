@@ -51,7 +51,7 @@ readonly LLMLINT_MIN="0.4.11"
 # `oneharness.toml` when Codex refuses the configured model for the account it is
 # signed in with (HTTP 400, "not supported when using Codex with a ChatGPT
 # account"), so the committed fallback chain reaches a verdict through claude-code
-# on such a host with no `ONEHARNESS_*` override. `.github/tests/judge-fallthrough.test.mjs`
+# on such a host with no `ONEHARNESS_*` override. `.github/tests/judge-install/judge-fallthrough.test.mjs`
 # installs through this script and holds the version it reports to this pin.
 readonly ONEHARNESS_VERSION="0.26.1"
 readonly BIN_DIR="$HOME/.local/bin"

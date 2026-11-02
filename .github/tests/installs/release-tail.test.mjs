@@ -31,7 +31,7 @@ import { parse, stringify } from "yaml";
 
 const ROOT = resolve(".");
 // The onevcs release this repository adopts for the tail's reads.
-export const ONEVCS_ADOPTED = "0.57.4";
+export const ONEVCS_ADOPTED = "0.57.6";
 const REPOSITORY = "nickderobertis/onepipeline-ui";
 const RELEASE = "v0.64.0";
 const RELEASE_RUN = 41269844133;
