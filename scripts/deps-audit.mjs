@@ -14,7 +14,8 @@
 //           (`cargo machete`) fail it as before. An advisory fails it only when
 //           it matches a package version this change introduces — one the base's
 //           Cargo.lock does not resolve. One matching a version the base already
-//           resolves is printed and passes: it is the advisories report's.
+//           resolves is summarized on one line and passes: it is the advisories
+//           report's.
 //   report  Every advisory in the head's Cargo.lock, whatever the base resolved,
 //           so an unrelated dependency update cannot hide one that was already
 //           there. Exits non-zero while any remains. Informational: no check that
@@ -28,7 +29,9 @@
 //           GITHUB_REPOSITORY the change request is a fork's, whose token cannot
 //           post a status, so posting is skipped and the summary and log are where
 //           the report is read. Exits non-zero when advisories remain or a status
-//           this repository's token should have posted was refused.
+//           this repository's token should have posted was refused. The Actions
+//           context it posts with (GITHUB_REPOSITORY, GITHUB_SERVER_URL,
+//           GITHUB_RUN_ID) is validated before anything runs.
 //
 // No advisory is ignored or downgraded in deny.toml to get there: the
 // configuration still treats every advisory and yanked crate as a finding, and
@@ -48,6 +51,19 @@ import { appendFileSync, existsSync } from "node:fs";
 const CONTEXT = "advisories";
 const FLAGS = { "--base": "base", "--sha": "sha", "--head-repo": "headRepo" };
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+// What Actions sets for the run link a status points at.
+const SERVER_URL = /^https:\/\/[A-Za-z0-9.-]+(:[0-9]+)?$/;
+const RUN_ID = /^[0-9]+$/;
+// GitHub refuses a status description longer than this.
+const DESCRIPTION_LIMIT = 140;
+
+const isObject = (value) => typeof value === "object" && value !== null;
+// A non-empty value with no whitespace (an id, a crate name, a version), or "".
+const token = (value) =>
+  typeof value === "string" && /^\S+$/.test(value) ? value : "";
+// Free text on one line, or the fallback when it is not a string.
+const text = (value, fallback) =>
+  typeof value === "string" ? value.replace(/\s+/g, " ").trim() : fallback;
 
 function usage(message) {
   console.error(`deps-audit: ${message}`);
@@ -96,15 +112,31 @@ function run(command, args, { inherit = false } = {}) {
   return result;
 }
 
-// `name version` for every package a Cargo.lock resolves.
+// `name version` for every package a Cargo.lock resolves, or why it cannot be
+// read. Cargo writes the file in one fixed shape, so a `[[package]]` without
+// exactly one quoted name and one quoted version is a lockfile this cannot vouch
+// for, never one to read the rest of: a package dropped here would turn a
+// pre-existing advisory into an introduced one.
 function lockedPackages(text) {
   const packages = new Set();
-  for (const block of text.split(/^\[\[package\]\]\s*$/m).slice(1)) {
-    const name = /^name\s*=\s*"([^"]+)"/m.exec(block)?.[1];
-    const version = /^version\s*=\s*"([^"]+)"/m.exec(block)?.[1];
-    if (name && version) packages.add(`${name} ${version}`);
+  const blocks = text.split(/^\[\[package\]\][ \t]*\r?$/m).slice(1);
+  for (const [index, block] of blocks.entries()) {
+    const body = block.split(/^\[/m)[0];
+    const values = (key) =>
+      [
+        ...body.matchAll(
+          new RegExp(`^${key}[ \\t]*=[ \\t]*"([^"\\s]+)"[ \\t]*\\r?$`, "gm"),
+        ),
+      ].map((match) => match[1]);
+    const names = values("name");
+    const versions = values("version");
+    if (names.length !== 1 || versions.length !== 1)
+      return {
+        error: `[[package]] number ${index + 1} has ${names.length} quoted name and ${versions.length} quoted version fields, not one of each`,
+      };
+    packages.add(`${names[0]} ${versions[0]}`);
   }
-  return packages;
+  return { packages };
 }
 
 // The base's Cargo.lock, as the set of what it resolves, and the commit read.
@@ -131,22 +163,32 @@ function basePackages(rev) {
     process.exit(1);
   }
   commit = verified.stdout.trim();
-  const shown = run("git", ["show", `${commit}:./Cargo.lock`]);
   // A base with no Cargo.lock resolves nothing, so every advisory is the
-  // change's; any other failure to read it is a refusal.
-  if (shown.status !== 0) {
-    const listed = run("git", ["ls-tree", "--name-only", commit, "./"]);
-    if (
-      listed.status === 0 &&
-      !listed.stdout.split("\n").some((p) => p.endsWith("Cargo.lock"))
-    )
-      return { commit, packages: new Set() };
-    console.error(shown.stderr.trim());
-    console.error(`deps-audit: cannot read Cargo.lock at the base ${commit}`);
-    console.error("ACTION: fix the git error above and re-run");
+  // change's; one it has and that cannot be read is a refusal.
+  const listed = run("git", [
+    "ls-tree",
+    "--name-only",
+    commit,
+    "--",
+    "Cargo.lock",
+  ]);
+  if (listed.status === 0 && listed.stdout.trim() === "")
+    return { commit, packages: new Set() };
+  const shown = run("git", ["show", `${commit}:./Cargo.lock`]);
+  const read =
+    shown.status === 0
+      ? lockedPackages(shown.stdout)
+      : { error: `${listed.stderr}${shown.stderr}`.trim() };
+  if (read.error) {
+    console.error(
+      `deps-audit: cannot read Cargo.lock at the base ${commit}: ${read.error}`,
+    );
+    console.error(
+      "ACTION: pass --base a commit whose Cargo.lock cargo wrote, or fix the git error above",
+    );
     process.exit(1);
   }
-  return { commit, packages: lockedPackages(shown.stdout) };
+  return { commit, packages: read.packages };
 }
 
 // cargo-deny's advisories check, read as JSON: every advisory it matched, and
@@ -168,27 +210,40 @@ function advisoriesCheck() {
     try {
       entry = JSON.parse(line);
     } catch {
-      errors.push(line.trim());
+      errors.push(`unparseable output: ${line.trim()}`);
       continue;
     }
-    const fields = entry.fields ?? {};
-    if (entry.type === "log") {
-      if (fields.level === "ERROR") errors.push(fields.message);
+    const fields =
+      isObject(entry) && isObject(entry.fields) ? entry.fields : {};
+    if (entry?.type === "log") {
+      if (fields.level === "ERROR") errors.push(text(fields.message, line));
       continue;
     }
-    if (entry.type !== "diagnostic" || fields.severity !== "error") continue;
-    const krate = fields.graphs?.[0]?.Krate;
-    if (fields.advisory && krate) {
-      advisories.push({
-        id: fields.advisory.id,
-        title: fields.advisory.title ?? fields.message,
-        kind: fields.code,
-        name: krate.name,
-        version: krate.version,
-      });
+    if (entry?.type !== "diagnostic" || fields.severity !== "error") continue;
+    const graph = Array.isArray(fields.graphs) ? fields.graphs[0] : undefined;
+    const krate = isObject(graph?.Krate) ? graph.Krate : undefined;
+    // An advisory is classified only on fields that read as what they name:
+    // anything else fails the run as an unreadable diagnostic rather than being
+    // matched, or not, on a value that is not there.
+    if (isObject(fields.advisory)) {
+      const advisory = {
+        id: token(fields.advisory.id),
+        title: text(fields.advisory.title ?? fields.message, ""),
+        kind: token(fields.code),
+        name: token(krate?.name),
+        version: token(krate?.version),
+      };
+      if (advisory.id && advisory.kind && advisory.name && advisory.version)
+        advisories.push(advisory);
+      else
+        errors.push(`an advisory diagnostic this cannot read: ${line.trim()}`);
     } else {
-      const where = krate ? ` (${krate.name} ${krate.version})` : "";
-      errors.push(`${fields.code ?? "error"}: ${fields.message}${where}`);
+      const where = krate
+        ? ` (${text(krate.name, "?")} ${text(krate.version, "?")})`
+        : "";
+      errors.push(
+        `${text(fields.code, "error")}: ${text(fields.message, line.trim())}${where}`,
+      );
     }
   }
   // A failed run this reading found nothing in is not a pass.
@@ -205,8 +260,12 @@ function advisoriesCheck() {
   return { advisories, errors };
 }
 
-const describe = (a) =>
-  `${a.id} ${a.name} ${a.version} (${a.kind}): ${a.title}`;
+const key = (a) => `${a.name} ${a.version}`;
+const named = (a) => `${a.id} ${a.name} ${a.version}`;
+const describe = (a) => `${named(a)} (${a.kind}): ${a.title}`;
+const ALL_CLEAR = "no advisory matches the resolved graph";
+const ADVISORIES_CHECK_ACTION =
+  "ACTION: fix the cargo-deny error above — an advisory database it cannot open or fetch is refreshed by 'cargo deny fetch' — and re-run";
 
 function check(options) {
   let failed = false;
@@ -230,30 +289,30 @@ function check(options) {
 
   const base = basePackages(options.base);
   const { advisories, errors } = advisoriesCheck();
-  for (const error of errors) {
+  for (const error of errors)
     console.error(`deps-audit: advisories check: ${error}`);
+  if (errors.length > 0) {
     failed = true;
+    console.error(ADVISORIES_CHECK_ACTION);
   }
   const short = base.commit.slice(0, 12);
-  for (const advisory of advisories) {
-    if (base.packages.has(`${advisory.name} ${advisory.version}`)) {
-      console.log(
-        `deps-audit: pre-existing, not blocking: ${describe(advisory)} — the base ${short} already resolves ${advisory.name} ${advisory.version}; the advisories report carries it`,
-      );
-    } else {
-      console.error(
-        `deps-audit: introduced by this change: ${describe(advisory)} — the base ${short} does not resolve ${advisory.name} ${advisory.version}`,
-      );
-      failed = true;
-    }
-  }
-  if (
-    failed &&
-    advisories.some((a) => !base.packages.has(`${a.name} ${a.version}`))
-  )
+  const preExisting = advisories.filter((a) => base.packages.has(key(a)));
+  const introduced = advisories.filter((a) => !base.packages.has(key(a)));
+  // What passes is one line; the advisories report lists each of them.
+  if (preExisting.length > 0)
+    console.log(
+      `deps-audit: pre-existing, not blocking: ${preExisting.map(named).join(", ")} — the base ${short} already resolves ${preExisting.length === 1 ? "it" : "each"}; \`just advisories-report\` lists ${preExisting.length === 1 ? "it" : "them"}`,
+    );
+  for (const advisory of introduced)
+    console.error(
+      `deps-audit: introduced by this change: ${describe(advisory)} — the base ${short} does not resolve ${advisory.name} ${advisory.version}`,
+    );
+  if (introduced.length > 0) {
+    failed = true;
     console.error(
       "ACTION: move the introduced crate to a patched version ('cargo update -p <crate>'), or drop it",
     );
+  }
 
   // machete prints the unused deps it finds on stdout, so keep it: hiding them
   // would leave a failing gate with no actionable detail.
@@ -262,19 +321,22 @@ function check(options) {
   return failed ? 1 : 0;
 }
 
-function report(options) {
+// The report's findings, printed; `quiet` leaves the all-clear line to a caller
+// that concludes with its own.
+function report(options, { quiet = false } = {}) {
   const base = basePackages(options.base);
   const { advisories, errors } = advisoriesCheck();
   for (const error of errors)
     console.error(`deps-audit: advisories check: ${error}`);
+  if (errors.length > 0) console.error(ADVISORIES_CHECK_ACTION);
   for (const advisory of advisories) {
-    const origin = base.packages.has(`${advisory.name} ${advisory.version}`)
+    const origin = base.packages.has(key(advisory))
       ? `already resolved at the base ${base.commit.slice(0, 12)}`
       : "introduced by this change";
     console.log(`deps-audit: advisory ${describe(advisory)} — ${origin}`);
   }
-  if (advisories.length === 0 && errors.length === 0)
-    console.log("deps-audit: no advisory matches the resolved graph");
+  if (advisories.length === 0 && errors.length === 0 && !quiet)
+    console.log(`deps-audit: ${ALL_CLEAR}`);
   else if (advisories.length > 0)
     console.error(
       `ACTION: ${advisories.length} advisor${advisories.length === 1 ? "y matches" : "ies match"} the resolved graph; move each crate to a patched version`,
@@ -286,23 +348,65 @@ function report(options) {
   };
 }
 
-function status(options) {
-  const { advisories, errors, code } = report(options);
-  const repository = process.env.GITHUB_REPOSITORY;
-  if (!repository) {
-    console.error("deps-audit: status needs GITHUB_REPOSITORY (owner/name)");
-    console.error("ACTION: run it from Actions, or set GITHUB_REPOSITORY");
-    return 1;
+// The status description: every advisory that fits whole in GitHub's limit,
+// then how many more the run's summary and log name.
+function statusDescription(advisories, errors) {
+  if (advisories.length === 0)
+    return errors.length > 0
+      ? "the advisories check did not run; see the log"
+      : ALL_CLEAR;
+  const names = advisories.map(named);
+  for (let shown = names.length; shown > 0; shown -= 1) {
+    const rest = names.length - shown;
+    const description = `${names.slice(0, shown).join(", ")}${rest > 0 ? `, and ${rest} more in the run's summary` : ""}`;
+    if (description.length <= DESCRIPTION_LIMIT) return description;
   }
-  const named = advisories.map((a) => `${a.id} ${a.name} ${a.version}`);
-  let description;
-  if (advisories.length > 0) description = named.join(", ");
-  else if (errors.length > 0)
-    description = "the advisories check did not run; see the log";
-  else description = "no advisory matches the resolved graph";
-  // GitHub refuses a description over 140 characters; the job log and its step
-  // summary carry the whole list.
-  if (description.length > 140) description = `${description.slice(0, 137)}...`;
+  return `${names.length} advisories; the run's summary names each`;
+}
+
+// A workflow command's property and message, escaped as Actions reads them.
+const escapeData = (value) =>
+  value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+const escapeProperty = (value) =>
+  escapeData(value).replace(/:/g, "%3A").replace(/,/g, "%2C");
+
+// The Actions context a status is posted with, validated before anything runs.
+function actionsContext() {
+  const refuse = (message, action) => {
+    console.error(`deps-audit: ${message}`);
+    console.error(`ACTION: ${action}`);
+    process.exit(1);
+  };
+  const repository = process.env.GITHUB_REPOSITORY;
+  if (!repository)
+    refuse(
+      "status needs GITHUB_REPOSITORY (owner/name)",
+      "run it from Actions, or set GITHUB_REPOSITORY",
+    );
+  if (!REPOSITORY.test(repository))
+    refuse(
+      `GITHUB_REPOSITORY '${repository}' is not an owner/name repository`,
+      "set GITHUB_REPOSITORY to owner/name",
+    );
+  const server = process.env.GITHUB_SERVER_URL || "https://github.com";
+  if (!SERVER_URL.test(server))
+    refuse(
+      `GITHUB_SERVER_URL '${server}' is not an https origin`,
+      "set GITHUB_SERVER_URL to the server's https origin, or unset it",
+    );
+  const runId = process.env.GITHUB_RUN_ID;
+  if (runId && !RUN_ID.test(runId))
+    refuse(
+      `GITHUB_RUN_ID '${runId}' is not a run id`,
+      "set GITHUB_RUN_ID to the numeric run id, or unset it",
+    );
+  return { repository, server, runId };
+}
+
+function status(options) {
+  const { repository, server, runId } = actionsContext();
+  const { advisories, errors, code } = report(options, { quiet: true });
+  const description = statusDescription(advisories, errors);
   const fork = options.headRepo.toLowerCase() !== repository.toLowerCase();
   const where = fork
     ? `\n\nThis pull request comes from the fork ${options.headRepo}, whose token cannot post the \`${CONTEXT}\` status: this summary is the report.`
@@ -322,16 +426,15 @@ function status(options) {
   if (process.env.GITHUB_ACTIONS)
     for (const a of advisories)
       console.log(
-        `::warning title=${a.id} in ${a.name} ${a.version}::${a.title}`,
+        `::warning title=${escapeProperty(`${a.id} in ${a.name} ${a.version}`)}::${escapeData(a.title)}`,
       );
+  const verdict = code === 0 ? ALL_CLEAR : description;
   if (fork) {
     console.log(
-      `deps-audit: ${options.headRepo} is a fork of ${repository}; its token cannot post the ${CONTEXT} status, so the report above and the step summary are where it is read`,
+      `deps-audit: ${verdict}; ${options.headRepo} is a fork of ${repository}, whose token cannot post the ${CONTEXT} status, so this log and the step summary are the report`,
     );
     return code;
   }
-  const server = process.env.GITHUB_SERVER_URL ?? "https://github.com";
-  const runId = process.env.GITHUB_RUN_ID;
   const args = [
     "api",
     "--method",
@@ -356,7 +459,7 @@ function status(options) {
     return 1;
   }
   console.log(
-    `deps-audit: posted ${CONTEXT}=${code === 0 ? "success" : "failure"} on ${options.sha}`,
+    `deps-audit: posted ${CONTEXT}=${code === 0 ? "success" : "failure"} on ${options.sha}: ${verdict}`,
   );
   return code;
 }

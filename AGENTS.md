@@ -151,20 +151,14 @@ commit start.
 **A security advisory blocks only the change that brings it in.** A database
 update publishes advisories against versions `main` already resolves, and an
 audit that failed on any of them held every change and release until someone
-merged past it by hand (RUSTSEC-2026-0433, pulldown-cmark 0.13.5). So
-`scripts/deps-audit.mjs` splits it: `lint`'s `deps-check` blocks on bans,
-licenses, sources, yanked crates, unused dependencies and an advisory matching a
-version the base's `Cargo.lock` does not resolve; `just advisories-report` names
-every advisory in the head's lockfile and is informational — a
-`continue-on-error` step of `lint` posts it as the `advisories` commit status on
-each pull request from this repository and writes it to `lint`'s step summary
-and log on every one (a fork's read-only token gets only those: no status, by
-the manager's ruling against a privileged `workflow_run` job for forks), and
-`ci-cache.yml`'s `advisories` job runs it on `main`. Both
-are red until the advisory is fixed. `.github/required-contexts.mjs` is the check
-contract: what blocks, and that `advisories` is never required, needed or waited
-on (`.github/tests/advisories.test.mjs`). Never ignore an advisory in
-`deny.toml` to get a change through.
+merged past it by hand (RUSTSEC-2026-0433, pulldown-cmark 0.13.5). So `lint`'s
+audit blocks on an advisory only when the base's `Cargo.lock` did not resolve
+that version, and every advisory is reported, red until fixed, as the
+informational `advisories` status that nothing may require or wait on.
+`scripts/deps-audit.mjs` says how and `.github/required-contexts.mjs` is the
+check contract. A fork's pull request gets the report only in `lint`'s summary
+and log: the manager ruled out a privileged `workflow_run` job to post it. Never
+ignore an advisory in `deny.toml` to get a change through.
 
 **The four jobs restore `main`'s Rust build and save none.** `ci-cache.yml` is
 the producer: on every push to `main` one build-only job per OS

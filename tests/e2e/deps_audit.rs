@@ -45,9 +45,13 @@ const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 /// database, read it.
 const DEFAULT_DB_DIR: &str = "advisory-db-3157b0e258782691";
 
-/// The fixture database's two advisories, with the crate version each matches.
+/// The fixture database's advisories, with the crate version each matches.
 const VULN: &str = "RUSTSEC-2099-0001 fixture-vuln 1.0.0";
 const LIB_2_1: &str = "RUSTSEC-2099-0002 fixture-lib 2.1.0";
+const LONG: &str = "RUSTSEC-2099-0003 fixture-whose-name-is-long-enough-to-overflow-a-status 1.0.0";
+/// The crate [`LONG`] is against: named beside the other two, the advisories
+/// overflow the 140 characters GitHub allows a status description.
+const LONG_NAME: &str = "fixture-whose-name-is-long-enough-to-overflow-a-status";
 
 /// Every vendored crate: name, version, license.
 const VENDORED: &[(&str, &str, &str)] = &[
@@ -56,6 +60,7 @@ const VENDORED: &[(&str, &str, &str)] = &[
     ("fixture-lib", "2.1.0", "MIT"),
     ("fixture-extra", "1.0.0", "MIT"),
     ("fixture-gpl", "1.0.0", "GPL-3.0-only"),
+    (LONG_NAME, "1.0.0", "MIT"),
     // A crate `deny.toml` bans by name.
     ("serde_yaml", "0.9.0", "MIT"),
 ];
@@ -279,7 +284,23 @@ fn just(project: &Project, args: &[&str], env: &[(&str, &OsStr)]) -> Run {
         .arg(Path::new(ROOT).join("justfile"))
         .arg("--working-directory")
         .arg(&project.repo)
+        .args(args);
+    run_in(project, command, env)
+}
+
+/// `scripts/deps-audit.mjs` itself, from the fixture repository's root, for what
+/// the recipes never pass it: `--base`, and arguments it must refuse.
+fn script(project: &Project, args: &[&str]) -> Run {
+    let mut command = Command::new("node");
+    command
+        .arg(Path::new(ROOT).join("scripts/deps-audit.mjs"))
         .args(args)
+        .current_dir(&project.repo);
+    run_in(project, command, &[])
+}
+
+fn run_in(project: &Project, mut command: Command, env: &[(&str, &OsStr)]) -> Run {
+    command
         .env("CARGO_HOME", &project.home)
         .env("CARGO_NET_OFFLINE", "true")
         .env("GIT_CONFIG_GLOBAL", &project.gitconfig)
@@ -565,12 +586,219 @@ fn a_base_it_cannot_resolve_is_refused_rather_than_read_as_empty() {
     assert!(!check.all().contains("pre-existing, not blocking"));
 }
 
+/// A commit on an orphan branch whose tree is `Cargo.lock` holding `lock` alone,
+/// or nothing when `lock` is `None`: a base no fixture side describes, for
+/// `--base`. The checkout is left on the change.
+fn odd_base(project: &Project, lock: Option<&str>) -> String {
+    let git = |args: &[&str]| git(&project.gitconfig, &project.repo, args);
+    git(&["checkout", "-q", "--orphan", "odd-base"]);
+    git(&["rm", "-rq", "--cached", "."]);
+    if let Some(lock) = lock {
+        fs::write(project.repo.join("Cargo.lock"), lock).expect("write the base lockfile");
+        git(&["add", "Cargo.lock"]);
+    }
+    git(&["commit", "-qm", "an odd base", "--allow-empty"]);
+    let commit = git(&["rev-parse", "HEAD"]);
+    git(&["checkout", "-qf", "change"]);
+    commit
+}
+
+fn fixture_lock(name: &str) -> String {
+    fs::read_to_string(Path::new(ROOT).join(format!("tests/fixtures/deps-audit/{name}.Cargo.lock")))
+        .expect("read a fixture lockfile")
+}
+
+#[test]
+fn an_explicit_base_is_the_one_read() {
+    // `origin/main` is clean, so against it the advisory is the change's; the
+    // base named instead already resolved it.
+    let project = project(&CLEAN, &VULNERABLE);
+    assert_ne!(blocking(&project).code, Some(0));
+    let base = odd_base(&project, Some(&fixture_lock(VULNERABLE.lock)));
+    let check = script(&project, &["check", "--base", &base]);
+    assert_eq!(
+        check.code,
+        Some(0),
+        "the audit blocked against the base it was given:\n{}",
+        check.all()
+    );
+    assert!(
+        check
+            .stdout
+            .contains(&format!("pre-existing, not blocking: {VULN}")),
+        "{}",
+        check.all()
+    );
+    assert!(check.stdout.contains(&base[..12]), "{}", check.all());
+}
+
+#[test]
+fn a_base_with_no_lockfile_resolved_nothing_so_every_advisory_is_introduced() {
+    let project = project(&VULNERABLE, &VULNERABLE);
+    let base = odd_base(&project, None);
+    let check = script(&project, &["check", "--base", &base]);
+    assert_ne!(check.code, Some(0), "the audit passed:\n{}", check.all());
+    assert!(
+        check
+            .stderr
+            .contains(&format!("introduced by this change: {VULN}")),
+        "{}",
+        check.all()
+    );
+}
+
+#[test]
+fn a_base_lockfile_it_cannot_read_is_refused_rather_than_read_in_part() {
+    let project = project(&VULNERABLE, &VULNERABLE);
+    // The vulnerable base, with fixture-vuln's version dropped: read in part, it
+    // would resolve fixture-lib and nothing the advisory matches.
+    let lock = fixture_lock(VULNERABLE.lock).replace("version = \"1.0.0\"\n", "");
+    let base = odd_base(&project, Some(&lock));
+    for args in [["check", "--base", &base], ["report", "--base", &base]] {
+        let run = script(&project, &args);
+        assert_eq!(
+            run.code,
+            Some(1),
+            "{args:?} was not refused:\n{}",
+            run.all()
+        );
+        assert!(
+            run.stderr.contains("cannot read Cargo.lock at the base")
+                && run.stderr.contains("0 quoted version fields")
+                && run.stderr.contains("ACTION:"),
+            "{args:?} did not say why:\n{}",
+            run.all()
+        );
+        assert!(!run.all().contains("RUSTSEC-2099-0001"), "{}", run.all());
+    }
+}
+
+#[test]
+fn a_base_that_is_not_a_commit_is_refused() {
+    let project = project(&VULNERABLE, &VULNERABLE);
+    let check = script(&project, &["check", "--base", "no-such-commit"]);
+    assert_eq!(check.code, Some(1), "{}", check.all());
+    assert!(
+        check
+            .stderr
+            .contains("the base 'no-such-commit' is not a commit here"),
+        "{}",
+        check.all()
+    );
+}
+
+#[test]
+fn arguments_it_cannot_use_are_a_usage_error() {
+    let project = project(&CLEAN, &CLEAN);
+    let sha = "0123456789abcdef0123456789abcdef01234567";
+    let cases: &[(&[&str], &str)] = &[
+        (&[], "name a mode"),
+        (&["audit"], "'audit' is not check, report or status"),
+        (
+            &["check", "--frobnicate", "x"],
+            "unknown argument '--frobnicate'",
+        ),
+        (&["check", "--base"], "--base needs a value"),
+        (
+            &["report", "--sha", sha],
+            "only status takes --sha and --head-repo",
+        ),
+        (
+            &["status", "--head-repo", "a/b"],
+            "status needs --sha <commit>",
+        ),
+        (
+            &["status", "--sha", "abc123", "--head-repo", "a/b"],
+            "'abc123' is not a full commit id",
+        ),
+        (
+            &["status", "--sha", sha],
+            "status needs --head-repo <owner/name>",
+        ),
+    ];
+    for (args, refusal) in cases {
+        let run = script(&project, args);
+        assert_eq!(
+            run.code,
+            Some(2),
+            "{args:?} was not refused:\n{}",
+            run.all()
+        );
+        assert!(
+            run.stderr.contains(refusal) && run.stderr.contains("ACTION: run 'deps-audit.mjs"),
+            "{args:?} did not say {refusal}:\n{}",
+            run.all()
+        );
+    }
+}
+
+#[test]
+fn an_advisory_database_it_cannot_read_fails_both_halves_saying_what_to_do() {
+    let project = project(&VULNERABLE, &VULNERABLE);
+    // A database entry the advisories check cannot parse, in both the database
+    // and the origin it fetches from.
+    let db = project.home.join("advisory-dbs").join(DEFAULT_DB_DIR);
+    fs::write(
+        db.join("crates/fixture-vuln/RUSTSEC-2099-0009.md"),
+        "not an advisory\n",
+    )
+    .expect("write a broken advisory");
+    let git = |args: &[&str]| git(&project.gitconfig, &db, args);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "a broken advisory"]);
+    git(&["push", "-q", "origin", "HEAD"]);
+    let fetched = git(&["rev-parse", "HEAD"]);
+    fs::write(db.join(".git/FETCH_HEAD"), format!("{fetched}\n")).expect("write FETCH_HEAD");
+
+    for run in [blocking(&project), report(&project)] {
+        assert_eq!(
+            run.code,
+            Some(1),
+            "a broken database passed:\n{}",
+            run.all()
+        );
+        assert!(
+            run.stderr.contains("deps-audit: advisories check:")
+                && run
+                    .stderr
+                    .contains("ACTION: fix the cargo-deny error above"),
+            "the failure did not say what to do:\n{}",
+            run.all()
+        );
+        assert!(
+            !run.all().contains("pre-existing, not blocking"),
+            "{}",
+            run.all()
+        );
+    }
+}
+
+// llmlint: ignore-block[e2e_not_mocked] the journeys from here to the end of the
+// file stand in for `gh` at the PATH boundary, and nothing else: the real one
+// would write a commit status on a public repository from every test run, needs
+// a token with `statuses: write`, and cannot be made to refuse with the 403 a
+// fork's read-only token gets. The script under test is the real script, run by
+// the real recipe over a real crate audited by the real cargo-deny; the stand-in
+// records the exact request it was asked to send. What GitHub does with that
+// request is exercised by `lint` on every pull request from this repository.
 /// The pull request head the status is posted on.
 const HEAD_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
 /// The repository the workflow runs in, and a fork of it.
 const REPOSITORY: &str = "nickderobertis/onepipeline-ui";
 const FORK: &str = "contributor/onepipeline-ui";
+
+/// The fixture change that leaves all three fixture advisories in the head.
+const THREE_ADVISORIES: Side = Side {
+    lock: "three-advisories",
+    version: "0.1.0",
+    deps: &[
+        ("fixture-lib", "2.1.0"),
+        ("fixture-vuln", "1.0.0"),
+        (LONG_NAME, "1.0.0"),
+    ],
+    unused: &[],
+};
 
 /// The fixture change that leaves both fixture advisories in the head.
 const VULNERABLE_LIB_2_1: Side = Side {
@@ -580,10 +808,32 @@ const VULNERABLE_LIB_2_1: Side = Side {
     unused: &[],
 };
 
-/// `just advisories-status` for a head living in `head_repo`, with a `gh` that
-/// records each argument on a line of its own and answers with `code`, as
-/// Actions runs it: in [`REPOSITORY`], with a step summary to write.
+/// The Actions run the status journeys post from.
+const RUN_ID: &str = "41436212603";
+const SERVER_URL: &str = "https://github.com";
+
+/// What Actions sets for `lint`'s step: the repository it runs in and the run
+/// a status links to.
+const ACTIONS: &[(&str, &str)] = &[
+    ("GITHUB_REPOSITORY", REPOSITORY),
+    ("GITHUB_RUN_ID", RUN_ID),
+    ("GITHUB_SERVER_URL", SERVER_URL),
+];
+
+/// `just advisories-status` for a head living in `head_repo`, as Actions runs
+/// it from [`ACTIONS`] and with a step summary to write.
 fn status(project: &Project, code: i32, head_repo: &str) -> (Run, String, String) {
+    status_in(project, code, head_repo, ACTIONS)
+}
+
+/// [`status`] under the Actions context `actions`, with a `gh` that records
+/// each argument on a line of its own and answers with `code`.
+fn status_in(
+    project: &Project,
+    code: i32,
+    head_repo: &str,
+    actions: &[(&str, &str)],
+) -> (Run, String, String) {
     let scratch = project.repo.parent().expect("the repository has a parent");
     let calls = scratch.join("gh-calls");
     let summary = scratch.join("step-summary");
@@ -597,16 +847,17 @@ fn status(project: &Project, code: i32, head_repo: &str) -> (Run, String, String
             calls.display()
         ),
     );
-    let run = just(
-        project,
-        &["advisories-status", HEAD_SHA, head_repo],
-        &[
-            ("PATH", path.as_os_str()),
-            ("GITHUB_ACTIONS", OsStr::new("true")),
-            ("GITHUB_REPOSITORY", OsStr::new(REPOSITORY)),
-            ("GITHUB_STEP_SUMMARY", summary.as_os_str()),
-        ],
+    let mut env: Vec<(&str, &OsStr)> = vec![
+        ("PATH", path.as_os_str()),
+        ("GITHUB_ACTIONS", OsStr::new("true")),
+        ("GITHUB_STEP_SUMMARY", summary.as_os_str()),
+    ];
+    env.extend(
+        actions
+            .iter()
+            .map(|(name, value)| (*name, OsStr::new(*value))),
     );
+    let run = just(project, &["advisories-status", HEAD_SHA, head_repo], &env);
     let read = |file: &Path| fs::read_to_string(file).unwrap_or_default();
     (run, read(&calls), read(&summary))
 }
@@ -625,6 +876,7 @@ fn the_status_is_posted_red_naming_every_advisory() {
         "state=failure",
         "context=advisories",
         &format!("description={VULN}, {LIB_2_1}"),
+        &format!("target_url={SERVER_URL}/{REPOSITORY}/actions/runs/{RUN_ID}"),
     ] {
         assert!(
             args.contains(&expected),
@@ -754,3 +1006,96 @@ fn a_head_repository_that_is_not_one_is_refused_before_anything_is_posted() {
         run.all()
     );
 }
+
+#[test]
+fn a_description_too_long_for_github_names_whole_advisories_and_how_many_more() {
+    let project = project(&VULNERABLE, &THREE_ADVISORIES);
+    let (run, calls, summary) = status(&project, 0, REPOSITORY);
+    assert_ne!(run.code, Some(0), "the status step passed:\n{}", run.all());
+    let description = calls
+        .lines()
+        .find_map(|arg| arg.strip_prefix("description="))
+        .unwrap_or_else(|| panic!("gh was asked for no description: {calls}"));
+    // All three would be 153 characters; GitHub refuses more than 140.
+    assert!(
+        format!("{VULN}, {LIB_2_1}, {LONG}").chars().count() > 140,
+        "the fixture no longer overflows a description"
+    );
+    assert_eq!(
+        description,
+        format!("{VULN}, {LIB_2_1}, and 1 more in the run's summary")
+    );
+    assert!(description.chars().count() <= 140);
+    for named in [VULN, LIB_2_1, LONG] {
+        assert!(
+            run.stdout.contains(&format!("advisory {named}")),
+            "the log omits {named}:\n{}",
+            run.all()
+        );
+    }
+    assert!(
+        summary.contains(&format!("RUSTSEC-2099-0003` {LONG_NAME} 1.0.0")),
+        "the step summary omits the advisory the description left out:\n{summary}"
+    );
+}
+
+#[test]
+fn a_status_without_its_actions_context_is_refused_before_anything_runs() {
+    let project = project(&VULNERABLE, &VULNERABLE);
+    let cases: &[(&[(&str, &str)], &str)] = &[
+        (&[], "status needs GITHUB_REPOSITORY"),
+        (
+            &[("GITHUB_REPOSITORY", "not a repository")],
+            "GITHUB_REPOSITORY 'not a repository' is not an owner/name repository",
+        ),
+        (
+            &[
+                ("GITHUB_REPOSITORY", REPOSITORY),
+                ("GITHUB_SERVER_URL", "http://github.com/x"),
+            ],
+            "GITHUB_SERVER_URL 'http://github.com/x' is not an https origin",
+        ),
+        (
+            &[
+                ("GITHUB_REPOSITORY", REPOSITORY),
+                ("GITHUB_RUN_ID", "1/../2"),
+            ],
+            "GITHUB_RUN_ID '1/../2' is not a run id",
+        ),
+    ];
+    for (actions, refusal) in cases {
+        let (run, calls, summary) = status_in(&project, 0, REPOSITORY, actions);
+        assert_eq!(
+            run.code,
+            Some(1),
+            "{actions:?} was not refused:\n{}",
+            run.all()
+        );
+        assert!(
+            run.stderr.contains(refusal) && run.stderr.contains("ACTION:"),
+            "{actions:?} did not say {refusal}:\n{}",
+            run.all()
+        );
+        assert!(calls.is_empty(), "gh was asked for: {calls}");
+        assert!(summary.is_empty(), "a summary was written: {summary}");
+        assert!(!run.stdout.contains("RUSTSEC-2099-0001"), "{}", run.all());
+    }
+}
+
+#[test]
+fn an_annotation_escapes_what_actions_would_read_as_its_own_syntax() {
+    // RUSTSEC-2099-0003's title carries a `%`, which Actions would read as the
+    // start of an escape: the annotation must carry it as `%25`.
+    let project = project(&VULNERABLE, &THREE_ADVISORIES);
+    let (run, _, _) = status(&project, 0, FORK);
+    let annotation = format!(
+        "::warning title=RUSTSEC-2099-0003 in {LONG_NAME} 1.0.0::\
+         Unbounded allocation: 100%25 of memory, in {LONG_NAME}\n"
+    );
+    assert!(
+        run.stdout.contains(&annotation),
+        "no escaped {annotation}:\n{}",
+        run.all()
+    );
+}
+// llmlint: ignore-end[e2e_not_mocked]
