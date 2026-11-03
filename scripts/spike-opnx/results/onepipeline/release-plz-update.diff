@@ -1,0 +1,43 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index fd853f2..57c231a 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
+ 
+ ## [Unreleased]
+ 
++## [0.99.0](https://github.com/nickderobertis/onepipeline/compare/v0.98.4...v0.99.0) - 2026-11-03
++
++### Added
++
++- *(deps)* [**breaking**] link the onetaskgraph release that lands section links on their headings ([#1385](https://github.com/nickderobertis/onepipeline/pull/1385))
++
+ ## [0.98.4](https://github.com/nickderobertis/onepipeline/compare/v0.98.3...v0.98.4) - 2026-11-03
+ 
+ ### Fixed
+diff --git a/Cargo.lock b/Cargo.lock
+index f48488f..92f5015 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1644,7 +1644,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "onepipeline"
+-version = "0.98.4"
++version = "0.99.0"
+ dependencies = [
+  "async-trait",
+  "clap",
+diff --git a/Cargo.toml b/Cargo.toml
+index 0fdf30e..637cd3f 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1352,7 +1352,7 @@ windows-sys = "0.61"
+ 
+ [package]
+ name = "onepipeline"
+-version = "0.98.4"
++version = "0.99.0"
+ edition = "2021"
+ rust-version.workspace = true
+ description = "Execute a task DAG over oneagentgraph and onevcs, merging their event streams into one."

@@ -1,0 +1,56 @@
+{
+  "label": "bad-token",
+  "task": "dag-model:test",
+  "sidecar": "start",
+  "store": "live",
+  "readiness": {
+    "live": 401,
+    "authed": 404,
+    "authedMs": 921
+  },
+  "pinnedCommit": "91839c24885842cac86567c30e23b37fb85f7e33",
+  "context": {
+    "os": "linux",
+    "cwd": "/home/whoop/.onevcs/workspaces/github.com-nickderobertis-onepipeline-ui-95f7516c419c/pool/3/worktree"
+  },
+  "nx": {
+    "exit": 1,
+    "ms": 1449,
+    "replayedFromRemote": false
+  },
+  "requests": [
+    {
+      "method": "GET",
+      "hash": "14448500774875392184",
+      "requestBytes": 0,
+      "responseBytes": 0,
+      "status": 401,
+      "ms": 7
+    }
+  ],
+  "replayed": [],
+  "written": [],
+  "store_listing": {
+    "requests": 1,
+    "entries": 44,
+    "bytes": 9732415444,
+    "nxEntries": 6,
+    "nxBytes": 3739,
+    "createdByThisRun": [],
+    "thisTask": [
+      {
+        "id": 9950318841,
+        "key": "nx-cache-14448500774875392184",
+        "ref": "refs/pull/603/merge",
+        "bytes": 685
+      },
+      {
+        "id": 9949892933,
+        "key": "nx-cache-14448500774875392184",
+        "ref": "refs/pull/602/merge",
+        "bytes": 692
+      }
+    ]
+  },
+  "sidecarLog": "/tmp/spike-opnx-sidecar-yJku13/sidecar.log"
+}

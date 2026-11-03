@@ -1,0 +1,45 @@
+{
+  "label": "linux no-token",
+  "task": "dag-model:test",
+  "sidecar": "start",
+  "store": "live",
+  "readiness": {
+    "live": 401,
+    "authed": 404,
+    "authedMs": 2
+  },
+  "pinnedCommit": "91839c24885842cac86567c30e23b37fb85f7e33",
+  "context": {
+    "os": "linux",
+    "event": "pull_request",
+    "ref": "refs/pull/602/merge",
+    "workspace": "/home/runner/work/onepipeline-ui/onepipeline-ui",
+    "cwd": "/home/runner/work/onepipeline-ui/onepipeline-ui"
+  },
+  "nx": {
+    "exit": 0,
+    "ms": 2368,
+    "replayedFromRemote": false
+  },
+  "requests": [
+    {
+      "method": "GET",
+      "hash": "14448500774875392184",
+      "requestBytes": 0,
+      "responseBytes": 0,
+      "status": 404,
+      "ms": 7
+    },
+    {
+      "method": "PUT",
+      "hash": "14448500774875392184",
+      "requestBytes": 446,
+      "responseBytes": 0,
+      "status": 403,
+      "ms": 2
+    }
+  ],
+  "replayed": [],
+  "written": [],
+  "sidecarLog": "/tmp/spike-opnx-sidecar-gOd6zq/sidecar.log"
+}

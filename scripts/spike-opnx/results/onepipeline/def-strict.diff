@@ -1,0 +1,126 @@
+diff --git a/.github/project.json b/.github/project.json
+index 8ca71b7..6445b7e 100644
+--- a/.github/project.json
++++ b/.github/project.json
+@@ -33,7 +33,10 @@
+         },
+         "{workspaceRoot}/npm/onepipeline-cli/package.json",
+         "{workspaceRoot}/tests/ci_workflows.rs",
+-        "sharedGlobals"
++        "sharedGlobals",
++        {
++          "runtime": "node scripts/nx-cargo-inputs.mjs --version"
++        }
+       ],
+       "outputs": [
+         "{projectRoot}/.telemetry/macos-policy.json"
+diff --git a/npm/project.json b/npm/project.json
+index 85adabb..c55c204 100644
+--- a/npm/project.json
++++ b/npm/project.json
+@@ -80,7 +80,10 @@
+         "{workspaceRoot}/pyproject.toml",
+         "sharedGlobals",
+         "{workspaceRoot}/scripts/build-staged-release.py",
+-        "{workspaceRoot}/release/release.py"
++        "{workspaceRoot}/release/release.py",
++        {
++          "runtime": "node scripts/nx-cargo-inputs.mjs --version"
++        }
+       ]
+     },
+     "test-launcher": {
+diff --git a/project.json b/project.json
+index 442d655..c6bfe8d 100644
+--- a/project.json
++++ b/project.json
+@@ -60,7 +60,10 @@
+     "test-rest": {
+       "command": "just _crate-test-rest",
+       "inputs": [
+-        "crateTestSource"
++        "crateTestSource",
++        {
++          "runtime": "node scripts/nx-cargo-inputs.mjs --version"
++        }
+       ],
+       "dependsOn": [
+         "test-archive"
+@@ -108,6 +111,9 @@
+         "crateTestSource",
+         {
+           "env": "ONEPIPELINE_TEST_PARTITION"
++        },
++        {
++          "runtime": "node scripts/nx-cargo-inputs.mjs --version"
+         }
+       ],
+       "dependsOn": [
+diff --git a/release/project.json b/release/project.json
+index 28da1a4..e5ccbe4 100644
+--- a/release/project.json
++++ b/release/project.json
+@@ -47,7 +47,10 @@
+         {
+           "runtime": "node scripts/nx-cargo-inputs.mjs"
+         },
+-        "sharedGlobals"
++        "sharedGlobals",
++        {
++          "runtime": "node scripts/nx-cargo-inputs.mjs --version"
++        }
+       ]
+     },
+     "check": {
+diff --git a/tests/contract/project.json b/tests/contract/project.json
+index 69412fc..39b2f73 100644
+--- a/tests/contract/project.json
++++ b/tests/contract/project.json
+@@ -35,7 +35,10 @@
+     "test": {
+       "command": "just _contract-test",
+       "inputs": [
+-        "contractSource"
++        "contractSource",
++        {
++          "runtime": "node scripts/nx-cargo-inputs.mjs --version"
++        }
+       ],
+       "dependsOn": [
+         {
+@@ -55,6 +58,9 @@
+         "contractSource",
+         {
+           "env": "ONEPIPELINE_TEST_PARTITION"
++        },
++        {
++          "runtime": "node scripts/nx-cargo-inputs.mjs --version"
+         }
+       ],
+       "dependsOn": [
+diff --git a/tests/e2e/project.json b/tests/e2e/project.json
+index c4d9c31..af47e76 100644
+--- a/tests/e2e/project.json
++++ b/tests/e2e/project.json
+@@ -35,7 +35,10 @@
+     "test": {
+       "command": "just _e2e-test",
+       "inputs": [
+-        "e2eSource"
++        "e2eSource",
++        {
++          "runtime": "node scripts/nx-cargo-inputs.mjs --version"
++        }
+       ],
+       "dependsOn": [
+         {
+@@ -61,6 +64,9 @@
+         "e2eSource",
+         {
+           "env": "ONEPIPELINE_TEST_PARTITION"
++        },
++        {
++          "runtime": "node scripts/nx-cargo-inputs.mjs --version"
+         }
+       ],
+       "dependsOn": [

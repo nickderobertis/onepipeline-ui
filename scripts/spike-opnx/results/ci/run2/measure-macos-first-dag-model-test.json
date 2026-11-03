@@ -1,0 +1,52 @@
+{
+  "label": "macos first dag-model:test",
+  "task": "dag-model:test",
+  "sidecar": "external",
+  "store": "live",
+  "readiness": {
+    "live": 401,
+    "authed": 404,
+    "authedMs": 103
+  },
+  "pinnedCommit": "91839c24885842cac86567c30e23b37fb85f7e33",
+  "context": {
+    "os": "darwin",
+    "event": "pull_request",
+    "ref": "refs/pull/602/merge",
+    "workspace": "/Users/runner/work/onepipeline-ui/onepipeline-ui",
+    "cwd": "/Users/runner/work/onepipeline-ui/onepipeline-ui"
+  },
+  "nx": {
+    "exit": 0,
+    "ms": 1525,
+    "replayedFromRemote": true
+  },
+  "requests": [
+    {
+      "method": "GET",
+      "hash": "14448500774875392184",
+      "requestBytes": 0,
+      "responseBytes": 446,
+      "status": 200,
+      "ms": 422
+    }
+  ],
+  "replayed": ["14448500774875392184"],
+  "written": [],
+  "store_listing": {
+    "requests": 1,
+    "entries": 40,
+    "bytes": 9732413066,
+    "nxEntries": 2,
+    "nxBytes": 1361,
+    "createdByThisRun": [],
+    "thisTask": [
+      {
+        "id": 9949892933,
+        "key": "nx-cache-14448500774875392184",
+        "ref": "refs/pull/602/merge",
+        "bytes": 692
+      }
+    ]
+  }
+}

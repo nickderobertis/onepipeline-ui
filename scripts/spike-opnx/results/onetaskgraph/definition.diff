@@ -1,0 +1,1238 @@
+diff --git a/.github/policy/project.json b/.github/policy/project.json
+index 7063255..ac4d89c 100644
+--- a/.github/policy/project.json
++++ b/.github/policy/project.json
+@@ -2,8 +2,11 @@
+   "$schema": "../../node_modules/nx/schemas/project-schema.json",
+   "name": "github-workflow-policy",
+   "projectType": "library",
+-  "tags": ["lang:javascript", "layer:workspace"],
+-  "//": "Nx gives a file to the project whose root holds it, so the workflow policy journeys and the macOS budgets live under this root: a crate or SDK edit selects github-workflows' CD journeys without them. tests/inventory.test.mjs reconciles both projects' commands, read sets, inventory and selection, here, where any .github edit selects it. llmlint: ignore-file[external_service_suite_stays_out_of_the_affected_tier] rust-cache-action's journey reads the pinned rust-cache revision's public source from GitHub anonymously — the read every workflow run that uses the action makes — with no credential and no write, so it is not a hosted service suite; it moved here unchanged from github-workflows' test target, which carries the same reasoned exception, and AGENTS.md keeps tests that reach something real inside the required check rather than in a tier a merge does not wait on. JSON has no comment to scope this to that one target.",
++  "tags": [
++    "lang:javascript",
++    "layer:workspace"
++  ],
++  "//": "Nx gives a file to the project whose root holds it, so the workflow policy journeys and the macOS budgets live under this root: a crate or SDK edit selects github-workflows' CD journeys without them. tests/inventory.test.mjs reconciles both projects' commands, read sets, inventory and selection, here, where any .github edit selects it. llmlint: ignore-file[external_service_suite_stays_out_of_the_affected_tier] rust-cache-action's journey reads the pinned rust-cache revision's public source from GitHub anonymously \u2014 the read every workflow run that uses the action makes \u2014 with no credential and no write, so it is not a hosted service suite; it moved here unchanged from github-workflows' test target, which carries the same reasoned exception, and AGENTS.md keeps tests that reach something real inside the required check rather than in a tier a merge does not wait on. JSON has no comment to scope this to that one target.",
+   "namedInputs": {
+     "default": [
+       "{projectRoot}/**/*",
+@@ -15,7 +18,6 @@
+       "{workspaceRoot}/screencomp.toml",
+       "{workspaceRoot}/scripts/product_versions.py",
+       "{workspaceRoot}/scripts/release_products.py",
+-      "{workspaceRoot}/bun.lock",
+       "{workspaceRoot}/rust-toolchain.toml",
+       "{workspaceRoot}/scripts/ci-job.sh",
+       "{workspaceRoot}/scripts/project.json",
+@@ -33,7 +35,8 @@
+       "{workspaceRoot}/scripts/check-release-tooling-selection.sh",
+       "{workspaceRoot}/scripts/check-real-release-preparation.sh",
+       "{workspaceRoot}/scripts/check-npm-publish.sh",
+-      "{workspaceRoot}/scripts/check-fixture-discrimination.sh"
++      "{workspaceRoot}/scripts/check-fixture-discrimination.sh",
++      "versionFree"
+     ],
+     "releaseTail": [
+       "{workspaceRoot}/.github/workflows/release.yml",
+@@ -43,18 +46,25 @@
+       "{workspaceRoot}/.github/package.json",
+       "{workspaceRoot}/.github/bun.lock",
+       "{workspaceRoot}/budgets.yaml",
+-      "{workspaceRoot}/package.json",
+-      "{workspaceRoot}/scripts/actions-budget-figures.sh"
++      "{workspaceRoot}/scripts/actions-budget-figures.sh",
++      "versionFree"
+     ]
+   },
+   "targets": {
+     "bootstrap": {
+       "executor": "nx:noop",
+-      "dependsOn": ["github-workflows:bootstrap"]
++      "dependsOn": [
++        "github-workflows:bootstrap"
++      ]
+     },
+     "check": {
+       "executor": "nx:noop",
+-      "dependsOn": ["format-check", "lint", "coverage", "budgets"]
++      "dependsOn": [
++        "format-check",
++        "lint",
++        "coverage",
++        "budgets"
++      ]
+     },
+     "format-check": {
+       "executor": "nx:run-commands",
+@@ -70,21 +80,31 @@
+     },
+     "policy-tests": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["bootstrap"],
++      "dependsOn": [
++        "bootstrap"
++      ],
+       "options": {
+         "command": "node --test .github/policy/tests/boundaries.test.mjs .github/policy/tests/inventory.test.mjs .github/policy/tests/policy-routing.test.mjs .github/policy/tests/policy.test.mjs .github/policy/tests/release-shortcut.test.mjs .github/policy/tests/reusable.test.mjs .github/policy/tests/rust-cache-warm.test.mjs"
+       },
+       "cache": false,
+-      "outputs": ["{workspaceRoot}/.github/.telemetry/macos-policy.json"]
++      "outputs": [
++        "{workspaceRoot}/.github/.telemetry/macos-policy.json"
++      ]
+     },
+     "test": {
+       "executor": "nx:noop",
+-      "dependsOn": ["policy-tests", "rust-cache-action", "release-tail"],
++      "dependsOn": [
++        "policy-tests",
++        "rust-cache-action",
++        "release-tail"
++      ],
+       "cache": false
+     },
+     "budgets": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["test"],
++      "dependsOn": [
++        "test"
++      ],
+       "options": {
+         "command": "bun run onebudgetspec check .github/policy/budgets.yaml"
+       },
+@@ -96,7 +116,9 @@
+     },
+     "rust-cache-action": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["bootstrap"],
++      "dependsOn": [
++        "bootstrap"
++      ],
+       "options": {
+         "command": "node --test .github/policy/tests/rust-cache.test.mjs"
+       },
+@@ -105,11 +127,15 @@
+     },
+     "release-tail": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["bootstrap"],
++      "dependsOn": [
++        "bootstrap"
++      ],
+       "options": {
+         "command": "node --test .github/policy/tests/release-tail.test.mjs"
+       },
+-      "inputs": ["releaseTail"],
++      "inputs": [
++        "releaseTail"
++      ],
+       "cache": true,
+       "//": "publish's release tail: its install step and its last step run as release.yml writes them over GitHub answers recorded from this repository (tests/fixtures/release-tail/). Here, in the project no crate or SDK edit selects, and a target of its own keyed on its reads alone, because it installs onevcs and onebudgetspec from npm."
+     }
+diff --git a/.github/project.json b/.github/project.json
+index c2ebe3e..5ae02d2 100644
+--- a/.github/project.json
++++ b/.github/project.json
+@@ -2,7 +2,10 @@
+   "$schema": "../node_modules/nx/schemas/project-schema.json",
+   "name": "github-workflows",
+   "projectType": "library",
+-  "tags": ["lang:javascript", "layer:workspace"],
++  "tags": [
++    "lang:javascript",
++    "layer:workspace"
++  ],
+   "namedInputs": {
+     "default": [
+       "{projectRoot}/**/*",
+@@ -21,7 +24,6 @@
+     "cdJourneys": [
+       "default",
+       "{workspaceRoot}/config/github-interfaces.toml",
+-      "{workspaceRoot}/pyproject.toml",
+       "{workspaceRoot}/release-plz.toml",
+       "{workspaceRoot}/npm/**/*",
+       "{workspaceRoot}/scripts/release_cd.py",
+@@ -43,26 +45,35 @@
+       "{workspaceRoot}/scripts/set-version.sh",
+       "{workspaceRoot}/scripts/scratch-clone.sh",
+       "{workspaceRoot}/justfile",
+-      "{workspaceRoot}/Cargo.toml",
+-      "{workspaceRoot}/Cargo.lock",
+       "{workspaceRoot}/rust-toolchain.toml",
+       "{workspaceRoot}/.cargo/**/*",
+       "{workspaceRoot}/crates/**/*",
+       "{workspaceRoot}/sdks/**/*",
+       "{workspaceRoot}/README.md",
+       "{workspaceRoot}/LICENSE",
+-      "{workspaceRoot}/uv.lock",
+-      "{workspaceRoot}/bun.lock",
+-      "{workspaceRoot}/package.json"
++      "!{workspaceRoot}/Cargo.toml",
++      "!{workspaceRoot}/Cargo.lock",
++      "!{workspaceRoot}/package.json",
++      "!{workspaceRoot}/bun.lock",
++      "!{workspaceRoot}/pyproject.toml",
++      "!{workspaceRoot}/uv.lock",
++      "!{workspaceRoot}/crates/*/Cargo.toml",
++      "!{workspaceRoot}/crates/*/CHANGELOG.md",
++      "!{workspaceRoot}/npm/cli/package.json",
++      "!{workspaceRoot}/npm/platforms/*/package.json",
++      "!{workspaceRoot}/sdks/python/pyproject.toml",
++      "!{workspaceRoot}/sdks/typescript/package.json",
++      "!{workspaceRoot}/sdks/python/src/onetaskgraph_sdk/__init__.py",
++      "!{workspaceRoot}/sdks/typescript/src/index.ts",
++      "versionFree"
+     ],
+     "budgetJourneys": [
+       "workflowGraph",
+       "{workspaceRoot}/budgets.yaml",
+       "{workspaceRoot}/justfile",
+-      "{workspaceRoot}/package.json",
+-      "{workspaceRoot}/bun.lock",
+       "{workspaceRoot}/scripts/gate-time.sh",
+-      "{workspaceRoot}/scripts/gate-time-budget.mjs"
++      "{workspaceRoot}/scripts/gate-time-budget.mjs",
++      "versionFree"
+     ]
+   },
+   "targets": {
+@@ -74,7 +85,12 @@
+     },
+     "check": {
+       "executor": "nx:noop",
+-      "dependsOn": ["format-check", "lint", "typecheck", "coverage"]
++      "dependsOn": [
++        "format-check",
++        "lint",
++        "typecheck",
++        "coverage"
++      ]
+     },
+     "format": {
+       "executor": "nx:run-commands",
+@@ -92,7 +108,9 @@
+     "lint": {
+       "executor": "nx:run-commands",
+       "options": {
+-        "commands": ["bun run biome lint --error-on-warnings .github"],
++        "commands": [
++          "bun run biome lint --error-on-warnings .github"
++        ],
+         "parallel": false
+       }
+     },
+@@ -104,37 +122,54 @@
+     },
+     "ci-jobs": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["bootstrap"],
++      "dependsOn": [
++        "bootstrap"
++      ],
+       "options": {
+         "command": "node --test .github/tests/ci-jobs.spec.mjs"
+       },
+-      "inputs": ["default"],
++      "inputs": [
++        "default"
++      ],
+       "cache": true,
+       "//": "The pull request's four jobs, their keyed caches and the Rust cache warmer, read from the workflow files alone: keyed on this directory alone, it imports nothing that reads outside it, which the spec itself refuses. Whether the required checks are still reported needs the run graph, which reads files outside it, and is ci-contexts'."
+     },
+     "ci-contexts": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["bootstrap"],
++      "dependsOn": [
++        "bootstrap"
++      ],
+       "options": {
+         "command": "node --test .github/tests/ci-contexts.spec.mjs"
+       },
+-      "inputs": ["workflowGraph"],
++      "inputs": [
++        "workflowGraph"
++      ],
+       "cache": true,
+       "//": "The required contexts use the workflow graph read set. This spec also reconciles this project's own journey targets with their external reads; the test-file inventory across both projects is policy/tests/inventory.test.mjs's."
+     },
+     "budget-journeys": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["bootstrap"],
++      "dependsOn": [
++        "bootstrap"
++      ],
+       "options": {
+         "command": "node --test .github/tests/ci-events.test.mjs .github/tests/gate-time.test.mjs"
+       },
+-      "inputs": ["budgetJourneys"],
++      "inputs": [
++        "budgetJourneys"
++      ],
+       "cache": true,
+       "//": "Which jobs and workflows run on a pull request and on the release commit, and the timing wrapper `just gate` runs its body inside, over the real onebudgetspec. Keyed on the workflow graph's read set and every outside file they read; ci-events also reads this repository's immutable git history."
+     },
+     "test": {
+       "executor": "nx:noop",
+-      "dependsOn": ["ci-jobs", "ci-contexts", "budget-journeys", "cd-journeys"],
++      "dependsOn": [
++        "ci-jobs",
++        "ci-contexts",
++        "budget-journeys",
++        "cd-journeys"
++      ],
+       "cache": false
+     },
+     "coverage": {
+@@ -143,12 +178,17 @@
+     },
+     "cd-journeys": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["bootstrap"],
++      "dependsOn": [
++        "bootstrap"
++      ],
+       "options": {
+         "command": "node --test .github/tests/github-interfaces.test.mjs .github/tests/release-cd.test.mjs .github/tests/release-plz.test.mjs .github/tests/release.test.mjs"
+       },
+       "cache": false,
+-      "inputs": ["workflowGraph", "cdJourneys"]
++      "inputs": [
++        "workflowGraph",
++        "cdJourneys"
++      ]
+     }
+   },
+   "//": "llmlint: ignore-file[projects_stay_in_one_js_workspace,external_service_suite_stays_out_of_the_affected_tier] The task requires this private workflow-tooling project and lockfile to stay isolated from public SDK dependency resolution; its bootstrap installs only YAML, Actions expressions and budget reporting in .github. Its cdJourneys input names the release plumbing the CD journeys under tests/ drive \u2014 scripts/release_cd.py and every script and manifest a CD job runs (including the justfile the real release recipes read, plus the crates and SDK sources the release builds and packages) \u2014 so a change to how a release is produced selects them, while graph-only checks retain their narrower workflow inputs. linear-documents-policy/ and policy/ (github-workflow-policy) are projects of their own, excluded here. The CD journeys' crate publication reads index.crates.io and static.crates.io without a credential \u2014 the public reads every cargo build in the affected tier already makes for its dependencies \u2014 through the double's index proxy and cargo's own verification build; they write only to loopback doubles, and dropping cargo's verification build to avoid them would stop proving each crate builds with its siblings resolved from a registry. JSON has no comment to scope this to the test target."
+diff --git a/crates/onetaskgraph-e2e/project.json b/crates/onetaskgraph-e2e/project.json
+index 13d7deb..dfdb671 100644
+--- a/crates/onetaskgraph-e2e/project.json
++++ b/crates/onetaskgraph-e2e/project.json
+@@ -2,7 +2,11 @@
+   "$schema": "../../node_modules/nx/schemas/project-schema.json",
+   "name": "onetaskgraph-e2e",
+   "projectType": "application",
+-  "tags": ["lang:rust", "layer:e2e", "test-in-coverage:crate"],
++  "tags": [
++    "lang:rust",
++    "layer:e2e",
++    "test-in-coverage:crate"
++  ],
+   "//": "A test-only member holding only tests/, which spawn the binary onetaskgraph:build made: the engine's and the command line's own journeys. Its implicitDependencies are its Cargo dependencies and the crates the binary it drives links, so any change the engine or the binary can see selects it; the binary itself is named in its `default` named input, since a package with only binaries cannot be a Cargo dependency. scripts/check-nx-graph.sh reconciles both against the Cargo graph.",
+   "implicitDependencies": [
+     "onetaskgraph-core",
+@@ -13,7 +17,27 @@
+     "onetaskgraph-status-options"
+   ],
+   "namedInputs": {
+-    "default": ["{projectRoot}/**/*", "sharedGlobals", "{workspaceRoot}/crates/onetaskgraph/**/*"]
++    "default": [
++      "{projectRoot}/**/*",
++      "sharedGlobals",
++      "{workspaceRoot}/crates/onetaskgraph/**/*",
++      "!{workspaceRoot}/Cargo.toml",
++      "!{workspaceRoot}/Cargo.lock",
++      "!{workspaceRoot}/package.json",
++      "!{workspaceRoot}/bun.lock",
++      "!{workspaceRoot}/pyproject.toml",
++      "!{workspaceRoot}/uv.lock",
++      "!{workspaceRoot}/crates/*/Cargo.toml",
++      "!{workspaceRoot}/crates/*/CHANGELOG.md",
++      "!{workspaceRoot}/npm/cli/package.json",
++      "!{workspaceRoot}/npm/platforms/*/package.json",
++      "!{workspaceRoot}/sdks/python/pyproject.toml",
++      "!{workspaceRoot}/sdks/typescript/package.json",
++      "!{workspaceRoot}/sdks/python/src/onetaskgraph_sdk/__init__.py",
++      "!{workspaceRoot}/sdks/typescript/src/index.ts",
++      "!{projectRoot}/Cargo.toml",
++      "!{projectRoot}/CHANGELOG.md"
++    ]
+   },
+   "targets": {
+     "bootstrap": {
+@@ -57,16 +81,23 @@
+       "options": {
+         "command": "cargo test --quiet -p onetaskgraph-e2e --all-features --locked"
+       },
+-      "dependsOn": ["onetaskgraph:build"],
++      "dependsOn": [
++        "onetaskgraph:build"
++      ],
+       "//": "Spawns target/debug/onetaskgraph, which onetaskgraph:build alone produces and this target depends on; it never builds the onetaskgraph package itself, so it cannot relink the file another spawner is running. scripts/check-workspace-config.sh holds the arrangement."
+     },
+     "coverage": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["workspace:coverage-clear", "onetaskgraph:coverage"],
++      "dependsOn": [
++        "workspace:coverage-clear",
++        "onetaskgraph:coverage"
++      ],
+       "options": {
+         "command": "bash scripts/rust-coverage.sh onetaskgraph-e2e"
+       },
+-      "outputs": ["{workspaceRoot}/target/llvm-cov-target/*.profraw"],
++      "outputs": [
++        "{workspaceRoot}/target/llvm-cov-target/*.profraw"
++      ],
+       "cache": false,
+       "//": "Uncached: cargo-llvm-cov names every raw profile after the workspace, not the crate, so a cache hit would restore a sibling's stale profiles beside its own. It depends on onetaskgraph:coverage because that run is what builds the instrumented binary into target/llvm-cov-target, where these journeys find it, so its lines are attributed to the union workspace:coverage holds to the floor; this run never builds the onetaskgraph package, so it cannot relink that file while it runs."
+     }
+diff --git a/crates/onetaskgraph-github-projects-e2e/project.json b/crates/onetaskgraph-github-projects-e2e/project.json
+index 48b0eeb..7b40ccc 100644
+--- a/crates/onetaskgraph-github-projects-e2e/project.json
++++ b/crates/onetaskgraph-github-projects-e2e/project.json
+@@ -2,7 +2,10 @@
+   "$schema": "../../node_modules/nx/schemas/project-schema.json",
+   "name": "onetaskgraph-github-projects-e2e",
+   "projectType": "application",
+-  "tags": ["lang:rust", "layer:e2e"],
++  "tags": [
++    "lang:rust",
++    "layer:e2e"
++  ],
+   "//": "A test-only member holding only tests/, which spawn the binary onetaskgraph:build made. Its implicitDependencies are the plugin crate it exercises, so a change to that plugin selects it and a change to a sibling plugin does not; the binary, the engine and the shared harness it also exercises are named in its own `default` named input instead, which Nx treats as touching this project when they change without the graph edge that would make every plugin's change select it through them. scripts/check-nx-graph.sh reconciles both halves against the Cargo graph, and scripts/check-affected-selection.sh proves the selection against real Nx.",
+   "implicitDependencies": [
+     "onetaskgraph-github-projects",
+@@ -18,7 +21,23 @@
+       "{workspaceRoot}/crates/onetaskgraph-core/**/*",
+       "{workspaceRoot}/crates/onetaskgraph-e2e-support/**/*",
+       "{workspaceRoot}/crates/onetaskgraph-in-memory/**/*",
+-      "{workspaceRoot}/crates/onetaskgraph-local-md/**/*"
++      "{workspaceRoot}/crates/onetaskgraph-local-md/**/*",
++      "!{workspaceRoot}/Cargo.toml",
++      "!{workspaceRoot}/Cargo.lock",
++      "!{workspaceRoot}/package.json",
++      "!{workspaceRoot}/bun.lock",
++      "!{workspaceRoot}/pyproject.toml",
++      "!{workspaceRoot}/uv.lock",
++      "!{workspaceRoot}/crates/*/Cargo.toml",
++      "!{workspaceRoot}/crates/*/CHANGELOG.md",
++      "!{workspaceRoot}/npm/cli/package.json",
++      "!{workspaceRoot}/npm/platforms/*/package.json",
++      "!{workspaceRoot}/sdks/python/pyproject.toml",
++      "!{workspaceRoot}/sdks/typescript/package.json",
++      "!{workspaceRoot}/sdks/python/src/onetaskgraph_sdk/__init__.py",
++      "!{workspaceRoot}/sdks/typescript/src/index.ts",
++      "!{projectRoot}/Cargo.toml",
++      "!{projectRoot}/CHANGELOG.md"
+     ]
+   },
+   "targets": {
+@@ -32,7 +51,14 @@
+     "check": {
+       "executor": "nx:noop",
+       "//": "llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] AGENTS.md requires hosted live journeys to be ordinary required tests selected by their plugin diff: an advisory lane let an invalid GitHub query merge. This node explicitly owes a credential-and-nomination-gated live asset copy under Session::open, so the domain check must include its ordinary test target.",
+-      "dependsOn": ["format-check", "lint", "typecheck", "test", "coverage", "budgets"],
++      "dependsOn": [
++        "format-check",
++        "lint",
++        "typecheck",
++        "test",
++        "coverage",
++        "budgets"
++      ],
+       "// end": "llmlint: ignore-end[external_service_suite_stays_out_of_the_affected_tier]"
+     },
+     "format": {
+@@ -69,7 +95,9 @@
+       },
+       "// end": "llmlint: ignore-end[external_service_suite_stays_out_of_the_affected_tier]",
+       "// live order": "The main and asset credentialed journeys contribute to one session, main before assets. That order is the asset journey's own: it makes no request until the main entry point's record is complete (tests/live.rs, wait_for_current_main), so this suite's loopback binaries run beside the plugin's main session rather than after its whole test target. `budgets` still depends on both tests, so whenever this suite is selected the main session runs in the same invocation. Its `--also-build` builds the plugin's own test binaries first, which live_pair runs.",
+-      "dependsOn": ["onetaskgraph:build"],
++      "dependsOn": [
++        "onetaskgraph:build"
++      ],
+       "//": "Spawns target/debug/onetaskgraph, which onetaskgraph:build alone produces and this target depends on; it never builds the onetaskgraph package itself, so it cannot relink the file another spawner is running. scripts/check-workspace-config.sh holds the arrangement.",
+       "outputs": [
+         "{workspaceRoot}/target/debug/telemetry/onetaskgraph-github-projects-e2e",
+@@ -106,7 +134,9 @@
+           "env": "GITHUB_LIVE_SOURCE_REVISION"
+         },
+         "{workspaceRoot}/scripts/live-crate-test.sh",
+-        { "env": "ONETASKGRAPH_TESTS_UNDER_COVERAGE" }
++        {
++          "env": "ONETASKGRAPH_TESTS_UNDER_COVERAGE"
++        }
+       ]
+     },
+     "coverage": {
+@@ -120,7 +150,9 @@
+       "options": {
+         "command": "bash scripts/rust-coverage.sh onetaskgraph-github-projects-e2e"
+       },
+-      "outputs": ["{workspaceRoot}/target/llvm-cov-target/*.profraw"],
++      "outputs": [
++        "{workspaceRoot}/target/llvm-cov-target/*.profraw"
++      ],
+       "cache": false,
+       "//": "Uncached: cargo-llvm-cov names every raw profile after the workspace, not the crate, so a cache hit would restore a sibling's stale profiles beside its own. It depends on onetaskgraph:coverage because that run is what builds the instrumented binary into target/llvm-cov-target, where these journeys find it, so its lines are attributed to the union workspace:coverage holds to the floor; this run never builds the onetaskgraph package, so it cannot relink that file while it runs.",
+       "// union end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]"
+@@ -128,7 +160,10 @@
+     "budgets": {
+       "executor": "nx:run-commands",
+       "// live dependency": "llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] This task requires report-only whole-session pricing after both domain tests; the explicit main dependency joins the same Nx task once and prevents reporting before both current records exist.",
+-      "dependsOn": ["test", "onetaskgraph-github-projects:test"],
++      "dependsOn": [
++        "test",
++        "onetaskgraph-github-projects:test"
++      ],
+       "// live dependency end": "llmlint: ignore-end[external_service_suite_stays_out_of_the_affected_tier]",
+       "options": {
+         "command": "python3 crates/onetaskgraph-github-projects-e2e/lane_runner.py budgets"
+@@ -163,7 +198,9 @@
+     },
+     "budgets-host": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["test"],
++      "dependsOn": [
++        "test"
++      ],
+       "options": {
+         "command": "bun run onebudgetspec check crates/onetaskgraph-github-projects-e2e/budgets.yaml --label host"
+       },
+diff --git a/crates/onetaskgraph-linear-e2e/project.json b/crates/onetaskgraph-linear-e2e/project.json
+index 67cea0d..b2d9192 100644
+--- a/crates/onetaskgraph-linear-e2e/project.json
++++ b/crates/onetaskgraph-linear-e2e/project.json
+@@ -2,9 +2,16 @@
+   "$schema": "../../node_modules/nx/schemas/project-schema.json",
+   "name": "onetaskgraph-linear-e2e",
+   "projectType": "application",
+-  "tags": ["lang:rust", "layer:e2e"],
++  "tags": [
++    "lang:rust",
++    "layer:e2e"
++  ],
+   "//": "A test-only member holding only tests/, which spawn the binary onetaskgraph:build made. Its implicitDependencies are the plugin crate it exercises, so a change to that plugin selects it and a change to a sibling plugin does not; the binary, the engine and the shared harness it also exercises are named in its own `default` named input instead, which Nx treats as touching this project when they change without the graph edge that would make every plugin's change select it through them. scripts/check-nx-graph.sh reconciles both halves against the Cargo graph, and scripts/check-affected-selection.sh proves the selection against real Nx.",
+-  "implicitDependencies": ["onetaskgraph-linear", "onetaskgraph-plugin-api", "onetaskgraph-live"],
++  "implicitDependencies": [
++    "onetaskgraph-linear",
++    "onetaskgraph-plugin-api",
++    "onetaskgraph-live"
++  ],
+   "namedInputs": {
+     "default": [
+       "{projectRoot}/**/*",
+@@ -12,7 +19,23 @@
+       "{workspaceRoot}/crates/onetaskgraph/**/*",
+       "{workspaceRoot}/crates/onetaskgraph-core/**/*",
+       "{workspaceRoot}/crates/onetaskgraph-e2e-support/**/*",
+-      "{workspaceRoot}/crates/onetaskgraph-local-md/**/*"
++      "{workspaceRoot}/crates/onetaskgraph-local-md/**/*",
++      "!{workspaceRoot}/Cargo.toml",
++      "!{workspaceRoot}/Cargo.lock",
++      "!{workspaceRoot}/package.json",
++      "!{workspaceRoot}/bun.lock",
++      "!{workspaceRoot}/pyproject.toml",
++      "!{workspaceRoot}/uv.lock",
++      "!{workspaceRoot}/crates/*/Cargo.toml",
++      "!{workspaceRoot}/crates/*/CHANGELOG.md",
++      "!{workspaceRoot}/npm/cli/package.json",
++      "!{workspaceRoot}/npm/platforms/*/package.json",
++      "!{workspaceRoot}/sdks/python/pyproject.toml",
++      "!{workspaceRoot}/sdks/typescript/package.json",
++      "!{workspaceRoot}/sdks/python/src/onetaskgraph_sdk/__init__.py",
++      "!{workspaceRoot}/sdks/typescript/src/index.ts",
++      "!{projectRoot}/Cargo.toml",
++      "!{projectRoot}/CHANGELOG.md"
+     ]
+   },
+   "targets": {
+@@ -25,7 +48,14 @@
+     },
+     "check": {
+       "executor": "nx:noop",
+-      "dependsOn": ["format-check", "lint", "typecheck", "test", "coverage", "budgets"]
++      "dependsOn": [
++        "format-check",
++        "lint",
++        "typecheck",
++        "test",
++        "coverage",
++        "budgets"
++      ]
+     },
+     "format": {
+       "executor": "nx:run-commands",
+@@ -61,25 +91,45 @@
+       },
+       "// end": "llmlint: ignore-end[external_service_suite_stays_out_of_the_affected_tier]",
+       "// linear": "llmlint: ignore[external_service_suite_stays_out_of_the_affected_tier,expensive_tests_stay_behind_their_own_edge] `budgets` reads the plugin's ordinary-pass journal, which onetaskgraph-linear:test alone writes, and test-linux judges `budgets` without task dependencies after running `test` for affected projects only; so the producer runs wherever this suite does. The plugin's target is `parallelism: false`, so the two seat-holders still run in turn. As a task dependency it runs even for a project the live-lane decision excludes.",
+-      "dependsOn": ["onetaskgraph:build", "onetaskgraph-linear:test"],
++      "dependsOn": [
++        "onetaskgraph:build",
++        "onetaskgraph-linear:test"
++      ],
+       "//": "These credential inputs prevent an uncredentialed cache hit from replacing that required run. Spawns target/debug/onetaskgraph, which onetaskgraph:build alone produces and this target depends on; it never builds the onetaskgraph package itself, so it cannot relink the file another spawner is running. scripts/check-workspace-config.sh holds the arrangement. Its output is the telemetry the budget journeys record, which `budgets` reads, so a cache hit restores it.",
+       "inputs": [
+         "default",
+         "^default",
+-        { "env": "ONETASKGRAPH_LINEAR_DOCUMENT_MODE" },
+-        { "env": "GITHUB_ACTIONS" },
+-        { "env": "LINEAR_API_KEY" },
+-        { "env": "LINEAR_WRITE_TEAM" },
+-        { "env": "ONETASKGRAPH_LIVE_REQUIRED" },
++        {
++          "env": "ONETASKGRAPH_LINEAR_DOCUMENT_MODE"
++        },
++        {
++          "env": "GITHUB_ACTIONS"
++        },
++        {
++          "env": "LINEAR_API_KEY"
++        },
++        {
++          "env": "LINEAR_WRITE_TEAM"
++        },
++        {
++          "env": "ONETASKGRAPH_LIVE_REQUIRED"
++        },
+         "{workspaceRoot}/scripts/live-crate-test.sh",
+-        { "env": "ONETASKGRAPH_TESTS_UNDER_COVERAGE" }
++        {
++          "env": "ONETASKGRAPH_TESTS_UNDER_COVERAGE"
++        }
+       ],
+-      "outputs": ["{workspaceRoot}/target/debug/telemetry/onetaskgraph-linear-e2e"]
++      "outputs": [
++        "{workspaceRoot}/target/debug/telemetry/onetaskgraph-linear-e2e"
++      ]
+     },
+     "budgets": {
+       "executor": "nx:run-commands",
+       "//": "llmlint: ignore[external_service_suite_stays_out_of_the_affected_tier,expensive_tests_stay_behind_their_own_edge] Both lane tests produce the HTTP journals this report consumes, including when only the consumer changes; both are required prerequisites within the Linear budget edge. On its own line, this directive covers exactly the dependsOn line below it, the one biome lets it share no line with.",
+-      "dependsOn": ["test", "onetaskgraph-linear:test"],
++      "dependsOn": [
++        "test",
++        "onetaskgraph-linear:test"
++      ],
+       "options": {
+         "command": "bun run onebudgetspec check crates/onetaskgraph-linear-e2e/budgets.yaml"
+       },
+@@ -87,8 +137,12 @@
+       "inputs": [
+         "default",
+         "^default",
+-        { "dependentTasksOutputFiles": "**/telemetry/onetaskgraph-linear-e2e/*.json" },
+-        { "dependentTasksOutputFiles": "**/telemetry/onetaskgraph-linear/*.json" }
++        {
++          "dependentTasksOutputFiles": "**/telemetry/onetaskgraph-linear-e2e/*.json"
++        },
++        {
++          "dependentTasksOutputFiles": "**/telemetry/onetaskgraph-linear/*.json"
++        }
+       ]
+     },
+     "live-documents": {
+@@ -99,15 +153,22 @@
+         "command": "cargo test --locked -p onetaskgraph-linear-e2e --test e2e -- linear_assets::live_disposable_issue_and_document_assets_copy_and_recopy --exact --nocapture"
+       },
+       "//": "Explicit daily creation and initialization only: this target is outside the affected check fan-out and must reach the service on every invocation.",
+-      "dependsOn": ["onetaskgraph:build"]
++      "dependsOn": [
++        "onetaskgraph:build"
++      ]
+     },
+     "coverage": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["workspace:coverage-clear", "onetaskgraph:coverage"],
++      "dependsOn": [
++        "workspace:coverage-clear",
++        "onetaskgraph:coverage"
++      ],
+       "options": {
+         "command": "bash scripts/rust-coverage.sh onetaskgraph-linear-e2e"
+       },
+-      "outputs": ["{workspaceRoot}/target/llvm-cov-target/*.profraw"],
++      "outputs": [
++        "{workspaceRoot}/target/llvm-cov-target/*.profraw"
++      ],
+       "cache": false,
+       "//": "Uncached: cargo-llvm-cov names every raw profile after the workspace, not the crate, so a cache hit would restore a sibling's stale profiles beside its own. It depends on onetaskgraph:coverage because that run is what builds the instrumented binary into target/llvm-cov-target, where these journeys find it, so its lines are attributed to the union workspace:coverage holds to the floor; this run never builds the onetaskgraph package, so it cannot relink that file while it runs."
+     }
+diff --git a/crates/onetaskgraph-status-options-e2e/project.json b/crates/onetaskgraph-status-options-e2e/project.json
+index 88dbda1..3d8bd85 100644
+--- a/crates/onetaskgraph-status-options-e2e/project.json
++++ b/crates/onetaskgraph-status-options-e2e/project.json
+@@ -2,9 +2,15 @@
+   "$schema": "../../node_modules/nx/schemas/project-schema.json",
+   "name": "onetaskgraph-status-options-e2e",
+   "projectType": "application",
+-  "tags": ["lang:rust", "layer:e2e", "test-in-coverage:crate"],
++  "tags": [
++    "lang:rust",
++    "layer:e2e",
++    "test-in-coverage:crate"
++  ],
+   "//": "A test-only member holding only tests/, which spawn the binary onetaskgraph:build made. Its implicitDependencies are the plugin crate it exercises, so a change to that plugin selects it and a change to a sibling plugin does not; the binary, the engine and the shared harness it also exercises are named in its own `default` named input instead, which Nx treats as touching this project when they change without the graph edge that would make every plugin's change select it through them. scripts/check-nx-graph.sh reconciles both halves against the Cargo graph, and scripts/check-affected-selection.sh proves the selection against real Nx.",
+-  "implicitDependencies": ["onetaskgraph-status-options"],
++  "implicitDependencies": [
++    "onetaskgraph-status-options"
++  ],
+   "namedInputs": {
+     "default": [
+       "{projectRoot}/**/*",
+@@ -12,7 +18,23 @@
+       "{workspaceRoot}/crates/onetaskgraph/**/*",
+       "{workspaceRoot}/crates/onetaskgraph-core/**/*",
+       "{workspaceRoot}/crates/onetaskgraph-e2e-support/**/*",
+-      "{workspaceRoot}/crates/onetaskgraph-in-memory/**/*"
++      "{workspaceRoot}/crates/onetaskgraph-in-memory/**/*",
++      "!{workspaceRoot}/Cargo.toml",
++      "!{workspaceRoot}/Cargo.lock",
++      "!{workspaceRoot}/package.json",
++      "!{workspaceRoot}/bun.lock",
++      "!{workspaceRoot}/pyproject.toml",
++      "!{workspaceRoot}/uv.lock",
++      "!{workspaceRoot}/crates/*/Cargo.toml",
++      "!{workspaceRoot}/crates/*/CHANGELOG.md",
++      "!{workspaceRoot}/npm/cli/package.json",
++      "!{workspaceRoot}/npm/platforms/*/package.json",
++      "!{workspaceRoot}/sdks/python/pyproject.toml",
++      "!{workspaceRoot}/sdks/typescript/package.json",
++      "!{workspaceRoot}/sdks/python/src/onetaskgraph_sdk/__init__.py",
++      "!{workspaceRoot}/sdks/typescript/src/index.ts",
++      "!{projectRoot}/Cargo.toml",
++      "!{projectRoot}/CHANGELOG.md"
+     ]
+   },
+   "targets": {
+@@ -57,16 +79,23 @@
+       "options": {
+         "command": "cargo test --quiet -p onetaskgraph-status-options-e2e --all-features --locked"
+       },
+-      "dependsOn": ["onetaskgraph:build"],
++      "dependsOn": [
++        "onetaskgraph:build"
++      ],
+       "//": "Spawns target/debug/onetaskgraph, which onetaskgraph:build alone produces and this target depends on; it never builds the onetaskgraph package itself, so it cannot relink the file another spawner is running. scripts/check-workspace-config.sh holds the arrangement."
+     },
+     "coverage": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["workspace:coverage-clear", "onetaskgraph:coverage"],
++      "dependsOn": [
++        "workspace:coverage-clear",
++        "onetaskgraph:coverage"
++      ],
+       "options": {
+         "command": "bash scripts/rust-coverage.sh onetaskgraph-status-options-e2e"
+       },
+-      "outputs": ["{workspaceRoot}/target/llvm-cov-target/*.profraw"],
++      "outputs": [
++        "{workspaceRoot}/target/llvm-cov-target/*.profraw"
++      ],
+       "cache": false,
+       "//": "Uncached: cargo-llvm-cov names every raw profile after the workspace, not the crate, so a cache hit would restore a sibling's stale profiles beside its own. It depends on onetaskgraph:coverage because that run is what builds the instrumented binary into target/llvm-cov-target, where these journeys find it, so its lines are attributed to the union workspace:coverage holds to the floor; this run never builds the onetaskgraph package, so it cannot relink that file while it runs."
+     }
+diff --git a/nx.json b/nx.json
+index 93f8133..6fe7da8 100644
+--- a/nx.json
++++ b/nx.json
+@@ -2,31 +2,81 @@
+   "$schema": "./node_modules/nx/schemas/nx-schema.json",
+   "defaultBase": "origin/main",
+   "namedInputs": {
+-    "default": ["{projectRoot}/**/*", "sharedGlobals"],
++    "default": [
++      "{projectRoot}/**/*",
++      "!{projectRoot}/Cargo.toml",
++      "!{projectRoot}/CHANGELOG.md",
++      "sharedGlobals"
++    ],
+     "sharedGlobals": [
+-      "{workspaceRoot}/Cargo.toml",
+-      "{workspaceRoot}/Cargo.lock",
+       "{workspaceRoot}/rust-toolchain.toml",
+       "{workspaceRoot}/.cargo/config.toml",
+       "{workspaceRoot}/clippy.toml",
+       "{workspaceRoot}/rustfmt.toml",
+       "{workspaceRoot}/deny.toml",
+       "{workspaceRoot}/biome.json",
+-      "{workspaceRoot}/package.json",
+-      "{workspaceRoot}/bun.lock"
++      "versionFree"
++    ],
++    "versionFree": [
++      {
++        "runtime": "node scripts/version-free-inputs.mjs"
++      }
+     ]
+   },
+   "targetDefaults": {
+     "check": {
+-      "dependsOn": ["format-check", "lint", "typecheck", "test", "coverage"],
++      "dependsOn": [
++        "format-check",
++        "lint",
++        "typecheck",
++        "test",
++        "coverage"
++      ],
+       "cache": false
+     },
+-    "format-check": { "inputs": ["default"], "cache": true },
+-    "lint": { "inputs": ["default", "^default"], "cache": true },
+-    "typecheck": { "inputs": ["default", "^default"], "cache": true },
+-    "test": { "inputs": ["default", "^default"], "cache": true },
+-    "coverage": { "inputs": ["default", "^default"], "cache": true },
+-    "test-uncovered": { "inputs": ["default", "^default"], "cache": true },
+-    "bootstrap": { "cache": false }
++    "format-check": {
++      "inputs": [
++        "default"
++      ],
++      "cache": true
++    },
++    "lint": {
++      "inputs": [
++        "default",
++        "^default"
++      ],
++      "cache": true
++    },
++    "typecheck": {
++      "inputs": [
++        "default",
++        "^default"
++      ],
++      "cache": true
++    },
++    "test": {
++      "inputs": [
++        "default",
++        "^default"
++      ],
++      "cache": true
++    },
++    "coverage": {
++      "inputs": [
++        "default",
++        "^default"
++      ],
++      "cache": true
++    },
++    "test-uncovered": {
++      "inputs": [
++        "default",
++        "^default"
++      ],
++      "cache": true
++    },
++    "bootstrap": {
++      "cache": false
++    }
+   }
+ }
+diff --git a/scripts/version-free-inputs.mjs b/scripts/version-free-inputs.mjs
+new file mode 100644
+index 0000000..c69acf4
+--- /dev/null
++++ b/scripts/version-free-inputs.mjs
+@@ -0,0 +1,90 @@
++#!/usr/bin/env node
++// Spike (ci-release-test-cache / spike-opnx-audit), onetaskgraph: an Nx `runtime` input that
++// stands in for every file release-plz + scripts/set-version.sh rewrite, with only the
++// workspace's own release version masked. Prints one line per file, `<path> <sha256>` of the
++// file with each occurrence of the workspace version V (root Cargo.toml [workspace.package]
++// version) replaced by `<V>` -- but only in the contexts that carry the workspace's own version:
++//   * a manifest's own `version = "V"` / `"version": "V"` line,
++//   * a sibling pin naming one of this workspace's packages (onetaskgraph*, @onetaskgraph/*),
++//   * Cargo.lock / uv.lock package blocks with no registry source (the workspace's own members),
++//   * the SDKs' `__version__ = "V"` and `export const VERSION = "V";`.
++// A version that disagrees with V stays literal, so a half-applied bump still moves the hash,
++// and the shape of V (digits replaced by N) is printed, so a change of format moves it too.
++// Pure node, no shell: runs the same under bash, Git Bash and pwsh on Linux, macOS and Windows.
++import { createHash } from "node:crypto";
++import { existsSync, readFileSync, readdirSync } from "node:fs";
++import { join } from "node:path";
++
++const root = process.cwd();
++const read = (p) => readFileSync(join(root, p), "utf8").replaceAll("\r\n", "\n");
++const workspaceManifest = read("Cargo.toml");
++const section = workspaceManifest.split(/^\[workspace\.package\]$/m)[1] ?? "";
++const V = (section.match(/^version = "([^"]+)"$/m) ?? [])[1];
++if (!V) {
++  console.error("version-free-inputs: no [workspace.package] version in Cargo.toml");
++  process.exit(1);
++}
++const esc = V.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
++const sub = (line) => line.replaceAll(V, "<V>");
++
++const lineRules = [
++  new RegExp(`^\\s*version\\s*=\\s*"${esc}"\\s*$`),               // TOML own version
++  new RegExp(`^\\s*"version"\\s*:\\s*"${esc}",?\\s*$`),           // JSON own version
++  new RegExp(`^\\s*onetaskgraph[\\w-]*\\s*=.*"=?${esc}"`),         // Cargo sibling pin
++  new RegExp(`^\\s*"@onetaskgraph/[\\w-]+"\\s*:\\s*"${esc}",?\\s*$`), // npm sibling pin
++  new RegExp(`"onetaskgraph[\\w-]*==${esc}"`),                    // PEP 508 sibling pin
++  new RegExp(`^__version__ = "${esc}"$`),
++  new RegExp(`^export const VERSION = "${esc}";$`),
++];
++
++function normalizeLines(text) {
++  return text
++    .split("\n")
++    .map((line) => (lineRules.some((r) => r.test(line)) ? sub(line) : line))
++    .join("\n");
++}
++
++// Lockfiles: a [[package]] block is the workspace's own when it names no registry source.
++function normalizeLock(text, own) {
++  return text
++    .split(/(?=^\[\[package\]\]$)/m)
++    .map((block) => {
++      if (!block.startsWith("[[package]]") || !own(block)) return block;
++      return block.replace(new RegExp(`^version = "${esc}"$`, "m"), 'version = "<V>"');
++    })
++    .join("");
++}
++const cargoOwn = (b) => !/^source = /m.test(b);
++const uvOwn = (b) => /^source = \{ (editable|virtual) = /m.test(b);
++
++const files = ["Cargo.toml", "Cargo.lock", "package.json", "bun.lock", "pyproject.toml", "uv.lock"];
++for (const dir of ["crates", "npm/platforms"]) {
++  for (const entry of readdirSync(join(root, dir)).sort()) {
++    for (const name of ["Cargo.toml", "package.json"]) {
++      const p = `${dir}/${entry}/${name}`;
++      if (existsSync(join(root, p))) files.push(p);
++    }
++  }
++}
++files.push(
++  "npm/cli/package.json",
++  "sdks/python/pyproject.toml",
++  "sdks/typescript/package.json",
++  "sdks/python/src/onetaskgraph_sdk/__init__.py",
++  "sdks/typescript/src/index.ts",
++);
++
++const out = [`version-shape ${V.replace(/\d+/g, "N")}`];
++for (const p of files) {
++  if (!existsSync(join(root, p))) {
++    out.push(`${p} absent`);
++    continue;
++  }
++  const text = read(p);
++  const normal =
++    p === "Cargo.lock" ? normalizeLock(text, cargoOwn)
++    : p === "uv.lock" ? normalizeLock(text, uvOwn)
++    : normalizeLines(text);
++  out.push(`${p} ${createHash("sha256").update(normal).digest("hex")}`);
++}
++process.stdout.write(`${out.join("\n")}\n`);
+diff --git a/sdks/python/project.json b/sdks/python/project.json
+index 0c83123..ae42834 100644
+--- a/sdks/python/project.json
++++ b/sdks/python/project.json
+@@ -2,8 +2,14 @@
+   "$schema": "../../node_modules/nx/schemas/project-schema.json",
+   "name": "sdk-python",
+   "projectType": "library",
+-  "tags": ["lang:python", "layer:sdk", "test-in-coverage:sdk"],
+-  "implicitDependencies": ["onetaskgraph"],
++  "tags": [
++    "lang:python",
++    "layer:sdk",
++    "test-in-coverage:sdk"
++  ],
++  "implicitDependencies": [
++    "onetaskgraph"
++  ],
+   "targets": {
+     "bootstrap": {
+       "executor": "nx:run-commands",
+@@ -14,7 +20,13 @@
+     },
+     "check": {
+       "executor": "nx:noop",
+-      "dependsOn": ["format-check", "lint", "typecheck", "test", "coverage"]
++      "dependsOn": [
++        "format-check",
++        "lint",
++        "typecheck",
++        "test",
++        "coverage"
++      ]
+     },
+     "format": {
+       "executor": "nx:run-commands",
+@@ -41,7 +53,9 @@
+     },
+     "generate-check": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["onetaskgraph:build"],
++      "dependsOn": [
++        "onetaskgraph:build"
++      ],
+       "options": {
+         "command": "uv run --frozen python generate.py --check",
+         "cwd": "sdks/python"
+@@ -57,9 +71,14 @@
+     },
+     "test": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["onetaskgraph:build"],
++      "dependsOn": [
++        "onetaskgraph:build"
++      ],
+       "options": {
+-        "commands": ["uv run --frozen pytest -q --no-cov", "bash check-sync.sh"],
++        "commands": [
++          "uv run --frozen pytest -q --no-cov",
++          "bash check-sync.sh"
++        ],
+         "parallel": false,
+         "cwd": "sdks/python"
+       },
+@@ -68,7 +87,9 @@
+         "default",
+         "^default",
+         {
+-          "externalDependencies": ["@onebudgetspec/cli"]
++          "externalDependencies": [
++            "@onebudgetspec/cli"
++          ]
+         }
+       ]
+     },
+@@ -83,7 +104,9 @@
+     },
+     "coverage": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["onetaskgraph:build"],
++      "dependsOn": [
++        "onetaskgraph:build"
++      ],
+       "options": {
+         "command": "uv run --frozen pytest -q",
+         "cwd": "sdks/python"
+@@ -93,7 +116,9 @@
+         "default",
+         "^default",
+         {
+-          "externalDependencies": ["@onebudgetspec/cli"]
++          "externalDependencies": [
++            "@onebudgetspec/cli"
++          ]
+         }
+       ]
+     },
+@@ -106,10 +131,22 @@
+       "inputs": [
+         "default",
+         {
+-          "externalDependencies": ["@onebudgetspec/cli"]
++          "externalDependencies": [
++            "@onebudgetspec/cli"
++          ]
+         }
+       ],
+       "//": "CPU time varies with host load, so an over host-variable reading warns here. Other host budgets and measurement errors fail; direct onebudgetspec checks remain strict."
+     }
++  },
++  "namedInputs": {
++    "default": [
++      "{projectRoot}/**/*",
++      "sharedGlobals",
++      "!{projectRoot}/Cargo.toml",
++      "!{projectRoot}/CHANGELOG.md",
++      "!{projectRoot}/pyproject.toml",
++      "!{projectRoot}/src/onetaskgraph_sdk/__init__.py"
++    ]
+   }
+ }
+diff --git a/sdks/typescript/project.json b/sdks/typescript/project.json
+index 4d23743..e973f2c 100644
+--- a/sdks/typescript/project.json
++++ b/sdks/typescript/project.json
+@@ -2,9 +2,15 @@
+   "$schema": "../../node_modules/nx/schemas/project-schema.json",
+   "name": "sdk-typescript",
+   "projectType": "library",
+-  "tags": ["lang:typescript", "layer:sdk", "test-in-coverage:sdk"],
++  "tags": [
++    "lang:typescript",
++    "layer:sdk",
++    "test-in-coverage:sdk"
++  ],
+   "//": "The generator executes the binary and consumes its emitted schema and command surface.",
+-  "implicitDependencies": ["onetaskgraph"],
++  "implicitDependencies": [
++    "onetaskgraph"
++  ],
+   "targets": {
+     "bootstrap": {
+       "executor": "nx:run-commands",
+@@ -28,7 +34,9 @@
+     },
+     "generate-check": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["onetaskgraph:build"],
++      "dependsOn": [
++        "onetaskgraph:build"
++      ],
+       "options": {
+         "command": "bun run --cwd sdks/typescript generate:check"
+       },
+@@ -36,7 +44,9 @@
+     },
+     "build": {
+       "executor": "nx:run-commands",
+-      "options": { "command": "bun run --cwd sdks/typescript build" }
++      "options": {
++        "command": "bun run --cwd sdks/typescript build"
++      }
+     },
+     "format": {
+       "executor": "nx:run-commands",
+@@ -66,7 +76,9 @@
+     },
+     "test": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["generate-check"],
++      "dependsOn": [
++        "generate-check"
++      ],
+       "options": {
+         "command": "bun scripts/test.ts",
+         "cwd": "sdks/typescript"
+@@ -74,7 +86,9 @@
+     },
+     "coverage": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["generate-check"],
++      "dependsOn": [
++        "generate-check"
++      ],
+       "options": {
+         "command": "bun scripts/test.ts --coverage --coverage-threshold=0.95",
+         "cwd": "sdks/typescript"
+@@ -82,8 +96,23 @@
+     },
+     "pack": {
+       "executor": "nx:run-commands",
+-      "dependsOn": ["build", "generate-check"],
+-      "options": { "command": "bash sdks/typescript/scripts/test-packed.sh" }
++      "dependsOn": [
++        "build",
++        "generate-check"
++      ],
++      "options": {
++        "command": "bash sdks/typescript/scripts/test-packed.sh"
++      }
+     }
++  },
++  "namedInputs": {
++    "default": [
++      "{projectRoot}/**/*",
++      "sharedGlobals",
++      "!{projectRoot}/Cargo.toml",
++      "!{projectRoot}/CHANGELOG.md",
++      "!{projectRoot}/package.json",
++      "!{projectRoot}/src/index.ts"
++    ]
+   }
+ }
+diff --git a/workspace/project.json b/workspace/project.json
+index 1a12129..5cea71c 100644
+--- a/workspace/project.json
++++ b/workspace/project.json
+@@ -2,7 +2,9 @@
+   "$schema": "../node_modules/nx/schemas/project-schema.json",
+   "name": "workspace",
+   "projectType": "library",
+-  "tags": ["layer:workspace"],
++  "tags": [
++    "layer:workspace"
++  ],
+   "//": "Depends on every other project so the cross-cutting checks run whenever anything they check can change. Without these edges a crate-only change would skip the graph check that keeps affected selection honest. llmlint: ignore-file[expensive_tests_stay_behind_their_own_edge,external_service_suite_stays_out_of_the_affected_tier] JSON has no comment to scope these to the `test` and `coverage` targets below, which are what they are about. The clone-based checks under `test` are cross-cutting by construction: what each drives \u2014 the git hooks, the gate's provisioning, the Nx graph itself, the plugin-isolation rule \u2014 is owned by no product project, so there is no narrower project to put them behind, and the edges above are exactly what makes them run when anything they check changes. `coverage` depends on every crate's coverage target, the two hosted plugins' included, because the 95% line floor is enforced once over the union of every crate's instrumented run; a coverage run cannot reach either service, because scripts/rust-coverage.sh clears GH_PROJECTS_TOKEN, LINEAR_API_KEY and ONETASKGRAPH_LIVE_REQUIRED before the run, so those suites skip their live journeys under it \u2014 scripts/check-live-lane.sh holds that clearing.",
+   "implicitDependencies": [
+     "onetaskgraph",
+@@ -54,12 +56,26 @@
+       "inputs": [
+         "{workspaceRoot}/biome.json",
+         "{workspaceRoot}/nx.json",
+-        "{workspaceRoot}/package.json",
+         "{workspaceRoot}/.claude/**/*.json",
+         "{workspaceRoot}/workspace/**/*.json",
+         "{workspaceRoot}/crates/*/project.json",
+         "{workspaceRoot}/sdks/*/project.json",
+-        "{workspaceRoot}/sdks/*/*.json"
++        "{workspaceRoot}/sdks/*/*.json",
++        "!{workspaceRoot}/Cargo.toml",
++        "!{workspaceRoot}/Cargo.lock",
++        "!{workspaceRoot}/package.json",
++        "!{workspaceRoot}/bun.lock",
++        "!{workspaceRoot}/pyproject.toml",
++        "!{workspaceRoot}/uv.lock",
++        "!{workspaceRoot}/crates/*/Cargo.toml",
++        "!{workspaceRoot}/crates/*/CHANGELOG.md",
++        "!{workspaceRoot}/npm/cli/package.json",
++        "!{workspaceRoot}/npm/platforms/*/package.json",
++        "!{workspaceRoot}/sdks/python/pyproject.toml",
++        "!{workspaceRoot}/sdks/typescript/package.json",
++        "!{workspaceRoot}/sdks/python/src/onetaskgraph_sdk/__init__.py",
++        "!{workspaceRoot}/sdks/typescript/src/index.ts",
++        "versionFree"
+       ]
+     },
+     "lint": {
+@@ -86,11 +102,8 @@
+       "inputs": [
+         "{workspaceRoot}/biome.json",
+         "{workspaceRoot}/nx.json",
+-        "{workspaceRoot}/package.json",
+         "{workspaceRoot}/.claude/**/*.json",
+         "{workspaceRoot}/workspace/**/*.json",
+-        "{workspaceRoot}/Cargo.toml",
+-        "{workspaceRoot}/Cargo.lock",
+         "{workspaceRoot}/crates/*/Cargo.toml",
+         "{workspaceRoot}/crates/*/project.json",
+         "{workspaceRoot}/crates/*/src/**/*.rs",
+@@ -124,7 +137,22 @@
+         "{workspaceRoot}/crates/onetaskgraph-github-projects/src/lib.rs",
+         "{workspaceRoot}/scripts/check-design-prefix-spelling.sh",
+         "{workspaceRoot}/scripts/check-capability-verdicts.sh",
+-        "{workspaceRoot}/scripts/check-copy-pagination-guards.sh"
++        "{workspaceRoot}/scripts/check-copy-pagination-guards.sh",
++        "!{workspaceRoot}/Cargo.toml",
++        "!{workspaceRoot}/Cargo.lock",
++        "!{workspaceRoot}/package.json",
++        "!{workspaceRoot}/bun.lock",
++        "!{workspaceRoot}/pyproject.toml",
++        "!{workspaceRoot}/uv.lock",
++        "!{workspaceRoot}/crates/*/Cargo.toml",
++        "!{workspaceRoot}/crates/*/CHANGELOG.md",
++        "!{workspaceRoot}/npm/cli/package.json",
++        "!{workspaceRoot}/npm/platforms/*/package.json",
++        "!{workspaceRoot}/sdks/python/pyproject.toml",
++        "!{workspaceRoot}/sdks/typescript/package.json",
++        "!{workspaceRoot}/sdks/python/src/onetaskgraph_sdk/__init__.py",
++        "!{workspaceRoot}/sdks/typescript/src/index.ts",
++        "versionFree"
+       ]
+     },
+     "typecheck": {
+@@ -150,7 +178,22 @@
+         "{workspaceRoot}/scripts/**/*.ts",
+         "{workspaceRoot}/scripts/**/*.sh",
+         "{workspaceRoot}/scripts/**/*.js",
+-        "{workspaceRoot}/scripts/**/*.mjs"
++        "{workspaceRoot}/scripts/**/*.mjs",
++        "!{workspaceRoot}/Cargo.toml",
++        "!{workspaceRoot}/Cargo.lock",
++        "!{workspaceRoot}/package.json",
++        "!{workspaceRoot}/bun.lock",
++        "!{workspaceRoot}/pyproject.toml",
++        "!{workspaceRoot}/uv.lock",
++        "!{workspaceRoot}/crates/*/Cargo.toml",
++        "!{workspaceRoot}/crates/*/CHANGELOG.md",
++        "!{workspaceRoot}/npm/cli/package.json",
++        "!{workspaceRoot}/npm/platforms/*/package.json",
++        "!{workspaceRoot}/sdks/python/pyproject.toml",
++        "!{workspaceRoot}/sdks/typescript/package.json",
++        "!{workspaceRoot}/sdks/python/src/onetaskgraph_sdk/__init__.py",
++        "!{workspaceRoot}/sdks/typescript/src/index.ts",
++        "versionFree"
+       ],
+       "//": "The SDK and script sources are inputs because check-workspace-config.sh scans them for the files that resolve target/debug/onetaskgraph and for a cargo invocation inside one; without them a spawner added to a test would not re-run this check."
+     },

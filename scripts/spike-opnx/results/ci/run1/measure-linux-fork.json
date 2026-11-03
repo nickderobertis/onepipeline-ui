@@ -1,0 +1,55 @@
+{
+  "label": "linux fork-read-only",
+  "task": "timeline-categories:test",
+  "sidecar": "start",
+  "store": "live",
+  "readiness": {
+    "live": 401,
+    "authed": 404,
+    "authedMs": 10017
+  },
+  "pinnedCommit": "91839c24885842cac86567c30e23b37fb85f7e33",
+  "context": {
+    "os": "linux",
+    "event": "pull_request",
+    "ref": "refs/pull/602/merge",
+    "workspace": "/home/runner/work/onepipeline-ui/onepipeline-ui",
+    "cwd": "/home/runner/work/onepipeline-ui/onepipeline-ui",
+    "readOnly": "fork"
+  },
+  "nx": {
+    "exit": 0,
+    "ms": 12002,
+    "replayedFromRemote": false
+  },
+  "requests": [
+    {
+      "method": "GET",
+      "hash": "7371721558486388342",
+      "requestBytes": 0,
+      "responseBytes": 0,
+      "status": 404,
+      "ms": 10015
+    },
+    {
+      "method": "PUT",
+      "hash": "7371721558486388342",
+      "requestBytes": 383,
+      "responseBytes": 0,
+      "status": 403,
+      "ms": 1
+    }
+  ],
+  "replayed": [],
+  "written": [],
+  "store_listing": {
+    "requests": 1,
+    "entries": 39,
+    "bytes": 9732412397,
+    "nxEntries": 1,
+    "nxBytes": 692,
+    "createdByThisRun": [],
+    "thisTask": []
+  },
+  "sidecarLog": "/tmp/spike-opnx-sidecar-262I3l/sidecar.log"
+}
