@@ -1,0 +1,83 @@
+{
+  "label": "put-500",
+  "task": "dag-model:test",
+  "sidecar": "start",
+  "store": "full",
+  "readiness": {
+    "live": 401,
+    "authed": 404,
+    "authedMs": 29
+  },
+  "pinnedCommit": "91839c24885842cac86567c30e23b37fb85f7e33",
+  "context": {
+    "os": "linux",
+    "cwd": "/home/whoop/.onevcs/workspaces/github.com-nickderobertis-onepipeline-ui-95f7516c419c/pool/3/worktree"
+  },
+  "nx": {
+    "exit": 1,
+    "ms": 10614,
+    "replayedFromRemote": false
+  },
+  "requests": [
+    {
+      "method": "GET",
+      "hash": "14448500774875392184",
+      "requestBytes": 0,
+      "responseBytes": 0,
+      "status": 404,
+      "ms": 16
+    },
+    {
+      "method": "PUT",
+      "hash": "14448500774875392184",
+      "requestBytes": 380,
+      "responseBytes": 0,
+      "status": 500,
+      "ms": 16
+    },
+    {
+      "method": "PUT",
+      "hash": "14448500774875392184",
+      "requestBytes": 380,
+      "responseBytes": 0,
+      "status": 500,
+      "ms": 9
+    },
+    {
+      "method": "PUT",
+      "hash": "14448500774875392184",
+      "requestBytes": 380,
+      "responseBytes": 0,
+      "status": 500,
+      "ms": 10
+    },
+    {
+      "method": "PUT",
+      "hash": "14448500774875392184",
+      "requestBytes": 380,
+      "responseBytes": 0,
+      "status": 500,
+      "ms": 11
+    },
+    {
+      "method": "PUT",
+      "hash": "14448500774875392184",
+      "requestBytes": 380,
+      "responseBytes": 0,
+      "status": 500,
+      "ms": 10
+    },
+    {
+      "method": "PUT",
+      "hash": "14448500774875392184",
+      "requestBytes": 380,
+      "responseBytes": 0,
+      "status": 500,
+      "ms": 9
+    }
+  ],
+  "replayed": [],
+  "written": [],
+  "storeCalls": ["GetCacheEntryDownloadURL", "GetCacheEntryDownloadURL"],
+  "sidecarLog": "/tmp/spike-opnx-sidecar-cMYVws/sidecar.log"
+}
