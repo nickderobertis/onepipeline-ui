@@ -2,7 +2,7 @@
 use onetaskgraph_core::{
     CopyConditions, CopyItems, CopyRequest, CopyScope, GlobalId, StatusPolicy,
 };
-use std::fs;
+use std::{fs, path::Path};
 
 #[tokio::test]
 async fn a_copied_project_document_keeps_its_budget_fragment_at_the_destination() {
@@ -110,7 +110,31 @@ async fn a_copied_project_document_keeps_its_budget_fragment_at_the_destination(
     let onetaskgraph_plugin_api::Location::Path(location) = location else {
         panic!("a local Markdown task has a file location");
     };
-    assert!(content.contains(&format!("{location}#budgets")));
+    let relative = format!(
+        "../{}",
+        Path::new(location)
+            .canonicalize()
+            .expect("the copied task exists")
+            .strip_prefix(destination.canonicalize().expect("the destination exists"))
+            .expect("the copied task is under the destination")
+            .to_string_lossy()
+            .replace('\\', "/")
+    );
+    assert!(content.contains(&format!("[Budget]({relative}#budgets)")));
+    let Some(onetaskgraph_plugin_api::Location::Path(document_location)) =
+        &document.items[0].item.location
+    else {
+        panic!("a local Markdown document has a file location");
+    };
+    assert_eq!(
+        Path::new(document_location)
+            .parent()
+            .expect("the copied document's directory")
+            .join(&relative)
+            .canonicalize()
+            .expect("the link reaches a file"),
+        Path::new(location).canonicalize().expect("the copied task")
+    );
     assert!(!content.contains(source_location));
     assert!(
         engine

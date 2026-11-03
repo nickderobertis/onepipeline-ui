@@ -174,9 +174,9 @@ onemessagebus = "0.9.1"
 # it cannot notice, because both sides' rustdoc still spells the path
 # `onepipeline::Error` while the type behind it changed identity, so
 # `scripts/semver-check.sh` refuses a release that moved this line while the
-# commits release-plz versions from announce no break. At `=0.98.4` this crate's
-# surface follows onepipeline 0.98's: `error::ApiError::from_engine` takes that
-# release's `onepipeline::Error`, which 0.97's is not.
+# commits release-plz versions from announce no break. At `=0.99.0` this crate's
+# surface follows onepipeline 0.99's: `error::ApiError::from_engine` takes that
+# release's `onepipeline::Error`, which 0.98's is not.
 #
 # The engine pin also fixes the linked plan-store, onevcs, oneagentgraph and
 # onejudge families. A host holds its engine and this reader to one linked
@@ -185,7 +185,7 @@ onemessagebus = "0.9.1"
 # The test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.98.4"
+onepipeline = "=0.99.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -222,7 +222,7 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right. Exact, at the
-# release the linked engine's lock resolves (0.98.4 requires ^0.57.4); earlier
+# release the linked engine's lock resolves (0.99.0 requires ^0.57.4); earlier
 # moves are in docs/engine-dependency-history.md.
 onevcs = "=0.57.4"
 # The same library the crate links above, with the schema bundle it publishes
@@ -248,9 +248,9 @@ predicates = "3"
 # journey in `tests/plan_linear_create.rs` that copies a plan into a loopback
 # Linear: the stand-in answers exactly the documents the linked plugin sends,
 # by the plugin's own constants rather than a second spelling of them.
-onetaskgraph-core = { version = "=0.13.2", features = ["linear"] }
-onetaskgraph-linear = "=0.13.2"
-onetaskgraph-plugin-api = "=0.13.2"
+onetaskgraph-core = { version = "=0.13.3", features = ["linear"] }
+onetaskgraph-linear = "=0.13.3"
+onetaskgraph-plugin-api = "=0.13.3"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # engine-driven journey over a panel-judged member reads the provider block it was
