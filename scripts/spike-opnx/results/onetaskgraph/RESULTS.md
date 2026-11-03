@@ -192,7 +192,7 @@ Full table (raw: `main.json`, `orig-release.json`, `diff-main-release.txt`, `exp
 
 ## 3. A sound input definition, recomputed
 
-Implemented only in the scratch copy `def/` (`definition.diff`: `nx.json` + 9 `project.json` + the new `scripts/version-free-inputs.mjs`), by `tools/apply-definition.py`:
+Implemented only in the scratch copy `def/` (`definition.diff.gz`: `nx.json` + 9 `project.json` + the new `scripts/version-free-inputs.mjs`), by `tools/apply-definition.py`:
 
 1. **`versionFree` runtime input**: `{ "runtime": "node scripts/version-free-inputs.mjs" }`, a pure-node script (no shell; runs the same from bash, Git Bash and pwsh, and CRLF is normalised although `.gitattributes` forces LF). It prints `version-shape N.N.N` and one `<path> <sha256>` line per version-bearing file: the root `Cargo.toml`, `Cargo.lock`, `package.json`, `bun.lock`, `pyproject.toml` and `uv.lock`, every `crates/*/Cargo.toml`, the npm manifests, both SDK manifests and the two SDK version source files. Each digest is taken after masking the workspace version V (read from `[workspace.package]`), but **only** in these places:
    - the manifest's own `version` line;
@@ -431,4 +431,4 @@ The `CARGO_PKG_VERSION` case is different: it is compiled in, so keeping the cra
 
 ## Raw records in this directory
 
-`main.json`, `main-recapture.json`, `orig-release.json`, `pre-v0.13.3.json`, `orig-{source,dep-cargo,dep-npm}.json`, `def-{main,release,source,dep-cargo,dep-npm,halfbump,prerelease}.json`, `def-pre-v0.13.3.json`; diffs `diff-*.txt`; `explain-*.tsv`; edit diffs `release-edits.diff`, `real-release-v0.13.3.diff`, `definition.diff`, `variant-*.diff`; `digest-main.txt` (the runtime input's output on main); `sel/`, `projects/`, `ci/` (job logs, job JSON, task times), `timing/`.
+`main.json`, `main-recapture.json`, `orig-release.json`, `pre-v0.13.3.json`, `orig-{source,dep-cargo,dep-npm}.json`, `def-{main,release,source,dep-cargo,dep-npm,halfbump,prerelease}.json`, `def-pre-v0.13.3.json`; diffs `diff-*.txt`; `explain-*.tsv`; edit diffs `release-edits.diff`, `real-release-v0.13.3.diff`, `definition.diff.gz`, `variant-*.diff`; `digest-main.txt` (the runtime input's output on main); `sel/`, `projects/`, `ci/` (job logs, job JSON, task times), `timing/`.

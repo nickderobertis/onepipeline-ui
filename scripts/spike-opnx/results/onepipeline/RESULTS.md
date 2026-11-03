@@ -29,7 +29,7 @@ Plan `ci-release-test-cache`, spike `spike-opnx-audit`. Every path below is rela
 | `diff-main-release.txt`, `diff-main-only-*.txt` | `task-hashes.mjs diff` output |
 | `release-plz-update.diff` | the exact edits `release-plz update` made |
 | `table-main-release.md` | section 2's table |
-| `def-blind.diff`, `def-strict.diff` | the input definitions (diff against main, and strict against blind) |
+| `def-blind.diff.gz`, `def-strict.diff` | the input definitions (diff against main, and strict against blind) |
 | `tools/nx-cargo-inputs.mjs` | the runtime-input script the definitions use |
 | `states-{current,blind,strict}/` | captures for base / release / own-source / dependency states under each definition |
 | `matrix-{current,blind,strict}.md`, `summary-{current,blind,strict}.txt` | per-task tables and summaries of those states |
@@ -220,7 +220,7 @@ The only release-edit lines that reach cached tasks are the `version` of `[packa
 
 `sharedGlobals` (`nx.json`, `package.json`, `package-lock.json`, `justfile`) is untouched by the release edits.
 
-### The definition ("version-blind", branch `def`, `def-blind.diff`)
+### The definition ("version-blind", branch `def`, `def-blind.diff.gz`)
 
 1. `scripts/nx-cargo-inputs.mjs` (`tools/nx-cargo-inputs.mjs`): prints a SHA-256 over Cargo.toml without the
    `version` key of its `[package]` table and Cargo.lock without the `version` line of every `[[package]]`
