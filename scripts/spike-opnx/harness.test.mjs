@@ -10,7 +10,13 @@
 // the report cites, not here.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -76,6 +82,40 @@ test("task-hashes names the input that moved, and refuses records that do not co
       "dag-model:lint": { hash: "1", nodes: {} },
     },
   };
+  writeFileSync(join(scratch, "moved.json"), JSON.stringify(moved));
+  const renamed = {
+    ...base,
+    tasks: {
+      "dag-model:test": {
+        hash: `${task.hash}2`,
+        nodes: {
+          ...Object.fromEntries(
+            Object.entries(task.nodes).filter(([key]) => key !== node),
+          ),
+          "runtime:node -p process.platform": "linux",
+        },
+      },
+    },
+  };
+  writeFileSync(join(scratch, "renamed.json"), JSON.stringify(renamed));
+  const nodesMoved = run("task-hashes.mjs", [
+    "diff",
+    join(scratch, "a.json"),
+    join(scratch, "renamed.json"),
+  ]);
+  assert.equal(nodesMoved.status, 0, nodesMoved.stderr);
+  assert.ok(
+    nodesMoved.stdout.includes(node) &&
+      nodesMoved.stdout.includes("runtime:node -p process.platform"),
+    "an input that disappeared and one that appeared are both named",
+  );
+  const removed = run("task-hashes.mjs", [
+    "diff",
+    join(scratch, "moved.json"),
+    join(scratch, "a.json"),
+  ]);
+  assert.equal(removed.status, 1);
+  assert.match(removed.stderr, /dag-model:lint is only in .*moved\.json/);
   writeFileSync(join(scratch, "moved.json"), JSON.stringify(moved));
   const compared = run("task-hashes.mjs", [
     "diff",
@@ -386,8 +426,10 @@ test("measure refuses a task that is not project:target, and an action checkout 
     const refused = run("measure.mjs", ["--task", task]);
     assert.equal(refused.status, 2, task);
   }
-  const source = process.env.SPIKE_OPNX_ACTION;
-  if (!source) return;
+  const source =
+    process.env.SPIKE_OPNX_ACTION ?? join(ROOT, ".tools/op-nx-github-cache");
+  if (!existsSync(join(source, "start-cache-server/index.js")))
+    assert.equal(run("measure.mjs", ["--task", "dag-model:test"]).status, 0);
   const dirty = join(scratch, "dirty-action");
   spawnSync("git", ["clone", "--quiet", source, dirty]);
   const head = spawnSync("git", ["-C", source, "rev-parse", "HEAD"], {
@@ -429,13 +471,16 @@ const listingServer = async (answer) => {
   await new Promise((done) => server.listen(0, "127.0.0.1", done));
   return { server, pages, url: `http://127.0.0.1:${server.address().port}` };
 };
-const entry = (id, key) => ({
+// llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] a test double's copy of GitHub's documented cache-listing entry, the one boundary this file stands in for; measure.mjs's own copy is the validator under test, and the real API is what the spike's CI runs listed.
+const entry = (id, key, extra = {}) => ({
   id,
   key,
   ref: "refs/pull/1/merge",
   size_in_bytes: 100,
   created_at: "2026-11-03T00:00:00Z",
+  ...extra,
 });
+// llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
 test("measure pages through a store listing, counting each request and finding the task's entry", async () => {
   const hash = record("a.json").tasks["dag-model:test"].hash;
@@ -552,4 +597,115 @@ test("measure sends no token to a non-loopback http API base, and survives an un
   assert.match(listing.error, /neither https nor loopback http/);
   assert.match(done.stderr, /cannot append to GITHUB_STEP_SUMMARY/);
   assert.match(done.stderr, /^ACTION: unset GITHUB_STEP_SUMMARY/m);
+});
+
+// A server for Nx's self-hosted cache API (the contract the sidecar serves)
+// that keeps what it is sent, so a write that succeeds and a replay can be
+// produced off a runner.
+const nxCacheServer = async (token) => {
+  const stored = new Map();
+  const server = createServer((req, res) => {
+    if (req.headers.authorization !== `Bearer ${token}`) {
+      res.writeHead(401, { "content-type": "text/plain" }).end("unauthorized");
+      return;
+    }
+    const hash = req.url.split("/").pop();
+    if (req.method === "GET") {
+      if (!stored.has(hash)) res.writeHead(404).end();
+      else res.writeHead(200).end(stored.get(hash));
+      return;
+    }
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      stored.set(hash, Buffer.concat(chunks));
+      res.writeHead(200).end();
+    });
+  });
+  await new Promise((done) => server.listen(0, "127.0.0.1", done));
+  return { server, stored, url: `http://127.0.0.1:${server.address().port}` };
+};
+
+test("measure accounts a stored write and its replay byte for byte, and attributes only this run's entries", async () => {
+  const token = "b".repeat(64);
+  const cache = await nxCacheServer(token);
+  let listed = true;
+  const github = await listingServer((_page, res) => {
+    const caches = listed
+      ? [...cache.stored.keys()].flatMap((hash, i) => [
+          entry(10 + i, `nx-cache-${hash}`, {
+            created_at: new Date(Date.now() + 60_000).toISOString(),
+          }),
+          entry(20 + i, `nx-cache-${hash}`, { ref: "refs/pull/2/merge" }),
+          entry(30 + i, `nx-cache-${hash}`, {
+            created_at: "2020-01-01T00:00:00Z",
+          }),
+        ])
+      : [];
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify({ total_count: caches.length, actions_caches: caches }),
+    );
+  });
+  const env = {
+    NX_SELF_HOSTED_REMOTE_CACHE_SERVER: cache.url,
+    NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: token,
+    GITHUB_API_URL: github.url,
+    GITHUB_REPOSITORY: "owner/name",
+    GITHUB_REF: "refs/pull/1/merge",
+    GITHUB_TOKEN: "t",
+  };
+  const measureRun = (name, task) =>
+    runAsync(
+      [
+        "--sidecar",
+        "external",
+        "--task",
+        task,
+        "--out",
+        join(scratch, `${name}.json`),
+      ],
+      env,
+    );
+  try {
+    const first = await measureRun("wrote", "dag-model:test");
+    assert.equal(first.status, 0, first.stderr);
+    const wrote = record("wrote.json");
+    const [hash, body] = [...cache.stored.entries()][0];
+    assert.deepEqual(
+      wrote.requests.map((r) => [r.method, r.status]),
+      [
+        ["GET", 404],
+        ["PUT", 200],
+      ],
+    );
+    assert.deepEqual(wrote.written, [{ hash, bytes: body.length }]);
+    assert.deepEqual(
+      wrote.store_listing.storedByThisRun.map((e) => e.id),
+      [10],
+      "same ref and created after the run started; the other ref and the older entry are not this run's",
+    );
+    assert.deepEqual(wrote.store_listing.writtenNotYetListed, []);
+
+    const again = await measureRun("replayed", "dag-model:test");
+    assert.equal(again.status, 0, again.stderr);
+    const replayed = record("replayed.json");
+    assert.equal(replayed.nx.replayedFromRemote, true);
+    assert.deepEqual(replayed.replayed, [hash]);
+    assert.equal(replayed.requests[0].responseBytes, body.length);
+    assert.deepEqual(replayed.written, []);
+
+    listed = false;
+    const lagging = await measureRun("lagging", "timeline-categories:test");
+    assert.equal(lagging.status, 0, lagging.stderr);
+    const lag = record("lagging.json");
+    assert.equal(lag.written.length, 1);
+    assert.deepEqual(lag.store_listing.writtenNotYetListed, [
+      `nx-cache-${lag.written[0].hash}`,
+    ]);
+    assert.deepEqual(lag.store_listing.storedByThisRun, []);
+  } finally {
+    cache.server.close();
+    github.server.close();
+  }
 });

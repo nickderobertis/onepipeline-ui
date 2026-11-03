@@ -301,7 +301,7 @@ function repository() {
   return named && REPOSITORY.test(named) ? named : undefined;
 }
 
-// llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] GitHub's REST schema for "List GitHub Actions caches for a repository", which this repository has no generated types for; the check below is the gate: a response that drifts from the fields read here is reported as a listing error rather than counted.
+// llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] GitHub's REST schema for "List GitHub Actions caches for a repository" (its envelope and entry fields, through listStore), which this repository has no generated types for; the checks in this block are the gate: a response that drifts from the fields read here is reported as a listing error rather than counted.
 const isCacheEntry = (e) =>
   e !== null &&
   typeof e === "object" &&
@@ -312,7 +312,6 @@ const isCacheEntry = (e) =>
   e.size_in_bytes >= 0 &&
   typeof e.created_at === "string" &&
   !Number.isNaN(Date.parse(e.created_at));
-// llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
 // GITHUB_API_URL is the runner's own name for the REST base (GHES included).
 // The listing carries a token, so its base is https, or plain http only on loopback.
@@ -374,6 +373,8 @@ async function listStore(repo, token) {
   }
   return { requests, total, entries };
 }
+
+// llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
 const log = [];
 const sidecarToken = randomBytes(32).toString("hex");
