@@ -1502,8 +1502,8 @@ fn advisories_output_it_cannot_read_fails_rather_than_passing_as_none() {
 
 /// Builds a rustup distribution server at `MIRROR` serving one toolchain,
 /// `VERSION` for `TARGET`, in its minimal profile cut to what `cargo metadata`
-/// needs: the `rustc` and `cargo` components, each a rust-installer tarball of
-/// the files the installed toolchain at `SYSROOT` records for it.
+/// needs: the `rustc` and `cargo` components, each a zstd rust-installer tarball
+/// of the files the installed toolchain at `SYSROOT` records for it.
 const RUSTUP_MIRROR: &str = r#"set -euo pipefail
 sysroot="$1" mirror="$2" version="$3" target="$4"
 dist="$mirror/dist"
@@ -1523,11 +1523,11 @@ for comp in rustc cargo; do
     mkdir -p "$root/$comp/$(dirname "$file")"
     cp -L "$sysroot/$file" "$root/$comp/$file"
   done < "$root/$comp/manifest.in"
-  tar -C "$mirror/work" -cf - "$name" | gzip -1 > "$dist/pkgs/$name.tar.gz"
+  tar -C "$mirror/work" -cf - "$name" | zstd -q -1 -T0 > "$dist/pkgs/$name.tar.zst"
   rm -rf "$root"
-  hash="$(sha256sum "$dist/pkgs/$name.tar.gz" | cut -d' ' -f1)"
-  printf '\n[pkg.%s]\nversion = "%s"\n\n[pkg.%s.target.%s]\navailable = true\nurl = "file://%s"\nhash = "%s"\ncomponents = []\nextensions = []\n' \
-    "$comp" "$version" "$comp" "$target" "$dist/pkgs/$name.tar.gz" "$hash" >> "$manifest"
+  hash="$(sha256sum "$dist/pkgs/$name.tar.zst" | cut -d' ' -f1)"
+  printf '\n[pkg.%s]\nversion = "%s"\n\n[pkg.%s.target.%s]\navailable = true\nzst_url = "file://%s"\nzst_hash = "%s"\ncomponents = []\nextensions = []\n' \
+    "$comp" "$version" "$comp" "$target" "$dist/pkgs/$name.tar.zst" "$hash" >> "$manifest"
 done
 printf '\n[pkg.rust]\nversion = "%s"\n\n[pkg.rust.target.%s]\navailable = true\n' "$version" "$target" >> "$manifest"
 for comp in rustc cargo; do
@@ -1537,15 +1537,6 @@ done
 printf '\n[profiles]\nminimal = ["rustc", "cargo"]\n\n[renames]\n' >> "$manifest"
 (cd "$dist" && sha256sum "channel-rust-$version.toml" > "channel-rust-$version.toml.sha256")
 "#;
-
-/// The real rustup proxy, an empty `RUSTUP_HOME` of the journey's own, and a
-/// distribution server holding the toolchain this suite runs under.
-struct Rustup {
-    proxies: PathBuf,
-    mirror: PathBuf,
-    version: String,
-    scratch: PathBuf,
-}
 
 /// `rustc`'s answer to `args`, as the toolchain this suite runs under gives it.
 fn host_rustc(args: &[&str]) -> String {
@@ -1561,8 +1552,20 @@ fn host_rustc(args: &[&str]) -> String {
         .to_owned()
 }
 
+/// The real rustup proxy, a distribution server of the journey's own, and a
+/// `RUSTUP_HOME` per report that starts with no toolchain.
+struct Rustup {
+    proxies: PathBuf,
+    mirror: PathBuf,
+    version: String,
+    scratch: PathBuf,
+}
+
 impl Rustup {
-    fn new(project: &Project) -> Self {
+    /// The proxy and a distribution server under `project`'s scratch directory:
+    /// one serving the toolchain this suite runs under when `serve`, an empty
+    /// one otherwise, so nothing is ever fetched from the network.
+    fn new(project: &Project, serve: bool) -> Self {
         let rustup = Command::new("sh")
             .args(["-c", "command -v rustup"])
             .output()
@@ -1590,45 +1593,52 @@ impl Rustup {
             .nth(1)
             .expect("rustc names its version")
             .to_owned();
-        let target = host_rustc(&["-vV"])
-            .lines()
-            .find_map(|line| line.strip_prefix("host: "))
-            .expect("rustc names its host")
-            .to_owned();
-        let scratch = project
-            .repo
-            .parent()
-            .expect("the repository has a parent")
-            .to_owned();
+        let scratch = project.repo.parent().expect("a scratch parent").to_owned();
         let mirror = scratch.join("rustup-mirror");
-        let built = Command::new("bash")
-            .args(["-c", RUSTUP_MIRROR, "rustup-mirror"])
-            .arg(host_rustc(&["--print", "sysroot"]))
-            .arg(&mirror)
-            .args([&version, &target])
-            .output()
-            .expect("run bash");
-        assert!(
-            built.status.success(),
-            "could not build the distribution server: {}",
-            String::from_utf8_lossy(&built.stderr)
-        );
-        // What the fixture's own checkout pins, as this repository pins it.
-        fs::write(
-            project.repo.join("rust-toolchain.toml"),
-            format!("[toolchain]\nchannel = \"{version}\"\nprofile = \"minimal\"\n"),
-        )
-        .expect("write rust-toolchain.toml");
-        Self {
+        fs::create_dir_all(mirror.join("dist")).expect("create the distribution server");
+        if serve {
+            let target = host_rustc(&["-vV"])
+                .lines()
+                .find_map(|line| line.strip_prefix("host: ").map(str::to_owned))
+                .expect("rustc names its host");
+            let built = Command::new("bash")
+                .args(["-c", RUSTUP_MIRROR, "rustup-mirror"])
+                .arg(host_rustc(&["--print", "sysroot"]))
+                .arg(&mirror)
+                .args([version.as_str(), target.as_str()])
+                .output()
+                .expect("run bash");
+            assert!(
+                built.status.success(),
+                "could not build the distribution server: {}",
+                String::from_utf8_lossy(&built.stderr)
+            );
+        }
+        let rustup = Self {
             proxies,
             mirror,
             version,
             scratch,
-        }
+        };
+        rustup.pin(project);
+        rustup
     }
 
-    /// `just advisories-report` under the real proxy and a `RUSTUP_HOME` that
-    /// holds no toolchain, with rustup's own `extra` variables.
+    /// Pin `project`'s checkout to the served toolchain, as this repository's
+    /// rust-toolchain.toml pins its own.
+    fn pin(&self, project: &Project) {
+        fs::write(
+            project.repo.join("rust-toolchain.toml"),
+            format!(
+                "[toolchain]\nchannel = \"{}\"\nprofile = \"minimal\"\n",
+                self.version
+            ),
+        )
+        .expect("write rust-toolchain.toml");
+    }
+
+    /// `just advisories-report` under the real proxy and the empty
+    /// `RUSTUP_HOME` named `home`, with rustup's own `extra` variables.
     fn report(&self, project: &Project, home: &str, extra: &[(&str, &OsStr)]) -> Run {
         let rustup_home = self.scratch.join(home);
         let mut path = vec![self.proxies.clone()];
@@ -1645,8 +1655,8 @@ impl Rustup {
             .arg("--working-directory")
             .arg(&project.repo)
             .arg("advisories-report");
-        // What the proxy that started this suite exported for its own toolchain
-        // would pick one for the journey's proxy too.
+        // What the proxy that started this suite exported for its own toolchain,
+        // which would choose one for the journey's proxy too.
         for variable in ["RUSTUP_TOOLCHAIN", "CARGO", "RUSTC", "RUSTDOC"] {
             command.env_remove(variable);
         }
@@ -1666,7 +1676,7 @@ fn a_toolchain_installed_on_first_use_is_not_read_as_cargo_denys_output() {
     // The report is the half that calls cargo-deny's advisories check first,
     // which is where the `advisories` job's rustup installed the toolchain.
     let clean = project(&CLEAN, &CLEAN);
-    let rustup = Rustup::new(&clean);
+    let rustup = Rustup::new(&clean, true);
     let run = rustup.report(&clean, "rustup-home", &[]);
     assert_eq!(
         run.code,
@@ -1692,8 +1702,8 @@ fn a_toolchain_installed_on_first_use_is_not_read_as_cargo_denys_output() {
     // A red report still means an advisory: the one it reads after the
     // installation, and nothing about the installation itself.
     let vulnerable = project(&VULNERABLE, &VULNERABLE);
-    let rustup = Rustup::new(&vulnerable);
-    let run = rustup.report(&vulnerable, "rustup-home", &[]);
+    rustup.pin(&vulnerable);
+    let run = rustup.report(&vulnerable, "rustup-home-vulnerable", &[]);
     assert_ne!(run.code, Some(0), "the report passed:\n{}", run.all());
     assert!(
         run.stderr.contains("info: downloading 2 components")
@@ -1709,10 +1719,11 @@ fn a_toolchain_installed_on_first_use_is_not_read_as_cargo_denys_output() {
 
 #[test]
 fn a_toolchain_rustup_will_not_install_fails_the_check_saying_so() {
-    // With auto-install off, the pinned toolchain is never installed: the check
-    // did not run, which is never an empty graph.
+    // With auto-install off, the pinned toolchain is never installed, and the
+    // server serves nothing for a fallback to fetch: the check did not run,
+    // which is never an empty graph.
     let clean = project(&CLEAN, &CLEAN);
-    let rustup = Rustup::new(&clean);
+    let rustup = Rustup::new(&clean, false);
     let run = rustup.report(
         &clean,
         "rustup-home",
