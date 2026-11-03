@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.65.3](https://github.com/nickderobertis/onepipeline-ui/compare/v0.65.2...v0.65.3) - 2026-11-03
+
+### Fixed
+
+- *(deps)* link the engine that reads a plan from its own source ([#594](https://github.com/nickderobertis/onepipeline-ui/pull/594))
+
 ## [0.65.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.65.1...v0.65.2) - 2026-11-02
 
 ### Fixed
