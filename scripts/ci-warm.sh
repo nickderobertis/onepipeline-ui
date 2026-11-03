@@ -100,5 +100,11 @@ if [ "$os" = linux ]; then
   # Caches saved before the wheel smoke moved out of `target` restore its old
   # virtualenv's directories under target/wheel-smoke, which rust-cache's save
   # walks as cargo output and errors on; removed so this job's save drops them.
-  [ -n "$plan" ] || rm -rf target/wheel-smoke
+  if [ -z "$plan" ]; then
+    rm -rf target/wheel-smoke || {
+      echo "ci-warm: could not remove target/wheel-smoke (rm's reason is above), which this job's cache save would carry on" >&2
+      echo "ACTION: make target/wheel-smoke removable by $(id -un) (its owner and its parent's permissions), then re-run" >&2
+      exit 1
+    }
+  fi
 fi

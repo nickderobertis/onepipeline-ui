@@ -729,7 +729,7 @@ test("a compile the warmer drops, changes or invents is refused", () => {
 // `target`. The compilers it hands its lines to (`just`, `cargo`, and the `bash`
 // that runs Nx) are recording stand-ins on PATH: each line is minutes of
 // compiling, and what is under test is what the script does around them.
-function warmFromScratch(args) {
+function warmFromScratch(args, { locked = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "ci-warm-legacy-"));
   mkdirSync(join(root, "scripts"));
   copyFileSync("scripts/ci-warm.sh", join(root, "scripts/ci-warm.sh"));
@@ -751,6 +751,9 @@ function warmFromScratch(args) {
     );
     chmodSync(join(bin, name), 0o755);
   }
+  // A directory whose entries cannot be unlinked: what a tree left owned by
+  // another user looks like to the job.
+  if (locked) chmodSync(join(root, "target/wheel-smoke"), 0o555);
   const run = spawnSync(
     "/bin/bash",
     [join(root, "scripts/ci-warm.sh"), "linux", ...args],
@@ -765,6 +768,7 @@ function warmFromScratch(args) {
     build: existsSync(build),
     calls: existsSync(calls) ? readFileSync(calls, "utf8") : "",
   };
+  if (locked) chmodSync(join(root, "target/wheel-smoke"), 0o755);
   rmSync(root, { recursive: true, force: true });
   return result;
 }
@@ -783,4 +787,13 @@ test("the Linux warm drops the wheel smoke's old tree from what it saves, and it
   assert.equal(planned.run.status, 0, planned.run.stderr);
   assert.equal(planned.calls, "", "--plan ran a compile");
   assert.equal(planned.legacy, true, "--plan removed target/wheel-smoke");
+
+  // A tree it cannot remove fails the warm, before the save could carry it.
+  const stuck = warmFromScratch([], { locked: true });
+  assert.equal(stuck.run.status, 1, stuck.run.stderr);
+  assert.match(stuck.run.stderr, /could not remove target\/wheel-smoke/);
+  assert.match(
+    stuck.run.stderr,
+    /^ACTION: make target\/wheel-smoke removable/m,
+  );
 });
