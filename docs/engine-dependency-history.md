@@ -734,6 +734,17 @@ entry move: its onetaskgraph 0.13.1, onevcs ^0.57.4, oneagentgraph, onejudge,
 onemessagebus and oneharness-core requirements are the ones 0.98.0 resolved, and
 no route, payload, public type or MSRV changes beyond the release `/healthz`
 reports.
+0.98.4 is the patch of that engine that links onetaskgraph 0.13.2, whose Linear
+plugin creates new Linear projects again — including after an undo deleted an
+earlier attempt's project, whose id Linear refuses to reuse — and reads an id
+Linear does not hold as absent. A host holds this reader and its engine to one
+linked engine and one plan store, so it can adopt that store only once this
+crate links it. The plan-store family and its test-only exact requirements move
+to 0.13.2; onevcs ^0.57.4, oneagentgraph, onejudge, onemessagebus and
+oneharness-core are the requirements 0.98.3 resolved, and no route, payload,
+public type or MSRV changes beyond the release `/healthz` reports.
+`tests/plan_linear_create.rs` holds the linked store to that over a loopback
+Linear.
 
 The test-only `onevcs` requirement, which the `EventKind` drift gate in
 `tests/contract.rs` reads, has followed the release each linked engine resolves:
@@ -743,4 +754,4 @@ declares the stacking, review and landing kinds that engine relays; 0.56.3 for
 copies, and for 0.79.1, 0.82.0, 0.84.0, 0.84.1 and 0.85.0; 0.56.9 for 0.89.0,
 which relays each check's times; 0.56.11 for 0.90.0; 0.57.0 for 0.95.5; and
 0.57.4 for 0.96.0 (^0.57.4), 0.96.1, 0.96.2, 0.97.0, 0.97.2,
-0.98.0 and 0.98.3.
+0.98.0, 0.98.3 and 0.98.4.
