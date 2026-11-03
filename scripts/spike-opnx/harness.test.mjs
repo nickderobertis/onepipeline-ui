@@ -5,9 +5,13 @@
 //
 // The sidecar cases need the action checkout at measure.mjs's pinned commit;
 // SPIKE_OPNX_ACTION names one, otherwise measure.mjs clones it into .tools.
+// A replay (GET 200) and a stored write (PUT 200) need GitHub's own cache
+// service, which only a runner reaches: those paths are proven by the CI runs
+// the report cites, not here.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, test } from "node:test";
@@ -281,7 +285,6 @@ test("measure drives a sidecar it did not start, at the URL and token the workfl
   const token = "a".repeat(64);
   const dir =
     process.env.SPIKE_OPNX_ACTION ?? join(ROOT, ".tools/op-nx-github-cache");
-  const { spawn } = await import("node:child_process");
   const sidecar = spawn(
     process.execPath,
     [join(dir, "start-cache-server/index.js")],
@@ -317,5 +320,188 @@ test("measure drives a sidecar it did not start, at the URL and token the workfl
     );
   } finally {
     sidecar.kill("SIGTERM");
+  }
+});
+
+test("task-hashes moves a task's hash, and names the input, when a real file in its project changes", () => {
+  const probe = join(ROOT, "packages/dag-model/spike-opnx-harness-probe.txt");
+  const changed = join(scratch, "changed.json");
+  writeFileSync(probe, "a change the hasher must see\n");
+  let done;
+  try {
+    done = run("task-hashes.mjs", [
+      "capture",
+      ROOT,
+      "dag-model:test",
+      "--out",
+      changed,
+    ]);
+  } finally {
+    rmSync(probe, { force: true });
+  }
+  assert.equal(done.status, 0, done.stderr);
+  const compared = run("task-hashes.mjs", [
+    "diff",
+    join(scratch, "a.json"),
+    changed,
+  ]);
+  assert.equal(compared.status, 0, compared.stderr);
+  assert.match(
+    compared.stdout,
+    /^moved dag-model:test \d+ -> \d+: dag-model:packages\/dag-model\/\*\*\/\*$/m,
+  );
+});
+
+test("task-hashes refuses a workspace it cannot load Nx from, an unwritable record, and a record keyed by an object property", () => {
+  const empty = mkdtempSync(join(scratch, "no-nx-"));
+  const noNx = run("task-hashes.mjs", ["capture", empty, "dag-model:test"]);
+  assert.equal(noNx.status, 1);
+  assert.match(noNx.stderr, /cannot load Nx from/);
+  assert.match(noNx.stderr, /^ACTION: /m);
+  const unwritable = run("task-hashes.mjs", [
+    "capture",
+    ROOT,
+    "dag-model:test",
+    "--out",
+    join(scratch, "no-such-dir", "x.json"),
+  ]);
+  assert.equal(unwritable.status, 1);
+  assert.match(unwritable.stderr, /cannot write/);
+  writeFileSync(
+    join(scratch, "proto.json"),
+    '{"tasks":{"constructor":{"hash":"1","nodes":{}}}}',
+  );
+  const proto = run("task-hashes.mjs", [
+    "diff",
+    join(scratch, "a.json"),
+    join(scratch, "proto.json"),
+  ]);
+  assert.equal(proto.status, 1);
+  assert.match(proto.stderr, /is not a capture record/);
+});
+
+test("measure refuses a task that is not project:target, and an action checkout whose bundle was changed", () => {
+  for (const task of ["--help", "no-colon"]) {
+    const refused = run("measure.mjs", ["--task", task]);
+    assert.equal(refused.status, 2, task);
+  }
+  const source = process.env.SPIKE_OPNX_ACTION;
+  if (!source) return;
+  const dirty = join(scratch, "dirty-action");
+  spawnSync("git", ["clone", "--quiet", source, dirty]);
+  const head = spawnSync("git", ["-C", source, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).stdout.trim();
+  spawnSync("git", ["-C", dirty, "checkout", "--quiet", head]);
+  writeFileSync(
+    join(dirty, "start-cache-server/index.js"),
+    "process.exit(0)\n",
+  );
+  const refused = run("measure.mjs", ["--action", dirty]);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /has changes to tracked files/);
+});
+
+// GitHub's listing, served at GITHUB_API_URL (the runner's own name for the
+// REST base) so pagination and failures can be produced on demand.
+const runAsync = (args, env) =>
+  new Promise((done) => {
+    const child = spawn(
+      process.execPath,
+      [join(ROOT, "scripts/spike-opnx/measure.mjs"), ...args],
+      { cwd: ROOT, env: { ...process.env, ...env } },
+    );
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.stdout.resume();
+    child.on("close", (status) => done({ status, stderr }));
+  });
+const listingServer = async (answer) => {
+  const pages = [];
+  const server = createServer((req, res) => {
+    const page = Number(new URL(req.url, "http://x").searchParams.get("page"));
+    pages.push(page);
+    answer(page, res);
+  });
+  await new Promise((done) => server.listen(0, "127.0.0.1", done));
+  return { server, pages, url: `http://127.0.0.1:${server.address().port}` };
+};
+const entry = (id, key) => ({
+  id,
+  key,
+  ref: "refs/pull/1/merge",
+  size_in_bytes: 100,
+  created_at: "2026-11-03T00:00:00Z",
+});
+
+test("measure pages through a store listing, counting each request and finding the task's entry", async () => {
+  const hash = record("a.json").tasks["dag-model:test"].hash;
+  const github = await listingServer((page, res) => {
+    const caches =
+      page === 1
+        ? Array.from({ length: 100 }, (_, i) => entry(i + 1, `rust-${i}`))
+        : [entry(101, `nx-cache-${hash}`), entry(102, "nx-cache-1")];
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ total_count: 102, actions_caches: caches }));
+  });
+  try {
+    const done = await runAsync(
+      [...action, "--out", join(scratch, "paged.json")],
+      {
+        GITHUB_API_URL: github.url,
+        GITHUB_REPOSITORY: "owner/name",
+        GITHUB_TOKEN: "t",
+      },
+    );
+    assert.equal(done.status, 0, done.stderr);
+    const listing = record("paged.json").store_listing;
+    assert.deepEqual(github.pages, [1, 2]);
+    assert.equal(listing.requests, 2);
+    assert.equal(listing.entries, 102);
+    assert.equal(listing.nxEntries, 2);
+    assert.equal(listing.nxBytes, 200);
+    assert.deepEqual(
+      listing.thisTask.map((e) => e.id),
+      [101],
+    );
+    assert.deepEqual(listing.storedByThisRun, []);
+  } finally {
+    github.server.close();
+  }
+});
+
+test("measure reports a listing that fails or drifts from GitHub's shape as an error, never as a count", async () => {
+  const cases = [
+    [(_page, res) => res.writeHead(500).end(), /^HTTP 500$/],
+    [
+      (_page, res) =>
+        res.end(
+          JSON.stringify({ total_count: 1, actions_caches: [{ id: 1 }] }),
+        ),
+      /did not have the documented shape/,
+    ],
+    [(_page, res) => res.end("not json"), /listing request failed/],
+  ];
+  for (const [answer, error] of cases) {
+    const github = await listingServer(answer);
+    try {
+      const done = await runAsync(
+        [...action, "--out", join(scratch, "listing-error.json")],
+        {
+          GITHUB_API_URL: github.url,
+          GITHUB_REPOSITORY: "owner/name",
+          GITHUB_TOKEN: "t",
+        },
+      );
+      assert.equal(done.status, 0, done.stderr);
+      const listing = record("listing-error.json").store_listing;
+      assert.match(listing.error, error);
+      assert.equal(listing.requests, 1);
+      assert.equal(listing.entries, undefined);
+    } finally {
+      github.server.close();
+    }
   }
 });

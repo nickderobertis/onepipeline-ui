@@ -5,12 +5,7 @@ name: spike-opnx-cache
 # copies it there, and it never lands.
 #
 # Throwaway experiment of spike `spike-opnx-audit` (plan ci-release-test-cache):
-# it runs on the spike's own draft pull request and its stacked demonstration
-# pull request, and never lands. Each leg starts op-nx/github-cache's sidecar as
-# the plan would — the NX_* variables pre-set in a regular step, the action as a
-# background step, `cancel:` to stop it — and runs the tasks listed in
-# scripts/spike-opnx/ci-tasks.txt through scripts/spike-opnx/measure.mjs, which
-# records every replay and write and lists the Actions cache.
+# the measurements behind its report, taken on real runners.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -111,7 +106,8 @@ jobs:
           path: ${{ runner.temp }}/measure-*.json
 
   # The token a no-write pull request gets (a Dependabot head's is read-only):
-  # nothing here may write to the repository.
+  # no repository write permission. Whether the cache still accepts writes is
+  # what this leg measures.
   linux-no-write-token:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -143,7 +139,7 @@ jobs:
           port: "3000"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: A token that cannot write
+      - name: A token with contents read and no other permission
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

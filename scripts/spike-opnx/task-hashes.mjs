@@ -30,29 +30,41 @@ const usage = (message) => {
 
 async function capture(workspace, ids, out) {
   const root = resolve(workspace);
-  process.chdir(root);
   process.env.NX_DAEMON = "false";
   process.env.NX_WORKSPACE_ROOT_PATH = root;
-  const require = createRequire(`${root}/package.json`);
-  const load = (path) => import(pathToFileURL(require.resolve(path)).href);
-  const { createProjectGraphAsync } = await load("nx/src/devkit-exports.js");
-  const { readNxJson } = await load("nx/src/config/nx-json.js");
-  const { createTaskGraph } = await load(
-    "nx/src/tasks-runner/create-task-graph.js",
-  );
-  const { createTaskHasher } = await load(
-    "nx/src/hasher/create-task-hasher.js",
-  );
-  const nxVersion = JSON.parse(
-    readFileSync(require.resolve("nx/package.json"), "utf8"),
-  ).version;
-  const projectGraph = await createProjectGraphAsync({ exitOnError: true });
-  const nxJson = readNxJson(root);
-  const hasher = createTaskHasher(projectGraph, nxJson);
+  let createTaskGraph;
+  let projectGraph;
+  let hasher;
+  let nxVersion;
+  try {
+    process.chdir(root);
+    const require = createRequire(`${root}/package.json`);
+    const load = (path) => import(pathToFileURL(require.resolve(path)).href);
+    const { createProjectGraphAsync } = await load("nx/src/devkit-exports.js");
+    const { readNxJson } = await load("nx/src/config/nx-json.js");
+    ({ createTaskGraph } = await load(
+      "nx/src/tasks-runner/create-task-graph.js",
+    ));
+    const { createTaskHasher } = await load(
+      "nx/src/hasher/create-task-hasher.js",
+    );
+    nxVersion = JSON.parse(
+      readFileSync(require.resolve("nx/package.json"), "utf8"),
+    ).version;
+    projectGraph = await createProjectGraphAsync({ exitOnError: true });
+    const nxJson = readNxJson(root);
+    hasher = createTaskHasher(projectGraph, nxJson);
+  } catch (error) {
+    console.error(`task-hashes: cannot load Nx from ${root}: ${error.message}`);
+    console.error(
+      "ACTION: install the workspace's dependencies (its bootstrap or workspace-install script) and name the directory holding nx.json",
+    );
+    process.exit(1);
+  }
   const tasks = {};
   for (const id of ids) {
     const at = id.lastIndexOf(":");
-    if (at <= 0) usage(`'${id}' is not <project:target>`);
+    if (at <= 0 || !TASK.test(id)) usage(`'${id}' is not <project:target>`);
     const project = id.slice(0, at);
     const target = id.slice(at + 1);
     const missing = (detail) => {
@@ -80,9 +92,18 @@ async function capture(workspace, ids, out) {
     tasks[id] = { hash: hash.value, nodes: hash.details.nodes };
   }
   const record = `${JSON.stringify({ nx: nxVersion, tasks }, null, 2)}\n`;
-  if (out) writeFileSync(out, record);
-  else process.stdout.write(record);
+  if (out) {
+    try {
+      writeFileSync(out, record);
+    } catch (error) {
+      console.error(`task-hashes: cannot write ${out}: ${error.message}`);
+      console.error("ACTION: pass --out a path in a writable directory");
+      process.exit(1);
+    }
+  } else process.stdout.write(record);
 }
+
+const TASK = /^[A-Za-z0-9@][A-Za-z0-9@._/-]*:[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 // A record is what `capture` writes: {tasks: {<id>: {hash: string, nodes: {...}}}}.
 function readRecord(path) {
@@ -99,6 +120,7 @@ function readRecord(path) {
     value !== null && typeof value === "object" && !Array.isArray(value);
   const valid =
     isMap(tasks) &&
+    Object.keys(tasks).every((id) => TASK.test(id)) &&
     Object.values(tasks).every(
       (task) =>
         typeof task?.hash === "string" &&
@@ -118,14 +140,14 @@ function diff(beforePath, afterPath) {
   const after = readRecord(afterPath);
   const unmatched = [
     ...Object.keys(before)
-      .filter((id) => !after[id])
+      .filter((id) => !Object.hasOwn(after, id))
       .map((id) => `${id} is only in ${beforePath}`),
     ...Object.keys(after)
-      .filter((id) => !before[id])
+      .filter((id) => !Object.hasOwn(before, id))
       .map((id) => `${id} is only in ${afterPath}`),
   ];
   for (const id of Object.keys(before).sort()) {
-    if (!after[id]) continue;
+    if (!Object.hasOwn(after, id)) continue;
     if (before[id].hash === after[id].hash) {
       console.log(`same ${id} ${before[id].hash}`);
       continue;

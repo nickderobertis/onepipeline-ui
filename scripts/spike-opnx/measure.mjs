@@ -93,6 +93,12 @@ if (!["start", "external", "none"].includes(options.sidecar))
   usage(`'${options.sidecar}' is not start, external or none`);
 if (!["live", "down", "fault", "full"].includes(options.store))
   usage(`'${options.store}' is not live, down, fault or full`);
+if (
+  !/^[A-Za-z0-9@][A-Za-z0-9@._/-]*:[A-Za-z0-9][A-Za-z0-9._-]*$/.test(
+    options.task,
+  )
+)
+  usage(`'${options.task}' is not a <project:target> task`);
 if (options.store !== "live" && options.sidecar !== "start")
   usage("--store other than live needs --sidecar start");
 
@@ -139,30 +145,52 @@ async function startStore(mode) {
 }
 // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
-// The figures name PINNED_COMMIT, so a checkout at any other commit is refused
+const fail = (message, action) => {
+  console.error(`measure: ${message}`);
+  console.error(`ACTION: ${action}`);
+  process.exit(1);
+};
+
+const git = (dir, ...args) => {
+  try {
+    return execFileSync("git", ["-C", dir, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  } catch (error) {
+    fail(
+      `git ${args.join(" ")} failed in ${dir}: ${error.stderr || error.message}`,
+      "check network access to github.com and that the directory is a git checkout, or pass --action with a checkout at the pinned commit",
+    );
+  }
+};
+
+// The figures name PINNED_COMMIT, so the bundle that runs must be that
+// commit's, unmodified: any other commit, or a changed working tree, is refused
 // rather than measured under that name.
 function ensureAction(dir) {
   if (!existsSync(join(dir, "start-cache-server/index.js"))) {
-    execFileSync("git", [
+    git(
+      ".",
       "clone",
       "--quiet",
       "https://github.com/op-nx/github-cache.git",
       dir,
-    ]);
-    execFileSync("git", ["-C", dir, "checkout", "--quiet", PINNED_COMMIT]);
-  }
-  const head = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], {
-    encoding: "utf8",
-  }).trim();
-  if (head !== PINNED_COMMIT) {
-    console.error(
-      `measure: ${dir} is at ${head}, not op-nx/github-cache ${PINNED_COMMIT}`,
     );
-    console.error(
-      `ACTION: run 'git -C ${dir} checkout ${PINNED_COMMIT}', or pass --action with a checkout at that commit`,
-    );
-    process.exit(1);
+    git(dir, "checkout", "--quiet", PINNED_COMMIT);
   }
+  const head = git(dir, "rev-parse", "HEAD");
+  if (head !== PINNED_COMMIT)
+    fail(
+      `${dir} is at ${head}, not op-nx/github-cache ${PINNED_COMMIT}`,
+      `run 'git -C ${dir} checkout ${PINNED_COMMIT}', or pass --action with a checkout at that commit`,
+    );
+  const changed = git(dir, "status", "--porcelain", "--untracked-files=no");
+  if (changed)
+    fail(
+      `${dir} has changes to tracked files, so its bundle is not ${PINNED_COMMIT}'s: ${changed.split("\n")[0]}`,
+      `run 'git -C ${dir} checkout -- .' to restore the pinned bundle`,
+    );
 }
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -273,6 +301,7 @@ function repository() {
   return named && REPOSITORY.test(named) ? named : undefined;
 }
 
+// llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] GitHub's REST schema for "List GitHub Actions caches for a repository", which this repository has no generated types for; the check below is the gate: a response that drifts from the fields read here is reported as a listing error rather than counted.
 const isCacheEntry = (e) =>
   e !== null &&
   typeof e === "object" &&
@@ -282,6 +311,10 @@ const isCacheEntry = (e) =>
   Number.isInteger(e.size_in_bytes) &&
   typeof e.created_at === "string" &&
   !Number.isNaN(Date.parse(e.created_at));
+// llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+
+// GITHUB_API_URL is the runner's own name for the REST base (GHES included).
+const API = process.env.GITHUB_API_URL || "https://api.github.com";
 
 async function listStore(repo, token) {
   const entries = [];
@@ -289,18 +322,28 @@ async function listStore(repo, token) {
   let total;
   for (let page = 1; ; page += 1) {
     requests += 1;
-    const res = await fetch(
-      `https://api.github.com/repos/${repo}/actions/caches?per_page=100&page=${page}`,
-      {
-        headers: {
-          authorization: `Bearer ${token}`,
-          accept: "application/vnd.github+json",
-          "x-github-api-version": "2022-11-28",
+    let res;
+    let body;
+    try {
+      res = await fetch(
+        `${API}/repos/${repo}/actions/caches?per_page=100&page=${page}`,
+        {
+          headers: {
+            authorization: `Bearer ${token}`,
+            accept: "application/vnd.github+json",
+            "x-github-api-version": "2022-11-28",
+          },
+          signal: AbortSignal.timeout(30_000),
         },
-      },
-    );
-    if (!res.ok) return { error: `HTTP ${res.status}`, requests };
-    const body = await res.json();
+      );
+      if (!res.ok) return { error: `HTTP ${res.status}`, requests };
+      body = await res.json();
+    } catch (error) {
+      return {
+        error: `the listing request failed: ${error.message}`,
+        requests,
+      };
+    }
     if (
       !Number.isInteger(body?.total_count) ||
       !Array.isArray(body.actions_caches) ||
@@ -534,7 +577,14 @@ const json = `${JSON.stringify(result, null, 2)}\n`;
 const count = (list, code) => list.filter((e) => e.status === code).length;
 const summary = `measure: ${options.label ?? options.task}: Nx exit ${nxExit} in ${nxMs} ms; GET 200 x${count(gets, 200)}, GET 404 x${count(gets, 404)}; PUT ${puts.map((e) => e.status).join(",") || "none"}; ${result.written.map((e) => `${e.hash} ${e.bytes} B`).join(", ") || "nothing written"}; listing ${result.store_listing?.requests ?? "not taken"} request(s)`;
 if (options.out) {
-  writeFileSync(options.out, json);
+  try {
+    writeFileSync(options.out, json);
+  } catch (error) {
+    fail(
+      `cannot write ${options.out}: ${error.message}`,
+      "pass --out a path in a writable directory",
+    );
+  }
   console.log(`${summary}; record ${options.out}`);
 } else {
   console.error(summary);
