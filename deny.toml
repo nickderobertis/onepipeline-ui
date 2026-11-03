@@ -9,7 +9,11 @@ all-features = true
 
 [advisories]
 yanked = "deny"
-ignore = []
+# smallstr is unmaintained, not vulnerable, and reached only through
+# onetaskgraph-linear -> yrs. Every yrs release through 0.28.0 depends on it.
+# Retire this exception when a yrs release drops smallstr; the engine and plan
+# store carry the same exception while they await that release.
+ignore = ["RUSTSEC-2026-0215"]
 
 [licenses]
 # Permissive licenses compatible with this MIT-licensed binary. Adding a
