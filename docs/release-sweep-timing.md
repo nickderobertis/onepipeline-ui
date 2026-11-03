@@ -232,3 +232,16 @@ unchanged fixture specifies. The forwarding audit records two builds in
 `/tmp/sweepcap/release-forwarded.log`; the successful browser rerun is
 `/tmp/sweepcap/browser-alone.log`. These are local verification records, not
 claims that a complete local sweep or a hosted CI job was run successfully.
+
+## The pool-maintenance measurement runs alone (2026-11-03)
+
+`pool-maintenance:budgets-host` now declares `parallelism: false`, because its
+prune pass deleted an rlib the release rehearsal's wheel build had already
+judged fresh (job 125894529262, run 41581023931). Nx therefore starts it only
+when no other task is running, which in the sweep puts it last. The sweep's Nx
+run in that job took 22m14s, and this task already completed 67 s before the
+run ended. So the time it can add is at most its own duration: 40.8 s for
+`nx run pool-maintenance:budgets-host --skip-nx-cache` alone on an 8-core host
+with a warm `target/debug`. Twice that for the hosted runner's four cores still
+leaves the job well inside its 36-minute cap. The next release pull request's
+Linux job validates this.

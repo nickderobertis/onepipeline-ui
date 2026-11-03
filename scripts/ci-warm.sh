@@ -94,7 +94,17 @@ if [ "$os" = linux ]; then
   compile "nx dag-ui:build-api-server" bash scripts/nx.sh run dag-ui:build-api-server --skip-nx-cache
   compile "test tests/e2e/linked_report.rs" \
     cargo auditable build --offline --locked --bin onepipeline-api --config 'build.build-dir="target"' --target-dir target/auditable
-  # The wheel smoke builds into target/wheel-smoke and the release rehearsal into
+  # The wheel smoke builds into .tools/wheel-smoke and the release rehearsal into
   # its own --out; cargo's target directory is `target/wheel-<target>` for both.
-  compile "just _crate-wheel-smoke" just wheel-linux x86_64-unknown-linux-gnu target/wheel-smoke
+  compile "just _crate-wheel-smoke" just wheel-linux x86_64-unknown-linux-gnu .tools/wheel-smoke
+  # Caches saved before the wheel smoke moved out of `target` restore its old
+  # virtualenv's directories under target/wheel-smoke, which rust-cache's save
+  # walks as cargo output and errors on; removed so this job's save drops them.
+  if [ -z "$plan" ]; then
+    rm -rf target/wheel-smoke || {
+      echo "ci-warm: could not remove target/wheel-smoke (rm's reason is above), which this job's cache save would carry on" >&2
+      echo "ACTION: make target/wheel-smoke removable by $(id -un) (its owner and its parent's permissions), then re-run" >&2
+      exit 1
+    }
+  fi
 fi

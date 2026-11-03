@@ -559,10 +559,10 @@ fn the_pull_request_check_builds_the_release_x86_64_linux_leg_through_the_recipe
         .and_then(|rest| rest.split("\n\n").next())
         .expect("the justfile's _crate-wheel-smoke recipe");
     let built = recipe
-        .find("just wheel-linux x86_64-unknown-linux-gnu target/wheel-smoke")
+        .find("just wheel-linux x86_64-unknown-linux-gnu .tools/wheel-smoke")
         .expect("the wheel is built through the recipe");
     let installed = recipe
-        .find("pip install --quiet --no-index target/wheel-smoke/*.whl")
+        .find("pip install --quiet --no-index .tools/wheel-smoke/*.whl")
         .expect("the wheel-smoke installs the wheel it built, and only that");
     let smoked = recipe
         .find("bash scripts/smoke-published.sh")
@@ -570,6 +570,17 @@ fn the_pull_request_check_builds_the_release_x86_64_linux_leg_through_the_recipe
     assert!(
         built < installed && installed < smoked,
         "the wheel-smoke builds, then installs, then smoke-tests"
+    );
+    // rust-cache saves `target` and walks every directory in it as cargo
+    // output: the virtualenv the smoke installed into made each save error.
+    // Only the removal of where it used to build may name `target/`.
+    let in_target: Vec<_> = recipe
+        .lines()
+        .filter(|line| line.contains("target/") && !line.trim_start().starts_with("@rm -rf"))
+        .collect();
+    assert!(
+        in_target.is_empty(),
+        "the wheel-smoke writes under target/, which rust-cache saves: {in_target:?}"
     );
     assert!(
         recipe.contains("--expect-version"),

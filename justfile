@@ -286,13 +286,22 @@ _crate-install-smoke:
 # The release's x86_64 Linux wheel, built by the one definition release.yml's
 # `build-linux` job runs (`wheel-linux`), then installed into a fresh virtualenv
 # and smoke-tested. Needs Docker and the browser view `dag-ui:build` writes.
+#
+# The wheel and its virtualenv go under `.tools/`, never `target/`: rust-cache
+# saves `target` and walks every directory in it as cargo output, and a
+# virtualenv's `tests` packages read to it as cargo test trees, so each save and
+# each partial restore errored (`ENOENT … colorama/tests/target`) and kept the
+# virtualenv's directories in the cache. Cargo's own build stays in
+# `target/wheel-<target>`, which is the build the cache is for. `target/wheel-smoke`
+# is where this used to build, removed so a tree restored from an older cache
+# cannot carry it on.
 # Build the x86_64 Linux wheel as the release does, install it, smoke-test it.
 _crate-wheel-smoke:
-    @rm -rf target/wheel-smoke
-    @just wheel-linux x86_64-unknown-linux-gnu target/wheel-smoke
-    @python3 -m venv target/wheel-smoke/venv
-    @target/wheel-smoke/venv/bin/pip install --quiet --no-index target/wheel-smoke/*.whl
-    @PATH="$PWD/target/wheel-smoke/venv/bin:$PATH" bash scripts/smoke-published.sh \
+    @rm -rf target/wheel-smoke .tools/wheel-smoke
+    @just wheel-linux x86_64-unknown-linux-gnu .tools/wheel-smoke
+    @python3 -m venv .tools/wheel-smoke/venv
+    @.tools/wheel-smoke/venv/bin/pip install --quiet --no-index .tools/wheel-smoke/*.whl
+    @PATH="$PWD/.tools/wheel-smoke/venv/bin:$PATH" bash scripts/smoke-published.sh \
       --expect-version "$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)" \
       --label "onepipeline-api-cli wheel on ${RUNNER_OS:-$(uname -s)}/${RUNNER_ARCH:-$(uname -m)}"
 
@@ -476,8 +485,10 @@ test-cost:
 # Every project's onebudgetspec budgets, the host-labelled ones included. Not in
 # `check` or `gate`, and no per-change run reaches it: the host budgets measure
 # this machine rather than a diff — `pool-maintenance:budgets-host` builds the
-# crate twice to time one pool-maintenance pass — so ci.yml's `sweep` runs this
-# after the full gate, on the release pull request alone.
+# crate twice to time one pool-maintenance pass — so only `test-linux`'s sweep
+# runs them, on the release pull request alone. That pass deletes builds from
+# all of `target`, so its target declares `parallelism: false` and Nx runs it
+# with no other task beside it.
 # Check every project's budgets, host-labelled ones included.
 budgets:
     @bash scripts/nx.sh run-many -t budgets budgets-host
@@ -498,15 +509,16 @@ _crate-format:
 _crate-lint:
     @cargo clippy --all-targets --locked --quiet -- -D warnings
 
-# The crate's suite runs as ten Nx projects, one per tier, each selecting its
+# The crate's suite runs as eleven Nx projects, one per tier, each selecting its
 # tests through the nextest profile of the same name in `.config/nextest.toml`,
-# which is where the ten filters are written and partition the suite. Four
+# which is where the eleven filters are written and partition the suite. Four
 # tiers are instrumented and run here; the baseline comparison, the cost
-# journeys, the linked-report journeys, the judged tier's journeys and the CI
-# jobs' recipes run through `_tier-test` below, for what each needs that the rest
-# do not — another commit of this repository compiled, a syscall tracer, a second
-# build of this one with `cargo auditable`, an installed llmlint, and inputs that
-# are the project graph rather than the crate.
+# journeys, the linked-report journeys, the judged tier's journeys, the
+# deps-audit toolchain journeys and the CI jobs' recipes run through `_tier-test`
+# below, for what each needs that the rest do not — another commit of this
+# repository compiled, a syscall tracer, a second build of this one with `cargo
+# auditable`, an installed llmlint, a toolchain packed and installed through
+# rustup, and inputs that are the project graph rather than the crate.
 #
 # Each instrumented tier leaves its raw profiles under `target/llvm-cov-target`
 # named for the tier, and reports nothing: `_crate-coverage` merges every tier's

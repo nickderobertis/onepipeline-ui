@@ -479,6 +479,36 @@ fn the_broader_tier_sweeps_every_project_with_the_budgets() {
         "the sweep builds the release rehearsal's wheel a second time: {selected:?}"
     );
     assert!(run.ran().is_empty(), "--plan ran tasks: {:?}", run.ran());
+
+    // The pool-maintenance measurement deletes builds from every profile under
+    // `target` while the sweep's other tasks build there: run beside the release
+    // rehearsal it deleted an rlib cargo had judged fresh, and the wheel failed
+    // to link. Nx's own plan of the task must hold it to running alone.
+    let graph = Command::new("bash")
+        .args([
+            "scripts/nx.sh",
+            "run",
+            "pool-maintenance:budgets-host",
+            "--graph=stdout",
+        ])
+        .current_dir(workspace.root())
+        .env("NX_DAEMON", "false")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("bash runs Nx");
+    assert!(
+        graph.status.success(),
+        "Nx could not plan the measurement:\n{}",
+        plain(&graph.stderr)
+    );
+    let graph: serde_json::Value =
+        serde_json::from_slice(&graph.stdout).expect("Nx prints its task graph as JSON");
+    assert_eq!(
+        graph["tasks"]["tasks"]["pool-maintenance:budgets-host"]["parallelism"],
+        serde_json::Value::Bool(false),
+        "Nx would run the pool-maintenance pass beside the sweep's builds: {}",
+        graph["tasks"]["tasks"]["pool-maintenance:budgets-host"]
+    );
 }
 
 /// A lockfile the checkout no longer matches fails `test-linux` and names what

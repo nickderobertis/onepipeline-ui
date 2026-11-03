@@ -39,7 +39,7 @@ use tempfile::TempDir;
 
 use crate::stub_bin;
 
-const ROOT: &str = env!("CARGO_MANIFEST_DIR");
+pub(crate) const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
 /// The directory cargo-deny keeps its default database (RustSec's advisory-db)
 /// in under `$CARGO_HOME/advisory-dbs`, named for the hash of that URL. Placing
@@ -48,7 +48,7 @@ const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 const DEFAULT_DB_DIR: &str = "advisory-db-3157b0e258782691";
 
 /// The fixture database's advisories, with the crate version each matches.
-const VULN: &str = "RUSTSEC-2099-0001 fixture-vuln 1.0.0";
+pub(crate) const VULN: &str = "RUSTSEC-2099-0001 fixture-vuln 1.0.0";
 const LIB_2_1: &str = "RUSTSEC-2099-0002 fixture-lib 2.1.0";
 const LONG: &str = "RUSTSEC-2099-0003 fixture-whose-name-is-long-enough-to-overflow-a-status 1.0.0";
 /// The crate [`LONG`] is against: named beside the other two, the advisories
@@ -72,29 +72,29 @@ const CHECKSUM: &str = "5d5c5e5f000000000000000000000000000000000000000000000000
 
 /// One side of a change: the committed lockfile it resolves, the root crate's
 /// version, its exact dependencies, and which of them its source leaves unused.
-struct Side {
+pub(crate) struct Side {
     lock: &'static str,
     version: &'static str,
     deps: &'static [(&'static str, &'static str)],
     unused: &'static [&'static str],
 }
 
-const VULNERABLE: Side = Side {
+pub(crate) const VULNERABLE: Side = Side {
     lock: "vulnerable",
     version: "0.1.0",
     deps: &[("fixture-lib", "2.0.0"), ("fixture-vuln", "1.0.0")],
     unused: &[],
 };
-const CLEAN: Side = Side {
+pub(crate) const CLEAN: Side = Side {
     lock: "clean",
     version: "0.1.0",
     deps: &[("fixture-lib", "2.0.0")],
     unused: &[],
 };
 
-struct Project {
+pub(crate) struct Project {
     _dir: TempDir,
-    repo: PathBuf,
+    pub(crate) repo: PathBuf,
     home: PathBuf,
     gitconfig: PathBuf,
 }
@@ -145,7 +145,7 @@ fn write_side(repo: &Path, side: &Side) {
 
 /// A repository whose `origin/main` resolves `base` and whose checked-out branch
 /// resolves `head`, with the fixture database installed as cargo-deny's default.
-fn project(base: &Side, head: &Side) -> Project {
+pub(crate) fn project(base: &Side, head: &Side) -> Project {
     let dir = TempDir::new().expect("temp dir");
     let gitconfig = dir.path().join("gitconfig");
     fs::write(
@@ -265,14 +265,14 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-struct Run {
-    code: Option<i32>,
-    stdout: String,
-    stderr: String,
+pub(crate) struct Run {
+    pub(crate) code: Option<i32>,
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
 }
 
 impl Run {
-    fn all(&self) -> String {
+    pub(crate) fn all(&self) -> String {
         format!("{}\n{}", self.stdout, self.stderr)
     }
 }
@@ -301,7 +301,7 @@ fn script(project: &Project, args: &[&str]) -> Run {
     run_in(project, command, &[])
 }
 
-fn run_in(project: &Project, mut command: Command, env: &[(&str, &OsStr)]) -> Run {
+pub(crate) fn run_in(project: &Project, mut command: Command, env: &[(&str, &OsStr)]) -> Run {
     command
         .env("CARGO_HOME", &project.home)
         .env("CARGO_NET_OFFLINE", "true")
