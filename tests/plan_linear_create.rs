@@ -108,13 +108,14 @@ fn optional<'a>(input: &'a Value, field: &str) -> Result<Option<&'a str>, String
     }
 }
 
-fn page(rows: &[Value], first: &Value) -> Value {
-    let first = first.as_u64().map_or(rows.len(), |first| {
-        usize::try_from(first).unwrap_or(usize::MAX)
-    });
+fn page(rows: &[Value], first: &Value) -> Result<Value, String> {
+    let first = first
+        .as_u64()
+        .and_then(|first| usize::try_from(first).ok())
+        .ok_or_else(|| format!("a page size must be a whole number, not {first}"))?;
     let more = rows.len() > first;
-    json!({"nodes": rows.iter().take(first).collect::<Vec<_>>(),
-        "pageInfo": {"hasNextPage": more, "endCursor": if more { json!("more") } else { Value::Null }}})
+    Ok(json!({"nodes": rows.iter().take(first).collect::<Vec<_>>(),
+        "pageInfo": {"hasNextPage": more, "endCursor": if more { json!("more") } else { Value::Null }}}))
 }
 
 /// The filter a listing of the configured team's issues carries.
@@ -160,8 +161,8 @@ impl Workspace {
             // row held is an honest answer to the lookup.
             q if q == graphql::COUNTERPART_LOOKUPS => {
                 let mut data = resolution();
-                data["originIssues"] = page(&self.issues, &variables["issuesFirst"]);
-                data["originProjects"] = page(&self.projects, &variables["projectsFirst"]);
+                data["originIssues"] = page(&self.issues, &variables["issuesFirst"])?;
+                data["originProjects"] = page(&self.projects, &variables["projectsFirst"])?;
                 data
             }
             q if q == graphql::PROJECT || q == graphql::PROJECT_CACHED => {
@@ -189,7 +190,7 @@ impl Workspace {
             }
             // A team-wide listing, which every row of this one-team workspace answers.
             q if q == graphql::ISSUES && variables["filter"] == team_filter() => {
-                json!({"issues": page(&self.issues, &variables["first"])})
+                json!({"issues": page(&self.issues, &variables["first"])?})
             }
             // This workspace holds no document, so every read of one names nothing.
             q if q == graphql::DOCUMENT => {
