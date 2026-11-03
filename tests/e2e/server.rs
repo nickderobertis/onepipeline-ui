@@ -16903,6 +16903,215 @@ fn an_adopted_run_settles_a_store_copied_plan_launched_under_the_rendered_only_c
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+/// A run the pinned engine wrote from first record to last — launched by its
+/// `start` from a `local-md` project, each human action completed by its
+/// `attest` and each pass driven by its `adopt` — is served as that engine
+/// recorded it: the plan the run holds, every node's status at each point the
+/// run stopped, and its settlement, each read beside the engine's own record of
+/// it rather than beside anything this journey wrote.
+///
+/// Every node is a human action, so no agent is dispatched and nothing in the
+/// run stands in for anything: the store, the engine's verbs and this server
+/// are the whole of it. The one write asked of the server — attesting the
+/// sign-off before its approval is done — is refused by the engine this binary
+/// links in the words the CLI's own refusal uses, and leaves the run as it was.
+#[cfg(unix)]
+#[test]
+fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine_recorded_it() {
+    const SIGNOFF: &str = "signoff";
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let graph = write_node_scope_graph(&dir);
+    fixture_run::configure_local_md_store(&dir);
+    let approval = create_store_task(
+        &dir,
+        "Approve the change",
+        onetaskgraph_core::Body::plain("Approve the change."),
+        &[
+            ("onepipeline.id", json!(fixture_run::APPROVAL_NODE_ID)),
+            ("onepipeline.kind", json!("human")),
+        ],
+        &[],
+    );
+    create_store_task(
+        &dir,
+        "Sign off the change",
+        onetaskgraph_core::Body::plain("Sign off the approved change."),
+        &[
+            ("onepipeline.id", json!(SIGNOFF)),
+            ("onepipeline.kind", json!("human")),
+        ],
+        &[&approval],
+    );
+    let engine = |arguments: &[&str]| provisioned_onepipeline(&root, &dir, &graph, arguments);
+    let run = started_and_let_go(&engine(&[
+        "start",
+        &format!(
+            "{}:{}",
+            fixture_run::LOCAL_MD_SOURCE,
+            fixture_run::LOCAL_MD_PROJECT
+        ),
+        "--detach",
+    ]));
+    // What the engine itself says each node is, through its own `results`.
+    let recorded_statuses = || -> Value {
+        let printed: Value =
+            serde_json::from_slice(&engine(&["results", "--json", &run])).expect("results JSON");
+        printed["nodes"]
+            .as_array()
+            .expect("the engine's nodes")
+            .iter()
+            .map(|node| {
+                (
+                    node["id"].as_str().expect("a node id").to_owned(),
+                    node["status"].clone(),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>()
+            .into()
+    };
+    let engine_plan: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(&run).join("plan.json")).expect("the engine's plan"),
+    )
+    .expect("the engine's plan parses");
+
+    let serving = Serving::start_in_as_with_env(workspace, fixture_run::SESSION, &[]);
+    let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    let served_statuses = || detail()["graph"]["node_status"].clone();
+
+    // The plan served is the plan the engine launched: the same tasks, in the
+    // same order, of the same kinds, with the same dependency.
+    let launched = detail();
+    let tasks = |plan: &Value| -> Vec<(Value, Value, Value)> {
+        plan["tasks"]
+            .as_array()
+            .unwrap_or_else(|| panic!("a plan's tasks: {plan}"))
+            .iter()
+            .map(|task| {
+                (
+                    task["id"].clone(),
+                    task["kind"].clone(),
+                    task["deps"].clone(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        tasks(&launched["graph"]["plan"]),
+        tasks(&engine_plan),
+        "the served plan is not the one the engine launched: {}",
+        launched["graph"]["plan"]
+    );
+    assert_eq!(
+        tasks(&engine_plan),
+        vec![
+            (
+                json!(fixture_run::APPROVAL_NODE_ID),
+                json!("human"),
+                Value::Null
+            ),
+            (
+                json!(SIGNOFF),
+                json!("human"),
+                json!([fixture_run::APPROVAL_NODE_ID])
+            ),
+        ],
+        "{engine_plan}"
+    );
+    assert_eq!(
+        launched["graph"]["plan"]["goal"]["text"],
+        engine_plan["goal"]["text"]
+    );
+
+    // Stopped on the approval: the statuses served are the engine's.
+    let waiting = recorded_statuses();
+    assert_eq!(
+        waiting[fixture_run::APPROVAL_NODE_ID],
+        json!("waiting"),
+        "{waiting}"
+    );
+    assert_eq!(served_statuses(), waiting, "{}", detail()["graph"]);
+
+    // A sign-off attested before its approval is done is refused, as the CLI
+    // refuses it, and nothing about the run moves.
+    let premature = http::post(
+        serving.address,
+        &format!("/api/v2/runs/{run}/attest"),
+        &json!({ "reference": SIGNOFF }).to_string(),
+    );
+    assert_eq!(premature.status, 422, "{}", premature.body);
+    let premature = premature.json();
+    assert_eq!(premature["error"]["code"], json!("refused"), "{premature}");
+    assert!(
+        premature["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("is not a ready, waiting human action")),
+        "{premature}"
+    );
+    assert_eq!(served_statuses(), waiting);
+    assert_eq!(recorded_statuses(), waiting);
+
+    // Each action attested and each pass driven by the engine's own verbs; the
+    // server serves what each pass recorded.
+    engine(&["attest", &run, fixture_run::APPROVAL_NODE_ID]);
+    started_and_let_go(&engine(&["adopt", &run, "--detach"]));
+    let approved = recorded_statuses();
+    assert_eq!(
+        approved,
+        json!({ fixture_run::APPROVAL_NODE_ID: "done", SIGNOFF: "waiting" })
+    );
+    assert_eq!(served_statuses(), approved, "{}", detail()["graph"]);
+
+    engine(&["attest", &run, SIGNOFF]);
+    started_and_let_go(&engine(&["adopt", &run, "--detach"]));
+    let settled = recorded_statuses();
+    assert_eq!(
+        settled,
+        json!({ fixture_run::APPROVAL_NODE_ID: "done", SIGNOFF: "done" })
+    );
+    let served = detail();
+    assert_eq!(
+        served["graph"]["node_status"], settled,
+        "{}",
+        served["graph"]
+    );
+    assert_eq!(
+        served["run"]["state"],
+        json!("settled"),
+        "{}",
+        served["run"]
+    );
+
+    // The settlement the engine wrote is the one served: its result record's
+    // nodes, and the `results` rendering the CLI prints over the same run.
+    let result: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(&run).join("result.json")).expect("the engine's result"),
+    )
+    .expect("the engine's result parses");
+    assert_eq!(result["ok"], json!(true), "{result}");
+    for field in ["ok", "state"] {
+        assert_eq!(
+            served["graph"]["result"][field], result[field],
+            "the served result's {field} is not the engine's: {}",
+            served["graph"]["result"]
+        );
+    }
+    for node in result["nodes"].as_array().expect("the result's nodes") {
+        let id = node["id"].as_str().expect("a node id");
+        assert_eq!(served["graph"]["node_status"][id], node["status"], "{id}");
+    }
+    let results = http::get(serving.address, &format!("/api/v2/runs/{run}/results"));
+    assert_eq!(results.status, 200, "{}", results.body);
+    assert_eq!(
+        results.json()["rendered"],
+        json!(String::from_utf8_lossy(&engine(&["results", &run]))),
+        "the served results are not what the engine prints"
+    );
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 /// The harness stand-in a dispatch here runs: it records the argv it was given
 /// and the prompt it was handed, on one line, and answers as the adapter
 /// expects, so a journey can read back *that* it ran and *what as*.
