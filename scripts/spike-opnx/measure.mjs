@@ -308,13 +308,27 @@ const isCacheEntry = (e) =>
   Number.isInteger(e.id) &&
   typeof e.key === "string" &&
   typeof e.ref === "string" &&
-  Number.isInteger(e.size_in_bytes) &&
+  Number.isSafeInteger(e.size_in_bytes) &&
+  e.size_in_bytes >= 0 &&
   typeof e.created_at === "string" &&
   !Number.isNaN(Date.parse(e.created_at));
 // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
 // GITHUB_API_URL is the runner's own name for the REST base (GHES included).
+// The listing carries a token, so its base is https, or plain http only on loopback.
 const API = process.env.GITHUB_API_URL || "https://api.github.com";
+const apiAllowed = (() => {
+  try {
+    const url = new URL(API);
+    return (
+      url.protocol === "https:" ||
+      (url.protocol === "http:" &&
+        ["127.0.0.1", "localhost"].includes(url.hostname))
+    );
+  } catch {
+    return false;
+  }
+})();
 
 async function listStore(repo, token) {
   const entries = [];
@@ -345,7 +359,8 @@ async function listStore(repo, token) {
       };
     }
     if (
-      !Number.isInteger(body?.total_count) ||
+      !Number.isSafeInteger(body?.total_count) ||
+      body.total_count < 0 ||
       !Array.isArray(body.actions_caches) ||
       !body.actions_caches.every(isCacheEntry)
     )
@@ -497,7 +512,8 @@ const result = {
   sidecar: options.sidecar,
   store: options.store,
   readiness,
-  pinnedCommit: PINNED_COMMIT,
+  // Only a sidecar this command started is checked to be PINNED_COMMIT's bundle.
+  actionCommit: options.sidecar === "start" ? PINNED_COMMIT : "not verified",
   context: {
     os: process.platform,
     event: process.env.GITHUB_EVENT_NAME,
@@ -522,16 +538,19 @@ const result = {
 
 const repo = repository();
 const ghToken = githubToken();
-if (options.store === "live" && repo && ghToken) {
-  let listing = await listStore(repo, ghToken);
+const LISTING_ACTION =
+  "check GITHUB_TOKEN (or gh auth) can read the repository's Actions caches (actions: read), GITHUB_REPOSITORY, and GITHUB_API_URL; the measurement itself is unaffected";
+if (options.store === "live" && repo && ghToken && !apiAllowed)
+  result.store_listing = {
+    error: `GITHUB_API_URL '${API}' is neither https nor loopback http, so no token was sent`,
+    requests: 0,
+    action: LISTING_ACTION,
+  };
+else if (options.store === "live" && repo && ghToken) {
+  const listing = await listStore(repo, ghToken);
   const wanted = new Set(result.written.map((entry) => cacheKey(entry.hash)));
-  for (let tries = 0; tries < 3 && !listing.error; tries += 1) {
-    if ([...wanted].every((key) => listing.entries.some((e) => e.key === key)))
-      break;
-    await sleep(5000);
-    listing = await listStore(repo, ghToken);
-  }
-  if (listing.error) result.store_listing = listing;
+  if (listing.error)
+    result.store_listing = { ...listing, action: LISTING_ACTION };
   else {
     const nxEntries = listing.entries.filter((e) =>
       e.key.startsWith(cacheKey("")),
@@ -559,6 +578,11 @@ if (options.store === "live" && repo && ghToken) {
           bytes: e.size_in_bytes,
           created_at: e.created_at,
         })),
+      // Keys this run stored that one listing, taken once, did not show yet:
+      // the listing may lag a write, and a later listing is the way to see them.
+      writtenNotYetListed: [...wanted].filter(
+        (key) => !listing.entries.some((e) => e.key === key),
+      ),
       thisTask: nxEntries
         .filter((e) => log.some((entry) => e.key === cacheKey(entry.hash)))
         .map((e) => ({
@@ -590,6 +614,10 @@ if (options.out) {
   console.error(summary);
   process.stdout.write(json);
 }
+if (result.store_listing?.error) {
+  console.error(`measure: store listing: ${result.store_listing.error}`);
+  console.error(`ACTION: ${LISTING_ACTION}`);
+}
 if (process.env.GITHUB_STEP_SUMMARY) {
   const rows = log
     .map(
@@ -597,9 +625,18 @@ if (process.env.GITHUB_STEP_SUMMARY) {
         `| ${e.method} | ${e.hash} | ${e.status} | ${e.requestBytes} | ${e.responseBytes} | ${e.ms} |`,
     )
     .join("\n");
-  appendFileSync(
-    process.env.GITHUB_STEP_SUMMARY,
-    `### measure ${options.label ?? options.task}\n\nNx exit ${nxExit} in ${nxMs} ms; listing cost ${result.store_listing?.requests ?? "n/a"} request(s).\n\n| method | hash | status | request bytes | response bytes | ms |\n| --- | --- | --- | --- | --- | --- |\n${rows}\n\n`,
-  );
+  try {
+    appendFileSync(
+      process.env.GITHUB_STEP_SUMMARY,
+      `### measure ${options.label ?? options.task}\n\nNx exit ${nxExit} in ${nxMs} ms; listing cost ${result.store_listing?.requests ?? "n/a"} request(s).\n\n| method | hash | status | request bytes | response bytes | ms |\n| --- | --- | --- | --- | --- | --- |\n${rows}\n\n`,
+    );
+  } catch (error) {
+    console.error(
+      `measure: cannot append to GITHUB_STEP_SUMMARY ${process.env.GITHUB_STEP_SUMMARY}: ${error.message}`,
+    );
+    console.error(
+      "ACTION: unset GITHUB_STEP_SUMMARY or point it at a writable file; the record above is complete",
+    );
+  }
 }
 process.exit(nxExit ?? 1);

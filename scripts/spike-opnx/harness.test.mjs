@@ -309,6 +309,7 @@ test("measure drives a sidecar it did not start, at the URL and token the workfl
     );
     assert.equal(done.status, 0, done.stderr);
     const external = record("external.json");
+    assert.equal(external.actionCommit, "not verified");
     assert.equal(external.readiness.live, 401);
     assert.equal(external.readiness.authed, 404);
     assert.deepEqual(
@@ -483,6 +484,16 @@ test("measure reports a listing that fails or drifts from GitHub's shape as an e
       /did not have the documented shape/,
     ],
     [(_page, res) => res.end("not json"), /listing request failed/],
+    [
+      (_page, res) =>
+        res.end(
+          JSON.stringify({
+            total_count: 1,
+            actions_caches: [{ ...entry(1, "k"), size_in_bytes: -1 }],
+          }),
+        ),
+      /did not have the documented shape/,
+    ],
   ];
   for (const [answer, error] of cases) {
     const github = await listingServer(answer);
@@ -496,6 +507,8 @@ test("measure reports a listing that fails or drifts from GitHub's shape as an e
         },
       );
       assert.equal(done.status, 0, done.stderr);
+      assert.match(done.stderr, /^measure: store listing: /m);
+      assert.match(done.stderr, /^ACTION: check GITHUB_TOKEN/m);
       const listing = record("listing-error.json").store_listing;
       assert.match(listing.error, error);
       assert.equal(listing.requests, 1);
@@ -504,4 +517,39 @@ test("measure reports a listing that fails or drifts from GitHub's shape as an e
       github.server.close();
     }
   }
+});
+
+test("the experiment workflow starts the same op-nx/github-cache commit measure.mjs pins", () => {
+  const pinned = readFileSync(
+    join(ROOT, "scripts/spike-opnx/measure.mjs"),
+    "utf8",
+  ).match(/^const PINNED_COMMIT = "([0-9a-f]{40})";$/m)?.[1];
+  assert.ok(pinned, "measure.mjs declares PINNED_COMMIT");
+  const refs = [
+    ...readFileSync(
+      join(ROOT, "scripts/spike-opnx/experiment-workflow.yml"),
+      "utf8",
+    ).matchAll(/uses: op-nx\/github-cache\/start-cache-server@(\S+)/g),
+  ].map((m) => m[1]);
+  assert.ok(refs.length > 0);
+  assert.deepEqual([...new Set(refs)], [pinned]);
+});
+
+test("measure sends no token to a non-loopback http API base, and survives an unwritable step summary", () => {
+  const done = run(
+    "measure.mjs",
+    [...action, "--out", join(scratch, "plain-http.json")],
+    {
+      GITHUB_API_URL: "http://example.com",
+      GITHUB_REPOSITORY: "owner/name",
+      GITHUB_TOKEN: "t",
+      GITHUB_STEP_SUMMARY: join(scratch, "no-such-dir", "summary.md"),
+    },
+  );
+  assert.equal(done.status, 0, done.stderr);
+  const listing = record("plain-http.json").store_listing;
+  assert.equal(listing.requests, 0);
+  assert.match(listing.error, /neither https nor loopback http/);
+  assert.match(done.stderr, /cannot append to GITHUB_STEP_SUMMARY/);
+  assert.match(done.stderr, /^ACTION: unset GITHUB_STEP_SUMMARY/m);
 });

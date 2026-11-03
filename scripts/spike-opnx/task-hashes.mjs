@@ -88,7 +88,16 @@ async function capture(workspace, ids, out) {
     const task = graph.tasks[id];
     if (!task)
       missing(`it has ${Object.keys(graph.tasks).join(", ") || "none"}`);
-    const hash = await hasher.hashTask(task, graph, process.env);
+    let hash;
+    try {
+      hash = await hasher.hashTask(task, graph, process.env);
+    } catch (error) {
+      console.error(`task-hashes: Nx could not hash ${id}: ${error.message}`);
+      console.error(
+        "ACTION: run 'nx show project' for its project and fix the inputs Nx reports, then capture again",
+      );
+      process.exit(1);
+    }
     tasks[id] = { hash: hash.value, nodes: hash.details.nodes };
   }
   const record = `${JSON.stringify({ nx: nxVersion, tasks }, null, 2)}\n`;
