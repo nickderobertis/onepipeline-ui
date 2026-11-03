@@ -1,5 +1,12 @@
 name: spike-opnx-cache
 
+# KEPT OUT OF .github/workflows ON PURPOSE: it ran from there as
+# .github/workflows/spike-opnx-cache.yml at commits 8260c65, 850b8ce and 63a481a
+# (draft #602) and on the stacked demonstration #603, and was moved here once
+# those runs were captured, because this repository's ci-shape test admits no
+# workflow beyond its five. The only edit since is the Context step binding the
+# head repository through env: rather than interpolating it into the script.
+#
 # Throwaway experiment of spike `spike-opnx-audit` (plan ci-release-test-cache):
 # it runs on the spike's own draft pull request and its stacked demonstration
 # pull request, and never lands. Each leg starts op-nx/github-cache's sidecar as
@@ -33,9 +40,11 @@ jobs:
       - name: Install the workspace
         run: bash scripts/workspace-install.sh
       - name: Context
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           echo "event=$GITHUB_EVENT_NAME ref=$GITHUB_REF workspace=$GITHUB_WORKSPACE pwd=$PWD cache_mode=${ACTIONS_CACHE_MODE:-unset}"
-          echo "head=${{ github.event.pull_request.head.repo.full_name }} base=${{ github.repository }}"
+          echo "head=$HEAD_REPOSITORY base=$GITHUB_REPOSITORY"
       - name: Pre-set the Nx client's variables
         run: |
           echo "NX_SELF_HOSTED_REMOTE_CACHE_SERVER=http://127.0.0.1:3000" >> "$GITHUB_ENV"
