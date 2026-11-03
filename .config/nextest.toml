@@ -25,7 +25,7 @@ final-status-level = "fail"
 # The journeys a user drives — the binary as a subprocess, the server on a real
 # port, the browser view it serves. `onepipeline-ui-e2e:test`.
 [profile.e2e]
-default-filter = "binary(=e2e) and not test(/^(baseline|baseline_reuse|cost|ci_jobs|ci_tier|deps_audit|ensure_baseline|ensure_node_without_execve|ensure_sibling|judged_tier|linked_report|linux_wheel|nx_affected|packaging|release_probe|release_status|semver_check|workspace_install)::/)"
+default-filter = "binary(=e2e) and not test(/^(baseline|baseline_reuse|cost|ci_jobs|ci_tier|deps_audit|deps_audit_toolchain|ensure_baseline|ensure_node_without_execve|ensure_sibling|judged_tier|linked_report|linux_wheel|nx_affected|packaging|release_probe|release_status|semver_check|workspace_install)::/)"
 status-level = "fail"
 final-status-level = "fail"
 
@@ -80,6 +80,14 @@ final-status-level = "fail"
 # `just setup-llmlint` provides. `onepipeline-ui-judged-tier:test`.
 [profile.judged-tier]
 default-filter = "binary(=e2e) and test(/^judged_tier::/)"
+status-level = "fail"
+final-status-level = "fail"
+
+# deps-audit under a toolchain rustup installs on first use, or will not
+# install: the real rustup proxy, a RUSTUP_HOME of its own and a local
+# distribution server. `onepipeline-ui-deps-audit-toolchain:test`.
+[profile.deps-audit-toolchain]
+default-filter = "binary(=e2e) and test(/^deps_audit_toolchain::/)"
 status-level = "fail"
 final-status-level = "fail"
 

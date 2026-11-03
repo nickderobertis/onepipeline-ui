@@ -42,7 +42,7 @@ const SUITES_THAT_SERVE_THE_BASELINE: [&str; 1] = ["onepipeline-ui-baseline:test
 
 /// The crate's test tiers: the Nx project and target each runs as, and the
 /// nextest profile in `.config/nextest.toml` that selects its tests.
-const TIERS: [(&str, &str, &str); 10] = [
+const TIERS: [(&str, &str, &str); 11] = [
     ("onepipeline-ui", "test", "unit"),
     ("onepipeline-ui-e2e", "test", "e2e"),
     ("onepipeline-ui-repo-tooling", "test", "repo-tooling"),
@@ -53,6 +53,11 @@ const TIERS: [(&str, &str, &str); 10] = [
     ("onepipeline-ui-linked-report", "test", "linked-report"),
     ("onepipeline-ui-ci-jobs", "test", "ci-jobs"),
     ("onepipeline-ui-judged-tier", "test", "judged-tier"),
+    (
+        "onepipeline-ui-deps-audit-toolchain",
+        "test",
+        "deps-audit-toolchain",
+    ),
 ];
 
 const PROVISIONING: &str = "onepipeline-ui:ensure-baseline";
@@ -818,10 +823,10 @@ fn every_tier_is_keyed_by_every_module_its_journeys_read() {
 
 /// Every test runs under exactly one tier.
 ///
-/// The suite is ten Nx projects, each running its own nextest profile, and the
-/// ten filters are the halves of one partition: `unit` is every binary but the
+/// The suite is eleven Nx projects, each running its own nextest profile, and the
+/// eleven filters are the halves of one partition: `unit` is every binary but the
 /// two the other tiers draw on, and inside `e2e` the `e2e` profile is `not` what
-/// the other eight select. They are written as module lists in two places, so
+/// the other nine select. They are written as module lists in two places, so
 /// nothing but this holds them to each other — and either side drifting alone is
 /// silent: widen an exclusion and tests stop running under the coverage floor,
 /// narrow an inclusion and a whole tier is declared for and runs nowhere. The
@@ -845,7 +850,7 @@ fn the_tier_profiles_partition_the_suite() {
         .collect();
     let profiles = tier_profiles();
 
-    // Inside the `e2e` binary: the eight selections are disjoint, and the `e2e`
+    // Inside the `e2e` binary: the nine selections are disjoint, and the `e2e`
     // profile excludes exactly their union.
     let mut drawn = std::collections::BTreeSet::new();
     for profile in [
@@ -857,6 +862,7 @@ fn the_tier_profiles_partition_the_suite() {
         "linked-report",
         "ci-jobs",
         "judged-tier",
+        "deps-audit-toolchain",
     ] {
         for module in &profiles[profile].modules {
             assert!(
@@ -886,6 +892,7 @@ fn the_tier_profiles_partition_the_suite() {
         "linked-report",
         "ci-jobs",
         "judged-tier",
+        "deps-audit-toolchain",
     ]
     .iter()
     .flat_map(|profile| profiles[*profile].binaries.iter().cloned())

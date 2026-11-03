@@ -326,6 +326,31 @@ fn a_change_to_what_the_judged_tier_reads_selects_it_and_nothing_else_does() {
 }
 
 #[test]
+fn a_change_to_what_the_toolchain_journeys_read_selects_them_and_nothing_else_does() {
+    for path in ["scripts/deps-audit.mjs", "rust-toolchain.toml"] {
+        let workspace = Workspace::new();
+        let tasks = workspace.change(path).on_push();
+        assert!(
+            selected(&tasks, "onepipeline-ui-deps-audit-toolchain"),
+            "a change to {path} does not run the deps-audit toolchain journeys: {tasks:?}"
+        );
+    }
+    for path in [
+        ".github/workflows/ci.yml",
+        "src/lib.rs",
+        "apps/dag-ui/package.json",
+    ] {
+        let workspace = Workspace::new();
+        let tasks = workspace.change(path).on_push();
+        assert!(
+            !selected(&tasks, "onepipeline-ui-deps-audit-toolchain"),
+            "a change to {path} installs a toolchain through rustup, which reads nothing it \
+             changed: {tasks:?}"
+        );
+    }
+}
+
+#[test]
 fn a_change_to_a_journey_selects_its_tier_and_not_the_repository_machinery() {
     let workspace = Workspace::new();
     let tasks = workspace.change("tests/e2e/server.rs").on_push();
@@ -343,6 +368,7 @@ fn a_change_to_a_journey_selects_its_tier_and_not_the_repository_machinery() {
         "onepipeline-ui-cost",
         "onepipeline-ui-linked-report",
         "onepipeline-ui-judged-tier",
+        "onepipeline-ui-deps-audit-toolchain",
     ] {
         assert!(
             !selected(&tasks, tier),

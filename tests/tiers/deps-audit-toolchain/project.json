@@ -1,0 +1,32 @@
+{
+  "name": "onepipeline-ui-deps-audit-toolchain",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:tooling", "type:test", "lang:rust"],
+  "targets": {
+    "test": {
+      "command": "just _tier-test deps-audit-toolchain",
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
+      "inputs": [
+        "{workspaceRoot}/tests/e2e/main.rs",
+        "{workspaceRoot}/tests/e2e/deps_audit_toolchain.rs",
+        "{workspaceRoot}/tests/e2e/deps_audit.rs",
+        "{workspaceRoot}/tests/fixtures/deps-audit/**/*",
+        "{workspaceRoot}/scripts/deps-audit.mjs",
+        "{workspaceRoot}/deny.toml",
+        "{workspaceRoot}/rust-toolchain.toml",
+        "{workspaceRoot}/justfile",
+        "{workspaceRoot}/.config/nextest.toml",
+        "{projectRoot}/project.json"
+      ]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  }
+}
