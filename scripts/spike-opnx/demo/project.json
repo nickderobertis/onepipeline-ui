@@ -1,0 +1,13 @@
+{
+  "name": "spike-opnx-demo",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "tags": ["scope:tooling"],
+  "targets": {
+    "probe": {
+      "command": "node -e \"console.log('spike-opnx demo probe')\"",
+      "cache": true,
+      "inputs": ["{projectRoot}/**/*"]
+    }
+  }
+}

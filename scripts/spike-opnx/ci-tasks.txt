@@ -1,1 +1,2 @@
 dag-model:test
+spike-opnx-demo:probe
