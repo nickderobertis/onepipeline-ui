@@ -226,7 +226,6 @@ function basePackages(rev) {
 // resolved first, by a call whose output is shown and not read, and the call
 // read below prints only what cargo-deny does.
 function advisoriesCheck() {
-  // llmlint: ignore-block[changed_behavior_has_e2e] tests/e2e/deps_audit.rs drives this through the real recipe, script, cargo and cargo-deny, standing in only for rustup's first-use installation: a real one downloads a whole toolchain from static.rust-lang.org, hundreds of megabytes per journey, which that offline suite cannot fetch. The stand-in prints the lines the `advisories` job recorded on main, and the journey fails without this block.
   const toolchain = spawnSync("cargo", ["--version"], {
     encoding: "utf8",
     stdio: ["ignore", "ignore", "inherit"],
@@ -243,7 +242,6 @@ function advisoriesCheck() {
         `'cargo --version' exited ${toolchain.status} resolving the toolchain cargo-deny runs under (its output is above)`,
       ],
     };
-  // llmlint: ignore-end[changed_behavior_has_e2e]
   const result = run("cargo", [
     "deny",
     "--locked",
