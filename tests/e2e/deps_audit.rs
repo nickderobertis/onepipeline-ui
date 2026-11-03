@@ -25,6 +25,14 @@
 //! one). Both are stand-ins from `support/stub_bin.rs`, so the script is the real
 //! script and what it asked for, or was answered, is readable here.
 //!
+//! A third, `cargo` as rustup's proxy, stands in for rustup installing a pinned
+//! toolchain on first use, and for refusing to. The real installation downloads
+//! a whole toolchain from static.rust-lang.org, hundreds of megabytes and minutes
+//! per journey, which this offline suite cannot fetch. What the script has to
+//! survive is only what that installation prints, so the stand-in prints the
+//! lines the `advisories` job's log recorded on `main` (job 125735334189) on the
+//! stderr cargo-deny then writes to, and runs the real cargo after.
+//!
 //! Linux only: the audit's one runner is the Linux `lint` job, and what it
 //! decides — which lockfile resolved which version — is not a property of the
 //! platform. `test-linux` installs the two tools these journeys fail without.

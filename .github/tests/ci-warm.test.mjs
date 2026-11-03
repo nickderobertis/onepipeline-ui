@@ -12,7 +12,19 @@
 // warmer's own `scripts/ci-warm.sh <os> --plan`, both ways round.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
 
@@ -710,4 +722,65 @@ test("a compile the warmer drops, changes or invents is refused", () => {
       ),
     ),
   );
+});
+
+// `scripts/ci-warm.sh linux` run for real from a scratch root holding a copy of
+// it and a tree restored from a cache saved before the wheel smoke moved out of
+// `target`. The compilers it hands its lines to (`just`, `cargo`, and the `bash`
+// that runs Nx) are recording stand-ins on PATH: each line is minutes of
+// compiling, and what is under test is what the script does around them.
+function warmFromScratch(args) {
+  const root = mkdtempSync(join(tmpdir(), "ci-warm-legacy-"));
+  mkdirSync(join(root, "scripts"));
+  copyFileSync("scripts/ci-warm.sh", join(root, "scripts/ci-warm.sh"));
+  const legacy = join(
+    root,
+    "target/wheel-smoke/venv/lib/python3.12/site-packages/pip/_vendor/colorama/tests",
+  );
+  mkdirSync(legacy, { recursive: true });
+  writeFileSync(join(legacy, "__init__.py"), "");
+  const build = join(root, "target/wheel-x86_64-unknown-linux-gnu");
+  mkdirSync(build, { recursive: true });
+  const bin = join(root, "stand-ins");
+  mkdirSync(bin);
+  const calls = join(root, "calls.log");
+  for (const name of ["just", "cargo", "bash"]) {
+    writeFileSync(
+      join(bin, name),
+      `#!/bin/sh\necho "${name} $*" >> '${calls}'\n`,
+    );
+    chmodSync(join(bin, name), 0o755);
+  }
+  const run = spawnSync(
+    "/bin/bash",
+    [join(root, "scripts/ci-warm.sh"), "linux", ...args],
+    {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    },
+  );
+  const result = {
+    run,
+    legacy: existsSync(join(root, "target/wheel-smoke")),
+    build: existsSync(build),
+    calls: existsSync(calls) ? readFileSync(calls, "utf8") : "",
+  };
+  rmSync(root, { recursive: true, force: true });
+  return result;
+}
+
+test("the Linux warm drops the wheel smoke's old tree from what it saves, and its plan touches nothing", () => {
+  const warmed = warmFromScratch([]);
+  assert.equal(warmed.run.status, 0, warmed.run.stderr);
+  assert.match(
+    warmed.calls,
+    /^just wheel-linux x86_64-unknown-linux-gnu \.tools\/wheel-smoke$/m,
+  );
+  assert.equal(warmed.legacy, false, "target/wheel-smoke survived the warm");
+  assert.equal(warmed.build, true, "the warm removed cargo's wheel build");
+
+  const planned = warmFromScratch(["--plan"]);
+  assert.equal(planned.run.status, 0, planned.run.stderr);
+  assert.equal(planned.calls, "", "--plan ran a compile");
+  assert.equal(planned.legacy, true, "--plan removed target/wheel-smoke");
 });
