@@ -1,4 +1,5 @@
 name: spike-opnx-cache
+# llmlint: ignore-file[work_goes_through_command_surface] these legs need only the Node workspace that scripts/workspace-install.sh (the install `just bootstrap` runs first) provides; `just bootstrap` would also provision the Rust sibling CLI, which no step here runs, and this copy is kept as the experiment that actually ran.
 # llmlint: ignore-file[contracts_have_one_source_or_a_drift_gate] a `uses:` ref must be a literal, so each leg repeats op-nx/github-cache's commit; harness.test.mjs holds every one to measure.mjs's PINNED_COMMIT, and this copy runs only from a throwaway pull request, never from this path or this repository's gate.
 
 # Not under .github/workflows: this repository's ci-shape test admits only its

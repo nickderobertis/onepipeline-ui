@@ -400,44 +400,49 @@ if (options.sidecar === "external") {
 }
 if (options.sidecar === "start") {
   ensureAction(options.action);
-  const probe = createServer();
-  const port = await listen(probe);
-  await new Promise((done) => probe.close(done));
-  sidecarUrl = `http://127.0.0.1:${port}`;
   token = sidecarToken;
-  const env = {
-    ...process.env,
-    INPUT_PORT: String(port),
-    NX_SELF_HOSTED_REMOTE_CACHE_SERVER: sidecarUrl,
-    NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: token,
-  };
-  if (options.store !== "live") {
-    store = await startStore(options.store);
-    Object.assign(env, {
-      GITHUB_ACTIONS: "true",
-      GITHUB_EVENT_NAME: env.GITHUB_EVENT_NAME || "push",
-      GITHUB_SERVER_URL: "https://github.com",
-      GITHUB_REPOSITORY: env.GITHUB_REPOSITORY || repository(),
-      GITHUB_WORKSPACE: ROOT,
-      RUNNER_TEMP:
-        env.RUNNER_TEMP || mkdtempSync(join(tmpdir(), "spike-opnx-runner-")),
-      GITHUB_TOKEN: env.GITHUB_TOKEN || "injected-store-case",
-      ACTIONS_CACHE_SERVICE_V2: "true",
-      ACTIONS_RESULTS_URL: store.url,
-      ACTIONS_RUNTIME_TOKEN: "injected-store-case",
-    });
-  }
+  if (options.store !== "live") store = await startStore(options.store);
   const out = join(sidecarLog, "sidecar.log");
-  writeFileSync(out, "");
-  sidecar = spawn(
-    process.execPath,
-    [join(options.action, "start-cache-server/index.js")],
-    { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] },
-  );
-  sidecar.stdout.on("data", (chunk) => appendFileSync(out, chunk));
-  sidecar.stderr.on("data", (chunk) => appendFileSync(out, chunk));
-  readiness = await ready(sidecarUrl, token);
-  if (readiness.live !== 401) {
+  // A free port is chosen by binding and releasing it, so another process can
+  // take it before the sidecar binds; an answer that is not the sidecar's 401
+  // is that process, and a fresh port is tried.
+  for (let attempt = 1; ; attempt += 1) {
+    const probe = createServer();
+    const port = await listen(probe);
+    await new Promise((done) => probe.close(done));
+    sidecarUrl = `http://127.0.0.1:${port}`;
+    const env = {
+      ...process.env,
+      INPUT_PORT: String(port),
+      NX_SELF_HOSTED_REMOTE_CACHE_SERVER: sidecarUrl,
+      NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: token,
+    };
+    if (store)
+      Object.assign(env, {
+        GITHUB_ACTIONS: "true",
+        GITHUB_EVENT_NAME: env.GITHUB_EVENT_NAME || "push",
+        GITHUB_SERVER_URL: "https://github.com",
+        GITHUB_REPOSITORY: env.GITHUB_REPOSITORY || repository(),
+        GITHUB_WORKSPACE: ROOT,
+        RUNNER_TEMP:
+          env.RUNNER_TEMP || mkdtempSync(join(tmpdir(), "spike-opnx-runner-")),
+        GITHUB_TOKEN: env.GITHUB_TOKEN || "injected-store-case",
+        ACTIONS_CACHE_SERVICE_V2: "true",
+        ACTIONS_RESULTS_URL: store.url,
+        ACTIONS_RUNTIME_TOKEN: "injected-store-case",
+      });
+    writeFileSync(out, "");
+    sidecar = spawn(
+      process.execPath,
+      [join(options.action, "start-cache-server/index.js")],
+      { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    sidecar.stdout.on("data", (chunk) => appendFileSync(out, chunk));
+    sidecar.stderr.on("data", (chunk) => appendFileSync(out, chunk));
+    readiness = await ready(sidecarUrl, token);
+    if (readiness.live === 401) break;
+    sidecar.kill("SIGTERM");
+    if (readiness.live !== 0 && attempt < 3) continue;
     console.error(
       `measure: the sidecar never answered (last ${readiness.live}); its log is ${out}`,
     );
@@ -445,7 +450,6 @@ if (options.sidecar === "start") {
       "ACTION: read the sidecar log; --sidecar none measures a sidecar that is down",
     );
     console.error(readFileSync(out, "utf8"));
-    sidecar.kill("SIGTERM");
     store?.close();
     process.exit(1);
   }
@@ -462,14 +466,11 @@ if (options.sidecar === "none") {
 const proxyUrl = await startProxy(sidecarUrl, log);
 const nxCache = mkdtempSync(join(tmpdir(), "spike-opnx-nx-cache-"));
 const nxBegun = Date.now();
+// Through the repository's own Nx entry point, which installs the workspace
+// and runs its pinned Nx.
 const nx = spawn(
-  process.execPath,
-  [
-    join(ROOT, "node_modules/nx/dist/bin/nx.js"),
-    "run",
-    options.task,
-    "--outputStyle=static",
-  ],
+  "bash",
+  [join(ROOT, "scripts/nx.sh"), "run", options.task, "--outputStyle=static"],
   {
     cwd: ROOT,
     stdio: ["ignore", "pipe", "pipe"],

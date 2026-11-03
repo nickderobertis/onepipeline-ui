@@ -709,3 +709,94 @@ test("measure accounts a stored write and its replay byte for byte, and attribut
     github.server.close();
   }
 });
+
+test("measure refuses incomplete or contradictory options as usage errors", () => {
+  for (const args of [
+    ["--task"],
+    ["--sidecar", "sometimes"],
+    ["--store", "full", "--sidecar", "none"],
+  ]) {
+    const refused = run("measure.mjs", args);
+    assert.equal(refused.status, 2, `${args.join(" ")}: ${refused.stderr}`);
+    assert.match(refused.stderr, /^ACTION: /m);
+  }
+});
+
+test("measure names a failed git step, a sidecar that never comes up, and an unwritable record", () => {
+  const notGit = mkdtempSync(join(scratch, "not-git-"));
+  spawnSync("mkdir", ["-p", join(notGit, "start-cache-server")]);
+  writeFileSync(join(notGit, "start-cache-server/index.js"), "");
+  const gitFailed = run("measure.mjs", ["--action", notGit], {
+    GIT_CEILING_DIRECTORIES: scratch,
+  });
+  assert.equal(gitFailed.status, 1);
+  assert.match(gitFailed.stderr, /git rev-parse HEAD failed/);
+  assert.match(gitFailed.stderr, /^ACTION: /m);
+
+  // A write-trusted context with a malformed repository: the sidecar refuses to start.
+  const never = run("measure.mjs", action, {
+    GITHUB_ACTIONS: "true",
+    GITHUB_EVENT_NAME: "push",
+    GITHUB_SERVER_URL: "https://github.com",
+    GITHUB_REPOSITORY: "not a repository",
+    GITHUB_TOKEN: "t",
+  });
+  assert.equal(never.status, 1);
+  assert.match(never.stderr, /the sidecar never answered/);
+  assert.match(never.stderr, /GITHUB_REPOSITORY must be a valid owner\/name/);
+
+  const unwritable = run("measure.mjs", [
+    "--sidecar",
+    "none",
+    "--out",
+    join(scratch, "no-such-dir", "x.json"),
+  ]);
+  assert.equal(unwritable.status, 1);
+  assert.match(unwritable.stderr, /cannot write/);
+  assert.match(unwritable.stderr, /^ACTION: pass --out/m);
+});
+
+test("task-hashes prints a capture record on stdout without --out, refuses --out with no path, and names a project configuration Nx cannot read", () => {
+  const printed = run("task-hashes.mjs", ["capture", ROOT, "dag-model:test"]);
+  assert.equal(printed.status, 0, printed.stderr);
+  assert.match(
+    JSON.parse(printed.stdout).tasks["dag-model:test"].hash,
+    /^\d+$/,
+  );
+  const noPath = run("task-hashes.mjs", [
+    "capture",
+    ROOT,
+    "dag-model:test",
+    "--out",
+  ]);
+  assert.equal(noPath.status, 2);
+  assert.match(noPath.stderr, /--out needs a path/);
+
+  const project = join(ROOT, "scripts/spike-opnx/unhashable-probe");
+  spawnSync("mkdir", ["-p", project]);
+  writeFileSync(
+    join(project, "project.json"),
+    JSON.stringify({
+      name: "spike-opnx-unhashable-probe",
+      targets: {
+        probe: { command: "true", inputs: [{ runtime: 7 }] },
+      },
+    }),
+  );
+  let unhashable;
+  try {
+    unhashable = run("task-hashes.mjs", [
+      "capture",
+      ROOT,
+      "spike-opnx-unhashable-probe:probe",
+    ]);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+  assert.equal(unhashable.status, 1, unhashable.stdout);
+  assert.match(unhashable.stderr, /Nx could not read .*project graph/);
+  assert.match(
+    unhashable.stderr,
+    /^ACTION: fix the nx\.json or project\.json/m,
+  );
+});

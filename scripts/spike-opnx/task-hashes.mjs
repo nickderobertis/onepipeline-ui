@@ -33,6 +33,9 @@ async function capture(workspace, ids, out) {
   process.env.NX_DAEMON = "false";
   process.env.NX_WORKSPACE_ROOT_PATH = root;
   let createTaskGraph;
+  let createProjectGraphAsync;
+  let readNxJson;
+  let createTaskHasher;
   let projectGraph;
   let hasher;
   let nxVersion;
@@ -40,24 +43,31 @@ async function capture(workspace, ids, out) {
     process.chdir(root);
     const require = createRequire(`${root}/package.json`);
     const load = (path) => import(pathToFileURL(require.resolve(path)).href);
-    const { createProjectGraphAsync } = await load("nx/src/devkit-exports.js");
-    const { readNxJson } = await load("nx/src/config/nx-json.js");
+    ({ createProjectGraphAsync } = await load("nx/src/devkit-exports.js"));
+    ({ readNxJson } = await load("nx/src/config/nx-json.js"));
     ({ createTaskGraph } = await load(
       "nx/src/tasks-runner/create-task-graph.js",
     ));
-    const { createTaskHasher } = await load(
-      "nx/src/hasher/create-task-hasher.js",
-    );
+    ({ createTaskHasher } = await load("nx/src/hasher/create-task-hasher.js"));
     nxVersion = JSON.parse(
       readFileSync(require.resolve("nx/package.json"), "utf8"),
     ).version;
-    projectGraph = await createProjectGraphAsync({ exitOnError: true });
-    const nxJson = readNxJson(root);
-    hasher = createTaskHasher(projectGraph, nxJson);
   } catch (error) {
     console.error(`task-hashes: cannot load Nx from ${root}: ${error.message}`);
     console.error(
       "ACTION: install the workspace's dependencies (its bootstrap or workspace-install script) and name the directory holding nx.json",
+    );
+    process.exit(1);
+  }
+  try {
+    projectGraph = await createProjectGraphAsync({ exitOnError: true });
+    hasher = createTaskHasher(projectGraph, readNxJson(root));
+  } catch (error) {
+    console.error(
+      `task-hashes: Nx could not read ${root}'s project graph: ${error.message}`,
+    );
+    console.error(
+      "ACTION: fix the nx.json or project.json Nx names, check it with 'nx show projects', then capture again",
     );
     process.exit(1);
   }
