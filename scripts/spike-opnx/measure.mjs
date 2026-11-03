@@ -102,6 +102,7 @@ const listen = (server) =>
     server.listen(0, "127.0.0.1", () => done(server.address().port)),
   );
 
+// llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] a deliberate stand-in for GitHub's cache service, whose only definition is the @actions/cache 6.2.0 client bundled in the action at PINNED_COMMIT; nothing importable exists, and ensureAction refuses any other commit, so the bundle these answers were written against is the one that reads them.
 // A stand-in for the Actions cache service (twirp v2) that faults or is full.
 async function startStore(mode) {
   if (mode === "down") {
@@ -136,25 +137,46 @@ async function startStore(mode) {
     close: () => server.close(),
   };
 }
+// llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
+// The figures name PINNED_COMMIT, so a checkout at any other commit is refused
+// rather than measured under that name.
 function ensureAction(dir) {
-  if (existsSync(join(dir, "start-cache-server/index.js"))) return;
-  execFileSync("git", [
-    "clone",
-    "--quiet",
-    "https://github.com/op-nx/github-cache.git",
-    dir,
-  ]);
-  execFileSync("git", ["-C", dir, "checkout", "--quiet", PINNED_COMMIT]);
+  if (!existsSync(join(dir, "start-cache-server/index.js"))) {
+    execFileSync("git", [
+      "clone",
+      "--quiet",
+      "https://github.com/op-nx/github-cache.git",
+      dir,
+    ]);
+    execFileSync("git", ["-C", dir, "checkout", "--quiet", PINNED_COMMIT]);
+  }
+  const head = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+  if (head !== PINNED_COMMIT) {
+    console.error(
+      `measure: ${dir} is at ${head}, not op-nx/github-cache ${PINNED_COMMIT}`,
+    );
+    console.error(
+      `ACTION: run 'git -C ${dir} checkout ${PINNED_COMMIT}', or pass --action with a checkout at that commit`,
+    );
+    process.exit(1);
+  }
 }
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+// llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the two names this harness reads the sidecar and the store by: Nx's self-hosted cache route, and op-nx/github-cache's `cacheKeyFor` (packages/github-cache/src/lib/cache-key.ts). Both are TypeScript or Rust in projects this repository does not build, and ensureAction pins the one commit whose key these figures describe; a different key would show as entries the listing never finds.
+const cacheRoute = (hash) => `/v1/cache/${hash}`;
+const cacheKey = (hash) => `nx-cache-${hash}`;
+// llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
 // The status of a GET on an unknown hash: unauthenticated it is answered 401
 // before the store is touched (liveness); authenticated it reaches the store.
 async function status(url, token, timeoutMs = 10_000) {
   try {
-    const res = await fetch(`${url}/v1/cache/deadbeef`, {
+    const res = await fetch(`${url}${cacheRoute("deadbeef")}`, {
       headers: token ? { authorization: `Bearer ${token}` } : {},
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -180,7 +202,8 @@ async function ready(url, token) {
   return { live, authed, authedMs: Date.now() - begun };
 }
 
-// Forwards Nx's requests to the sidecar and records each one.
+// Nx's own output names neither the hash it asked for nor the status it got,
+// so a replay and a write are told apart here, on the wire.
 async function startProxy(target, log) {
   const server = createServer((req, res) => {
     const begun = Date.now();
@@ -231,21 +254,34 @@ function githubToken() {
   }
 }
 
+// owner/name, as GitHub spells it; anything else is not interpolated into a URL.
+const REPOSITORY = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/;
 function repository() {
-  if (process.env.GITHUB_REPOSITORY) return process.env.GITHUB_REPOSITORY;
-  try {
-    const url = execFileSync(
-      "git",
-      ["-C", ROOT, "remote", "get-url", "origin"],
-      {
-        encoding: "utf8",
-      },
-    ).trim();
-    return url.match(/github\.com[:/](.+?)(?:\.git)?$/)?.[1];
-  } catch {
-    return undefined;
+  let named = process.env.GITHUB_REPOSITORY;
+  if (!named) {
+    try {
+      const url = execFileSync(
+        "git",
+        ["-C", ROOT, "remote", "get-url", "origin"],
+        { encoding: "utf8" },
+      ).trim();
+      named = url.match(/github\.com[:/](.+?)(?:\.git)?$/)?.[1];
+    } catch {
+      return undefined;
+    }
   }
+  return named && REPOSITORY.test(named) ? named : undefined;
 }
+
+// A listing entry carries what the report reads, with the types it reads them as.
+const isCacheEntry = (e) =>
+  e !== null &&
+  typeof e === "object" &&
+  Number.isInteger(e.id) &&
+  typeof e.key === "string" &&
+  typeof e.ref === "string" &&
+  Number.isInteger(e.size_in_bytes) &&
+  typeof e.created_at === "string";
 
 // One listing of the store: every Actions-cache entry, 100 a page.
 async function listStore(repo, token) {
@@ -266,6 +302,15 @@ async function listStore(repo, token) {
     );
     if (!res.ok) return { error: `HTTP ${res.status}`, requests };
     const body = await res.json();
+    if (
+      !Number.isInteger(body?.total_count) ||
+      !Array.isArray(body.actions_caches) ||
+      !body.actions_caches.every(isCacheEntry)
+    )
+      return {
+        error: "the listing did not have the documented shape",
+        requests,
+      };
     total = body.total_count;
     entries.push(...body.actions_caches);
     if (body.actions_caches.length < 100 || entries.length >= total) break;
@@ -281,10 +326,17 @@ let sidecar;
 let store;
 let readiness;
 const sidecarLog = mkdtempSync(join(tmpdir(), "spike-opnx-sidecar-"));
-if (options.sidecar === "external" && (!sidecarUrl || !token))
-  usage(
-    "--sidecar external needs NX_SELF_HOSTED_REMOTE_CACHE_SERVER and _ACCESS_TOKEN",
-  );
+if (options.sidecar === "external") {
+  if (!sidecarUrl || !token)
+    usage(
+      "--sidecar external needs NX_SELF_HOSTED_REMOTE_CACHE_SERVER and _ACCESS_TOKEN",
+    );
+  // The bearer token is forwarded to this URL, so only a loopback sidecar is accepted.
+  if (!/^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}$/.test(sidecarUrl))
+    usage(
+      `NX_SELF_HOSTED_REMOTE_CACHE_SERVER is '${sidecarUrl}', not a loopback http://127.0.0.1:<port>`,
+    );
+}
 if (options.sidecar === "start") {
   ensureAction(options.action);
   const probe = createServer();
@@ -425,9 +477,7 @@ const repo = repository();
 const ghToken = githubToken();
 if (options.store === "live" && repo && ghToken) {
   let listing = await listStore(repo, ghToken);
-  const wanted = new Set(
-    result.written.map((entry) => `nx-cache-${entry.hash}`),
-  );
+  const wanted = new Set(result.written.map((entry) => cacheKey(entry.hash)));
   for (let tries = 0; tries < 3 && !listing.error; tries += 1) {
     if ([...wanted].every((key) => listing.entries.some((e) => e.key === key)))
       break;
@@ -437,7 +487,7 @@ if (options.store === "live" && repo && ghToken) {
   if (listing.error) result.store_listing = listing;
   else {
     const nxEntries = listing.entries.filter((e) =>
-      e.key.startsWith("nx-cache-"),
+      e.key.startsWith(cacheKey("")),
     );
     result.store_listing = {
       requests: listing.requests,
@@ -445,8 +495,16 @@ if (options.store === "live" && repo && ghToken) {
       bytes: listing.entries.reduce((sum, e) => sum + e.size_in_bytes, 0),
       nxEntries: nxEntries.length,
       nxBytes: nxEntries.reduce((sum, e) => sum + e.size_in_bytes, 0),
-      createdByThisRun: nxEntries
-        .filter((e) => wanted.has(e.key) && new Date(e.created_at) >= started)
+      // An entry under a key this run's PUT stored (200), created after this
+      // run started, in this run's ref when the run has one: the Actions cache
+      // records no producer, so this is the closest attribution it allows.
+      storedByThisRun: nxEntries
+        .filter(
+          (e) =>
+            wanted.has(e.key) &&
+            new Date(e.created_at) >= started &&
+            (!process.env.GITHUB_REF || e.ref === process.env.GITHUB_REF),
+        )
         .map((e) => ({
           id: e.id,
           key: e.key,
@@ -455,7 +513,7 @@ if (options.store === "live" && repo && ghToken) {
           created_at: e.created_at,
         })),
       thisTask: nxEntries
-        .filter((e) => log.some((entry) => e.key === `nx-cache-${entry.hash}`))
+        .filter((e) => log.some((entry) => e.key === cacheKey(entry.hash)))
         .map((e) => ({
           id: e.id,
           key: e.key,
@@ -469,8 +527,15 @@ if (sidecar) result.sidecarLog = join(sidecarLog, "sidecar.log");
 rmSync(nxCache, { recursive: true, force: true });
 
 const json = `${JSON.stringify(result, null, 2)}\n`;
-if (options.out) writeFileSync(options.out, json);
-console.log(`measure: ${json}`);
+const count = (list, code) => list.filter((e) => e.status === code).length;
+const summary = `measure: ${options.label ?? options.task}: Nx exit ${nxExit} in ${nxMs} ms; GET 200 x${count(gets, 200)}, GET 404 x${count(gets, 404)}; PUT ${puts.map((e) => e.status).join(",") || "none"}; ${result.written.map((e) => `${e.hash} ${e.bytes} B`).join(", ") || "nothing written"}; listing ${result.store_listing?.requests ?? "not taken"} request(s)`;
+if (options.out) {
+  writeFileSync(options.out, json);
+  console.log(`${summary}; record ${options.out}`);
+} else {
+  console.error(summary);
+  process.stdout.write(json);
+}
 if (process.env.GITHUB_STEP_SUMMARY) {
   const rows = log
     .map(

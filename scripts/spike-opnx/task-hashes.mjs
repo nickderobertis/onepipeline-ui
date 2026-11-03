@@ -13,7 +13,8 @@
 // and prints (or writes) {nx, tasks: {<id>: {hash, nodes}}}: `nodes` is Nx's
 // per-input breakdown, so `diff` can name the inputs that moved each hash.
 // `diff` prints one line per task: `same <id>` or `moved <id>: <input>, ...`.
-// Exit 0 on success, 2 on a usage error, 1 when a task is not in the graph.
+// Exit 0 on success, 2 on a usage error, 1 when a task is not in the graph or
+// a record is unreadable or names a task the other does not.
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
@@ -78,14 +79,47 @@ async function capture(workspace, ids, out) {
   else process.stdout.write(record);
 }
 
+// A record is what `capture` writes: {tasks: {<id>: {hash: string, nodes: {...}}}}.
+function readRecord(path) {
+  let record;
+  try {
+    record = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    console.error(`task-hashes: cannot read ${path}: ${error.message}`);
+    console.error("ACTION: pass a record written by 'task-hashes.mjs capture'");
+    process.exit(1);
+  }
+  const tasks = record?.tasks;
+  const valid =
+    tasks !== null &&
+    typeof tasks === "object" &&
+    Object.values(tasks).every(
+      (task) =>
+        typeof task?.hash === "string" &&
+        task.nodes !== null &&
+        typeof task.nodes === "object",
+    );
+  if (!valid) {
+    console.error(`task-hashes: ${path} is not a capture record`);
+    console.error("ACTION: pass a record written by 'task-hashes.mjs capture'");
+    process.exit(1);
+  }
+  return tasks;
+}
+
 function diff(beforePath, afterPath) {
-  const before = JSON.parse(readFileSync(beforePath, "utf8")).tasks;
-  const after = JSON.parse(readFileSync(afterPath, "utf8")).tasks;
+  const before = readRecord(beforePath);
+  const after = readRecord(afterPath);
+  const unmatched = [
+    ...Object.keys(before)
+      .filter((id) => !after[id])
+      .map((id) => `${id} is only in ${beforePath}`),
+    ...Object.keys(after)
+      .filter((id) => !before[id])
+      .map((id) => `${id} is only in ${afterPath}`),
+  ];
   for (const id of Object.keys(before).sort()) {
-    if (!after[id]) {
-      console.log(`missing ${id}`);
-      continue;
-    }
+    if (!after[id]) continue;
     if (before[id].hash === after[id].hash) {
       console.log(`same ${id} ${before[id].hash}`);
       continue;
@@ -100,6 +134,13 @@ function diff(beforePath, afterPath) {
     console.log(
       `moved ${id} ${before[id].hash} -> ${after[id].hash}: ${moved.join(", ")}`,
     );
+  }
+  if (unmatched.length > 0) {
+    for (const line of unmatched) console.error(`task-hashes: ${line}`);
+    console.error(
+      "ACTION: capture both states with the same task list, so every task is compared",
+    );
+    process.exit(1);
   }
 }
 

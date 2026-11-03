@@ -1,11 +1,8 @@
 name: spike-opnx-cache
 
-# KEPT OUT OF .github/workflows ON PURPOSE: it ran from there as
-# .github/workflows/spike-opnx-cache.yml at commits 8260c65, 850b8ce and 63a481a
-# (draft #602) and on the stacked demonstration #603, and was moved here once
-# those runs were captured, because this repository's ci-shape test admits no
-# workflow beyond its five. The only edit since is the Context step binding the
-# head repository through env: rather than interpolating it into the script.
+# Not under .github/workflows: this repository's ci-shape test admits only its
+# five workflows, so this experiment runs only from a throwaway pull request that
+# copies it there, and it never lands.
 #
 # Throwaway experiment of spike `spike-opnx-audit` (plan ci-release-test-cache):
 # it runs on the spike's own draft pull request and its stacked demonstration
