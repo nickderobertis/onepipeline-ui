@@ -6,12 +6,15 @@
 //! plugin's own constants, and answers them as Linear does: a read of an id it does not hold is
 //! an errored `Entity not found: <kind>` rather than a null, and a create under an id a record
 //! already holds — a deleted one's included — is refused under HTTP 200 with
-//! `conflict on insert of <kind>`. Both are the responses onetaskgraph's change #3867 recorded
-//! Linear giving on a live run (2026-11-03) and holds its own loopback fixtures to.
+//! `conflict on insert of <kind>`. Both are what onetaskgraph's change #3867 recorded Linear
+//! answering on a live run, and both are spelled here by that plugin's own `graphql` constants,
+//! which its live project-create journey checks against Linear on every credentialed run — so
+//! this file holds no second copy of either.
 use onetaskgraph_core::{
     CopyAction, CopyConditions, CopyItems, CopyRequest, CopyScope, GlobalId, StatusPolicy,
 };
 use onetaskgraph_linear::graphql;
+use onetaskgraph_plugin_api::MetadataRecord;
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -37,27 +40,56 @@ struct Workspace {
     unexpected: Vec<String>,
 }
 
-/// Linear's errored answer to a read by an id of `kind` it does not hold.
-fn not_found(kind: &str) -> (u16, Value) {
+/// Linear's errored answer to a read by an id of a `record` it does not hold.
+fn not_found(record: MetadataRecord) -> (u16, Value) {
+    let (message, presentable) = match record {
+        MetadataRecord::Task => (
+            graphql::ISSUE_NOT_FOUND_MESSAGE,
+            graphql::ISSUE_NOT_FOUND_PRESENTABLE,
+        ),
+        MetadataRecord::Project => (
+            graphql::PROJECT_NOT_FOUND_MESSAGE,
+            graphql::PROJECT_NOT_FOUND_PRESENTABLE,
+        ),
+        MetadataRecord::Document => (
+            graphql::DOCUMENT_NOT_FOUND_MESSAGE,
+            graphql::DOCUMENT_NOT_FOUND_PRESENTABLE,
+        ),
+    };
     (
         400,
-        json!({"data": null, "errors": [{"message": format!("Entity not found: {kind}"),
+        json!({"data": null, "errors": [{"message": message,
             "extensions": {"type": "invalid input", "code": "INPUT_ERROR", "statusCode": 400,
-                "userError": true,
-                "userPresentableMessage": format!("Could not find referenced {kind}.")}}]}),
+                "userError": true, "userPresentableMessage": presentable}}]}),
     )
 }
 
-/// Linear's refusal of a `kind` create sent under an `id` a record already holds.
-fn id_conflict(kind: &str, id: &str) -> (u16, Value) {
+/// Linear's refusal, under HTTP 200, of a `record` create sent under an `id` a record holds.
+fn id_conflict(record: MetadataRecord, root: &str, id: &str) -> (u16, Value) {
     (
         200,
-        json!({"data": null, "errors": [{"message": format!("conflict on insert of {kind}"),
-            "path": [format!("{}Create", kind.to_ascii_lowercase())],
+        json!({"data": null, "errors": [{"message": graphql::id_conflict_message(record),
+            "path": [root],
             "extensions": {"code": "INPUT_ERROR", "statusCode": 400, "type": "invalid input",
                 "userError": true,
-                "userPresentableMessage": format!("Entity {kind} with id {id} already exists.")}}]}),
+                "userPresentableMessage": graphql::id_conflict_presentable(record, id)}}]}),
     )
+}
+
+/// `field` of `input`, which must be a string.
+fn required<'a>(input: &'a Value, field: &str) -> Result<&'a str, String> {
+    input[field]
+        .as_str()
+        .ok_or_else(|| format!("`{field}` must be a string, not {}", input[field]))
+}
+
+/// `field` of `input`, which may be absent or null and is otherwise a string.
+fn optional<'a>(input: &'a Value, field: &str) -> Result<Option<&'a str>, String> {
+    match &input[field] {
+        Value::Null => Ok(None),
+        Value::String(text) => Ok(Some(text)),
+        other => Err(format!("`{field}` must be a string, not {other}")),
+    }
 }
 
 /// One page of `rows` of at most `first`, as a connection answers it.
@@ -89,17 +121,36 @@ fn team_filter() -> Value {
 
 const STAMP: &str = "2026-11-03T00:00:00.000Z";
 
-fn status_of(input: &Value, states: &[(&str, &str, &str)], field: &str) -> Value {
-    let id = input[field].as_str().unwrap_or_default();
-    states.iter().find(|(state, ..)| *state == id).map_or(
-        Value::Null,
-        |(_, name, kind)| json!({"name": name, "type": kind}),
-    )
+/// The status `field` of `input` names among `states`, refusing one this workspace does not hold.
+fn status_of(input: &Value, states: &[(&str, &str, &str)], field: &str) -> Result<Value, String> {
+    let Some(id) = optional(input, field)? else {
+        return Ok(Value::Null);
+    };
+    states
+        .iter()
+        .find(|(state, ..)| *state == id)
+        .map(|(_, name, kind)| json!({"name": name, "type": kind}))
+        .ok_or_else(|| format!("`{field}` names no status this workspace holds: {id}"))
 }
 
 impl Workspace {
     fn answer(&mut self, query: &str, variables: &Value) -> (u16, Value) {
-        let id = variables["id"].as_str().unwrap_or_default();
+        match self.answer_valid(query, variables) {
+            Ok(answer) => answer,
+            // A document this stand-in does not answer, or one it does with variables Linear
+            // would refuse, is a request the plugin must never have sent: the journey fails on it.
+            Err(why) => {
+                eprintln!("refused: {why}\ndocument: {query}\nvariables: {variables}");
+                self.unexpected.push(format!("{why}: {query}"));
+                (
+                    400,
+                    json!({"errors": [{"message": format!("the stand-in refuses this request: {why}")}]}),
+                )
+            }
+        }
+    }
+
+    fn answer_valid(&mut self, query: &str, variables: &Value) -> Result<(u16, Value), String> {
         let input = &variables["input"];
         let data = match query {
             q if q == graphql::RESOLUTION => resolution(),
@@ -112,22 +163,25 @@ impl Workspace {
                 data
             }
             q if q == graphql::PROJECT || q == graphql::PROJECT_CACHED => {
+                let id = required(variables, "id")?;
                 match self.projects.iter().find(|project| project["id"] == id) {
                     Some(project) => json!({"project": project}),
-                    None => return not_found("Project"),
+                    None => return Ok(not_found(MetadataRecord::Project)),
                 }
             }
             q if q == graphql::ISSUE || q == graphql::ISSUE_CACHED => {
+                let id = required(variables, "id")?;
                 match self.issues.iter().find(|issue| issue["id"] == id) {
                     Some(issue) => json!({"issue": issue}),
-                    None => return not_found("Issue"),
+                    None => return Ok(not_found(MetadataRecord::Task)),
                 }
             }
             q if q == graphql::ISSUE_RESOLVED => {
+                let id = required(variables, "id")?;
                 let mut data = resolution();
                 match self.issues.iter().find(|issue| issue["id"] == id) {
                     Some(issue) => data["issue"] = issue.clone(),
-                    None => return not_found("Issue"),
+                    None => return Ok(not_found(MetadataRecord::Task)),
                 }
                 data
             }
@@ -136,58 +190,74 @@ impl Workspace {
                 json!({"issues": page(&self.issues, &variables["first"])})
             }
             // This workspace holds no document, so every read of one names nothing.
-            q if q == graphql::DOCUMENT => return not_found("Document"),
+            q if q == graphql::DOCUMENT => {
+                required(variables, "id")?;
+                return Ok(not_found(MetadataRecord::Document));
+            }
             q if q == graphql::PROJECT_CREATE => {
-                let id = input["id"].as_str().unwrap_or_default().to_owned();
+                let id = required(input, "id")?.to_owned();
+                let name = required(input, "name")?;
+                let content = optional(input, "content")?;
+                let status = status_of(
+                    input,
+                    &[
+                        ("STATUS-TODO", "Todo", "planned"),
+                        ("STATUS-DONE", "Done", "completed"),
+                    ],
+                    "statusId",
+                )?;
                 self.project_creates.push(id.clone());
                 if std::mem::take(&mut self.first_project_id_held) {
                     self.burnt.push(id.clone());
                 }
                 if self.burnt.contains(&id) || self.projects.iter().any(|p| p["id"] == id) {
-                    return id_conflict("Project", &id);
+                    return Ok(id_conflict(MetadataRecord::Project, "projectCreate", &id));
                 }
-                let project = json!({"id": id, "name": input["name"],
-                    "content": input["content"], "url": format!("https://linear.app/p/{id}"),
+                let project = json!({"id": id, "name": name, "content": content,
+                    "url": format!("https://linear.app/p/{id}"),
                     "createdAt": STAMP, "updatedAt": STAMP, "archivedAt": null,
-                    "status": status_of(input, &[("STATUS-TODO", "Todo", "planned"),
-                        ("STATUS-DONE", "Done", "completed")], "statusId"),
-                    "labels": {"nodes": []}});
+                    "status": status, "labels": {"nodes": []}});
                 self.projects.push(project.clone());
                 json!({"projectCreate": {"success": true, "project": project}})
             }
             q if q == graphql::ISSUE_CREATE => {
-                let id = input["id"].as_str().unwrap_or_default().to_owned();
+                let id = required(input, "id")?.to_owned();
+                let title = required(input, "title")?;
+                let description = optional(input, "description")?;
+                let project = optional(input, "projectId")?;
+                let state = status_of(
+                    input,
+                    &[
+                        ("STATE-TODO", "Todo", "unstarted"),
+                        ("STATE-DONE", "Done", "completed"),
+                    ],
+                    "stateId",
+                )?;
+                let priority = match &input["priority"] {
+                    Value::Null => 0,
+                    other => other
+                        .as_u64()
+                        .ok_or_else(|| format!("`priority` must be a whole number, not {other}"))?,
+                };
                 if self.burnt.contains(&id) || self.issues.iter().any(|i| i["id"] == id) {
-                    return id_conflict("Issue", &id);
+                    return Ok(id_conflict(MetadataRecord::Task, "issueCreate", &id));
                 }
-                let project = input["projectId"].as_str();
                 if project.is_some_and(|p| !self.projects.iter().any(|held| held["id"] == p)) {
-                    return not_found("Project");
+                    return Ok(not_found(MetadataRecord::Project));
                 }
                 let issue = json!({"id": id,
                     "identifier": format!("ENG-{}", self.issues.len() + 1),
-                    "title": input["title"], "description": input["description"],
+                    "title": title, "description": description,
                     "url": format!("https://linear.app/i/{id}"), "createdAt": STAMP,
-                    "updatedAt": STAMP, "archivedAt": null,
-                    "state": status_of(input, &[("STATE-TODO", "Todo", "unstarted"),
-                        ("STATE-DONE", "Done", "completed")], "stateId"),
-                    "priority": input["priority"].as_u64().unwrap_or(0),
-                    "labels": {"nodes": []},
+                    "updatedAt": STAMP, "archivedAt": null, "state": state,
+                    "priority": priority, "labels": {"nodes": []},
                     "project": project.map(|p| json!({"id": p}))});
                 self.issues.push(issue.clone());
                 json!({"issueCreate": {"success": true, "issue": issue}})
             }
-            _ => {
-                eprintln!("unanswered document: {query}\nvariables: {variables}");
-                self.unexpected.push(query.to_owned());
-                return (
-                    400,
-                    json!({"errors": [{"message":
-                        format!("the stand-in does not answer this document: {query} {variables}")}]}),
-                );
-            }
+            _ => return Err("the stand-in does not answer this document".to_owned()),
         };
-        (200, json!({ "data": data }))
+        Ok((200, json!({ "data": data })))
     }
 }
 
@@ -313,7 +383,6 @@ async fn a_plan_copied_into_linear_creates_its_project_and_an_absent_id_reads_ab
         .expect("copy the plan into Linear");
 
     {
-        // What the stand-in holds once the copy settled.
         let held = workspace.lock().expect("the workspace");
         assert!(
             held.unexpected.is_empty(),
