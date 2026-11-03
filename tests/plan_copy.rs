@@ -113,7 +113,9 @@ async fn a_copied_project_document_keeps_its_budget_fragment_at_the_destination(
     let relative = format!(
         "../{}",
         Path::new(location)
-            .strip_prefix(&destination)
+            .canonicalize()
+            .expect("the copied task exists")
+            .strip_prefix(destination.canonicalize().expect("the destination exists"))
             .expect("the copied task is under the destination")
             .to_string_lossy()
             .replace('\\', "/")
