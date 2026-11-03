@@ -100,6 +100,7 @@ async function capture(workspace, ids, out) {
       missing(`it has ${Object.keys(graph.tasks).join(", ") || "none"}`);
     let hash;
     try {
+      // llmlint: ignore[changed_behavior_has_e2e] Nx rejects a malformed input while it builds the graph (that path is tested); failing here, after the graph built, takes a defect inside Nx's hasher, which no workspace this test can write produces.
       hash = await hasher.hashTask(task, graph, process.env);
     } catch (error) {
       console.error(`task-hashes: Nx could not hash ${id}: ${error.message}`);

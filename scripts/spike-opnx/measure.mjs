@@ -7,7 +7,8 @@
 //
 //   node scripts/spike-opnx/measure.mjs [--task <project:target>]
 //     [--sidecar start|external|none] [--action <dir>] [--nx-token <token>]
-//     [--store live|down|fault|full] [--label <name>] [--out <file.json>]
+//     [--store live|down|fault|full] [--port <n>] [--label <name>]
+//     [--out <file.json>]
 //
 // --task     the Nx task to run (default dag-model:test: a real test target that
 //            declares no outputs, so its entry is terminal output only).
@@ -59,7 +60,7 @@ const ROOT = resolve(import.meta.dirname, "../..");
 const usage = (message) => {
   console.error(`measure: ${message}`);
   console.error(
-    "ACTION: run 'node scripts/spike-opnx/measure.mjs [--task <project:target>] [--sidecar start|external|none] [--action <dir>] [--nx-token <t>] [--store live|down|fault|full] [--label <name>] [--out <file>]'",
+    "ACTION: run 'node scripts/spike-opnx/measure.mjs [--task <project:target>] [--sidecar start|external|none] [--action <dir>] [--nx-token <t>] [--store live|down|fault|full] [--port <n>] [--label <name>] [--out <file>]'",
   );
   process.exit(2);
 };
@@ -72,6 +73,7 @@ const options = {
   store: "live",
   label: undefined,
   out: undefined,
+  port: undefined,
 };
 const flags = {
   "--task": "task",
@@ -81,6 +83,7 @@ const flags = {
   "--store": "store",
   "--label": "label",
   "--out": "out",
+  "--port": "port",
 };
 const argv = process.argv.slice(2);
 for (let at = 0; at < argv.length; at += 2) {
@@ -91,6 +94,15 @@ for (let at = 0; at < argv.length; at += 2) {
 }
 if (!["start", "external", "none"].includes(options.sidecar))
   usage(`'${options.sidecar}' is not start, external or none`);
+if (
+  options.port !== undefined &&
+  !(
+    /^\d{1,5}$/.test(options.port) &&
+    Number(options.port) >= 1 &&
+    Number(options.port) <= 65535
+  )
+)
+  usage(`'${options.port}' is not a port from 1 to 65535`);
 if (!["live", "down", "fault", "full"].includes(options.store))
   usage(`'${options.store}' is not live, down, fault or full`);
 if (
@@ -226,6 +238,7 @@ async function ready(url, token) {
   }
   if (live !== 401) return { live };
   const begun = Date.now();
+  // llmlint: ignore[changed_behavior_has_e2e] the timed-out branch needs a store that stays silent for this probe's whole 120 s while the harness's own requests queue behind it; the slow-store behaviour it records is proven by the fault case (a 29.6 s probe that answered) and by the CI runs the report cites.
   const authed = await status(url, token, 120_000);
   return { live, authed, authedMs: Date.now() - begun };
 }
@@ -407,9 +420,13 @@ if (options.sidecar === "start") {
   // take it before the sidecar binds; an answer that is not the sidecar's 401
   // is that process, and a fresh port is tried.
   for (let attempt = 1; ; attempt += 1) {
-    const probe = createServer();
-    const port = await listen(probe);
-    await new Promise((done) => probe.close(done));
+    // --port is tried first, as the plan's workflow binds a fixed port.
+    let port = attempt === 1 && options.port ? Number(options.port) : undefined;
+    if (!port) {
+      const probe = createServer();
+      port = await listen(probe);
+      await new Promise((done) => probe.close(done));
+    }
     sidecarUrl = `http://127.0.0.1:${port}`;
     const env = {
       ...process.env,

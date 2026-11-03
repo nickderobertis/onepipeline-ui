@@ -800,3 +800,36 @@ test("task-hashes prints a capture record on stdout without --out, refuses --out
     /^ACTION: fix the nx\.json or project\.json/m,
   );
 });
+
+test("measure moves the sidecar to a fresh port when another process answers on the one it was given", async () => {
+  const squatter = createServer((_req, res) =>
+    res.writeHead(200).end("not the sidecar"),
+  );
+  await new Promise((done) => squatter.listen(0, "127.0.0.1", done));
+  try {
+    const done = await runAsync(
+      [
+        ...action,
+        "--port",
+        String(squatter.address().port),
+        "--out",
+        join(scratch, "moved-port.json"),
+      ],
+      {},
+    );
+    assert.equal(done.status, 0, done.stderr);
+    const moved = record("moved-port.json");
+    assert.equal(moved.readiness.live, 401);
+    assert.deepEqual(
+      moved.requests.map((r) => [r.method, r.status]),
+      [
+        ["GET", 404],
+        ["PUT", 403],
+      ],
+    );
+  } finally {
+    squatter.close();
+  }
+  const refused = run("measure.mjs", ["--port", "70000"]);
+  assert.equal(refused.status, 2);
+});
