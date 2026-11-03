@@ -16954,7 +16954,6 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
         ),
         "--detach",
     ]));
-    // What the engine itself says each node is, through its own `results`.
     let recorded_statuses = || -> Value {
         let printed: Value =
             serde_json::from_slice(&engine(&["results", "--json", &run])).expect("results JSON");
@@ -16980,8 +16979,6 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
     let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
     let served_statuses = || detail()["graph"]["node_status"].clone();
 
-    // The plan served is the plan the engine launched: the same tasks, in the
-    // same order, of the same kinds, with the same dependency.
     let launched = detail();
     let tasks = |plan: &Value| -> Vec<(Value, Value, Value)> {
         plan["tasks"]
@@ -17024,7 +17021,6 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
         engine_plan["goal"]["text"]
     );
 
-    // Stopped on the approval: the statuses served are the engine's.
     let waiting = recorded_statuses();
     assert_eq!(
         waiting[fixture_run::APPROVAL_NODE_ID],
@@ -17033,8 +17029,6 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
     );
     assert_eq!(served_statuses(), waiting, "{}", detail()["graph"]);
 
-    // A sign-off attested before its approval is done is refused, as the CLI
-    // refuses it, and nothing about the run moves.
     let premature = http::post(
         serving.address,
         &format!("/api/v2/runs/{run}/attest"),
@@ -17052,8 +17046,6 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
     assert_eq!(served_statuses(), waiting);
     assert_eq!(recorded_statuses(), waiting);
 
-    // Each action attested and each pass driven by the engine's own verbs; the
-    // server serves what each pass recorded.
     engine(&["attest", &run, fixture_run::APPROVAL_NODE_ID]);
     started_and_let_go(&engine(&["adopt", &run, "--detach"]));
     let approved = recorded_statuses();
@@ -17083,8 +17075,6 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
         served["run"]
     );
 
-    // The settlement the engine wrote is the one served: its result record's
-    // nodes, and the `results` rendering the CLI prints over the same run.
     let result: Value = serde_json::from_str(
         &fs::read_to_string(root.join(&run).join("result.json")).expect("the engine's result"),
     )
