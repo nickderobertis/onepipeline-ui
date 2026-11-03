@@ -16,6 +16,7 @@
         "{workspaceRoot}/tests/e2e/main.rs",
         "{workspaceRoot}/tests/e2e/deps_audit_toolchain.rs",
         "{workspaceRoot}/tests/e2e/deps_audit.rs",
+        "{workspaceRoot}/tests/support/stub_bin.rs",
         "{workspaceRoot}/tests/fixtures/deps-audit/**/*",
         "{workspaceRoot}/scripts/deps-audit.mjs",
         "{workspaceRoot}/deny.toml",
