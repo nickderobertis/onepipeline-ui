@@ -725,6 +725,15 @@ unchanged, the lock's onejudge 0.22.1 and onemessagebus 0.9.4 already meet its
 requirements, and no route, payload or MSRV changes beyond the release
 `/healthz` reports. This changes the engine types carried by
 ApiError::from_engine and the other engine-typed public items.
+0.98.3 is the patch of that engine whose plan reader reads a qualified plan from
+its own source and whose live edits let any reply retry an export edge's end. A
+host holds this reader and its engine to one linked engine, so it can launch a
+private coordinating plan from its board and recover a failed export step by
+retry only once this crate links it. Only the `onepipeline` line and its lock
+entry move: its onetaskgraph 0.13.1, onevcs ^0.57.4, oneagentgraph, onejudge,
+onemessagebus and oneharness-core requirements are the ones 0.98.0 resolved, and
+no route, payload, public type or MSRV changes beyond the release `/healthz`
+reports.
 
 The test-only `onevcs` requirement, which the `EventKind` drift gate in
 `tests/contract.rs` reads, has followed the release each linked engine resolves:
@@ -733,5 +742,5 @@ declares the stacking, review and landing kinds that engine relays; 0.56.3 for
 0.79.0 (^0.56.2), which declares `publication-resumed`, which `payload::vcs`
 copies, and for 0.79.1, 0.82.0, 0.84.0, 0.84.1 and 0.85.0; 0.56.9 for 0.89.0,
 which relays each check's times; 0.56.11 for 0.90.0; 0.57.0 for 0.95.5; and
-0.57.4 for 0.96.0 (^0.57.4), 0.96.1, 0.96.2, 0.97.0, 0.97.2
-and 0.98.0.
+0.57.4 for 0.96.0 (^0.57.4), 0.96.1, 0.96.2, 0.97.0, 0.97.2,
+0.98.0 and 0.98.3.
