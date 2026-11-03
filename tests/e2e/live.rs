@@ -180,6 +180,22 @@ impl Tab {
         }
     }
 
+    /// Read until the state this tab holds satisfies `done`, applying each
+    /// frame in order, and return how many frames that took. Only a stream that
+    /// goes [`PATIENCE`] without a frame fails: how long the server takes is
+    /// not what a journey holds it to.
+    fn until_listed(&mut self, what: &str, done: impl Fn(&Self) -> bool) -> usize {
+        let mut read = 0;
+        while !done(self) {
+            assert!(
+                self.receive(PATIENCE).is_some(),
+                "the stream went quiet before {what} was listed, after {read} frames"
+            );
+            read += 1;
+        }
+        read
+    }
+
     /// The next frame within `patience`, checked against its SSE framing and
     /// applied.
     fn receive(&mut self, patience: Duration) -> Option<Value> {
@@ -742,15 +758,21 @@ fn a_cursor_the_subscription_cannot_resume_from_is_answered_with_one_named_reset
 
 #[test]
 fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
-    // Many runs, each grown once per poll while the stream is away, so the
-    // subscription records more frames than it retains. A moving run's row is
-    // pushed at most once every `ROW_POLLS_PER_READ` polls, so on a loaded host
-    // that takes longer than the contract's grace for a subscription nothing is
-    // connected to; this journey is about retention, so its grace is longer.
-    let runs: Vec<String> = (0..60)
+    // The subscription has to record more frames than it retains while its
+    // stream is away, and how fast a server makes frames is the host's: a
+    // moved run's row is the SDK folding its summary and syncing the cache,
+    // and sixty runs grown together made fewer than five frames a second on a
+    // loaded Windows runner. So the frames are made from the sidebar's two cheapest changes —
+    // a run going away, which reads nothing, and coming back with the summary
+    // its journal already matches, which folds nothing — and each step waits
+    // for its own frames, so the journey reaches the boundary on any host
+    // rather than racing one to it.
+    let runs: Vec<String> = (0..64)
         .map(|index| format!("retained-{index:02}"))
         .collect();
-    let grace = Duration::from_secs(600);
+    // Longer than any host takes to make the frames: a subscription the grace
+    // retired would be answered `410 expired`, which is not what this holds.
+    let grace = Duration::from_secs(24 * 60 * 60);
     let live = Live::start_with(
         |root| {
             for run in &runs {
@@ -776,30 +798,37 @@ fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
     // recorded more than it keeps.
     let mut counter = Tab::open(&live, &json!({ "type": "sidebar" }));
     // And a third, connected but never read: its stream falls more than the
-    // retained frames behind, is dropped, and on reconnecting is answered with
-    // the one explicit re-send rather than a replay that lost frames.
+    // retained frames behind, and on reconnecting from the snapshot it never
+    // read past is answered with the one explicit re-send rather than a replay
+    // that lost frames.
     let stalled = Tab::open(&live, &json!({ "type": "sidebar" }));
-    let deadline = Instant::now() + grace;
-    let mut counted = 0;
+    let journals: Vec<(PathBuf, PathBuf)> = runs
+        .iter()
+        .map(|run| {
+            let journal = live.journal(run);
+            let away = journal.with_extension("jsonl.away");
+            (journal, away)
+        })
+        .collect();
+    let listed = |tab: &Tab| -> usize {
+        tab.state["sidebar"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .filter(|row| runs.iter().any(|run| row["id"] == run.as_str()))
+            .count()
+    };
+    counter.until_listed("every run", |tab| listed(tab) == runs.len());
+    let mut counted = counter.frames.len();
     while counted <= onepipeline_ui::contract::RETAINED_FRAMES {
-        let appends: Vec<(PathBuf, Vec<String>)> = runs
-            .iter()
-            .map(|run| {
-                let journal = live.serving.run_dir(run).join("events.jsonl");
-                let line = activity(&journal, run, fixture_run::NODE_ID, "churn");
-                (journal, vec![line])
-            })
-            .collect();
-        let borrowed: Vec<(&Path, &[String])> = appends
-            .iter()
-            .map(|(journal, lines)| (journal.as_path(), lines.as_slice()))
-            .collect();
-        live_journal::append_many(&borrowed);
-        counted += counter.drain().len();
-        assert!(
-            Instant::now() < deadline,
-            "only {counted} frames were sent within the subscription's grace"
-        );
+        for (journal, away) in &journals {
+            rename(journal, away);
+        }
+        counted += counter.until_listed("every run gone", |tab| listed(tab) == 0);
+        for (journal, away) in &journals {
+            rename(away, journal);
+        }
+        counted += counter.until_listed("every run back", |tab| listed(tab) == runs.len());
     }
     let mut stream = http::stream(
         live.address(),
@@ -810,8 +839,17 @@ fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
     assert_eq!(frame["type"], "reset");
     assert_eq!(frame["reason"], "stale-cursor");
     assert_eq!(
+        frame["base"],
+        snapshot_id.as_str(),
+        "the reset echoes the cursor it refused"
+    );
+    assert_eq!(
         frame["snapshot"]["sidebar"].as_array().map(Vec::len),
         Some(runs.len())
+    );
+    assert!(
+        stream.frame_within(QUIET).is_none(),
+        "one reset, nothing replayed after it"
     );
     let Tab {
         subscription,
@@ -835,6 +873,28 @@ fn a_cursor_older_than_the_retained_frames_is_answered_stale() {
         .json();
     assert_eq!(reset["type"], "reset");
     assert_eq!(reset["reason"], "stale-cursor");
+}
+
+/// Move a run's journal, the way a run is taken out from under the root and put
+/// back. Windows refuses a rename while another process holds the file without
+/// sharing its deletion — a scanner opening a file just written does — so a
+/// refusal is retried for as long as a journey waits on the server.
+fn rename(from: &Path, to: &Path) {
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        match fs::rename(from, to) {
+            Ok(()) => return,
+            Err(err) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "move {} to {}: {err}",
+                    from.display(),
+                    to.display()
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    }
 }
 
 /// Hold the server's next look at the runs root inside its read of `run`, and
