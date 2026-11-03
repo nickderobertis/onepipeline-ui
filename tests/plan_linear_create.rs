@@ -76,7 +76,6 @@ fn id_conflict(record: MetadataRecord, root: &str, id: &str) -> (u16, Value) {
     )
 }
 
-/// `field` of `input`, which must be a string.
 fn required<'a>(input: &'a Value, field: &str) -> Result<&'a str, String> {
     input[field]
         .as_str()
@@ -92,7 +91,6 @@ fn optional<'a>(input: &'a Value, field: &str) -> Result<Option<&'a str>, String
     }
 }
 
-/// One page of `rows` of at most `first`, as a connection answers it.
 fn page(rows: &[Value], first: &Value) -> Value {
     let first = first.as_u64().map_or(rows.len(), |first| {
         usize::try_from(first).unwrap_or(usize::MAX)
@@ -121,7 +119,6 @@ fn team_filter() -> Value {
 
 const STAMP: &str = "2026-11-03T00:00:00.000Z";
 
-/// The status `field` of `input` names among `states`, refusing one this workspace does not hold.
 fn status_of(input: &Value, states: &[(&str, &str, &str)], field: &str) -> Result<Value, String> {
     let Some(id) = optional(input, field)? else {
         return Ok(Value::Null);
