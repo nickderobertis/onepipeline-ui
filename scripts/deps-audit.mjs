@@ -236,12 +236,10 @@ function advisoriesCheck() {
       "install cargo and re-run",
     );
   if (toolchain.status !== 0)
-    return {
-      advisories: [],
-      errors: [
-        `'cargo --version' exited ${toolchain.status} resolving the toolchain cargo-deny runs under (its output is above)`,
-      ],
-    };
+    throw new Refusal(
+      `'cargo --version' exited ${toolchain.status} resolving the toolchain cargo-deny runs under (its output is above), so the advisories check did not run`,
+      "install the toolchain rust-toolchain.toml pins ('rustup toolchain install' from the crate root), or let rustup install it on first use ('rustup set auto-install enable'), then re-run",
+    );
   const result = run("cargo", [
     "deny",
     "--locked",

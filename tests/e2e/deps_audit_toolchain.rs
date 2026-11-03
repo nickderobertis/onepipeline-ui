@@ -259,7 +259,11 @@ fn a_toolchain_rustup_will_not_install_fails_the_check_saying_so() {
             && run
                 .stderr
                 .contains("'cargo --version' exited 1 resolving the toolchain")
+            && run.stderr.contains("so the advisories check did not run")
             && run
+                .stderr
+                .contains("ACTION: install the toolchain rust-toolchain.toml pins")
+            && !run
                 .stderr
                 .contains("ACTION: fix the cargo-deny error above")
             && !run.stdout.contains("no advisory matches"),
