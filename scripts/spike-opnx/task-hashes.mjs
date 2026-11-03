@@ -55,22 +55,27 @@ async function capture(workspace, ids, out) {
     if (at <= 0) usage(`'${id}' is not <project:target>`);
     const project = id.slice(0, at);
     const target = id.slice(at + 1);
-    const graph = createTaskGraph(
-      projectGraph,
-      {},
-      [project],
-      [target],
-      undefined,
-      {},
-    );
-    const task = graph.tasks[id];
-    if (!task) {
-      console.error(
-        `task-hashes: no task ${id} in the task graph; it has ${Object.keys(graph.tasks).join(", ") || "none"}`,
-      );
+    const missing = (detail) => {
+      console.error(`task-hashes: no task ${id} in the task graph; ${detail}`);
       console.error("ACTION: name a task the workspace's graph holds");
       process.exit(1);
+    };
+    let graph;
+    try {
+      graph = createTaskGraph(
+        projectGraph,
+        {},
+        [project],
+        [target],
+        undefined,
+        {},
+      );
+    } catch (error) {
+      missing(error.message);
     }
+    const task = graph.tasks[id];
+    if (!task)
+      missing(`it has ${Object.keys(graph.tasks).join(", ") || "none"}`);
     const hash = await hasher.hashTask(task, graph, process.env);
     tasks[id] = { hash: hash.value, nodes: hash.details.nodes };
   }
@@ -90,14 +95,15 @@ function readRecord(path) {
     process.exit(1);
   }
   const tasks = record?.tasks;
+  const isMap = (value) =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
   const valid =
-    tasks !== null &&
-    typeof tasks === "object" &&
+    isMap(tasks) &&
     Object.values(tasks).every(
       (task) =>
         typeof task?.hash === "string" &&
-        task.nodes !== null &&
-        typeof task.nodes === "object",
+        isMap(task.nodes) &&
+        Object.values(task.nodes).every((node) => typeof node === "string"),
     );
   if (!valid) {
     console.error(`task-hashes: ${path} is not a capture record`);

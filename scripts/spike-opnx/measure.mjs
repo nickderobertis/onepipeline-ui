@@ -84,7 +84,7 @@ const flags = {
 };
 const argv = process.argv.slice(2);
 for (let at = 0; at < argv.length; at += 2) {
-  const key = flags[argv[at]];
+  const key = Object.hasOwn(flags, argv[at]) ? flags[argv[at]] : undefined;
   if (!key) usage(`unknown argument '${argv[at]}'`);
   if (argv[at + 1] === undefined) usage(`${argv[at]} needs a value`);
   options[key] = argv[at + 1];
@@ -273,7 +273,6 @@ function repository() {
   return named && REPOSITORY.test(named) ? named : undefined;
 }
 
-// A listing entry carries what the report reads, with the types it reads them as.
 const isCacheEntry = (e) =>
   e !== null &&
   typeof e === "object" &&
@@ -281,9 +280,9 @@ const isCacheEntry = (e) =>
   typeof e.key === "string" &&
   typeof e.ref === "string" &&
   Number.isInteger(e.size_in_bytes) &&
-  typeof e.created_at === "string";
+  typeof e.created_at === "string" &&
+  !Number.isNaN(Date.parse(e.created_at));
 
-// One listing of the store: every Actions-cache entry, 100 a page.
 async function listStore(repo, token) {
   const entries = [];
   let requests = 0;
@@ -332,7 +331,10 @@ if (options.sidecar === "external") {
       "--sidecar external needs NX_SELF_HOSTED_REMOTE_CACHE_SERVER and _ACCESS_TOKEN",
     );
   // The bearer token is forwarded to this URL, so only a loopback sidecar is accepted.
-  if (!/^http:\/\/(127\.0\.0\.1|localhost):\d{1,5}$/.test(sidecarUrl))
+  const port = Number(
+    sidecarUrl.match(/^http:\/\/(?:127\.0\.0\.1|localhost):(\d{1,5})$/)?.[1],
+  );
+  if (!Number.isInteger(port) || port < 1 || port > 65535)
     usage(
       `NX_SELF_HOSTED_REMOTE_CACHE_SERVER is '${sidecarUrl}', not a loopback http://127.0.0.1:<port>`,
     );
@@ -424,9 +426,11 @@ const nx = spawn(
   },
 );
 let nxOutput = "";
+// Without --out the JSON record is this command's stdout, so Nx's own output
+// goes to stderr then and stdout stays one parseable document.
 nx.stdout.on("data", (chunk) => {
   nxOutput += chunk;
-  process.stdout.write(chunk);
+  (options.out ? process.stdout : process.stderr).write(chunk);
 });
 nx.stderr.on("data", (chunk) => {
   nxOutput += chunk;
