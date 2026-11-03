@@ -833,3 +833,37 @@ test("measure moves the sidecar to a fresh port when another process answers on 
   const refused = run("measure.mjs", ["--port", "70000"]);
   assert.equal(refused.status, 2);
 });
+
+test("measure finds a token in GH_TOKEN, and with no credential at all takes no listing", async () => {
+  const github = await listingServer((_page, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ total_count: 0, actions_caches: [] }));
+  });
+  try {
+    const viaGhToken = await runAsync(
+      [...action, "--out", join(scratch, "gh-token.json")],
+      {
+        GITHUB_API_URL: github.url,
+        GITHUB_REPOSITORY: "owner/name",
+        GITHUB_TOKEN: "",
+        GH_TOKEN: "from-gh-token",
+      },
+    );
+    assert.equal(viaGhToken.status, 0, viaGhToken.stderr);
+    assert.equal(record("gh-token.json").store_listing.requests, 1);
+    assert.deepEqual(github.pages, [1]);
+  } finally {
+    github.server.close();
+  }
+  const bare = await runAsync(
+    [...action, "--out", join(scratch, "no-credential.json")],
+    {
+      GITHUB_REPOSITORY: "owner/name",
+      GITHUB_TOKEN: "",
+      GH_TOKEN: "",
+      GH_CONFIG_DIR: mkdtempSync(join(scratch, "gh-")),
+    },
+  );
+  assert.equal(bare.status, 0, bare.stderr);
+  assert.equal(record("no-credential.json").store_listing, undefined);
+});

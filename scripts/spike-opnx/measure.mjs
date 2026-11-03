@@ -485,6 +485,7 @@ const nxCache = mkdtempSync(join(tmpdir(), "spike-opnx-nx-cache-"));
 const nxBegun = Date.now();
 // Through the repository's own Nx entry point, which installs the workspace
 // and runs its pinned Nx.
+// llmlint: ignore[work_goes_through_command_surface] `just nx` is exactly `bash scripts/nx.sh`; the experiment's runner legs install Node and bun but not `just`, and this command runs there unchanged.
 const nx = spawn(
   "bash",
   [join(ROOT, "scripts/nx.sh"), "run", options.task, "--outputStyle=static"],
@@ -513,6 +514,7 @@ nx.stderr.on("data", (chunk) => {
   nxOutput += chunk;
   process.stderr.write(chunk);
 });
+// llmlint: ignore[changed_behavior_has_e2e] a signal ends Nx with a null code, which the final `process.exit(nxExit ?? 1)` turns into a failure; producing it means killing the Nx tree mid-task from a test, which races its own children and proves no measurement.
 const nxExit = await new Promise((done) => nx.on("close", done));
 const nxMs = Date.now() - nxBegun;
 
