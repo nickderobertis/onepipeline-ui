@@ -1494,6 +1494,105 @@ fn advisories_output_it_cannot_read_fails_rather_than_passing_as_none() {
     }
 }
 
+/// PATH with a `cargo` in front that behaves as rustup's proxy does under a
+/// rust-toolchain.toml naming a toolchain not installed yet: its first call
+/// prints rustup's installation progress on stderr, as the `advisories` job's
+/// runner did on every push to `main`, and every call then runs the real cargo.
+fn toolchain_installing_cargo(project: &Project) -> OsString {
+    let scratch = project.repo.parent().expect("the repository has a parent");
+    let installed = scratch.join("toolchain-installed");
+    let cargo = Command::new("sh")
+        .args(["-c", "command -v cargo"])
+        .output()
+        .expect("find cargo");
+    let cargo = String::from_utf8(cargo.stdout).expect("a UTF-8 path");
+    stub_bin::install(
+        &scratch.join("rustup-bin"),
+        "cargo",
+        &format!(
+            "#!/bin/sh\nif [ ! -e '{installed}' ]; then\n\
+             echo 'info: syncing channel updates for 1.97.1-x86_64-unknown-linux-gnu' >&2\n\
+             echo 'info: downloading 9 components' >&2\n\
+             echo 'warn: the missing active toolchain `1.97.1-x86_64-unknown-linux-gnu` has been auto-installed' >&2\n\
+             : > '{installed}'\nfi\nexec '{cargo}' \"$@\"\n",
+            installed = installed.display(),
+            cargo = cargo.trim()
+        ),
+    )
+}
+
+#[test]
+fn a_toolchain_installed_on_first_use_is_not_read_as_cargo_denys_output() {
+    // The report is the half that calls cargo-deny's advisories check first,
+    // which is where the toolchain was installed on `main`.
+    let clean = project(&CLEAN, &CLEAN);
+    let path = toolchain_installing_cargo(&clean);
+    let run = just(
+        &clean,
+        &["advisories-report"],
+        &[("PATH", path.as_os_str())],
+    );
+    assert_eq!(
+        run.code,
+        Some(0),
+        "installing the toolchain failed a report with nothing to report:\n{}",
+        run.all()
+    );
+    assert!(
+        run.stdout
+            .contains("no advisory matches the resolved graph")
+            && run.stderr.contains("info: syncing channel updates"),
+        "the report did not show the installation and then its verdict:\n{}",
+        run.all()
+    );
+
+    // A red report still means an advisory: the one it reads after the
+    // installation, and nothing about the installation itself.
+    let vulnerable = project(&VULNERABLE, &VULNERABLE);
+    let path = toolchain_installing_cargo(&vulnerable);
+    let run = just(
+        &vulnerable,
+        &["advisories-report"],
+        &[("PATH", path.as_os_str())],
+    );
+    assert_ne!(run.code, Some(0), "the report passed:\n{}", run.all());
+    assert!(
+        run.stderr.contains(&format!("advisory {VULN}"))
+            && !run.stderr.contains("unparseable output")
+            && !run
+                .stderr
+                .contains("ACTION: fix the cargo-deny error above"),
+        "the report did not fail on the advisory alone:\n{}",
+        run.all()
+    );
+
+    // A toolchain rustup will not install (auto-install off) is the check not
+    // running, said as such, never an empty graph.
+    let scratch = clean.repo.parent().expect("the repository has a parent");
+    let path = stub_bin::install(
+        &scratch.join("no-install-bin"),
+        "cargo",
+        "#!/bin/sh\necho \"error: toolchain '1.97.1-x86_64-unknown-linux-gnu' is not installed\" >&2\nexit 1\n",
+    );
+    let run = just(
+        &clean,
+        &["advisories-report"],
+        &[("PATH", path.as_os_str())],
+    );
+    assert_ne!(run.code, Some(0), "the report passed:\n{}", run.all());
+    assert!(
+        run.stderr.contains("is not installed")
+            && run
+                .stderr
+                .contains("'cargo --version' exited 1 resolving the toolchain")
+            && run
+                .stderr
+                .contains("ACTION: fix the cargo-deny error above"),
+        "the report did not say the toolchain could not be resolved:\n{}",
+        run.all()
+    );
+}
+
 #[test]
 fn a_yanked_crate_still_blocks() {
     let project = project(&CLEAN, &CLEAN);

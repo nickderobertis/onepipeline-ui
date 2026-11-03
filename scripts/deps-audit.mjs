@@ -216,7 +216,32 @@ function basePackages(rev) {
 // the summary record whose error count matches the errors printed and the exit
 // status: output this cannot read, or a verdict its own count does not explain,
 // is an error, never nothing found.
+//
+// `cargo` is rustup's proxy wherever rustup installed it, and the first call
+// under a rust-toolchain.toml whose toolchain is not installed yet installs it,
+// printing its progress (`info: syncing channel updates ...`) on the same stderr
+// cargo-deny writes its records to. The `advisories` job installs no toolchain
+// before this runs, so every report on `main` read that progress as output it
+// could not parse and failed with no advisory to show. So the toolchain is
+// resolved first, by a call whose output is shown and not read, and the call
+// read below prints only what cargo-deny does.
 function advisoriesCheck() {
+  const toolchain = spawnSync("cargo", ["--version"], {
+    encoding: "utf8",
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+  if (toolchain.error)
+    throw new Refusal(
+      `cannot run cargo: ${toolchain.error.message}`,
+      "install cargo and re-run",
+    );
+  if (toolchain.status !== 0)
+    return {
+      advisories: [],
+      errors: [
+        `'cargo --version' exited ${toolchain.status} resolving the toolchain cargo-deny runs under (its output is above)`,
+      ],
+    };
   const result = run("cargo", [
     "deny",
     "--locked",
