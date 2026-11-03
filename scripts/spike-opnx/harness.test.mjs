@@ -930,3 +930,46 @@ test("measure reports a task that fails as Nx's failure, writing nothing to the 
   );
   assert.deepEqual(failing.written, []);
 });
+
+test("measure finds the repository from the origin remote and a token through gh, and lists nothing for a malformed name", async () => {
+  const origin = spawnSync("git", ["-C", ROOT, "remote", "get-url", "origin"], {
+    encoding: "utf8",
+  }).stdout.trim();
+  const repository = origin.match(/github\.com[:/](.+?)(?:\.git)?$/)?.[1];
+  const ghToken = spawnSync("gh", ["auth", "token"], { encoding: "utf8" });
+  const paths = [];
+  const github = await listingServer((_page, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ total_count: 0, actions_caches: [] }));
+  });
+  github.server.prependListener("request", (req) => paths.push(req.url));
+  try {
+    const found = await runAsync(
+      [...action, "--out", join(scratch, "discovered.json")],
+      {
+        GITHUB_API_URL: github.url,
+        GITHUB_REPOSITORY: "",
+        GITHUB_TOKEN: "",
+        GH_TOKEN: "",
+      },
+    );
+    assert.equal(found.status, 0, found.stderr);
+    if (repository && ghToken.status === 0) {
+      assert.equal(record("discovered.json").store_listing.requests, 1);
+      assert.match(
+        paths[0],
+        new RegExp(`^/repos/${repository}/actions/caches`),
+      );
+    } else {
+      assert.equal(record("discovered.json").store_listing, undefined);
+    }
+  } finally {
+    github.server.close();
+  }
+  const malformed = await runAsync(
+    [...action, "--out", join(scratch, "malformed-name.json")],
+    { GITHUB_REPOSITORY: "not a repository", GITHUB_TOKEN: "t" },
+  );
+  assert.equal(malformed.status, 0, malformed.stderr);
+  assert.equal(record("malformed-name.json").store_listing, undefined);
+});
