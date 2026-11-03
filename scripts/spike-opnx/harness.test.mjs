@@ -5,9 +5,9 @@
 //
 // The sidecar cases need the action checkout at measure.mjs's pinned commit;
 // SPIKE_OPNX_ACTION names one, otherwise measure.mjs clones it into .tools.
-// A replay (GET 200) and a stored write (PUT 200) need GitHub's own cache
-// service, which only a runner reaches: those paths are proven by the CI runs
-// the report cites, not here.
+// A write and a replay are driven here against a server for Nx's cache API;
+// what GitHub's own cache service then keeps, and which scopes may read it,
+// only a runner can show, and the CI runs the report cites are that proof.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
@@ -866,4 +866,67 @@ test("measure finds a token in GH_TOKEN, and with no credential at all takes no 
   );
   assert.equal(bare.status, 0, bare.stderr);
   assert.equal(record("no-credential.json").store_listing, undefined);
+});
+
+test("task-hashes captures several tasks at once, each with its own hash and inputs", () => {
+  const done = run("task-hashes.mjs", [
+    "capture",
+    ROOT,
+    "dag-model:test",
+    "timeline-categories:test",
+  ]);
+  assert.equal(done.status, 0, done.stderr);
+  const { tasks } = JSON.parse(done.stdout);
+  assert.deepEqual(Object.keys(tasks).sort(), [
+    "dag-model:test",
+    "timeline-categories:test",
+  ]);
+  assert.notEqual(
+    tasks["dag-model:test"].hash,
+    tasks["timeline-categories:test"].hash,
+  );
+  assert.ok(
+    Object.keys(tasks["timeline-categories:test"].nodes).some((node) =>
+      node.startsWith("timeline-categories:packages/timeline-categories"),
+    ),
+  );
+});
+
+test("measure reports a task that fails as Nx's failure, writing nothing to the cache", () => {
+  const project = join(ROOT, "scripts/spike-opnx/failing-probe");
+  spawnSync("mkdir", ["-p", project]);
+  writeFileSync(
+    join(project, "project.json"),
+    JSON.stringify({
+      name: "spike-opnx-failing-probe",
+      targets: {
+        probe: {
+          command: 'node -e "process.exit(3)"',
+          cache: true,
+          inputs: ["{projectRoot}/**/*"],
+        },
+      },
+    }),
+  );
+  let done;
+  try {
+    done = run("measure.mjs", [
+      ...action,
+      "--task",
+      "spike-opnx-failing-probe:probe",
+      "--out",
+      join(scratch, "failing.json"),
+    ]);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
+  }
+  assert.notEqual(done.status, 0);
+  const failing = record("failing.json");
+  assert.notEqual(failing.nx.exit, 0);
+  assert.deepEqual(
+    failing.requests.map((r) => [r.method, r.status]),
+    [["GET", 404]],
+    "Nx asks for the result, then stores no failure",
+  );
+  assert.deepEqual(failing.written, []);
 });

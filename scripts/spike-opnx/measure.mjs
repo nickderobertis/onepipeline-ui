@@ -209,6 +209,7 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the two names this harness reads the sidecar and the store by: Nx's self-hosted cache route, and op-nx/github-cache's `cacheKeyFor` (packages/github-cache/src/lib/cache-key.ts). Both are TypeScript or Rust in projects this repository does not build, and ensureAction pins the one commit whose key these figures describe; a different key would show as entries the listing never finds.
 const cacheRoute = (hash) => `/v1/cache/${hash}`;
+const CACHE_REQUEST = /^\/v1\/cache\/([a-f0-9]{1,512})$/;
 const cacheKey = (hash) => `nx-cache-${hash}`;
 // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 
@@ -247,10 +248,18 @@ async function ready(url, token) {
 // so a replay and a write are told apart here, on the wire.
 async function startProxy(target, log) {
   const server = createServer((req, res) => {
+    // Only Nx's cache requests are forwarded and recorded: a GET or PUT of one
+    // hash. Anything else is answered here and never reaches the sidecar.
+    const hash = req.url.match(CACHE_REQUEST)?.[1];
+    if (!hash || !["GET", "PUT"].includes(req.method)) {
+      req.resume();
+      res.writeHead(404).end();
+      return;
+    }
     const begun = Date.now();
     const entry = {
       method: req.method,
-      hash: req.url.split("/").pop(),
+      hash,
       requestBytes: 0,
       responseBytes: 0,
     };
