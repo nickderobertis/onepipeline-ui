@@ -115,7 +115,7 @@ if (mode === "capture") {
   const [workspace, ...ids] = rest;
   if (!workspace || ids.length === 0)
     usage("capture needs a workspace and at least one task");
-  await capture(workspace, ids, out);
+  await capture(workspace, ids, out && resolve(out));
 } else if (mode === "diff") {
   if (rest.length !== 2) usage("diff needs two records");
   diff(rest[0], rest[1]);
