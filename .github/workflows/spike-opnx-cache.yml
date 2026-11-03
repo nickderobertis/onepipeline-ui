@@ -70,14 +70,27 @@ jobs:
               --label "linux again $task" --out "$RUNNER_TEMP/measure-linux-again-${task//:/-}.json"
           done < scripts/spike-opnx/ci-tasks.txt
       - cancel: cache-server
+      # A second sidecar as a fork's head would get it: the plan's workflow sets
+      # CACHE_READ_ONLY when the head repository is not this one.
+      - uses: op-nx/github-cache/start-cache-server@91839c24885842cac86567c30e23b37fb85f7e33
+        id: cache-server-fork
+        background: true
+        with:
+          port: "3001"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CACHE_READ_ONLY: fork
       - name: A fork's head, as the plan's workflow would mark it
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CACHE_READ_ONLY: fork
+          NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3001
         run: |
-          node scripts/spike-opnx/measure.mjs --task timeline-categories:test \
-            --label "linux fork-read-only" --out "$RUNNER_TEMP/measure-linux-fork.json"
+          for task in dag-model:test timeline-categories:test; do
+            node scripts/spike-opnx/measure.mjs --sidecar external --task "$task" \
+              --label "linux fork-read-only $task" --out "$RUNNER_TEMP/measure-linux-fork-${task//:/-}.json"
+          done
+      - cancel: cache-server-fork
       - name: No token reaches the sidecar
         continue-on-error: true
         env:
@@ -111,13 +124,27 @@ jobs:
           bun-version-file: package.json
       - name: Install the workspace
         run: bash scripts/workspace-install.sh
+      - name: Pre-set the Nx client's variables
+        run: |
+          echo "NX_SELF_HOSTED_REMOTE_CACHE_SERVER=http://127.0.0.1:3000" >> "$GITHUB_ENV"
+          token="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+          echo "::add-mask::${token}"
+          echo "NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=${token}" >> "$GITHUB_ENV"
+      - uses: op-nx/github-cache/start-cache-server@91839c24885842cac86567c30e23b37fb85f7e33
+        id: cache-server
+        background: true
+        with:
+          port: "3000"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: A token that cannot write
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          node scripts/spike-opnx/measure.mjs --task telemetry-client:test \
+          node scripts/spike-opnx/measure.mjs --sidecar external --task telemetry-client:test \
             --label "linux no-write-token" --out "$RUNNER_TEMP/measure-linux-no-write-token.json"
+      - cancel: cache-server
       - uses: actions/upload-artifact@v4
         if: always()
         with:

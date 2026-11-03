@@ -44,6 +44,7 @@ import {
   appendFileSync,
   existsSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -330,6 +331,7 @@ if (options.sidecar === "start") {
     console.error(
       "ACTION: read the sidecar log; --sidecar none measures a sidecar that is down",
     );
+    console.error(readFileSync(out, "utf8"));
     sidecar.kill("SIGTERM");
     store?.close();
     process.exit(1);
