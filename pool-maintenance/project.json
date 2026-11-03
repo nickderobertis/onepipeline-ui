@@ -17,6 +17,8 @@
       "dependsOn": ["test"]
     },
     "budgets-host": {
+      "//parallelism": "Never beside another task: measure.sh runs `just pool-maintenance`, which deletes builds from every profile under `target`, while the sweep's other tasks build there. cargo-prune-superseded groups a crate's builds by name alone, so of the three jsonschema versions the graph links it kept the newest and deleted the other two, after cargo had judged them fresh and before it linked them: the release journey's wheel then failed with `failed to build archive from rlib … libjsonschema-…rlib: No such file`. Run alone, it deletes nothing a running build has read, and a later build rebuilds whatever it removed.",
+      "parallelism": false,
       "command": "node_modules/.bin/onebudgetspec check pool-maintenance/budgets.yaml --label host",
       "dependsOn": [
         "bootstrap",
