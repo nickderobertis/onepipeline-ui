@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.65.4](https://github.com/nickderobertis/onepipeline-ui/compare/v0.65.3...v0.65.4) - 2026-11-03
+
+### Fixed
+
+- *(deps)* link the engine and plan store that create new Linear projects again ([#604](https://github.com/nickderobertis/onepipeline-ui/pull/604))
+
 ## [0.65.3](https://github.com/nickderobertis/onepipeline-ui/compare/v0.65.2...v0.65.3) - 2026-11-03
 
 ### Fixed
