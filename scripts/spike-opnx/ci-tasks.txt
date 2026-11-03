@@ -1,2 +1,4 @@
 dag-model:test
 spike-opnx-demo:probe
+telemetry-client:test
+timeline-categories:test
