@@ -561,7 +561,7 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// comparison of the two above passes for any release both moved to together —
 /// including one whose adopted runs write their plan's home nothing. It moves
 /// with the `onepipeline` pin and [`STORE_RELEASE`], as one change.
-const ENGINE_RELEASE: &str = "0.98.3";
+const ENGINE_RELEASE: &str = "0.98.4";
 
 /// Where the lock must resolve [`ENGINE_RELEASE`] from: crates.io, which serves
 /// the release a crates.io consumer and the sibling CLI `just bootstrap`
@@ -728,7 +728,7 @@ fn the_same_engine_release_from_another_source_is_refused_naming_it() {
 /// a comparison of the two and still link a store whose closure handling nothing
 /// here was proven against. It moves with the `onepipeline` pin, as one change, to
 /// the store release that engine links.
-const STORE_RELEASE: &str = "0.13.1";
+const STORE_RELEASE: &str = "0.13.2";
 
 /// The members of the plan-store family the shipped binary cannot be without:
 /// the store itself, the plugin boundary, and the GitHub plugin a board is read
@@ -742,8 +742,8 @@ const STORE_MEMBERS: [&str; 3] = [
 /// Every way `lock` and `manifest` fail to link exactly [`STORE_RELEASE`] of the
 /// plan store, as a reader would be told them: a family member at another
 /// release, a member resolved at more than one, a required member missing, an
-/// engine edge to another release, or a dev-dependency pinned to anything but
-/// that release exactly.
+/// engine edge to another release, or a dev-dependency on any member pinned to
+/// anything but that release exactly, as a plain string or a table's `version`.
 fn store_identity_disagreements(lock: &str, manifest: &str) -> Vec<String> {
     let lock: toml::Table = toml::from_str(lock).expect("Cargo.lock parses");
     let mut releases: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -803,10 +803,17 @@ fn store_identity_disagreements(lock: &str, manifest: &str) -> Vec<String> {
     }
     let manifest: toml::Table = toml::from_str(manifest).expect("Cargo.toml parses");
     let exact = format!("={STORE_RELEASE}");
-    for member in ["onetaskgraph-core", "onetaskgraph-plugin-api"] {
-        let requirement = manifest["dev-dependencies"]
-            .get(member)
-            .and_then(toml::Value::as_str);
+    let dev = manifest["dev-dependencies"]
+        .as_table()
+        .expect("Cargo.toml has dev-dependencies");
+    let mut members: BTreeSet<&str> = ["onetaskgraph-core", "onetaskgraph-plugin-api"].into();
+    members.extend(
+        dev.keys()
+            .map(String::as_str)
+            .filter(|name| name.starts_with("onetaskgraph-")),
+    );
+    for member in members {
+        let requirement = dev.get(member).and_then(requirement_of);
         if requirement != Some(exact.as_str()) {
             found.push(format!(
                 "Cargo.toml requires {member} as {requirement:?}, not exactly {exact}"
@@ -855,6 +862,7 @@ fn a_plan_store_moved_together_or_resolved_twice_is_refused_naming_it() {
         moved,
         [
             format!("Cargo.toml requires onetaskgraph-core as Some(\"={moved_to}\"), not exactly ={STORE_RELEASE}"),
+            format!("Cargo.toml requires onetaskgraph-linear as Some(\"={moved_to}\"), not exactly ={STORE_RELEASE}"),
             format!("Cargo.toml requires onetaskgraph-plugin-api as Some(\"={moved_to}\"), not exactly ={STORE_RELEASE}"),
             format!("the lock resolves onetaskgraph-core {moved_to}, not the store release {STORE_RELEASE}"),
             format!("the lock resolves onetaskgraph-plugin-api {moved_to}, not the store release {STORE_RELEASE}"),
