@@ -1980,6 +1980,7 @@ fn a_run_that_never_goes_quiet_still_has_its_telemetry_folded_again() {
     let mut seen = live.refreshes().len();
     let mut eligible = false;
     loop {
+        let read_started = Instant::now();
         let refreshes = live.refreshes();
         assert!(
             writer.0.try_wait().expect("writer status").is_none(),
@@ -2005,9 +2006,11 @@ fn a_run_that_never_goes_quiet_still_has_its_telemetry_folded_again() {
             }
         }
         seen = refreshes.len();
-        // Discard every trace already logged before the two-interval boundary:
-        // observing an old fold late must never qualify it.
-        if moving_since.elapsed() > Duration::from_millis(600) * 2 {
+        // Only the NEXT batch can qualify: its records were not in this
+        // snapshot, so they were logged after read_started. Stamp before
+        // reading, not after: a scheduling pause after the read must never
+        // make an earlier fold eligible. Quiet ticks reset this lower bound.
+        if read_started.saturating_duration_since(moving_since) > Duration::from_millis(600) * 2 {
             eligible = true;
         }
         assert!(
