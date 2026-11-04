@@ -28,10 +28,12 @@ test("the split tiers run exactly the tests the original targets ran", () => {
       encoding: "utf8",
     }).trim();
     const oldConfig = join(scratch, "base-nextest.toml");
-    writeFileSync(
-      oldConfig,
-      execFileSync("git", ["show", `${base}:.config/nextest.toml`]),
+    const oldConfigText = execFileSync(
+      "git",
+      ["show", `${base}:.config/nextest.toml`],
+      { encoding: "utf8" },
     );
+    writeFileSync(oldConfig, oldConfigText);
     const metadata = join(scratch, "binaries.json");
     writeFileSync(
       metadata,
@@ -63,7 +65,13 @@ test("the split tiers run exactly the tests the original targets ran", () => {
           ]),
         ),
       );
-    const before = [...list("e2e", true), ...list("repo-tooling", true)].sort();
+    const before = [
+      ...list("e2e", true),
+      ...list("repo-tooling", true),
+      ...(/^\[profile\.versions\]\s*$/m.test(oldConfigText)
+        ? list("versions", true)
+        : []),
+    ].sort();
     const versions = list("versions");
     assert.equal(versions.length, 4);
     const after = [...list("e2e"), ...list("repo-tooling"), ...versions].sort();
