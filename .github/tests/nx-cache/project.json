@@ -39,6 +39,7 @@
       "inputs": [
         "cacheContract",
         "platform",
+        { "runtime": "llmlint fingerprint --config llmlint.yml" },
         {
           "runtime": "git merge-base HEAD origin/main"
         },

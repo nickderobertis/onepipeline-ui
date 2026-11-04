@@ -85,10 +85,11 @@ test("Nx fixture readers hash and select on the production cache plugin they loa
   }
 });
 
-test("the judged tier hashes the real judge fingerprint and ignores recording-only changes", () => {
+test("both test tiers hash the real judge fingerprint and ignore recording-only changes", () => {
   const cwd = workspaceFixture();
   const ids = [
     "onepipeline-ui-judged-tier:test",
+    "github-workflows-nx-cache:test",
     "onepipeline-ui-repo-tooling:test-quick",
   ];
   const model = process.env.ONEHARNESS_MODEL;
@@ -101,8 +102,13 @@ test("the judged tier hashes the real judge fingerprint and ignores recording-on
     // changes its fingerprint without editing any declared workspace file.
     process.env.ONEHARNESS_MODEL = "cache-input-probe-model";
     const changed = taskHashes(cwd, ids);
-    assert.notEqual(changed[ids[0]].hash, before[ids[0]].hash);
-    assert.equal(changed[ids[1]].hash, before[ids[1]].hash);
+    for (const id of ids.slice(0, 2))
+      assert.notEqual(
+        changed[id].hash,
+        before[id].hash,
+        `${id} reads the judge`,
+      );
+    assert.equal(changed[ids[2]].hash, before[ids[2]].hash);
     process.env.LLMLINT_NO_HISTORY = "1";
     const recordingOnly = taskHashes(cwd, ids);
     for (const id of ids)
