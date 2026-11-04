@@ -8,6 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
@@ -78,10 +79,7 @@ function command(file, args) {
 
 test("workflow reports real filesystem usage and survives a reporting failure", () => {
   const root = mkdtempSync(
-    join(
-      process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? process.cwd(),
-      "disk-report-",
-    ),
+    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(), "disk-report-"),
   );
   try {
     const workspace = join(root, "workspace");
@@ -194,10 +192,7 @@ test("workflow reports real filesystem usage and survives a reporting failure", 
 
 test("workflow preserves its verdict for input, allocation and summary failures", () => {
   const root = mkdtempSync(
-    join(
-      process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? process.cwd(),
-      "disk-errors-",
-    ),
+    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(), "disk-errors-"),
   );
   const target = join(root, "target");
   mkdirSync(target);
