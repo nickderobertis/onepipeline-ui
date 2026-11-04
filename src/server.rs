@@ -914,10 +914,8 @@ async fn human_items(State(serving): Store, uri: Uri) -> Response {
         }
     };
     answer_record(move || {
-        let (items, session) = serving.store.human_items();
-        items
-            .list(session, &filter)
-            .map(|items| HumanItemList { items })
+        let (items, _) = serving.store.human_items();
+        items.list(&filter).map(|items| HumanItemList { items })
     })
     .await
 }
@@ -928,8 +926,8 @@ async fn human_item(State(serving): Store, Path(id): Path<String>) -> Response {
         Err(error) => return error.into_response(),
     };
     answer_record(move || {
-        let (items, session) = serving.store.human_items();
-        items.detail(session, &id)
+        let (items, _) = serving.store.human_items();
+        items.detail(&id)
     })
     .await
 }
@@ -948,7 +946,7 @@ async fn raise_human_item(State(serving): Store, raw: String) -> Response {
     .await
 }
 
-/// One write to item `id`, as the acting session.
+/// One write to any owner’s item `id`, attributed by the server.
 async fn act_on_human_item(serving: Serving, id: &str, act: Result<Act, ApiError>) -> Response {
     let (id, act) = match human_item_id(id).and_then(|id| act.map(|act| (id, act))) {
         Ok(pair) => pair,
@@ -961,14 +959,14 @@ async fn act_on_human_item(serving: Serving, id: &str, act: Result<Act, ApiError
     .await
 }
 
-// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`. What this handler enforces server-side is that session's authority, the ownership rule `stop` keeps: `HumanItems::act` refuses an item another session owns before the engine is asked, and the actor is that session rather than anything the body says.
+// llmlint: ignore[authorization_enforced_server_side] `docs/contract.md` deliberately permits host-wide resolutions, including approvals, without authentication or an acting session. `HumanItems::act` applies the engine’s validation and approval authority and supplies session:<id> or browser attribution; the body cannot supply actor or on_behalf_of.
 async fn answer_human_item(State(serving): Store, Path(id): Path<String>, raw: String) -> Response {
     let act =
         body::<HumanItemAnswerRequest>("{text}", &raw).map(|request| Act::Answer(request.text));
     act_on_human_item(serving, &id, act).await
 }
 
-// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`. What this handler enforces server-side is that session's authority, the ownership rule `stop` keeps: `HumanItems::act` refuses an item another session owns before the engine is asked, and the actor is that session rather than anything the body says.
+// llmlint: ignore[authorization_enforced_server_side] `docs/contract.md` deliberately permits host-wide resolutions, including approvals, without authentication or an acting session. `HumanItems::act` applies the engine’s validation and approval authority and supplies session:<id> or browser attribution; the body cannot supply actor or on_behalf_of.
 async fn complete_human_item(
     State(serving): Store,
     Path(id): Path<String>,
@@ -983,7 +981,7 @@ async fn complete_human_item(
     act_on_human_item(serving, &id, act).await
 }
 
-// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`. What this handler enforces server-side is that session's authority, the ownership rule `stop` keeps: `HumanItems::act` refuses an item another session owns before the engine is asked, and the actor is that session rather than anything the body says.
+// llmlint: ignore[authorization_enforced_server_side] `docs/contract.md` deliberately permits host-wide resolutions, including approvals, without authentication or an acting session. `HumanItems::act` applies the engine’s validation and approval authority and supplies session:<id> or browser attribution; the body cannot supply actor or on_behalf_of.
 async fn dismiss_human_item(
     State(serving): Store,
     Path(id): Path<String>,
