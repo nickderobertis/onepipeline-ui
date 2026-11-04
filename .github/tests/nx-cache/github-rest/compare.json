@@ -1,0 +1,183 @@
+{
+  "schema": 1,
+  "source_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/compare/d978e887c28c654761cf94c6a59c7a36c269d9ba...d978e887c28c654761cf94c6a59c7a36c269d9ba",
+  "fetched_at": "2026-11-04T05:19:57.068531+00:00",
+  "kind": "Unmodified recorded GitHub REST response; local journeys derive labelled synthetic selection values from it",
+  "response": {
+    "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/compare/d978e887c28c654761cf94c6a59c7a36c269d9ba...d978e887c28c654761cf94c6a59c7a36c269d9ba",
+    "html_url": "https://github.com/nickderobertis/onepipeline-ui/compare/d978e887c28c654761cf94c6a59c7a36c269d9ba...d978e887c28c654761cf94c6a59c7a36c269d9ba",
+    "permalink_url": "https://github.com/nickderobertis/onepipeline-ui/compare/nickderobertis:d978e88...nickderobertis:d978e88",
+    "diff_url": "https://github.com/nickderobertis/onepipeline-ui/compare/d978e887c28c654761cf94c6a59c7a36c269d9ba...d978e887c28c654761cf94c6a59c7a36c269d9ba.diff",
+    "patch_url": "https://github.com/nickderobertis/onepipeline-ui/compare/d978e887c28c654761cf94c6a59c7a36c269d9ba...d978e887c28c654761cf94c6a59c7a36c269d9ba.patch",
+    "base_commit": {
+      "sha": "d978e887c28c654761cf94c6a59c7a36c269d9ba",
+      "node_id": "C_kwDOTx3Fc9oAKGQ5NzhlODg3YzI4YzY1NDc2MWNmOTRjNmE1OWM3YTM2YzI2OWQ5YmE",
+      "commit": {
+        "author": {
+          "name": "Nick DeRobertis",
+          "email": "whoopnip@gmail.com",
+          "date": "2026-11-04T04:07:51Z"
+        },
+        "committer": {
+          "name": "GitHub",
+          "email": "noreply@github.com",
+          "date": "2026-11-04T04:07:51Z"
+        },
+        "message": "chore: release v0.66.1 (#611)\n\n## 🤖 New release\n\n* `onepipeline-ui`: 0.66.0 -> 0.66.1 (✓ API compatible changes)\n\n<details><summary><i><b>Changelog</b></i></summary><p>\n\n<blockquote>\n\n##\n[0.66.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.66.0...v0.66.1)\n- 2026-11-04\n\n### Fixed\n\n- make browser human items visible and actionable host-wide\n([#610](https://github.com/nickderobertis/onepipeline-ui/pull/610))\n</blockquote>\n\n\n</p></details>\n\n---\nThis PR was generated with\n[release-plz](https://github.com/release-plz/release-plz/).",
+        "tree": {
+          "sha": "1a1060d7ed785fb90350325177e69f2afe141440",
+          "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/git/trees/1a1060d7ed785fb90350325177e69f2afe141440"
+        },
+        "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/git/commits/d978e887c28c654761cf94c6a59c7a36c269d9ba",
+        "comment_count": 0,
+        "verification": {
+          "verified": true,
+          "reason": "valid",
+          "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq6q+XCRC1aQ7uu5UhlAAAj8MQAILZKxHV+2u8OvzSdB0R2PiB\nuRUzV2l7xQaSOGAHJw4eYY30EtoKdXPZkvQ8uCXBZ5VqJ6gcBpLysr3dH9VG064I\n10gBws+DRpAWeMzOkQ0gXlZ0Sfk6IKD8aIAj2q+R8rahGyQ8bGP+WUl4O51y9Vms\n2C+BF64rldp0kO3X4T7DtMU7w+o0NhgZDeDtu594ZJ3ocFzY82G97LRI3mVOhlDT\n9K4BgUSujO26tLR+DM2yKn4fJRVXrNS6sDzh1lEaLko7lL48+LkTVdBimtR/YM3f\noO8rVXL9LDDF+I/03eHlBuyPLfr/ie1oiuK6+p/ttW5HXje9J1SVmGrLDhFRX96g\nI8B/MuNisLwQH61yNpX2j+QqZs4NNO5J2wnpAubnHj3uLTvVZ89N9LKHjUJHKW8S\n1re/AQUEggCqFBjIPXUtmly412eOsBseH18GzlNUTLwvU9nXa8YnQEdN05pOXLK8\nvasQ8fatWroUUA0AMdFgyumQWoqW3GoiM1yDs/Cq9BHE/0Z7SSycLq2RV3vsvjY4\nDHmpHAFUgpg8+JcaTmnHbULNPPKhgplQlVw9jAngZFZ2bcSIBMJnMWQQTUvMD0f2\ni6stFGAUQRD8ezbDbJdI8Fmb1rSlZfka7wY6ep/WDR3ucvvwU7LtXkKjikN2YBGf\n3+cAY5Fb61ZkXSa2AxkW\n=ancq\n-----END PGP SIGNATURE-----\n",
+          "payload": "tree 1a1060d7ed785fb90350325177e69f2afe141440\nparent 7707b2a2dcd26cde3e6dbfca58feca059c0ec52e\nauthor Nick DeRobertis <whoopnip@gmail.com> 1793765271 -0600\ncommitter GitHub <noreply@github.com> 1793765271 +0000\n\nchore: release v0.66.1 (#611)\n\n## 🤖 New release\n\n* `onepipeline-ui`: 0.66.0 -> 0.66.1 (✓ API compatible changes)\n\n<details><summary><i><b>Changelog</b></i></summary><p>\n\n<blockquote>\n\n##\n[0.66.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.66.0...v0.66.1)\n- 2026-11-04\n\n### Fixed\n\n- make browser human items visible and actionable host-wide\n([#610](https://github.com/nickderobertis/onepipeline-ui/pull/610))\n</blockquote>\n\n\n</p></details>\n\n---\nThis PR was generated with\n[release-plz](https://github.com/release-plz/release-plz/).",
+          "verified_at": "2026-11-04T04:07:51Z"
+        }
+      },
+      "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/commits/d978e887c28c654761cf94c6a59c7a36c269d9ba",
+      "html_url": "https://github.com/nickderobertis/onepipeline-ui/commit/d978e887c28c654761cf94c6a59c7a36c269d9ba",
+      "comments_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/commits/d978e887c28c654761cf94c6a59c7a36c269d9ba/comments",
+      "author": {
+        "login": "nickderobertis",
+        "id": 19440155,
+        "node_id": "MDQ6VXNlcjE5NDQwMTU1",
+        "avatar_url": "https://avatars.githubusercontent.com/u/19440155?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/nickderobertis",
+        "html_url": "https://github.com/nickderobertis",
+        "followers_url": "https://api.github.com/users/nickderobertis/followers",
+        "following_url": "https://api.github.com/users/nickderobertis/following{/other_user}",
+        "gists_url": "https://api.github.com/users/nickderobertis/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/nickderobertis/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/nickderobertis/subscriptions",
+        "organizations_url": "https://api.github.com/users/nickderobertis/orgs",
+        "repos_url": "https://api.github.com/users/nickderobertis/repos",
+        "events_url": "https://api.github.com/users/nickderobertis/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/nickderobertis/received_events",
+        "type": "User",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "committer": {
+        "login": "web-flow",
+        "id": 19864447,
+        "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+        "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/web-flow",
+        "html_url": "https://github.com/web-flow",
+        "followers_url": "https://api.github.com/users/web-flow/followers",
+        "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+        "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+        "organizations_url": "https://api.github.com/users/web-flow/orgs",
+        "repos_url": "https://api.github.com/users/web-flow/repos",
+        "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/web-flow/received_events",
+        "type": "User",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "parents": [
+        {
+          "sha": "7707b2a2dcd26cde3e6dbfca58feca059c0ec52e",
+          "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/commits/7707b2a2dcd26cde3e6dbfca58feca059c0ec52e",
+          "html_url": "https://github.com/nickderobertis/onepipeline-ui/commit/7707b2a2dcd26cde3e6dbfca58feca059c0ec52e"
+        }
+      ]
+    },
+    "merge_base_commit": {
+      "sha": "d978e887c28c654761cf94c6a59c7a36c269d9ba",
+      "node_id": "C_kwDOTx3Fc9oAKGQ5NzhlODg3YzI4YzY1NDc2MWNmOTRjNmE1OWM3YTM2YzI2OWQ5YmE",
+      "commit": {
+        "author": {
+          "name": "Nick DeRobertis",
+          "email": "whoopnip@gmail.com",
+          "date": "2026-11-04T04:07:51Z"
+        },
+        "committer": {
+          "name": "GitHub",
+          "email": "noreply@github.com",
+          "date": "2026-11-04T04:07:51Z"
+        },
+        "message": "chore: release v0.66.1 (#611)\n\n## 🤖 New release\n\n* `onepipeline-ui`: 0.66.0 -> 0.66.1 (✓ API compatible changes)\n\n<details><summary><i><b>Changelog</b></i></summary><p>\n\n<blockquote>\n\n##\n[0.66.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.66.0...v0.66.1)\n- 2026-11-04\n\n### Fixed\n\n- make browser human items visible and actionable host-wide\n([#610](https://github.com/nickderobertis/onepipeline-ui/pull/610))\n</blockquote>\n\n\n</p></details>\n\n---\nThis PR was generated with\n[release-plz](https://github.com/release-plz/release-plz/).",
+        "tree": {
+          "sha": "1a1060d7ed785fb90350325177e69f2afe141440",
+          "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/git/trees/1a1060d7ed785fb90350325177e69f2afe141440"
+        },
+        "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/git/commits/d978e887c28c654761cf94c6a59c7a36c269d9ba",
+        "comment_count": 0,
+        "verification": {
+          "verified": true,
+          "reason": "valid",
+          "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq6q+XCRC1aQ7uu5UhlAAAj8MQAILZKxHV+2u8OvzSdB0R2PiB\nuRUzV2l7xQaSOGAHJw4eYY30EtoKdXPZkvQ8uCXBZ5VqJ6gcBpLysr3dH9VG064I\n10gBws+DRpAWeMzOkQ0gXlZ0Sfk6IKD8aIAj2q+R8rahGyQ8bGP+WUl4O51y9Vms\n2C+BF64rldp0kO3X4T7DtMU7w+o0NhgZDeDtu594ZJ3ocFzY82G97LRI3mVOhlDT\n9K4BgUSujO26tLR+DM2yKn4fJRVXrNS6sDzh1lEaLko7lL48+LkTVdBimtR/YM3f\noO8rVXL9LDDF+I/03eHlBuyPLfr/ie1oiuK6+p/ttW5HXje9J1SVmGrLDhFRX96g\nI8B/MuNisLwQH61yNpX2j+QqZs4NNO5J2wnpAubnHj3uLTvVZ89N9LKHjUJHKW8S\n1re/AQUEggCqFBjIPXUtmly412eOsBseH18GzlNUTLwvU9nXa8YnQEdN05pOXLK8\nvasQ8fatWroUUA0AMdFgyumQWoqW3GoiM1yDs/Cq9BHE/0Z7SSycLq2RV3vsvjY4\nDHmpHAFUgpg8+JcaTmnHbULNPPKhgplQlVw9jAngZFZ2bcSIBMJnMWQQTUvMD0f2\ni6stFGAUQRD8ezbDbJdI8Fmb1rSlZfka7wY6ep/WDR3ucvvwU7LtXkKjikN2YBGf\n3+cAY5Fb61ZkXSa2AxkW\n=ancq\n-----END PGP SIGNATURE-----\n",
+          "payload": "tree 1a1060d7ed785fb90350325177e69f2afe141440\nparent 7707b2a2dcd26cde3e6dbfca58feca059c0ec52e\nauthor Nick DeRobertis <whoopnip@gmail.com> 1793765271 -0600\ncommitter GitHub <noreply@github.com> 1793765271 +0000\n\nchore: release v0.66.1 (#611)\n\n## 🤖 New release\n\n* `onepipeline-ui`: 0.66.0 -> 0.66.1 (✓ API compatible changes)\n\n<details><summary><i><b>Changelog</b></i></summary><p>\n\n<blockquote>\n\n##\n[0.66.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.66.0...v0.66.1)\n- 2026-11-04\n\n### Fixed\n\n- make browser human items visible and actionable host-wide\n([#610](https://github.com/nickderobertis/onepipeline-ui/pull/610))\n</blockquote>\n\n\n</p></details>\n\n---\nThis PR was generated with\n[release-plz](https://github.com/release-plz/release-plz/).",
+          "verified_at": "2026-11-04T04:07:51Z"
+        }
+      },
+      "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/commits/d978e887c28c654761cf94c6a59c7a36c269d9ba",
+      "html_url": "https://github.com/nickderobertis/onepipeline-ui/commit/d978e887c28c654761cf94c6a59c7a36c269d9ba",
+      "comments_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/commits/d978e887c28c654761cf94c6a59c7a36c269d9ba/comments",
+      "author": {
+        "login": "nickderobertis",
+        "id": 19440155,
+        "node_id": "MDQ6VXNlcjE5NDQwMTU1",
+        "avatar_url": "https://avatars.githubusercontent.com/u/19440155?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/nickderobertis",
+        "html_url": "https://github.com/nickderobertis",
+        "followers_url": "https://api.github.com/users/nickderobertis/followers",
+        "following_url": "https://api.github.com/users/nickderobertis/following{/other_user}",
+        "gists_url": "https://api.github.com/users/nickderobertis/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/nickderobertis/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/nickderobertis/subscriptions",
+        "organizations_url": "https://api.github.com/users/nickderobertis/orgs",
+        "repos_url": "https://api.github.com/users/nickderobertis/repos",
+        "events_url": "https://api.github.com/users/nickderobertis/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/nickderobertis/received_events",
+        "type": "User",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "committer": {
+        "login": "web-flow",
+        "id": 19864447,
+        "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+        "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+        "gravatar_id": "",
+        "url": "https://api.github.com/users/web-flow",
+        "html_url": "https://github.com/web-flow",
+        "followers_url": "https://api.github.com/users/web-flow/followers",
+        "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+        "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+        "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+        "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+        "organizations_url": "https://api.github.com/users/web-flow/orgs",
+        "repos_url": "https://api.github.com/users/web-flow/repos",
+        "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+        "received_events_url": "https://api.github.com/users/web-flow/received_events",
+        "type": "User",
+        "user_view_type": "public",
+        "site_admin": false
+      },
+      "parents": [
+        {
+          "sha": "7707b2a2dcd26cde3e6dbfca58feca059c0ec52e",
+          "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/commits/7707b2a2dcd26cde3e6dbfca58feca059c0ec52e",
+          "html_url": "https://github.com/nickderobertis/onepipeline-ui/commit/7707b2a2dcd26cde3e6dbfca58feca059c0ec52e"
+        }
+      ]
+    },
+    "status": "identical",
+    "ahead_by": 0,
+    "behind_by": 0,
+    "total_commits": 0,
+    "commits": [],
+    "files": []
+  }
+}

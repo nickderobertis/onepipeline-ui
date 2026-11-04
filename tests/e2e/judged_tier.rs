@@ -50,6 +50,7 @@ const COPIED: &[&str] = &[
     ".gitignore",
     "oneharness.toml",
     "scripts/nx.sh",
+    "scripts/nx-remote-cache.mjs",
     "scripts/workspace-install.sh",
 ];
 
@@ -294,6 +295,8 @@ impl Fixture {
         );
         command
             .current_dir(self.workspace())
+            // This miniature workspace owns its cache, not the outer CI report.
+            .env_remove("GITHUB_ACTIONS")
             .env("PATH", std::env::join_paths(path).expect("join PATH"))
             .env("HOME", self.home())
             .env("XDG_CONFIG_HOME", self.home().join(".config"))

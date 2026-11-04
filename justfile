@@ -538,11 +538,10 @@ _tier-test-covered profile:
       || { echo "the $1 tier failed — the failing tests are listed above" >&2; exit 1; }
 
 # 95% line coverage is the gate; lower it only with a documented reason in
-# AGENTS.md. Measured over the union of the four instrumented tiers, which is the
-# suite less the baseline and cost tiers — the same lines the floor was measured
-# over when one target ran all three. `onepipeline-ui-coverage:coverage` depends
-# on each tier's `test`, so a tier with nothing new to say replays its profiles
-# from the cache rather than leaving a hole in the report.
+# AGENTS.md. Measured over the union of the five instrumented tiers, excluding
+# baseline and cost journeys. Coverage producers and the aggregate stay uncached:
+# LLVM profiles cannot cross a Cargo package-version rebuild. The aggregate
+# depends on each producer's `test`, so every report uses fresh profiles.
 # Merge every instrumented tier's profiles and hold them to the coverage floor.
 _crate-coverage:
     @cargo llvm-cov report --locked --fail-under-lines 95 \

@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "source_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/runs/41674998643/artifacts",
+  "fetched_at": "2026-11-04T05:04:56.900062+00:00",
+  "kind": "Unmodified recorded GitHub REST response; local journeys derive labelled synthetic selection values from it",
+  "response": {
+    "total_count": 4,
+    "artifacts": [
+      {
+        "id": 13250102365,
+        "node_id": "MDg6QXJ0aWZhY3QxMzI1MDEwMjM2NQ==",
+        "name": "measure-linux",
+        "size_in_bytes": 3320,
+        "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/artifacts/13250102365",
+        "archive_download_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/artifacts/13250102365/zip",
+        "expired": false,
+        "digest": "sha256:969ba0acda03069e6266fc9da629fa861dc31128528109e5ced70bb36f850fbd",
+        "created_at": "2026-11-03T16:31:47Z",
+        "updated_at": "2026-11-03T16:31:47Z",
+        "expires_at": "2027-02-01T16:31:04Z",
+        "workflow_run": {
+          "id": 41674998643,
+          "repository_id": 1327351155,
+          "head_repository_id": 1327351155,
+          "head_branch": "nick/ci-release-test-cache/spike-opnx-audit",
+          "head_sha": "850b8ce7e25cf2fd64eeb6e79755b7fed754dc5d"
+        }
+      },
+      {
+        "id": 13249767154,
+        "node_id": "MDg6QXJ0aWZhY3QxMzI0OTc2NzE1NA==",
+        "name": "measure-linux-no-write-token",
+        "size_in_bytes": 754,
+        "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/artifacts/13249767154",
+        "archive_download_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/artifacts/13249767154/zip",
+        "expired": false,
+        "digest": "sha256:d262f88e3d63c4b0ecfeeeb8bc4124720821b6ae38b239925e1a376a018716b0",
+        "created_at": "2026-11-03T16:31:22Z",
+        "updated_at": "2026-11-03T16:31:22Z",
+        "expires_at": "2027-02-01T16:31:04Z",
+        "workflow_run": {
+          "id": 41674998643,
+          "repository_id": 1327351155,
+          "head_repository_id": 1327351155,
+          "head_branch": "nick/ci-release-test-cache/spike-opnx-audit",
+          "head_sha": "850b8ce7e25cf2fd64eeb6e79755b7fed754dc5d"
+        }
+      },
+      {
+        "id": 13248804845,
+        "node_id": "MDg6QXJ0aWZhY3QxMzI0ODgwNDg0NQ==",
+        "name": "measure-windows",
+        "size_in_bytes": 706,
+        "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/artifacts/13248804845",
+        "archive_download_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/artifacts/13248804845/zip",
+        "expired": false,
+        "digest": "sha256:155ada284b1a6544d6245ddaaa25711435acc29605ef745badf385b523d2ae47",
+        "created_at": "2026-11-03T16:33:20Z",
+        "updated_at": "2026-11-03T16:33:20Z",
+        "expires_at": "2027-02-01T16:31:04Z",
+        "workflow_run": {
+          "id": 41674998643,
+          "repository_id": 1327351155,
+          "head_repository_id": 1327351155,
+          "head_branch": "nick/ci-release-test-cache/spike-opnx-audit",
+          "head_sha": "850b8ce7e25cf2fd64eeb6e79755b7fed754dc5d"
+        }
+      },
+      {
+        "id": 13248659608,
+        "node_id": "MDg6QXJ0aWZhY3QxMzI0ODY1OTYwOA==",
+        "name": "measure-macos",
+        "size_in_bytes": 705,
+        "url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/artifacts/13248659608",
+        "archive_download_url": "https://api.github.com/repos/nickderobertis/onepipeline-ui/actions/artifacts/13248659608/zip",
+        "expired": false,
+        "digest": "sha256:9281764d893789d86d66da153e850e7703ea9307cf94f87d177418f491d9f54d",
+        "created_at": "2026-11-03T16:31:57Z",
+        "updated_at": "2026-11-03T16:31:57Z",
+        "expires_at": "2027-02-01T16:31:04Z",
+        "workflow_run": {
+          "id": 41674998643,
+          "repository_id": 1327351155,
+          "head_repository_id": 1327351155,
+          "head_branch": "nick/ci-release-test-cache/spike-opnx-audit",
+          "head_sha": "850b8ce7e25cf2fd64eeb6e79755b7fed754dc5d"
+        }
+      }
+    ]
+  }
+}

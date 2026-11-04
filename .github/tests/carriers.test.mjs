@@ -12,7 +12,7 @@ test("an unaffected crate still costs one Mac job, never a second", () => {
     { event: "pull_request", action: "synchronize", crate: "false" },
     { macosRequired: true },
   );
-  // `test-macos` starts on every pull request but a release-plz branch's, and
+  // `test-macos` starts on every pull request, and
   // affected selection — not a job condition — decides what it runs.
   assert.deepEqual(
     rows.filter((row) => row.macos && row.requested).map((row) => row.job),

@@ -1,0 +1,7 @@
+{
+  "pull_request": 607,
+  "commit": "aaabfdbf03bd256e9f7104ef1528d8ff19056be1",
+  "previous": "0.65.4",
+  "version": "0.66.0",
+  "changelog": "## [0.66.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.65.4...v0.66.0) - 2026-11-03\n\n### Fixed\n\n- *(deps)* [**breaking**] link the onepipeline engine that lands section links on their headings ([#606](https://github.com/nickderobertis/onepipeline-ui/pull/606))\n\n"
+}

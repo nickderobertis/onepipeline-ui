@@ -42,10 +42,11 @@ const SUITES_THAT_SERVE_THE_BASELINE: [&str; 1] = ["onepipeline-ui-baseline:test
 
 /// The crate's test tiers: the Nx project and target each runs as, and the
 /// nextest profile in `.config/nextest.toml` that selects its tests.
-const TIERS: [(&str, &str, &str); 11] = [
+const TIERS: [(&str, &str, &str); 12] = [
     ("onepipeline-ui", "test", "unit"),
     ("onepipeline-ui-e2e", "test", "e2e"),
     ("onepipeline-ui-repo-tooling", "test", "repo-tooling"),
+    ("onepipeline-ui-versions", "test", "versions"),
     ("onepipeline-ui-npm-launcher", "test", "npm-launcher"),
     ("onepipeline-ui-baseline", "test-baseline", "baseline"),
     ("onepipeline-ui-baseline-reuse", "test", "baseline-reuse"),

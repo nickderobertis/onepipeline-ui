@@ -4,11 +4,12 @@
 #
 #   release-tail   the last step of release.yml's `publish`, reporting only:
 #                  `onebudgetspec check budgets.yaml --label release-tail`, after
-#                  the Release is settled. The seven GitHub figures, taken by
+#                  the Release is settled. The GitHub figures, taken by
 #                  scripts/actions-budget-figures.sh (copied byte for byte
-#                  from dero-skills' create-repo at d12c819, version 10, so its
-#                  header is the source's own) through onevcs's read-only host
-#                  queries. The CD figures leave out `CI cache`, the main-push
+#                  from dero-skills' create-repo at 63e071b, version 11, so its
+#                  header is the source's own). The seven host figures use
+#                  onevcs's read-only queries; cache-use reads CI and promotion
+#                  artifacts through GitHub's API directly. The CD figures leave out `CI cache`, the main-push
 #                  cache warmer, which delivers nothing to a release.
 #   host-variable  `just gate` on a development machine, as a warning: the
 #                  recipe records its own start and end, then checks this label.
@@ -58,12 +59,13 @@ budgets:
   # user's requirement. Today: 13,549 s median per release (current shape).
   - id: onepipeline-ui-release-cycle-time
     description: >-
-      Per pull request one release carries, its last commit's checks (first run
+      Per pull request one release carries whose merge changes a published path,
+      its last commit's checks (first run
       created to last job completed) plus its merge to the end of `publish`; the
       maximum over the release's pull requests, in seconds. Holds a change to 90
       minutes from its final checks to its release.
     measure: reported
-    command: [bash, scripts/actions-budget-figures.sh, release-cycle-time]
+    command: [bash, scripts/actions-budget-figures.sh, release-cycle-time, --published-paths, .github/release-published-paths]
     unit: seconds
     direction: max
     threshold: 5400
@@ -159,3 +161,23 @@ budgets:
     direction: max
     threshold: 1800
     labels: [host-variable]
+
+  # Workload: one release carrying 1–3 merged PRs; 54 releases and 140 merged
+  # PRs (85 non-release) in 31 days, 2026-09-15 to 10-16. About 32 merged PRs
+  # in GitHub's seven-day window, five open at once, three pushes per PR, with
+  # 100% of pushes changing crate inputs and four CI jobs per push (up to 58
+  # cacheable tasks at the spike baseline, coverage included). Promotion adds a base-scope copy and
+  # retains source scopes. Basis: design; revisit 100% after real tail figures.
+  - id: onepipeline-ui-nx-cache-use
+    description: >-
+      Remote hits as a percentage of attempt-qualified cacheable task/OS/hash
+      executions, excluding local hits. Measure the release PR and same-PR
+      retries and later pushes of the release's counted PRs from existing run
+      artifacts. Report misses, receipt age, promotion failures, unavailable
+      evidence, stored bytes and GitHub requests; absent evidence is not a pass.
+    measure: reported
+    command: [bash, scripts/actions-budget-figures.sh, cache-use]
+    unit: percent
+    direction: min
+    threshold: 100
+    labels: [release-tail]
