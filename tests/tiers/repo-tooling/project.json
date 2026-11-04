@@ -6,16 +6,26 @@
   "targets": {
     "test": {
       "command": "just _tier-test-covered repo-tooling",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
-      "inputs": ["repoMachinery"],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
+      "inputs": ["repoMachinery", "platform"],
       "outputs": [
         "{workspaceRoot}/target/llvm-cov-target/repo-tooling-*.profraw"
       ]
     },
     "test-quick": {
       "command": "just _tier-test repo-tooling",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
-      "inputs": ["repoMachinery"]
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
+      "inputs": ["repoMachinery", "platform"]
     },
     "check": {
       "executor": "nx:noop"
@@ -31,7 +41,7 @@
       "{workspaceRoot}/scripts/**/*",
       "{workspaceRoot}/.github/**/*",
       "{workspaceRoot}/npm/**/*",
-      "{workspaceRoot}/pyproject.toml",
+      "pythonVersionFree",
       "{workspaceRoot}/release-plz.toml",
       "{workspaceRoot}/release-targets.toml",
       "{workspaceRoot}/gh-secrets.json",
@@ -46,8 +56,7 @@
       "{workspaceRoot}/apps/*/project.json",
       "{workspaceRoot}/packages/*/project.json",
       "{workspaceRoot}/tests/tiers/*/project.json",
-      "{workspaceRoot}/**/package.json",
-      "{workspaceRoot}/bun.lock",
+      "npmVersionFree",
       "{workspaceRoot}/**/tsconfig*.json",
       "{workspaceRoot}/tests/packaging.rs",
       "{workspaceRoot}/tests/e2e/main.rs",

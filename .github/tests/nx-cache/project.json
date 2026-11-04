@@ -1,0 +1,58 @@
+{
+  "name": "github-workflows-nx-cache",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:tooling", "type:test", "lang:javascript"],
+  "namedInputs": {
+    "cacheContract": [
+      "{projectRoot}/**/*",
+      "sharedGlobals",
+      "apiServerSurface",
+      "embeddedView",
+      "testTiers",
+      "pythonVersionFree",
+      "{workspaceRoot}/nx.json",
+      "{workspaceRoot}/**/project.json",
+      "{workspaceRoot}/.github/workflow-graph.mjs",
+      "{workspaceRoot}/.github/workflows/ci.yml",
+      "{workspaceRoot}/.github/workflows/release-plz.yml",
+      "{workspaceRoot}/.github/workflows/release.yml",
+      "{workspaceRoot}/.github/nx-version-files",
+      "{workspaceRoot}/.github/release-published-paths",
+      "{workspaceRoot}/scripts/nx-remote-cache.mjs",
+      "{workspaceRoot}/scripts/nx-version-free-inputs.mjs",
+      "{workspaceRoot}/scripts/actions-budget-figures.sh",
+      "{workspaceRoot}/scripts/ci-job.sh",
+      "{workspaceRoot}/budgets.yaml",
+      "{workspaceRoot}/tests/**/*.rs",
+      "{workspaceRoot}/tests/fixtures/**/*",
+      "{workspaceRoot}/apps/dag-ui-e2e/fixtures/**/*",
+      "{workspaceRoot}/packages/timeline-categories/**/*",
+      "{workspaceRoot}/.gitignore"
+    ]
+  },
+  "targets": {
+    "bootstrap": {
+      "command": "bash scripts/workspace-install.sh"
+    },
+    "lint": {
+      "command": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings .github/tests/nx-cache",
+      "inputs": ["cacheContract", "platform"]
+    },
+    "test": {
+      "command": "node --test --test-concurrency=1 .github/tests/nx-cache/*.test.mjs",
+      "inputs": ["cacheContract", "platform"],
+      "dependsOn": [
+        "bootstrap",
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
+      "cache": false
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  }
+}

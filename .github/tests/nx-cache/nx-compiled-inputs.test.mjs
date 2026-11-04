@@ -1,18 +1,9 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import {
-  copyFileSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { taskHashes, workspaceFixture } from "./nx-fixture.mjs";
 
-const root = resolve(".");
 const projects = {
   "dag-ui-build-cache": [
     "apps/dag-ui-build-cache/project.json",
@@ -35,18 +26,7 @@ const projects = {
 const ids = Object.entries(projects).flatMap(([name, [, targets]]) =>
   targets.map((target) => `${name}:${target}`),
 );
-const hashes = (cwd) =>
-  JSON.parse(
-    execFileSync(
-      process.execPath,
-      [join(root, ".github/nx-task-hashes.mjs"), cwd, ...ids],
-      {
-        encoding: "utf8",
-        env: { ...process.env, NX_DAEMON: "false" },
-        maxBuffer: 8 * 1024 * 1024,
-      },
-    ),
-  );
+const hashes = (cwd) => taskHashes(cwd, ids);
 const requireMoved = (before, after) => {
   for (const id of ids)
     assert.notEqual(
@@ -57,20 +37,8 @@ const requireMoved = (before, after) => {
 };
 
 test("compiled test targets hash library sources and Cargo dependencies", () => {
-  const cwd = mkdtempSync(
-    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(), "nx-compiled-"),
-  );
+  const cwd = workspaceFixture();
   try {
-    const archive = execFileSync("git", ["archive", "HEAD"], {
-      maxBuffer: 32 * 1024 * 1024,
-    });
-    execFileSync("tar", ["-x", "-C", cwd], { input: archive });
-    execFileSync("git", ["init", "-q"], { cwd });
-    execFileSync("git", ["add", "."], { cwd });
-    symlinkSync(join(root, "node_modules"), join(cwd, "node_modules"), "dir");
-    for (const [file] of Object.values(projects))
-      copyFileSync(join(root, file), join(cwd, file));
-    copyFileSync(join(root, "nx.json"), join(cwd, "nx.json"));
     const before = hashes(cwd);
     const source = readFileSync(join(cwd, "src/lib.rs"), "utf8");
     writeFileSync(
@@ -91,6 +59,40 @@ test("compiled test targets hash library sources and Cargo dependencies", () => 
     );
     writeFileSync(join(cwd, "Cargo.toml"), changed);
     requireMoved(before, hashes(cwd));
+    writeFileSync(join(cwd, "Cargo.toml"), manifest);
+    for (const [file, mutate] of [
+      [
+        "Cargo.toml",
+        (text) => text.replace("bundled-ui = []", 'bundled-ui = ["probe"]'),
+      ],
+      [
+        "Cargo.lock",
+        (text) =>
+          text.replace(
+            /version = "(\d+)\.(\d+)\.(\d+)"/,
+            'version = "999.0.0"',
+          ),
+      ],
+      ["rust-toolchain.toml", (text) => `${text}\n# toolchain hash probe\n`],
+    ]) {
+      const original = readFileSync(join(cwd, file), "utf8");
+      const changed = mutate(original);
+      assert.notEqual(changed, original, file);
+      writeFileSync(join(cwd, file), changed);
+      requireMoved(before, hashes(cwd));
+      writeFileSync(join(cwd, file), original);
+    }
+    // Negative control: removing the compile surface reproduces the original hole.
+    const file = join(cwd, "apps/dag-ui-build-cache/project.json");
+    const definition = JSON.parse(readFileSync(file, "utf8"));
+    for (const target of ["test", "lint"])
+      definition.targets[target].inputs = definition.targets[
+        target
+      ].inputs.filter((input) => input !== "apiServerSurface");
+    writeFileSync(file, JSON.stringify(definition));
+    const broken = hashes(cwd);
+    writeFileSync(join(cwd, "src/lib.rs"), `${source}\n// negative control\n`);
+    assert.throws(() => requireMoved(broken, hashes(cwd)), /omitted an input/);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

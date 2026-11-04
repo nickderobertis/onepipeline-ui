@@ -7,19 +7,31 @@
     "test": {
       "command": "just _tier-test-covered e2e",
       "dependsOn": [
-        { "projects": ["onepipeline-ui"], "target": "ensure-sibling" },
-        { "projects": ["dag-ui"], "target": "build" }
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
       ],
-      "inputs": ["e2eJourneys"],
+      "inputs": ["e2eJourneys", "platform"],
       "outputs": ["{workspaceRoot}/target/llvm-cov-target/e2e-*.profraw"]
     },
     "test-quick": {
       "command": "just _tier-test e2e",
       "dependsOn": [
-        { "projects": ["onepipeline-ui"], "target": "ensure-sibling" },
-        { "projects": ["dag-ui"], "target": "build" }
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
       ],
-      "inputs": ["e2eJourneys"]
+      "inputs": ["e2eJourneys", "platform"]
     },
     "check": {
       "executor": "nx:noop"

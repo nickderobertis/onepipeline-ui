@@ -16,9 +16,10 @@
         "{workspaceRoot}/shots/baseline/**/*",
         "{workspaceRoot}/scripts/visual-capture.sh",
         "{workspaceRoot}/.github/workflows/visual-docs.yml",
-        "{workspaceRoot}/apps/dag-ui-e2e/package.json",
+        "npmVersionFree",
         "{workspaceRoot}/apps/dag-ui-e2e/viewports.ts",
-        "{workspaceRoot}/apps/dag-ui-e2e/gallery.screens.spec.ts"
+        "{workspaceRoot}/apps/dag-ui-e2e/gallery.screens.spec.ts",
+        "platform"
       ]
     },
     "check": {

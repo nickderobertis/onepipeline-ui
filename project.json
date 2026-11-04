@@ -17,9 +17,14 @@
       "cache": false
     },
     "ensure-baseline": {
-      "//": "After the browser tiers’ server: both build in target’s build directory, which cargo locks per build, and the browser tiers wait on the server (docs/linux-cold-cache-timing.md).",
+      "//": "After the browser tiers\u2019 server: both build in target\u2019s build directory, which cargo locks per build, and the browser tiers wait on the server (docs/linux-cold-cache-timing.md).",
       "command": "just _ensure-baseline",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build-api-server" }],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build-api-server"
+        }
+      ],
       "cache": false
     },
     "format": {
@@ -30,40 +35,67 @@
     },
     "lint": {
       "command": "just _crate-lint",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }]
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ]
     },
     "test": {
       "command": "just _tier-test-covered unit",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
       "inputs": [
         "default",
         "servedGoldens",
         "{workspaceRoot}/docs/contract.md",
         "{workspaceRoot}/apps/dag-ui/src/**/*",
         "{workspaceRoot}/apps/dag-ui-e2e/fixtures/**/*",
-        "{workspaceRoot}/packages/*/src/**/*"
+        "{workspaceRoot}/packages/*/src/**/*",
+        "platform"
       ],
       "outputs": ["{workspaceRoot}/target/llvm-cov-target/unit-*.profraw"]
     },
     "test-quick": {
       "command": "just _tier-test unit",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
       "inputs": [
         "default",
         "servedGoldens",
         "{workspaceRoot}/docs/contract.md",
         "{workspaceRoot}/apps/dag-ui/src/**/*",
         "{workspaceRoot}/apps/dag-ui-e2e/fixtures/**/*",
-        "{workspaceRoot}/packages/*/src/**/*"
+        "{workspaceRoot}/packages/*/src/**/*",
+        "platform"
       ]
     },
     "doc": {
       "command": "just _crate-doc",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }]
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ]
     },
     "msrv": {
       "command": "just _crate-msrv",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }]
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ]
     },
     "deps-check": {
       "command": "just _crate-deps-check"
@@ -71,12 +103,22 @@
     "install-smoke": {
       "//packaging": "llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these two carry ci.yml's `install (ubuntu-latest)` and `wheel` jobs, which ran whenever `just affected-crate` found any `lang:rust` project affected; this project carries that tag, so its own edge is no wider than theirs was and no change pays for them that did not before. The files they package are the crate's own (Cargo.toml, src, build.rs, README.md, pyproject.toml, npm/), which is exactly this project's ownership, and Nx selects by ownership rather than by a target's inputs, so a narrower edge would need a project owning a subset of the crate's files. They stay uncached because each verdict is about the host as much as the tree: `cargo install` resolving the registry and the manylinux image the wheel builds in.",
       "command": "just _crate-install-smoke",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
       "cache": false
     },
     "wheel-smoke": {
       "command": "just _crate-wheel-smoke",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
       "cache": false,
       "//packaging-end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]"
     },

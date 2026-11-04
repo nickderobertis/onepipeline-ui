@@ -7,9 +7,18 @@
     "test-baseline": {
       "command": "just _tier-test baseline",
       "dependsOn": [
-        { "projects": ["onepipeline-ui"], "target": "ensure-sibling" },
-        { "projects": ["onepipeline-ui"], "target": "ensure-baseline" },
-        { "projects": ["dag-ui"], "target": "build" }
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
+        },
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-baseline"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
       ],
       "inputs": [
         "apiServerSurface",
@@ -26,7 +35,8 @@
         "{workspaceRoot}/tests/support/timeline_schema.rs",
         {
           "runtime": "git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main"
-        }
+        },
+        "platform"
       ]
     },
     "check": {

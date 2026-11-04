@@ -6,12 +6,18 @@
   "targets": {
     "lint": {
       "command": "cargo clippy --locked --quiet --test build-cache -- -D warnings",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
       "cache": true,
       "inputs": [
         "apiServerSurface",
         "{workspaceRoot}/tests/build_cache.rs",
-        "{projectRoot}/project.json"
+        "{projectRoot}/project.json",
+        "platform"
       ]
     },
     "test": {
@@ -22,11 +28,11 @@
         "{workspaceRoot}/tests/build_cache.rs",
         "{workspaceRoot}/apps/dag-ui/**/*",
         "{workspaceRoot}/packages/dag-model/**/*",
-        "{workspaceRoot}/package.json",
-        "{workspaceRoot}/bun.lock",
+        "npmVersionFree",
         "{workspaceRoot}/tsconfig.base.json",
         "{workspaceRoot}/scripts/nx.sh",
-        "{projectRoot}/project.json"
+        "{projectRoot}/project.json",
+        "platform"
       ]
     },
     "check": {

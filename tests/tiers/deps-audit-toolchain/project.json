@@ -24,7 +24,8 @@
         "{workspaceRoot}/rust-toolchain.toml",
         "{workspaceRoot}/justfile",
         "{workspaceRoot}/.config/nextest.toml",
-        "{projectRoot}/project.json"
+        "{projectRoot}/project.json",
+        "platform"
       ]
     },
     "check": {

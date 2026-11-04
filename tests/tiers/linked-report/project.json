@@ -6,7 +6,12 @@
   "targets": {
     "test": {
       "command": "just _tier-test linked-report",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
       "inputs": [
         "apiServerSurface",
         "testTiers",
@@ -19,7 +24,8 @@
         "{workspaceRoot}/tests/support/http.rs",
         "{workspaceRoot}/tests/support/journal_schema.rs",
         "{workspaceRoot}/tests/support/serving.rs",
-        "{workspaceRoot}/tests/support/sibling.rs"
+        "{workspaceRoot}/tests/support/sibling.rs",
+        "platform"
       ]
     },
     "check": {

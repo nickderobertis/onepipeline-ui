@@ -13,7 +13,8 @@
         "apiServerSurface",
         "{workspaceRoot}/tests/fixtures/history/**",
         "{workspaceRoot}/tests/support/github_board.py",
-        "{workspaceRoot}/tests/support/approval_authority.py"
+        "{workspaceRoot}/tests/support/approval_authority.py",
+        "platform"
       ],
       "dependsOn": [
         {
@@ -33,7 +34,7 @@
     "test-isolation": {
       "//": "After `test`, so the browser tier has a dependent and Nx starts it before the crate tasks it queued behind (docs/linux-cold-cache-timing.md).",
       "command": "npx playwright test --config apps/dag-ui-e2e/isolation.config.ts",
-      "inputs": ["default", "apiServerSurface"],
+      "inputs": ["default", "apiServerSurface", "platform"],
       "dependsOn": [
         "test",
         {
@@ -67,7 +68,8 @@
       "inputs": [
         "{projectRoot}/budgets.yaml",
         "{projectRoot}/request-load-budget.mjs",
-        "{projectRoot}/telemetry/request-load.json"
+        "{projectRoot}/telemetry/request-load.json",
+        "platform"
       ],
       "cache": true
     },

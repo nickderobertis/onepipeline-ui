@@ -23,7 +23,7 @@
           "target": "build"
         }
       ],
-      "inputs": ["baselineProvisioning"]
+      "inputs": ["baselineProvisioning", "platform"]
     },
     "test-quick": {
       "command": "just _tier-test baseline-reuse",
@@ -33,7 +33,7 @@
           "target": "build"
         }
       ],
-      "inputs": ["baselineProvisioning"]
+      "inputs": ["baselineProvisioning", "platform"]
     },
     "check": {
       "executor": "nx:noop"

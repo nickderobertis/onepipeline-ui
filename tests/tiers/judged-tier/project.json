@@ -6,7 +6,12 @@
   "targets": {
     "test": {
       "command": "just _tier-test judged-tier",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
       "inputs": [
         "apiServerSurface",
         "{workspaceRoot}/tests/e2e/main.rs",
@@ -19,11 +24,11 @@
         "{workspaceRoot}/justfile",
         "{workspaceRoot}/scripts/nx.sh",
         "{workspaceRoot}/scripts/workspace-install.sh",
-        "{workspaceRoot}/package.json",
-        "{workspaceRoot}/bun.lock",
+        "npmVersionFree",
         "{workspaceRoot}/.gitignore",
         "{workspaceRoot}/llmlint.yml",
-        "{workspaceRoot}/oneharness.toml"
+        "{workspaceRoot}/oneharness.toml",
+        "platform"
       ]
     },
     "check": {

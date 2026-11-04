@@ -1,0 +1,33 @@
+# Files used to build registry packages and release archives.
+# Match package inputs plus the lock and toolchain used for the binary.
+:(top,glob)src/**/*.rs
+:(top,glob)build.rs
+:(top,glob)Cargo.toml
+:(top,glob)README.md
+:(top,glob)LICENSE
+:(top,glob)docs/contract.md
+:(top,glob)pyproject.toml
+:(top,glob)npm/onepipeline-api-cli/package.json
+:(top,glob)npm/onepipeline-api-cli/bin/**
+:(top,glob)npm/onepipeline-ui/package.json
+:(top,glob)npm/onepipeline-ui/README.md
+:(top,glob)scripts/npm-build.mjs
+:(top,glob)scripts/sbom.mjs
+:(top,glob)scripts/build-linux-wheel.sh
+:(top,glob)scripts/release.mjs
+:(top,glob)scripts/release-package.py
+:(top,glob)apps/dag-ui/index.html
+:(top,glob)apps/dag-ui/src/**
+:(top,glob)apps/dag-ui/package.json
+:(top,glob)apps/dag-ui/tsconfig.json
+:(top,glob)apps/dag-ui/vite.config.ts
+:(top,glob)packages/*/src/**
+:(top,glob)packages/*/package.json
+:(top,glob)packages/*/tsconfig.json
+:(top,glob)packages/*/project.json
+:(top,glob)tsconfig.base.json
+:(top,glob)package.json
+:(top,glob)bun.lock
+Cargo.lock
+rust-toolchain.toml
+.cargo/**

@@ -160,6 +160,19 @@ check contract. A fork's pull request gets the report only in `lint`'s summary
 and log: the manager ruled out a privileged `workflow_run` job to post it. Never
 ignore an advisory in `deny.toml` to get a change through.
 
+**The four jobs share Nx test results separately from the Rust build cache.**
+`scripts/nx-remote-cache.mjs` records trusted same-repository PR entries and
+promotes them in the existing release-plz job before it updates the release PR.
+Fork and Dependabot PRs read only. The script and version-free manifest digests
+are upstream-owned copies; the workflow suite holds their bytes to create-repo.
+Version/changelog edits retain source and dependency hashes; the `versions`,
+npm-launcher and release tiers keep the version where their tests read it.
+Test outputs name coverage profiles or reports, never Rust build directories;
+release rehearsal stays uncached. Reports and promotion receipts feed the
+release-tail cache-use figure; missing evidence never counts as replay. Every
+release PR runs all four jobs through the same steps as any other PR; no
+branch-name or version-only classifier bypasses its macOS lane.
+
 **The four jobs restore `main`'s Rust build and save none.** `ci-cache.yml` is
 the producer: on every push to `main` one build-only job per OS
 (`scripts/ci-warm.sh`, `just ci-warm-<os>`) compiles what that OS's jobs compile
@@ -245,17 +258,18 @@ fans one uniformly-named target across all of them.
   file installed and run before it publishes, and read back from its registry
   after.
 <!-- llmlint: ignore-block[agents_md_durable_and_terse] the budgets' ids and labels are named here on purpose: this is where a maintainer learns which label decides where each budget is checked (publish's last step or the gate) and that the release-tail ones block nothing, which budgets.yaml's entries cannot say about each other. -->
-- **Eight budgets hold CI, CD and the local gate to their lines** (root
-  `budgets.yaml`, read from telemetry). The seven `release-tail` ones —
+- **Nine budgets hold CI, CD and the local gate to their lines** (root
+  `budgets.yaml`, read from telemetry). The eight `release-tail` ones —
   `onepipeline-ui-ci-check-time`, `-cd-job-time`, `-release-cycle-time`,
   `-ci-job-count`, `-cd-job-count`, `-release-read-requests` and
-  `-pr-read-requests` — are reported by `publish`'s last step and read by
+  `-pr-read-requests` and `-nx-cache-use` — are reported by `publish`'s last step and read by
   nothing, so an overrun turns that step red and never blocks, demotes or reverts
   a release. `onepipeline-ui-gate-time` (`host-variable`) is checked by `just
   gate` itself, whose whole body runs inside `scripts/gate-time.sh`: over is a
   warning, an unmeasurable budget fails the gate. At pull-request time a job's
   `timeout-minutes` is the line; any other check of the root file excludes both
-  labels. The figures reach GitHub only through `onevcs host`, via
+  labels. The seven host figures reach GitHub through `onevcs host`; cache-use reads
+  CI reports and promotion receipts through GitHub's API directly. Both use
   `scripts/actions-budget-figures.sh`, a copy of dero-skills' create-repo source
   that is edited only there.
 <!-- llmlint: ignore-end[agents_md_durable_and_terse] -->

@@ -10,7 +10,7 @@
       "embeddedView",
       "sharedGlobals",
       "{workspaceRoot}/justfile",
-      "{workspaceRoot}/pyproject.toml",
+      "pythonVersionFree",
       "{workspaceRoot}/README.md",
       "{workspaceRoot}/LICENSE",
       "{workspaceRoot}/CHANGELOG.md",
@@ -33,7 +33,10 @@
       "{workspaceRoot}/.github/workflows/release.yml",
       "{workspaceRoot}/.github/workflows/release-plz.yml",
       "{workspaceRoot}/.github/workflow-graph.mjs",
-      "{workspaceRoot}/.github/fixtures/release-v0.37.0.json"
+      "{workspaceRoot}/.github/fixtures/release-v0.37.0.json",
+      {
+        "runtime": "node scripts/nx-version-free-inputs.mjs --ecosystem cargo --keep-version"
+      }
     ]
   },
   "targets": {
@@ -43,43 +46,61 @@
     },
     "lint": {
       "command": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings tests/release",
-      "inputs": ["{projectRoot}/**/*", "sharedGlobals"]
+      "inputs": ["{projectRoot}/**/*", "sharedGlobals", "platform"]
     },
     "rehearse": {
       "//": "The manylinux build and the checks on what it staged. The staged tree is an output, because test-staged reads it (docs/linux-cold-cache-timing.md).",
       "command": "node --test --test-concurrency=1 tests/release/journeys.test.mjs",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
-      "inputs": ["releaseMachinery"],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        },
+        "tools"
+      ],
+      "inputs": ["releaseMachinery", "platform"],
       "outputs": ["{workspaceRoot}/target/release-journey/linux"],
-      "cache": true
+      "cache": false
     },
     "test-staged": {
-      "//": "The journeys over the rehearsal’s staged files, both at once: each reads that tree and writes only its own, and one target starts them together in the slot the rehearsal frees.",
+      "//": "The journeys over the rehearsal\u2019s staged files, both at once: each reads that tree and writes only its own, and one target starts them together in the slot the rehearsal frees.",
       "command": "node --test --test-concurrency=2 tests/release/rehearsal-failures.test.mjs tests/release/registries.test.mjs",
       "dependsOn": [
-        { "projects": ["dag-ui"], "target": "build" },
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        },
         "tools",
         "rehearse"
       ],
-      "inputs": ["releaseMachinery"]
+      "inputs": ["releaseMachinery", "platform"]
     },
     "test-standalone": {
-      "//": "The release journeys that read none of the rehearsal’s files, beside it. Each stages into its own tree and serves its doubles on system-picked ports. Not check.test.mjs, which times waits and failed under the compiles running here.",
+      "//": "The release journeys that read none of the rehearsal\u2019s files, beside it. Each stages into its own tree and serves its doubles on system-picked ports. Not check.test.mjs, which times waits and failed under the compiles running here.",
       "command": "node --test --test-concurrency=1 tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/staging.test.mjs tests/release/publication.test.mjs tests/release/sbom.test.mjs",
-      "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }, "tools"],
-      "inputs": ["releaseMachinery"]
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        },
+        "tools"
+      ],
+      "inputs": ["releaseMachinery", "platform"]
     },
     "test": {
       "//": "Last: check.test.mjs and npm-upload.test.mjs time waits, so they run behind the rehearsal and the compiles beside it, and tools.test.mjs, which recreates the venv and .tools copies the others run, after it.",
       "command": "node --test --test-concurrency=1 tests/release/check.test.mjs tests/release/npm-upload.test.mjs tests/release/tools.test.mjs",
       "dependsOn": [
-        { "projects": ["dag-ui"], "target": "build" },
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        },
         "tools",
         "rehearse",
         "test-staged",
         "test-standalone"
       ],
-      "inputs": ["releaseMachinery"]
+      "inputs": ["releaseMachinery", "platform"]
     },
     "check": {
       "executor": "nx:noop",

@@ -7,8 +7,14 @@
     "test-cost": {
       "command": "just _tier-test cost",
       "dependsOn": [
-        { "projects": ["onepipeline-ui"], "target": "ensure-sibling" },
-        { "projects": ["dag-ui"], "target": "build" }
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
       ],
       "inputs": [
         "apiServerSurface",
@@ -22,7 +28,8 @@
         "{workspaceRoot}/tests/support/http.rs",
         "{workspaceRoot}/tests/support/journal_schema.rs",
         "{workspaceRoot}/tests/support/serving.rs",
-        "{workspaceRoot}/tests/support/sibling.rs"
+        "{workspaceRoot}/tests/support/sibling.rs",
+        "platform"
       ]
     },
     "check": {
