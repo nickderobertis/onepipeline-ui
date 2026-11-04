@@ -13,6 +13,7 @@
         }
       ],
       "inputs": [
+        "apiServerSurface",
         "{workspaceRoot}/tests/e2e/main.rs",
         "{workspaceRoot}/tests/e2e/deps_audit_toolchain.rs",
         "{workspaceRoot}/tests/e2e/deps_audit.rs",

@@ -5,6 +5,7 @@
   "tags": ["scope:tooling", "type:test", "lang:rust"],
   "namedInputs": {
     "baselineProvisioning": [
+      "apiServerSurface",
       "{projectRoot}/**/*",
       "testTiers",
       "sharedGlobals",

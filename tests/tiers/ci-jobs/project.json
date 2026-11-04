@@ -17,6 +17,7 @@
   },
   "namedInputs": {
     "ciJobSelection": [
+      "apiServerSurface",
       "testTiers",
       "sharedGlobals",
       "{workspaceRoot}/scripts/**/*",

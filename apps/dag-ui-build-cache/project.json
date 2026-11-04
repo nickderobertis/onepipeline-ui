@@ -9,6 +9,7 @@
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
       "cache": true,
       "inputs": [
+        "apiServerSurface",
         "{workspaceRoot}/tests/build_cache.rs",
         "{projectRoot}/project.json"
       ]
@@ -17,6 +18,7 @@
       "command": "cargo nextest run --locked --test build-cache --status-level fail --final-status-level fail",
       "cache": true,
       "inputs": [
+        "apiServerSurface",
         "{workspaceRoot}/tests/build_cache.rs",
         "{workspaceRoot}/apps/dag-ui/**/*",
         "{workspaceRoot}/packages/dag-model/**/*",

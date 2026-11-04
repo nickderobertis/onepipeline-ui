@@ -8,6 +8,7 @@
       "command": "just _tier-test judged-tier",
       "dependsOn": [{ "projects": ["dag-ui"], "target": "build" }],
       "inputs": [
+        "apiServerSurface",
         "{workspaceRoot}/tests/e2e/main.rs",
         "{workspaceRoot}/tests/e2e/judged_tier.rs",
         "{workspaceRoot}/.config/nextest.toml",
