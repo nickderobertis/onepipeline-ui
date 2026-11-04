@@ -40,7 +40,8 @@ mock or harness.
   and each narrowing the list on its own. Scope is never a filter or a column; it
   stays in the engine's record. No owner-ended label, filter or state exists.
 - The list is in the engine's order — blocking first, then urgent, high, medium and
-  low — and holds only the items the server's session owns.
+  low — and includes every owner’s open items by default. Explicit filters narrow
+  this host-wide queue.
 
 ## Acting on an item
 
@@ -54,8 +55,12 @@ mock or harness.
   document", and the engine dismisses the obsolete task and raises one replacement
   for the new version; the page shows the refusal and the replacement.
 - **Dismiss** asks for an optional reason in a dialog; an empty reason sends none.
-- **Every write is the reader's own.** The engine records the server's acting session
-  as the actor and nobody as `on_behalf_of`; the page sends neither. A manager
+- **Every write is the reader's own.** Every owner’s items are visible and
+  actionable, including design reviews, even through an unattributed server.
+  The engine records `session:<id>` for the server’s acting session or `browser`
+  without one, and `on_behalf_of: null`; the page sends neither. Owners and
+  delivery to their watches stay unchanged. Raising still requires the server
+  to act as the owner. A manager
   completing a task on a user's behalf, after that user approved in the manager's
   chat, does so through the CLI and engine runtime, which record `on_behalf_of` —
   never through this page or its routes.

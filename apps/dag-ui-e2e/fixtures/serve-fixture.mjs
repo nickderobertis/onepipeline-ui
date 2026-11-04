@@ -393,8 +393,9 @@ async function serve(workspace, port, ui, corpus) {
       // launched by, so a stop on one of them is the owner's and a stop on any
       // other run is refused naming its owner — and the unwatched report is
       // about exactly those runs.
-      "--session",
-      corpus.session?.() ?? SUPERVISOR_SESSION,
+      ...((corpus.session?.() ?? SUPERVISOR_SESSION)
+        ? ["--session", corpus.session?.() ?? SUPERVISOR_SESSION]
+        : []),
       // The binary `dag-ui:build-api-server` compiled after `dag-ui:build`, so
       // the view it embeds is the bundle every other origin here previews.
       ...(ui ? ["--ui"] : []),

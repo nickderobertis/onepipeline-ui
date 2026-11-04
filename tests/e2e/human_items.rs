@@ -687,7 +687,7 @@ fn release_plan(world: &World, name: &str) -> String {
 /// exactly what the CLI selects for that session, in the engine's declared
 /// order, and each session's watch was told of its own items and no other's.
 #[test]
-fn a_queue_raised_across_ten_sessions_is_served_to_each_owner_in_the_engines_order() {
+fn a_queue_raised_across_ten_sessions_is_served_host_wide_in_the_engines_order() {
     let world = World::new();
     let sessions = sessions();
     let plan = release_plan(&world, "release");
@@ -732,13 +732,7 @@ fn a_queue_raised_across_ten_sessions_is_served_to_each_owner_in_the_engines_ord
         let server = world.serve(Some(session));
         let served = items(&http::get(server.address, "/api/human-items"));
         let selected = world.listed(&["--session", session]);
-        assert_eq!(
-            served, selected,
-            "{session}'s list is what the CLI selects for it"
-        );
-        assert!(served
-            .iter()
-            .all(|view| view["item"]["owner"]["session"] == session.as_str()));
+        assert_eq!(served, everything, "{session} sees the entire host queue");
         assert!(in_declared_order(&served), "{:#?}", ids(&served));
         let kinds: Vec<&str> = served
             .iter()
@@ -759,7 +753,7 @@ fn a_queue_raised_across_ten_sessions_is_served_to_each_owner_in_the_engines_ord
         // A run's human step is raised again — with its derived impact — as
         // its run is driven; it is still one item, told to its owner alone.
         told.dedup();
-        let mut owned = ids(&served);
+        let mut owned = ids(&selected);
         owned.sort();
         assert_eq!(
             told, owned,
@@ -918,7 +912,17 @@ fn every_filter_selects_what_the_cli_selects() {
         &["human-items", "answer", &cache, "--text", "Reuse it."],
     );
     world.ok(Some(owner), &["human-items", "dismiss", &export]);
-    let server = world.serve(Some(owner));
+    world.raise(
+        "another-owner",
+        &input(
+            "another-owner",
+            "foreign-filter",
+            "task",
+            "low",
+            json!({"scope": "nothing"}),
+        ),
+    );
+    let server = world.serve(Some("foreign-filter-reader"));
     for (query, arguments) in [
         ("", vec![]),
         ("kind=task", vec!["--kind", "task"]),
@@ -1086,7 +1090,7 @@ fn every_action_through_the_route_resolves_once_and_reaches_only_its_owners_watc
         assert_eq!(stored["state"], state);
         assert_eq!(
             stored["resolution"],
-            json!({"actor": owner, "on_behalf_of": null, "text": text, "reason": reason}),
+            json!({"actor": format!("session:{owner}"), "on_behalf_of": null, "text": text, "reason": reason}),
             "{verb} is the acting session's own, on nobody's behalf"
         );
         assert_eq!(serde_json::to_value(&receipt.item.item).unwrap(), stored);
@@ -1256,7 +1260,7 @@ fn completing_a_current_design_review_records_its_approval_through_each_surface(
     assert_eq!(
         world.approvals(),
         [
-            json!({"board_copy": "docs/design/action-items.md", "key": "sha256:5d1c0a", "actor": owner, "on_behalf_of": null}),
+            json!({"board_copy": "docs/design/action-items.md", "key": "sha256:5d1c0a", "actor": format!("session:{owner}"), "on_behalf_of": null}),
             json!({"board_copy": "docs/design/dashboard.md", "key": "sha256:c4e2f9", "actor": format!("session:{owner}"), "on_behalf_of": format!("user:{USER}")}),
         ]
     );
@@ -1655,75 +1659,164 @@ fn a_long_body_is_served_and_printed_in_full() {
 /// nothing, and a raise as anyone but the acting session is refused — all
 /// without changing the journal.
 #[test]
-fn another_sessions_items_are_neither_read_nor_written() {
-    let world = World::new();
-    let owner = "manager-owner";
-    let mine = world.raise(
-        owner,
-        &input(
-            owner,
-            "mine",
-            "question",
-            "high",
-            json!({"scope": "nothing"}),
-        ),
-    );
-    let journal = world.root.join(onepipeline::human_items::JOURNAL_PATH);
-    let before = std::fs::read(&journal).unwrap();
-    for server in [world.serve(Some("manager-intruder")), world.serve(None)] {
-        assert!(items(&http::get(server.address, "/api/human-items")).is_empty());
-        let read = error(
-            &http::get(server.address, &format!("/api/human-items/{mine}")),
-            403,
-            "human_item_not_owner",
-        );
-        assert!(!read.contains("Should mine"), "{read}");
-        for (verb, body) in [
-            ("answer", r#"{"text":"x"}"#),
-            ("complete", "{}"),
-            ("dismiss", "{}"),
+fn foreign_and_unattributed_servers_resolve_items_but_cannot_raise_for_another_owner() {
+    for session in [Some("manager-intruder"), None] {
+        let world = World::new();
+        let owner = "manager-owner";
+        let server = world.serve(session);
+        let actor = session.map_or_else(|| "browser".to_owned(), |id| format!("session:{id}"));
+        for (key, kind, verb, body, state, event) in [
+            (
+                "question",
+                "question",
+                "answer",
+                r#"{"text":"Yes"}"#,
+                "answered",
+                "human-item-answered",
+            ),
+            (
+                "task",
+                "task",
+                "complete",
+                "{}",
+                "completed",
+                "human-item-completed",
+            ),
+            (
+                "dismiss",
+                "task",
+                "dismiss",
+                r#"{"reason":"Superseded"}"#,
+                "dismissed",
+                "human-item-dismissed",
+            ),
         ] {
+            let id = world.raise(
+                owner,
+                &input(owner, key, kind, "high", json!({"scope":"nothing"})),
+            );
+            world.watch(owner);
+            assert_eq!(
+                ids(&items(&http::get(server.address, "/api/human-items"))).as_slice(),
+                std::slice::from_ref(&id)
+            );
+            let detail = http::get(server.address, &format!("/api/human-items/{id}"));
+            assert_eq!(detail.status, 200, "{}", detail.body);
+            let original_owner = world.stored(&id)["owner"].clone();
+            for field in ["actor", "on_behalf_of"] {
+                let mut spoof: Value = serde_json::from_str(body).unwrap();
+                spoof[field] = json!("someone");
+                error(
+                    &http::post(
+                        server.address,
+                        &format!("/api/human-items/{id}/{verb}"),
+                        &spoof.to_string(),
+                    ),
+                    422,
+                    "invalid_request",
+                );
+            }
+            if kind == "question" {
+                error(
+                    &http::post(
+                        server.address,
+                        &format!("/api/human-items/{id}/answer"),
+                        r#"{"text":" "}"#,
+                    ),
+                    409,
+                    "human_item_conflict",
+                );
+                error(
+                    &http::post(
+                        server.address,
+                        &format!("/api/human-items/{id}/complete"),
+                        "{}",
+                    ),
+                    409,
+                    "human_item_conflict",
+                );
+            }
+            let response = http::post(
+                server.address,
+                &format!("/api/human-items/{id}/{verb}"),
+                body,
+            );
+            assert_eq!(response.status, 200, "{}", response.body);
+            let stored = world.stored(&id);
+            assert_eq!(stored["state"], state);
+            assert_eq!(stored["owner"], original_owner);
+            assert_eq!(stored["resolution"]["actor"], actor);
+            assert_eq!(stored["resolution"]["on_behalf_of"], Value::Null);
+            assert_eq!(
+                delivered(&world.watch(owner)),
+                [(event.to_owned(), id.clone())]
+            );
+            assert!(items(&http::get(server.address, "/api/human-items")).is_empty());
+            let conflicting = if verb == "dismiss" {
+                "complete"
+            } else {
+                "dismiss"
+            };
             error(
                 &http::post(
                     server.address,
-                    &format!("/api/human-items/{mine}/{verb}"),
-                    body,
+                    &format!("/api/human-items/{id}/{conflicting}"),
+                    "{}",
                 ),
-                403,
-                "human_item_not_owner",
+                409,
+                "human_item_conflict",
             );
         }
+        let review = world.raise_design(owner, "docs/design/action-items.md", "sha256:5d1c0a");
+        let original_owner = world.stored(&review)["owner"].clone();
+        world.watch(owner);
+        let response = http::post(
+            server.address,
+            &format!("/api/human-items/{review}/complete"),
+            "{}",
+        );
+        assert_eq!(response.status, 200, "{}", response.body);
+        assert_eq!(
+            world.approvals(),
+            [
+                json!({"board_copy":"docs/design/action-items.md", "key":"sha256:5d1c0a", "actor":actor, "on_behalf_of":null})
+            ]
+        );
+        let stored = world.stored(&review);
+        assert_eq!(stored["state"], "completed");
+        assert_eq!(stored["owner"], original_owner);
+        assert_eq!(stored["resolution"]["actor"], actor);
+        assert_eq!(stored["resolution"]["on_behalf_of"], Value::Null);
+        assert_eq!(
+            delivered(&world.watch(owner)),
+            [("human-item-completed".to_owned(), review)]
+        );
         error(
             &http::post(
                 server.address,
                 "/api/human-items",
-                &input(owner, "forged", "task", "low", json!({"scope": "nothing"})).to_string(),
+                &input(owner, "forged", "task", "low", json!({"scope":"nothing"})).to_string(),
             ),
             403,
             "human_item_not_owner",
         );
+        for path in [
+            "/api/human-items/hi-0000000000000000000a",
+            "/api/human-items/hi-0000000000000000000a/answer",
+        ] {
+            let response = if path.ends_with("answer") {
+                http::post(server.address, path, r#"{"text":"Yes"}"#)
+            } else {
+                http::get(server.address, path)
+            };
+            error(&response, 404, "human_item_not_found");
+        }
+        error(
+            &http::get(server.address, "/api/human-items/not%20an%20id"),
+            422,
+            "invalid_human_item_id",
+        );
     }
-    assert_eq!(
-        std::fs::read(&journal).unwrap(),
-        before,
-        "nothing was written"
-    );
-    // The owner reconnects — a new server for the same session — and finds it.
-    let server = world.serve(Some(owner));
-    assert_eq!(
-        ids(&items(&http::get(server.address, "/api/human-items"))),
-        [mine]
-    );
-    error(
-        &http::get(server.address, "/api/human-items/hi-0000000000000000000a"),
-        404,
-        "human_item_not_found",
-    );
-    error(
-        &http::get(server.address, "/api/human-items/not%20an%20id"),
-        422,
-        "invalid_human_item_id",
-    );
 }
 
 /// Raising over the route is the owner's: it answers the engine's receipt,
