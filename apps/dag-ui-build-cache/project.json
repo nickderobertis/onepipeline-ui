@@ -38,6 +38,7 @@
         "npmVersionFree",
         "{workspaceRoot}/tsconfig.base.json",
         "{workspaceRoot}/scripts/nx.sh",
+        "{workspaceRoot}/scripts/nx-remote-cache.mjs",
         "{projectRoot}/project.json",
         "platform"
       ]

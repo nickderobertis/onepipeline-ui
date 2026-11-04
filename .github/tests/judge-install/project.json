@@ -17,6 +17,7 @@
         "{workspaceRoot}/.github/fixtures/judge/**/*",
         "{workspaceRoot}/scripts/setup-llmlint.sh",
         "{workspaceRoot}/scripts/nx.sh",
+        "{workspaceRoot}/scripts/nx-remote-cache.mjs",
         "{workspaceRoot}/oneharness.toml",
         "{workspaceRoot}/llmlint.yml",
         "{workspaceRoot}/justfile",

@@ -30,6 +30,7 @@
         "{workspaceRoot}/judged-diff/project.json",
         "{workspaceRoot}/justfile",
         "{workspaceRoot}/scripts/nx.sh",
+        "{workspaceRoot}/scripts/nx-remote-cache.mjs",
         "{workspaceRoot}/scripts/workspace-install.sh",
         "npmVersionFree",
         "{workspaceRoot}/.gitignore",
