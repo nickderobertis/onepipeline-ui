@@ -185,7 +185,7 @@ onemessagebus = "0.9.1"
 # The test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.100.0"
+onepipeline = "=0.101.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -248,9 +248,9 @@ predicates = "3"
 # journey in `tests/plan_linear_create.rs` that copies a plan into a loopback
 # Linear: the stand-in answers exactly the documents the linked plugin sends,
 # by the plugin's own constants rather than a second spelling of them.
-onetaskgraph-core = { version = "=0.13.3", features = ["linear"] }
-onetaskgraph-linear = "=0.13.3"
-onetaskgraph-plugin-api = "=0.13.3"
+onetaskgraph-core = { version = "=0.13.4", features = ["linear"] }
+onetaskgraph-linear = "=0.13.4"
+onetaskgraph-plugin-api = "=0.13.4"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # engine-driven journey over a panel-judged member reads the provider block it was
