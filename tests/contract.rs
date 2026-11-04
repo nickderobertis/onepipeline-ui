@@ -4257,3 +4257,43 @@ fn the_engine_judges_every_human_item_verdict_as_the_corpus_says() {
         );
     }
 }
+
+/// The browser/API corpus reads real host check fields and every classified state.
+/// VCS exports Check and CheckState, but no journal payload schema; compare its
+/// serialized fields and computed state rather than inventing a schema here.
+#[test]
+fn check_visibility_records_follow_the_host_check_contract() {
+    let records: Vec<Value> = serde_json::from_str(include_str!(
+        "../apps/dag-ui-e2e/fixtures/check-visibility.json"
+    ))
+    .expect("shared check visibility records");
+    let mut states = std::collections::BTreeSet::new();
+    for record in records
+        .iter()
+        .filter(|record| record["kind"] == "change-check")
+    {
+        let payload = &record["payload"];
+        let check: onevcs::Check =
+            serde_json::from_value(payload.clone()).expect("a producer check");
+        let state = serde_json::to_value(check.state()).expect("producer state");
+        assert_eq!(payload["state"], state, "{}", check.name);
+        states.insert(state.as_str().unwrap().to_owned());
+        let declared = serde_json::to_value(check).expect("producer fields");
+        for (field, value) in payload.as_object().unwrap() {
+            if field != "state" {
+                assert_eq!(
+                    declared.get(field),
+                    Some(value),
+                    "undeclared check field {field}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        states,
+        onepipeline_ui::payload::vcs::CheckState::ALL
+            .map(|state| state.as_str().to_owned())
+            .into_iter()
+            .collect()
+    );
+}

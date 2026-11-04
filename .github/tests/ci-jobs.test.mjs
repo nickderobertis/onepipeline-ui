@@ -745,3 +745,27 @@ test("a Linux arm64 wheel or runner coming back is refused", () => {
       assert.ok(problems.includes(problem), `${problem}: ${problems}`);
   }
 });
+
+// A hosted runner's upload cannot be driven offline. This assertion holds the
+// retrieval wiring to the real capture directory without changing capture gates.
+test("the x86_64 capture remains retrievable when publication is disabled", () => {
+  const steps = load()["ci.yml"].jobs.lint.steps;
+  const upload = steps.find(
+    (step) => step.name === "Upload x86_64 capture for baseline review",
+  );
+  assert.equal(upload?.uses, "actions/upload-artifact@v4");
+  assert.equal(upload.if, "always() && github.event_name == 'pull_request'");
+  assert.deepEqual(upload.with, {
+    name: "screencomp-capture-x86_64",
+    path: "shots/current/x86_64",
+    "retention-days": 3,
+    "if-no-files-found": "ignore",
+  });
+  const capture = steps.findIndex(
+    (step) =>
+      step.name ===
+      "Capture the visual docs twice, for the reproducibility gate",
+  );
+  assert.equal(steps[capture].env.SHOTS_OUT, upload.with.path);
+  assert.equal(steps[capture + 1], upload);
+});

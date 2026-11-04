@@ -296,6 +296,10 @@ export function NodeTimelineView({
                       </tr>
                     </thead>
                     <tbody>
+                      {/* The shared check-visibility corpus is reconciled with
+                          onevcs::Check::state in tests/contract.rs; the browser
+                          journey drives these rows for all five producer states,
+                          including a completed check with no conclusion. */}
                       {node.detail?.verification.checks?.map((check) => (
                         <tr
                           key={check.name}

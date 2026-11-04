@@ -75,6 +75,49 @@
     }
   },
   {
+    "source": "vcs",
+    "kind": "change-check",
+    "labels": {
+      "significance": "attention"
+    },
+    "payload": {
+      "name": "pending-check",
+      "required": false,
+      "state": "pending",
+      "status": "in_progress",
+      "url": "https://github.com/example/widgets/actions/runs/1/job/pending-check"
+    }
+  },
+  {
+    "source": "vcs",
+    "kind": "change-check",
+    "labels": {
+      "significance": "attention"
+    },
+    "payload": {
+      "name": "skipped-check",
+      "required": false,
+      "state": "skipped",
+      "status": "completed",
+      "url": "https://github.com/example/widgets/actions/runs/1/job/skipped-check",
+      "conclusion": "skipped"
+    }
+  },
+  {
+    "source": "vcs",
+    "kind": "change-check",
+    "labels": {
+      "significance": "attention"
+    },
+    "payload": {
+      "name": "empty-conclusion",
+      "required": false,
+      "state": "failed",
+      "status": "completed",
+      "url": "https://github.com/example/widgets/actions/runs/1/job/empty-conclusion"
+    }
+  },
+  {
     "source": "pipeline",
     "kind": "planner-surface-queued",
     "payload": {
