@@ -1500,6 +1500,10 @@ fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
     let output = Command::new("just")
         .args(["nx", "run-many", "-t", TIERS, "--graph=stdout"])
         .current_dir(repo_root())
+        // Resolve plugins in this nested Nx process, as the other graph
+        // fixtures do: Windows workers can exit before their load message
+        // arrives while the outer Nx is running the suite.
+        .env("NX_ISOLATE_PLUGINS", "false")
         .output()
         .expect("just is on PATH");
     assert!(
@@ -1546,6 +1550,8 @@ fn every_suite_that_compiles_the_read_api_builds_the_view_first() {
     let output = Command::new("just")
         .args(["nx", "run-many", "-t", COMPILING_TIERS, "--graph=stdout"])
         .current_dir(repo_root())
+        // Keep the same in-process resolution as the provisioning graph above.
+        .env("NX_ISOLATE_PLUGINS", "false")
         .output()
         .expect("just is on PATH");
     assert!(
