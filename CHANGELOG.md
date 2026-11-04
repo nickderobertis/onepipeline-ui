@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.66.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.66.1...v0.66.2) - 2026-11-04
+
+### Added
+
+- *(ci)* share proven Nx results across pull requests
+
+### Fixed
+
+- *(ci)* scope semantic manifest affected selection to files
+- *(ci)* preserve affected selection with semantic inputs
+- *(ci)* preserve manifest bytes and isolate coverage results
+
 ## [0.66.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.66.0...v0.66.1) - 2026-11-04
 
 ### Fixed
