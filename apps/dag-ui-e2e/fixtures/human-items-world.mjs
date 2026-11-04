@@ -66,7 +66,7 @@ const builtSchema = z.object({
 
 /** The login a manager session acts on behalf of. */
 export const USER = "operator";
-/** The session whose items the journeys never see. */
+/** A second owner whose items share the host-wide queue. */
 export const OTHER_SESSION = "other-session";
 /** What marks a workspace as holding a world already built. */
 const BUILT = "human-items-world.json";
@@ -404,7 +404,7 @@ const QUEUE_PLANS = {
 };
 
 /** The queue every journey but the long-body ones reads. */
-function buildQueue(workspace, token) {
+function buildQueue(workspace, token, thirdOwner = SUPERVISOR_SESSION) {
   const planA = "board:plan-a";
   const runA = start(workspace, token, planA);
   const ids = {};
@@ -427,13 +427,13 @@ function buildQueue(workspace, token) {
     owner: owner(null, "board:plan-b"),
     block: { scope: "plan", plan: "board:plan-b" },
   });
-  ids.cache = raise(workspace, token, SUPERVISOR_SESSION, {
+  ids.cache = raise(workspace, token, thirdOwner, {
     dedup_key: "warm-cache",
     kind: "question",
     title: "Should retries reuse the warm cache?",
     body: "Retries currently start cold and take eight minutes. Reusing the warm cache is faster but can hide a stale artifact.",
     priority: "urgent",
-    owner: owner(),
+    owner: owner(null, null, thirdOwner),
     block: { scope: "nothing" },
   });
   ids.design = raiseDesign(workspace, token, {
@@ -619,6 +619,10 @@ function buildSessions(workspace, token) {
 const WORLDS = {
   sessions: { plans: {}, build: buildSessions },
   queue: { plans: QUEUE_PLANS, build: buildQueue },
+  hostwide: {
+    plans: QUEUE_PLANS,
+    build: (workspace, token) => buildQueue(workspace, token, "third-owner"),
+  },
   long: { plans: LONG_PLANS, build: buildLong },
 };
 

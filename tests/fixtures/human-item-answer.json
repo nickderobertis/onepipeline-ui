@@ -21,7 +21,7 @@
       "approval": null,
       "state": "answered",
       "resolution": {
-        "actor": "claude-code-supervising-session",
+        "actor": "session:claude-code-supervising-session",
         "on_behalf_of": null,
         "text": "eu-west",
         "reason": null

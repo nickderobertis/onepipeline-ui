@@ -137,6 +137,15 @@ const DECLARED = [
     source: `Source: session ${SUPERVISOR}`,
   },
   {
+    key: "other",
+    title: "Rotate the deploy credentials",
+    kind: "Task",
+    priority: "Critical",
+    wire: "urgent",
+    blocks: undefined,
+    source: `Source: session ${OTHER}`,
+  },
+  {
     key: "design",
     title: "Review the action-items design",
     kind: "Task",
@@ -469,16 +478,16 @@ test("the sidebar's kinds stay on Action items and a run selected from it leaves
   await expect(page.getByRole("button", { name: /^Stop/u })).toHaveCount(0);
 });
 
-test("lists every open item of the session in the engine's order, as compact full-width cards", async ({
+test("lists every open item of the host in the engine's order, as compact full-width cards", async ({
   page,
 }) => {
   const served = await serveWorld("queue");
   const list = await open(page, served);
   expect(await titles(list)).toEqual(DECLARED.map(({ title }) => title));
   // The engine's own order, as its CLI lists the same journal.
-  expect(
-    listed(served, ["--session", SUPERVISOR]).map(({ item }) => item.title),
-  ).toEqual(DECLARED.map(({ title }) => title));
+  expect(listed(served).map(({ item }) => item.title)).toEqual(
+    DECLARED.map(({ title }) => title),
+  );
 
   const wire = listSchema.parse(
     await (await page.request.get(`${served.origin}/api/human-items`)).json(),
@@ -522,8 +531,7 @@ test("lists every open item of the session in the engine's order, as compact ful
     ).toHaveAttribute("href", url);
   }
 
-  // The session's own items only: another session's item is not shown.
-  await expect(page.getByText("Rotate the deploy credentials")).toHaveCount(0);
+  await expect(card(page, "Rotate the deploy credentials")).toBeVisible();
   // No P-labels, no owner-ended anything, no scope, no approval control.
   const text = await page.getByRole("main").innerText();
   expect(text).not.toMatch(/\bP[0-3]\b/u);
@@ -581,6 +589,14 @@ test("at 1440×900 six complete cards and all their controls fit the list unscro
 }) => {
   const served = await serveWorld("queue");
   const list = await open(page, served);
+  // The original density target is six cards; select that same six-item corpus.
+  await page
+    .getByRole("combobox", { name: "Source", exact: true })
+    .selectOption("session");
+  await page
+    .getByRole("searchbox", { name: "Source identifier", exact: true })
+    .fill(SUPERVISOR);
+  await expect(list.getByRole("article")).toHaveCount(6);
   const region = listRegion(page);
   const box = await region.boundingBox();
   if (box === null) throw new Error("the list has no box");
@@ -595,7 +611,7 @@ test("at 1440×900 six complete cards and all their controls fit the list unscro
   for (const kind of ["Task", "Question"])
     await expect(list.getByText(kind, { exact: true })).toHaveCount(3);
   await expect(list.getByRole("textbox")).toHaveCount(3);
-  for (const { title, key } of DECLARED) {
+  for (const { title, key } of DECLARED.filter(({ key }) => key !== "other")) {
     const shown = card(page, title);
     const cardBox = await shown.boundingBox();
     if (cardBox === null) throw new Error("a card has no box");
@@ -719,12 +735,9 @@ test("every filter narrows the list on its own, on the wire's vocabulary", async
   };
   const reset = async (label: string, value: string) =>
     choose(label, value, "");
-  /** What the engine's CLI selects for `args`, for this session. */
+  /** What the engine's CLI selects across the host. */
   const selected = (args: string[]) =>
-    listed(
-      served,
-      args.includes("--session") ? args : [...args, "--session", SUPERVISOR],
-    ).map(({ item }) => item.title);
+    listed(served, args).map(({ item }) => item.title);
 
   await choose("Kind", "question", "?kind=question");
   await expect.poll(() => titles(list)).toEqual(QUESTIONS);
@@ -750,9 +763,10 @@ test("every filter narrows the list on its own, on the wire's vocabulary", async
     .toEqual([
       "Restore the build service",
       "Should retries reuse the warm cache?",
+      "Rotate the deploy credentials",
     ]);
   expect(selected(["--priority", "Critical"])).toEqual(await titles(list));
-  await expect(list.getByText("Critical", { exact: true })).toHaveCount(2);
+  await expect(list.getByText("Critical", { exact: true })).toHaveCount(3);
   await reset("Priority", "");
 
   await choose("State", "answered", "?state=answered");
@@ -790,7 +804,11 @@ test("every filter narrows the list on its own, on the wire's vocabulary", async
       "board:plan-b",
       ["Keep the legacy export format?", "Review the dashboard layout"],
     ],
-    ["session", SUPERVISOR, DECLARED.map(({ title }) => title)],
+    [
+      "session",
+      SUPERVISOR,
+      DECLARED.filter(({ key }) => key !== "other").map(({ title }) => title),
+    ],
   ] as const) {
     await filters.getByLabel("Source", { exact: true }).selectOption(source);
     const read = page.waitForRequest(
@@ -858,7 +876,7 @@ test("Tab moves straight between answer boxes, Enter answers in place, Shift+Ent
   expect(stored(served, region)).toMatchObject({
     state: "answered",
     resolution: {
-      actor: SUPERVISOR,
+      actor: `session:${SUPERVISOR}`,
       on_behalf_of: null,
       text: "eu-west, matching the incident report",
     },
@@ -936,7 +954,7 @@ test("card actions are a focus group of their own after the answer boxes, operab
   await expect(card(page, "Restore the build service")).toHaveCount(0);
   expect(stored(served, idOf(served, "build"))).toMatchObject({
     state: "dismissed",
-    resolution: { actor: SUPERVISOR, reason: null },
+    resolution: { actor: `session:${SUPERVISOR}`, reason: null },
   });
 
   // Complete, from the keyboard. The group now opens on the first card left —
@@ -966,12 +984,17 @@ test("card actions are a focus group of their own after the answer boxes, operab
     page.getByRole("button", { name: `Details: ${region}` }),
   ).toBeFocused();
   const design = trackerOf(served, idOf(served, "design"));
+  const other = trackerOf(served, idOf(served, "other"));
   for (const [role, name] of [
     ["button", `Dismiss: ${region}`],
     ["button", "Details: Keep the legacy export format?"],
     ["button", "Dismiss: Keep the legacy export format?"],
     ["button", `Details: ${LAST_QUESTION}`],
     ["button", `Dismiss: ${LAST_QUESTION}`],
+    ["link", other.name],
+    ["button", "Details: Rotate the deploy credentials"],
+    ["button", "Complete: Rotate the deploy credentials"],
+    ["button", "Dismiss: Rotate the deploy credentials"],
     ["link", design.name],
     ["button", "Details: Review the action-items design"],
     ["button", "Complete: Review the action-items design"],
@@ -1025,7 +1048,7 @@ test("a design review completes with the ordinary Complete, and a changed docume
     {
       board_copy: "docs/design/action-items.md",
       key: "sha256:5d1c0a",
-      actor: SUPERVISOR,
+      actor: `session:${SUPERVISOR}`,
       on_behalf_of: null,
     },
   ]);
@@ -1061,7 +1084,7 @@ test("a design review completes with the ordinary Complete, and a changed docume
   expect(approvals(served)[1]).toEqual({
     board_copy: "docs/design/dashboard.md",
     key: "sha256:c4e2f9",
-    actor: SUPERVISOR,
+    actor: `session:${SUPERVISOR}`,
     on_behalf_of: null,
   });
   const told = watch(served, SUPERVISOR).map(([kind]) => kind);
@@ -1297,66 +1320,97 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
   expect(stored(served, idOf(served, "build")).state).toBe("completed");
 });
 
-test("a write by a server acting for another session is refused, changes nothing, and lands once the owner is back", async ({
+test("the visual queue includes nine stored items across two foreign owners", async ({
   page,
-}) => {
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
   const served = await serveWorld("queue");
-  await open(page, served);
-  const sent = writes(page);
-  const question = "Should retries reuse the warm cache?";
-  const task = "Restore the build service";
-
-  // After the page read them, the server is replaced by one acting for
-  // another session over the same journal: its authority refuses the one
-  // write of each in the engine's words, the next read no longer shows the
-  // item, and the journal is unchanged.
-  for (const [key, title, act] of [
-    [
-      "cache",
-      question,
-      async () => {
-        await answerBox(page, question).fill("Reuse it");
-        await answerBox(page, question).press("Enter");
-      },
-    ],
-    [
-      "build",
-      task,
-      () => page.getByRole("button", { name: `Complete: ${task}` }).click(),
-    ],
-  ] as const) {
-    const id = idOf(served, key);
-    await actAs(served, OTHER);
-    const before = journal(served);
-    const count = sent.length;
-    await act();
-    await expect(outcome(page)).toHaveText(
-      `${title}: human item ${id} belongs to another session; its content and its actions are that session's`,
-    );
-    await expect(card(page, title)).toHaveCount(0);
-    expect(sent).toHaveLength(count + 1);
-    const response = await sent[count]?.response();
-    if (!response) throw new Error(`the write to ${id} had no response`);
-    expect(response.status()).toBe(403);
-    expect((await response.json()).error.code).toBe("human_item_not_owner");
-    expect(journal(served)).toBe(before);
-    expect(stored(served, id).state).toBe("open");
-    // The other session's own item is what that server lists.
-    await expect(card(page, "Rotate the deploy credentials")).toBeVisible();
-    await actAs(served, SUPERVISOR);
-    await page.getByRole("button", { name: "Refresh" }).click();
-    await expect(card(page, title)).toBeVisible();
-  }
-
-  // The owner reconnected: the refused answer's draft is still there and
-  // lands as written.
-  await expect(answerBox(page, question)).toHaveValue("Reuse it");
-  await answerBox(page, question).press("Enter");
-  await expect(outcome(page)).toHaveText(`${question}: Answered`);
-  expect(stored(served, idOf(served, "cache")).resolution?.text).toBe(
-    "Reuse it",
+  await actAs(served, "visual-browser-server");
+  const list = await open(page, served);
+  expect(await titles(list)).toEqual(DECLARED.map(({ title }) => title));
+  const all = Object.values(factsOf(served).ids).map((id) =>
+    stored(served, id),
   );
+  expect(all).toHaveLength(9);
+  expect(new Set(all.map((item) => item.owner.session))).toEqual(
+    new Set([SUPERVISOR, OTHER]),
+  );
+  expect(all.filter((item) => item.state === "open")).toHaveLength(7);
+  expect(all.filter((item) => item.state === "answered")).toHaveLength(1);
+  expect(all.filter((item) => item.state === "dismissed")).toHaveLength(1);
+  await page.screenshot({ path: testInfo.outputPath("host-wide-queue.png") });
 });
+
+for (const acting of ["browser-owns-nothing", SUPERVISOR, ""]) {
+  test(`host-wide resolutions with server session ${acting || "unattributed"}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    const served = await serveWorld("hostwide");
+    await actAs(served, acting);
+    const owners = [SUPERVISOR, OTHER, "third-owner"];
+    for (const owner of owners) watch(served, owner);
+    const list = await open(page, served);
+    const all = listed(served);
+    expect(all).toHaveLength(7);
+    expect(all.filter(({ item }) => item.kind === "question")).toHaveLength(3);
+    expect(all.filter(({ item }) => item.kind === "task")).toHaveLength(4);
+    expect(all.filter(({ item }) => item.approval !== null)).toHaveLength(2);
+    expect(new Set(all.map(({ item }) => item.owner.session))).toEqual(
+      new Set(owners),
+    );
+    expect(await titles(list)).toEqual(all.map(({ item }) => item.title));
+    // CLI defaults remain session-scoped even though HTTP defaults are host-wide.
+    const report = cli(served, ["human-items", "report"], SUPERVISOR);
+    expect(report).toContain("Restore the build service");
+    expect(report).not.toContain("Should retries reuse the warm cache?");
+    expect(report).not.toContain("Rotate the deploy credentials");
+    const actor = acting ? `session:${acting}` : "browser";
+    for (const [key, verb, event] of [
+      ["cache", "answer", "human-item-answered"],
+      ["other", "complete", "human-item-completed"],
+      ["export", "dismiss", "human-item-dismissed"],
+      ["design", "complete", "human-item-completed"],
+    ] as const) {
+      const id = idOf(served, key);
+      const before = stored(served, id);
+      await page
+        .getByRole("button", { name: `Details: ${before.title}` })
+        .click();
+      const pane = detailPane(page);
+      await expect(
+        pane.getByRole("heading", { name: before.title }),
+      ).toBeVisible();
+      if (verb === "answer") {
+        await pane.getByRole("textbox", { name: /answer/i }).fill("Reuse it");
+        await pane.getByRole("textbox", { name: /answer/i }).press("Enter");
+      } else if (verb === "dismiss") {
+        await pane.getByRole("button", { name: /^Dismiss/ }).click();
+        await page
+          .getByRole("dialog")
+          .getByRole("button", { name: "Dismiss item" })
+          .click();
+      } else {
+        await pane.getByRole("button", { name: /^Complete/ }).click();
+      }
+      await expect(card(page, before.title)).toHaveCount(0);
+      const after = stored(served, id);
+      expect(after.owner).toEqual(before.owner);
+      expect(after.resolution).toMatchObject({ actor, on_behalf_of: null });
+      for (const owner of owners)
+        expect(watch(served, owner)).toEqual(
+          owner === before.owner.session ? [[event, id]] : [],
+        );
+      await pane.getByRole("button", { name: "Close detail" }).click();
+    }
+    expect(approvals(served)).toContainEqual({
+      board_copy: "docs/design/action-items.md",
+      key: "sha256:5d1c0a",
+      actor,
+      on_behalf_of: null,
+    });
+  });
+}
 
 test("a detail that cannot be read says why, and another item's opens once the server can read again", async ({
   page,
@@ -1412,32 +1466,13 @@ test("an open detail whose reread fails drops what it read, and shows it again o
   await expect(steps).toHaveCount(5);
   await expect(pane.getByRole("alert")).toHaveCount(0);
 
-  // A server acting for another session: the reread is refused, and nothing
-  // of the item's content or its actions stays on screen — only why, and a way
-  // out.
+  // Changing the acting session leaves foreign detail and actions available.
   await actAs(served, OTHER);
   await refresh();
-  await expect(card(page, region)).toHaveCount(0);
-  await expect(pane.getByRole("alert")).toContainText(
-    "belongs to another session",
-  );
-  await expect(pane.getByRole("heading", { name: region })).toHaveCount(0);
-  await expect(steps).toHaveCount(0);
-  await expect(pane.getByRole("button", { name: /^Dismiss/ })).toHaveCount(0);
-
-  // The owner is back: the same pane reads it again in full.
-  await actAs(served, SUPERVISOR);
-  await refresh();
+  await expect(card(page, region)).toBeVisible();
   await expect(pane.getByRole("heading", { name: region })).toBeVisible();
   await expect(steps).toHaveCount(5);
   await expect(pane.getByRole("alert")).toHaveCount(0);
-
-  // Refused again, the pane's own Close dismisses it.
-  await actAs(served, OTHER);
-  await refresh();
-  await expect(pane.getByRole("alert")).toContainText(
-    "belongs to another session",
-  );
   await pane.getByRole("button", { name: "Close detail" }).click();
   await expect(pane).toHaveCount(0);
 });
@@ -1523,7 +1558,7 @@ test("ending its run retires the items holding that run's work, and leaves host 
   ).toBeVisible();
 });
 
-test("ten sessions each see only their own items, and each answer reaches only its owner's watch", async ({
+test("ten sessions see the host queue, and each answer reaches only its owner's watch", async ({
   page,
 }) => {
   const served = await serveWorld("sessions");
@@ -1538,14 +1573,16 @@ test("ten sessions each see only their own items, and each answer reaches only i
       ({ item }) => item.title,
     );
     expect(own).toHaveLength(2);
-    await expect.poll(() => titles(list)).toEqual(own);
+    await expect
+      .poll(() => titles(list))
+      .toEqual(listed(served).map(({ item }) => item.title));
     const question = `Which day should ${session} ship?`;
     await answerBox(page, question).fill("Thursday");
     await answerBox(page, question).press("Enter");
     await expect(outcome(page)).toHaveText(`${question}: Answered`);
     const id = idOf(served, `${session}-question`);
     expect(stored(served, id).resolution).toEqual({
-      actor: session,
+      actor: `session:${session}`,
       on_behalf_of: null,
       text: "Thursday",
       reason: null,
@@ -1843,7 +1880,7 @@ test("a world name the fixture does not define is refused before anything is bui
       );
       expect(refused.status, `${name}: ${refused.stderr}`).toBe(2);
       expect(refused.stderr).toContain(
-        `serve-fixture: '${name}' is not a human-items world; name one of sessions, queue, long`,
+        `serve-fixture: '${name}' is not a human-items world; name one of sessions, queue, hostwide, long`,
       );
       expect(existsSync(join(workspace, "runs")), name).toBe(false);
     } finally {

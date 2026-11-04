@@ -9,9 +9,8 @@
 //! started in. Persistence, ordering, blocked-step derivation, bus delivery to
 //! the owning session's watch, approval authorities and a run's end retiring
 //! its holds are all the engine's. What this module owns is what the engine's
-//! store does not: the acting session as the actor of every write, and the
-//! ownership rule `stop` keeps — an item's content and its writes belong to
-//! the session that raised it.
+//! store does not: host-wide read and resolution authority, attribution of
+//! resolutions, and owner-only raises.
 //!
 //! A host whose effective configuration does not enable human items is served
 //! the engine's own `unavailable` refusal on every route.
@@ -55,7 +54,7 @@ pub(crate) struct HumanItems {
 }
 
 /// A write to one item, as its route's body carried it. The actor is never in
-/// here: it is the acting session, added when the write is made.
+/// here: the server attributes the write when it is made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Act {
     /// Answer a question.
@@ -89,28 +88,14 @@ impl HumanItems {
         Engine::open(&self.root, dir).map_err(refusal)
     }
 
-    /// Every item `session` may read that `filter` selects, in the engine's order.
-    pub(crate) fn list(
-        &self,
-        session: Option<&SessionId>,
-        filter: &HumanItemFilter,
-    ) -> Result<Vec<HumanItemView>, ApiError> {
-        Ok(self
-            .engine()?
-            .query(filter)
-            .map_err(refusal)?
-            .into_iter()
-            .filter(|view| owns(session, &view.item.owner.session))
-            .collect())
+    /// Every item `filter` selects, in the engine's order.
+    pub(crate) fn list(&self, filter: &HumanItemFilter) -> Result<Vec<HumanItemView>, ApiError> {
+        self.engine()?.query(filter).map_err(refusal)
     }
 
-    /// One item and every step it blocks, as `human-items show --json` serves it.
-    pub(crate) fn detail(
-        &self,
-        session: Option<&SessionId>,
-        id: &HumanItemId,
-    ) -> Result<HumanItemDetail, ApiError> {
-        readable(&self.engine()?, session, id)
+    /// One item and every step it blocks, independent of its owner.
+    pub(crate) fn detail(&self, id: &HumanItemId) -> Result<HumanItemDetail, ApiError> {
+        readable(&self.engine()?, id)
     }
 
     /// Raise an item owned by `session`.
@@ -132,11 +117,7 @@ impl HumanItems {
         engine.apply(HumanItemAction::Raise(input)).map_err(refusal)
     }
 
-    /// Make `act` on item `id` as `session`.
-    ///
-    /// Ownership is judged on the journal's state before the write; the owner
-    /// of an item never changes, so the engine's own serialized write cannot
-    /// land on an item whose owner differs from the one judged.
+    /// Make `act` on any owner’s item `id`, attributed to this server.
     pub(crate) fn act(
         &self,
         session: Option<&SessionId>,
@@ -144,17 +125,17 @@ impl HumanItems {
         act: Act,
     ) -> Result<HumanItemReceipt, ApiError> {
         let engine = self.engine()?;
-        readable(&engine, session, id)?;
+        readable(&engine, id)?;
         // Over HTTP a write is the user's own action through this server, so
-        // the actor is the acting session and nobody is acted for: there is no
-        // `on_behalf_of` in any body and no flag that sets one. A manager
+        // the actor names the acting session, or browser without one, and nobody
+        // is acted for: no body supplies `on_behalf_of` and no flag sets one. A manager
         // completing on a user's behalf after that user approved in the
         // manager's chat is the CLI/runtime path's, where the manager running
         // the command supplies it (`docs/contract.md`, "Human items").
-        let actor = session
-            .map(SessionId::as_str)
-            .unwrap_or_default()
-            .to_owned();
+        let actor = session.map_or_else(
+            || "browser".to_owned(),
+            |session| format!("session:{}", session.as_str()),
+        );
         let id = id.as_str().to_owned();
         let action = match act {
             Act::Answer(text) => HumanItemAction::Answer {
@@ -179,18 +160,13 @@ impl HumanItems {
     }
 }
 
-/// Whether `session` holds the authority over an item `owner` raised: the
-/// ownership rule `stop` keeps, under which an unattributed server owns nothing.
+/// Whether `session` may raise an item for `owner`; an unattributed server may not.
 fn owns(session: Option<&SessionId>, owner: &str) -> bool {
     session.is_some_and(|session| session.as_str() == owner)
 }
 
-/// Item `id` and every step it blocks, if `session` may read it.
-fn readable(
-    engine: &Engine,
-    session: Option<&SessionId>,
-    id: &HumanItemId,
-) -> Result<HumanItemDetail, ApiError> {
+/// Item `id` and every step it blocks, or the HTTP not-found refusal.
+fn readable(engine: &Engine, id: &HumanItemId) -> Result<HumanItemDetail, ApiError> {
     // The engine answers an id it holds no item for with the same `Conflict`
     // a store it cannot read is answered with, so whether the id is held is
     // asked of the journal first: an id no item in any state carries is the
@@ -198,15 +174,7 @@ fn readable(
     if !held(engine, id)? {
         return Err(ApiError::HumanItemNotFound(id.clone()));
     }
-    let detail = engine.show(id.as_str()).map_err(refusal)?;
-    if !owns(session, &detail.item.owner.session) {
-        return Err(ApiError::HumanItemNotOwner(format!(
-            "human item {} belongs to another session; its content and its actions are that \
-             session's",
-            id.as_str()
-        )));
-    }
-    Ok(detail)
+    engine.show(id.as_str()).map_err(refusal)
 }
 
 /// Whether any item, in any state and of any owner, carries `id`.
