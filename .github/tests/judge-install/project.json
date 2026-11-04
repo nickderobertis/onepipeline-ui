@@ -23,10 +23,12 @@
         "{workspaceRoot}/nx.json",
         "{workspaceRoot}/project.json",
         "{workspaceRoot}/judged-diff/project.json",
-        "cargoVersionFree",
+        "{workspaceRoot}/Cargo.toml",
+        "{workspaceRoot}/Cargo.lock",
         "{workspaceRoot}/.gitignore",
         "{workspaceRoot}/scripts/workspace-install.sh",
-        "npmVersionFree"
+        "{workspaceRoot}/package.json",
+        "{workspaceRoot}/bun.lock"
       ],
       "cache": false,
       "//registry-end": "llmlint: ignore-end[external_service_suite_stays_out_of_the_affected_tier]"

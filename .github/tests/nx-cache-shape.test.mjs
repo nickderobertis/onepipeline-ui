@@ -12,11 +12,11 @@ import {
 const expression = (body) => `$${"{{"} ${body} }}`;
 const workflow = (name) =>
   parse(readFileSync(`.github/workflows/${name}.yml`, "utf8"));
-// Remote cache: dero-skills babeb92341428df0b84e09268481cd5981297b82.
+// Remote cache: dero-skills 25025c5c7a26a438192299ce32e4dcdb24eb0d78.
 // Other copies: dero-skills 63e071b72420bd6737226a50cb8a7a7760cc73a4.
 const upstream = {
   "scripts/nx-remote-cache.mjs":
-    "81871b7b1f992b71fab79bc38d3412b4d2306e2a4c475c64059c0e02b10f9079",
+    "3c9fb8af9550d6497f6717ab22e14857c139ef8988f9896ebcf3a4bbde30bdaf",
   "scripts/nx-version-free-inputs.mjs":
     "fdd4f59fc98a0073dbefdbaa0f08f4b58432bbf8e55d315865f951e0151b19b2",
   "scripts/actions-budget-figures.sh":

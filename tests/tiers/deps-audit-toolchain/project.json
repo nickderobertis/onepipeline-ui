@@ -2,6 +2,7 @@
   "name": "onepipeline-ui-deps-audit-toolchain",
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
+  "implicitDependencies": ["onepipeline-ui"],
   "tags": ["scope:tooling", "type:test", "lang:rust"],
   "targets": {
     "test": {

@@ -2,6 +2,7 @@
   "name": "dag-layout",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "projectType": "library",
+  "implicitDependencies": ["onepipeline-ui"],
   "sourceRoot": "packages/dag-layout/src",
   "tags": ["scope:shared", "type:layout"],
   "targets": {

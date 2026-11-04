@@ -166,7 +166,9 @@ promotes them in the existing release-plz job before it updates the release PR.
 Fork and Dependabot PRs read only. The script and version-free manifest digests
 are upstream-owned copies; the workflow suite holds their bytes to create-repo.
 Formatters and linters keep raw manifests where they check their text; semantic
-consumers use version-free manifest digests. Version/changelog edits retain source
+consumers use version-free manifest digests. Runtime manifest consumers retain explicit
+Nx dependencies on the root project: runtime digests alone do not select affected
+projects when a manifest changes. Version/changelog edits retain source
 and dependency hashes; the `versions`,
 npm-launcher and release tiers keep the version where their tests read it.
 Rust coverage producers and the aggregate stay uncached: LLVM profiles cannot

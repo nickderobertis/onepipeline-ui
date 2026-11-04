@@ -4,7 +4,7 @@
   "projectType": "application",
   "sourceRoot": "apps/dag-ui-e2e",
   "tags": ["scope:e2e", "type:e2e"],
-  "implicitDependencies": ["dag-ui"],
+  "implicitDependencies": ["dag-ui", "onepipeline-ui"],
   "targets": {
     "test": {
       "command": "npx playwright test --config apps/dag-ui-e2e/playwright.config.ts",

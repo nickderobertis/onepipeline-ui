@@ -1,7 +1,7 @@
 // Copied from dero-skills' create-repo skill; edit only the source.
 // source: github.com/nickderobertis/dero-skills/skills/bootstrap/create-repo/assets/ci/nx-remote-cache.mjs
-// version: 2
-// sha256: a7b144b1810f6c86d640438ee5b0b0ba8f75d0d2bf58c447d27f92c309b899e9
+// version: 3
+// sha256: daadb26df896e42535abb648f463961435dfb6926f6c91438e569e7ef1974f13
 import {
   appendFileSync,
   readFileSync,
@@ -1146,8 +1146,11 @@ function validateSelection(gh, doc, run) {
   const pr = associatedPrs(gh, run).find((pr) => pr.number === doc.pr);
   check(
     pr &&
-      pr.head?.repo?.full_name === gh.repo &&
-      pr.base?.repo?.full_name === gh.repo,
+      (run.pull_requests.length
+        ? pr.head?.repo?.url === `https://api.github.com/repos/${gh.repo}` &&
+          pr.base?.repo?.url === `https://api.github.com/repos/${gh.repo}`
+        : pr.head?.repo?.full_name === gh.repo &&
+          pr.base?.repo?.full_name === gh.repo),
     'untrusted source PR repository',
   );
   const membership = gh.pages(`repos/${gh.repo}/commits/${run.head_sha}/pulls`);

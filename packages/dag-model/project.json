@@ -2,6 +2,7 @@
   "name": "dag-model",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "projectType": "library",
+  "implicitDependencies": ["onepipeline-ui"],
   "sourceRoot": "packages/dag-model/src",
   "tags": ["scope:shared", "type:model"],
   "targets": {

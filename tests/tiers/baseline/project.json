@@ -2,6 +2,7 @@
   "name": "onepipeline-ui-baseline",
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
+  "implicitDependencies": ["onepipeline-ui"],
   "tags": ["scope:api", "type:test", "lang:rust"],
   "targets": {
     "test-baseline": {

@@ -1,6 +1,7 @@
 {
   "name": "github-workflows",
   "projectType": "application",
+  "implicitDependencies": ["onepipeline-ui"],
   "tags": ["scope:tooling", "type:test", "lang:javascript"],
   "namedInputs": {
     "workflowPolicy": [

@@ -2,6 +2,7 @@
   "name": "dag-ui-build-cache",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
+  "implicitDependencies": ["onepipeline-ui"],
   "tags": ["scope:app", "type:test", "lang:rust"],
   "targets": {
     "lint": {

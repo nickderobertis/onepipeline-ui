@@ -384,18 +384,28 @@ test("cache-use under onebudgetspec measures real executions behind simulated re
     const tip = await git("rev-parse", "HEAD");
     const ordinary = payload("maintainer");
     ordinary.pull_request.base.sha = base;
+    const initialPush = structuredClone(ordinary);
+    initialPush.pull_request.head.sha = "0".repeat(40);
     const first = await cacheSession(
       cwd,
       cache,
       join(cwd, "observations/first"),
-      ordinary,
+      initialPush,
     );
     try {
       await first.nx();
     } finally {
       await first.close();
     }
-    sourceMetadata(cache, join(first.temp, "nx-cache-report"), { base, merge });
+    const initialRecord = sourceMetadata(
+      cache,
+      join(first.temp, "nx-cache-report"),
+      {
+        base,
+        merge,
+        head: initialPush.pull_request.head.sha,
+      },
+    );
     rmSync(join(cwd, ".nx"), { recursive: true, force: true });
     const retry = await cacheSession(
       cwd,
@@ -559,20 +569,15 @@ test("cache-use under onebudgetspec measures real executions behind simulated re
     assert.match(observed.stdout, /within/);
     // GitHub's recorded run shows this behavior: its embedded PR head moved
     // after the run, while head_sha and the saved execution stayed unchanged.
-    const association = source.source.pull_requests[0];
+    const association = initialRecord.source.pull_requests[0];
     const priorHead = association.head.sha;
-    const priorBase = association.base.sha;
-    association.head.sha = "9".repeat(40);
-    association.base.sha = "8".repeat(40);
-    source.pr.head.sha = association.head.sha;
-    source.pr.base.sha = association.base.sha;
+    association.head.sha = source.pr.head.sha;
+    initialRecord.pr.head.sha = source.pr.head.sha;
     const earlierPush = await measure();
     assert.match(earlierPush.stdout, /actual 100 percent/);
     assert.match(earlierPush.stdout, /aggregate: 2\/2 remote hits/);
     association.head.sha = priorHead;
-    association.base.sha = priorBase;
-    source.pr.head.sha = priorHead;
-    source.pr.base.sha = priorBase;
+    initialRecord.pr.head.sha = priorHead;
     // Re-read the same real artifacts with unavailable or untrusted GitHub metadata.
     source.artifact.expired = true;
     const expired = await measure();
@@ -747,6 +752,9 @@ test("cache-use under onebudgetspec measures real executions behind simulated re
     listing.workflow_runs = listing.workflow_runs.filter(
       (record) => record.id === 1 || record.id === lastLocal.record.source.id,
     );
+    // This selection keeps only the first proving push as the merged source
+    // head, plus a release execution that hit its local cache: nothing is eligible.
+    source.pr.head.sha = initialPush.pull_request.head.sha;
     const zero = await measure();
     assert.match(zero.stdout, /zero eligible executions/);
     assert.doesNotMatch(zero.stdout, /— within/);

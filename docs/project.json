@@ -2,6 +2,7 @@
   "name": "docs",
   "$schema": "../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
+  "implicitDependencies": ["onepipeline-ui"],
   "tags": ["scope:docs"],
   "//": "The repository's documents, a project of their own so a change to one selects what reads it rather than the crate's root project, which owns every file no other project does and which the view depends on. The crate's targets name `docs/contract.md` among their inputs, so a change to the contract still selects the crate and, through it, the view and its journeys.",
   "targets": {

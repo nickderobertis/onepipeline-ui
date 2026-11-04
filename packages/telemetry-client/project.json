@@ -4,7 +4,7 @@
   "projectType": "library",
   "sourceRoot": "packages/telemetry-client/src",
   "tags": ["scope:shared", "type:client"],
-  "implicitDependencies": ["dag-model"],
+  "implicitDependencies": ["dag-model", "onepipeline-ui"],
   "targets": {
     "build": {
       "cache": false,

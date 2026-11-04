@@ -16,10 +16,13 @@
         "{projectRoot}/**/*",
         "{workspaceRoot}/.github/fixtures/release-tail/**/*",
         "{workspaceRoot}/.github/workflows/**/*",
-        "npmVersionFree",
+        "{workspaceRoot}/.github/package.json",
         "{workspaceRoot}/budgets.yaml",
         "{workspaceRoot}/scripts/actions-budget-figures.sh",
-        "{workspaceRoot}/scripts/workspace-install.sh"
+        "{workspaceRoot}/scripts/workspace-install.sh",
+        "{workspaceRoot}/package.json",
+        "{workspaceRoot}/bun.lock",
+        "{workspaceRoot}/scripts/nx-remote-cache.mjs"
       ],
       "cache": false,
       "//registry-end": "llmlint: ignore-end[external_service_suite_stays_out_of_the_affected_tier]"
