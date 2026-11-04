@@ -176,6 +176,16 @@ jobs:
           SHOTS_OUT: shots/current/x86_64
           SHOTS_VERIFY: shots/verify/x86_64
         run: just dag-ui-screens
+      - name: Upload x86_64 capture for baseline review
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: screencomp-capture-x86_64
+          path: shots/current/x86_64
+          retention-days: 3
+          # Setup or capture may fail before producing files; their existing
+          # checks own that failure, and this retrieval step adds no gate.
+          if-no-files-found: ignore
       - uses: nickderobertis/screencomp@v0
         if: github.event_name == 'pull_request' && !cancelled()
         with:
