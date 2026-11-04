@@ -36,6 +36,7 @@
         "{workspaceRoot}/.gitignore",
         "{workspaceRoot}/llmlint.yml",
         "{workspaceRoot}/oneharness.toml",
+        { "runtime": "llmlint fingerprint --config llmlint.yml" },
         "platform"
       ]
     },

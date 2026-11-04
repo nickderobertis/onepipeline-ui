@@ -84,3 +84,34 @@ test("Nx fixture readers hash and select on the production cache plugin they loa
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+test("the judged tier hashes the real judge fingerprint and ignores recording-only changes", () => {
+  const cwd = workspaceFixture();
+  const ids = [
+    "onepipeline-ui-judged-tier:test",
+    "onepipeline-ui-repo-tooling:test-quick",
+  ];
+  const model = process.env.ONEHARNESS_MODEL;
+  const history = process.env.LLMLINT_NO_HISTORY;
+  try {
+    delete process.env.ONEHARNESS_MODEL;
+    delete process.env.LLMLINT_NO_HISTORY;
+    const before = taskHashes(cwd, ids);
+    // Resolve a different configuration through the real installed judge. This
+    // changes its fingerprint without editing any declared workspace file.
+    process.env.ONEHARNESS_MODEL = "cache-input-probe-model";
+    const changed = taskHashes(cwd, ids);
+    assert.notEqual(changed[ids[0]].hash, before[ids[0]].hash);
+    assert.equal(changed[ids[1]].hash, before[ids[1]].hash);
+    process.env.LLMLINT_NO_HISTORY = "1";
+    const recordingOnly = taskHashes(cwd, ids);
+    for (const id of ids)
+      assert.equal(recordingOnly[id].hash, changed[id].hash);
+  } finally {
+    if (model === undefined) delete process.env.ONEHARNESS_MODEL;
+    else process.env.ONEHARNESS_MODEL = model;
+    if (history === undefined) delete process.env.LLMLINT_NO_HISTORY;
+    else process.env.LLMLINT_NO_HISTORY = history;
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
