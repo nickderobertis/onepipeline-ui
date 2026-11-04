@@ -75,3 +75,5 @@
 # The pool maintenance `onevcs.toml` declares, and the budget timing one pass.
 /onevcs.toml             @nickderobertis
 /pool-maintenance/       @nickderobertis
+/tests/tiers/versions/   @nickderobertis
+/.github/tests/nx-cache/ @nickderobertis

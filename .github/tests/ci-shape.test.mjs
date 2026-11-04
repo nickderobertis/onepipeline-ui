@@ -4,7 +4,7 @@
 // conditions and reusable calls included.
 //
 //   - a pull request's `opened`, `synchronize` and `reopened`: ci.yml's four jobs
-//     and nothing else (a release-plz branch's skips `test-macos`);
+//     and nothing else, including a release-plz branch;
 //   - a push to `main`: release-plz.yml, visual-docs.yml's canonical gallery and
 //     ci-cache.yml's warm jobs and informational advisories report;
 //   - the release commit (the push merging release-plz's pull request): release-plz.yml,
@@ -97,7 +97,7 @@ export function shapeProblems(workflows) {
     );
     expect(
       pr(action, "release-plz-2026-11-01T03-00-00Z"),
-      FOUR.filter((job) => job !== "test-macos").map((job) => `ci.yml ${job}`),
+      FOUR.map((job) => `ci.yml ${job}`),
     );
   }
   const pushWorkflows = (scenario) =>
@@ -167,7 +167,7 @@ export function shapeProblems(workflows) {
 // release-plz.yml's digest: the release workflow is an interface other work builds
 // against, so any edit to it has to be made here too, on purpose.
 const RELEASE_PLZ_SHA256 =
-  "91db755b0275d0f6e2f40402b8f1a7136d1a08ebcfb9b5e346b52c513e9a7141";
+  "b9c57fdf35411e913df499ae0dee958a93a3eeb31ab8d9dbb7a992dafc4856a3";
 
 test("a pull request runs the four jobs, main and the release commit run only what they name", () => {
   assert.deepEqual(shapeProblems(load()), []);

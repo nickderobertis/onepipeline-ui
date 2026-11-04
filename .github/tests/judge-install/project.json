@@ -2,27 +2,22 @@
   "name": "github-workflows-judge-install",
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
-  "tags": [
-    "scope:tooling",
-    "type:test",
-    "lang:javascript"
-  ],
+  "tags": ["scope:tooling", "type:test", "lang:javascript"],
   "//": "The judged-lint journey, which installs the llmlint toolchain from PyPI through scripts/setup-llmlint.sh, as a project of its own with its own bootstrap, so a change to the rest of the workflow policy, or to the release tail, does not select it. Its inputs name what the journey reads, which is what makes it affected, and then the pull request's affected tier runs it.",
   "targets": {
     "bootstrap": {
       "command": "bash scripts/workspace-install.sh"
     },
     "test": {
-      "//registry": "llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] this journey reads a public registry with no credential — PyPI for the judged-lint toolchain, as `just bootstrap` and the gate already reach crates.io and npm — and it is coverage the base ran on every pull request its inputs reach: moving it to a promoted or credential-gated tier would cut that coverage, which the planner's ruling forbids. Its own project and inputs are what keep any other change from selecting it.",
+      "//registry": "llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] this journey reads a public registry with no credential \u2014 PyPI for the judged-lint toolchain, as `just bootstrap` and the gate already reach crates.io and npm \u2014 and it is coverage the base ran on every pull request its inputs reach: moving it to a promoted or credential-gated tier would cut that coverage, which the planner's ruling forbids. Its own project and inputs are what keep any other change from selecting it.",
       "command": "node --test .github/tests/judge-install/*.test.mjs",
-      "dependsOn": [
-        "bootstrap"
-      ],
+      "dependsOn": ["bootstrap"],
       "inputs": [
         "{projectRoot}/**/*",
         "{workspaceRoot}/.github/fixtures/judge/**/*",
         "{workspaceRoot}/scripts/setup-llmlint.sh",
         "{workspaceRoot}/scripts/nx.sh",
+        "{workspaceRoot}/scripts/nx-remote-cache.mjs",
         "{workspaceRoot}/oneharness.toml",
         "{workspaceRoot}/llmlint.yml",
         "{workspaceRoot}/justfile",
@@ -41,9 +36,7 @@
     },
     "check": {
       "executor": "nx:noop",
-      "dependsOn": [
-        "test"
-      ]
+      "dependsOn": ["test"]
     }
   }
 }

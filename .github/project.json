@@ -4,6 +4,9 @@
   "tags": ["scope:tooling", "type:test", "lang:javascript"],
   "namedInputs": {
     "workflowPolicy": [
+      "{workspaceRoot}/scripts/nx-remote-cache.mjs",
+      "{workspaceRoot}/scripts/nx-version-free-inputs.mjs",
+      "{workspaceRoot}/scripts/ci-job.sh",
       "sharedGlobals",
       "{projectRoot}/**/*",
       "{workspaceRoot}/screencomp.toml",
@@ -18,7 +21,6 @@
       "{workspaceRoot}/scripts/verify-staged-release.mjs",
       "{workspaceRoot}/scripts/npm-build.mjs",
       "{workspaceRoot}/scripts/sbom.mjs",
-      "{workspaceRoot}/scripts/ci-job.sh",
       "{workspaceRoot}/scripts/measure-cold-linux.sh",
       "{workspaceRoot}/scripts/measure-cold-linux.d/**/*",
       "{workspaceRoot}/scripts/ci-warm.sh",
@@ -31,16 +33,22 @@
       "{workspaceRoot}/llmlint.yml",
       "{workspaceRoot}/judged-diff/project.json",
       "{workspaceRoot}/nx.json",
-      "{workspaceRoot}/package.json",
-      "{workspaceRoot}/bun.lock",
+      "npmVersionFree",
       "{workspaceRoot}/**/project.json",
       "{workspaceRoot}/scripts/workspace-install.sh",
       "{workspaceRoot}/scripts/nx.sh",
       "{workspaceRoot}/tests/e2e/linked_report.rs",
-      "{workspaceRoot}/Cargo.toml"
+      "cargoVersionFree"
     ]
   },
   "targets": {
+    "manifest-inputs-for-affected": {
+      "//": "Carries only file-based affected edges for semantic manifest inputs; CI never runs this uncached no-op.",
+      "executor": "nx:noop",
+      "cache": false,
+      "inputs": ["cargoManifestSelection", "npmManifestSelection"],
+      "outputs": []
+    },
     "bootstrap": {
       "command": "bash scripts/workspace-install.sh"
     },
@@ -53,11 +61,11 @@
     "test-ci-jobs": {
       "command": "node --test .github/tests/ci-jobs.test.mjs",
       "dependsOn": ["bootstrap"],
-      "inputs": ["{projectRoot}/**/*"]
+      "inputs": ["{projectRoot}/**/*", "platform"]
     },
     "lint": {
       "command": "node .github/lint.mjs",
-      "inputs": ["workflowPolicy"],
+      "inputs": ["workflowPolicy", "platform"],
       "dependsOn": ["bootstrap"]
     },
     "budgets": {

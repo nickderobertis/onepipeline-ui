@@ -70,7 +70,6 @@ esac
 #   test-windows  the platform-sensitive tiers (`check-cross`), the release's
 #                 browser build, and the documented install.
 #   test-macos    the platform-sensitive tiers and the documented install.
-exclude=()
 case "$job" in
   lint) targets="format-check,lint,typecheck,msrv,deps-check" ;;
   test-linux)
@@ -88,10 +87,9 @@ case "$job" in
       # `lint` runs over the same affected set, so this job does not compile the
       # crate a second time to lint it. Listed rather than reached through
       # `check`, which would pull them back in; `tests/e2e/ci_jobs.rs` holds the
-      # list to `check`'s selection. `dag-ui-build-cache` declares a `check` that
-      # runs neither of its targets, which the exclusion below keeps.
+      # list to `check`'s selection. Browser-bundle tests run here too, so their
+      # result is proven before the broader release tier needs it.
       targets="build,test,test-baseline,test-cost,test-isolation,doc,coverage,budgets,test-ci-jobs,install-smoke,wheel-smoke"
-      exclude=(--exclude=dag-ui-build-cache)
     fi
     ;;
   test-windows) targets="format-check,lint,test-quick,build,install-smoke" ;;
@@ -107,7 +105,7 @@ nx_run() {
   if [ "$tier" = "broader" ]; then
     bash scripts/nx.sh run-many -t "$targets" "$@"
   else
-    bash scripts/nx-affected.sh -t "$targets" ${exclude[@]+"${exclude[@]}"} "$@"
+    bash scripts/nx-affected.sh -t "$targets" "$@"
   fi
 }
 graph="$(nx_run --graph=stdout)" || {

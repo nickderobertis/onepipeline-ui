@@ -3,78 +3,216 @@
   "defaultBase": "main",
   "cacheDirectory": ".nx/cache",
   "namedInputs": {
+    "cargoManifestSelection": [
+      "{workspaceRoot}/**/Cargo.toml",
+      "{workspaceRoot}/**/Cargo.lock"
+    ],
+    "npmManifestSelection": [
+      "{workspaceRoot}/**/package.json",
+      "{workspaceRoot}/**/bun.lock",
+      "{workspaceRoot}/**/package-lock.json",
+      "{workspaceRoot}/**/pnpm-lock.yaml"
+    ],
+    "pythonManifestSelection": [
+      "{workspaceRoot}/**/pyproject.toml",
+      "{workspaceRoot}/**/uv.lock"
+    ],
+    "filesManifestSelection": ["{workspaceRoot}/.github/nx-version-files"],
     "sharedGlobals": [
       "{workspaceRoot}/nx.json",
-      "{workspaceRoot}/package.json",
-      "{workspaceRoot}/bun.lock",
+      "npmVersionFree",
       "{workspaceRoot}/rust-toolchain.toml",
       "{workspaceRoot}/rustfmt.toml",
       "{workspaceRoot}/clippy.toml",
       "{workspaceRoot}/biome.json",
       "{workspaceRoot}/eslint.config.mjs",
-      "{workspaceRoot}/tsconfig.base.json"
+      "{workspaceRoot}/tsconfig.base.json",
+      "platform"
     ],
-    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "default": [
+      "projectFiles",
+      "!{projectRoot}/**/Cargo.toml",
+      "!{projectRoot}/**/Cargo.lock",
+      "!{projectRoot}/**/package.json",
+      "!{projectRoot}/**/bun.lock",
+      "!{projectRoot}/**/pyproject.toml",
+      "sharedInputs"
+    ],
+    "manifestText": ["projectFiles", "sharedInputs"],
     "production": ["default"],
     "wholeWorkspace": ["{workspaceRoot}/**/*"],
     "apiServerSurface": [
+      "{workspaceRoot}/rust-toolchain.toml",
       "{workspaceRoot}/src/**/*.rs",
       "{workspaceRoot}/build.rs",
-      "{workspaceRoot}/Cargo.toml",
-      "{workspaceRoot}/Cargo.lock"
+      "cargoVersionFree"
     ],
     "servedGoldens": [
       "{workspaceRoot}/tests/fixtures/*.json",
-      { "runtime": "git hash-object tests/fixtures/project.json" }
+      {
+        "runtime": "git hash-object tests/fixtures/project.json"
+      }
     ],
     "embeddedView": [
       "{workspaceRoot}/apps/dag-ui/index.html",
       "{workspaceRoot}/apps/dag-ui/src/**/*",
-      "{workspaceRoot}/apps/dag-ui/package.json",
+      "npmVersionFree",
       "{workspaceRoot}/apps/dag-ui/tsconfig.json",
       "{workspaceRoot}/apps/dag-ui/vite.config.ts",
       "{workspaceRoot}/packages/*/src/**/*",
-      "{workspaceRoot}/packages/*/package.json",
       "{workspaceRoot}/packages/*/tsconfig.json"
     ],
     "testTiers": [
       "{workspaceRoot}/.config/nextest.toml",
       "{workspaceRoot}/justfile"
+    ],
+    "platform": [
+      {
+        "runtime": "node -p process.platform"
+      }
+    ],
+    "cargoVersionFree": [
+      {
+        "runtime": "node scripts/nx-version-free-inputs.mjs --ecosystem cargo"
+      },
+      "{workspaceRoot}/scripts/nx-version-free-inputs.mjs",
+      "{workspaceRoot}/.github/nx-version-files"
+    ],
+    "npmVersionFree": [
+      {
+        "runtime": "node scripts/nx-version-free-inputs.mjs --ecosystem npm"
+      },
+      "{workspaceRoot}/scripts/nx-version-free-inputs.mjs",
+      "{workspaceRoot}/.github/nx-version-files"
+    ],
+    "pythonVersionFree": [
+      {
+        "runtime": "node scripts/nx-version-free-inputs.mjs --ecosystem python"
+      },
+      "{workspaceRoot}/scripts/nx-version-free-inputs.mjs",
+      "{workspaceRoot}/.github/nx-version-files"
+    ],
+    "filesVersionFree": [
+      {
+        "runtime": "node scripts/nx-version-free-inputs.mjs --ecosystem files"
+      },
+      "{workspaceRoot}/scripts/nx-version-free-inputs.mjs",
+      "{workspaceRoot}/.github/nx-version-files"
+    ],
+    "projectFiles": ["{projectRoot}/**/*", "!{projectRoot}/**/CHANGELOG*"],
+    "sharedInputs": [
+      "sharedGlobals",
+      "cargoVersionFree",
+      "npmVersionFree",
+      "pythonVersionFree",
+      "filesVersionFree",
+      "platform"
+    ],
+    "versionFreeWorkspace": [
+      "{workspaceRoot}/**/*",
+      "!{workspaceRoot}/**/CHANGELOG*",
+      "!{workspaceRoot}/**/Cargo.toml",
+      "!{workspaceRoot}/**/Cargo.lock",
+      "!{workspaceRoot}/**/package.json",
+      "!{workspaceRoot}/**/bun.lock",
+      "!{workspaceRoot}/**/pyproject.toml",
+      "sharedInputs"
     ]
   },
   "targetDefaults": {
-    "bootstrap": { "cache": false },
-    "format": { "cache": false },
-    "format-check": { "cache": true, "inputs": ["default"] },
-    "lint": { "cache": true, "inputs": ["default"] },
-    "typecheck": { "cache": true, "inputs": ["default"] },
-    "build": { "cache": true, "inputs": ["default"] },
-    "test": { "cache": true, "inputs": ["default"] },
-    "test-quick": { "cache": true, "inputs": ["default"] },
-    "test-baseline": { "cache": true, "inputs": ["default"] },
-    "test-cost": { "cache": true, "inputs": ["default"] },
-    "test-isolation": { "cache": true, "inputs": ["default"] },
-    "doc": { "cache": true, "inputs": ["default"] },
-    "coverage": { "cache": false },
-    "msrv": { "cache": false },
-    "deps-check": { "cache": false },
+    "bootstrap": {
+      "cache": false
+    },
+    "format": {
+      "cache": false
+    },
+    "format-check": {
+      "cache": true,
+      "inputs": ["default"],
+      "outputs": []
+    },
+    "lint": {
+      "cache": true,
+      "inputs": ["default"],
+      "outputs": []
+    },
+    "typecheck": {
+      "cache": true,
+      "inputs": ["default"],
+      "outputs": []
+    },
+    "build": {
+      "cache": true,
+      "inputs": ["default"]
+    },
+    "test": {
+      "cache": true,
+      "inputs": ["default"],
+      "outputs": []
+    },
+    "test-quick": {
+      "cache": true,
+      "inputs": ["default"],
+      "outputs": []
+    },
+    "test-baseline": {
+      "cache": true,
+      "inputs": ["default"],
+      "outputs": []
+    },
+    "test-cost": {
+      "cache": true,
+      "inputs": ["default"],
+      "outputs": []
+    },
+    "test-isolation": {
+      "cache": true,
+      "inputs": ["default"],
+      "outputs": []
+    },
+    "doc": {
+      "cache": true,
+      "inputs": ["default"],
+      "outputs": []
+    },
+    "coverage": {
+      "cache": false
+    },
+    "msrv": {
+      "cache": false
+    },
+    "deps-check": {
+      "cache": false
+    },
     "budgets": {
       "cache": true,
       "inputs": [
         "{projectRoot}/**/*",
         "^production",
-        { "dependentTasksOutputFiles": "**/telemetry/*.json" },
-        { "externalDependencies": ["@onebudgetspec/cli"] }
-      ]
+        {
+          "dependentTasksOutputFiles": "**/telemetry/*.json"
+        },
+        {
+          "externalDependencies": ["@onebudgetspec/cli"]
+        }
+      ],
+      "outputs": []
     },
-    "budgets-host": { "cache": false },
+    "budgets-host": {
+      "cache": false
+    },
     "lint-llm-diff": {
       "cache": true,
       "inputs": [
         "wholeWorkspace",
-        { "env": "LLMLINT_DIFF_BASE_SHA" },
-        { "runtime": "llmlint fingerprint" }
-      ]
+        {
+          "env": "LLMLINT_DIFF_BASE_SHA"
+        },
+        {
+          "runtime": "llmlint fingerprint"
+        }
+      ],
+      "outputs": []
     },
     "check": {
       "cache": false,
@@ -91,5 +229,6 @@
         "coverage"
       ]
     }
-  }
+  },
+  "plugins": ["./scripts/nx-remote-cache.mjs"]
 }

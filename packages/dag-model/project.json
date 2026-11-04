@@ -5,19 +5,34 @@
   "sourceRoot": "packages/dag-model/src",
   "tags": ["scope:shared", "type:model"],
   "targets": {
+    "manifest-inputs-for-affected": {
+      "//": "Carries only file-based affected edges for semantic manifest inputs; CI never runs this uncached no-op.",
+      "executor": "nx:noop",
+      "cache": false,
+      "inputs": [
+        "cargoManifestSelection",
+        "filesManifestSelection",
+        "npmManifestSelection",
+        "pythonManifestSelection"
+      ],
+      "outputs": []
+    },
     "build": {
+      "cache": false,
       "command": "node node_modules/typescript/bin/tsc -p packages/dag-model/tsconfig.json --emitDeclarationOnly",
       "outputs": ["{projectRoot}/dist"]
     },
     "lint": {
-      "command": "node node_modules/@biomejs/biome/bin/biome check packages/dag-model && npx eslint --max-warnings 0 packages/dag-model"
+      "command": "node node_modules/@biomejs/biome/bin/biome check packages/dag-model && npx eslint --max-warnings 0 packages/dag-model",
+      "inputs": ["manifestText"]
     },
     "test": {
       "command": "npx vitest run --root packages/dag-model",
       "inputs": [
         "default",
         "servedGoldens",
-        "{workspaceRoot}/tests/fixtures/human-items/verdicts.json"
+        "{workspaceRoot}/tests/fixtures/human-items/verdicts.json",
+        "platform"
       ]
     },
     "typecheck": {
@@ -27,7 +42,8 @@
       "command": "node node_modules/@biomejs/biome/bin/biome check --write --linter-enabled=false packages/dag-model"
     },
     "format-check": {
-      "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false packages/dag-model"
+      "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false packages/dag-model",
+      "inputs": ["manifestText"]
     },
     "check": {
       "executor": "nx:noop"

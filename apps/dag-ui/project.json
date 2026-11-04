@@ -11,23 +11,41 @@
     "onepipeline-ui"
   ],
   "targets": {
+    "manifest-inputs-for-affected": {
+      "//": "Carries only file-based affected edges for semantic manifest inputs; CI never runs this uncached no-op.",
+      "executor": "nx:noop",
+      "cache": false,
+      "inputs": [
+        "cargoManifestSelection",
+        "filesManifestSelection",
+        "npmManifestSelection",
+        "pythonManifestSelection"
+      ],
+      "outputs": []
+    },
     "serve": {
       "command": "cd apps/dag-ui && npx vite --config vite.config.ts"
     },
     "build": {
+      "cache": false,
       "command": "cd apps/dag-ui && npx vite build --config vite.config.ts",
-      "inputs": ["default", "^default"],
+      "inputs": ["default", "^default", "platform"],
       "outputs": ["{projectRoot}/dist"]
     },
     "build-api-server": {
       "//": "Runs cargo directly, not through a just recipe: the visual-docs capture runs this target in a container with no just. The binary goes to target/dag-ui-api, which no other build names, and its units go to this clone's shared build directory, target (CARGO_BUILD_BUILD_DIR, set through env so no shell has to quote TOML). No RUSTFLAGS here: they would fingerprint the units this build shares with the test tiers under a second flag set, and _crate-lint already denies warnings over this binary target.",
       "command": "cargo build --locked --quiet --bin onepipeline-api --target-dir target/dag-ui-api",
-      "options": { "env": { "CARGO_BUILD_BUILD_DIR": "target" } },
+      "options": {
+        "env": {
+          "CARGO_BUILD_BUILD_DIR": "target"
+        }
+      },
       "cache": false,
       "dependsOn": ["build"]
     },
     "lint": {
-      "command": "node node_modules/@biomejs/biome/bin/biome check apps/dag-ui && npx eslint --max-warnings 0 apps/dag-ui"
+      "command": "node node_modules/@biomejs/biome/bin/biome check apps/dag-ui && npx eslint --max-warnings 0 apps/dag-ui",
+      "inputs": ["manifestText"]
     },
     "test": {
       "command": "cd apps/dag-ui && npx vitest run --config vite.config.ts"
@@ -39,7 +57,8 @@
       "command": "node node_modules/@biomejs/biome/bin/biome check --write --linter-enabled=false apps/dag-ui"
     },
     "format-check": {
-      "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false apps/dag-ui"
+      "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false apps/dag-ui",
+      "inputs": ["manifestText"]
     },
     "check": {
       "executor": "nx:noop"

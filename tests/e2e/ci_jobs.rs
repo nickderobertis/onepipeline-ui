@@ -35,7 +35,7 @@ const BASE_SHA: &str = "ONEPIPELINE_UI_NX_BASE_SHA";
 
 /// The one project the committed change reaches directly: a shared package
 /// nothing but the browser view imports.
-const CHANGED: &str = "packages/timeline-categories/package.json";
+const CHANGED: &str = "packages/timeline-categories/src/index.ts";
 const CHANGED_PROJECT: &str = "timeline-categories";
 
 /// Packages the change does not reach: neither imports the changed one, and no
@@ -108,6 +108,8 @@ impl Run {
 /// touch, or `None` for a commit that changes nothing.
 fn workspace(change: Option<&str>) -> Workspace {
     let workspace = Workspace::new();
+    // Cached workflow-contract tests key the real Git baseline, just as CI does.
+    workspace.git(&["update-ref", "refs/remotes/origin/main", &workspace.base]);
     match change {
         Some(path) => {
             workspace.change(path);
@@ -154,6 +156,16 @@ fn recipe(workspace: &Workspace, recipe: &str, arguments: &[&str], refuse_toolch
     fs::create_dir_all(&mirror).expect("the empty release mirror");
     command.env("ONEPIPELINE_UI_SIBLING_RELEASES", &mirror);
     if refuse_toolchain {
+        // A real bootstrap failure prevents this orchestration journey from
+        // recursively running the cache-contract suite it selects. The directory
+        // is occupied by a file, as the bootstrap recovery journey also proves.
+        fs::create_dir_all(workspace.root().join(".tools")).expect("tool directory");
+        fs::write(
+            workspace.root().join(".tools/op-nx-cache"),
+            "unavailable tool cache",
+        )
+        .expect("blocked sidecar cache");
+        command.env("CI_JOBS_REAL_CARGO", env!("CARGO"));
         let stand_ins = workspace.dir.path().join("refusing-toolchain");
         // llmlint: ignore-block[e2e_not_mocked] the stand-ins are for `cargo` and
         // `docker`, below the layer under test: the recipe, its Nx selection and
@@ -167,7 +179,7 @@ fn recipe(workspace: &Workspace, recipe: &str, arguments: &[&str], refuse_toolch
         let path = stub_bin::install(
             &stand_ins,
             "cargo",
-            "#!/usr/bin/env bash\necho \"cargo stand-in: refused $*\" >&2\nexit 1\n",
+            "#!/usr/bin/env bash\nif [ \"$*\" = --version ] || [ \"$*\" = 'nextest --version' ]; then exec \"$CI_JOBS_REAL_CARGO\" \"$@\"; fi\necho \"cargo stand-in: refused $*\" >&2\nexit 1\n",
         );
         // llmlint: ignore-end[e2e_not_mocked]
         command.env("PATH", path);
@@ -329,6 +341,7 @@ fn the_jobs_platform_split_is_what_each_selects_for_a_crate_change() {
         "onepipeline-ui-baseline:test-baseline",
         "onepipeline-ui-cost:test-cost",
         "dag-ui-e2e:test",
+        "dag-ui-build-cache:test",
     ] {
         assert!(
             linux.contains(task),

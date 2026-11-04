@@ -881,8 +881,6 @@ test("all producer and installer target declarations match the release targets",
 
 test("real workflow command usage errors return 2 with an actionable diagnostic", () => {
   for (const [command, args, env] of [
-    ["node", [".github/macos-policy.mjs"], {}],
-    ["node", [".github/macos-policy.mjs", "classify", "--unknown"], {}],
     ["node", ["scripts/verify-staged-release.mjs"], {}],
     ["node", ["scripts/release.mjs"], {}],
     ["node", ["scripts/release.mjs", "linux"], {}],

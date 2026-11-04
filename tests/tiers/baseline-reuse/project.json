@@ -5,6 +5,7 @@
   "tags": ["scope:tooling", "type:test", "lang:rust"],
   "namedInputs": {
     "baselineProvisioning": [
+      "apiServerSurface",
       "{projectRoot}/**/*",
       "testTiers",
       "sharedGlobals",
@@ -14,6 +15,13 @@
     ]
   },
   "targets": {
+    "manifest-inputs-for-affected": {
+      "//": "Carries only file-based affected edges for semantic manifest inputs; CI never runs this uncached no-op.",
+      "executor": "nx:noop",
+      "cache": false,
+      "inputs": ["cargoManifestSelection", "npmManifestSelection"],
+      "outputs": []
+    },
     "test": {
       "command": "just _tier-test baseline-reuse",
       "dependsOn": [
@@ -22,7 +30,7 @@
           "target": "build"
         }
       ],
-      "inputs": ["baselineProvisioning"]
+      "inputs": ["baselineProvisioning", "platform"]
     },
     "test-quick": {
       "command": "just _tier-test baseline-reuse",
@@ -32,7 +40,7 @@
           "target": "build"
         }
       ],
-      "inputs": ["baselineProvisioning"]
+      "inputs": ["baselineProvisioning", "platform"]
     },
     "check": {
       "executor": "nx:noop"
