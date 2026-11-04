@@ -31,11 +31,6 @@ const FOUR = {
   "test-windows": "windows-latest",
   "test-macos": "macos-latest",
 };
-// The one job condition the four may carry: `test-macos` never starts on a
-// same-repository release-plz branch, whose version-only diff the Mac policy
-// lets skip, which keeps the macOS runs-per-change budget at two.
-const MAC_CONDITION =
-  "github.event_name == 'pull_request' && !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.head.repo.full_name == github.repository)";
 const REUSABLE =
   "nickderobertis/screencomp/.github/workflows/visual-docs-reusable.yml";
 const COMPOSITES = [
@@ -74,7 +69,7 @@ export function jobProblems(workflows) {
       );
     if (job["runs-on"] !== runner)
       problems.push(`job ${id} runs on ${job["runs-on"]}, not ${runner}`);
-    const allowed = id === "test-macos" ? MAC_CONDITION : undefined;
+    const allowed = undefined;
     if (job.if !== allowed)
       problems.push(`job ${id} has the condition ${JSON.stringify(job.if)}`);
     const recipe = `just ci-${id}`;

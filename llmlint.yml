@@ -36,6 +36,10 @@ files:
     # own header says: create-repo's baseline check compares the copy with its
     # source, and an edit here to satisfy a rule would fork it from that source.
     - "scripts/actions-budget-figures.sh"
+    # Upstream-owned copies, held byte-identical to their dero-skills commits by
+    # .github/tests/nx-cache-shape.test.mjs; their directives name upstream rules.
+    - "scripts/nx-remote-cache.mjs"
+    - "scripts/nx-version-free-inputs.mjs"
 rationales: true
 # No `agents` block: the harness/model are NOT pinned here. `oneharness.toml`
 # (composed alongside this file) selects them in fallback mode — codex + gpt-6.1-sol

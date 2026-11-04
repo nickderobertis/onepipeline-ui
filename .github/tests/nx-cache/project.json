@@ -1,0 +1,75 @@
+{
+  "name": "github-workflows-nx-cache",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:tooling", "type:test", "lang:javascript"],
+  "namedInputs": {
+    "cacheContract": [
+      "versionFreeWorkspace",
+      "{workspaceRoot}/apps/dag-ui-e2e/package.json",
+      "{workspaceRoot}/apps/dag-ui/package.json",
+      "{workspaceRoot}/packages/dag-layout/package.json",
+      "{workspaceRoot}/packages/dag-model/package.json",
+      "{workspaceRoot}/packages/telemetry-client/package.json",
+      "{workspaceRoot}/packages/timeline-categories/package.json"
+    ]
+  },
+  "targets": {
+    "manifest-inputs-for-affected": {
+      "//": "Carries only file-based affected edges for semantic manifest inputs; CI never runs this uncached no-op.",
+      "executor": "nx:noop",
+      "cache": false,
+      "inputs": [
+        "cargoManifestSelection",
+        "filesManifestSelection",
+        "npmManifestSelection",
+        "pythonManifestSelection"
+      ],
+      "outputs": []
+    },
+    "bootstrap": {
+      "command": "bash scripts/workspace-install.sh && node .github/tests/nx-cache/setup-sidecar.mjs"
+    },
+    "lint": {
+      "command": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings .github/tests/nx-cache",
+      "inputs": ["cacheContract", "platform"]
+    },
+    "test": {
+      "command": "node --test --test-concurrency=1 .github/tests/nx-cache/*.test.mjs",
+      "inputs": [
+        "cacheContract",
+        "platform",
+        {
+          "runtime": "git merge-base HEAD origin/main"
+        },
+        {
+          "runtime": "git ls-files"
+        },
+        {
+          "runtime": "git --version"
+        },
+        {
+          "runtime": "node -p process.version"
+        },
+        {
+          "runtime": "cargo --version"
+        },
+        {
+          "runtime": "cargo nextest --version"
+        }
+      ],
+      "dependsOn": [
+        "bootstrap",
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
+      "cache": true,
+      "outputs": []
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  }
+}

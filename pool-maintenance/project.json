@@ -10,7 +10,7 @@
     "test": {
       "command": "node --test pool-maintenance/tests/*.test.mjs",
       "dependsOn": ["bootstrap"],
-      "inputs": ["{projectRoot}/**/*", "{workspaceRoot}/justfile"]
+      "inputs": ["{projectRoot}/**/*", "{workspaceRoot}/justfile", "platform"]
     },
     "check": {
       "executor": "nx:noop",
@@ -22,8 +22,14 @@
       "command": "node_modules/.bin/onebudgetspec check pool-maintenance/budgets.yaml --label host",
       "dependsOn": [
         "bootstrap",
-        { "projects": ["onepipeline-ui"], "target": "bootstrap" },
-        { "projects": ["dag-ui"], "target": "build" }
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "bootstrap"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
       ]
     }
   }

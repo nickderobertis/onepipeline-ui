@@ -16,8 +16,10 @@
 // timestamps and counts, and the read figures from the double's own record of
 // what it was asked.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
+  chmodSync,
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -241,6 +243,7 @@ function recorded() {
       number: pr.number,
       head: pr.head.sha,
       merged: pr.merged_at,
+      merge: pr.merge_commit_sha,
     }));
   const jobsOf = (run) =>
     at(records, new RegExp(`/actions/runs/${run}/jobs\\?`)).jobs;
@@ -301,15 +304,29 @@ export function expectedFigures(release, now, runner) {
   const cdSecs = release.cdRuns.flatMap((run) =>
     run.jobs.flatMap(counted(now, runner)),
   );
-  const cycle = release.prs.map((pr) => {
-    const ends = pr.runs.flatMap((run) =>
-      run.jobs
-        .filter((job) => counted(now, runner)(job).length)
-        .map((job) => ts(job.completed_at)),
-    );
-    const first = Math.min(...pr.runs.map((run) => ts(run.created_at)));
-    return Math.max(...ends) - first + (now - ts(pr.merged));
-  });
+  const specs = readFileSync(
+    join(ROOT, ".github/release-published-paths"),
+    "utf8",
+  )
+    .split("\n")
+    .filter((line) => line && !line.startsWith("#"));
+  const cycle = release.prs
+    .filter((pr) =>
+      execFileSync(
+        "git",
+        ["diff", "--name-only", `${pr.merge}^1`, pr.merge, "--", ...specs],
+        { cwd: ROOT, encoding: "utf8" },
+      ).trim(),
+    )
+    .map((pr) => {
+      const ends = pr.runs.flatMap((run) =>
+        run.jobs
+          .filter((job) => counted(now, runner)(job).length)
+          .map((job) => ts(job.completed_at)),
+      );
+      const first = Math.min(...pr.runs.map((run) => ts(run.created_at)));
+      return Math.max(...ends) - first + (now - ts(pr.merged));
+    });
   return {
     "onepipeline-ui-ci-check-time": Math.max(...prSecs.flat()),
     "onepipeline-ui-ci-job-count": Math.max(
@@ -377,6 +394,14 @@ function step(dir, extra = {}) {
   const log = join(scratch, `requests-${serial}.jsonl`);
   mkdirSync(temp, { recursive: true });
   writeFileSync(log, "");
+  const missingCache = join(temp, "bin");
+  mkdirSync(missingCache);
+  const gh = join(missingCache, "gh");
+  writeFileSync(
+    gh,
+    '#!/bin/sh\necho "recorded release predates cache report artifacts" >&2\nexit 1\n',
+  );
+  chmodSync(gh, 0o755);
   const job = release().jobs.publish;
   const last = job.steps.at(-1);
   const {
@@ -389,7 +414,12 @@ function step(dir, extra = {}) {
     String(value).replace(JOB_TOKEN, "replayed-token");
   const env = {
     ...inherited,
-    PATH: path,
+    PATH: `${missingCache}:${path}`,
+    GIT_DIR: execFileSync("git", ["rev-parse", "--absolute-git-dir"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    }).trim(),
+    GIT_WORK_TREE: ROOT,
     ...Object.fromEntries(
       Object.entries(job.env ?? {}).map(([k, v]) => [k, placeholder(v)]),
     ),
@@ -462,7 +492,10 @@ function withThresholds(change) {
   serial += 1;
   const dir = join(scratch, `budgets-${serial}`);
   mkdirSync(dir, { recursive: true });
-  symlinkSync(join(ROOT, "scripts"), join(dir, "scripts"));
+  mkdirSync(join(dir, "scripts"));
+  for (const file of ["actions-budget-figures.sh", "nx-remote-cache.mjs"])
+    copyFileSync(join(ROOT, "scripts", file), join(dir, "scripts", file));
+  symlinkSync(join(ROOT, ".github"), join(dir, ".github"), "dir");
   const document = parse(readFileSync(join(ROOT, "budgets.yaml"), "utf8"));
   for (const budget of document.budgets) budget.threshold = change(budget);
   writeFileSync(join(dir, "budgets.yaml"), stringify(document));
@@ -487,9 +520,35 @@ test("over the recorded release the step reports all seven budgets, each figure 
     assert.ok(figures[id].detail.length > 0, `${id} has no breakdown`);
   // Over its real thresholds the recorded (pre-change) release is over, so the
   // step is red: exit 1, with every figure reported.
-  assert.equal(run.status, 1, run.stderr);
+  assert.equal(run.status, 3, run.stderr);
+  assert.match(run.stdout, /onepipeline-ui-nx-cache-use:.*error/);
 
   const release = recorded();
+  const cycle = figures["onepipeline-ui-release-cycle-time"].detail.join("\n");
+  assert.match(cycle, /#563: checks /);
+  assert.match(cycle, /#564: checks /);
+  assert.match(cycle, /#566: left out, changes no published path/);
+  const outside = at(release.records, /\/pulls\?state=closed/).find(
+    (pr) => pr.number === 560,
+  );
+  assert.ok(outside, "recorded PR #560 predates this release's range");
+  assert.ok(
+    execFileSync(
+      "git",
+      [
+        "diff",
+        "--name-only",
+        `${outside.merge_commit_sha}^1`,
+        outside.merge_commit_sha,
+        "--",
+        "Cargo.toml",
+      ],
+      { cwd: ROOT, encoding: "utf8" },
+    ).trim(),
+    "the out-of-range PR changes a published manifest",
+  );
+  assert.ok(!release.prs.some((pr) => pr.number === outside.number));
+  assert.doesNotMatch(cycle, /#560:/);
   const low = expectedFigures(release, run.started, runner);
   const high = expectedFigures(release, run.ended, runner);
   for (const id of Object.keys(low)) {
@@ -545,7 +604,8 @@ test("each GitHub read is made once across the seven, and the read figures are t
 
 test("each budget whose threshold lies below its recorded figure turns the step red, naming it", () => {
   const roomy = step(withThresholds(() => 1e12));
-  assert.equal(roomy.status, 0, roomy.stdout + roomy.stderr);
+  assert.equal(roomy.status, 3, roomy.stdout + roomy.stderr);
+  assert.match(roomy.stdout, /onepipeline-ui-nx-cache-use:.*error/);
   const figures = report(roomy.stdout);
   for (const id of SEVEN) assert.equal(figures[id].verdict, "within", id);
   for (const id of SEVEN) {
@@ -554,7 +614,7 @@ test("each budget whose threshold lies below its recorded figure turns the step 
         budget.id === id ? Math.max(figures[id].actual - 1, 0) : 1e12,
       ),
     );
-    assert.equal(below.status, 1, `${id}: ${below.stderr}`);
+    assert.equal(below.status, 3, `${id}: ${below.stderr}`);
     const verdicts = report(below.stdout);
     assert.equal(verdicts[id].verdict, "over", id);
     for (const other of SEVEN.filter((o) => o !== id))

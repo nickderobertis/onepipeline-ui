@@ -4,13 +4,27 @@
   "projectType": "application",
   "tags": ["scope:api", "type:test", "lang:rust"],
   "targets": {
+    "manifest-inputs-for-affected": {
+      "//": "Carries only file-based affected edges for semantic manifest inputs; CI never runs this uncached no-op.",
+      "executor": "nx:noop",
+      "cache": false,
+      "inputs": ["cargoManifestSelection", "npmManifestSelection"],
+      "outputs": []
+    },
     "test": {
+      "cache": false,
       "command": "just _tier-test-covered npm-launcher",
       "dependsOn": [
-        { "projects": ["onepipeline-ui"], "target": "ensure-node-without-execve" },
-        { "projects": ["dag-ui"], "target": "build" }
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-node-without-execve"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
       ],
-      "inputs": ["npmLauncherJourneys"],
+      "inputs": ["npmLauncherJourneys", "platform"],
       "outputs": [
         "{workspaceRoot}/target/llvm-cov-target/npm-launcher-*.profraw"
       ]
@@ -18,10 +32,16 @@
     "test-quick": {
       "command": "just _tier-test npm-launcher",
       "dependsOn": [
-        { "projects": ["onepipeline-ui"], "target": "ensure-node-without-execve" },
-        { "projects": ["dag-ui"], "target": "build" }
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-node-without-execve"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
       ],
-      "inputs": ["npmLauncherJourneys"]
+      "inputs": ["npmLauncherJourneys", "platform"]
     },
     "check": {
       "executor": "nx:noop"
@@ -45,7 +65,10 @@
       "{workspaceRoot}/tests/support/http.rs",
       "{workspaceRoot}/tests/support/journal_schema.rs",
       "{workspaceRoot}/tests/support/serving.rs",
-      "{workspaceRoot}/tests/support/sibling.rs"
+      "{workspaceRoot}/tests/support/sibling.rs",
+      {
+        "runtime": "node scripts/nx-version-free-inputs.mjs --ecosystem cargo --keep-version"
+      }
     ]
   }
 }

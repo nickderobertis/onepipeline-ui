@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "kind": "Synthetic GitHub selection metadata for local offline journeys, not live GitHub history",
+  "real_data": "The executions, cache bodies, report archives and promotion receipts come from the real pinned sidecar, Nx and copied CLI. The source shapes come from the neighbouring recorded REST responses.",
+  "overrides": {
+    "pull_request": [
+      "number",
+      "head.sha",
+      "head.ref",
+      "base.sha",
+      "base.ref",
+      "merged_at",
+      "merge_commit_sha"
+    ],
+    "run": [
+      "id",
+      "run_attempt",
+      "head_sha",
+      "head_branch",
+      "event",
+      "head_repository",
+      "pull_requests",
+      "status",
+      "conclusion",
+      "run_started_at",
+      "updated_at",
+      "head_commit.id"
+    ],
+    "job": ["id", "run_id", "name", "conclusion", "started_at", "completed_at"],
+    "artifact": [
+      "id",
+      "name",
+      "expired",
+      "created_at",
+      "size_in_bytes",
+      "workflow_run",
+      "expires_at"
+    ],
+    "release": ["tag_name", "draft", "published_at"],
+    "commit": ["sha", "parents"],
+    "compare": ["status"],
+    "listings": ["workflow_runs", "jobs", "artifacts", "total_count"]
+  }
+}

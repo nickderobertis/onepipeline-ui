@@ -1,0 +1,98 @@
+{
+  "name": "onepipeline-ui-versions",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "tags": ["scope:api", "type:test", "lang:rust"],
+  "targets": {
+    "manifest-inputs-for-affected": {
+      "//": "Carries only file-based affected edges for semantic manifest inputs; CI never runs this uncached no-op.",
+      "executor": "nx:noop",
+      "cache": false,
+      "inputs": [
+        "cargoManifestSelection",
+        "npmManifestSelection",
+        "pythonManifestSelection"
+      ],
+      "outputs": []
+    },
+    "test": {
+      "cache": false,
+      "command": "just _tier-test-covered versions",
+      "dependsOn": [
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
+      "inputs": ["versionJourneys", "platform"],
+      "outputs": ["{workspaceRoot}/target/llvm-cov-target/versions-*.profraw"]
+    },
+    "test-quick": {
+      "command": "just _tier-test versions",
+      "dependsOn": [
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ],
+      "inputs": ["versionJourneys", "platform"]
+    },
+    "check": {
+      "executor": "nx:noop"
+    }
+  },
+  "namedInputs": {
+    "versionJourneys": [
+      "apiServerSurface",
+      "embeddedView",
+      "testTiers",
+      "sharedGlobals",
+      "{workspaceRoot}/src/**/*.rs",
+      "{workspaceRoot}/build.rs",
+      "cargoVersionFree",
+      "{workspaceRoot}/README.md",
+      "{workspaceRoot}/LICENSE",
+      "{workspaceRoot}/docs/contract.md",
+      "pythonVersionFree",
+      "npmVersionFree",
+      "{workspaceRoot}/npm/onepipeline-api-cli/bin/**",
+      "{workspaceRoot}/npm/onepipeline-ui/README.md",
+      "{workspaceRoot}/scripts/npm-build.mjs",
+      "{workspaceRoot}/scripts/sbom.mjs",
+      "{workspaceRoot}/scripts/build-linux-wheel.sh",
+      "{workspaceRoot}/scripts/release.mjs",
+      "{workspaceRoot}/scripts/release-package.py",
+      "{workspaceRoot}/apps/dag-ui/index.html",
+      "{workspaceRoot}/apps/dag-ui/src/**",
+      "{workspaceRoot}/apps/dag-ui/tsconfig.json",
+      "{workspaceRoot}/apps/dag-ui/vite.config.ts",
+      "{workspaceRoot}/packages/*/src/**",
+      "{workspaceRoot}/packages/*/tsconfig.json",
+      "{workspaceRoot}/packages/*/project.json",
+      "{workspaceRoot}/tsconfig.base.json",
+      "{workspaceRoot}/tests/e2e/main.rs",
+      "{workspaceRoot}/tests/e2e/cli.rs",
+      "{workspaceRoot}/tests/e2e/server.rs",
+      "{workspaceRoot}/tests/e2e/ui.rs",
+      "{workspaceRoot}/tests/packaging.rs",
+      "{workspaceRoot}/tests/support/fixture_run.rs",
+      "{workspaceRoot}/tests/support/serving.rs",
+      "{workspaceRoot}/tests/support/http.rs",
+      "{workspaceRoot}/tests/support/journal_schema.rs",
+      "{workspaceRoot}/tests/support/sibling.rs",
+      "{workspaceRoot}/tests/support/release_declaration.rs",
+      {
+        "runtime": "node scripts/nx-version-free-inputs.mjs --ecosystem cargo --keep-version"
+      }
+    ]
+  },
+  "//": "The UI refusal journey builds Cargo\u2019s packaged tree, so the package\u2019s source inputs join the four selected tests and their helpers. Workflow and provisioning-test edits do not select these version-reading journeys."
+}

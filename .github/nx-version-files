@@ -1,0 +1,2 @@
+# Tracked non-manifest files containing the workspace version as a literal.
+# Cargo.toml/Cargo.lock are normalized by the cargo ecosystem input.
