@@ -8,11 +8,25 @@ use crate::ensure_sibling::{assert_view_task_graph, view_task_graph};
 #[test]
 fn view_graph_survives_a_worker_load_message_delayed_past_nx_deadline() {
     let scratch = TempDir::new().expect("graph scratch directory");
-    let preload = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/nx/delay-worker-load.mjs");
-    // Node parses NODE_OPTIONS itself, including on Windows and in paths with
-    // spaces. This preload reaches the real child workers as well as the CLI.
-    let options = format!("--require \"{}\"", preload.display());
+    // Unix permits a literal backslash in a filename; Windows supplies them as
+    // path separators. Exercise NODE_OPTIONS escaping on either platform.
+    let filename = if cfg!(unix) {
+        "worker \\ preload.mjs"
+    } else {
+        "worker preload.mjs"
+    };
+    let preload = scratch.path().join(filename);
+    std::fs::copy(fixture, &preload).expect("copy the real worker-delay preload");
+    // NODE_OPTIONS consumes backslashes as escapes even inside quotes. Pass
+    // an escaped, quoted path so separators and spaces reach Node's loader.
+    let escaped = preload
+        .display()
+        .to_string()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let options = format!("--require \"{escaped}\"");
     let run = |before_fix| {
         let mut command = view_task_graph();
         if before_fix {
