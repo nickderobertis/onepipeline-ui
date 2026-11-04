@@ -2,22 +2,16 @@
   "name": "github-workflows-installs",
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
-  "tags": [
-    "scope:tooling",
-    "type:test",
-    "lang:javascript"
-  ],
+  "tags": ["scope:tooling", "type:test", "lang:javascript"],
   "//": "The release-tail journey, which installs publish's onevcs from npm, as a project of its own with its own bootstrap, so a change to the rest of the workflow policy, or to the judged-lint toolchain, does not select it. Its inputs name what the journey reads, which is what makes it affected, and then the pull request's affected tier runs it.",
   "targets": {
     "bootstrap": {
       "command": "bash scripts/workspace-install.sh"
     },
     "test": {
-      "//registry": "llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] this journey reads a public registry with no credential — npm for publish's onevcs, as `just bootstrap` and the gate already reach npm — and it is coverage the base ran on every pull request its inputs reach: moving it to a promoted or credential-gated tier would cut that coverage, which the planner's ruling forbids. Its own project and inputs are what keep any other change from selecting it.",
+      "//registry": "llmlint: ignore-block[external_service_suite_stays_out_of_the_affected_tier] this journey reads a public registry with no credential \u2014 npm for publish's onevcs, as `just bootstrap` and the gate already reach npm \u2014 and it is coverage the base ran on every pull request its inputs reach: moving it to a promoted or credential-gated tier would cut that coverage, which the planner's ruling forbids. Its own project and inputs are what keep any other change from selecting it.",
       "command": "node --test .github/tests/installs/*.test.mjs",
-      "dependsOn": [
-        "bootstrap"
-      ],
+      "dependsOn": ["bootstrap"],
       "inputs": [
         "{projectRoot}/**/*",
         "{workspaceRoot}/.github/fixtures/release-tail/**/*",
@@ -27,16 +21,15 @@
         "{workspaceRoot}/scripts/actions-budget-figures.sh",
         "{workspaceRoot}/scripts/workspace-install.sh",
         "{workspaceRoot}/package.json",
-        "{workspaceRoot}/bun.lock"
+        "{workspaceRoot}/bun.lock",
+        "{workspaceRoot}/scripts/nx-remote-cache.mjs"
       ],
       "cache": false,
       "//registry-end": "llmlint: ignore-end[external_service_suite_stays_out_of_the_affected_tier]"
     },
     "check": {
       "executor": "nx:noop",
-      "dependsOn": [
-        "test"
-      ]
+      "dependsOn": ["test"]
     }
   }
 }

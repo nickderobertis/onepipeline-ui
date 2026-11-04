@@ -25,7 +25,7 @@ final-status-level = "fail"
 # The journeys a user drives — the binary as a subprocess, the server on a real
 # port, the browser view it serves. `onepipeline-ui-e2e:test`.
 [profile.e2e]
-default-filter = "binary(=e2e) and not test(/^(baseline|baseline_reuse|cost|ci_jobs|ci_tier|deps_audit|deps_audit_toolchain|ensure_baseline|ensure_node_without_execve|ensure_sibling|judged_tier|linked_report|linux_wheel|nx_affected|packaging|release_probe|release_status|semver_check|workspace_install)::/)"
+default-filter = "(binary(=e2e) and not test(/^(baseline|baseline_reuse|cost|ci_jobs|ci_tier|deps_audit|deps_audit_toolchain|ensure_baseline|ensure_node_without_execve|ensure_sibling|judged_tier|linked_report|linux_wheel|nx_affected|packaging|release_probe|release_status|semver_check|workspace_install)::/)) and not (test(=cli::version_reports_the_crate_version) or test(=server::browser_supervision_is_removed_and_shutdown_is_host_only) or test(=ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing))"
 status-level = "fail"
 final-status-level = "fail"
 
@@ -33,7 +33,7 @@ final-status-level = "fail"
 # and CI scripts and the provisioning recipes.
 # `onepipeline-ui-repo-tooling:test`.
 [profile.repo-tooling]
-default-filter = "binary(=packaging) or (binary(=e2e) and test(/^(ci_tier|deps_audit|ensure_baseline|ensure_sibling|linux_wheel|nx_affected|release_probe|release_status|semver_check|workspace_install)::/))"
+default-filter = "(binary(=packaging) or (binary(=e2e) and test(/^(ci_tier|deps_audit|ensure_baseline|ensure_sibling|linux_wheel|nx_affected|release_probe|release_status|semver_check|workspace_install)::/))) and not (test(=the_assembled_launcher_pins_every_platform_package_to_the_crate_version))"
 status-level = "fail"
 final-status-level = "fail"
 
@@ -95,5 +95,11 @@ final-status-level = "fail"
 # `onepipeline-ui-baseline-reuse:test` and its cross-platform `test-quick`.
 [profile.baseline-reuse]
 default-filter = "binary(=e2e) and test(/^baseline_reuse::/)"
+status-level = "fail"
+final-status-level = "fail"
+
+# Tests that read the crate version, isolated so a release replays other journeys.
+[profile.versions]
+default-filter = "(binary(=e2e) and (test(=cli::version_reports_the_crate_version) or test(=server::browser_supervision_is_removed_and_shutdown_is_host_only) or test(=ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing))) or (binary(=packaging) and test(=the_assembled_launcher_pins_every_platform_package_to_the_crate_version))"
 status-level = "fail"
 final-status-level = "fail"

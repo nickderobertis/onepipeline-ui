@@ -60,7 +60,7 @@ function environment(path) {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key]) =>
-        !/^(LLMLINT_|ONEHARNESS_|NX_|CLAUDE_|CODEX_|OPENAI_|ANTHROPIC_)/.test(
+        !/^(GITHUB_ACTIONS$|LLMLINT_|ONEHARNESS_|NX_|CLAUDE_|CODEX_|OPENAI_|ANTHROPIC_)/.test(
           key,
         ),
     ),
@@ -121,6 +121,7 @@ const COPIED = [
   ".gitignore",
   "oneharness.toml",
   "scripts/nx.sh",
+  "scripts/nx-remote-cache.mjs",
   "scripts/workspace-install.sh",
 ];
 const RULES = `rules:

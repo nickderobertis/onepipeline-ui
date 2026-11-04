@@ -45,7 +45,9 @@ use crate::stub_bin;
 /// Several targets and not one, because each of them is a tier a reader can ask
 /// for by name — that is what having an edge of their own means — and a tier
 /// reached on its own is exactly the one whose provisioning nothing else has done.
-const SUITES_THAT_START_THE_READ_API: [&str; 4] = [
+const SUITES_THAT_START_THE_READ_API: [&str; 6] = [
+    "onepipeline-ui-versions:test",
+    "onepipeline-ui-versions:test-quick",
     "onepipeline-ui-e2e:test",
     "onepipeline-ui-e2e:test-quick",
     "onepipeline-ui-baseline:test-baseline",
@@ -75,9 +77,11 @@ const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 /// packaging targets, the lints, the docs and the MSRV check compile the crate
 /// too, and one Nx run of a CI job runs them beside the view's build — a view
 /// rebuilt under a compile deletes a file `build.rs` is embedding.
-const TASKS_THAT_COMPILE_THE_READ_API: [&str; 22] = [
+const TASKS_THAT_COMPILE_THE_READ_API: [&str; 24] = [
     "onepipeline-ui:test",
     "onepipeline-ui:test-quick",
+    "onepipeline-ui-versions:test",
+    "onepipeline-ui-versions:test-quick",
     "onepipeline-ui-e2e:test",
     "onepipeline-ui-e2e:test-quick",
     "onepipeline-ui-repo-tooling:test",

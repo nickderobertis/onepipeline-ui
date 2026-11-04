@@ -66,6 +66,10 @@ jobs:
       # has none to delete. The capture, the reproducibility gate, classify and
       # the gallery build run and block either way.
       VISUAL_DOCS_PUBLISH: "false"
+      # One selection definition for every job's Nx/report steps. Job scope
+      # preserves the global Rust-cache environment shared with ci-cache.yml.
+      NX_BASE: &nx-base ${{ github.event.pull_request.base.sha }}
+      NX_HEAD: &nx-head ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,6 +100,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - name: Decide cache trust and configure the sidecar
+        id: nx-cache-trust
+        shell: bash
+        run: |
+          node scripts/nx-remote-cache.mjs trust
+          token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+      - uses: op-nx/github-cache/start-cache-server@91839c24885842cac86567c30e23b37fb85f7e33
+        id: nx-cache
+        background: true
+        with:
+          port: '3000'
+        env:
+          NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
+          NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
+          CACHE_READ_ONLY: ${{ steps.nx-cache-trust.outputs.read_only == 'true' && '1' || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Wait for the cache recording proxy
+        shell: bash
+        env:
+          NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
+          NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
+        run: node scripts/nx-remote-cache.mjs ready
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -230,6 +258,30 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !cancelled()
         uses: nickderobertis/notignored@v0
 
+      - name: Report cache entries and task executions
+        if: always()
+        shell: bash
+        run: |
+          node scripts/nx-remote-cache.mjs report --job "$GITHUB_JOB" --out "$RUNNER_TEMP/nx-cache-report"
+          for profile in target/llvm-cov-target/*.profraw; do
+            if [ -f "$profile" ]; then du -k "$profile"; fi
+          done
+          for directory in apps/dag-ui/dist packages/dag-layout/dist packages/dag-model/dist packages/telemetry-client/dist packages/timeline-categories/dist; do
+            if [ -d "$directory" ]; then
+              du -sk "$directory"
+            else
+              echo "$directory: not built in this workspace"
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.nx-cache-trust.outputs.promotable == 'true'
+        with:
+          name: nx-cache-entries-${{ github.job }}
+          path: ${{ runner.temp }}/nx-cache-report
+          retention-days: 7
+      # GitHub accepts only cancel here; job teardown also stops the background step.
+      - cancel: nx-cache
+
   # The deterministic gate on Linux: `check`'s tiers over the affected projects
   # (every test tier, the Playwright browser tier, the coverage floor, docs —
   # formatting, lints and type checks are `lint`'s), the documented install and
@@ -241,6 +293,9 @@ jobs:
     runs-on: ubuntu-latest
     # 29.8 min upper estimate / 0.85, rounded up: docs/release-sweep-timing.md.
     timeout-minutes: 36
+    env:
+      NX_BASE: *nx-base
+      NX_HEAD: *nx-head
     steps:
       - uses: actions/checkout@v4
         with:
@@ -253,6 +308,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - name: Decide cache trust and configure the sidecar
+        id: nx-cache-trust
+        shell: bash
+        run: |
+          node scripts/nx-remote-cache.mjs trust
+          token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+      - uses: op-nx/github-cache/start-cache-server@91839c24885842cac86567c30e23b37fb85f7e33
+        id: nx-cache
+        background: true
+        with:
+          port: '3000'
+        env:
+          NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
+          NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
+          CACHE_READ_ONLY: ${{ steps.nx-cache-trust.outputs.read_only == 'true' && '1' || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Wait for the cache recording proxy
+        shell: bash
+        env:
+          NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
+          NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
+        run: node scripts/nx-remote-cache.mjs ready
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -310,6 +389,29 @@ jobs:
       - name: Gate, install and wheel (affected projects; every project on the release PR)
         run: just ci-test-linux --tier "${{ steps.tier.outputs.tier }}"
 
+      - name: Report cache entries and task executions
+        if: always()
+        shell: bash
+        run: |
+          node scripts/nx-remote-cache.mjs report --job "$GITHUB_JOB" --out "$RUNNER_TEMP/nx-cache-report"
+          for profile in target/llvm-cov-target/*.profraw; do
+            if [ -f "$profile" ]; then du -k "$profile"; fi
+          done
+          for directory in apps/dag-ui/dist packages/dag-layout/dist packages/dag-model/dist packages/telemetry-client/dist packages/timeline-categories/dist; do
+            if [ -d "$directory" ]; then
+              du -sk "$directory"
+            else
+              echo "$directory: not built in this workspace"
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.nx-cache-trust.outputs.promotable == 'true'
+        with:
+          name: nx-cache-entries-${{ github.job }}
+          path: ${{ runner.temp }}/nx-cache-report
+          retention-days: 7
+      - cancel: nx-cache
+
   # The platform-sensitive tiers on Windows (`check-cross`: formatting, lints and
   # the suite against a real binary, without the Linux-only coverage floor), the
   # release's browser build, and the documented install.
@@ -319,6 +421,9 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      NX_BASE: *nx-base
+      NX_HEAD: *nx-head
     steps:
       - uses: actions/checkout@v4
         with:
@@ -334,6 +439,30 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - name: Decide cache trust and configure the sidecar
+        id: nx-cache-trust
+        shell: bash
+        run: |
+          node scripts/nx-remote-cache.mjs trust
+          token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+      - uses: op-nx/github-cache/start-cache-server@91839c24885842cac86567c30e23b37fb85f7e33
+        id: nx-cache
+        background: true
+        with:
+          port: '3000'
+        env:
+          NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
+          NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
+          CACHE_READ_ONLY: ${{ steps.nx-cache-trust.outputs.read_only == 'true' && '1' || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Wait for the cache recording proxy
+        shell: bash
+        env:
+          NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
+          NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
+        run: node scripts/nx-remote-cache.mjs ready
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -356,18 +485,40 @@ jobs:
       - name: Platform tiers, browser build and install (affected projects)
         run: just ci-test-windows
 
-  # The platform-sensitive tiers and the documented install on macOS: the one
-  # Mac job a run may start (.github/budgets.yaml). Pull requests only, and never
-  # a same-repository release-plz branch, whose version-only diff the Mac policy
-  # authorizes skipping; every other pull request classifies itself first and
-  # does Mac work only when .github/macos-policy.mjs requires it.
+      - name: Report cache entries and task executions
+        if: always()
+        shell: bash
+        run: |
+          node scripts/nx-remote-cache.mjs report --job "$GITHUB_JOB" --out "$RUNNER_TEMP/nx-cache-report"
+          for profile in target/llvm-cov-target/*.profraw; do
+            if [ -f "$profile" ]; then du -k "$profile"; fi
+          done
+          for directory in apps/dag-ui/dist packages/dag-layout/dist packages/dag-model/dist packages/telemetry-client/dist packages/timeline-categories/dist; do
+            if [ -d "$directory" ]; then
+              du -sk "$directory"
+            else
+              echo "$directory: not built in this workspace"
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.nx-cache-trust.outputs.promotable == 'true'
+        with:
+          name: nx-cache-entries-${{ github.job }}
+          path: ${{ runner.temp }}/nx-cache-report
+          retention-days: 7
+      - cancel: nx-cache
+
+  # The platform-sensitive tiers and install, with proven results replayed on
+  # release branches through the same Nx step every pull request runs.
   test-macos:
-    if: github.event_name == 'pull_request' && !(startsWith(github.head_ref, 'release-plz-') && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: macos-latest
     timeout-minutes: 30
     defaults:
       run:
         shell: bash
+    env:
+      NX_BASE: *nx-base
+      NX_HEAD: *nx-head
     steps:
       - uses: actions/checkout@v4
         with:
@@ -377,47 +528,47 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - name: Classify the Mac lane from the semantic diff
-        id: macos
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          result="$(node .github/macos-policy.mjs classify --event "$GITHUB_EVENT_PATH" --base "$BASE" --head "$HEAD")"
-          echo "$result"
-          # Anything but a boolean is refused: a missing or garbled answer must
-          # fail this job, never read as "not required" and skip the Mac work.
-          required="$(node -e '
-            const { macosRequired } = JSON.parse(process.argv[1]);
-            if (typeof macosRequired !== "boolean") {
-              console.error(`the Mac policy answered macosRequired=${JSON.stringify(macosRequired)}, not a boolean`);
-              process.exit(1);
-            }
-            process.stdout.write(String(macosRequired));
-          ' "$result")"
-          echo "required=$required" >> "$GITHUB_OUTPUT"
       # Main's macOS build, which `ci-cache.yml`'s `warm-macos` saves: restored,
       # never saved from here.
       - uses: Swatinem/rust-cache@v2.9.2
-        if: steps.macos.outputs.required == 'true'
         with:
           shared-key: test-macos
           save-if: false
+      - name: Decide cache trust and configure the sidecar
+        id: nx-cache-trust
+        shell: bash
+        run: |
+          node scripts/nx-remote-cache.mjs trust
+          token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+      - uses: op-nx/github-cache/start-cache-server@91839c24885842cac86567c30e23b37fb85f7e33
+        id: nx-cache
+        background: true
+        with:
+          port: '3000'
+        env:
+          NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
+          NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
+          CACHE_READ_ONLY: ${{ steps.nx-cache-trust.outputs.read_only == 'true' && '1' || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Wait for the cache recording proxy
+        shell: bash
+        env:
+          NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
+          NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
+        run: node scripts/nx-remote-cache.mjs ready
       - uses: oven-sh/setup-bun@v2
-        if: steps.macos.outputs.required == 'true'
         with:
           bun-version-file: package.json
       - uses: taiki-e/install-action@v2
-        if: steps.macos.outputs.required == 'true'
         with:
           tool: just,nextest,cargo-llvm-cov,cargo-auditable
       - name: What the provisioned sibling is built from
         id: pins
-        if: steps.macos.outputs.required == 'true'
         run: echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
       - name: Restore the sibling CLI
         id: sibling
-        if: steps.macos.outputs.required == 'true'
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -425,8 +576,29 @@ jobs:
             .tools/bin/onepipeline.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
       - name: Bootstrap
-        if: steps.macos.outputs.required == 'true'
         run: just bootstrap
       - name: Platform tiers and install (affected projects)
-        if: steps.macos.outputs.required == 'true'
         run: just ci-test-macos
+
+      - name: Report cache entries and task executions
+        if: always()
+        shell: bash
+        run: |
+          node scripts/nx-remote-cache.mjs report --job "$GITHUB_JOB" --out "$RUNNER_TEMP/nx-cache-report"
+          for profile in target/llvm-cov-target/*.profraw; do
+            if [ -f "$profile" ]; then du -k "$profile"; fi
+          done
+          for directory in apps/dag-ui/dist packages/dag-layout/dist packages/dag-model/dist packages/telemetry-client/dist packages/timeline-categories/dist; do
+            if [ -d "$directory" ]; then
+              du -sk "$directory"
+            else
+              echo "$directory: not built in this workspace"
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.nx-cache-trust.outputs.promotable == 'true'
+        with:
+          name: nx-cache-entries-${{ github.job }}
+          path: ${{ runner.temp }}/nx-cache-report
+          retention-days: 7
+      - cancel: nx-cache

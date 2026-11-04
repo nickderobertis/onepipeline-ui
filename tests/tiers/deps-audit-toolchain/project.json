@@ -4,6 +4,13 @@
   "projectType": "application",
   "tags": ["scope:tooling", "type:test", "lang:rust"],
   "targets": {
+    "manifest-inputs-for-affected": {
+      "//": "Carries only file-based affected edges for semantic manifest inputs; CI never runs this uncached no-op.",
+      "executor": "nx:noop",
+      "cache": false,
+      "inputs": ["cargoManifestSelection"],
+      "outputs": []
+    },
     "test": {
       "command": "just _tier-test deps-audit-toolchain",
       "dependsOn": [
@@ -13,6 +20,7 @@
         }
       ],
       "inputs": [
+        "apiServerSurface",
         "{workspaceRoot}/tests/e2e/main.rs",
         "{workspaceRoot}/tests/e2e/deps_audit_toolchain.rs",
         "{workspaceRoot}/tests/e2e/deps_audit.rs",
@@ -23,7 +31,8 @@
         "{workspaceRoot}/rust-toolchain.toml",
         "{workspaceRoot}/justfile",
         "{workspaceRoot}/.config/nextest.toml",
-        "{projectRoot}/project.json"
+        "{projectRoot}/project.json",
+        "platform"
       ]
     },
     "check": {
