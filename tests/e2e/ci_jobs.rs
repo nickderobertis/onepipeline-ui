@@ -308,12 +308,6 @@ fn the_linux_job_runs_what_check_selects_less_what_lint_runs() {
         .filter(|task| !lint_owned.iter().any(|suffix| task.ends_with(suffix)))
         .cloned()
         .collect();
-    // The affected Linux recipe deliberately excludes this project; the
-    // broader release tier still selects its tests.
-    let owed: BTreeSet<String> = owed
-        .into_iter()
-        .filter(|task| !task.starts_with("dag-ui-build-cache:"))
-        .collect();
     let packaging = ["onepipeline-ui:install-smoke", "onepipeline-ui:wheel-smoke"];
     let selected: BTreeSet<String> = linux
         .selected("test-linux")
@@ -347,6 +341,7 @@ fn the_jobs_platform_split_is_what_each_selects_for_a_crate_change() {
         "onepipeline-ui-baseline:test-baseline",
         "onepipeline-ui-cost:test-cost",
         "dag-ui-e2e:test",
+        "dag-ui-build-cache:test",
     ] {
         assert!(
             linux.contains(task),
