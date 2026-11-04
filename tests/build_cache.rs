@@ -1,4 +1,4 @@
-//! The browser bundle cache against real Nx and Vite builds.
+//! Browser bundle rebuilds against real Nx and Vite builds.
 //! Kept behind dag-ui-build-cache:test, a project that depends on nothing in
 //! the crate, so only a change to what these builds read runs them.
 
@@ -18,7 +18,7 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// Build the real app in an isolated checkout, warm its cache, then change the
+/// Build the real app twice in an isolated checkout, then change the
 /// model it imports. Replaying the old bundle would reject the server's new
 /// timeline schema even though both source trees agreed on it.
 #[test]
@@ -92,8 +92,8 @@ fn changing_the_imported_model_invalidates_the_browser_bundle_cache() {
     assert!(!cold.contains("[local cache]"), "{cold}");
     let before = bundle();
     let warm = build();
-    assert!(warm.contains("[local cache]"), "{warm}");
-    assert_eq!(bundle(), before, "cached build changes no bytes");
+    assert!(!warm.contains("[local cache]"), "{warm}");
+    assert_eq!(bundle(), before, "an unchanged build reproduces the bundle");
     let model = root.join("packages/dag-model/src/index.ts");
     let source = fs::read_to_string(&model).expect("model");
     let schema = onepipeline_ui::contract::TIMELINE_SCHEMA_VERSION;

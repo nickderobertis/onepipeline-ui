@@ -5,6 +5,7 @@
   "tags": ["scope:api", "type:test", "lang:rust"],
   "targets": {
     "test": {
+      "cache": false,
       "command": "just _tier-test-covered versions",
       "dependsOn": [
         {

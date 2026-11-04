@@ -15,20 +15,15 @@
       "platform"
     ],
     "default": [
-      "{projectRoot}/**/*",
-      "!{projectRoot}/**/CHANGELOG*",
+      "projectFiles",
       "!{projectRoot}/**/Cargo.toml",
       "!{projectRoot}/**/Cargo.lock",
       "!{projectRoot}/**/package.json",
       "!{projectRoot}/**/bun.lock",
       "!{projectRoot}/**/pyproject.toml",
-      "sharedGlobals",
-      "cargoVersionFree",
-      "npmVersionFree",
-      "pythonVersionFree",
-      "filesVersionFree",
-      "platform"
+      "sharedInputs"
     ],
+    "manifestText": ["projectFiles", "sharedInputs"],
     "production": ["default"],
     "wholeWorkspace": ["{workspaceRoot}/**/*"],
     "apiServerSurface": [
@@ -88,6 +83,25 @@
       },
       "{workspaceRoot}/scripts/nx-version-free-inputs.mjs",
       "{workspaceRoot}/.github/nx-version-files"
+    ],
+    "projectFiles": ["{projectRoot}/**/*", "!{projectRoot}/**/CHANGELOG*"],
+    "sharedInputs": [
+      "sharedGlobals",
+      "cargoVersionFree",
+      "npmVersionFree",
+      "pythonVersionFree",
+      "filesVersionFree",
+      "platform"
+    ],
+    "versionFreeWorkspace": [
+      "{workspaceRoot}/**/*",
+      "!{workspaceRoot}/**/CHANGELOG*",
+      "!{workspaceRoot}/**/Cargo.toml",
+      "!{workspaceRoot}/**/Cargo.lock",
+      "!{workspaceRoot}/**/package.json",
+      "!{workspaceRoot}/**/bun.lock",
+      "!{workspaceRoot}/**/pyproject.toml",
+      "sharedInputs"
     ]
   },
   "targetDefaults": {

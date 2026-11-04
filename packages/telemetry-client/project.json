@@ -7,11 +7,13 @@
   "implicitDependencies": ["dag-model"],
   "targets": {
     "build": {
+      "cache": false,
       "command": "node node_modules/typescript/bin/tsc -p packages/telemetry-client/tsconfig.json --emitDeclarationOnly",
       "outputs": ["{projectRoot}/dist"]
     },
     "lint": {
-      "command": "node node_modules/@biomejs/biome/bin/biome check packages/telemetry-client && npx eslint --max-warnings 0 packages/telemetry-client"
+      "command": "node node_modules/@biomejs/biome/bin/biome check packages/telemetry-client && npx eslint --max-warnings 0 packages/telemetry-client",
+      "inputs": ["manifestText"]
     },
     "test": {
       "command": "npx vitest run --root packages/telemetry-client"
@@ -23,7 +25,8 @@
       "command": "node node_modules/@biomejs/biome/bin/biome check --write --linter-enabled=false packages/telemetry-client"
     },
     "format-check": {
-      "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false packages/telemetry-client"
+      "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false packages/telemetry-client",
+      "inputs": ["manifestText"]
     },
     "check": {
       "executor": "nx:noop"

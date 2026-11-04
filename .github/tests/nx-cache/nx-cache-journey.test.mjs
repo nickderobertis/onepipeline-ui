@@ -7,39 +7,36 @@ import {
   cacheSession,
   GithubCache,
   json,
+  recordedREST,
   reportZip,
   run,
+  sidecarCheckout,
   sourceMetadata,
 } from "./nx-cache-journey.mjs";
 import { workspaceFixture } from "./nx-fixture.mjs";
 
-const payload = (identity) => ({
-  repository: { full_name: "nickderobertis/onepipeline-ui" },
-  pull_request: {
-    number: 1,
-    head: {
-      sha: "1".repeat(40),
-      repo: {
-        full_name:
-          identity === "fork"
-            ? "contributor/onepipeline-ui"
-            : "nickderobertis/onepipeline-ui",
-      },
+// Preserve the recorded trust inputs (user, head.repo and base.repo). Only the
+// selection ids are synthetic, so each independent local journey has its own scope.
+const payload = (identity) => {
+  const recorded = json(
+    `.github/tests/nx-cache/events/${identity}.json`,
+  ).pull_request;
+  return {
+    repository: { full_name: recorded.base.repo.full_name },
+    pull_request: {
+      ...recorded,
+      number: 1,
+      head: { ...recorded.head, sha: "1".repeat(40) },
+      base: { ...recorded.base, sha: "2".repeat(40) },
     },
-    base: {
-      sha: "2".repeat(40),
-      repo: { full_name: "nickderobertis/onepipeline-ui" },
-    },
-    user: {
-      login: identity === "dependabot" ? "dependabot[bot]" : "maintainer",
-    },
-  },
-});
+  };
+};
 
 test("workflow cache steps run the real task and sidecar, with untrusted PRs read-only", async () => {
   const cwd = workspaceFixture();
   const cache = await new GithubCache().start();
   try {
+    await assert.rejects(sidecarCheckout(cwd), /ACTION: run just nx run/);
     for (const identity of ["fork", "dependabot", "maintainer"]) {
       rmSync(join(cwd, ".nx"), { recursive: true, force: true });
       const session = await cacheSession(
@@ -58,6 +55,8 @@ test("workflow cache steps run the real task and sidecar, with untrusted PRs rea
           identity === "maintainer" ? "" : "1",
         );
         await session.nx();
+        if (identity === "maintainer")
+          await session.nx(["run", "dag-ui:build"]);
       } finally {
         await session.close();
       }
@@ -66,6 +65,17 @@ test("workflow cache steps run the real task and sidecar, with untrusted PRs rea
       );
       assert.equal(manifest.entries.length, identity === "maintainer" ? 1 : 0);
       assert.equal(cache.entries.size, identity === "maintainer" ? 1 : 0);
+      const outputSizes = readFileSync(
+        join(session.temp, "report.log"),
+        "utf8",
+      );
+      if (identity === "maintainer")
+        assert.match(outputSizes, /\d+\s+apps\/dag-ui\/dist/);
+      else
+        assert.match(
+          outputSizes,
+          /apps\/dag-ui\/dist: not built in this workspace/,
+        );
       if (identity === "maintainer") {
         assert.ok(manifest.stored_bytes > 0);
         rmSync(join(cwd, ".nx"), { recursive: true, force: true });
@@ -194,28 +204,6 @@ test("merge promotion reuses the latest replay-only report and never promotes un
       );
       for (const identity of ["fork", "dependabot", "missing", "trusted"]) {
         cache.metadata.set(
-          "/repos/nickderobertis/onepipeline-ui/commits/" +
-            "4".repeat(40) +
-            "/pulls",
-          [
-            {
-              ...pr,
-              head: {
-                ...pr.head,
-                repo: {
-                  ...pr.head.repo,
-                  full_name:
-                    identity === "fork" ? "fork/ui" : pr.head.repo.full_name,
-                },
-              },
-              user: {
-                login:
-                  identity === "dependabot" ? "dependabot[bot]" : "maintainer",
-              },
-            },
-          ],
-        );
-        cache.metadata.set(
           "/repos/nickderobertis/onepipeline-ui/actions/runs/2/artifacts",
           {
             artifacts:
@@ -225,24 +213,19 @@ test("merge promotion reuses the latest replay-only report and never promotes un
           },
         );
         // Restore the selected PR after registering the artifact metadata.
+        const identityPr =
+          identity === "fork" || identity === "dependabot"
+            ? payload(identity).pull_request
+            : pr;
+        main.env.GITHUB_REPOSITORY = identityPr.base.repo.full_name;
         const selected = {
           ...pr,
-          head: {
-            ...pr.head,
-            repo: {
-              ...pr.head.repo,
-              full_name:
-                identity === "fork" ? "fork/ui" : pr.head.repo.full_name,
-            },
-          },
-          user: {
-            login: identity === "dependabot" ? "dependabot[bot]" : "maintainer",
-          },
+          user: identityPr.user,
+          head: { ...pr.head, repo: identityPr.head.repo },
+          base: { ...pr.base, repo: identityPr.base.repo },
         };
         cache.metadata.set(
-          "/repos/nickderobertis/onepipeline-ui/commits/" +
-            "4".repeat(40) +
-            "/pulls",
+          `/repos/${main.env.GITHUB_REPOSITORY}/commits/${"4".repeat(40)}/pulls`,
           [selected],
         );
         rmSync(join(main.temp, "nx-cache-evidence"), {
@@ -360,6 +343,7 @@ test("cache-use under onebudgetspec measures real executions behind simulated re
       "-c",
       "user.email=cache@example.invalid",
       "commit",
+      "--allow-empty",
       "-qm",
       "fixture base",
     );
@@ -478,22 +462,28 @@ test("cache-use under onebudgetspec measures real executions behind simulated re
     const receipt = json(
       join(promotion.temp, "nx-cache-promotion/receipt.json"),
     );
-    const repository = { id: 1, full_name: "nickderobertis/onepipeline-ui" };
+    const repository = source.pr.base.repo;
     cache.metadata.set(`${repo}/releases`, [
       {
+        ...recordedREST("release"),
         tag_name: "simulated-next",
         draft: false,
         published_at: new Date(Date.now() + 1000).toISOString(),
       },
     ]);
-    cache.metadata.set(`${repo}/commits/simulated-next`, { sha: tip });
+    cache.metadata.set(`${repo}/commits/simulated-next`, {
+      ...recordedREST("commit"),
+      sha: tip,
+    });
     cache.metadata.set(`${repo}/commits?sha=simulated-next`, [
-      { sha: merge },
-      { sha: tip },
+      { ...recordedREST("commit"), sha: merge },
+      { ...recordedREST("commit"), sha: tip },
     ]);
     cache.metadata.set(`${repo}/actions/workflows/release-plz.yml/runs`, {
+      ...recordedREST("runs"),
       workflow_runs: [
         {
+          ...recordedREST("run"),
           id: 4,
           run_attempt: 1,
           head_sha: merge,
@@ -505,12 +495,19 @@ test("cache-use under onebudgetspec measures real executions behind simulated re
       ],
     });
     cache.metadata.set(`${repo}/actions/runs/4/artifacts`, {
+      ...recordedREST("artifacts"),
       artifacts: [
         {
+          ...recordedREST("artifacts").artifacts[0],
           id: 401,
           name: `nx-cache-promotion-${merge}`,
           expired: false,
-          workflow_run: { id: 4, head_sha: merge, head_repository_id: 1 },
+          workflow_run: {
+            ...recordedREST("artifacts").artifacts[0].workflow_run,
+            id: 4,
+            head_sha: merge,
+            head_repository_id: repository.id,
+          },
         },
       ],
     });
@@ -518,8 +515,12 @@ test("cache-use under onebudgetspec measures real executions behind simulated re
       `${repo}/actions/artifacts/401/zip`,
       reportZip(join(promotion.temp, "nx-cache-promotion")),
     );
-    cache.metadata.set(`${repo}/commits/${merge}`, { sha: merge });
+    cache.metadata.set(`${repo}/commits/${merge}`, {
+      ...recordedREST("commit"),
+      sha: merge,
+    });
     cache.metadata.set(`${repo}/compare/${merge}...${merge}`, {
+      ...recordedREST("compare"),
       status: "identical",
     });
     let attempt = 0;
@@ -556,6 +557,22 @@ test("cache-use under onebudgetspec measures real executions behind simulated re
     assert.match(observed.stdout, /actual 100 percent/);
     assert.match(observed.stdout, /aggregate: 2\/2 remote hits/);
     assert.match(observed.stdout, /within/);
+    // GitHub's recorded run shows this behavior: its embedded PR head moved
+    // after the run, while head_sha and the saved execution stayed unchanged.
+    const association = source.source.pull_requests[0];
+    const priorHead = association.head.sha;
+    const priorBase = association.base.sha;
+    association.head.sha = "9".repeat(40);
+    association.base.sha = "8".repeat(40);
+    source.pr.head.sha = association.head.sha;
+    source.pr.base.sha = association.base.sha;
+    const earlierPush = await measure();
+    assert.match(earlierPush.stdout, /actual 100 percent/);
+    assert.match(earlierPush.stdout, /aggregate: 2\/2 remote hits/);
+    association.head.sha = priorHead;
+    association.base.sha = priorBase;
+    source.pr.head.sha = priorHead;
+    source.pr.base.sha = priorBase;
     // Re-read the same real artifacts with unavailable or untrusted GitHub metadata.
     source.artifact.expired = true;
     const expired = await measure();
@@ -627,6 +644,7 @@ test("cache-use under onebudgetspec measures real executions behind simulated re
       );
       cache.metadata.set(`${repo}/releases`, [
         {
+          ...recordedREST("release"),
           tag_name: "simulated-next",
           draft: false,
           published_at: new Date(Date.now() + 1000).toISOString(),
@@ -696,6 +714,7 @@ test("cache-use under onebudgetspec measures real executions behind simulated re
       assert.match(failure.stdout, /miss .*failed|miss .*throttled/);
     }
     cache.metadata.set(`${repo}/actions/workflows/release-plz.yml/runs`, {
+      ...recordedREST("runs"),
       workflow_runs: [],
     });
     cache.entries.clear();

@@ -74,7 +74,8 @@
       "cache": true
     },
     "lint": {
-      "command": "node node_modules/@biomejs/biome/bin/biome check apps/dag-ui-e2e && npx eslint --max-warnings 0 apps/dag-ui-e2e"
+      "command": "node node_modules/@biomejs/biome/bin/biome check apps/dag-ui-e2e && npx eslint --max-warnings 0 apps/dag-ui-e2e",
+      "inputs": ["manifestText"]
     },
     "typecheck": {
       "command": "npx tsc -p apps/dag-ui-e2e/tsconfig.json --noEmit"
@@ -83,7 +84,8 @@
       "command": "node node_modules/@biomejs/biome/bin/biome check --write --linter-enabled=false apps/dag-ui-e2e"
     },
     "format-check": {
-      "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false apps/dag-ui-e2e"
+      "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false apps/dag-ui-e2e",
+      "inputs": ["manifestText"]
     },
     "bootstrap": {
       "//": "Provision only the browser here. test and test-isolation build the API through dag-ui:build-api-server, so compilation can overlap the other test tiers.",

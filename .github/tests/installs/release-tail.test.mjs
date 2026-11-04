@@ -524,6 +524,31 @@ test("over the recorded release the step reports all seven budgets, each figure 
   assert.match(run.stdout, /onepipeline-ui-nx-cache-use:.*error/);
 
   const release = recorded();
+  const cycle = figures["onepipeline-ui-release-cycle-time"].detail.join("\n");
+  assert.match(cycle, /#563: checks /);
+  assert.match(cycle, /#564: checks /);
+  assert.match(cycle, /#566: left out, changes no published path/);
+  const outside = at(release.records, /\/pulls\?state=closed/).find(
+    (pr) => pr.number === 560,
+  );
+  assert.ok(outside, "recorded PR #560 predates this release's range");
+  assert.ok(
+    execFileSync(
+      "git",
+      [
+        "diff",
+        "--name-only",
+        `${outside.merge_commit_sha}^1`,
+        outside.merge_commit_sha,
+        "--",
+        "Cargo.toml",
+      ],
+      { cwd: ROOT, encoding: "utf8" },
+    ).trim(),
+    "the out-of-range PR changes a published manifest",
+  );
+  assert.ok(!release.prs.some((pr) => pr.number === outside.number));
+  assert.doesNotMatch(cycle, /#560:/);
   const low = expectedFigures(release, run.started, runner);
   const high = expectedFigures(release, run.ended, runner);
   for (const id of Object.keys(low)) {

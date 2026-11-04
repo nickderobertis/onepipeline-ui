@@ -12,6 +12,11 @@ const versionReaders = (id) =>
 
 test("real Nx replays release edits except targets whose tests read the version", () => {
   const cwd = workspaceFixture();
+  const base = workspaceFixture(
+    execFileSync("git", ["merge-base", "HEAD", "origin/main"], {
+      encoding: "utf8",
+    }).trim(),
+  );
   try {
     // Replay the exact version fields and changelog section written by release-plz
     // in this repository's recorded PR #607, independently of today's version.
@@ -39,9 +44,34 @@ test("real Nx replays release edits except targets whose tests read the version"
     writeFileSync(lockPath, baselineLock);
     writeFileSync(changelogPath, baselineChangelog);
     const before = taskHashes(cwd);
-    assert.ok(
-      Object.keys(before).length >= 58,
-      "cover the four jobs' full cacheable selection",
+    const intentionallyUncached = new Set([
+      "onepipeline-ui-release:rehearse",
+      ...[
+        "onepipeline-ui",
+        "onepipeline-ui-e2e",
+        "onepipeline-ui-repo-tooling",
+        "onepipeline-ui-npm-launcher",
+      ].map((project) => `${project}:test`),
+      ...[
+        "dag-ui",
+        "dag-layout",
+        "dag-model",
+        "telemetry-client",
+        "timeline-categories",
+      ].map((project) => `${project}:build`),
+    ]);
+    const expected = new Set([
+      ...Object.keys(taskHashes(base)).filter(
+        (id) => !intentionallyUncached.has(id),
+      ),
+      "onepipeline-ui-versions:test-quick",
+      "github-workflows-nx-cache:lint",
+      "github-workflows-nx-cache:test",
+    ]);
+    assert.deepEqual(
+      Object.keys(before).sort(),
+      [...expected].sort(),
+      "cover every base cacheable task, with only deliberate cache removals and additions",
     );
     writeFileSync(
       manifestPath,
@@ -82,6 +112,7 @@ test("real Nx replays release edits except targets whose tests read the version"
         );
     }
   } finally {
+    rmSync(base, { recursive: true, force: true });
     rmSync(cwd, { recursive: true, force: true });
   }
 });
@@ -166,18 +197,16 @@ test("every cached task separates platforms and test outputs name only profile/r
         ...(!task.inputs.runtime.includes("node -p process.platform")
           ? [`${id}: platform missing`]
           : []),
-        ...(/:(test(?:-.+)?|lint|format-check|typecheck|doc|budgets)$/.test(id)
-          ? task.outputs
-              .filter(
-                (output) =>
-                  !/\.(profraw|json|lcov|xml|txt|html)$/.test(output) ||
-                  /\*\*|(?:^|\/)deps\//.test(output),
-              )
-              .map((output) => `${id}: invalid output ${output}`)
-          : []),
+        ...task.outputs
+          .filter(
+            (output) =>
+              !/\.(profraw|json|lcov|xml|txt|html)$/.test(output) ||
+              /\*\*|(?:^|\/)deps\//.test(output),
+          )
+          .map((output) => `${id}: invalid output ${output}`),
       ]);
     assert.deepEqual(problems(hashes), []);
-    const id = "onepipeline-ui-e2e:test";
+    const id = "onepipeline-ui-e2e:test-quick";
     const broken = structuredClone(hashes);
     broken[id].inputs.runtime = broken[id].inputs.runtime.filter(
       (command) => command !== "node -p process.platform",

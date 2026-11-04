@@ -12,10 +12,11 @@ import {
 const expression = (body) => `$${"{{"} ${body} }}`;
 const workflow = (name) =>
   parse(readFileSync(`.github/workflows/${name}.yml`, "utf8"));
-// Full-file digests at dero-skills 63e071b72420bd6737226a50cb8a7a7760cc73a4.
+// Remote cache: dero-skills babeb92341428df0b84e09268481cd5981297b82.
+// Other copies: dero-skills 63e071b72420bd6737226a50cb8a7a7760cc73a4.
 const upstream = {
   "scripts/nx-remote-cache.mjs":
-    "4445c0d8d5f6045bb2b14b19cd03f9600b6b98f88dc689421d98d3ef996664b6",
+    "81871b7b1f992b71fab79bc38d3412b4d2306e2a4c475c64059c0e02b10f9079",
   "scripts/nx-version-free-inputs.mjs":
     "fdd4f59fc98a0073dbefdbaa0f08f4b58432bbf8e55d315865f951e0151b19b2",
   "scripts/actions-budget-figures.sh":
@@ -50,8 +51,8 @@ function cacheSteps(job) {
     expression("steps.nx-cache-trust.outputs.read_only == 'true' && '1' || ''"),
   );
   const teardown = steps.find((step) => step.cancel === "nx-cache");
-  assert.equal(teardown.if, "always()");
-  assert.equal(teardown["continue-on-error"], true);
+  // GitHub rejects conditions and continue-on-error on cancel steps.
+  assert.deepEqual(teardown, { cancel: "nx-cache" });
   return { steps, ready };
 }
 test("the four existing CI jobs record and upload trusted cache receipts around their Nx runs", () => {
@@ -221,4 +222,44 @@ test("lint exclusions added for shared copies name only upstream-owned exact pat
       Object.hasOwn(upstream, path),
       `unexpected lint exclusion ${path}`,
     );
+});
+
+test("coverage producers cannot replay profiles across Cargo package versions", () => {
+  const paths = execFileSync(
+    "git",
+    ["ls-files", "--", "project.json", "tests/tiers/*/project.json"],
+    { encoding: "utf8" },
+  )
+    .trim()
+    .split("\n");
+  const producers = [];
+  for (const path of paths) {
+    const project = JSON.parse(readFileSync(path, "utf8"));
+    for (const [name, target] of Object.entries(project.targets)) {
+      if (
+        !target.command?.includes("_tier-test-covered") &&
+        name !== "coverage"
+      )
+        continue;
+      assert.equal(
+        target.cache ??
+          JSON.parse(readFileSync("nx.json", "utf8")).targetDefaults[name]
+            ?.cache,
+        false,
+        `${project.name}:${name} must not reuse version-specific LLVM profiles`,
+      );
+      producers.push(`${project.name}:${name}`);
+    }
+  }
+  assert.deepEqual(
+    producers.sort(),
+    [
+      "onepipeline-ui:test",
+      "onepipeline-ui-coverage:coverage",
+      "onepipeline-ui-e2e:test",
+      "onepipeline-ui-npm-launcher:test",
+      "onepipeline-ui-repo-tooling:test",
+      "onepipeline-ui-versions:test",
+    ].sort(),
+  );
 });

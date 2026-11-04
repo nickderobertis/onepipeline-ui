@@ -165,10 +165,14 @@ ignore an advisory in `deny.toml` to get a change through.
 promotes them in the existing release-plz job before it updates the release PR.
 Fork and Dependabot PRs read only. The script and version-free manifest digests
 are upstream-owned copies; the workflow suite holds their bytes to create-repo.
-Version/changelog edits retain source and dependency hashes; the `versions`,
+Formatters and linters keep raw manifests where they check their text; semantic
+consumers use version-free manifest digests. Version/changelog edits retain source
+and dependency hashes; the `versions`,
 npm-launcher and release tiers keep the version where their tests read it.
-Test outputs name coverage profiles or reports, never Rust build directories;
-release rehearsal stays uncached. Reports and promotion receipts feed the
+Rust coverage producers and the aggregate stay uncached: LLVM profiles cannot
+cross a package-version rebuild. The 95% floor still applies. Cached outputs
+name reports, never build directories; release rehearsal and frontend/package
+builds also stay uncached. Reports and promotion receipts feed the
 release-tail cache-use figure; missing evidence never counts as replay. Every
 release PR runs all four jobs through the same steps as any other PR; no
 branch-name or version-only classifier bypasses its macOS lane.

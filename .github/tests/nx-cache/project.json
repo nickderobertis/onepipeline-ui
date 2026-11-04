@@ -5,35 +5,18 @@
   "tags": ["scope:tooling", "type:test", "lang:javascript"],
   "namedInputs": {
     "cacheContract": [
-      "{projectRoot}/**/*",
-      "sharedGlobals",
-      "apiServerSurface",
-      "embeddedView",
-      "testTiers",
-      "pythonVersionFree",
-      "{workspaceRoot}/nx.json",
-      "{workspaceRoot}/**/project.json",
-      "{workspaceRoot}/.github/workflow-graph.mjs",
-      "{workspaceRoot}/.github/workflows/ci.yml",
-      "{workspaceRoot}/.github/workflows/release-plz.yml",
-      "{workspaceRoot}/.github/workflows/release.yml",
-      "{workspaceRoot}/.github/nx-version-files",
-      "{workspaceRoot}/.github/release-published-paths",
-      "{workspaceRoot}/scripts/nx-remote-cache.mjs",
-      "{workspaceRoot}/scripts/nx-version-free-inputs.mjs",
-      "{workspaceRoot}/scripts/actions-budget-figures.sh",
-      "{workspaceRoot}/scripts/ci-job.sh",
-      "{workspaceRoot}/budgets.yaml",
-      "{workspaceRoot}/tests/**/*.rs",
-      "{workspaceRoot}/tests/fixtures/**/*",
-      "{workspaceRoot}/apps/dag-ui-e2e/fixtures/**/*",
-      "{workspaceRoot}/packages/timeline-categories/**/*",
-      "{workspaceRoot}/.gitignore"
+      "versionFreeWorkspace",
+      "{workspaceRoot}/apps/dag-ui-e2e/package.json",
+      "{workspaceRoot}/apps/dag-ui/package.json",
+      "{workspaceRoot}/packages/dag-layout/package.json",
+      "{workspaceRoot}/packages/dag-model/package.json",
+      "{workspaceRoot}/packages/telemetry-client/package.json",
+      "{workspaceRoot}/packages/timeline-categories/package.json"
     ]
   },
   "targets": {
     "bootstrap": {
-      "command": "bash scripts/workspace-install.sh"
+      "command": "bash scripts/workspace-install.sh && node .github/tests/nx-cache/setup-sidecar.mjs"
     },
     "lint": {
       "command": "node node_modules/@biomejs/biome/bin/biome check --error-on-warnings .github/tests/nx-cache",
@@ -41,7 +24,28 @@
     },
     "test": {
       "command": "node --test --test-concurrency=1 .github/tests/nx-cache/*.test.mjs",
-      "inputs": ["cacheContract", "platform"],
+      "inputs": [
+        "cacheContract",
+        "platform",
+        {
+          "runtime": "git merge-base HEAD origin/main"
+        },
+        {
+          "runtime": "git ls-files"
+        },
+        {
+          "runtime": "git --version"
+        },
+        {
+          "runtime": "node -p process.version"
+        },
+        {
+          "runtime": "cargo --version"
+        },
+        {
+          "runtime": "cargo nextest --version"
+        }
+      ],
       "dependsOn": [
         "bootstrap",
         {
@@ -49,7 +53,8 @@
           "target": "build"
         }
       ],
-      "cache": false
+      "cache": true,
+      "outputs": []
     },
     "check": {
       "executor": "nx:noop"

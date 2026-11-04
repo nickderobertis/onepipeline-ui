@@ -43,6 +43,7 @@
       ]
     },
     "test": {
+      "cache": false,
       "command": "just _tier-test-covered unit",
       "dependsOn": [
         {

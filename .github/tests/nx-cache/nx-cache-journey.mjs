@@ -19,6 +19,26 @@ import { interpolate } from "../../workflow-graph.mjs";
 
 export const run = promisify(execFile);
 export const json = (path) => JSON.parse(readFileSync(path, "utf8"));
+// Scalar fields this double consumes/returns; the protocol test reconciles them
+// with @actions/cache's generated Cache V2 messages in the pinned sidecar.
+export const CACHE_RPC_FIELDS = {
+  CreateCacheEntry: {
+    request: { key: "string", version: "string" },
+    response: { ok: "boolean", signedUploadUrl: "string" },
+  },
+  FinalizeCacheEntryUpload: {
+    request: { key: "string", version: "string" },
+    response: { ok: "boolean", entryId: "int64" },
+  },
+  GetCacheEntryDownloadURL: {
+    request: { key: "string", version: "string" },
+    response: {
+      ok: "boolean",
+      signedDownloadUrl: "string",
+      matchedKey: "string",
+    },
+  },
+};
 export class GithubCache {
   entries = new Map();
   uploads = new Map();
@@ -32,9 +52,30 @@ export class GithubCache {
       for await (const chunk of req) chunks.push(chunk);
       const bytes = Buffer.concat(chunks);
       const url = new URL(req.url, this.url);
-      const scope = req.headers.authorization?.replace(/^Bearer /, "");
+      const scope = req.headers.authorization?.startsWith("Bearer ")
+        ? req.headers.authorization.slice(7)
+        : null;
       this.calls.push({ method: req.method, path: req.url, scope });
       const reply = (value, status = 200) => {
+        if (req.method === "POST" && status === 200) {
+          const fields =
+            CACHE_RPC_FIELDS[url.pathname.split("/").at(-1)]?.response;
+          const valid =
+            fields &&
+            Object.entries(value).every(([key, child]) =>
+              fields[key] === "int64"
+                ? typeof child === "string" && /^\d+$/.test(child)
+                : fields[key] === typeof child,
+            ) &&
+            Object.keys(fields).every((key) => key in value);
+          if (!valid) {
+            status = 500;
+            value = {
+              message:
+                "Cache double returned a field outside its drift-gated protocol",
+            };
+          }
+        }
         const body = Buffer.isBuffer(value)
           ? value
           : Buffer.from(JSON.stringify(value));
@@ -48,9 +89,34 @@ export class GithubCache {
           .end(body);
       };
       if (req.method === "POST") {
-        const body = JSON.parse(bytes);
+        let body;
+        try {
+          body = JSON.parse(bytes);
+        } catch {
+          return reply({ message: "Malformed JSON" }, 400);
+        }
+        const text = (value) =>
+          typeof value === "string" &&
+          value.length > 0 &&
+          Array.from(value).every(
+            (character) => character.codePointAt(0) >= 32,
+          );
+        if (!text(scope) || scope.includes(":"))
+          return reply({ message: "A bearer scope is required" }, 401);
+        if (
+          !body ||
+          Array.isArray(body) ||
+          !text(body.key) ||
+          !text(body.version)
+        )
+          return reply(
+            { message: "key and version must be nonempty strings" },
+            400,
+          );
         const method = url.pathname.split("/").at(-1);
-        const key = `${body.key}:${body.version}`;
+        if (!Object.hasOwn(CACHE_RPC_FIELDS, method))
+          return reply({ message: "Unknown cache RPC" }, 404);
+        const key = JSON.stringify([body.key, body.version]);
         if (this.mode === "fault")
           return reply({ code: "internal", msg: "store unavailable" }, 500);
         if (method === "GetCacheEntryDownloadURL") {
@@ -86,21 +152,45 @@ export class GithubCache {
           const upload = [...this.uploads.values()].find(
             (u) => u.scope === scope && u.key === key,
           );
+          if (!upload) return reply({ message: "Unknown upload" }, 404);
+          if (!Buffer.isBuffer(upload.body))
+            return reply({ message: "Upload is incomplete" }, 409);
           this.entries.set(`${scope}:${key}`, upload.body);
           return reply({ ok: true, entryId: "1" });
         }
       }
       if (req.method === "PUT") {
-        const upload = this.uploads.get(url.pathname.split("/").at(-1));
-        if (url.searchParams.get("comp") === "block")
-          upload.blocks.set(url.searchParams.get("blockid"), bytes);
-        else if (url.searchParams.get("comp") === "blocklist")
-          upload.body = Buffer.concat(
-            [...bytes.toString().matchAll(/<Latest>(.*?)<\/Latest>/g)].map(
-              (m) => upload.blocks.get(m[1]),
-            ),
+        const token = url.pathname.split("/").at(-1);
+        const upload = /^\d+$/.test(token) && this.uploads.get(token);
+        if (!upload || !(upload.blocks instanceof Map))
+          return reply({ message: "Unknown upload" }, 404);
+        const operation = url.searchParams.get("comp");
+        if (operation === "block") {
+          const id = url.searchParams.get("blockid");
+          if (!id || !/^[A-Za-z0-9+/=]+$/.test(id))
+            return reply({ message: "Invalid block identifier" }, 400);
+          upload.blocks.set(id, bytes);
+        } else if (operation === "blocklist") {
+          const envelope = bytes
+            .toString()
+            .trim()
+            .match(
+              /^(?:<\?xml[^>]*>\s*)?<BlockList(?:\s+xmlns="[^"<>]*")?>([\s\S]*)<\/BlockList>$/,
+            );
+          const contents = envelope?.[1];
+          if (
+            !contents ||
+            !/^(?:\s*<Latest>[A-Za-z0-9+/=]+<\/Latest>\s*)+$/.test(contents)
+          )
+            return reply({ message: "Invalid block list" }, 400);
+          const ids = [...contents.matchAll(/<Latest>(.*?)<\/Latest>/g)].map(
+            (m) => m[1],
           );
-        else upload.body = bytes;
+          if (ids.some((id) => !upload.blocks.has(id)))
+            return reply({ message: "Unknown block" }, 400);
+          upload.body = Buffer.concat(ids.map((id) => upload.blocks.get(id)));
+        } else if (operation === null) upload.body = bytes;
+        else return reply({ message: "Unknown upload operation" }, 400);
         return reply(Buffer.alloc(0), 201);
       }
       if (req.method === "GET") {
@@ -115,8 +205,19 @@ export class GithubCache {
             this.metadata.get(url.pathname);
           if (value === undefined)
             return reply({ message: `No fixture route: ${req.url}` }, 404);
-          const page = Number(url.searchParams.get("page") || 1);
-          const size = Number(url.searchParams.get("per_page") || 100);
+          const rawPage = url.searchParams.get("page") ?? "1";
+          const rawSize = url.searchParams.get("per_page") ?? "100";
+          const page = Number(rawPage);
+          const size = Number(rawSize);
+          if (
+            !/^[1-9]\d*$/.test(rawPage) ||
+            !/^[1-9]\d*$/.test(rawSize) ||
+            !Number.isSafeInteger(page) ||
+            !Number.isSafeInteger(size) ||
+            size > 100 ||
+            !Number.isSafeInteger(page * size)
+          )
+            return reply({ message: "Invalid pagination" }, 400);
           const slice = (v) =>
             Array.isArray(v) ? v.slice((page - 1) * size, page * size) : v;
           if (!this.metadata.has(req.url) && url.searchParams.has("page"))
@@ -128,7 +229,7 @@ export class GithubCache {
           return reply(value);
         }
         const found = this.uploads.get(url.pathname.split("/").at(-1));
-        return found ? reply(found) : reply({}, 404);
+        return Buffer.isBuffer(found) ? reply(found) : reply({}, 404);
       }
       return reply({}, 405);
     });
@@ -143,21 +244,16 @@ export class GithubCache {
   }
 }
 
-export async function sidecarCheckout() {
-  const action = resolve(".tools/op-nx-cache", OP_NX_COMMIT);
-  if (!existsSync(join(action, ".git"))) {
-    mkdirSync(action, { recursive: true });
-    await run("git", [
-      "clone",
-      "--quiet",
-      "https://github.com/op-nx/github-cache.git",
-      action,
-    ]);
-    await run("git", ["checkout", "--quiet", OP_NX_COMMIT], { cwd: action });
-  }
+export async function sidecarCheckout(root = process.cwd()) {
+  const action = resolve(root, ".tools/op-nx-cache", OP_NX_COMMIT);
+  if (!existsSync(join(action, ".git")))
+    throw new Error(
+      "Pinned cache sidecar is not provisioned\nACTION: run just nx run github-workflows-nx-cache:bootstrap",
+    );
   assert.equal(
     (await run("git", ["rev-parse", "HEAD"], { cwd: action })).stdout.trim(),
     OP_NX_COMMIT,
+    "Cache sidecar commit differs\nACTION: run just nx run github-workflows-nx-cache:bootstrap",
   );
   return action;
 }
@@ -188,7 +284,8 @@ export async function cacheSession(
     ),
     GITHUB_EVENT_NAME: "pull_request",
     GITHUB_SERVER_URL: "https://github.com",
-    GITHUB_REPOSITORY: "nickderobertis/onepipeline-ui",
+    GITHUB_REPOSITORY:
+      payload.repository?.full_name || "nickderobertis/onepipeline-ui",
     GITHUB_REF: "refs/pull/1/merge",
     GITHUB_SHA: "3".repeat(40),
     GITHUB_EVENT_PATH: join(temp, "event.json"),
@@ -292,6 +389,10 @@ export async function cacheSession(
         );
         if (report) {
           const result = await execute(report.run);
+          writeFileSync(
+            join(temp, "report.log"),
+            result.stdout + result.stderr,
+          );
           assert.ok(
             existsSync(join(temp, "nx-cache-report/executions.json")),
             result.stdout + result.stderr,
@@ -346,6 +447,25 @@ export function reportZip(path) {
   end.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, directory, end]);
 }
+// Shapes are recorded API answers. Selection overrides are enumerated in
+// github-rest/selection.json; local task executions and report bytes stay real.
+export function recordedREST(name) {
+  if (
+    ![
+      "run",
+      "runs",
+      "jobs",
+      "artifacts",
+      "release",
+      "commit",
+      "compare",
+    ].includes(name)
+  )
+    throw new Error(`Unknown recorded REST response: ${name}`);
+  return structuredClone(
+    json(new URL(`./github-rest/${name}.json`, import.meta.url)).response,
+  );
+}
 export function sourceMetadata(
   cache,
   report,
@@ -358,58 +478,117 @@ export function sourceMetadata(
   } = {},
 ) {
   const repo = "nickderobertis/onepipeline-ui";
-  const repository = { id: 1, full_name: repo };
+  const pr = structuredClone(
+    json(new URL("./events/maintainer.json", import.meta.url)).pull_request,
+  );
+  const repository = pr.base.repo;
   const now = new Date().toISOString();
-  const pr = {
+  Object.assign(pr, {
     number: prNumber,
-    head: { sha: head, ref: `change-${prNumber}`, repo: repository },
-    base: { sha: base, ref: "main", repo: repository },
-    user: { login: "maintainer" },
     merged_at: now,
     merge_commit_sha: merge,
-  };
+  });
+  Object.assign(pr.head, {
+    sha: head,
+    ref: `change-${prNumber}`,
+    repo: repository,
+  });
+  Object.assign(pr.base, { sha: base, ref: "main", repo: repository });
   const execution = json(join(report, "executions.json"));
-  const source = {
+  const source = recordedREST("run");
+  const association = structuredClone(source.pull_requests[0]);
+  association.number = prNumber;
+  Object.assign(association.head, { sha: head, ref: pr.head.ref });
+  Object.assign(association.base, { sha: base, ref: pr.base.ref });
+  Object.assign(source, {
     id: runId,
     run_attempt: 1,
     head_sha: head,
-    head_branch: `change-${prNumber}`,
+    head_branch: pr.head.ref,
     event: "pull_request",
     head_repository: repository,
-    pull_requests: [pr],
+    pull_requests: [association],
     status: "completed",
     conclusion: "success",
     run_started_at: execution.tasks.map((t) => t.started_at).sort()[0],
     updated_at: now,
-  };
-  const artifact = {
+  });
+  source.head_commit.id = head;
+  const artifact = recordedREST("artifacts").artifacts[0];
+  const zip = reportZip(report);
+  Object.assign(artifact, {
     id: runId * 100 + 1,
     name: "nx-cache-entries-test-linux",
     expired: false,
     created_at: now,
-    workflow_run: { id: runId, head_sha: head, head_repository_id: 1 },
-  };
+    size_in_bytes: zip.length,
+    expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+  });
+  Object.assign(artifact.workflow_run, {
+    id: runId,
+    head_sha: head,
+    head_repository_id: repository.id,
+    head_branch: pr.head.ref,
+  });
   cache.metadata.set(`/repos/${repo}/commits/${merge}/pulls`, [pr]);
+  cache.metadata.set(`/repos/${repo}/commits/${head}/pulls`, [pr]);
+  for (const tip of [head, encodeURIComponent(pr.base.ref)])
+    cache.metadata.set(`/repos/${repo}/compare/${base}...${tip}`, {
+      ...recordedREST("compare"),
+      status: "ahead",
+    });
   cache.metadata.set(`/repos/${repo}/pulls/${prNumber}`, pr);
+  for (const [sha, parent] of [
+    [head, base],
+    [merge, base],
+  ]) {
+    const commit = recordedREST("commit");
+    commit.sha = sha;
+    commit.parents = [{ ...commit.parents[0], sha: parent }];
+    cache.metadata.set(`/repos/${repo}/commits/${sha}`, commit);
+  }
+
   const listingPath = `/repos/${repo}/actions/workflows/ci.yml/runs`;
-  const listing = cache.metadata.get(listingPath) ?? { workflow_runs: [] };
+  const listing = cache.metadata.get(listingPath) ?? {
+    ...recordedREST("runs"),
+    workflow_runs: [],
+  };
   listing.workflow_runs = listing.workflow_runs.filter(
     (run) => run.id !== runId,
   );
   listing.workflow_runs.push(source);
+  listing.total_count = listing.workflow_runs.length;
   cache.metadata.set(listingPath, listing);
   cache.metadata.set(`/repos/${repo}/actions/runs/${runId}/attempts/1`, source);
-  cache.metadata.set(`/repos/${repo}/actions/runs/${runId}/attempts/1/jobs`, {
-    jobs: [
-      { name: "test-linux", conclusion: "success", labels: ["ubuntu-latest"] },
-    ],
+  const jobs = recordedREST("jobs");
+  const label = {
+    linux: "ubuntu-latest",
+    darwin: "macos-latest",
+    win32: "windows-latest",
+  }[execution.os];
+  const job = jobs.jobs.find((job) => job.labels.includes(label));
+  Object.assign(job, {
+    id: runId * 1000 + 1,
+    run_id: runId,
+    name: "test-linux",
+    conclusion: "success",
+    started_at: source.run_started_at,
+    completed_at: now,
   });
-  cache.metadata.set(`/repos/${repo}/actions/runs/${runId}/artifacts`, {
-    artifacts: [artifact],
-  });
+  Object.assign(jobs, { jobs: [job], total_count: 1 });
+  cache.metadata.set(
+    `/repos/${repo}/actions/runs/${runId}/attempts/1/jobs`,
+    jobs,
+  );
+  const artifacts = recordedREST("artifacts");
+  Object.assign(artifacts, { artifacts: [artifact], total_count: 1 });
+  cache.metadata.set(
+    `/repos/${repo}/actions/runs/${runId}/artifacts`,
+    artifacts,
+  );
   cache.metadata.set(
     `/repos/${repo}/actions/artifacts/${artifact.id}/zip`,
-    reportZip(report),
+    zip,
   );
   return { pr, source, artifact };
 }
