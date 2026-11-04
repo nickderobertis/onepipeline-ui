@@ -42,7 +42,7 @@ const SUITES_THAT_SERVE_THE_BASELINE: [&str; 1] = ["onepipeline-ui-baseline:test
 
 /// The crate's test tiers: the Nx project and target each runs as, and the
 /// nextest profile in `.config/nextest.toml` that selects its tests.
-const TIERS: [(&str, &str, &str); 12] = [
+const TIERS: [(&str, &str, &str); 13] = [
     ("onepipeline-ui", "test", "unit"),
     ("onepipeline-ui-e2e", "test", "e2e"),
     ("onepipeline-ui-repo-tooling", "test", "repo-tooling"),
@@ -53,6 +53,11 @@ const TIERS: [(&str, &str, &str); 12] = [
     ("onepipeline-ui-cost", "test-cost", "cost"),
     ("onepipeline-ui-linked-report", "test", "linked-report"),
     ("onepipeline-ui-ci-jobs", "test", "ci-jobs"),
+    (
+        "onepipeline-ui-nx-worker-startup",
+        "test",
+        "nx-worker-startup",
+    ),
     ("onepipeline-ui-judged-tier", "test", "judged-tier"),
     (
         "onepipeline-ui-deps-audit-toolchain",
@@ -862,6 +867,7 @@ fn the_tier_profiles_partition_the_suite() {
         "cost",
         "linked-report",
         "ci-jobs",
+        "nx-worker-startup",
         "judged-tier",
         "deps-audit-toolchain",
     ] {
@@ -892,6 +898,7 @@ fn the_tier_profiles_partition_the_suite() {
         "cost",
         "linked-report",
         "ci-jobs",
+        "nx-worker-startup",
         "judged-tier",
         "deps-audit-toolchain",
     ]
