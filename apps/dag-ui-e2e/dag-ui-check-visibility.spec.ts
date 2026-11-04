@@ -6,7 +6,7 @@ import { startFixtureServer } from "./fixture-server";
 import records from "./fixtures/check-visibility.json" with { type: "json" };
 import { appendRecords } from "./load/journal";
 
-test("the served view marks requirement and failing checks, including a follow read after settlement", async ({
+test("the served view marks requirement and failing checks, including a check recorded after settlement", async ({
   page,
 }) => {
   const server = await startFixtureServer("check-visibility", []);
