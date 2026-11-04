@@ -1935,9 +1935,16 @@ fn a_run_that_never_goes_quiet_still_has_its_telemetry_folded_again() {
         |root| growing_run(root, run),
         &[(onepipeline_ui::live::TELEMETRY_REFOLD_ENV, "600")],
     );
-    let _tab = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
-    // The load workload's own writer, a record every 25 ms — faster than the
-    // 50 ms poll — for longer than two intervals, so no tick is quiet.
+    // The load writer appends every 25 ms, faster than the 50 ms poll.
+    // Keep it alive beyond the observation deadline, rather than taking one
+    // trace snapshot after a fixed workload has already stopped.
+    struct Writing(std::process::Child);
+    impl Drop for Writing {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
     let root = live
         .serving
         .run_dir(run)
@@ -1946,28 +1953,69 @@ fn a_run_that_never_goes_quiet_still_has_its_telemetry_folded_again() {
         .to_path_buf();
     let log = live._trace_dir.path().join("appended.jsonl");
     let options = json!({
-        "root": root, "log": log, "durationMs": 2_500, "rate": 2_400,
+        "root": root, "log": log, "durationMs": PATIENCE.as_millis() * 2, "rate": 2_400,
         "runs": [{ "run": run, "node": fixture_run::NODE_ID }],
         "burst": 0, "burstRun": run, "burstAt": 0, "openRun": run,
     });
-    let writer = std::process::Command::new("node")
-        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui-e2e/load/writer.mjs"))
-        .arg(options.to_string())
-        .status()
-        .expect("node runs the load writer");
-    assert!(writer.success(), "the load writer failed");
-    // A tick that moved, whichever way the engine read it: on a loaded host a
-    // writer this fast can outrun the appended read, which the engine then
-    // answers with a reread, and the fold is owed on that tick all the same.
-    let folded_while_growing = live
-        .refreshes()
-        .iter()
-        .any(|line| line["refresh"] != "unchanged" && !line["telemetry_fold_ms"].is_null());
-    assert!(
-        folded_while_growing,
-        "the fold never caught up while the run kept moving: {:#?}",
-        live.refreshes()
+    let mut writer = Writing(
+        std::process::Command::new("node")
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui-e2e/load/writer.mjs"))
+            .arg(options.to_string())
+            .spawn()
+            .expect("node runs the load writer"),
     );
+    let deadline = Instant::now() + PATIENCE;
+    // Startup time is not writing time. Subscribe only after the first append,
+    // so the writer is already active before the subscription's first interval.
+    while fs::metadata(&log).map_or(true, |metadata| metadata.len() == 0) {
+        assert!(
+            writer.0.try_wait().expect("writer status").is_none(),
+            "the load writer exited before its first append"
+        );
+        assert!(Instant::now() < deadline, "the load writer never appended");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _tab = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
+    let mut moving_since = Instant::now();
+    let mut seen = live.refreshes().len();
+    let mut eligible = false;
+    loop {
+        let refreshes = live.refreshes();
+        assert!(
+            writer.0.try_wait().expect("writer status").is_none(),
+            "the load writer finished before a qualifying fold: {refreshes:#?}"
+        );
+        for refresh in &refreshes[seen..] {
+            if refresh["run"] != run {
+                continue;
+            }
+            if refresh["refresh"] == "unchanged" {
+                // A quiet tick cannot contribute to the continuous-writing
+                // window, even when the host delayed the writer's timer.
+                moving_since = Instant::now();
+                eligible = false;
+            } else if eligible && !refresh["telemetry_fold_ms"].is_null() {
+                // Appended and reread both mean the journal moved. Check the
+                // writer again at observation, including after reading the log.
+                assert!(
+                    writer.0.try_wait().expect("writer status").is_none(),
+                    "the load writer finished before the fold was observed: {refreshes:#?}"
+                );
+                return;
+            }
+        }
+        seen = refreshes.len();
+        // Discard every trace already logged before the two-interval boundary:
+        // observing an old fold late must never qualify it.
+        if moving_since.elapsed() > Duration::from_millis(600) * 2 {
+            eligible = true;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the fold never caught up while the run kept moving: {refreshes:#?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]
