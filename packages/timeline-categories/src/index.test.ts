@@ -174,6 +174,10 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] `onevcs` owns this kind and this package owns the category it reads under.
   "publication-resumed": "publication",
   "change-check": "verification",
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] This package owns category decisions; tests/contract.rs::the_browser_files_every_kind_those_libraries_declare holds the kinds to their producers.
+  "check-failed": "failure",
+  "checks-unfollowed": "verification",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   "change-merged": "publication",
   "sync-conflict": "failure",
   // The releases, across the two producers that record them: `onevcs` probes,

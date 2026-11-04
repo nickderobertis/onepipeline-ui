@@ -95,7 +95,7 @@ pub struct Matcher {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase: Option<Phase>,
     /// The `significance` its producer stamped among the envelope's labels —
-    /// `milestone`, `blocker` or `progress` — by exact equality. Which event is
+    /// `milestone`, `blocker`, `attention` or `progress` — by exact equality. Which event is
     /// which is that producer's table, never this crate's: an envelope carrying
     /// no stamp matches no significance a matcher asks for.
     #[serde(default, skip_serializing_if = "Option::is_none")]

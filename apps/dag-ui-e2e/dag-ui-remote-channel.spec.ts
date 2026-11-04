@@ -68,6 +68,11 @@ test("Remote retains publication and release and follows each check's destinatio
       ran,
       required,
     ]);
+    if (name === "published-smoke") {
+      await expect(row).toHaveClass("check-failing");
+    } else {
+      await expect(row).not.toHaveClass("check-failing");
+    }
     const destination = await row.getByRole("link").getAttribute("href");
     const opened = page.waitForEvent("popup");
     await row.getByRole("link").click();
@@ -156,6 +161,10 @@ test("Remote displays incomplete check records without inventing a status or lin
       "Required",
     ]);
     await expect(row.getByRole("link")).toHaveCount(0);
+    await page.getByRole("tab", { name: "Timeline", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "Open change-check", exact: true }),
+    ).toBeVisible();
   } finally {
     await server.stop();
   }

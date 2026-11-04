@@ -2,7 +2,7 @@
   "api_version": 2,
   "telemetry_schema_version": 27,
   "observed_at": "2026-08-07T12:00:00Z",
-  "timeline_schema_version": 14,
+  "timeline_schema_version": 15,
   "run_id": "run-20260807-a1b2c3",
   "spans": [
     {
@@ -410,6 +410,8 @@
           "review": {
             "name": "gate",
             "required": true,
+            "requirement": "required — blocks the merge",
+            "url": null,
             "state": "pending"
           },
           "dispatch_group": {
@@ -433,6 +435,8 @@
           "review": {
             "name": "published-smoke",
             "required": false,
+            "requirement": "not required — does not block",
+            "url": "https://example.test/checks/published-smoke",
             "state": "failed"
           },
           "reference": {
@@ -460,6 +464,8 @@
           "review": {
             "name": "gate",
             "required": true,
+            "requirement": "required — blocks the merge",
+            "url": null,
             "state": "passed"
           },
           "reference": {

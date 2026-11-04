@@ -24,4 +24,6 @@ pub const TIMELINE_EVENT_ADDITIONS: &[(u64, &str)] = &[
     (13, "fields"),
     (14, "description"),
     (14, "tool"),
+    (15, "review.requirement"),
+    (15, "review.url"),
 ];
