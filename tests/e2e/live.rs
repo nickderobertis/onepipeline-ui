@@ -1938,6 +1938,8 @@ fn a_run_that_never_goes_quiet_still_has_its_telemetry_folded_again() {
     // The load writer appends every 25 ms, faster than the 50 ms poll.
     // Keep it alive beyond the observation deadline, rather than taking one
     // trace snapshot after a fixed workload has already stopped.
+    // Writer exit does not synchronize with a server tick: on a slow host
+    // that snapshot can contain only a refresh from before a fold was owed.
     struct Writing(std::process::Child);
     impl Drop for Writing {
         fn drop(&mut self) {
@@ -1983,6 +1985,10 @@ fn a_run_that_never_goes_quiet_still_has_its_telemetry_folded_again() {
         let read_started = Instant::now();
         let refreshes = live.refreshes();
         assert!(
+            Instant::now() < deadline,
+            "the fold never caught up while the run kept moving: {refreshes:#?}"
+        );
+        assert!(
             writer.0.try_wait().expect("writer status").is_none(),
             "the load writer finished before a qualifying fold: {refreshes:#?}"
         );
@@ -2013,10 +2019,6 @@ fn a_run_that_never_goes_quiet_still_has_its_telemetry_folded_again() {
         if read_started.saturating_duration_since(moving_since) > Duration::from_millis(600) * 2 {
             eligible = true;
         }
-        assert!(
-            Instant::now() < deadline,
-            "the fold never caught up while the run kept moving: {refreshes:#?}"
-        );
         std::thread::sleep(Duration::from_millis(20));
     }
 }
