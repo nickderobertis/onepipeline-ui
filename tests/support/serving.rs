@@ -512,7 +512,30 @@ impl Serving {
     /// [`fixture_run::summarize`]), so that no read is mid-fold at the rename.
     pub fn take_out(&self, run: &str) -> std::path::PathBuf {
         let taken = self.workspace.path().join(format!("{run}.taken-out"));
-        std::fs::rename(self.run_dir(run), &taken).expect("the run leaves the root");
+        let source = self.run_dir(run);
+        if let Err(original) = std::fs::rename(&source, &taken) {
+            // Windows can deny the rename while the server's poll holds a read
+            // handle. Wait briefly for that reader, but retain the first error
+            // if the handle never closes; other failures are not transient.
+            let deadline = Instant::now() + Duration::from_secs(2);
+            assert_eq!(
+                original.kind(),
+                std::io::ErrorKind::PermissionDenied,
+                "the run leaves the root: {original}"
+            );
+            loop {
+                std::thread::sleep(WAIT_POLL);
+                match std::fs::rename(&source, &taken) {
+                    Ok(()) => break,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::PermissionDenied
+                            && Instant::now() < deadline => {}
+                    Err(error) => {
+                        panic!("the run leaves the root: {original}; last rename error: {error}")
+                    }
+                }
+            }
+        }
         taken
     }
 
