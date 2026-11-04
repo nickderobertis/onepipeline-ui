@@ -78,7 +78,11 @@ impl Workspace {
                 command.env_remove(name.as_ref());
             }
         }
-        command.env("NX_DAEMON", "false");
+        command
+            .env("NX_DAEMON", "false")
+            // Fixture tasks use their own local cache and never the outer CI telemetry.
+            .env_remove("GITHUB_ACTIONS")
+            .env("NX_SKIP_REMOTE_CACHE", "true");
         for (name, value) in environment {
             command.env(name, value);
         }
@@ -184,6 +188,9 @@ fn a_fixture_belongs_to_its_readers_and_to_no_project_of_its_own() {
         .args(["scripts/nx.sh", "show", "projects", "--json"])
         .current_dir(workspace.root())
         .env("NX_DAEMON", "false")
+        // Fixture tasks use their own local cache and never the outer CI telemetry.
+        .env_remove("GITHUB_ACTIONS")
+        .env("NX_SKIP_REMOTE_CACHE", "true")
         .output()
         .expect("bash is on PATH");
     assert!(listed.status.success(), "{}", stderr(&listed));
@@ -226,6 +233,9 @@ fn a_fixture_change_re_runs_a_cached_reader_rather_than_replaying_it() {
             ])
             .current_dir(workspace.root())
             .env("NX_DAEMON", "false")
+            // Fixture tasks use their own local cache and never the outer CI telemetry.
+            .env_remove("GITHUB_ACTIONS")
+            .env("NX_SKIP_REMOTE_CACHE", "true")
             .env_remove("NX_SKIP_NX_CACHE")
             .env_remove("NX_DISABLE_NX_CACHE")
             .output()

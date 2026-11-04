@@ -75,6 +75,9 @@ fn changing_the_imported_model_rebuilds_the_uncached_browser_bundle() {
         let output = Command::new("just")
             .args(["nx", "run", "dag-ui:build"])
             .env("NX_DAEMON", "false")
+            // Fixture tasks use their own local cache and never the outer CI telemetry.
+            .env_remove("GITHUB_ACTIONS")
+            .env("NX_SKIP_REMOTE_CACHE", "true")
             .env_remove("NX_SKIP_NX_CACHE")
             .current_dir(root)
             .output()

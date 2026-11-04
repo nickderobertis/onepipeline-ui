@@ -151,6 +151,9 @@ fn a_fresh_checkout_installs_from_the_lockfile_and_runs_a_target() {
         .args(["run", "timeline-categories:test", "--skip-nx-cache"])
         .current_dir(checkout.root())
         .env("NX_DAEMON", "false")
+        // This installed fixture is separate from the outer CI cache report.
+        .env_remove("GITHUB_ACTIONS")
+        .env("NX_SKIP_REMOTE_CACHE", "true")
         .env_remove("NX_SKIP_NX_CACHE")
         .output()
         .expect("bash is on PATH");

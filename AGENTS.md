@@ -175,7 +175,8 @@ Rust coverage producers and the aggregate stay uncached: LLVM profiles cannot
 cross a package-version rebuild. The 95% floor still applies. Cached outputs
 name reports, never build directories; release rehearsal and frontend/package
 builds also stay uncached. Reports and promotion receipts feed the
-release-tail cache-use figure; missing evidence never counts as replay. Every
+release-tail cache-use figure; missing evidence never counts as replay. Nested Nx
+fixtures isolate their cache and telemetry context from the outer CI run. Every
 release PR runs all four jobs through the same steps as any other PR; no
 branch-name or version-only classifier bypasses its macOS lane.
 
