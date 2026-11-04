@@ -16,6 +16,8 @@ import {
   readFileSync,
   rmSync,
   writeFileSync,
+  readdirSync,
+  utimesSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -172,4 +174,60 @@ test("a build that fails names the step it broke and reports no figure", () => {
   );
   assert.match(run.stderr, /ACTION: fix that error/);
   assert.equal(existsSync(run.result), false);
+});
+
+// Cache archives preserve old build times. The backlog pass must keep each
+// unit's newest hash even when it is old; Cargo can then build another hash
+// without refreshing that retained one (as with cached dependency variants).
+test("a restored target with an old retained build measures only the alternative", () => {
+  const root = fixture();
+  const env = { ...process.env, RUSTFLAGS: "--cfg restored_cache" };
+  delete env.CARGO_TARGET_DIR;
+  const build = spawnSync("cargo", ["nextest", "run", "--locked", "--no-run"], {
+    cwd: root,
+    env,
+    encoding: "utf8",
+  });
+  assert.equal(build.status, 0, build.stderr);
+  function age(path) {
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) age(child);
+      utimesSync(child, new Date("2001-01-01"), new Date("2001-01-01"));
+    }
+  }
+  age(join(root, "target"));
+  const run = measure(root);
+  assert.equal(run.status, 0, run.stderr);
+  assert.deepEqual(lines(root, "removed"), lines(root, "alternative"));
+  assert.deepEqual(lines(root, "removed-not-alternative"), []);
+});
+
+test("a timed pass with no aged alternative is refused", () => {
+  const root = fixture();
+  const script = join(root, "pool-maintenance", "measure.sh");
+  writeFileSync(script, readFileSync(script, "utf8").replace(
+    'BACKDATE="200001010000"', 'BACKDATE="209901010000"',
+  ));
+  const run = measure(root);
+  assert.equal(run.status, 1, run.stderr);
+  assert.match(run.stderr, /the timed pass removed no build/);
+});
+
+test("a timed pass that removes an ordinary build is refused", () => {
+  const root = fixture();
+  const script = join(root, "pool-maintenance", "measure.sh");
+  // Induce a broken setup: age the ordinary builds beyond the alternative,
+  // making the real pruner keep the alternative and remove ordinary entries.
+  writeFileSync(script, readFileSync(script, "utf8").replace(
+    'step="the timed pass',
+    `while IFS= read -r entry; do
+  find "$entry" -exec touch -h -t 199901010000 {} +
+done <"$EVIDENCE/before-alternative"
+step="the timed pass`,
+  ));
+  const run = measure(root);
+  assert.equal(run.status, 1, run.stderr);
+  assert.match(run.stderr, /the timed pass removed entries the alternative build did not create/);
+  assert.ok(lines(root, "removed-not-alternative").length > 0);
 });

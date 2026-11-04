@@ -13,7 +13,10 @@
 #      build created backdated past the window — they stand in for a run's
 #      builds that a later run has since superseded. The ordinary build runs
 #      first, untimed, so that build creates only what the feature changes and
-#      never a dependency both configurations share;
+#      never a dependency both configurations share. A second untimed pass
+#      after that ordinary build clears old cache hashes it superseded: the
+#      first pass kept each unit's newest hash even if old, and Cargo does not
+#      refresh an unused hash's timestamps when it builds a different one;
 #   c. the ordinary gate build, so each unit's newest build is the ordinary one;
 #   d. one declared pass, timed — the figure — which removes (b)'s builds.
 #
@@ -79,6 +82,8 @@ backlog_seconds="$(awk -v a="$started" -v b="$EPOCHREALTIME" 'BEGIN { printf "%.
 
 step="the ordinary build before the alternative one ('cargo nextest run --no-run')"
 cargo nextest run --locked --no-run
+step="the untimed post-build backlog pass ('just pool-maintenance')"
+just pool-maintenance
 list_entries >"$EVIDENCE/before-alternative"
 step="the alternative build ('cargo nextest run --no-run --features bundled-ui')"
 cargo nextest run --locked --no-run --features bundled-ui
