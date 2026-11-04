@@ -13,32 +13,57 @@ const versionReaders = (id) =>
 test("real Nx replays release edits except targets whose tests read the version", () => {
   const cwd = workspaceFixture();
   try {
+    // Replay the exact version fields and changelog section written by release-plz
+    // in this repository's recorded PR #607, independently of today's version.
+    const recorded = JSON.parse(
+      readFileSync(".github/tests/nx-cache/release-pr-607.json", "utf8"),
+    );
+    const manifestPath = join(cwd, "Cargo.toml");
+    const lockPath = join(cwd, "Cargo.lock");
+    const changelogPath = join(cwd, "CHANGELOG.md");
+    const manifest = readFileSync(manifestPath, "utf8");
+    const version = manifest.match(/^version = "([^"]+)"/m)[1];
+    const baselineManifest = manifest.replace(
+      `version = "${version}"`,
+      `version = "${recorded.previous}"`,
+    );
+    const baselineLock = readFileSync(lockPath, "utf8").replace(
+      `name = "onepipeline-ui"\nversion = "${version}"`,
+      `name = "onepipeline-ui"\nversion = "${recorded.previous}"`,
+    );
+    const baselineChangelog = readFileSync(changelogPath, "utf8").replace(
+      recorded.changelog,
+      "",
+    );
+    writeFileSync(manifestPath, baselineManifest);
+    writeFileSync(lockPath, baselineLock);
+    writeFileSync(changelogPath, baselineChangelog);
     const before = taskHashes(cwd);
     assert.ok(
       Object.keys(before).length >= 58,
       "cover the four jobs' full cacheable selection",
     );
-    const manifest = readFileSync(join(cwd, "Cargo.toml"), "utf8");
-    const version = manifest.match(/^version = "([^"]+)"/m)[1];
-    const next = version.replace(/\d+$/, (patch) => String(Number(patch) + 1));
-    // The exact three-file edit shape recorded from release-plz in the spike:
-    // its package version, its own lock entry, and a six-line changelog section.
     writeFileSync(
-      join(cwd, "Cargo.toml"),
-      manifest.replace(`version = "${version}"`, `version = "${next}"`),
-    );
-    const lock = readFileSync(join(cwd, "Cargo.lock"), "utf8");
-    writeFileSync(
-      join(cwd, "Cargo.lock"),
-      lock.replace(
-        `name = "onepipeline-ui"\nversion = "${version}"`,
-        `name = "onepipeline-ui"\nversion = "${next}"`,
+      manifestPath,
+      baselineManifest.replace(
+        `version = "${recorded.previous}"`,
+        `version = "${recorded.version}"`,
       ),
     );
-    const changelog = readFileSync(join(cwd, "CHANGELOG.md"), "utf8");
     writeFileSync(
-      join(cwd, "CHANGELOG.md"),
-      `## [${next}](https://github.com/nickderobertis/onepipeline-ui/compare/v${version}...v${next})\n\n### Fixed\n\n- Release input regression journey\n\n${changelog}`,
+      lockPath,
+      baselineLock.replace(
+        `name = "onepipeline-ui"\nversion = "${recorded.previous}"`,
+        `name = "onepipeline-ui"\nversion = "${recorded.version}"`,
+      ),
+    );
+    assert.ok(baselineChangelog.includes("## [Unreleased]\n\n"));
+    writeFileSync(
+      changelogPath,
+      baselineChangelog.replace(
+        "## [Unreleased]\n\n",
+        `## [Unreleased]\n\n${recorded.changelog}`,
+      ),
     );
     const after = taskHashes(cwd);
     assert.deepEqual(Object.keys(after), Object.keys(before));
