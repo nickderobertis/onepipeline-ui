@@ -17,8 +17,6 @@
       "dependsOn": ["test"]
     },
     "budgets-host": {
-      "//parallelism": "Never beside another task: measure.sh prunes builds from every profile under the shared `target` that the sweep's other tasks build in, and a build deleted after cargo judged it fresh fails that build's link.",
-      "parallelism": false,
       "command": "node_modules/.bin/onebudgetspec check pool-maintenance/budgets.yaml --label host",
       "dependsOn": [
         "bootstrap",

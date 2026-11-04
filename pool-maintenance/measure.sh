@@ -43,7 +43,9 @@ cd "$(dirname "$0")/.."
 # Keep the builds' own output to signal, as the justfile does for its recipes.
 export CARGO_TERM_QUIET=true
 # Every entry the pruner judges lives under these four directories of a profile.
-PROFILE="target/debug"
+MEASURED="$PWD/target/pool-maintenance"
+export CARGO_TARGET_DIR="$MEASURED/target"
+PROFILE="$CARGO_TARGET_DIR/debug"
 UNIT_DIRS=(deps .fingerprint build incremental)
 # Older than anything an ordinary build in this slot can carry, so the ordinary
 # build is always the newer one whatever age this slot's last build is. Any
@@ -59,8 +61,11 @@ fi
 
 result="${ONEBUDGETSPEC_RESULT:-}"
 unset ONEBUDGETSPEC_RESULT
-rm -rf "$EVIDENCE"
 mkdir -p "$EVIDENCE"
+# The real recipe prunes the same private tree the builds write.
+prune() {
+  just pool-maintenance "$CARGO_TARGET_DIR"
+}
 
 # One sorted line per top-level entry the pruner can select in the profile.
 list_entries() {
@@ -74,7 +79,7 @@ list_entries() {
 
 step="the untimed backlog pass ('just pool-maintenance')"
 started="$EPOCHREALTIME"
-just pool-maintenance
+prune
 backlog_seconds="$(awk -v a="$started" -v b="$EPOCHREALTIME" 'BEGIN { printf "%.3f", b - a }')"
 
 step="the ordinary build before the alternative one ('cargo nextest run --no-run')"
@@ -101,7 +106,7 @@ cargo nextest run --locked --no-run
 
 step="the timed pass ('just pool-maintenance')"
 list_entries >"$EVIDENCE/before-timed"
-ONEBUDGETSPEC_RESULT="$result" just pool-maintenance
+ONEBUDGETSPEC_RESULT="$result" prune
 list_entries >"$EVIDENCE/after-timed"
 LC_ALL=C comm -23 "$EVIDENCE/before-timed" "$EVIDENCE/after-timed" >"$EVIDENCE/removed"
 LC_ALL=C comm -23 "$EVIDENCE/removed" "$EVIDENCE/alternative" >"$EVIDENCE/removed-not-alternative"
