@@ -320,7 +320,9 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 27;
 /// `tool`, `{index, tool_call_id?, turn?}`, and the conversation `reference` of
 /// the turn it was published inside: where it sits in that conversation. Every
 /// other event is byte-for-byte what 13 served.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 14;
+/// **Version 15 carries each check's requirement label and recorded URL.**
+/// The label is the engine vocabulary's own rendering of the required flag.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 15;
 
 /// The largest run-list page any request can ask for.
 ///

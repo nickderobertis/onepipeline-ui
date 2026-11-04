@@ -297,7 +297,17 @@ export function NodeTimelineView({
                     </thead>
                     <tbody>
                       {node.detail?.verification.checks?.map((check) => (
-                        <tr key={check.name}>
+                        <tr
+                          key={check.name}
+                          className={
+                            check.status === "completed" &&
+                            !["success", "neutral", "skipped"].includes(
+                              check.conclusion ?? "",
+                            )
+                              ? "check-failing"
+                              : undefined
+                          }
+                        >
                           <th scope="row">
                             {check.url ? (
                               <a
@@ -323,7 +333,42 @@ export function NodeTimelineView({
                                 : { completedAt: check.completed_at })}
                             />
                           </td>
-                          <td>{check.required ? "Required" : "Optional"}</td>
+                          <td
+                            title={check.requirement}
+                            className={
+                              check.required
+                                ? "check-required"
+                                : "check-optional"
+                            }
+                          >
+                            <svg
+                              role="img"
+                              aria-label={
+                                check.required ? "required" : "not required"
+                              }
+                              width="12"
+                              height="12"
+                              viewBox="0 0 12 12"
+                            >
+                              {check.required ? (
+                                <path
+                                  d="M6 0.5 L11 2.5 V6 C11 9 8.5 11 6 11.5 C3.5 11 1 9 1 6 V2.5 Z"
+                                  fill="currentColor"
+                                />
+                              ) : (
+                                <circle
+                                  cx="6"
+                                  cy="6"
+                                  r="4.5"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.5"
+                                  strokeDasharray="2 1.5"
+                                />
+                              )}
+                            </svg>
+                            {check.required ? "Required" : "Optional"}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

@@ -1,0 +1,97 @@
+[
+  {
+    "source": "vcs",
+    "kind": "change-check",
+    "labels": {
+      "significance": "attention"
+    },
+    "payload": {
+      "name": "lint",
+      "required": true,
+      "state": "passed",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/example/widgets/actions/runs/1/job/lint"
+    }
+  },
+  {
+    "source": "vcs",
+    "kind": "change-check",
+    "labels": {
+      "significance": "attention"
+    },
+    "payload": {
+      "name": "test",
+      "required": true,
+      "state": "failed",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/example/widgets/actions/runs/1/job/test"
+    }
+  },
+  {
+    "source": "vcs",
+    "kind": "change-check",
+    "labels": {
+      "significance": "attention"
+    },
+    "payload": {
+      "name": "docs",
+      "required": false,
+      "state": "no-verdict",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "url": "https://github.com/example/widgets/actions/runs/1/job/docs"
+    }
+  },
+  {
+    "source": "vcs",
+    "kind": "change-check",
+    "labels": {
+      "significance": "attention"
+    },
+    "payload": {
+      "name": "audit",
+      "required": false,
+      "state": "failed",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://github.com/example/widgets/actions/runs/1/job/audit"
+    }
+  },
+  {
+    "source": "vcs",
+    "kind": "change-check",
+    "labels": {
+      "significance": "attention"
+    },
+    "payload": {
+      "name": "neutral-check",
+      "required": false,
+      "state": "passed",
+      "status": "completed",
+      "conclusion": "neutral",
+      "url": "https://github.com/example/widgets/actions/runs/1/job/neutral-check"
+    }
+  },
+  {
+    "source": "pipeline",
+    "kind": "planner-surface-queued",
+    "payload": {
+      "kind": "check-failed",
+      "message": "check 'audit' failed on https://github.com/example/widgets/pull/42; log: https://github.com/example/widgets/actions/runs/1/job/audit. Nothing is held, failed or retried for it.",
+      "source": "proposal",
+      "blocking": false
+    }
+  },
+  {
+    "source": "pipeline",
+    "kind": "planner-surface-queued",
+    "payload": {
+      "kind": "release-wait",
+      "message": "waiting for widgets\n  held by https://github.com/example/widgets/pull/43: its required checks passed and it has not been merged",
+      "source": "proposal",
+      "blocking": false
+    }
+  }
+]

@@ -818,7 +818,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(14));
+    assert_eq!(body["timeline_schema_version"], json!(15));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -5035,7 +5035,7 @@ fn a_notes_turn_is_served_where_the_record_names_one_and_nowhere_else() {
         &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(14));
+    assert_eq!(timeline["timeline_schema_version"], json!(15));
     // Every appended record is stamped at one instant, after everything the
     // live run wrote, so they are its last four edits in the order appended.
     let appended: Vec<Value> = events_on(&timeline)
@@ -5989,9 +5989,18 @@ fn invalid_remote_check_metadata_is_omitted() {
             .find(|check| check["name"] == "published-smoke")
             .expect("the check remains visible even without optional metadata");
         assert_eq!(check["status"], json!("completed"));
+        let timeline = timeline_under(&serving, None);
+        let reviews = review_events(&timeline, "change-check");
+        let review = reviews
+            .iter()
+            .find(|event| event["review"]["name"] == "published-smoke")
+            .expect("malformed URL check remains on the timeline");
+        assert!(review["review"]["url"].is_null(), "{review}");
         for key in ["conclusion", "url", "started_at", "completed_at"] {
             if key == "conclusion" && !invalid_conclusion {
                 assert_eq!(check[key], json!("failure"));
+            } else if key == "url" {
+                assert!(check[key].is_null(), "{check}");
             } else {
                 assert!(
                     check.get(key).is_none(),
@@ -6034,7 +6043,7 @@ fn the_checks_a_host_observed_on_a_publication_are_served_with_their_logs() {
     );
     assert_eq!(checks[1]["started_at"], json!("2026-08-07T12:00:10Z"));
     assert_eq!(checks[1]["completed_at"], json!("2026-08-07T12:00:12Z"));
-    assert!(checks[0].get("url").is_none());
+    assert!(checks[0]["url"].is_null());
     assert!(checks[0].get("started_at").is_none());
     let log = checks[1]["artifact_id"].as_str().expect("the check's log");
     let failed = verification["records"]
@@ -6680,7 +6689,7 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
         ),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(14));
+    assert_eq!(timeline["timeline_schema_version"], json!(15));
     let drafted = review_events(&timeline, "change-drafted");
     assert_eq!(drafted.len(), 1, "{timeline}");
     assert_eq!(
@@ -21662,4 +21671,148 @@ fn a_response_is_gzip_encoded_exactly_when_the_request_takes_gzip() {
     assert_eq!(retired.status, 204);
     assert_eq!(retired.header("content-encoding"), None);
     assert!(retired.body.is_empty(), "{:?}", retired.body);
+}
+
+#[test]
+fn check_visibility_records_reach_every_event_reading_and_the_node_checks() {
+    let records: Vec<Value> = serde_json::from_str(include_str!(
+        "../../apps/dag-ui-e2e/fixtures/check-visibility.json"
+    ))
+    .expect("the shared browser/API fixture");
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+        for record in &records {
+            let mut labels = json!({"run_id": fixture_run::RUN_ID, "node": fixture_run::NODE_ID});
+            if record["kind"] == "change-check" {
+                labels["significance"] = json!("attention");
+            }
+            fixture_run::append_relayed(
+                &dir,
+                record["source"].as_str().unwrap(),
+                record["kind"].as_str().unwrap(),
+                labels,
+                record["payload"].clone(),
+            );
+        }
+    });
+    let base = format!("/api/v2/runs/{}", fixture_run::RUN_ID);
+    for query in [
+        String::new(),
+        format!(
+            "&filter={}",
+            urlencode(r#"{"include":[{"significance":"attention"}]}"#)
+        ),
+    ] {
+        for scope in [
+            "scope=run".to_owned(),
+            format!("scope=node&node={}", fixture_run::NODE_ID),
+        ] {
+            let response = http::get(serving.address, &format!("{base}/timeline?{scope}{query}"));
+            assert_eq!(response.status, 200, "{}", response.body);
+            let events = events_on(&response.json());
+            for record in records
+                .iter()
+                .filter(|record| record["kind"] == "change-check")
+            {
+                let event = events
+                    .iter()
+                    .find(|event| event["review"]["name"] == record["payload"]["name"])
+                    .unwrap_or_else(|| panic!("missing check: {events:?}"));
+                assert_eq!(
+                    event["review"]["requirement"],
+                    json!(onepipeline::vocabulary::requirement_label(
+                        record["payload"]["required"].as_bool().unwrap()
+                    ))
+                );
+                assert_eq!(event["review"]["url"], record["payload"]["url"]);
+            }
+            if query.is_empty() {
+                for record in records
+                    .iter()
+                    .filter(|record| record["kind"] == "planner-surface-queued")
+                {
+                    assert!(
+                        events.iter().any(
+                            |event| event["surface"]["message"] == record["payload"]["message"]
+                        ),
+                        "{events:?}"
+                    );
+                }
+            }
+        }
+    }
+    let only_attention = urlencode(r#"{"include":[{"significance":"attention"}]}"#);
+    let next = http::post(
+        serving.address,
+        &format!("{base}/channel/next?filter={only_attention}"),
+        "",
+    );
+    assert_eq!(next.status, 200, "{}", next.body);
+    let next = next.json();
+    let events = next["events"].as_array().expect("attention events");
+    for record in records
+        .iter()
+        .filter(|record| record["kind"] == "change-check")
+    {
+        assert!(
+            events
+                .iter()
+                .any(|event| event["payload"] == record["payload"]
+                    && event["labels"]["significance"] == "attention"),
+            "{next}"
+        );
+    }
+    let mut stream = http::stream(
+        serving.address,
+        &format!(
+            "/api/v2/events?run_id={}&filter={only_attention}",
+            fixture_run::RUN_ID
+        ),
+        None,
+    );
+    assert_eq!(stream.status, 200);
+    assert_eq!(stream.next_frame().expect("snapshot").event, "snapshot");
+    fixture_run::append_relayed(
+        &serving.run_dir(fixture_run::RUN_ID),
+        "vcs",
+        "change-check",
+        json!({"run_id": fixture_run::RUN_ID, "node": fixture_run::NODE_ID, "significance": "attention"}),
+        records[3]["payload"].clone(),
+    );
+    loop {
+        let frame = stream
+            .next_frame()
+            .expect("attention movement is announced");
+        if frame.event == "run.changed" {
+            break;
+        }
+    }
+    let detail = http::get(serving.address, &base).json();
+    let checks = detail["node_details"][fixture_run::NODE_ID]["verification"]["checks"]
+        .as_array()
+        .expect("checks");
+    for record in records
+        .iter()
+        .filter(|record| record["kind"] == "change-check")
+    {
+        let check = checks
+            .iter()
+            .find(|check| check["name"] == record["payload"]["name"])
+            .expect("recorded check");
+        assert_eq!(
+            check["requirement"],
+            json!(onepipeline::vocabulary::requirement_label(
+                record["payload"]["required"].as_bool().unwrap()
+            ))
+        );
+        assert_eq!(check["url"], record["payload"]["url"]);
+    }
+    let refused = http::get(
+        serving.address,
+        &format!(
+            "{base}/timeline?scope=run&filter={}",
+            urlencode(r#"{"include":[{"significance":"not-a-significance"}]}"#)
+        ),
+    );
+    assert_eq!(refused.status, 422, "{}", refused.body);
 }

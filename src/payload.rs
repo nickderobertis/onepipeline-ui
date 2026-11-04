@@ -395,7 +395,11 @@ pub mod vcs {
     impl ReviewRecord {
         /// Every field name this record's `review` can carry.
         pub fn fields(&self) -> impl Iterator<Item = &'static str> {
-            let state: &'static [&'static str] = if self.state { &["state"] } else { &[] };
+            let state: &'static [&'static str] = if self.state {
+                &["state", "requirement", "url"]
+            } else {
+                &[]
+            };
             self.words
                 .iter()
                 .chain(self.lists)
@@ -2926,6 +2930,13 @@ fn observed_checks(events: &[&Envelope]) -> Vec<Value> {
                 .and_then(Value::as_bool)
                 .unwrap_or(false)),
         );
+        check.insert(
+            "requirement".into(),
+            json!(onepipeline::vocabulary::requirement_label(
+                check["required"].as_bool().unwrap_or(false)
+            )),
+        );
+        check.insert("url".into(), Value::Null);
         if let Some(from) = event.payload.get("from_status").and_then(Value::as_str) {
             check.insert("from_state".into(), json!(from));
         }
@@ -6239,6 +6250,24 @@ fn review_facts(event: &Envelope) -> Option<Value> {
         }
     }
     if read.state {
+        let required = event
+            .payload
+            .get("required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        record.insert(
+            "requirement".into(),
+            json!(onepipeline::vocabulary::requirement_label(required)),
+        );
+        record.insert(
+            "url".into(),
+            event
+                .payload
+                .get("url")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty() && url::Url::parse(value).is_ok())
+                .map_or(Value::Null, |value| json!(value)),
+        );
         record.insert(
             "state".into(),
             json!(vcs::check_state(&event.payload).as_str()),

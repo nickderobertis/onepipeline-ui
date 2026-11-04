@@ -351,7 +351,7 @@ export const TELEMETRY_SCHEMA_VERSION = 27;
  * points at, and a `turn-activity` event `tool`, where it sits in its
  * conversation. The browser shows the line and never derives its own.
  */
-export const TIMELINE_SCHEMA_VERSION = 14;
+export const TIMELINE_SCHEMA_VERSION = 15;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -1223,7 +1223,8 @@ const verificationCheckSchema = openObject({
   started_at: timestamp.optional(),
   completed_at: timestamp.optional(),
   required: z.boolean(),
-  url: z.string().url().optional(),
+  requirement: z.string().optional(),
+  url: z.string().url().nullable().optional(),
 });
 const verificationRecordSchema = openObject({
   ok: z.boolean(),
@@ -1456,6 +1457,8 @@ export const timelineSurfaceSchema = openObject({
 export const timelineReviewSchema = openObject({
   name: z.string().min(1).optional(),
   required: z.boolean().optional(),
+  requirement: z.string().optional(),
+  url: z.string().nullable().optional(),
   state: z.string().min(1).optional(),
   kind: z.string().min(1).optional(),
   base: z.string().min(1).optional(),

@@ -1207,7 +1207,7 @@ fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
     // nothing about.
-    assert_eq!(TIMELINE_SCHEMA_VERSION, 14);
+    assert_eq!(TIMELINE_SCHEMA_VERSION, 15);
     assert!(
         contract_text().contains(&format!("Timeline schema {TIMELINE_SCHEMA_VERSION}")),
         "docs/contract.md names no timeline schema {TIMELINE_SCHEMA_VERSION}"
@@ -1242,6 +1242,7 @@ fn the_fields_and_review_kinds_a_timeline_schema_added_are_the_ones_the_contract
         );
     }
     let review = timeline_schema_paragraph(11);
+    let check_labels = timeline_schema_paragraph(15);
     for record in onepipeline_ui::payload::vcs::REVIEW_RECORDS {
         let kind = record.kind;
         assert!(
@@ -1250,7 +1251,12 @@ fn the_fields_and_review_kinds_a_timeline_schema_added_are_the_ones_the_contract
         );
         for field in record.fields() {
             assert!(
-                review.contains(&format!("`{field}`")),
+                (if record.kind == "change-check" && matches!(field, "requirement" | "url") {
+                    &check_labels
+                } else {
+                    &review
+                })
+                .contains(&format!("`{field}`")),
                 "docs/contract.md's timeline schema 11 says no `{kind}` carries `{field}`"
             );
         }
