@@ -306,7 +306,12 @@ fn a_change_to_the_npm_launcher_selects_its_journeys_and_not_the_server_journeys
 
 #[test]
 fn a_change_to_what_the_judged_tier_reads_selects_it_and_nothing_else_does() {
-    for path in ["llmlint.yml", "oneharness.toml", "scripts/nx.sh"] {
+    for path in [
+        "llmlint.yml",
+        "oneharness.toml",
+        "scripts/nx.sh",
+        "src/lib.rs",
+    ] {
         let workspace = Workspace::new();
         let tasks = workspace.change(path).on_push();
         assert!(
@@ -314,7 +319,7 @@ fn a_change_to_what_the_judged_tier_reads_selects_it_and_nothing_else_does() {
             "a change to {path} does not run the judged tier's journeys: {tasks:?}"
         );
     }
-    for path in [".github/workflows/ci.yml", "src/lib.rs"] {
+    for path in [".github/workflows/ci.yml"] {
         let workspace = Workspace::new();
         let tasks = workspace.change(path).on_push();
         assert!(
@@ -327,7 +332,11 @@ fn a_change_to_what_the_judged_tier_reads_selects_it_and_nothing_else_does() {
 
 #[test]
 fn a_change_to_what_the_toolchain_journeys_read_selects_them_and_nothing_else_does() {
-    for path in ["scripts/deps-audit.mjs", "rust-toolchain.toml"] {
+    for path in [
+        "scripts/deps-audit.mjs",
+        "rust-toolchain.toml",
+        "src/lib.rs",
+    ] {
         let workspace = Workspace::new();
         let tasks = workspace.change(path).on_push();
         assert!(
@@ -335,11 +344,7 @@ fn a_change_to_what_the_toolchain_journeys_read_selects_them_and_nothing_else_do
             "a change to {path} does not run the deps-audit toolchain journeys: {tasks:?}"
         );
     }
-    for path in [
-        ".github/workflows/ci.yml",
-        "src/lib.rs",
-        "apps/dag-ui/package.json",
-    ] {
+    for path in [".github/workflows/ci.yml", "apps/dag-ui/package.json"] {
         let workspace = Workspace::new();
         let tasks = workspace.change(path).on_push();
         assert!(

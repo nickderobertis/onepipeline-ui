@@ -3,6 +3,21 @@
   "defaultBase": "main",
   "cacheDirectory": ".nx/cache",
   "namedInputs": {
+    "cargoManifestSelection": [
+      "{workspaceRoot}/**/Cargo.toml",
+      "{workspaceRoot}/**/Cargo.lock"
+    ],
+    "npmManifestSelection": [
+      "{workspaceRoot}/**/package.json",
+      "{workspaceRoot}/**/bun.lock",
+      "{workspaceRoot}/**/package-lock.json",
+      "{workspaceRoot}/**/pnpm-lock.yaml"
+    ],
+    "pythonManifestSelection": [
+      "{workspaceRoot}/**/pyproject.toml",
+      "{workspaceRoot}/**/uv.lock"
+    ],
+    "filesManifestSelection": ["{workspaceRoot}/.github/nx-version-files"],
     "sharedGlobals": [
       "{workspaceRoot}/nx.json",
       "npmVersionFree",

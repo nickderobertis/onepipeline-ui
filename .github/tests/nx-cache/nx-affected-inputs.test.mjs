@@ -3,6 +3,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { stripVTControlCharacters } from "node:util";
+import { runInNewContext } from "node:vm";
 import { taskHashes, workspaceFixture } from "./nx-fixture.mjs";
 
 const recordedBase = "d978e887c28c654761cf94c6a59c7a36c269d9ba";
@@ -99,6 +101,30 @@ test("semantic manifest inputs retain the recorded base's real Nx affected selec
           ),
       ],
     ];
+    for (const file of git(cwd, "ls-files")
+      .split("\n")
+      .filter((file) => file.endsWith("/package.json"))) {
+      cases.push([
+        file,
+        (text) => {
+          const manifest = JSON.parse(text);
+          const dependencies =
+            manifest.dependencies ??
+            manifest.devDependencies ??
+            manifest.optionalDependencies;
+          if (dependencies && Object.keys(dependencies).length) {
+            const name = Object.keys(dependencies)[0];
+            const current = dependencies[name];
+            dependencies[name] = current.startsWith("workspace:")
+              ? "workspace:^"
+              : current.startsWith("^")
+                ? current.slice(1)
+                : `^${current}`;
+          } else manifest.dependencies = { "cache-selection-probe": "^1.0.0" };
+          return `${JSON.stringify(manifest, null, 2)}\n`;
+        },
+      ]);
+    }
     for (const [file, mutate] of cases) {
       const selections = [];
       for (const root of [base, cwd]) {
@@ -121,12 +147,13 @@ test("semantic manifest inputs retain the recorded base's real Nx affected selec
         [],
         `${file} lost affected projects`,
       );
-      assert.ok(
-        selections[0].includes(
-          file.startsWith("Cargo") ? "onepipeline-ui-e2e" : "onepipeline-ui",
-        ),
-        `${file} base selection includes a manifest consumer`,
-      );
+      if (!file.includes("/"))
+        assert.ok(
+          selections[0].includes(
+            file.startsWith("Cargo") ? "onepipeline-ui-e2e" : "onepipeline-ui",
+          ),
+          `${file} base selection includes a manifest consumer`,
+        );
     }
     const implementationBase = commit(cwd);
     const sourcePath = join(cwd, "src/lib.rs");
@@ -144,14 +171,58 @@ test("semantic manifest inputs retain the recorded base's real Nx affected selec
         !implementationSelection.includes(registry),
         `${registry} was selected by an unrelated API source edit`,
       );
+    const journeyBase = commit(cwd);
+    const journeyPath = join(cwd, "tests/e2e/server.rs");
+    writeFileSync(
+      journeyPath,
+      `${readFileSync(journeyPath, "utf8")}\n// Journey-only selection regression.\n`,
+    );
+    commit(cwd);
+    const journeySelection = affected(cwd, journeyBase);
+    assert.ok(journeySelection.includes("onepipeline-ui-e2e"));
+    for (const unrelated of [
+      "onepipeline-ui-repo-tooling",
+      "onepipeline-ui-baseline",
+      "onepipeline-ui-cost",
+      "onepipeline-ui-linked-report",
+      "onepipeline-ui-judged-tier",
+      "onepipeline-ui-deps-audit-toolchain",
+    ])
+      assert.ok(
+        !journeySelection.includes(unrelated),
+        `a journey-only edit selected ${unrelated}`,
+      );
     const projects = inspect(cwd);
+    const cached = taskHashes(cwd);
     const validate = () => {
       for (const [name, project] of Object.entries(projects)) {
-        if (name !== "onepipeline-ui" && project.consumesManifests)
-          assert.ok(
-            project.dependencies.includes("onepipeline-ui"),
-            `${name} lost its root manifest owner edge`,
+        if (project.consumesManifests) {
+          const config = JSON.parse(
+            readFileSync(join(cwd, project.root, "project.json"), "utf8"),
           );
+          const marker = config.targets["manifest-inputs-for-affected"];
+          assert.equal(
+            marker?.executor,
+            "nx:noop",
+            `${name} lost its manifest selection target`,
+          );
+          assert.equal(marker.cache, false);
+          assert.deepEqual(marker.outputs, []);
+          assert.equal(marker.dependsOn, undefined);
+          for (const [id, task] of Object.entries(cached)) {
+            if (!id.startsWith(`${name}:`)) continue;
+            for (const command of task.inputs.runtime) {
+              const ecosystem = command.match(
+                /nx-version-free-inputs\.mjs --ecosystem (cargo|npm|python|files)\b/,
+              )?.[1];
+              if (ecosystem)
+                assert.ok(
+                  marker.inputs.includes(`${ecosystem}ManifestSelection`),
+                  `${name} lost ${ecosystem} manifest selection`,
+                );
+            }
+          }
+        }
         const visit = (next, trail) => {
           assert.ok(
             !trail.includes(next),
@@ -164,14 +235,27 @@ test("semantic manifest inputs retain the recorded base's real Nx affected selec
       }
     };
     validate();
-    const reader = projects["onepipeline-ui-e2e"];
-    const dependencies = reader.dependencies;
-    reader.dependencies = dependencies.filter(
-      (name) => name !== "onepipeline-ui",
+    const configPath = join(cwd, "tests/tiers/e2e/project.json");
+    const configText = readFileSync(configPath, "utf8");
+    const config = JSON.parse(configText);
+    config.targets["manifest-inputs-for-affected"].inputs = config.targets[
+      "manifest-inputs-for-affected"
+    ].inputs.filter((input) => input !== "cargoManifestSelection");
+    writeFileSync(configPath, JSON.stringify(config));
+    assert.throws(validate, /lost cargo manifest selection/);
+    const negativeBase = commit(cwd);
+    const manifestPath = join(cwd, "Cargo.toml");
+    writeFileSync(
+      manifestPath,
+      cases[0][1](readFileSync(manifestPath, "utf8")),
     );
-    assert.throws(validate, /lost its root manifest owner edge/);
-    reader.dependencies = dependencies;
-    projects["onepipeline-ui"].dependencies.push("onepipeline-ui-e2e");
+    commit(cwd);
+    assert.deepEqual(
+      missingSelections(["onepipeline-ui-e2e"], affected(cwd, negativeBase)),
+      ["onepipeline-ui-e2e"],
+    );
+    writeFileSync(configPath, configText);
+    projects["onepipeline-ui"].dependencies.push("onepipeline-ui");
     assert.throws(validate, /project cycle/);
   } finally {
     rmSync(base, { recursive: true, force: true });
@@ -186,10 +270,17 @@ test("a real affected cached test replays after an actual release version edit",
     const id = "timeline-categories:test";
     const before = taskHashes(cwd, [id])[id].hash;
     const run = () =>
-      execFileSync(
-        process.execPath,
-        ["node_modules/nx/dist/bin/nx.js", "run", id, "--output-style=static"],
-        { cwd, env, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+      stripVTControlCharacters(
+        execFileSync(
+          process.execPath,
+          [
+            "node_modules/nx/dist/bin/nx.js",
+            "run",
+            id,
+            "--output-style=static",
+          ],
+          { cwd, env, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+        ),
       );
     assert.match(run(), /Successfully ran target test/);
     const current = readFileSync(join(cwd, "Cargo.toml"), "utf8").match(
@@ -211,6 +302,25 @@ test("a real affected cached test replays after an actual release version edit",
     commit(cwd);
     assert.ok(affected(cwd, start).includes("timeline-categories"));
     assert.equal(taskHashes(cwd, [id])[id].hash, before);
+    for (const job of ["lint", "test-linux", "test-windows", "test-macos"]) {
+      const plan = execFileSync(
+        "bash",
+        [
+          "scripts/ci-job.sh",
+          job,
+          "--plan",
+          ...(job === "test-linux" ? ["--tier", "broader"] : []),
+        ],
+        {
+          cwd,
+          env: { ...env, ONEPIPELINE_UI_NX_BASE_SHA: start },
+          encoding: "utf8",
+          maxBuffer: 16 * 1024 * 1024,
+        },
+      );
+      assert.doesNotMatch(plan, /:manifest-inputs-for-affected/);
+    }
+
     assert.match(run(), /read the output from the cache/);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -235,4 +345,34 @@ test("manifest graph inspection rejects invalid workspaces and recovers", () => 
     );
   }
   assert.ok(inspect(".")["onepipeline-ui"]);
+});
+
+test("affected file patterns follow the copied digest's manifest inventory", () => {
+  const source = readFileSync("scripts/nx-version-free-inputs.mjs", "utf8");
+  const declaration = source.match(
+    /const selectedNames = (\{[\s\S]*?\})\[ecosystem\];/,
+  );
+  assert.ok(
+    declaration,
+    "the copied manifest inventory must remain inspectable",
+  );
+  const inventory = runInNewContext(
+    `(${declaration[1]})`,
+    {},
+    { timeout: 1000 },
+  );
+  const nx = JSON.parse(readFileSync("nx.json", "utf8"));
+  for (const [ecosystem, names] of Object.entries(inventory))
+    assert.deepEqual(
+      nx.namedInputs[`${ecosystem}ManifestSelection`],
+      Array.from(names, (name) => `{workspaceRoot}/**/${name}`),
+    );
+  const literals = readFileSync(".github/nx-version-files", "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+  assert.deepEqual(nx.namedInputs.filesManifestSelection, [
+    "{workspaceRoot}/.github/nx-version-files",
+    ...literals.map((file) => `{workspaceRoot}/${file}`),
+  ]);
 });

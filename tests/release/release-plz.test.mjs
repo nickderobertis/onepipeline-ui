@@ -34,6 +34,39 @@ const job = workflow.jobs["release-plz"];
 // can give; it builds two releases of a real crate, which a scratch one is not.
 const SEMVER_STEP = "Read the public surface against the baseline";
 
+// Cache lifecycle journeys run these other steps with the real sidecar and Nx.
+// This suite owns the release commands; unknown steps must be classified here.
+const releaseSteps = new Set([
+  "Is release automation switched on",
+  "Swatinem/rust-cache@v2",
+  "taiki-e/install-action@v2",
+  "Tag and publish a merged version bump",
+  "Use the latest release tag as the version baseline",
+  SEMVER_STEP,
+  "Open or update the release PR",
+  "Auto-merge the release PR when the gate is green",
+]);
+const cacheSteps = new Set([
+  "actions/checkout@v4",
+  "Decide cache trust and configure the sidecar",
+  "op-nx/github-cache/start-cache-server@91839c24885842cac86567c30e23b37fb85f7e33",
+  "Wait for the cache recording proxy",
+  "Promote the merged pull request's cache entries",
+  "actions/upload-artifact@v4",
+  "cancel:nx-cache",
+]);
+const stepKey = (step) => step.name ?? step.uses ?? `cancel:${step.cancel}`;
+function releaseOwnedSteps(steps) {
+  return steps.filter((step) => {
+    const key = stepKey(step);
+    assert.ok(
+      releaseSteps.has(key) || cacheSteps.has(key),
+      `Unclassified workflow step: ${key}`,
+    );
+    return releaseSteps.has(key);
+  });
+}
+
 const dirs = [];
 let forge;
 before(async () => {
@@ -105,9 +138,11 @@ function runJob({ dir, repo }, { token, headCommit }) {
   const steps = {};
   const ran = [];
   const output = [];
-  for (const step of job.steps) {
+  for (const step of releaseOwnedSteps(job.steps)) {
     const context = {
       github: {
+        event_name: "push",
+        ref: "refs/heads/main",
         event: { head_commit: { message: headCommit } },
         repository: "nickderobertis/scratch-crate",
       },
@@ -183,12 +218,23 @@ test("release-plz is the job's one job, and its guard decides as the old guard j
     undefined,
     "the guard runs before anything is checked out",
   );
-  for (const step of job.steps.slice(1))
+  for (const step of releaseOwnedSteps(job.steps).slice(1)) {
+    assert.match(String(step.if), /github\.event_name == 'push'/);
+    assert.match(String(step.if), /github\.ref == 'refs\/heads\/main'/);
     assert.match(
       String(step.if),
       /steps\.guard\.outputs\.enabled == 'true'/,
       step.name ?? step.uses,
     );
+  }
+  assert.throws(
+    () =>
+      releaseOwnedSteps([
+        ...job.steps,
+        { name: "An unguarded release command", run: "true" },
+      ]),
+    /Unclassified workflow step/,
+  );
 
   // The three cases the old `guard` job decided: no secret, an empty one, and
   // one that is set.

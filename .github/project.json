@@ -1,7 +1,6 @@
 {
   "name": "github-workflows",
   "projectType": "application",
-  "implicitDependencies": ["onepipeline-ui"],
   "tags": ["scope:tooling", "type:test", "lang:javascript"],
   "namedInputs": {
     "workflowPolicy": [
@@ -43,6 +42,13 @@
     ]
   },
   "targets": {
+    "manifest-inputs-for-affected": {
+      "//": "Carries only file-based affected edges for semantic manifest inputs; CI never runs this uncached no-op.",
+      "executor": "nx:noop",
+      "cache": false,
+      "inputs": ["cargoManifestSelection", "npmManifestSelection"],
+      "outputs": []
+    },
     "bootstrap": {
       "command": "bash scripts/workspace-install.sh"
     },

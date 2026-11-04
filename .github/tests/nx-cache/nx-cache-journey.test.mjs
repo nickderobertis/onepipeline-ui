@@ -55,8 +55,13 @@ test("workflow cache steps run the real task and sidecar, with untrusted PRs rea
           identity === "maintainer" ? "" : "1",
         );
         await session.nx();
-        if (identity === "maintainer")
+        if (identity === "maintainer") {
+          await session.nx([
+            "run",
+            "timeline-categories:manifest-inputs-for-affected",
+          ]);
           await session.nx(["run", "dag-ui:build"]);
+        }
       } finally {
         await session.close();
       }
