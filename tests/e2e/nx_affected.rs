@@ -319,7 +319,8 @@ fn a_change_to_what_the_judged_tier_reads_selects_it_and_nothing_else_does() {
             "a change to {path} does not run the judged tier's journeys: {tasks:?}"
         );
     }
-    for path in [".github/workflows/ci.yml"] {
+    {
+        let path = ".github/workflows/ci.yml";
         let workspace = Workspace::new();
         let tasks = workspace.change(path).on_push();
         assert!(

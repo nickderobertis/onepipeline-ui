@@ -22,7 +22,7 @@ fn stderr(output: &Output) -> String {
 /// model it imports. Replaying the old bundle would reject the server's new
 /// timeline schema even though both source trees agreed on it.
 #[test]
-fn changing_the_imported_model_invalidates_the_browser_bundle_cache() {
+fn changing_the_imported_model_rebuilds_the_uncached_browser_bundle() {
     use std::os::unix::fs::symlink;
 
     let fixture = TempDir::new().expect("isolated workspace");
