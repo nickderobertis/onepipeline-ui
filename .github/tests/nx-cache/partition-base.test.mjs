@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { assertPartition } from "./partition.mjs";
+import { assertPartition } from "./partition-base.mjs";
 
 const config = readFileSync(
   new URL("../../../.config/nextest.toml", import.meta.url),
