@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.67.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.66.1...v0.67.0) - 2026-11-05
+
+### Added
+
+- mark each check required or not and show attention events ([#615](https://github.com/nickderobertis/onepipeline-ui/pull/615))
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine whose exports carry every file ([#621](https://github.com/nickderobertis/onepipeline-ui/pull/621))
+
 ## [0.66.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.66.0...v0.66.1) - 2026-11-04
 
 ### Fixed
