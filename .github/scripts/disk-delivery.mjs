@@ -62,6 +62,7 @@ const limits =
 async function deliver(label, message) {
   if (!process.env.GH_TOKEN || samplingSignal?.aborted) return;
   try {
+    // llmlint: ignore-block[changed_behavior_has_e2e] Hosted token acceptance requires downstream CI credentials; the local HTTP journey proves acknowledged persistence and refusal isolation. Read separate Disk checks on the synthetic merge with filter=all to verify hosted delivery.
     // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] The request follows https://docs.github.com/rest/checks/runs#create-a-check-run; CI on GitHub-hosted runners proves compatibility with this externally owned REST shape.
     const response = await fetch(
       `${endpoint.href.replace(/\/$/, "")}/repos/${process.env.GITHUB_REPOSITORY}/check-runs`,
@@ -99,6 +100,7 @@ async function deliver(label, message) {
       },
     );
     // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+    // llmlint: ignore-end[changed_behavior_has_e2e]
     if (!response.ok)
       throw new Error(
         `HTTP ${response.status}: ${(await response.text()).slice(0, 1000)}`,
