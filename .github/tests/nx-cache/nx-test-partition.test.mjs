@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { partitionBase } from "./partition-base.mjs";
 
 const selected = (listing) =>
   Object.entries(listing["rust-suites"])
@@ -24,9 +25,7 @@ test("the split tiers run exactly the tests the original targets ran", () => {
       maxBuffer: 16 * 1024 * 1024,
     });
   try {
-    const base = execFileSync("git", ["merge-base", "HEAD", "origin/main"], {
-      encoding: "utf8",
-    }).trim();
+    const base = partitionBase();
     const oldConfig = join(scratch, "base-nextest.toml");
     const oldConfigText = execFileSync(
       "git",
