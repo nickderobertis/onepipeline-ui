@@ -17111,6 +17111,104 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this read journey uses the tier's already provisioned engine and local files, with no additional prerequisite.
+/// The engine sanitizes a public plan-store write-back before this reader serves
+/// the settled run. No agent or forge is needed for a human approval.
+#[cfg(unix)]
+#[test]
+fn a_sanitized_settlement_is_read_through_the_status_and_node_routes() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let graph = write_node_scope_graph(&dir);
+    let store = fixture_run::configure_local_md_store(&dir);
+    let approval = create_store_task(
+        &dir,
+        "Approve the change",
+        onetaskgraph_core::Body::plain("Approve the sample change."),
+        &[
+            ("onepipeline.id", json!(fixture_run::APPROVAL_NODE_ID)),
+            ("onepipeline.kind", json!("human")),
+        ],
+        &[],
+    );
+    let configuration = dir.join("onetaskgraph.yaml");
+    let config = fs::read_to_string(&configuration).expect("store configuration");
+    fs::write(
+        &configuration,
+        format!("{}\nwrite_policy:\n  sanitize_command: [onevcs, boundary, sanitize]\n  replacements:\n    - term: velvetquasar\n      with: sample\n", config.replace("plugin: local-md", "visibility: public\n    plugin: local-md")),
+    )
+    .expect("a public destination");
+    let engine = |arguments: &[&str]| provisioned_onepipeline(&root, &dir, &graph, arguments);
+    let run = started_and_let_go(&engine(&[
+        "start",
+        &format!(
+            "{}:{}",
+            fixture_run::LOCAL_MD_SOURCE,
+            fixture_run::LOCAL_MD_PROJECT
+        ),
+        "--detach",
+    ]));
+    // A person edits the board while approval waits. The settlement must screen
+    // the existing body as well as the metadata it is about to add.
+    let approval = approval.to_string();
+    let native = approval.split_once(':').expect("a source-qualified task").1;
+    let path = store.join("tasks").join(format!("{native}.md"));
+    let before = fs::read_to_string(&path).expect("the stored task");
+    let poisoned = before.replace(
+        "Approve the sample change.",
+        "Approve the velvetquasar change.",
+    );
+    assert_ne!(poisoned, before, "the edit must reach the task body");
+    fs::write(&path, &poisoned).expect("the board edit");
+    let serving = Serving::start_in_as_with_env(workspace, fixture_run::SESSION, &[]);
+    let detail_path = format!("/api/v2/runs/{run}");
+    let premature = http::post(
+        serving.address,
+        &format!("{detail_path}/attest"),
+        &json!({"reference": "missing-node"}).to_string(),
+    );
+    assert_eq!(premature.status, 422, "{}", premature.body);
+    assert_eq!(
+        http::get(serving.address, &detail_path).json()["graph"]["node_status"]
+            [fixture_run::APPROVAL_NODE_ID],
+        json!("waiting")
+    );
+    engine(&["attest", &run, fixture_run::APPROVAL_NODE_ID]);
+    started_and_let_go(&engine(&["adopt", &run, "--detach"]));
+    let written = fs::read_to_string(&path).expect("the settlement write-back");
+    assert!(written.contains("Approve the sample change."), "{written}");
+    assert!(!written.contains("velvetquasar"), "{written}");
+    assert!(stored_task(&dir, &approval)
+        .metadata
+        .contains_key("onepipeline.settlement"));
+    let detail = http::get(serving.address, &detail_path);
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    assert_eq!(detail.json()["run"]["state"], json!("settled"));
+    assert_eq!(
+        detail.json()["graph"]["node_status"][fixture_run::APPROVAL_NODE_ID],
+        json!("done")
+    );
+    let status = http::get(serving.address, &format!("{detail_path}/status"));
+    assert_eq!(status.status, 200, "{}", status.body);
+    assert_eq!(
+        status.json()["node_status"][fixture_run::APPROVAL_NODE_ID],
+        json!("done")
+    );
+    let results = http::get(serving.address, &format!("{detail_path}/results"));
+    assert_eq!(results.status, 200, "{}", results.body);
+    let results = results.json();
+    let rendered = results["rendered"]
+        .as_str()
+        .expect("the rendered node results");
+    assert!(
+        rendered.contains(fixture_run::APPROVAL_NODE_ID),
+        "{rendered}"
+    );
+    assert!(rendered.contains("done"), "{rendered}");
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 /// The harness stand-in a dispatch here runs: it records the argv it was given
 /// and the prompt it was handed, on one line, and answers as the adapter
 /// expects, so a journey can read back *that* it ran and *what as*.
