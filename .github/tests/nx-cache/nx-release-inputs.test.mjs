@@ -65,6 +65,8 @@ test("real Nx replays release edits except targets whose tests read the version"
         (id) => !intentionallyUncached.has(id),
       ),
       "onepipeline-ui-versions:test-quick",
+      "onepipeline-ui-nx-worker-startup:test",
+      "onepipeline-ui-nx-worker-startup:test-quick",
       "github-workflows-nx-cache:lint",
       "github-workflows-nx-cache:test",
     ]);

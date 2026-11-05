@@ -20,6 +20,7 @@
 /tests/tiers/cost/       @nickderobertis
 /tests/tiers/linked-report/ @nickderobertis
 /tests/tiers/ci-jobs/     @nickderobertis
+/tests/tiers/nx-worker-startup/ @nickderobertis
 /tests/tiers/judged-tier/ @nickderobertis
 /tests/tiers/deps-audit-toolchain/ @nickderobertis
 /tests/tiers/coverage/   @nickderobertis
