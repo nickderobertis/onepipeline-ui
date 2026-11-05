@@ -74,7 +74,12 @@ test("the split tiers run exactly the tests the original targets ran", () => {
     ].sort();
     const versions = list("versions");
     assert.equal(versions.length, 4);
-    const after = [...list("e2e"), ...list("repo-tooling"), ...versions].sort();
+    const after = [
+      ...list("e2e"),
+      ...list("repo-tooling"),
+      ...list("nx-worker-startup"),
+      ...versions,
+    ].sort();
     assert.deepEqual(after, before);
     assert.equal(
       new Set(after).size,
