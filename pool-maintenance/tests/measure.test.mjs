@@ -7,7 +7,7 @@
 // build and prune it. The figure itself is the budget's to judge; these assert
 // the workload, the report's shape and the refusals, never a threshold.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -49,7 +49,7 @@ after(() => {
 
 /** A repository root holding one crate, the real justfile and the real script. */
 function fixture({ feature = true, view = true } = {}) {
-  const root = mkdtempSync(join(tmpdir(), "pool-maintenance-measure-"));
+  const root = mkdtempSync(join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(), "pool-maintenance-measure-"));
   scratch.push(root);
   mkdirSync(join(root, "pool-maintenance"));
   copyFileSync(
@@ -147,7 +147,7 @@ test("the timed pass removes exactly the superseded build and reports itself", (
   assert.ok(ordinary.some((entry) => entry.includes("fixture_unit-")));
   for (const entry of ordinary) {
     assert.ok(kept.has(entry), `the timed pass removed the ordinary ${entry}`);
-    assert.ok(existsSync(join(root, entry)), `${entry} is gone from disk`);
+    assert.ok(existsSync(entry), `${entry} is gone from disk`);
   }
   assert.match(run.stderr, /the timed pass removed \d+ entries, all the alternative build's/);
 });
@@ -172,4 +172,89 @@ test("a build that fails names the step it broke and reports no figure", () => {
   );
   assert.match(run.stderr, /ACTION: fix that error/);
   assert.equal(existsSync(run.result), false);
+});
+
+function execute(command, args, options) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, options);
+    let stderr = "";
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stderr }));
+  });
+}
+
+test("another cargo build in the ordinary target survives the measurement", async () => {
+  const root = fixture();
+  const other = fixture();
+  const target = join(root, "target");
+  const env = { ...process.env, CARGO_TARGET_DIR: target };
+  const build = async (flags) => {
+    const run = await execute("cargo", ["build", "--offline"], {
+      cwd: other, env: { ...env, RUSTFLAGS: flags }, stdio: ["ignore", "ignore", "pipe"],
+    });
+    assert.equal(run.status, 0, run.stderr);
+  };
+  await build("--cfg old_build");
+  // A real superseded build, old enough for the declared maintenance to select.
+  const stamp = spawnSync("find", [join(target, "debug"), "-exec", "touch", "-h", "-t", "200001010000", "{}", "+"]);
+  assert.equal(stamp.status, 0);
+  await build("--cfg current_build");
+  const old = spawnSync("find", [join(target, "debug"), "-mindepth", "2", "-maxdepth", "2"], { encoding: "utf8" }).stdout.trim().split("\n");
+  let running = true;
+  let rounds = 0;
+  const writer = (async () => {
+    while (running) {
+      await build(`--cfg concurrent_${rounds}`);
+      rounds++;
+    }
+  })();
+  let run;
+  try {
+    run = await execute(join(root, "pool-maintenance", "measure.sh"), [], {
+      cwd: root,
+      env: { ...process.env, ONEBUDGETSPEC_RESULT: join(root, "result.json") },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+  } finally {
+    running = false;
+    await writer;
+  }
+  assert.equal(run.status, 0, run.stderr);
+  assert.ok(rounds > 0, "another cargo build completed during the measurement");
+  const report = JSON.parse(readFileSync(join(root, "result.json"), "utf8"));
+  assert.ok(Number.isFinite(report.value));
+  for (const entry of old) assert.ok(existsSync(entry), `measurement removed another build's ${entry}`);
+});
+
+test("a repeated measurement keeps its private tree and refreshes the evidence and report", () => {
+  const root = fixture();
+  const first = measure(root);
+  assert.equal(first.status, 0, first.stderr);
+  const ordinary = lines(root, "after-timed");
+  assert.ok(ordinary.length > 0);
+  const retained = join(root, "target", "pool-maintenance", "target", "retained");
+  writeFileSync(retained, "private build tree survives\n");
+  writeFileSync(first.result, JSON.stringify({ value: -1, detail: "stale" }));
+  writeFileSync(join(root, "target", "pool-maintenance", "removed"), "stale\n");
+  const second = measure(root);
+  assert.equal(second.status, 0, second.stderr);
+  const report = JSON.parse(readFileSync(second.result, "utf8"));
+  assert.ok(Number.isFinite(report.value) && report.value >= 0);
+  assert.doesNotMatch(report.detail, /stale/);
+  assert.equal(readFileSync(retained, "utf8"), "private build tree survives\n");
+  assert.deepEqual(lines(root, "removed"), lines(root, "alternative"));
+  assert.ok(lines(root, "removed").length > 0);
+  for (const entry of ordinary) assert.ok(existsSync(entry), `ordinary build disappeared: ${entry}`);
+});
+
+test("the maintenance target argument is a literal path", () => {
+  const root = fixture();
+  const marker = join(root, "executed");
+  const target = `$(touch ${marker})`;
+  const run = spawnSync("just", ["pool-maintenance", target], {
+    cwd: root, encoding: "utf8",
+  });
+  assert.equal(existsSync(marker), false, "a directory argument executed shell code");
+  assert.equal(run.status, 0, run.stderr);
 });

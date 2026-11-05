@@ -509,6 +509,10 @@ exec sleep 60`,
     );
     assert.equal(logFailure.status, 17);
     assert.match(logFailure.stderr, /Disk log copy failed/);
+    const previousSamplerLog = await readFile(
+      join(root, "disk-sampler-lint.log"),
+      "utf8",
+    );
     const watchStart = acknowledged.length;
     ({ runner, stepPid } = await startRunner(
       'node .github/scripts/disk-delivery.mjs start "$PPID"\nexec sleep 60',
@@ -531,16 +535,23 @@ exec sleep 60`,
         return true;
       }
     });
-    assert.match(
-      await readFile(join(root, "disk-sampler-lint.log"), "utf8"),
-      /Disk sampler stopped:.*EISDIR/,
-    );
+    const samplerLog = (
+      await readFile(join(root, "disk-sampler-lint.log"), "utf8")
+    ).slice(previousSamplerLog.length);
+    assert.match(samplerLog, /Disk sampler stopped:.*EISDIR/);
+    assert.equal(samplerLog.match(/Disk sampler stopped:/g)?.length, 1);
+    assert.doesNotMatch(samplerLog, /Disk diagnostic skipped:.*EISDIR/);
     await killRunner(runner, stepPid);
     runner = undefined;
     await rm(state, { recursive: true });
     const stopLog = await capture(
       "node .github/scripts/disk-delivery.mjs stop",
       env,
+    );
+    assert.equal(
+      stopLog.status,
+      0,
+      "a sampler failure preserves the stop verdict",
     );
     assert.match(stopLog.stderr, /Disk sampler stopped/);
     disposition = "ok";

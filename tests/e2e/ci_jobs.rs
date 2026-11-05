@@ -493,10 +493,7 @@ fn the_broader_tier_sweeps_every_project_with_the_budgets() {
     );
     assert!(run.ran().is_empty(), "--plan ran tasks: {:?}", run.ran());
 
-    // The pool-maintenance measurement deletes builds from every profile under
-    // `target` while the sweep's other tasks build there: run beside the release
-    // rehearsal it deleted an rlib cargo had judged fresh, and the wheel failed
-    // to link. Nx's own plan of the task must hold it to running alone.
+    // The measurement owns its build tree, so Nx may run it beside other builds.
     let graph = Command::new("bash")
         .args([
             "scripts/nx.sh",
@@ -518,8 +515,8 @@ fn the_broader_tier_sweeps_every_project_with_the_budgets() {
         serde_json::from_slice(&graph.stdout).expect("Nx prints its task graph as JSON");
     assert_eq!(
         graph["tasks"]["tasks"]["pool-maintenance:budgets-host"]["parallelism"],
-        serde_json::Value::Bool(false),
-        "Nx would run the pool-maintenance pass beside the sweep's builds: {}",
+        serde_json::Value::Bool(true),
+        "Nx serialized the isolated pool-maintenance measurement: {}",
         graph["tasks"]["tasks"]["pool-maintenance:budgets-host"]
     );
 }

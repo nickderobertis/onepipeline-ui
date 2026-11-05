@@ -159,10 +159,11 @@ _ensure-pruner:
 # superseded builds older than the window and keeps its newest, so a slot stays
 # warm. `pool-maintenance/measure.sh` times this same recipe for the budget.
 # Remove superseded cargo builds older than 2 days, keeping each unit's newest.
-pool-maintenance:
+[positional-arguments]
+pool-maintenance target="target":
     @command -v cargo-prune-superseded >/dev/null \
       || { echo "cargo-prune-superseded is not on PATH — run 'just bootstrap'" >&2; exit 1; }
-    @cargo-prune-superseded --keep-within 2d target
+    @cargo-prune-superseded --keep-within 2d "$1"
 
 # The tiers run in fail-fast order as dependencies, each fanned across every
 # project by Nx. The body then runs the per-project `check` aggregate — the same
@@ -486,9 +487,8 @@ test-cost:
 # `check` or `gate`, and no per-change run reaches it: the host budgets measure
 # this machine rather than a diff — `pool-maintenance:budgets-host` builds the
 # crate twice to time one pool-maintenance pass — so only `test-linux`'s sweep
-# runs them, on the release pull request alone. That pass deletes builds from
-# all of `target`, so its target declares `parallelism: false` and Nx runs it
-# with no other task beside it.
+# runs them, on the release pull request alone. Its private target directory
+# lets other Nx tasks build concurrently.
 # Check every project's budgets, host-labelled ones included.
 budgets:
     @bash scripts/nx.sh run-many -t budgets budgets-host

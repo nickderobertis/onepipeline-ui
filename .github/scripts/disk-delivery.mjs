@@ -303,22 +303,26 @@ async function main() {
       if (await stateExists()) break;
       await pause(100);
     }
-    const alive = async () =>
-      (await identity(worker)) === stamp && (await stateExists());
     const controller = new AbortController();
     samplingSignal = controller.signal;
-    const watcher = setInterval(() => {
-      alive().then(
-        (running) => {
-          if (!running) controller.abort();
-        },
-        (error) => {
+    // Both the sampling loop and watchdog check liveness. Report a failed
+    // check here so their scheduling cannot change the diagnostic or verdict.
+    const alive = async () => {
+      try {
+        return (await identity(worker)) === stamp && (await stateExists());
+      } catch (error) {
+        if (!samplingSignal.aborted)
           console.error(
             `Disk sampler stopped: ${error.message}. Inspect the sampler state file permissions and runner process.`,
           );
-          controller.abort();
-        },
-      );
+        controller.abort();
+        return false;
+      }
+    };
+    const watcher = setInterval(() => {
+      alive().then((running) => {
+        if (!running) controller.abort();
+      });
     }, 100);
     try {
       while (!samplingSignal.aborted && (await alive())) {
