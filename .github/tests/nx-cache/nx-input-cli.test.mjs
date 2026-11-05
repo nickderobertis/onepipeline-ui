@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, rmSync, utimesSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { taskHashes, workspaceFixture } from "./nx-fixture.mjs";
 
@@ -41,11 +41,40 @@ test("Nx fixture readers hash and select on the production cache plugin they loa
     "github-workflows-judge-install:test",
   ];
   try {
+    const plugin = join(cwd, "scripts/nx-remote-cache.mjs");
+    // Force Nx's whole-second mtime collision, independent of machine speed.
+    const timestamp = new Date("2026-01-01T00:00:00Z");
+    utimesSync(plugin, timestamp, timestamp);
+    const archivedHashes = () =>
+      JSON.parse(
+        execFileSync(
+          process.execPath,
+          [resolve(".github/tests/nx-cache/nx-task-hashes.mjs"), cwd, ...ids],
+          {
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              NX_DAEMON: "false",
+              NX_ISOLATE_PLUGINS: "false",
+              NX_WORKSPACE_DATA_DIRECTORY: join(cwd, ".nx/workspace-data"),
+            },
+          },
+        ),
+      );
+    const archivedBefore = archivedHashes();
     const before = taskHashes(cwd, ids);
     appendFileSync(
       join(cwd, "scripts/nx-remote-cache.mjs"),
       "\n// Cache-plugin input regression probe.\n",
     );
+    utimesSync(plugin, timestamp, timestamp);
+    const archivedAfter = archivedHashes();
+    for (const id of ids)
+      assert.equal(
+        archivedAfter[id].hash,
+        archivedBefore[id].hash,
+        `${id} reproduces Nx's stale file-hash archive`,
+      );
     const after = taskHashes(cwd, ids);
     for (const id of ids)
       assert.notEqual(
