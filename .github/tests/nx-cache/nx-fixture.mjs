@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readlinkSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -57,19 +58,28 @@ export function workspaceFixture(ref) {
   return cwd;
 }
 export function taskHashes(cwd, ids = ["--ci"]) {
-  return JSON.parse(
-    execFileSync(
-      process.execPath,
-      [resolve(".github/tests/nx-cache/nx-task-hashes.mjs"), cwd, ...ids],
-      {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          NX_DAEMON: "false",
-          NX_ISOLATE_PLUGINS: "false",
+  // Nx's native file-hash archive keys reuse on mtime alone (seconds on Unix).
+  // Each inspection must read current bytes, even for edits in the same second.
+  mkdirSync(join(cwd, ".nx"), { recursive: true });
+  const workspaceData = mkdtempSync(join(cwd, ".nx/hash-read-"));
+  try {
+    return JSON.parse(
+      execFileSync(
+        process.execPath,
+        [resolve(".github/tests/nx-cache/nx-task-hashes.mjs"), cwd, ...ids],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            NX_DAEMON: "false",
+            NX_ISOLATE_PLUGINS: "false",
+            NX_WORKSPACE_DATA_DIRECTORY: workspaceData,
+          },
+          maxBuffer: 32 * 1024 * 1024,
         },
-        maxBuffer: 32 * 1024 * 1024,
-      },
-    ),
-  );
+      ),
+    );
+  } finally {
+    rmSync(workspaceData, { recursive: true, force: true });
+  }
 }

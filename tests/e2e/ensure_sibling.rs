@@ -1504,6 +1504,7 @@ fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
         // fixtures do: Windows workers can exit before their load message
         // arrives while the outer Nx is running the suite.
         .env("NX_ISOLATE_PLUGINS", "false")
+        .env("NX_DAEMON", "false")
         .output()
         .expect("just is on PATH");
     assert!(
@@ -1547,18 +1548,28 @@ fn every_suite_that_starts_the_read_api_provisions_the_sibling_first() {
 /// that fills it runs first.
 #[test]
 fn every_suite_that_compiles_the_read_api_builds_the_view_first() {
-    let output = Command::new("just")
+    let output = view_task_graph().output().expect("just is on PATH");
+    assert_view_task_graph(&output);
+}
+
+/// An opted-in daemon may already have isolated workers and does not inherit
+/// this process's isolation setting. Build these inspection graphs locally.
+pub(super) fn view_task_graph() -> Command {
+    let mut command = Command::new("just");
+    command
         .args(["nx", "run-many", "-t", COMPILING_TIERS, "--graph=stdout"])
         .current_dir(repo_root())
-        // Keep the same in-process resolution as the provisioning graph above.
         .env("NX_ISOLATE_PLUGINS", "false")
-        .output()
-        .expect("just is on PATH");
+        .env("NX_DAEMON", "false");
+    command
+}
+
+pub(super) fn assert_view_task_graph(output: &Output) {
     assert!(
         output.status.success(),
         "Nx could not build the task graph for `{COMPILING_TIERS}` ({}):\n{}{}",
         output.status,
-        stderr(&output),
+        stderr(output),
         String::from_utf8_lossy(&output.stdout)
     );
     let dependencies = task_dependencies(&output.stdout);

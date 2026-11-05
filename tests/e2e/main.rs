@@ -69,6 +69,7 @@ mod linux_wheel;
 // llmlint: ignore-end[tests_mirror_real_usage]
 // llmlint: ignore-end[e2e_not_mocked]
 mod nx_affected;
+mod nx_worker_startup;
 mod packaging;
 mod release_probe;
 mod release_status;
