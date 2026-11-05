@@ -51,14 +51,13 @@ test("a synthetic PR merge retains the branch fork point and its own tier edits"
     assert.equal(git("show", `${base}:tiers`), "original tiers");
     assert.equal(git("show", "HEAD:feature-tiers"), "branch tier changes");
     assert.equal(partitionBase(cwd, {}), laterBase, "local runs use HEAD");
-    writeFileSync(
-      event,
-      JSON.stringify({ pull_request: { head: { sha: "--help" } } }),
-    );
-    assert.throws(
-      () => partitionBase(cwd, env),
-      /Invalid pull request head SHA/,
-    );
+    for (const sha of ["--help", "HEAD", null]) {
+      writeFileSync(event, JSON.stringify({ pull_request: { head: { sha } } }));
+      assert.throws(
+        () => partitionBase(cwd, env),
+        /Invalid pull request head SHA/,
+      );
+    }
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
