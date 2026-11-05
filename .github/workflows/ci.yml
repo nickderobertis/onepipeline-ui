@@ -84,10 +84,20 @@ jobs:
       # toolchain, because rust-cache hashes every installed toolchain and the
       # CARGO_* variables dtolnay exports into its key: placed after it, this job
       # would look for a key neither the warm job nor `test-linux` shares.
+      - name: Disk — Before Rust cache restore
+        if: always()
+        shell: bash
+        # Measurements must leave the job verdict and later success() conditions alone.
+        run: bash .github/scripts/report-disk.sh "Before Rust cache restore" || true
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           shared-key: test-linux
           save-if: false
+      - name: Disk — After Rust cache restore
+        if: always()
+        shell: bash
+        # Measurements must leave the job verdict and later success() conditions alone.
+        run: bash .github/scripts/report-disk.sh "After Rust cache restore" || true
       - name: Read the MSRV from Cargo.toml
         id: msrv
         run: |
@@ -291,6 +301,11 @@ jobs:
           retention-days: 7
       # GitHub accepts only cancel here; job teardown also stops the background step.
       - cancel: nx-cache
+      - name: Disk — End of job
+        if: always()
+        shell: bash
+        # Measurements must leave the job verdict and later success() conditions alone.
+        run: bash .github/scripts/report-disk.sh "End of job" || true
 
   # The deterministic gate on Linux: `check`'s tiers over the affected projects
   # (every test tier, the Playwright browser tier, the coverage floor, docs —
@@ -311,10 +326,20 @@ jobs:
         with:
           fetch-depth: 0
       # Main's Linux build, restored and never saved from here, as in `lint`.
+      - name: Disk — Before Rust cache restore
+        if: always()
+        shell: bash
+        # Measurements must leave the job verdict and later success() conditions alone.
+        run: bash .github/scripts/report-disk.sh "Before Rust cache restore" || true
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           shared-key: test-linux
           save-if: false
+      - name: Disk — After Rust cache restore
+        if: always()
+        shell: bash
+        # Measurements must leave the job verdict and later success() conditions alone.
+        run: bash .github/scripts/report-disk.sh "After Rust cache restore" || true
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -421,6 +446,11 @@ jobs:
           path: ${{ runner.temp }}/nx-cache-report
           retention-days: 7
       - cancel: nx-cache
+      - name: Disk — End of job
+        if: always()
+        shell: bash
+        # Measurements must leave the job verdict and later success() conditions alone.
+        run: bash .github/scripts/report-disk.sh "End of job" || true
 
   # The platform-sensitive tiers on Windows (`check-cross`: formatting, lints and
   # the suite against a real binary, without the Linux-only coverage floor), the
