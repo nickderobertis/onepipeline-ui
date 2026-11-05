@@ -85,6 +85,167 @@ function assertFigures(output, expected) {
     assert.deepEqual(match.slice(1).map(Number), expected);
 }
 
+function churnWriter(path, acknowledgementMs = 30000) {
+  const writer = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import { execFileSync } from "node:child_process";
+    import { rmSync } from "node:fs";
+    process.on("message", (action) => {
+      if (action === "allocate") execFileSync("dd", ["if=/dev/zero", "of=" + process.env.DISK_CHURN, "bs=1M", "count=384", "conv=fsync", "status=none"], { timeout: 20000 });
+      else rmSync(process.env.DISK_CHURN, { force: true });
+      process.send(action);
+    });
+  `,
+    ],
+    {
+      env: { ...process.env, DISK_CHURN: path },
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+    },
+  );
+  let diagnostic = "";
+  let failure;
+  writer.stderr.setEncoding("utf8");
+  writer.stderr.on("data", (chunk) => {
+    diagnostic = (diagnostic + chunk).slice(-8192);
+  });
+  // Keep a permanent error listener: IPC can fail after a request has settled.
+  writer.on("error", (error) => {
+    failure = error;
+  });
+  const exited = new Promise((resolve) => {
+    writer.once("exit", resolve);
+    writer.once("error", resolve);
+  });
+  const changeUsage = (action) =>
+    new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        writer.off("message", onMessage);
+        writer.off("error", onError);
+        writer.off("exit", onExit);
+        writer.off("disconnect", onDisconnect);
+        if (error) {
+          failure = error;
+          reject(
+            new Error(
+              `Disk churn writer ${action}: ${error.message}\n${diagnostic}`,
+            ),
+          );
+        } else resolve();
+      };
+      const onMessage = (message) => {
+        if (message === action) finish();
+        else finish(new Error(`unexpected acknowledgement: ${message}`));
+      };
+      const onError = (error) => finish(error);
+      const onExit = (code, signal) =>
+        finish(
+          new Error(
+            `exited before acknowledgement (code ${code}, signal ${signal})`,
+          ),
+        );
+      const onDisconnect = () =>
+        finish(new Error("IPC disconnected before acknowledgement"));
+      const timer = setTimeout(
+        () =>
+          finish(
+            new Error(
+              `acknowledgement timed out after ${acknowledgementMs} ms`,
+            ),
+          ),
+        acknowledgementMs,
+      );
+      writer.once("message", onMessage);
+      writer.once("error", onError);
+      writer.once("exit", onExit);
+      writer.once("disconnect", onDisconnect);
+      if (
+        failure ||
+        !writer.connected ||
+        writer.exitCode !== null ||
+        writer.signalCode !== null
+      ) {
+        finish(failure ?? new Error("writer is no longer connected"));
+        return;
+      }
+      writer.send(action, (error) => {
+        if (error) onError(error);
+      });
+    });
+  const stop = async () => {
+    // No further IPC is needed to clean up a failed writer. Kill only this
+    // child, whose PID came from spawn, and await its already-registered exit.
+    if (writer.exitCode === null && writer.signalCode === null)
+      writer.kill("SIGKILL");
+    await exited;
+    writer.stderr.destroy();
+    rmSync(path, { force: true });
+  };
+  return { changeUsage, stop, writer };
+}
+
+test("churn writer failures reject promptly and clean up without IPC", {
+  timeout: 5000,
+}, async () => {
+  const root = mkdtempSync(
+    join(
+      process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(),
+      "disk-writer-errors-",
+    ),
+  );
+  try {
+    // dd really fails at the filesystem boundary; no acknowledgement follows.
+    const failed = churnWriter(join(root, "missing", "cache"));
+    try {
+      await assert.rejects(
+        failed.changeUsage("allocate"),
+        /Disk churn writer allocate:[\s\S]*No such file or directory/,
+      );
+      await assert.rejects(
+        failed.changeUsage("remove"),
+        /Disk churn writer remove:/,
+      );
+      for (const event of ["message", "disconnect"])
+        assert.equal(failed.writer.listenerCount(event), 0);
+      assert.equal(failed.writer.listenerCount("error"), 2);
+    } finally {
+      await failed.stop();
+    }
+
+    const stalled = churnWriter(join(root, "stalled"), 100);
+    try {
+      // Stop our own child before it can handle a request, exercising the bound.
+      stalled.writer.kill("SIGSTOP");
+      await assert.rejects(
+        stalled.changeUsage("allocate"),
+        /acknowledgement timed out after 100 ms/,
+      );
+    } finally {
+      await stalled.stop();
+    }
+
+    const disconnected = churnWriter(join(root, "disconnected"));
+    try {
+      disconnected.writer.disconnect();
+      await assert.rejects(
+        disconnected.changeUsage("remove"),
+        /writer is no longer connected/,
+      );
+    } finally {
+      await disconnected.stop();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("workflow reports real filesystem usage and survives a reporting failure", async () => {
   const root = mkdtempSync(
     join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(), "disk-report-"),
@@ -142,32 +303,7 @@ test("workflow reports real filesystem usage and survives a reporting failure", 
     process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(),
     `disk-churn-${process.pid}`,
   );
-  const writer = spawn(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      `
-    import { execFileSync } from "node:child_process";
-    import { rmSync } from "node:fs";
-    process.on("message", (action) => {
-      if (action === "allocate") execFileSync("dd", ["if=/dev/zero", "of=" + process.env.DISK_CHURN, "bs=1M", "count=384", "conv=fsync", "status=none"]);
-      else rmSync(process.env.DISK_CHURN, { force: true });
-      process.send(action);
-    });
-  `,
-    ],
-    {
-      env: { ...process.env, DISK_CHURN: churn },
-      stdio: ["ignore", "inherit", "inherit", "ipc"],
-    },
-  );
-  const changeUsage = (action) =>
-    new Promise((resolve, reject) => {
-      writer.once("message", resolve);
-      writer.once("error", reject);
-      writer.send(action);
-    });
+  const { changeUsage, stop } = churnWriter(churn);
   try {
     const workspace = join(privateRoot, "workspace");
     const home = join(privateRoot, "home");
@@ -280,10 +416,8 @@ test("workflow reports real filesystem usage and survives a reporting failure", 
       );
     }
   } finally {
-    await changeUsage("remove");
+    await stop();
     rmSync(`${churn}.summary`, { force: true });
-    writer.disconnect();
-    await new Promise((resolve) => writer.once("exit", resolve));
   }
 });
 
