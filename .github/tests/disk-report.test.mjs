@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -78,14 +78,248 @@ function command(file, args) {
   return result.stdout;
 }
 
-test("workflow reports real filesystem usage and survives a reporting failure", () => {
+function assertFigures(output, expected) {
+  const figures = [...output.matchAll(/^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/gm)];
+  assert.equal(figures.length, 2);
+  for (const match of figures)
+    assert.deepEqual(match.slice(1).map(Number), expected);
+}
+
+function churnWriter(path, acknowledgementMs = 30000) {
+  const writer = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import { execFileSync } from "node:child_process";
+    import { rmSync } from "node:fs";
+    process.on("message", (action) => {
+      if (action === "allocate") execFileSync("dd", ["if=/dev/zero", "of=" + process.env.DISK_CHURN, "bs=1M", "count=384", "conv=fsync", "status=none"], { timeout: 20000 });
+      else rmSync(process.env.DISK_CHURN, { force: true });
+      process.send(action);
+    });
+  `,
+    ],
+    {
+      env: { ...process.env, DISK_CHURN: path },
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+    },
+  );
+  let diagnostic = "";
+  let failure;
+  writer.stderr.setEncoding("utf8");
+  writer.stderr.on("data", (chunk) => {
+    diagnostic = (diagnostic + chunk).slice(-8192);
+  });
+  // Keep a permanent error listener: IPC can fail after a request has settled.
+  writer.on("error", (error) => {
+    failure = error;
+  });
+  const exited = new Promise((resolve) => {
+    writer.once("exit", resolve);
+    writer.once("error", resolve);
+  });
+  const changeUsage = (action) =>
+    new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        writer.off("message", onMessage);
+        writer.off("error", onError);
+        writer.off("exit", onExit);
+        writer.off("disconnect", onDisconnect);
+        if (error) {
+          failure = error;
+          reject(
+            new Error(
+              `Disk churn writer ${action}: ${error.message}\n${diagnostic}`,
+            ),
+          );
+        } else resolve();
+      };
+      const onMessage = (message) => {
+        if (message === action) finish();
+        else finish(new Error(`unexpected acknowledgement: ${message}`));
+      };
+      const onError = (error) => finish(error);
+      const onExit = (code, signal) =>
+        finish(
+          new Error(
+            `exited before acknowledgement (code ${code}, signal ${signal})`,
+          ),
+        );
+      const onDisconnect = () =>
+        finish(new Error("IPC disconnected before acknowledgement"));
+      const timer = setTimeout(
+        () =>
+          finish(
+            new Error(
+              `acknowledgement timed out after ${acknowledgementMs} ms`,
+            ),
+          ),
+        acknowledgementMs,
+      );
+      writer.once("message", onMessage);
+      writer.once("error", onError);
+      writer.once("exit", onExit);
+      writer.once("disconnect", onDisconnect);
+      if (
+        failure ||
+        !writer.connected ||
+        writer.exitCode !== null ||
+        writer.signalCode !== null
+      ) {
+        finish(failure ?? new Error("writer is no longer connected"));
+        return;
+      }
+      writer.send(action, (error) => {
+        if (error) onError(error);
+      });
+    });
+  const stop = async () => {
+    // No further IPC is needed to clean up a failed writer. Kill only this
+    // child, whose PID came from spawn, and await its already-registered exit.
+    if (writer.exitCode === null && writer.signalCode === null)
+      writer.kill("SIGKILL");
+    await exited;
+    writer.stderr.destroy();
+    rmSync(path, { force: true });
+  };
+  return { changeUsage, stop, writer };
+}
+
+test("churn writer failures reject promptly and clean up without IPC", {
+  timeout: 5000,
+}, async () => {
+  const root = mkdtempSync(
+    join(
+      process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(),
+      "disk-writer-errors-",
+    ),
+  );
+  try {
+    // dd really fails at the filesystem boundary; no acknowledgement follows.
+    const failed = churnWriter(join(root, "missing", "cache"));
+    try {
+      await assert.rejects(
+        failed.changeUsage("allocate"),
+        /Disk churn writer allocate:[\s\S]*No such file or directory/,
+      );
+      await assert.rejects(
+        failed.changeUsage("remove"),
+        /Disk churn writer remove:/,
+      );
+      for (const event of ["message", "disconnect"])
+        assert.equal(failed.writer.listenerCount(event), 0);
+      assert.equal(failed.writer.listenerCount("error"), 2);
+    } finally {
+      await failed.stop();
+    }
+
+    const stalled = churnWriter(join(root, "stalled"), 100);
+    try {
+      // Stop our own child before it can handle a request, exercising the bound.
+      stalled.writer.kill("SIGSTOP");
+      await assert.rejects(
+        stalled.changeUsage("allocate"),
+        /acknowledgement timed out after 100 ms/,
+      );
+    } finally {
+      await stalled.stop();
+    }
+
+    const disconnected = churnWriter(join(root, "disconnected"));
+    try {
+      disconnected.writer.disconnect();
+      await assert.rejects(
+        disconnected.changeUsage("remove"),
+        /writer is no longer connected/,
+      );
+    } finally {
+      await disconnected.stop();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow reports real filesystem usage and survives a reporting failure", async () => {
   const root = mkdtempSync(
     join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(), "disk-report-"),
   );
+  // A private mount keeps unrelated host allocations out of the oracle. The
+  // outer directory remains on the workspace filesystem for the churn process.
+  if (!process.env.DISK_REPORT_PRIVATE_ROOT) {
+    try {
+      // Ubuntu runners can deny uid_map even with user namespaces enabled.
+      // Their passwordless sudo can create the same private mount namespace.
+      const userNamespace =
+        spawnSync("unshare", ["--user", "--map-root-user", "--mount", "true"])
+          .status === 0;
+      const result = spawnSync(
+        userNamespace ? "unshare" : "sudo",
+        [
+          ...(userNamespace
+            ? ["--user", "--map-root-user", "--mount"]
+            : ["-n", "unshare", "--mount"]),
+          "env",
+          `DISK_REPORT_PRIVATE_ROOT=${root}`,
+          ...(process.env.ONEPIPELINE_NODE_SCRATCH_DIR
+            ? [
+                `ONEPIPELINE_NODE_SCRATCH_DIR=${process.env.ONEPIPELINE_NODE_SCRATCH_DIR}`,
+              ]
+            : []),
+          "bash",
+          "-euc",
+          'mount -t tmpfs -o size=32m tmpfs "$DISK_REPORT_PRIVATE_ROOT"; exec "$@"',
+          "disk-report",
+          process.execPath,
+          "--test",
+          "--test-name-pattern",
+          "^workflow reports real filesystem usage and survives a reporting failure$",
+          import.meta.filename,
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            NODE_TEST_CONTEXT: undefined,
+            DISK_REPORT_PRIVATE_ROOT: root,
+          },
+        },
+      );
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.match(result.stdout, /tests 1/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+    return;
+  }
+  rmSync(root, { recursive: true, force: true });
+  const privateRoot = process.env.DISK_REPORT_PRIVATE_ROOT;
+  assert.equal(
+    command("findmnt", [
+      "--noheadings",
+      "--output",
+      "FSTYPE",
+      "--mountpoint",
+      privateRoot,
+    ]).trim(),
+    "tmpfs",
+    "The supplied root must be the isolated tmpfs mount",
+  );
+  const churn = join(
+    process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(),
+    `disk-churn-${process.pid}`,
+  );
+  const { changeUsage, stop } = churnWriter(churn);
   try {
-    const workspace = join(root, "workspace");
-    const home = join(root, "home");
-    const summary = join(root, "summary");
+    const workspace = join(privateRoot, "workspace");
+    const home = join(privateRoot, "home");
+    const summary = `${churn}.summary`;
     mkdirSync(join(workspace, "target"), { recursive: true });
     mkdirSync(home);
     writeFileSync(
@@ -108,6 +342,7 @@ test("workflow reports real filesystem usage and survives a reporting failure", 
           .split(/\s+/)
           .map(Number);
       const before = sample();
+      await changeUsage("allocate");
       const result = spawnSync(
         "bash",
         ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run],
@@ -121,25 +356,31 @@ test("workflow reports real filesystem usage and survives a reporting failure", 
           },
         },
       );
+      await changeUsage("remove");
       const after = sample();
+      assert.deepEqual(after, before);
       assert.equal(result.status, 0, result.stderr);
       assert.equal(readFileSync(summary, "utf8"), result.stdout);
       assert.ok(result.stdout.includes(label));
-      const figures = [
-        ...result.stdout.matchAll(/^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/gm),
-      ];
-      assert.equal(figures.length, 2);
-      for (const match of figures) {
-        const actual = match.slice(1).map(Number);
-        assert.equal(actual[0], before[0]);
-        // Other host processes can allocate while the report is running.
-        for (const column of [1, 2])
-          assert.ok(
-            actual[column] >=
-              Math.min(before[column], after[column]) - 1024 * 1024 &&
-              actual[column] <=
-                Math.max(before[column], after[column]) + 1024 * 1024,
-          );
+      assertFigures(result.stdout, before);
+      // Both stale/fabricated numbers and figures from a different filesystem
+      // must be rejected by the same oracle used above.
+      for (const wrong of [
+        [before[0], before[1] + 4096, before[2] - 4096],
+        command("df", [
+          "-B1",
+          "--output=size,used,avail",
+          process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(),
+        ])
+          .trim()
+          .split("\n")[1]
+          .trim()
+          .split(/\s+/)
+          .map(Number),
+      ]) {
+        assert.throws(() =>
+          assertFigures(`${wrong.join(" ")}\n${wrong.join(" ")}\n`, before),
+        );
       }
       if (label === labels[1])
         assert.ok(
@@ -187,7 +428,8 @@ test("workflow reports real filesystem usage and survives a reporting failure", 
       );
     }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await stop();
+    rmSync(`${churn}.summary`, { force: true });
   }
 });
 

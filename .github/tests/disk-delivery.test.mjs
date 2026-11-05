@@ -6,7 +6,9 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  rename,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -36,6 +38,12 @@ test("Linux reporting steps use the job token with checks write and bracket the 
   }
 });
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+// llmlint: ignore[contracts_have_one_source_or_a_drift_gate] Linux starttime is field 22 per https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html; journeys read the real process identity to watch the test's own worker or supply a deliberately stale identity. CI on GitHub-hosted runners proves compatibility with this proc ABI.
+async function processStamp(pid) {
+  return (await readFile(`/proc/${pid}/stat`, "utf8"))
+    .split(") ")[1]
+    .split(" ")[19];
+}
 async function until(predicate) {
   const end = Date.now() + 20000;
   while (!(await predicate())) {
@@ -442,10 +450,7 @@ exec sleep 60`,
       }
     });
     await rm(state, { recursive: true });
-    // llmlint: ignore[contracts_have_one_source_or_a_drift_gate] Linux starttime is field 22 per https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html; reading the real test process supplies a deliberately stale identity. CI on GitHub-hosted runners proves compatibility with this proc ABI.
-    const selfStartTime = (await readFile(`/proc/${process.pid}/stat`, "utf8"))
-      .split(") ")[1]
-      .split(" ")[19];
+    const selfStartTime = await processStamp(process.pid);
     const staleStamp = String(BigInt(selfStartTime) + 1n);
     await writeFile(
       state,
@@ -524,8 +529,10 @@ exec sleep 60`,
     disposition = "hang";
     const watchAttempts = attempts;
     await until(() => attempts > watchAttempts);
-    await rm(state);
-    await mkdir(state);
+    // Replace atomically: unlink + mkdir briefly means a normal stop (ENOENT).
+    const brokenState = join(root, "broken-state");
+    await symlink(root, brokenState);
+    await rename(brokenState, state);
     await until(async () => {
       try {
         return (await readFile(`/proc/${sampler}/stat`, "utf8")).includes(
@@ -586,6 +593,102 @@ exec sleep 60`,
       await killRunner(runner, stepPid);
     }
     await run("node .github/scripts/disk-delivery.mjs stop", env);
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("sampler state failures have one diagnostic before sampling, during delivery and after its timeout", async () => {
+  const root = await mkdtemp(
+    join(
+      process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(),
+      "sampler-order-",
+    ),
+  );
+  let requests = 0;
+  let cancelled = 0;
+  const server = createServer(async (req, res) => {
+    for await (const _chunk of req) {
+      // Consume the real request, then hold its response until fetch aborts.
+    }
+    requests++;
+    res.on("close", () => {
+      cancelled++;
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const stamp = await processStamp(process.pid);
+  try {
+    for (const ordering of [
+      "startup",
+      "pending delivery",
+      "expired delivery",
+    ]) {
+      const directory = join(root, ordering);
+      await mkdir(directory);
+      const state = join(directory, "disk-sampler-lint.json");
+      const replacement = join(directory, "replacement");
+      await symlink(directory, replacement);
+      if (ordering === "startup") await rename(replacement, state);
+      else await writeFile(state, "{}");
+      const priorRequests = requests;
+      const priorCancelled = cancelled;
+      const child = spawn(
+        process.execPath,
+        [
+          ".github/scripts/disk-delivery.mjs",
+          "sample",
+          String(process.pid),
+          stamp,
+        ],
+        {
+          env: {
+            ...process.env,
+            GH_TOKEN: "test-token",
+            GITHUB_API_URL: `http://127.0.0.1:${server.address().port}`,
+            GITHUB_REPOSITORY: "owner/repo",
+            GITHUB_SHA: "a".repeat(40),
+            GITHUB_JOB: "lint",
+            HOME: directory,
+            GITHUB_WORKSPACE: directory,
+            RUNNER_TEMP: directory,
+          },
+          stdio: ["ignore", "ignore", "pipe"],
+        },
+      );
+      let diagnostic = "";
+      child.stderr.on("data", (chunk) => {
+        diagnostic += chunk;
+      });
+      const exited = once(child, "close");
+      try {
+        if (ordering !== "startup") {
+          await until(() => requests > priorRequests);
+          if (ordering === "expired delivery") {
+            await until(() => cancelled > priorCancelled);
+            await until(() => diagnostic.includes("Disk delivery skipped:"));
+          }
+          // No missing-file interval: the only injected condition is EISDIR.
+          await rename(replacement, state);
+        }
+        await until(() => child.exitCode !== null);
+        assert.equal((await exited)[0], 0, diagnostic);
+        assert.match(diagnostic, /Disk sampler stopped:.*EISDIR/, ordering);
+        assert.equal(
+          diagnostic.match(/Disk sampler stopped:/g)?.length,
+          1,
+          ordering,
+        );
+        assert.doesNotMatch(diagnostic, /Disk diagnostic skipped:/, ordering);
+        assert.equal(requests - priorRequests, ordering === "startup" ? 0 : 1);
+      } finally {
+        if (child.exitCode === null) child.kill("SIGKILL");
+        await exited;
+      }
+    }
+  } finally {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
     await rm(root, { recursive: true, force: true });

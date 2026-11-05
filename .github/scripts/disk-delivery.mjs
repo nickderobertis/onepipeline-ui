@@ -291,31 +291,38 @@ async function main() {
   } else if (mode === "sample") {
     const worker = positive(process.argv[3]);
     const stamp = stampValue(process.argv[4]);
+    const controller = new AbortController();
+    samplingSignal = controller.signal;
+    let failureReported = false;
+    const stopped = (error) => {
+      // An in-flight liveness read can fail after another check aborts delivery.
+      // Preserve that failure, once, independently of cancellation ordering.
+      if (!failureReported) {
+        failureReported = true;
+        console.error(
+          `Disk sampler stopped: ${error.message}. Inspect the sampler state file permissions and runner process.`,
+        );
+      }
+      controller.abort();
+    };
     const stateExists = async () =>
       readFile(state, "utf8").then(
         () => true,
         (error) => {
-          if (error.code === "ENOENT") return false;
-          throw error;
+          if (error.code !== "ENOENT") stopped(error);
+          return false;
         },
       );
-    for (let attempt = 0; attempt < 20; attempt++) {
+    for (let attempt = 0; attempt < 20 && !samplingSignal.aborted; attempt++) {
       if (await stateExists()) break;
       await pause(100);
     }
-    const controller = new AbortController();
-    samplingSignal = controller.signal;
-    // Both the sampling loop and watchdog check liveness. Report a failed
-    // check here so their scheduling cannot change the diagnostic or verdict.
+    // Startup and both liveness checks share the same failure diagnostic.
     const alive = async () => {
       try {
         return (await identity(worker)) === stamp && (await stateExists());
       } catch (error) {
-        if (!samplingSignal.aborted)
-          console.error(
-            `Disk sampler stopped: ${error.message}. Inspect the sampler state file permissions and runner process.`,
-          );
-        controller.abort();
+        stopped(error);
         return false;
       }
     };
