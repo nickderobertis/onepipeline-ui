@@ -56,6 +56,7 @@ jobs:
       pull-requests: write
       # The `advisories` commit status the advisories report step posts.
       statuses: write
+      checks: write
     env:
       # The one switch for the visual docs' side effects: the sticky comment and
       # the /pr-<n>/ preview deploy. Off because this job must finish inside its
@@ -88,7 +89,11 @@ jobs:
         if: always()
         shell: bash
         # Measurements must leave the job verdict and later success() conditions alone.
-        run: bash .github/scripts/report-disk.sh "Before Rust cache restore" || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .github/scripts/report-disk.sh "Before Rust cache restore" || true
+          node .github/scripts/disk-delivery.mjs start "$PPID" || true
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           shared-key: test-linux
@@ -97,7 +102,11 @@ jobs:
         if: always()
         shell: bash
         # Measurements must leave the job verdict and later success() conditions alone.
-        run: bash .github/scripts/report-disk.sh "After Rust cache restore" || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node .github/scripts/disk-delivery.mjs stop || true
+          bash .github/scripts/report-disk.sh "After Rust cache restore" || true
       - name: Read the MSRV from Cargo.toml
         id: msrv
         run: |
@@ -305,6 +314,8 @@ jobs:
         if: always()
         shell: bash
         # Measurements must leave the job verdict and later success() conditions alone.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/report-disk.sh "End of job" || true
 
   # The deterministic gate on Linux: `check`'s tiers over the affected projects
@@ -315,6 +326,9 @@ jobs:
   # it is the sweep: every project, with the host-labelled budgets, and the
   # wheel the release journeys' rehearsal builds, installs and runs.
   test-linux:
+    permissions:
+      contents: read
+      checks: write
     runs-on: ubuntu-latest
     # 29.8 min upper estimate / 0.85, rounded up: docs/release-sweep-timing.md.
     timeout-minutes: 36
@@ -330,7 +344,11 @@ jobs:
         if: always()
         shell: bash
         # Measurements must leave the job verdict and later success() conditions alone.
-        run: bash .github/scripts/report-disk.sh "Before Rust cache restore" || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .github/scripts/report-disk.sh "Before Rust cache restore" || true
+          node .github/scripts/disk-delivery.mjs start "$PPID" || true
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           shared-key: test-linux
@@ -339,7 +357,11 @@ jobs:
         if: always()
         shell: bash
         # Measurements must leave the job verdict and later success() conditions alone.
-        run: bash .github/scripts/report-disk.sh "After Rust cache restore" || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node .github/scripts/disk-delivery.mjs stop || true
+          bash .github/scripts/report-disk.sh "After Rust cache restore" || true
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -450,6 +472,8 @@ jobs:
         if: always()
         shell: bash
         # Measurements must leave the job verdict and later success() conditions alone.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/report-disk.sh "End of job" || true
 
   # The platform-sensitive tiers on Windows (`check-cross`: formatting, lints and

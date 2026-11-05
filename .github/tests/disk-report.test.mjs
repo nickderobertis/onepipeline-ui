@@ -35,8 +35,9 @@ function reportsValid(job) {
       (position, i) =>
         steps[position]?.if === "always()" &&
         steps[position]?.shell === "bash" &&
-        steps[position]?.run ===
+        steps[position]?.run.includes(
           `bash .github/scripts/report-disk.sh "${labels[i]}" || true`,
+        ),
     )
   );
 }
@@ -62,8 +63,8 @@ for (const [id, job] of Object.entries(workflow.jobs).filter(
         if (defect === "conditional") broken.steps[index].if = "success()";
         if (defect === "fatal")
           broken.steps[index].run = broken.steps[index].run.replace(
-            " || true",
-            "",
+            `bash .github/scripts/report-disk.sh "${label}" || true`,
+            `bash .github/scripts/report-disk.sh "${label}"`,
           );
         assert.equal(reportsValid(broken), false, `${label}: ${defect}`);
       }
