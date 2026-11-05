@@ -1,0 +1,11 @@
+# Original unsplit selection from 2ba1021^ (.config/nextest.toml).
+# Keep this historical reference independent of branch and base history.
+[profile.e2e]
+default-filter = "binary(=e2e) and not test(/^(baseline|baseline_reuse|cost|ci_jobs|ci_tier|deps_audit|deps_audit_toolchain|ensure_baseline|ensure_node_without_execve|ensure_sibling|judged_tier|linked_report|linux_wheel|nx_affected|packaging|release_probe|release_status|semver_check|workspace_install)::/)"
+status-level = "fail"
+final-status-level = "fail"
+
+[profile.repo-tooling]
+default-filter = "binary(=packaging) or (binary(=e2e) and test(/^(ci_tier|deps_audit|ensure_baseline|ensure_sibling|linux_wheel|nx_affected|release_probe|release_status|semver_check|workspace_install)::/))"
+status-level = "fail"
+final-status-level = "fail"
