@@ -56,7 +56,7 @@ async function capture(command, env) {
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
   });
-  const [status] = await once(child, "exit");
+  const [status] = await once(child, "close");
   return { status, stdout, stderr };
 }
 async function run(command, env) {
@@ -504,7 +504,7 @@ exec sleep 60`,
       17,
     );
     const logFailure = await capture(
-      '(bash .github/scripts/report-disk.sh "End of job" | head -c 0) || true\nexit 17',
+      'bash .github/scripts/report-disk.sh "End of job" > /dev/full || true\nexit 17',
       env,
     );
     assert.equal(logFailure.status, 17);
