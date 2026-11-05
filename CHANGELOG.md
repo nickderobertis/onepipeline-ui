@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.68.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.67.0...v0.68.0) - 2026-11-05
+
+### Added
+
+- *(deps)* [**breaking**] link the engine whose plan-store writes rewrite declared private terms ([#642](https://github.com/nickderobertis/onepipeline-ui/pull/642))
+
 ## [0.67.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.66.1...v0.67.0) - 2026-11-05
 
 ### Added
