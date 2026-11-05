@@ -254,12 +254,24 @@ test("workflow reports real filesystem usage and survives a reporting failure", 
   // outer directory remains on the workspace filesystem for the churn process.
   if (!process.env.DISK_REPORT_PRIVATE_ROOT) {
     try {
+      // Ubuntu runners can deny uid_map even with user namespaces enabled.
+      // Their passwordless sudo can create the same private mount namespace.
+      const userNamespace =
+        spawnSync("unshare", ["--user", "--map-root-user", "--mount", "true"])
+          .status === 0;
       const result = spawnSync(
-        "unshare",
+        userNamespace ? "unshare" : "sudo",
         [
-          "--user",
-          "--map-root-user",
-          "--mount",
+          ...(userNamespace
+            ? ["--user", "--map-root-user", "--mount"]
+            : ["-n", "unshare", "--mount"]),
+          "env",
+          `DISK_REPORT_PRIVATE_ROOT=${root}`,
+          ...(process.env.ONEPIPELINE_NODE_SCRATCH_DIR
+            ? [
+                `ONEPIPELINE_NODE_SCRATCH_DIR=${process.env.ONEPIPELINE_NODE_SCRATCH_DIR}`,
+              ]
+            : []),
           "bash",
           "-euc",
           'mount -t tmpfs -o size=32m tmpfs "$DISK_REPORT_PRIVATE_ROOT"; exec "$@"',
