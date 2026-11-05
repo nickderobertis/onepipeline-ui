@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -78,14 +78,100 @@ function command(file, args) {
   return result.stdout;
 }
 
-test("workflow reports real filesystem usage and survives a reporting failure", () => {
+function assertFigures(output, expected) {
+  const figures = [...output.matchAll(/^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/gm)];
+  assert.equal(figures.length, 2);
+  for (const match of figures)
+    assert.deepEqual(match.slice(1).map(Number), expected);
+}
+
+test("workflow reports real filesystem usage and survives a reporting failure", async () => {
   const root = mkdtempSync(
     join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(), "disk-report-"),
   );
+  // A private mount keeps unrelated host allocations out of the oracle. The
+  // outer directory remains on the workspace filesystem for the churn process.
+  if (!process.env.DISK_REPORT_PRIVATE_ROOT) {
+    try {
+      const result = spawnSync(
+        "unshare",
+        [
+          "--user",
+          "--map-root-user",
+          "--mount",
+          "bash",
+          "-euc",
+          'mount -t tmpfs -o size=32m tmpfs "$DISK_REPORT_PRIVATE_ROOT"; exec "$@"',
+          "disk-report",
+          process.execPath,
+          "--test",
+          "--test-name-pattern",
+          "^workflow reports real filesystem usage and survives a reporting failure$",
+          import.meta.filename,
+        ],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            NODE_TEST_CONTEXT: undefined,
+            DISK_REPORT_PRIVATE_ROOT: root,
+          },
+        },
+      );
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.match(result.stdout, /tests 1/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+    return;
+  }
+  rmSync(root, { recursive: true, force: true });
+  const privateRoot = process.env.DISK_REPORT_PRIVATE_ROOT;
+  assert.equal(
+    command("findmnt", [
+      "--noheadings",
+      "--output",
+      "FSTYPE",
+      "--mountpoint",
+      privateRoot,
+    ]).trim(),
+    "tmpfs",
+    "The supplied root must be the isolated tmpfs mount",
+  );
+  const churn = join(
+    process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(),
+    `disk-churn-${process.pid}`,
+  );
+  const writer = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import { execFileSync } from "node:child_process";
+    import { rmSync } from "node:fs";
+    process.on("message", (action) => {
+      if (action === "allocate") execFileSync("dd", ["if=/dev/zero", "of=" + process.env.DISK_CHURN, "bs=1M", "count=384", "conv=fsync", "status=none"]);
+      else rmSync(process.env.DISK_CHURN, { force: true });
+      process.send(action);
+    });
+  `,
+    ],
+    {
+      env: { ...process.env, DISK_CHURN: churn },
+      stdio: ["ignore", "inherit", "inherit", "ipc"],
+    },
+  );
+  const changeUsage = (action) =>
+    new Promise((resolve, reject) => {
+      writer.once("message", resolve);
+      writer.once("error", reject);
+      writer.send(action);
+    });
   try {
-    const workspace = join(root, "workspace");
-    const home = join(root, "home");
-    const summary = join(root, "summary");
+    const workspace = join(privateRoot, "workspace");
+    const home = join(privateRoot, "home");
+    const summary = `${churn}.summary`;
     mkdirSync(join(workspace, "target"), { recursive: true });
     mkdirSync(home);
     writeFileSync(
@@ -108,6 +194,7 @@ test("workflow reports real filesystem usage and survives a reporting failure", 
           .split(/\s+/)
           .map(Number);
       const before = sample();
+      await changeUsage("allocate");
       const result = spawnSync(
         "bash",
         ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run],
@@ -121,25 +208,31 @@ test("workflow reports real filesystem usage and survives a reporting failure", 
           },
         },
       );
+      await changeUsage("remove");
       const after = sample();
+      assert.deepEqual(after, before);
       assert.equal(result.status, 0, result.stderr);
       assert.equal(readFileSync(summary, "utf8"), result.stdout);
       assert.ok(result.stdout.includes(label));
-      const figures = [
-        ...result.stdout.matchAll(/^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/gm),
-      ];
-      assert.equal(figures.length, 2);
-      for (const match of figures) {
-        const actual = match.slice(1).map(Number);
-        assert.equal(actual[0], before[0]);
-        // Other host processes can allocate while the report is running.
-        for (const column of [1, 2])
-          assert.ok(
-            actual[column] >=
-              Math.min(before[column], after[column]) - 1024 * 1024 &&
-              actual[column] <=
-                Math.max(before[column], after[column]) + 1024 * 1024,
-          );
+      assertFigures(result.stdout, before);
+      // Both stale/fabricated numbers and figures from a different filesystem
+      // must be rejected by the same oracle used above.
+      for (const wrong of [
+        [before[0], before[1] + 4096, before[2] - 4096],
+        command("df", [
+          "-B1",
+          "--output=size,used,avail",
+          process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(),
+        ])
+          .trim()
+          .split("\n")[1]
+          .trim()
+          .split(/\s+/)
+          .map(Number),
+      ]) {
+        assert.throws(() =>
+          assertFigures(`${wrong.join(" ")}\n${wrong.join(" ")}\n`, before),
+        );
       }
       if (label === labels[1])
         assert.ok(
@@ -187,7 +280,10 @@ test("workflow reports real filesystem usage and survives a reporting failure", 
       );
     }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await changeUsage("remove");
+    rmSync(`${churn}.summary`, { force: true });
+    writer.disconnect();
+    await new Promise((resolve) => writer.once("exit", resolve));
   }
 });
 
