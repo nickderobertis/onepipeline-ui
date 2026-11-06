@@ -265,30 +265,29 @@ class SessionBus(unittest.TestCase):
             self.skipTest('gh autolaunches a session bus only on Linux')
         if shutil.which('gh') is None:
             self.skipTest('gh is not installed, so nothing here can ask for a bus')
-        harness = RELEASED.harness
-        host = harness.Host()
-        self.addCleanup(host.close)
         scratch = tempfile.TemporaryDirectory()
         self.addCleanup(scratch.cleanup)
         record = record_bus_requests(scratch.name)
         # As the harness composes a step's environment, with the action's token, and a target that
         # token does not apply to: `github.localhost` is the one host this gh would not ask about.
-        job = {'HOME': scratch.name, **harness.real_gh_environment(host.url, scratch.name), 'GH_TOKEN': 'test-token',
-               **runner_environment()}
+        # gh looks in the keyring before it connects, so a closed loopback port is enough to ask with.
+        url = 'http://127.0.0.1:9'
+        job = {'HOME': scratch.name, **RELEASED.harness.real_gh_environment(url, scratch.name),
+               'GH_TOKEN': 'test-token', **runner_environment()}
 
         def gh(environment):
-            return subprocess.run(['gh', 'api', f'{host.url}/repos/owner/repo/commits/bus'],
+            return subprocess.run(['gh', 'api', f'{url}/repos/owner/repo'],
                                   env={**environment, 'PATH': f'{scratch.name}{os.pathsep}{environment["PATH"]}'},
                                   capture_output=True, text=True, timeout=60, check=False)
 
         control = gh({name: value for name, value in job.items() if name != 'DBUS_SESSION_BUS_ADDRESS'})
         if requests_for_a_bus(record) == 0:
             self.skipTest('this gh asks for no bus without the variable, so none can leak')
+        self.assertEqual(requests_for_a_bus(record), 1, 'the control asks for a bus exactly once')
         record.unlink()
         held = gh(job)
         self.assertEqual(requests_for_a_bus(record), 0, 'runner_environment() must set DBUS_SESSION_BUS_ADDRESS=disabled:')
         self.assertEqual((held.returncode, held.stdout), (control.returncode, control.stdout), held.stderr)
-        self.assertEqual(host.count('^/.*commits/bus'), 2)
 
 
 class ReleasedContract(unittest.TestCase):
