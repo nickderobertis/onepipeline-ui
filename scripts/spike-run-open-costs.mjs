@@ -263,7 +263,13 @@ class Server {
 
   /** Stop the one process this started. */
   async stop() {
-    this.child.kill("SIGTERM");
+    // Under strace the signal has to reach the server itself.
+    if (this.tracePid) {
+      const pid = this.child.pid;
+      const children = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8");
+      for (const child of children.trim().split(/\s+/u).filter(Boolean))
+        process.kill(Number(child), "SIGTERM");
+    } else this.child.kill("SIGTERM");
     const grace = new Promise((done) => setTimeout(done, 30_000, "late"));
     if ((await Promise.race([this.exited, grace])) === "late")
       this.child.kill("SIGKILL");
