@@ -2608,3 +2608,19 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   .spike-row { grid-template-columns: 10px minmax(0, 1fr); }
   .spike-row-tag { grid-column: 2; justify-self: start; }
 }
+.spike-md strong { font-weight: 700; color: var(--foreground); }
+.spike-md h1, .spike-md h2 { font-size: 16px; line-height: 22px; }
+.spike-md h3 { font-size: 14.5px; }
+.node-tab-panel > .spike-md h1, .node-tab-panel > .spike-md h2 { font-size: 18px; margin-top: 14px; }
+.node-tab-panel > .spike-md h3 { font-size: 15.5px; }
+@media (max-width: 640px) {
+  .spike-updates { flex-wrap: nowrap; }
+  .spike-updates > button { flex: none; width: 32px; height: 26px; padding: 0; font-size: 0; }
+}
+@media (min-width: 901px) {
+  .spike-card { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 10px; }
+  .spike-card > * { grid-column: 1 / -1; }
+  .spike-card > .spike-card-badges { grid-column: 1; }
+  .spike-card > h4 { grid-column: 2; }
+  .spike-card > .spike-card-actions { grid-column: 3; grid-row: 1; flex-wrap: nowrap; }
+}
