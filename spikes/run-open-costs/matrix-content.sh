@@ -7,6 +7,17 @@ label=$1 out=$2 root=$3 run=$4
 shift 4
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 mkdir -p "$out"
+# The status read, sweep off in both, compared with each way of leaving the fold.
+if [ "$label" = status ]; then
+  for prototype in "$@"; do
+    name="$label.$(basename "$run").$prototype"
+    [ -s "$out/$name.json" ] && continue
+    node "$repo/scripts/spike-run-open-costs.mjs" --runs-root "$root" --cwd "$(dirname "$root")" \
+      --run "$run" --measure content-status --baseline-prototype status-no-providers \
+      --prototype "$prototype" >"$out/$name.tmp" 2>"$out/$name.err" && mv "$out/$name.tmp" "$out/$name.json"
+  done
+  exit 0
+fi
 for prototype in "$@"; do
   for view in graph overall node; do
     name="$label.$view.$prototype"
