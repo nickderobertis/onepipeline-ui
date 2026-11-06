@@ -1,0 +1,32 @@
+# The profiled build of the read API for the run-open-costs spike: the crate's own
+# library under a `pprof` sampler, which the crate itself never depends on. Its own
+# workspace, lock and target directory, so nothing here reaches the root manifest,
+# its lock, or anything published.
+[package]
+name = "run-open-costs-profiled"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "onepipeline-api-profiled"
+path = "src/main.rs"
+
+[dependencies]
+onepipeline-ui = { path = "../..", features = ["spike-engine-open-current"] }
+clap = { version = "4.6", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+pprof = { version = "0.15", default-features = false, features = ["cpp"] }
+
+[profile.release]
+strip = false
+debug = "line-tables-only"
+lto = "thin"
+codegen-units = 16
+
+# The released engine with `RunView::open_current` made public, which is the one edit
+# `scripts/spike-run-open-costs-build.sh` makes to its copy under `target/spike/`.
+[patch.crates-io]
+onepipeline = { path = "../../target/spike/engine" }

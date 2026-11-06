@@ -7799,6 +7799,9 @@ pub(crate) struct ActivityFold {
     order: Vec<String>,
     latest: BTreeMap<String, (i128, Value)>,
     identities: HashSet<(String, u64)>,
+    /// Spike prototype `lazy-activity`: each node's latest record, its description
+    /// resolved only when the entries are read rather than once per record.
+    unresolved: BTreeMap<String, Envelope>,
 }
 
 impl ActivityFold {
@@ -7852,12 +7855,19 @@ impl ActivityFold {
         }
         entry.insert("at".into(), json!(stamp));
         // The call in one line, as the engine's resolver describes it.
-        entry.insert(
-            "description".into(),
-            json!(transcript::read(event, None)
-                .map(|read| read.description())
-                .unwrap_or_default()),
-        );
+        if crate::open_trace::prototype("lazy-activity") {
+            self.unresolved.insert(node.clone(), event.clone());
+            entry.insert("description".into(), json!(""));
+        } else {
+            let reading = crate::open_trace::timer();
+            entry.insert(
+                "description".into(),
+                json!(transcript::read(event, None)
+                    .map(|read| read.description())
+                    .unwrap_or_default()),
+            );
+            crate::open_trace::add("activity.transcript_read", reading);
+        }
         for field in ["kind", "name", "detail"] {
             entry.insert(
                 field.into(),
@@ -7888,7 +7898,20 @@ impl ActivityFold {
         activity.sort_by_key(|(at, _)| *at);
         activity
             .into_iter()
-            .map(|(_, entry)| entry.clone())
+            .map(|(_, entry)| {
+                let mut entry = entry.clone();
+                if let Some(event) = entry["node"]
+                    .as_str()
+                    .and_then(|node| self.unresolved.get(node))
+                {
+                    let reading = crate::open_trace::timer();
+                    entry["description"] = json!(transcript::read(event, None)
+                        .map(|read| read.description())
+                        .unwrap_or_default());
+                    crate::open_trace::add("activity.transcript_read", reading);
+                }
+                entry
+            })
             .collect()
     }
 }

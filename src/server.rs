@@ -519,7 +519,10 @@ async fn subscribe(State(serving): Store, raw: String) -> Response {
     };
     let hub = serving.hub.clone();
     match tokio::task::spawn_blocking(move || hub.subscribe(&request)).await {
-        Ok(Ok(subscribed)) => (axum::http::StatusCode::CREATED, Json(subscribed)).into_response(),
+        Ok(Ok(subscribed)) => {
+            let _span = crate::open_trace::span("subscribe.serialize");
+            (axum::http::StatusCode::CREATED, Json(subscribed)).into_response()
+        }
         Ok(Err(error)) => error.into_response(),
         Err(_) => ApiError::Read("unexpected read failure".to_owned()).into_response(),
     }

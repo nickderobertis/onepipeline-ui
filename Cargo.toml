@@ -120,6 +120,10 @@ path = "src/lib.rs"
 # binary fails there rather than shipping an `--ui` nobody can use.
 # `tests/packaging.rs` holds every job that compiles the binary to that.
 [features]
+# The run-open spike only: reads the engine's `RunView::open_current`, which the
+# release keeps crate-private, so this builds only over
+# `scripts/spike-run-open-costs-build.sh`'s patched engine.
+spike-engine-open-current = []
 bundled-ui = []
 
 [dependencies]

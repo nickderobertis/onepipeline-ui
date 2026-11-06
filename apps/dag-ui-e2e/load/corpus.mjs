@@ -18,7 +18,7 @@
  * text (`output.mjs`), so it compresses as a real host's does.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { receiptFor } from "./journal.ts";
@@ -86,14 +86,67 @@ function planOf(nodes) {
   };
 }
 
+/**
+ * Tool calls one recorded session holds before the next begins, in the spike's
+ * `transcript-store` shape: at the tool output's ~1.3 KB, what makes one resolve read
+ * ~1.8 MB, the reference-weighted mean of this host's largest live run.
+ */
+const CALLS_PER_SESSION = 1_400;
+
 /** A journal written whole, one record at a time, on one stream. */
 class Journal {
-  constructor(runId, at) {
+  constructor(runId, at, transcriptStore = null) {
     this.runId = runId;
     this.stream = streamOf(runId);
     this.at = at;
     this.lines = [];
     this.turns = new Map();
+    this.transcriptStore = transcriptStore;
+    this.calls = 0;
+  }
+
+  /**
+   * One tool call as the engine records it when the harness keeps a history store:
+   * a reference into a session file, with the output only in that file — so reading
+   * the record's description means reading the file.
+   */
+  recordedCall(node, index) {
+    const session = Math.floor(this.calls / CALLS_PER_SESSION);
+    const call = this.calls % CALLS_PER_SESSION;
+    this.calls += 1;
+    const history_session = `${this.stream}-${node}-${session}`;
+    const history_id = `${this.stream}-${node}-${session}-id`;
+    const project = "load-history-project";
+    const dir = join(this.transcriptStore, project);
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(
+      join(dir, `${history_session}.jsonl`),
+      `${JSON.stringify({
+        type: "event",
+        schema_version: "1.1",
+        run_id: history_id,
+        harness: "claude-code",
+        event: {
+          kind: "tool_call",
+          name: "Bash",
+          input: { command: `step ${index} of ${node}` },
+          output: toolOutput(index),
+          index: call,
+        },
+      })}\n`,
+    );
+    return {
+      transcript: {
+        history_dir: this.transcriptStore,
+        history_project: project,
+        history_session,
+        history_id,
+        index: call,
+      },
+      kind: "tool_call",
+      name: "Bash",
+      index: call,
+    };
   }
 
   emit(source, kind, labels, payload = {}) {
@@ -160,14 +213,16 @@ class Journal {
           "agentgraph",
           "turn-activity",
           { ...member, session },
-          {
-            kind: "tool_call",
-            name: "Bash",
-            detail: `step ${index} of ${node}`,
-            truncated: false,
-            output: toolOutput(index),
-            index,
-          },
+          this.transcriptStore === null
+            ? {
+                kind: "tool_call",
+                name: "Bash",
+                detail: `step ${index} of ${node}`,
+                truncated: false,
+                output: toolOutput(index),
+                index,
+              }
+            : this.recordedCall(node, index),
         );
       } else if (roll === 16) {
         this.emit(
@@ -231,13 +286,14 @@ function writeRun(
   startMs,
   stepMs,
   extra = 0,
+  transcriptStore = null,
 ) {
   const dir = join(root, runId);
   mkdirSync(dir, { recursive: true });
   const plan = planOf(nodes);
   writeJson(join(dir, "plan.json"), plan);
   writeJson(join(dir, "launch.json"), launch(runId, project, stamp(startMs)));
-  const journal = new Journal(runId, startMs);
+  const journal = new Journal(runId, startMs, transcriptStore);
   declareGraph(root, journal.stream, startMs);
   journal.emit("pipeline", "run-started", {}, { plan });
   // Live runs leave their last node running; the others settle every node.
@@ -280,6 +336,15 @@ const SCALES = {
     settledBig: 1000,
     settledSmall: 40,
   },
+  // The run-open spike's: this host's run directories, the same open run.
+  "host-850": {
+    openLiveRecords: OPEN_LIVE_RECORDS,
+    otherLive: 10,
+    stopped: 10,
+    runs: 850,
+    settledBig: 1000,
+    settledSmall: 40,
+  },
   journey: {
     openLiveRecords: 1_500,
     otherLive: 2,
@@ -291,9 +356,14 @@ const SCALES = {
 };
 
 /** Write the whole corpus under `root`; returns what the harness needs to know. */
-export function buildLoadCorpus(root, scaleName = "host") {
+export function buildLoadCorpus(
+  root,
+  scaleName = "host",
+  { transcriptStore = false } = {},
+) {
   const scale = SCALES[scaleName];
   if (scale === undefined) throw new Error(`no corpus scale ${scaleName}`);
+  const history = transcriptStore ? join(dirname(root), "history") : null;
   const otherLiveRuns = OTHER_LIVE_RUNS.slice(0, scale.otherLive);
   mkdirSync(root, { recursive: true });
   const now = Date.now();
@@ -320,6 +390,7 @@ export function buildLoadCorpus(root, scaleName = "host") {
     now - day,
     Math.floor(day / scale.openLiveRecords),
     extra,
+    history,
   );
   for (const runId of otherLiveRuns) {
     writeRun(
@@ -381,10 +452,22 @@ if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  const [root, scale = "host"] = process.argv.slice(2);
-  if (root === undefined || (scale !== "host" && scale !== "journey")) {
-    console.error("usage: corpus.mjs ROOT [host|journey]");
+  const [root, scale = "host", driver] = process.argv.slice(2);
+  if (
+    root === undefined ||
+    !(scale in SCALES) ||
+    (driver !== undefined && driver !== "transcript-store")
+  ) {
+    console.error(
+      "usage: corpus.mjs ROOT [host|host-850|journey] [transcript-store]",
+    );
     process.exit(2);
   }
-  console.log(JSON.stringify(buildLoadCorpus(root, scale)));
+  console.log(
+    JSON.stringify(
+      buildLoadCorpus(root, scale, {
+        transcriptStore: driver === "transcript-store",
+      }),
+    ),
+  );
 }

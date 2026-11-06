@@ -42,6 +42,7 @@ use crate::contract::{
 };
 use crate::error::ApiError;
 use crate::filter::EventFilter;
+use crate::open_trace::span;
 use crate::patch::Op;
 use crate::payload::live::{
     DetailInputs, Indexed, LiveDetail, LiveTimeline, TimelineScope, Touched,
@@ -588,10 +589,17 @@ struct Folded {
 
 impl Folded {
     fn of(view: &RunView) -> Self {
-        let aggregate = onepipeline::telemetry::of_run(&view.paths, &view.events);
-        let document = RunId::try_from(view.paths.run.as_str())
-            .ok()
-            .and_then(|run| crate::telemetry::of_aggregate(&run, &aggregate).ok());
+        let aggregate = {
+            let _span = span("telemetry.of_run");
+            onepipeline::telemetry::of_run(&view.paths, &view.events)
+        };
+        let document = {
+            let _span = span("telemetry.of_aggregate");
+            RunId::try_from(view.paths.run.as_str())
+                .ok()
+                .and_then(|run| crate::telemetry::of_aggregate(&run, &aggregate).ok())
+        };
+        let _serve = span("telemetry.serve_json");
         Self {
             document,
             served: json!(aggregate),
@@ -611,14 +619,42 @@ impl Folded {
 
 impl LiveRun {
     fn open(store: &RunStore, run: &RunId) -> Result<Self, ApiError> {
-        let view = store.view(run)?;
-        let indexed = Indexed::of(&view);
-        let declared = store.declared(&view);
+        let view = {
+            let _span = span("open.run_view");
+            #[cfg(feature = "spike-engine-open-current")]
+            {
+                // The prototype that answers from the checkpoint: every status
+                // and count, none of the history, which is the point it decides.
+                if crate::open_trace::prototype("checkpoint-first") {
+                    RunView::open_current(&store.paths_of(run))
+                        .map_err(|_| ApiError::RunNotFound(run.clone()))?
+                } else {
+                    store.view(run)?
+                }
+            }
+            #[cfg(not(feature = "spike-engine-open-current"))]
+            store.view(run)?
+        };
+        let indexed = {
+            let _span = span("open.index");
+            Indexed::of(&view)
+        };
+        let declared = {
+            let _span = span("open.declared_members");
+            store.declared(&view)
+        };
         let paths = store.paths_of(run);
-        let agents = onepipeline::verbs::agents(&paths, AgentScope::Run).ok();
+        let agents = {
+            let _span = span("open.agents");
+            onepipeline::verbs::agents(&paths, AgentScope::Run).ok()
+        };
+        let telemetry = {
+            let _span = span("open.telemetry");
+            Folded::of(&view)
+        };
         Ok(Self {
             run: run.clone(),
-            telemetry: Folded::of(&view),
+            telemetry,
             liveness: view.liveness(),
             failing: false,
             indexed,
@@ -653,6 +689,7 @@ impl LiveRun {
             } else {
                 filter.clone()
             };
+            let _span = span("ensure.detail_build");
             let built = LiveDetail::build(
                 &self.view,
                 &self.indexed,
@@ -697,6 +734,7 @@ impl LiveRun {
                     }) {
                         Some(at) => at,
                         None => {
+                            let _span = span("ensure.timeline_build");
                             let built = LiveTimeline::build(
                                 &self.view,
                                 &self.indexed,
@@ -711,6 +749,7 @@ impl LiveRun {
                         }
                     };
                 let (_, _, timeline) = &self.timelines[at];
+                let _clone = span("ensure.timeline_clone");
                 let timeline = enveloped(timeline.payload.payload(), &timeline.observed_at);
                 Ok(match scope {
                     TimelineScope::Run => json!({
@@ -876,6 +915,7 @@ impl Hub {
     /// node_not_found` for a node scope naming a node the run does not carry,
     /// and the filter's refusal for a profile the run does not have.
     pub fn subscribe(&self, request: &SubscribeRequest) -> Result<Value, ApiError> {
+        let _whole = span("subscribe");
         let shared = &self.0;
         let visible = Visible::of(&request.view);
         let spec = match &request.view {
@@ -890,28 +930,48 @@ impl Hub {
             None => None,
             Some(run) => {
                 let run = RunId::try_from(run)?;
-                let live = self.live_run(&run)?;
-                lock(&live).ensure(&shared.store, &visible, spec)?;
+                let live = {
+                    let _span = span("subscribe.live_run");
+                    self.live_run(&run)?
+                };
+                {
+                    let _span = span("subscribe.ensure_first");
+                    lock(&live).ensure(&shared.store, &visible, spec)?;
+                }
                 Some(live)
             }
         };
         // Then the publication boundary: the sidebar, the run and the
         // subscriptions locked together, so every change after the snapshot is
         // one this subscription is sent and none before it is.
-        self.first_look();
+        {
+            let _span = span("subscribe.first_look");
+            self.first_look();
+        }
         // The run this subscription shows is under the root — it was opened
         // above — so its snapshot lists it, however long ago the last look
         // was: a tab told a run's detail but not that the run is served would
         // open another one.
-        let missing = visible.run_id().and_then(|run| missing_row(shared, run));
+        let missing = {
+            let _span = span("subscribe.missing_row");
+            visible.run_id().and_then(|run| missing_row(shared, run))
+        };
+        let boundary = span("subscribe.boundary_locks");
         let mut sidebar = lock(&shared.sidebar);
         let added = missing.and_then(|(run, stamps, row)| sidebar.add(run, stamps, row));
         let mut run = live.as_ref().map(|live| lock(live));
-        let visible_state = match run.as_mut() {
-            Some(run) => run.ensure(&shared.store, &visible, spec)?,
-            None => json!({ "type": "sidebar" }),
+        drop(boundary);
+        let visible_state = {
+            let _span = span("subscribe.ensure_second");
+            match run.as_mut() {
+                Some(run) => run.ensure(&shared.store, &visible, spec)?,
+                None => json!({ "type": "sidebar" }),
+            }
         };
-        let rows = sidebar.snapshot();
+        let rows = {
+            let _span = span("subscribe.sidebar_snapshot");
+            sidebar.snapshot()
+        };
         let mut state = lock(&shared.state);
         // The reading is held for this subscription from the boundary on: a tick
         // that let it go between its opening and now — when no subscription yet
@@ -954,6 +1014,7 @@ impl Hub {
         drop(sidebar);
         self.start_polling();
         let id = self.id(seq);
+        crate::open_trace::flush();
         let snapshot = json!({ "id": id, "sidebar": rows, "visible": visible_state });
         let initial = match request.origin {
             SubscribeOrigin::Fresh | SubscribeOrigin::Replaces(_) => {

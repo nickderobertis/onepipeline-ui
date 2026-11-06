@@ -1,0 +1,643 @@
+#!/usr/bin/env node
+/**
+ * One measurement of what opening a run costs, over a named runs root.
+ *
+ *   node scripts/spike-run-open-costs.mjs --runs-root ROOT --measure MEASURE [--run RUN]
+ *
+ * Starts a fresh `onepipeline-api serve` on a spare loopback port, performs the one
+ * request (or browser navigation) MEASURE names, attributes its wall time to named
+ * causes from the spans the server wrote (`src/open_trace.rs`), stops that server by
+ * the PID it started, and prints one JSON document. Only reads: it never sends a
+ * write route, and the only thing a run under the root gains is the derived cache
+ * any reader keeps.
+ *
+ * MEASURE:
+ *   status           GET /api/v2/runs/<run>/status
+ *   graph            POST /api/v2/subscriptions, the view Graph opens (`detail`)
+ *   overall          the same, the view Overall opens (`timeline`, scope run)
+ *   node             the same, a node timeline (--node, or the run's first node)
+ *   sidebar          the same, no run: the sidebar alone
+ *   page-graph, page-overall, page-node
+ *                    a real browser opening that view, to history drawn
+ *   human-items      GET /api/human-items per filter the page sends, right after the
+ *                    journal of a scratch COPY of the root moved by one real record
+ *   provider-probe   `oneharness usage --harness <--harness>`, no server at all
+ *
+ * Options: --cwd DIR (the server's working directory, where oneharness discovers its
+ * configuration), --binary PATH, --ui-dist DIR, --prototype a,b (the branch's
+ * ONEPIPELINE_UI_SPIKE switches), --profile (write CPU samples; attaches `hot`),
+ * --keep-provider-env (leave this shell's CLAUDE_CONFIG_DIR in place; by default a
+ * dispatch's own overrides are removed so the server sees what the host's long-lived
+ * server sees), --concurrent N (N simultaneous status reads), --timeout SECONDS.
+ */
+
+import { spawn, spawnSync } from "node:child_process";
+import {
+  appendFileSync,
+  closeSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  readSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { createRequire } from "node:module";
+import { cpus, loadavg, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { parseArgs } from "node:util";
+
+const REPO = resolve(dirname(new URL(import.meta.url).pathname), "..");
+const DEFAULT_BINARY = join(
+  REPO,
+  "target/spike/release/onepipeline-api-profiled",
+);
+
+const VIEWS = {
+  graph: (run) => ({ type: "detail", run_id: run }),
+  overall: (run) => ({ type: "timeline", run_id: run, scope: "run" }),
+  node: (run, node) => ({ type: "timeline", run_id: run, scope: "node", node }),
+  sidebar: () => ({ type: "sidebar" }),
+};
+
+/** Span or running total → the cause it names, and the library that owns it. */
+const CAUSES = {
+  "status.present": ["run directory check", "onepipeline-ui"],
+  "status.open": ["RunView::open: journal read and fold", "onepipeline"],
+  "status.project": ["payload projection", "onepipeline-ui"],
+  "open.run_view": ["RunView::open: journal read and fold", "onepipeline"],
+  "open.index": ["Indexed::of: per-owner index", "onepipeline-ui"],
+  "open.declared_members": [
+    "declared members: graph records",
+    "onepipeline-ui over oneagentgraph",
+  ],
+  "open.agents": ["verbs::agents: session list", "onepipeline"],
+  "open.telemetry": ["telemetry fold", "onepipeline"],
+  "subscribe.first_look": [
+    "first_look: every run's metadata and summary",
+    "onepipeline-ui over onepipeline",
+  ],
+  "subscribe.missing_row": ["sidebar row of the opened run", "onepipeline-ui"],
+  "subscribe.boundary_locks": [
+    "publication boundary lock wait",
+    "onepipeline-ui",
+  ],
+  "subscribe.ensure_second": [
+    "second ensure: re-enveloping the held payload",
+    "onepipeline-ui",
+  ],
+  "subscribe.sidebar_snapshot": ["sidebar rows re-parsed", "onepipeline-ui"],
+  "subscribe.serialize": ["response serialization", "onepipeline-ui"],
+};
+
+function fail(message) {
+  console.error(`spike-run-open-costs: ${message}`);
+  process.exit(2);
+}
+
+function options() {
+  const { values } = parseArgs({
+    options: {
+      "runs-root": { type: "string" },
+      measure: { type: "string" },
+      run: { type: "string" },
+      node: { type: "string" },
+      cwd: { type: "string" },
+      binary: { type: "string" },
+      "ui-dist": { type: "string" },
+      prototype: { type: "string" },
+      profile: { type: "boolean", default: false },
+      "keep-provider-env": { type: "boolean", default: false },
+      concurrent: { type: "string", default: "1" },
+      harness: { type: "string", default: "claude-code" },
+      timeout: { type: "string", default: "580" },
+    },
+  });
+  if (!values.measure) fail("--measure names what to measure");
+  const known = [
+    ...Object.keys(VIEWS),
+    "status",
+    "page-graph",
+    "page-overall",
+    "page-node",
+    "human-items",
+    "provider-probe",
+  ];
+  if (!known.includes(values.measure))
+    fail(`no measure ${values.measure}: one of ${known.join(", ")}`);
+  if (values.measure !== "provider-probe" && !values["runs-root"])
+    fail("--runs-root names the root to serve");
+  const runless = ["sidebar", "human-items", "provider-probe"];
+  if (!runless.includes(values.measure) && !values.run)
+    fail(`--run names the run ${values.measure} reads`);
+  return values;
+}
+
+const load = () => loadavg().map((one) => Math.round(one * 100) / 100);
+
+/** This shell's environment without what a dispatch sets for itself. */
+function serverEnv(keepProviderEnv) {
+  const env = { ...process.env };
+  for (const name of Object.keys(env))
+    if (/^(ONEPIPELINE_|ONEVCS_|ORCHESTRATOR_)/u.test(name)) delete env[name];
+  if (!keepProviderEnv) {
+    delete env.CLAUDE_CONFIG_DIR;
+    delete env.XDG_RUNTIME_DIR;
+  }
+  return env;
+}
+
+class Server {
+  constructor(values, root, scratch) {
+    const binary = values.binary ?? DEFAULT_BINARY;
+    if (!existsSync(binary))
+      fail(`no binary at ${binary}: build it with just spike-run-open-costs-build`);
+    this.tracePath = join(scratch, "trace.jsonl");
+    this.profilePath = join(scratch, "profile.folded");
+    const args = [
+      "serve",
+      "--runs-root",
+      root,
+      "--bind",
+      "127.0.0.1:0",
+      "--session",
+      `spike-run-open-costs-${process.pid}`,
+    ];
+    if (values["ui-dist"]) args.push("--ui-dist", values["ui-dist"]);
+    const env = serverEnv(values["keep-provider-env"]);
+    env.ONEPIPELINE_UI_OPEN_TRACE = this.tracePath;
+    if (values.prototype) env.ONEPIPELINE_UI_SPIKE = values.prototype;
+    if (values.profile) env.ONEPIPELINE_UI_PROFILE = this.profilePath;
+    this.child = spawn(binary, args, {
+      cwd: values.cwd ?? dirname(root),
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    this.binary = binary;
+    this.exited = new Promise((done) => this.child.once("exit", done));
+  }
+
+  /** The address the server announces once it has bound. */
+  listening() {
+    return new Promise((done, refuse) => {
+      let text = "";
+      const read = (chunk) => {
+        text += chunk;
+        const found = /http:\/\/(127\.0\.0\.1:\d+)/u.exec(text);
+        if (found) done(`http://${found[1]}`);
+      };
+      this.child.stdout.on("data", read);
+      this.child.stderr.on("data", (chunk) => {
+        text += chunk;
+      });
+      this.child.once("exit", (code) =>
+        refuse(new Error(`the server exited ${code}: ${text}`)),
+      );
+    });
+  }
+
+  /** Stop the one process this started. */
+  async stop() {
+    this.child.kill("SIGTERM");
+    const grace = new Promise((done) => setTimeout(done, 30_000, "late"));
+    if ((await Promise.race([this.exited, grace])) === "late")
+      this.child.kill("SIGKILL");
+    await this.exited;
+  }
+
+  residentKb() {
+    const status = readFileSync(`/proc/${this.child.pid}/status`, "utf8");
+    const of = (name) =>
+      Number(new RegExp(`${name}:\\s+(\\d+)`, "u").exec(status)?.[1] ?? 0);
+    return { rss_kb: of("VmRSS"), peak_kb: of("VmHWM") };
+  }
+
+  cpuSeconds() {
+    const stat = readFileSync(`/proc/${this.child.pid}/stat`, "utf8");
+    const after = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    return (Number(after[11]) + Number(after[12])) / 100;
+  }
+
+  spans() {
+    if (!existsSync(this.tracePath)) return [];
+    return readFileSync(this.tracePath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  }
+}
+
+/** Sum the spans with `name`, in seconds. */
+const total = (spans, name, field = "wall_ms") =>
+  spans
+    .filter((span) => span.span === name || span.total === name)
+    .reduce((sum, span) => sum + span[field], 0) / 1000;
+
+function causes(wall, measure, spans) {
+  const rows = [];
+  const add = (cause, owner, seconds, method) => {
+    if (seconds > 0)
+      rows.push({
+        cause,
+        owner,
+        seconds: Math.round(seconds * 1000) / 1000,
+        share: Math.round((seconds / wall) * 1000) / 1000,
+        method,
+      });
+  };
+  for (const [name, [cause, owner]] of Object.entries(CAUSES))
+    add(cause, owner, total(spans, name), `span ${name}`);
+  if (measure === "status") {
+    const shadow = total(spans, "status.shadow_render_without_providers");
+    const full = total(spans, "status.render_with_providers");
+    add(
+      "provider sweep: oneagentgraph::health → oneharness usage --all, starting each provider CLI",
+      "onepipeline (asks) / oneagentgraph / oneharness-core",
+      full - shadow,
+      "span status.render_with_providers minus the same render without providers",
+    );
+    add(
+      "status text without providers",
+      "onepipeline",
+      shadow,
+      "span status.shadow_render_without_providers",
+    );
+  } else {
+    const transcripts = total(spans, "activity.transcript_read");
+    const detail = total(spans, "ensure.detail_build");
+    const timeline = total(spans, "ensure.timeline_build");
+    add(
+      "activity description: a whole session transcript read and parsed per turn-activity record",
+      "onepipeline-ui (asks per record) / onepipeline (whole-file resolve)",
+      transcripts,
+      "running total activity.transcript_read",
+    );
+    add(
+      "detail document apart from those reads",
+      "onepipeline-ui",
+      detail - Math.min(transcripts, detail),
+      "span ensure.detail_build minus the reads",
+    );
+    add(
+      "timeline apart from those reads",
+      "onepipeline-ui",
+      timeline - Math.max(0, transcripts - detail),
+      "span ensure.timeline_build minus any reads it held",
+    );
+    add(
+      "timeline re-enveloped",
+      "onepipeline-ui",
+      total(spans, "ensure.timeline_clone"),
+      "span ensure.timeline_clone",
+    );
+  }
+  rows.sort((left, right) => right.seconds - left.seconds);
+  const attributed = rows.reduce((sum, row) => sum + row.seconds, 0);
+  return {
+    rows,
+    attributed_share: Math.round((attributed / wall) * 1000) / 1000,
+    unattributed_seconds: Math.round((wall - attributed) * 1000) / 1000,
+  };
+}
+
+/** Which library each sampled frame's inclusive CPU belongs to. */
+function hotFrames(path) {
+  if (!existsSync(path)) return null;
+  const inclusive = new Map();
+  let samples = 0;
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    const at = line.lastIndexOf(" ");
+    if (at < 0) continue;
+    const count = Number(line.slice(at + 1));
+    samples += count;
+    const frames = new Set(
+      line
+        .slice(0, at)
+        .split(";")
+        .map((frame) => frame.replace(/<.*$/u, "")),
+    );
+    for (const frame of frames)
+      inclusive.set(frame, (inclusive.get(frame) ?? 0) + count);
+  }
+  const named = [...inclusive]
+    .filter(([frame]) =>
+      /^(absorb|resolve|read|live_activity_over|whole|from_str|open|fold|of_run|merge_order|owner_turns|detail_document|ensure|build|first_look)$/u.test(
+        frame,
+      ),
+    )
+    .sort((left, right) => right[1] - left[1])
+    .map(([frame, count]) => ({
+      frame,
+      share: Math.round((count / samples) * 1000) / 1000,
+    }));
+  return { samples, inclusive: named };
+}
+
+async function timed(url, init, seconds) {
+  const started = performance.now();
+  const response = await fetch(url, {
+    ...init,
+    signal: AbortSignal.timeout(seconds * 1000),
+  });
+  const firstByte = (performance.now() - started) / 1000;
+  const body = await response.text();
+  return {
+    status: response.status,
+    seconds: (performance.now() - started) / 1000,
+    first_byte_seconds: firstByte,
+    bytes: Buffer.byteLength(body),
+    body,
+  };
+}
+
+async function eventsHeader(origin, subscription, seconds) {
+  const started = performance.now();
+  const abort = new AbortController();
+  const limit = setTimeout(() => abort.abort(), seconds * 1000);
+  const response = await fetch(
+    `${origin}/api/v2/events?subscription=${subscription}`,
+    { signal: abort.signal, headers: { accept: "text/event-stream" } },
+  );
+  const reader = response.body.getReader();
+  const opened = (performance.now() - started) / 1000;
+  clearTimeout(limit);
+  await reader.cancel();
+  abort.abort();
+  return { status: response.status, seconds: opened };
+}
+
+function firstNodeOf(root, run) {
+  const plan = JSON.parse(readFileSync(join(root, run, "plan.json"), "utf8"));
+  return plan.tasks?.[0]?.id ?? fail(`${run} has no task to open`);
+}
+
+async function subscribeMeasure(values, server, origin, root) {
+  const node =
+    values.measure === "node"
+      ? (values.node ?? firstNodeOf(root, values.run))
+      : undefined;
+  const view = VIEWS[values.measure](values.run, node);
+  const budget = Number(values.timeout);
+  const posted = await timed(
+    `${origin}/api/v2/subscriptions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ view }),
+    },
+    budget,
+  );
+  if (posted.status !== 201) fail(`subscribe: ${posted.status} ${posted.body}`);
+  const answer = JSON.parse(posted.body);
+  const events = await eventsHeader(origin, answer.subscription, budget);
+  return {
+    view,
+    wall_seconds: posted.seconds,
+    response_bytes: posted.bytes,
+    events_open_seconds: events.seconds,
+    sidebar_rows: answer.initial.snapshot.sidebar.length,
+    server: server.residentKb(),
+    server_cpu_seconds: server.cpuSeconds(),
+  };
+}
+
+async function statusMeasure(values, server, origin) {
+  const budget = Number(values.timeout);
+  const url = `${origin}/api/v2/runs/${values.run}/status`;
+  const reads = await Promise.all(
+    Array.from({ length: Number(values.concurrent) }, () =>
+      timed(url, {}, budget),
+    ),
+  );
+  const refused = reads.find((read) => read.status !== 200);
+  if (refused) fail(`status: ${refused.status} ${refused.body}`);
+  const rendered = JSON.parse(reads[0].body).rendered ?? "";
+  return {
+    wall_seconds: Math.max(...reads.map((read) => read.seconds)),
+    each_seconds: reads.map((read) => Math.round(read.seconds * 100) / 100),
+    response_bytes: reads[0].bytes,
+    identities: (rendered.match(/"harness":/gu) ?? []).length,
+    server: server.residentKb(),
+    server_cpu_seconds: server.cpuSeconds(),
+  };
+}
+
+/** The real page: navigate, and time until the view shows the run's history. */
+async function pageMeasure(values, server, origin, root) {
+  const require = createRequire(join(REPO, "apps/dag-ui-e2e/package.json"));
+  const { chromium } = require("@playwright/test");
+  const view = values.measure.slice("page-".length);
+  const node = view === "node" ? (values.node ?? firstNodeOf(root, values.run)) : null;
+  const address =
+    view === "node"
+      ? `/?run=${values.run}&view=graph&node=${node}`
+      : `/?run=${values.run}&view=${view}`;
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    const started = performance.now();
+    const since = () => (performance.now() - started) / 1000;
+    let subscribed = null;
+    page.on("response", (response) => {
+      if (
+        subscribed === null &&
+        response.url().endsWith("/api/v2/subscriptions") &&
+        response.request().method() === "POST"
+      )
+        subscribed = since();
+    });
+    await page.goto(`${origin}${address}`);
+    const budget = Number(values.timeout) * 1000;
+    const shown =
+      view === "graph"
+        ? page.locator(".react-flow__node").first()
+        : view === "overall"
+          ? page
+              .getByRole("region", { name: "Graph timeline" })
+              .getByRole("button")
+              .first()
+          : page
+              .getByRole("region", { name: /^Timeline for / })
+              .getByRole("listitem")
+              .first();
+    await shown.waitFor({ timeout: budget });
+    const wall = since();
+    return {
+      address,
+      wall_seconds: wall,
+      subscribe_answered_seconds: subscribed,
+      server: server.residentKb(),
+      server_cpu_seconds: server.cpuSeconds(),
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+/** What the page's filters send: the default view and each state it offers. */
+const HUMAN_ITEM_QUERIES = ["", "?state=open", "?state=resolved", "?state=dismissed"];
+
+function itemsById(body) {
+  return new Map(
+    JSON.parse(body).items.map((item) => [item.id, JSON.stringify(item)]),
+  );
+}
+
+/**
+ * The cost of one human-item write, without writing anything real: a scratch copy of
+ * the root's `human-items` directory with its journal cut one record short, read; then
+ * that record appended, as the write would, and read again per view. What the second
+ * read costs is the query a pushing server would run on a poll where the journal moved,
+ * and what differs between the two answers is the patch it would send.
+ */
+async function humanItemsMeasure(values, scratch) {
+  const copy = join(scratch, "root");
+  mkdirSync(copy, { recursive: true });
+  cpSync(join(values["runs-root"], "human-items"), join(copy, "human-items"), {
+    recursive: true,
+    filter: (source) => !source.includes("/bus"),
+  });
+  const journal = join(copy, "human-items", "events.ndjson");
+  const lines = readFileSync(journal, "utf8").split("\n").filter(Boolean);
+  if (lines.length < 2) fail("the journal holds fewer than two records");
+  writeFileSync(journal, `${lines.slice(0, -1).join("\n")}\n`);
+  rmSync(join(copy, "human-items", "index.json"), { force: true });
+  const server = new Server(values, copy, scratch);
+  try {
+    const origin = await server.listening();
+    const budget = Number(values.timeout);
+    const before = await timed(`${origin}/api/human-items`, {}, budget);
+    if (before.status !== 200) fail(`human-items: ${before.status} ${before.body}`);
+    appendFileSync(journal, `${lines.at(-1)}\n`);
+    const views = [];
+    for (const query of HUMAN_ITEM_QUERIES) {
+      const read = await timed(`${origin}/api/human-items${query}`, {}, budget);
+      views.push({ query, status: read.status, seconds: read.seconds, bytes: read.bytes });
+    }
+    const after = await timed(`${origin}/api/human-items`, {}, budget);
+    const was = itemsById(before.body);
+    const now = itemsById(after.body);
+    const changed = [...now].filter(([id, item]) => was.get(id) !== item);
+    return {
+      journal_records: lines.length,
+      journal_bytes: statSync(journal).size,
+      index_bytes: existsSync(join(copy, "human-items", "index.json"))
+        ? statSync(join(copy, "human-items", "index.json")).size
+        : 0,
+      items: now.size,
+      views,
+      whole_list_bytes: after.bytes,
+      items_changed_by_the_write: changed.length,
+      patch_bytes: changed.reduce((sum, [, item]) => sum + item.length, 0),
+      wall_seconds: Math.max(...views.map((view) => view.seconds)),
+    };
+  } finally {
+    await server.stop();
+  }
+}
+
+function providerProbe(values) {
+  const started = performance.now();
+  const probe = spawnSync(
+    "oneharness",
+    ["usage", "--harness", values.harness, "--format", "json"],
+    {
+      cwd: values.cwd ?? process.cwd(),
+      env: serverEnv(values["keep-provider-env"]),
+      encoding: "utf8",
+      timeout: Number(values.timeout) * 1000,
+    },
+  );
+  const wall = (performance.now() - started) / 1000;
+  const state = JSON.parse(probe.stdout || '{"identities":[]}').identities.map(
+    (identity) => identity.availability.state,
+  );
+  return { harness: values.harness, wall_seconds: wall, exit: probe.status, state };
+}
+
+function runFacts(root, run) {
+  if (!run) return null;
+  const journal = join(root, run, "events.jsonl");
+  const bytes = statSync(journal).size;
+  const fd = openSync(journal, "r");
+  const chunk = Buffer.alloc(1 << 20);
+  let records = 0;
+  for (let read; (read = readSync(fd, chunk)) > 0; )
+    for (let at = 0; at < read; at += 1) if (chunk[at] === 10) records += 1;
+  closeSync(fd);
+  const plan = JSON.parse(readFileSync(join(root, run, "plan.json"), "utf8"));
+  return {
+    journal_bytes: bytes,
+    records,
+    nodes: plan.tasks?.length ?? 0,
+    settled: existsSync(join(root, run, "result.json")),
+  };
+}
+
+async function main() {
+  const values = options();
+  const scratch = mkdtempSync(
+    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(), "run-open-costs-"),
+  );
+  const root = values["runs-root"] ? resolve(values["runs-root"]) : null;
+  const before = load();
+  const startedAt = new Date().toISOString();
+  let result;
+  let spans = [];
+  let hot = null;
+  try {
+    if (values.measure === "provider-probe") result = providerProbe(values);
+    else if (values.measure === "human-items")
+      result = await humanItemsMeasure(values, scratch);
+    else {
+      const server = new Server(values, root, scratch);
+      try {
+        const origin = await server.listening();
+        result = values.measure.startsWith("page-")
+          ? await pageMeasure(values, server, origin, root)
+          : values.measure === "status"
+            ? await statusMeasure(values, server, origin)
+            : await subscribeMeasure(values, server, origin, root);
+      } finally {
+        await server.stop();
+      }
+      spans = server.spans();
+      hot = hotFrames(server.profilePath);
+    }
+    const attribution =
+      spans.length > 0 ? causes(result.wall_seconds, values.measure, spans) : null;
+    console.log(
+      JSON.stringify(
+        {
+          measure: values.measure,
+          run: values.run ?? null,
+          run_facts: root ? runFacts(root, values.run) : null,
+          runs_root: root,
+          runs_under_root: root
+            ? spawnSync("ls", [root], { encoding: "utf8" }).stdout.split("\n").length - 1
+            : null,
+          binary: values.binary ?? DEFAULT_BINARY,
+          prototype: values.prototype ?? null,
+          profiled: values.profile,
+          started_at: startedAt,
+          cores: cpus().length,
+          load_before: before,
+          load_after: load(),
+          ...result,
+          attribution,
+          hot,
+        },
+        null,
+        2,
+      ),
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+await main();

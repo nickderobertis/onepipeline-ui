@@ -51,6 +51,7 @@ pub mod error;
 pub mod filter;
 pub mod human_items;
 pub mod live;
+pub mod open_trace;
 pub mod liveness;
 pub mod patch;
 pub mod payload;

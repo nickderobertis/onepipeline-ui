@@ -334,6 +334,21 @@ impl RunStore {
         RunPaths::under(&self.root, run.as_str())
     }
 
+    #[cfg(feature = "spike-engine-open-current")]
+    fn status_read(&self, run: &RunId) -> Result<verbs::Status, ApiError> {
+        if crate::open_trace::prototype("status-checkpoint") {
+            let view = RunView::open_current(&self.paths_of(run))
+                .map_err(|error| Self::refused(run, error))?;
+            return Ok(verbs::Status::Run(verbs::RunStatus { view }));
+        }
+        verbs::status(&self.root, Some(run.as_str())).map_err(|error| Self::refused(run, error))
+    }
+
+    #[cfg(not(feature = "spike-engine-open-current"))]
+    fn status_read(&self, run: &RunId) -> Result<verbs::Status, ApiError> {
+        verbs::status(&self.root, Some(run.as_str())).map_err(|error| Self::refused(run, error))
+    }
+
     /// One run, folded — **and nothing else opened**.
     ///
     /// Opened by name rather than searched for in a survey of the root, which is
@@ -983,10 +998,30 @@ impl RunApi for RunStore {
     }
 
     fn status(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
-        self.present(run)?;
-        let status = verbs::status(&self.root, Some(run.as_str()))
-            .map_err(|error| Self::refused(run, error))?;
-        let rendered = verbs::render_status(&status);
+        let _whole = crate::open_trace::span("status");
+        {
+            let _span = crate::open_trace::span("status.present");
+            self.present(run)?;
+        }
+        let status = {
+            let _span = crate::open_trace::span("status.open");
+            self.status_read(run)?
+        };
+        let rendered = {
+            let _span = crate::open_trace::span("status.render_with_providers");
+            if crate::open_trace::prototype("status-no-providers") {
+                status.render_without_providers()
+            } else {
+                verbs::render_status(&status)
+            }
+        };
+        // Spike: the same render without the provider sweep, after the real one,
+        // so the sweep's share is the difference and only a traced read pays.
+        if std::env::var_os(crate::open_trace::OPEN_TRACE_ENV).is_some() {
+            let _span = crate::open_trace::span("status.shadow_render_without_providers");
+            let _ = status.render_without_providers();
+        }
+        let _project = crate::open_trace::span("status.project");
         let verbs::Status::Run(detail) = status else {
             return Err(ApiError::ProjectionFailed(
                 "a run's status answered as a listing".to_owned(),

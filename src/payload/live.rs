@@ -765,9 +765,13 @@ impl LiveDetail {
     ) -> Value {
         self.turns.clear();
         self.activity = ActivityFold::default();
-        for event in &view.events {
-            self.activity.absorb(event, &EventFilter::default());
+        {
+            let _span = crate::open_trace::span("detail.activity_fold");
+            for event in &view.events {
+                self.activity.absorb(event, &EventFilter::default());
+            }
         }
+        let owners_span = crate::open_trace::span("detail.owner_turns");
         for owner in std::iter::once(Owner::Run).chain(
             indexed
                 .node_order()
@@ -777,6 +781,8 @@ impl LiveDetail {
             self.turns
                 .insert(owner, owner_turns(&Run::of(view).over(&events), declared));
         }
+        drop(owners_span);
+        let _document = crate::open_trace::span("detail.document");
         detail_document(
             &Run::of(view),
             declared,
