@@ -44,6 +44,7 @@ import { ShutdownStatus } from "../features/shutdown/ShutdownStatus";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
 import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
+import { UpdateSetting } from "../spike/UpdateSetting";
 import { useHumanItemsRoute } from "../lib/humanItemsRoute";
 import { RecordDisclosure } from "../lib/RecordDisclosure";
 import {
@@ -257,18 +258,26 @@ export function App({
                   {lastActivity.node}: {activityLine(lastActivity)}
                 </button>
               )}
-              <Button
-                onClick={() => {
-                  setHostRefresh((value) => value + 1);
-                  telemetry.refresh();
-                }}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                <RefreshCw size={14} /> Refresh
-              </Button>
             </div>
+          </section>
+          <section aria-label="Main area updates" className="spike-updates">
+            <UpdateSetting
+              initial="live"
+              intervalWaiting={2}
+              label="Main area updates"
+              offWaiting={5}
+            />
+            <Button
+              onClick={() => {
+                setHostRefresh((value) => value + 1);
+                telemetry.refresh();
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              <RefreshCw size={14} /> Refresh
+            </Button>
           </section>
           {!runless && detail && (
             <RecordDisclosure

@@ -935,7 +935,7 @@ const LIVE_TASKS = [
     id: "dashboard",
     persona: "worker",
     deps: ["foundation", `run:${HISTORY_RUN}#archive`],
-    task: "## What\nBuild the live dashboard.\n\n## Acceptance criteria\nUsers can inspect transcripts",
+    task: SPIKE_TASK,
     context: "the reviewer asked for a changelog entry",
     max_turns: 12,
   },
@@ -3285,6 +3285,23 @@ function writeChannelRun(root) {
 }
 
 /** Write every run this fixture serves, oldest first. */
+const SPIKE_TASK = `## What
+
+Build the live dashboard that lets a reader follow a run from a phone. It reads the \`GET /api/v2/events\` stream and **never polls**. See [the read API contract](https://github.com/nickderobertis/onepipeline-ui/blob/main/docs/contract.md) and [issue #589](https://github.com/nickderobertis/onepipeline-ui/issues/589).
+
+### Why
+
+The person supervising several runs does it between other things, so:
+
+1. the page has to read at a glance;
+2. a resolved card must leave at once;
+3. nothing may scroll sideways, even for <https://github.com/nickderobertis/onepipeline-ui/blob/main/apps/dag-ui-e2e/fixtures/a-very-long-unbroken-path-that-has-to-wrap-inside-its-panel.mjs>.
+
+## Acceptance criteria
+
+- Users can inspect transcripts
+- A journey at phone width asserts nothing leaves its panel`;
+
 export function buildRuns(
   root,
   workspace,
@@ -3315,6 +3332,22 @@ export function buildRuns(
   writeSiblingRun(root);
   writeNamedRun(root);
   writeLiveRun(root, checkOrigin);
+  // SPIKE: kinds, so the kind control has something to show in both pictures.
+  for (const [run, kind] of [
+    [LIVE_RUN, "main"],
+    [SIBLING_RUN, "planning"],
+    [BUSY_RUN, "spikes"],
+    [NAMED_RUN, "follow-ups"],
+    ["dag-ui-supervised", "main"],
+    ["dag-ui-elsewhere", "field-research"],
+  ])
+    writeJson(join(root, run, "labels.json"), {
+      schema_version: 1,
+      labels: { kind },
+      unlabel: [],
+      set_at: "2026-10-22T00:00:00Z",
+      set_by: { launcher: "journey", session: "journey" },
+    });
 }
 
 /** Everything the fixture wrote, published beside the runs it serves. */

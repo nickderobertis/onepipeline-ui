@@ -324,7 +324,159 @@ async function pointAtPlot(page: Page, timeline: Locator): Promise<void> {
   await expect(timeline.getByLabel("Timeline crosshair")).toBeVisible();
 }
 
+/** SPIKE: realistic items, served to both the base page and the mock. */
+const spikeItem = (
+  id: string,
+  kind: "task" | "question",
+  priority: "urgent" | "high" | "medium" | "low",
+  title: string,
+  body: string,
+  extra: Record<string, unknown> = {},
+) => ({
+  item: {
+    schema_version: 1,
+    id,
+    dedup_key: id,
+    kind,
+    title,
+    body,
+    priority,
+    owner: {
+      session: "claude-code-supervising-session",
+      run: "brief-action-items-ui-2026-11-06-spikes",
+      plan: "local-md:action-items-ui-2026-11-06",
+    },
+    block: { scope: "nothing" },
+    approval: null,
+    state: "open",
+    resolution: null,
+    tracker: null,
+    created_at: "2026-11-06T06:00:00Z",
+    updated_at: "2026-11-06T06:00:00Z",
+    ...extra,
+  },
+  blocked: { total: 0, plans: [] },
+});
+const SPIKE_ITEMS = [
+  spikeItem(
+    "item-refused",
+    "task",
+    "urgent",
+    "Approve the design document for action-items-ui-2026-11-06: cards, one-click resolve and the navigation rework",
+    "Read [the design document](https://github.com/nickderobertis/ai-orchestrator/blob/main/.plans/documents/action-items-ui-2026-11-06-design.md) and approve it. **Five nodes wait on this.** The one high-cost decision is the journal rollout:\n\n- one engine release, not two\n- `just runs` must show no driver from before the pin\n- a server not restarted answers every human-items route unavailable",
+    {
+      tracker: {
+        task: "action-items-ui-2026-11-06",
+        url: "https://github.com/nickderobertis/onepipeline-ui/issues/653",
+      },
+    },
+  ),
+  spikeItem(
+    "item-question",
+    "question",
+    "urgent",
+    "Should the navigation default to every 30 seconds or to live?",
+    "Live keeps the list current but **rows jump while you read**; 30 seconds holds them still and shows a waiting count. See the [ruling](https://github.com/nickderobertis/onepipeline-ui/pull/649).",
+  ),
+  spikeItem(
+    "item-no-undo",
+    "task",
+    "high",
+    "Restart dag-ui so it links the engine that keeps copied design-document references working",
+    "After `onepipeline-api` 0.69.0 is on the host, restart the service and confirm `/healthz` reports the pinned release. Until then: <https://github.com/nickderobertis/onepipeline-ui/blob/main/docs/contract.md#a-very-long-anchor-that-has-no-break-opportunity-anywhere-along-its-length>",
+  ),
+  spikeItem(
+    "item-plain",
+    "task",
+    "high",
+    "Rotate PYPI_TOKEN to an account-scoped token",
+    "A token scoped to the old project **cannot create** `onepipeline-api-cli`. Replace it in the [repository secrets](https://github.com/nickderobertis/onepipeline-ui/settings/secrets/actions), then re-run the failed release job.",
+  ),
+  spikeItem(
+    "item-comment",
+    "task",
+    "medium",
+    "Review the follow-ups board for run brief-dag-run-load-speed-2026-11-06 before the sibling plan lands",
+    "Four drafts are unverified. The [board](https://github.com/users/nickderobertis/projects/7) lists them with the run that drafted each.",
+  ),
+  spikeItem(
+    "item-low",
+    "question",
+    "low",
+    "Keep the retired onepipeline-ui-cli package listed on PyPI?",
+    "npm and PyPI still serve it at 0.1.0. Nothing publishes it again.",
+  ),
+];
+async function spikeActionItems(page: Page): Promise<void> {
+  await page.route("**/api/human-items**", (route) =>
+    route.fulfill({ json: { items: SPIKE_ITEMS } }),
+  );
+  await page.goto("/human-items");
+  await settleReads(page);
+  await expect(
+    page.getByRole("region", { name: "Action item list" }),
+  ).toContainText("Rotate PYPI_TOKEN");
+}
+const spikePress = async (page: Page, name: string): Promise<void> => {
+  await spikeActionItems(page);
+  await page.getByRole("button", { name }).click();
+};
+async function spikeNav(page: Page): Promise<void> {
+  await page.goto(`/?run=${runs().live}`);
+  await settleReads(page);
+}
+async function spikeTask(page: Page): Promise<void> {
+  await page.goto(`/?run=${runs().live}&node=dashboard&tab=task`);
+  await settleReads(page);
+  await expect(page.getByText("Build the live dashboard")).toBeVisible();
+}
+
 const SURFACES: readonly Surface[] = [
+  { name: "b1-cards", title: "SPIKE-before cards", open: spikeActionItems },
+  { name: "b6-nav", title: "SPIKE-before nav", open: spikeNav },
+  { name: "b8-task", title: "SPIKE-before task", open: spikeTask },
+  { name: "a1-cards", title: "SPIKE-after cards", open: spikeActionItems },
+  {
+    name: "a2-dismiss-toast",
+    title: "SPIKE-after dismiss toast",
+    open: (page) => spikePress(page, "Dismiss: Rotate PYPI_TOKEN"),
+  },
+  {
+    name: "a3-complete-toast",
+    title: "SPIKE-after complete toast",
+    open: (page) => spikePress(page, "Complete: Rotate PYPI_TOKEN"),
+  },
+  {
+    name: "a4-reopen-greyed",
+    title: "SPIKE-after reopen greyed",
+    open: async (page) => {
+      await spikePress(page, "Complete: Restart dag-ui");
+      await page.getByRole("button", { name: "Why can't" }).click();
+    },
+  },
+  {
+    name: "a5-failed-write",
+    title: "SPIKE-after failed write",
+    open: (page) => spikePress(page, "Complete: Approve the design"),
+  },
+  {
+    name: "a6-nav",
+    title: "SPIKE-after nav",
+    open: async (page) => {
+      await spikeNav(page);
+      await page.getByText(/^Run kinds:/).click();
+    },
+  },
+  {
+    name: "a7-updates",
+    title: "SPIKE-after updates",
+    open: async (page) => {
+      await page.goto(`/?list=runs&run=${runs().live}&view=overall`);
+      await settleReads(page);
+      await page.getByRole("button", { name: "Main area updates off" }).click();
+    },
+  },
+  { name: "a8-task", title: "SPIKE-after task", open: spikeTask },
   {
     name: "01-run-list-overall",
     title: "Run list and the overall view",
@@ -833,6 +985,12 @@ for (const size of VIEWPORTS) {
     });
 
     for (const surface of SURFACES) {
+      // SPIKE: the mock's pictures are for the phone and one desktop width.
+      if (
+        surface.title.startsWith("SPIKE") &&
+        !["390x844", "1440x900"].includes(size.name)
+      )
+        continue;
       test(`captures ${surface.title}`, async ({ page }) => {
         await surface.open(page);
         await parkPointer(page);

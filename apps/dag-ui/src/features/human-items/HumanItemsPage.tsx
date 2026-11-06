@@ -17,6 +17,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type React from "react";
 import {
   BLOCKING_CHOICES,
   blockedGroups,
@@ -39,6 +40,7 @@ import {
   toFilter,
   trackerProvider,
 } from "./human-items-model";
+import { TaskMarkdown } from "../../spike/TaskMarkdown";
 import {
   type HumanItemWrite,
   useHumanItems,
@@ -78,10 +80,26 @@ export function HumanItemsPage({
     items.items?.find(({ item }) => item.id === selectedId) ??
     (items.detail === undefined ? undefined : items.detail);
 
+  // SPIKE: writes are faked locally, a card leaves at once and a toast answers.
+  const [groupBy, setGroupBy] = useState("priority");
+  const [gone, setGone] = useState<readonly string[]>([]);
+  const [toast, setToast] = useState<Toast>();
+  const [failed, setFailed] = useState<string>();
   const ask = (view: HumanItemView, change: HumanItemWrite) => {
-    if (change.action === "dismiss") setDismissing(view);
-    else items.write(view, change);
+    if (change.action === "answer") return items.write(view, change);
+    setSelectedId(undefined);
+    const action = change.action;
+    if (view.item.id === "item-refused") {
+      setFailed(view.item.id);
+      setToast({ action, view, refused: REFUSAL });
+    } else {
+      setGone((all) => [...all, view.item.id]);
+      setToast({ action, view });
+    }
   };
+  const shown = (items.items ?? []).filter(
+    ({ item }) => !gone.includes(item.id),
+  );
 
   return (
     <section
@@ -89,7 +107,12 @@ export function HumanItemsPage({
       className="human-items-page"
       data-detail-open={selectedId !== undefined}
     >
-      <Filters choice={choice} onChange={setChoice} />
+      <Filters
+        choice={choice}
+        groupBy={groupBy}
+        onChange={setChoice}
+        onGroupBy={setGroupBy}
+      />
       {items.outcome && (
         <p
           aria-label="Last outcome"
@@ -109,25 +132,41 @@ export function HumanItemsPage({
           {items.items?.length === 0 && (
             <p role="status">No action items match these filters.</p>
           )}
-          <ul
-            aria-label="Action items"
-            onKeyDown={(event) => roveCardActions(event, listRef.current)}
-            ref={listRef}
+          <div
+            onKeyDown={(event) =>
+              roveCardActions(
+                event as unknown as KeyboardEvent<HTMLUListElement>,
+                listRef.current as HTMLUListElement | null,
+              )
+            }
+            ref={listRef as unknown as React.RefObject<HTMLDivElement>}
           >
-            {items.items?.map((view) => (
-              <li key={view.item.id}>
-                <HumanItemCard
-                  draft={items.drafts[view.item.id] ?? ""}
-                  onDraft={(text) => items.setDraft(view.item.id, text)}
-                  onSelect={() => setSelectedId(view.item.id)}
-                  onWrite={ask}
-                  selected={view.item.id === selectedId}
-                  state={items.writes[view.item.id]}
-                  view={view}
-                />
-              </li>
+            {spikeGroups(shown, groupBy).map(({ heading, views }) => (
+              <section className="spike-group" key={heading}>
+                {heading !== "" && (
+                  <h3>
+                    {heading} <span>{views.length}</span>
+                  </h3>
+                )}
+                <ul aria-label={heading || "Action items"}>
+                  {views.map((view) => (
+                    <li key={view.item.id}>
+                      <HumanItemCard
+                        draft={items.drafts[view.item.id] ?? ""}
+                        onDraft={(text) => items.setDraft(view.item.id, text)}
+                        onSelect={() => setSelectedId(view.item.id)}
+                        onWrite={ask}
+                        refusal={failed === view.item.id ? REFUSAL : undefined}
+                        selected={view.item.id === selectedId}
+                        state={items.writes[view.item.id]}
+                        view={view}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </section>
             ))}
-          </ul>
+          </div>
           {(items.items?.length ?? 0) > 0 && (
             <button
               className="card-actions-entry"
@@ -155,6 +194,9 @@ export function HumanItemsPage({
           />
         )}
       </div>
+      {toast && (
+        <SpikeToast onClose={() => setToast(undefined)} toast={toast} />
+      )}
       <DismissDialog
         onCancel={() => setDismissing(undefined)}
         onConfirm={(reason) => {
@@ -196,9 +238,13 @@ function roveCardActions(
 function Filters({
   choice,
   onChange,
+  groupBy,
+  onGroupBy,
 }: {
   readonly choice: FilterChoice;
   readonly onChange: (choice: FilterChoice) => void;
+  readonly groupBy: string;
+  readonly onGroupBy: (field: string) => void;
 }) {
   const id = useId();
   const set = <K extends keyof FilterChoice>(key: K, value: FilterChoice[K]) =>
@@ -207,6 +253,20 @@ function Filters({
   return (
     <fieldset className="human-items-filters">
       <legend className="sr-only">Filter action items</legend>
+      <label className="spike-groupby" htmlFor={`${id}-group`}>
+        Group by
+      </label>
+      <select
+        id={`${id}-group`}
+        onChange={(event) => onGroupBy(event.target.value)}
+        value={groupBy}
+      >
+        <option value="priority">Priority</option>
+        <option value="kind">Kind</option>
+        <option value="source">Source</option>
+        <option value="blocking">Blocking</option>
+        <option value="">None</option>
+      </select>
       <label htmlFor={`${id}-kind`}>Kind</label>
       <select
         id={`${id}-kind`}
@@ -303,6 +363,7 @@ function HumanItemCard({
   selected,
   state,
   draft,
+  refusal,
   onDraft,
   onSelect,
   onWrite,
@@ -311,6 +372,7 @@ function HumanItemCard({
   readonly selected: boolean;
   readonly state?: WriteState;
   readonly draft: string;
+  readonly refusal?: string;
   readonly onDraft: (text: string) => void;
   readonly onSelect: () => void;
   readonly onWrite: Write;
@@ -320,35 +382,24 @@ function HumanItemCard({
   const open = item.state === "open";
   const blocked = blockedSummary(view);
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: the card's keyboard path is its Details action in the card-action group; this click is the pointer's shortcut to the same thing.
+    // biome-ignore lint/a11y/useKeyWithClickEvents: SPIKE
     <article
       aria-labelledby={titleId}
-      className="human-item-card"
+      className="spike-card"
       data-blocking={isBlocking(item)}
       data-selected={selected}
       onClick={(event) => {
         if (selectsCard(event)) onSelect();
       }}
     >
-      <div className="human-item-head">
+      <div className="spike-card-badges">
         <span className="human-item-priority" data-priority={item.priority}>
           {priorityLabel(item)}
         </span>
         <span className="human-item-kind">{kindLabel(item)}</span>
-        <h3 className="human-item-title" id={titleId}>
-          {item.title}
-        </h3>
-        <div className="human-item-actions">
-          <CardActions item={view} onSelect={onSelect} onWrite={onWrite} />
-        </div>
       </div>
+      <h4 id={titleId}>{item.title}</h4>
       <p className="human-item-meta">
-        {!open && (
-          <>
-            <span>{stateLabel(item)}</span>
-            {" · "}
-          </>
-        )}
         {blocked && (
           <>
             <span className="human-item-blocks">{blocked}</span>
@@ -357,7 +408,7 @@ function HumanItemCard({
         )}
         <span>Source: {sourceWords(item)}</span>
       </p>
-      <p className="human-item-body">{item.body}</p>
+      <TaskMarkdown clamp={4} source={item.body} />
       {item.kind === "question" && open && (
         <AnswerBox
           draft={draft}
@@ -367,8 +418,112 @@ function HumanItemCard({
           pending={state?.pending ?? false}
         />
       )}
+      {refusal && <p className="spike-failed-line">{refusal}</p>}
+      <div className="spike-card-actions">
+        <CardActions item={view} onSelect={onSelect} onWrite={onWrite} />
+      </div>
       <WriteStatus state={state} />
     </article>
+  );
+}
+
+/** SPIKE: grouping over the fields the plan names. */
+function spikeGroups(views: readonly HumanItemView[], field: string) {
+  const headingOf = ({ item }: HumanItemView): string =>
+    field === "priority"
+      ? priorityLabel(item)
+      : field === "kind"
+        ? kindLabel(item)
+        : field === "source"
+          ? sourceWords(item)
+          : field === "blocking"
+            ? isBlocking(item)
+              ? "Blocking"
+              : "Not blocking"
+            : "";
+  const groups = new Map<string, HumanItemView[]>();
+  for (const view of views) {
+    const heading = headingOf(view);
+    groups.set(heading, [...(groups.get(heading) ?? []), view]);
+  }
+  return [...groups].map(([heading, held]) => ({ heading, views: held }));
+}
+
+const REFUSAL =
+  "Re-read the current document: the design document changed after this approval was raised, so a replacement item now holds the approval.";
+const NO_UNDO =
+  "Reopen is unavailable: this item's completion script declares no undo, so the approval it recorded cannot be taken back here.";
+
+interface Toast {
+  readonly action: "complete" | "dismiss";
+  readonly view: HumanItemView;
+  readonly refused?: string;
+}
+
+/** SPIKE: the 15 second toast, without its timer. */
+function SpikeToast({
+  toast,
+  onClose,
+}: {
+  readonly toast: Toast;
+  readonly onClose: () => void;
+}) {
+  const [help, setHelp] = useState(false);
+  const { action, view, refused } = toast;
+  const dismissed = action === "dismiss";
+  const noUndo = view.item.id === "item-no-undo";
+  const close = (
+    <button
+      aria-label="Close"
+      className="spike-toast-close"
+      onClick={onClose}
+      type="button"
+    >
+      <X size={14} />
+    </button>
+  );
+  if (refused)
+    return (
+      <div className="spike-toast" data-failed="true" role="alert">
+        <div className="spike-toast-title">
+          <p>
+            <strong>Not {dismissed ? "dismissed" : "completed"}:</strong>{" "}
+            {view.item.title}
+          </p>
+          {close}
+        </div>
+        <p className="spike-toast-reason">{refused}</p>
+      </div>
+    );
+  return (
+    <div className="spike-toast" role="status">
+      <div className="spike-toast-title">
+        <p>
+          <strong>{dismissed ? "Dismissed" : "Completed"}:</strong>{" "}
+          {view.item.title}
+        </p>
+        {close}
+      </div>
+      <div className="spike-toast-actions">
+        <button disabled={noUndo} type="button">
+          {dismissed ? "Restore" : "Reopen"}
+        </button>
+        {noUndo && (
+          <button
+            aria-expanded={help}
+            aria-label="Why can't this be reopened?"
+            className="spike-help"
+            onClick={() => setHelp((value) => !value)}
+            title={NO_UNDO}
+            type="button"
+          >
+            ?
+          </button>
+        )}
+        <button type="button">{dismissed ? "Add reason" : "Add comment"}</button>
+      </div>
+      {help && <p className="spike-toast-reason">{NO_UNDO}</p>}
+    </div>
   );
 }
 
@@ -594,7 +749,7 @@ function DetailPane({
         // biome-ignore lint/a11y/noNoninteractiveTabindex: the body scrolls within the pane, and a region that scrolls has to be reachable by keyboard to be scrolled by one.
         tabIndex={0}
       >
-        {item.body}
+        <TaskMarkdown source={item.body} />
       </section>
       <div className="human-item-detail-actions">
         {item.kind === "question" && open && (

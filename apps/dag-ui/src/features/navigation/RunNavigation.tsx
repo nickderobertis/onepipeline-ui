@@ -1,17 +1,9 @@
-import {
-  Badge,
-  Button,
-  cn,
-  ScrollArea,
-  Separator,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@oneharness/ui";
+import { Button, cn, ScrollArea, Separator } from "@oneharness/ui";
 import type { SidebarRow } from "@onepipeline-ui/dag-model";
-import { Activity } from "lucide-react";
+import { Activity, ChevronDown, ChevronRight } from "lucide-react";
 import { stateDotClass } from "../../lib/StateBadge";
 import { rowCountSummary } from "../../lib/sidebar-model";
+import { UpdateSetting } from "../../spike/UpdateSetting";
 import { useProjectNavigation } from "./useProjectNavigation";
 
 /** One project list, with kinds discovered from the engine's effective labels. */
@@ -54,112 +46,109 @@ export function RunNavigation({
             </div>
           </div>
           <Separator className="my-[22px]" />
-          <Button
-            aria-current={hostCurrent ? "page" : undefined}
-            onClick={onHost}
-            variant="ghost"
-          >
-            Host
-          </Button>
-          {onActionItems && (
+          <div className="spike-nav-links">
             <Button
-              aria-current={actionItemsCurrent ? "page" : undefined}
-              onClick={onActionItems}
+              aria-current={hostCurrent ? "page" : undefined}
+              onClick={onHost}
               variant="ghost"
             >
-              Action items
+              Host
             </Button>
-          )}
+            {onActionItems && (
+              <Button
+                aria-current={actionItemsCurrent ? "page" : undefined}
+                onClick={onActionItems}
+                variant="ghost"
+              >
+                Action items
+              </Button>
+            )}
+          </div>
           {kinds.length > 0 && (
-            <fieldset className="kind-filter">
-              <legend>Run kinds</legend>
-              {kinds.map((kind) => (
-                <label key={kind}>
-                  <input
-                    type="checkbox"
-                    checked={!hiddenKinds.includes(kind)}
-                    onChange={(event) =>
-                      onKindsChange(
-                        event.target.checked
-                          ? hiddenKinds.filter((value) => value !== kind)
-                          : [...hiddenKinds, kind],
-                      )
-                    }
-                  />{" "}
-                  {kind}
-                </label>
-              ))}
-            </fieldset>
+            <details className="spike-kinds">
+              <summary>
+                <span>
+                  Run kinds: {kinds.length - hiddenKinds.length} of{" "}
+                  {kinds.length}
+                </span>
+                <ChevronDown aria-hidden="true" size={14} />
+              </summary>
+              <div>
+                {kinds.map((kind) => (
+                  <label key={kind}>
+                    <input
+                      type="checkbox"
+                      checked={!hiddenKinds.includes(kind)}
+                      onChange={(event) =>
+                        onKindsChange(
+                          event.target.checked
+                            ? hiddenKinds.filter((value) => value !== kind)
+                            : [...hiddenKinds, kind],
+                        )
+                      }
+                    />
+                    {kind}
+                  </label>
+                ))}
+              </div>
+            </details>
           )}
+          <div className="spike-nav-update">
+            <UpdateSetting
+              initial="interval"
+              intervalWaiting={3}
+              label="Navigation updates"
+              offWaiting={3}
+            />
+          </div>
+          <Separator className="my-[10px]" />
           {rows === undefined ? (
             <p role="status">Loading projects…</p>
           ) : (
             groups.map((group) => {
               const visible = group.runs;
+              const holdsSelected = visible.some(
+                (run) => run.id === selectedRunId,
+              );
               return (
                 <details
                   key={group.key}
-                  open
+                  open={holdsSelected}
                   aria-label={`Project ${group.label}`}
-                  className="project-group"
+                  className="spike-project"
                 >
-                  <summary>{group.label}</summary>
-                  <Button
-                    className="project-link"
-                    disabled={visible.length === 0}
-                    onClick={group.open}
-                    variant="ghost"
-                  >
-                    Open {group.label}
-                  </Button>
-                  {visible.length === 0 && (
-                    <p role="status">No runs of the shown kinds.</p>
-                  )}
-                  <div className="run-list">
-                    {visible.map((run) => (
-                      <button
-                        aria-current={
-                          selectedRunId === run.id ? "page" : undefined
-                        }
-                        className="run-link"
-                        data-active={selectedRunId === run.id}
-                        key={run.id}
-                        onClick={() => onSelect(run.id)}
-                        type="button"
-                      >
-                        <span className="run-link-main">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span
-                                role="img"
-                                aria-label={run.state}
-                                className={cn(
-                                  "run-dot",
-                                  stateDotClass(run.state),
-                                )}
-                              />
-                            </TooltipTrigger>
-                            <TooltipContent>{run.state}</TooltipContent>
-                          </Tooltip>
-                          <span>{run.name}</span>
-                          {run.kind && (
-                            <Badge
-                              aria-label={run.kind}
-                              role="note"
-                              variant="outline"
-                            >
-                              {run.kind}
-                            </Badge>
-                          )}
-                        </span>
-                        <span className="run-link-counts">
-                          {[run.state, rowCountSummary(run)]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                  <summary>
+                    <ChevronRight aria-hidden="true" size={12} />
+                    <span>{group.label}</span>
+                    <span className="spike-project-count">
+                      {visible.length}
+                    </span>
+                  </summary>
+                  {visible.map((run) => (
+                    <button
+                      aria-current={
+                        selectedRunId === run.id ? "page" : undefined
+                      }
+                      className="spike-row"
+                      data-active={selectedRunId === run.id}
+                      key={run.id}
+                      onClick={() => onSelect(run.id)}
+                      title={[run.state, rowCountSummary(run)]
+                        .filter(Boolean)
+                        .join(" · ")}
+                      type="button"
+                    >
+                      <span
+                        role="img"
+                        aria-label={run.state}
+                        className={cn("run-dot", stateDotClass(run.state))}
+                      />
+                      <span className="spike-row-name">{run.name}</span>
+                      {run.kind && (
+                        <span className="spike-row-tag">{run.kind}</span>
+                      )}
+                    </button>
+                  ))}
                 </details>
               );
             })

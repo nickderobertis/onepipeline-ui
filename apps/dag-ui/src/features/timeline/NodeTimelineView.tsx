@@ -5,6 +5,7 @@
 // repository imported precisely so as not to reimplement it, with nothing but the copied
 // journeys to catch what moved. The two hooks it does have — useConversation and
 // useStickyBottom — are the ones that were extracted upstream.
+import { TaskMarkdown } from "../../spike/TaskMarkdown";
 import {
   Alert,
   AlertDescription,
@@ -176,7 +177,7 @@ export function NodeTimelineView({
           ))}
         </TabsList>
         <TabsContent className="node-tab-panel" value="task">
-          <pre>{taskProse(node.task)}</pre>
+          <TaskMarkdown source={taskProse(node.task)} />
           <dl className="facts">
             {/* The settlement's own word — `merged`, `published`, `shipped` —
                 which the status badge does not carry: `done` is the same for a
@@ -211,7 +212,7 @@ export function NodeTimelineView({
           </dl>
         </TabsContent>
         <TabsContent className="node-tab-panel" value="criteria">
-          <pre>{acceptanceCriteria(node.task)}</pre>
+          <TaskMarkdown source={acceptanceCriteria(node.task)} />
         </TabsContent>
         <TabsContent className="node-tab-panel" value="dependencies">
           <dl className="facts">

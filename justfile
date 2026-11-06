@@ -601,6 +601,10 @@ run *ARGS:
 dag-ui-screens *ARGS:
     @bash scripts/visual-capture.sh {{ARGS}}
 
+# SPIKE: re-capture the action-items visual spike's before and after pictures.
+spike-visual-screens:
+    @bash scripts/spike-visual-capture.sh
+
 # Reads the floor from Cargo.toml's `rust-version`; that toolchain must be
 # installed (`rustup toolchain install <version>`). Warnings are errors here too.
 # The `onepipeline-ui:msrv` target, which no `check` depends on: the floor needs a
