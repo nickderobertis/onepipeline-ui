@@ -336,13 +336,25 @@ class ProductionCatalog(unittest.TestCase):
 
         base_files = journey.host.artifact_files(base.run_id)
         pull_files = journey.host.artifact_files(pull_request.run_id)
-        # The same results. This tree's only measuring budget is the job's own, which the release
-        # does not count towards a rolling file, and it says so.
-        self.assertEqual(set(base_files), set(pull_files))
-        self.assertIn('no rolling file saved', ' '.join(base.saved('comparison-report.json')['diagnostics']))
+        self.assertEqual(set(base_files) - set(pull_files), {'rolling-history.json'})
+        self.assertEqual(set(pull_files) - set(base_files), set())
         own = {r['id']: r for r in json.loads(base_files['budget-run.json'])['results']['results']}[OWN_BUDGET]
         self.assertEqual(own['unit'], 'seconds')
         self.assertIn(own['verdict'], ('within', 'over'), 'a real verdict, saved')
+
+        # This tree's only measuring budget is the job's own, and that alone saves history.
+        self.assertNotIn('no rolling file saved', ' '.join(base.saved('comparison-report.json')['diagnostics']))
+        [saved] = json.loads(base_files['rolling-history.json'])['runs']
+        self.assertEqual(saved['head_sha'], base.sha)
+        saved_own = {r['id']: r for r in saved['results']['results']}[OWN_BUDGET]
+        self.assertEqual(saved_own['actual'], own['actual'])
+        self.assertIsInstance(saved_own['actual'], (int, float))
+
+        [read] = pull_request.saved('comparison-input.json')['baseline']
+        self.assertEqual(read['head_sha'], base.sha)
+        read_own = {r['id']: r for r in read['results']['results']}[OWN_BUDGET]
+        self.assertEqual(read_own['actual'], own['actual'])
+        self.assertEqual(pull_request.rows()[OWN_BUDGET]['baseline_n'], 1)
 
     def test_a_budget_whose_input_is_present_keeps_its_enforcement(self):
         # With the view it names in place the command runs, and on this runner it cannot finish:
