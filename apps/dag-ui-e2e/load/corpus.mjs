@@ -314,7 +314,12 @@ function writeRun(
   const plan = planOf(nodes);
   writeJson(join(dir, "plan.json"), plan);
   writeJson(join(dir, "launch.json"), launch(runId, project, stamp(startMs)));
-  const journal = new Journal(runId, startMs, transcriptStore, recordsPerStream);
+  const journal = new Journal(
+    runId,
+    startMs,
+    transcriptStore,
+    recordsPerStream,
+  );
   declareGraph(root, journal.stream, startMs);
   journal.emit("pipeline", "run-started", {}, { plan });
   // Live runs leave their last node running; the others settle every node.
@@ -477,7 +482,9 @@ if (
   const [root, scale = "host", ...drivers] = process.argv.slice(2);
   const numbered = (name) => {
     const found = drivers.find((driver) => driver.startsWith(`${name}=`));
-    return found === undefined ? undefined : Number(found.slice(name.length + 1));
+    return found === undefined
+      ? undefined
+      : Number(found.slice(name.length + 1));
   };
   if (
     root === undefined ||

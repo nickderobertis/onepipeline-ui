@@ -160,7 +160,9 @@ function options() {
   if (!known.includes(values.measure))
     fail(`no measure ${values.measure}: one of ${known.join(", ")}`);
   if (
-    !["provider-probe", "checkouts", "cli-unpublished"].includes(values.measure) &&
+    !["provider-probe", "checkouts", "cli-unpublished"].includes(
+      values.measure,
+    ) &&
     !values["runs-root"]
   )
     fail("--runs-root names the root to serve");
@@ -194,7 +196,9 @@ class Server {
   constructor(values, root, scratch) {
     const binary = values.binary ?? DEFAULT_BINARY;
     if (!existsSync(binary))
-      fail(`no binary at ${binary}: build it with scripts/spike-run-open-costs-build.sh`);
+      fail(
+        `no binary at ${binary}: build it with scripts/spike-run-open-costs-build.sh`,
+      );
     this.tracePath = join(scratch, "trace.jsonl");
     this.profilePath = join(scratch, "profile.folded");
     const args = [
@@ -231,7 +235,19 @@ class Server {
     this.tracePid = values["trace-exec"];
     this.execPath = join(scratch, "exec.strace");
     const [program, argv] = this.tracePid
-      ? ["strace", ["-f", "-qq", "-e", "trace=execve", "-o", this.execPath, binary, ...args]]
+      ? [
+          "strace",
+          [
+            "-f",
+            "-qq",
+            "-e",
+            "trace=execve",
+            "-o",
+            this.execPath,
+            binary,
+            ...args,
+          ],
+        ]
       : [binary, args];
     this.child = spawn(program, argv, {
       cwd: values.cwd ?? dirname(root),
@@ -266,7 +282,10 @@ class Server {
     // Under strace the signal has to reach the server itself.
     if (this.tracePid) {
       const pid = this.child.pid;
-      const children = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8");
+      const children = readFileSync(
+        `/proc/${pid}/task/${pid}/children`,
+        "utf8",
+      );
       for (const child of children.trim().split(/\s+/u).filter(Boolean))
         process.kill(Number(child), "SIGTERM");
     } else this.child.kill("SIGTERM");
@@ -538,7 +557,9 @@ function eventsHeader(origin, subscription, seconds) {
  * so the plan's first task may be nothing the graph shows.
  */
 function firstNodeOf(root, run) {
-  const lines = readFileSync(join(root, run, "events.jsonl"), "utf8").split("\n");
+  const lines = readFileSync(join(root, run, "events.jsonl"), "utf8").split(
+    "\n",
+  );
   for (let at = lines.length - 1; at >= 0; at -= 1) {
     if (!lines[at].includes('"node-dispatched"')) continue;
     const node = JSON.parse(lines[at]).labels?.node;
@@ -728,7 +749,8 @@ function runFactsMeasure(values, root) {
     wall_seconds: (performance.now() - started) / 1000,
     streams: streams.size,
     records_per_stream: Math.round(
-      [...streams.values()].reduce((sum, n) => sum + n, 0) / Math.max(streams.size, 1),
+      [...streams.values()].reduce((sum, n) => sum + n, 0) /
+        Math.max(streams.size, 1),
     ),
     kinds: [...kinds].sort((a, b) => b[1] - a[1]).slice(0, 6),
     transcript_references: references,
@@ -769,7 +791,8 @@ async function pageMeasure(values, server, origin, root) {
   const require = createRequire(join(REPO, "apps/dag-ui-e2e/package.json"));
   const { chromium } = require("@playwright/test");
   const view = values.measure.slice("page-".length);
-  const node = view === "node" ? (values.node ?? firstNodeOf(root, values.run)) : null;
+  const node =
+    view === "node" ? (values.node ?? firstNodeOf(root, values.run)) : null;
   const address =
     view === "node"
       ? `/?run=${values.run}&view=graph&node=${node}`
@@ -798,7 +821,9 @@ async function pageMeasure(values, server, origin, root) {
           : page.getByRole("region", { name: /^Timeline for / }).first();
     await shown.waitFor({ timeout: budget }).catch(async (error) => {
       const text = await page.locator("body").innerText();
-      fail(`no ${view} view within the budget: ${error.message}\n${text.slice(-700)}`);
+      fail(
+        `no ${view} view within the budget: ${error.message}\n${text.slice(-700)}`,
+      );
     });
     const wall = since();
     return {
@@ -851,7 +876,11 @@ async function humanItemsMeasure(values, scratch) {
     const origin = await server.listening();
     const budget = Number(values.timeout);
     const read = async (query) => {
-      const answer = await timed(`${origin}/api/human-items${query}`, {}, budget);
+      const answer = await timed(
+        `${origin}/api/human-items${query}`,
+        {},
+        budget,
+      );
       if (answer.status !== 200)
         fail(`human-items${query}: ${answer.status} ${answer.body}`);
       return answer;
@@ -887,8 +916,14 @@ async function humanItemsMeasure(values, scratch) {
         ? statSync(join(copy, "human-items", "index.json")).size
         : 0,
       views,
-      query_seconds_all_views: views.reduce((sum, view) => sum + view.seconds, 0),
-      patch_bytes_all_views: views.reduce((sum, view) => sum + view.patch_bytes, 0),
+      query_seconds_all_views: views.reduce(
+        (sum, view) => sum + view.seconds,
+        0,
+      ),
+      patch_bytes_all_views: views.reduce(
+        (sum, view) => sum + view.patch_bytes,
+        0,
+      ),
       whole_list_bytes_all_views: views.reduce(
         (sum, view) => sum + view.list_bytes,
         0,
@@ -958,7 +993,10 @@ function runFacts(root, run) {
 async function main() {
   const values = options();
   const scratch = mkdtempSync(
-    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(), "run-open-costs-"),
+    join(
+      process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(),
+      "run-open-costs-",
+    ),
   );
   const root = values["runs-root"] ? resolve(values["runs-root"]) : null;
   const before = load();
@@ -969,8 +1007,10 @@ async function main() {
   try {
     if (values.measure === "provider-probe") result = providerProbe(values);
     else if (values.measure === "cli-status") result = cliStatus(values, root);
-    else if (values.measure === "cli-unpublished") result = cliUnpublished(values, scratch);
-    else if (values.measure === "run-facts") result = runFactsMeasure(values, root);
+    else if (values.measure === "cli-unpublished")
+      result = cliUnpublished(values, scratch);
+    else if (values.measure === "run-facts")
+      result = runFactsMeasure(values, root);
     else if (values.measure === "checkouts") result = checkouts(values);
     else if (values.measure === "human-items")
       result = await humanItemsMeasure(values, scratch);
@@ -994,7 +1034,9 @@ async function main() {
     }
     const attribution =
       // A page subscribes more than once, so its spans do not sum to its wall.
-      spans.length > 0 && Number(values.concurrent) === 1 && !values.measure.startsWith("page-")
+      spans.length > 0 &&
+      Number(values.concurrent) === 1 &&
+      !values.measure.startsWith("page-")
         ? causes(result.wall_seconds, values.measure, spans)
         : null;
     console.log(
@@ -1005,7 +1047,8 @@ async function main() {
           run_facts: root ? runFacts(root, values.run) : null,
           runs_root: root,
           runs_under_root: root
-            ? spawnSync("ls", [root], { encoding: "utf8" }).stdout.split("\n").length - 1
+            ? spawnSync("ls", [root], { encoding: "utf8" }).stdout.split("\n")
+                .length - 1
             : null,
           binary: values.binary ?? DEFAULT_BINARY,
           prototype: values.prototype ?? null,
@@ -1025,7 +1068,10 @@ async function main() {
               }
             : null,
           memory_steps_kb: spans
-            .filter((span) => span.span && span.rss_kb_after - span.rss_kb_before > 20_480)
+            .filter(
+              (span) =>
+                span.span && span.rss_kb_after - span.rss_kb_before > 20_480,
+            )
             .map((span) => ({
               span: span.span,
               grew_kb: span.rss_kb_after - span.rss_kb_before,
