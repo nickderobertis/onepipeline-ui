@@ -47,4 +47,27 @@ for variant in streams both; do
     m "$variant.page-$view.index.heap" "${C[@]}" --measure "page-$view" --prototype session-index,heap-merge "${slow[@]}"
   done
 done
+# Every full-history prototype together, the fastest complete first view tried.
+all=session-index,heap-merge,lazy-activity
+for label in small live largest; do
+  run=${!label}
+  for view in graph overall node; do
+    m "$view.$label.all" "${R[@]}" --run "$run" --measure "$view" --prototype "$all" "${slow[@]}"
+    m "page-$view.$label.all" "${R[@]}" --run "$run" --measure "page-$view" --prototype "$all" "${slow[@]}"
+  done
+done
+# A sample of the matrix again, from the finished harness.
+m final.status.small "${R[@]}" --run "$small" --measure status
+m final.status.largest "${R[@]}" --run "$largest" --measure status
+m final.graph.small "${R[@]}" --run "$small" --measure graph
+m final.graph.largest "${R[@]}" --run "$largest" --measure graph "${slow[@]}"
+m final.overall.small "${R[@]}" --run "$small" --measure overall
+m final.overall.largest "${R[@]}" --run "$largest" --measure overall "${slow[@]}"
+m final.node.small "${R[@]}" --run "$small" --measure node
+m final.node.largest "${R[@]}" --run "$largest" --measure node "${slow[@]}"
+m final.graph.live "${R[@]}" --run "$live" --measure graph "${slow[@]}"
+m final.overall.live "${R[@]}" --run "$live" --measure overall "${slow[@]}"
+m final.status.live "${R[@]}" --run "$live" --measure status
+m final.human-items "${R[@]}" --measure human-items
+m final.checkouts --measure checkouts --cwd "$(dirname "$root")"
 echo drivers done

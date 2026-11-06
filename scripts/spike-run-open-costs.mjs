@@ -737,6 +737,9 @@ function runFactsMeasure(values, root) {
     reference_weighted_session_mb:
       Math.round(bytes / Math.max(references, 1) / 1e4) / 100,
     gb_read_if_each_reference_reads_its_file: Math.round(bytes / 1e8) / 10,
+    checkpoint_bytes: existsSync(join(root, values.run, "checkpoint.json"))
+      ? statSync(join(root, values.run, "checkpoint.json")).size
+      : 0,
   };
 }
 
