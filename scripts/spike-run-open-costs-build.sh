@@ -6,6 +6,8 @@
 # it. Its own target directory, so the crate's other builds are untouched.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# The page measures serve this bundle; a stale one fails the page's contract validation.
+(cd apps/dag-ui && npx vite build --config vite.config.ts >/dev/null)
 version=$(awk '/^name = "onepipeline"$/ { getline; gsub(/[^0-9.]/, ""); print; exit }' Cargo.lock)
 cargo fetch --locked --quiet
 source=$(ls -d "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/"onepipeline-$version" | head -1)
