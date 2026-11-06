@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.69.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.68.1...v0.69.0) - 2026-11-06
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine that keeps copied design-document references working ([#651](https://github.com/nickderobertis/onepipeline-ui/pull/651))
+
 ## [0.68.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.68.0...v0.68.1) - 2026-11-06
 
 ### Fixed
