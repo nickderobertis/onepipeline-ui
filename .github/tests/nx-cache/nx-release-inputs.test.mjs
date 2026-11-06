@@ -125,6 +125,9 @@ test("Nx's expanded file inputs retain the base tasks' complete input surface", 
   }).trim();
   const retirementFiles = [
     ".github/macos-policy.mjs",
+    ".github/reporting/fixtures/onebudgetspec-github-action/v0.1.1/SHA256SUMS",
+    ".github/reporting/fixtures/onebudgetspec-github-action/v0.1.1/action.yml",
+    ".github/reporting/fixtures/onebudgetspec-github-action/v0.1.1/telemetry-help.txt",
     ".github/tests/policy.test.mjs",
     ".github/tests/routing-step.test.mjs",
   ];
@@ -138,7 +141,8 @@ test("Nx's expanded file inputs retain the base tasks' complete input surface", 
     .filter(Boolean);
   const deleted = execFileSync(
     "git",
-    ["diff", "--name-only", "--diff-filter=D", baseRef],
+    // A renamed file leaves its old path's input surface just as a deleted one does.
+    ["diff", "--name-only", "--no-renames", "--diff-filter=D", baseRef],
     { encoding: "utf8" },
   )
     .trim()
