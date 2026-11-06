@@ -23,12 +23,13 @@ for label in small live largest; do
   m "exec.status.$label.no-providers" "${R[@]}" --run "$run" --measure status --prototype status-no-providers --trace-exec
 done
 m exec.cli-unpublished --measure cli-unpublished --cwd "$(dirname "$root")" --timeout 600 --trace-exec
-for variant in streams both; do
+for variant in streams both calibrated; do
   dir="$out/$variant"
   if [ ! -f "$dir.facts.json" ]; then
     mkdir -p "$dir"
     driver=(streams=2000)
     [ "$variant" = both ] && driver+=(transcript-store)
+    [ "$variant" = calibrated ] && driver+=(transcript-store session-calls=14000)
     start=$(date +%s)
     node --experimental-strip-types "$repo/apps/dag-ui-e2e/load/corpus.mjs" "$dir/runs" host-850 "${driver[@]}" >"$dir.facts.json" 2>"$dir.facts.err"
     echo "$(($(date +%s) - start))" >"$dir.seconds"
@@ -38,6 +39,7 @@ for variant in streams both; do
   m "$variant.status.bare" "${C[@]}" --measure status --server-path /usr/bin:/bin
   m "$variant.status.bare.stub20" "${C[@]}" --measure status --server-path /usr/bin:/bin --stub-provider-seconds 20
   m "$variant.status.bare.heap" "${C[@]}" --measure status --server-path /usr/bin:/bin --prototype heap-merge
+  m "$variant.status.bare.checkpoint" "${C[@]}" --measure status --server-path /usr/bin:/bin --prototype status-checkpoint
   for view in graph overall node; do
     m "$variant.$view" "${C[@]}" --measure "$view" "${slow[@]}"
     m "$variant.$view.index.heap" "${C[@]}" --measure "$view" --prototype session-index,heap-merge "${slow[@]}"
