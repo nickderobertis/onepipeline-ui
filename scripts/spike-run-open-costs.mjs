@@ -29,6 +29,12 @@
  *                    whether it refused with `Argument list too long`
  *   run-facts        a run's journal, no server: its streams, its records by kind, and what
  *                    resolving every transcript reference would read
+ *   content-graph, content-overall, content-node, content-status
+ *                    the same read from a server with --baseline-prototype and one with
+ *                    --prototype, the two answers compared field by field. `equal` says
+ *                    whether they agree; `differences` groups what does not by path.
+ *                    Only `observed_at` is ignored, and only a run that is not changing
+ *                    gives a meaningful answer.
  *   checkouts        each checkout `onevcs repos` registers: its ref count and the time
  *                    to list them, as counts only, no name
  *
@@ -141,6 +147,7 @@ function options() {
       "keep-profile": { type: "string" },
       "server-path": { type: "string" },
       "trace-exec": { type: "boolean", default: false },
+      "baseline-prototype": { type: "string" },
     },
   });
   if (!values.measure) fail("--measure names what to measure");
@@ -156,6 +163,10 @@ function options() {
     "cli-unpublished",
     "checkouts",
     "run-facts",
+    "content-graph",
+    "content-overall",
+    "content-node",
+    "content-status",
   ];
   if (!known.includes(values.measure))
     fail(`no measure ${values.measure}: one of ${known.join(", ")}`);
@@ -289,10 +300,15 @@ class Server {
       for (const child of children.trim().split(/\s+/u).filter(Boolean))
         process.kill(Number(child), "SIGTERM");
     } else this.child.kill("SIGTERM");
-    const grace = new Promise((done) => setTimeout(done, 30_000, "late"));
+    let timer;
+    const grace = new Promise((done) => {
+      timer = setTimeout(done, 30_000, "late");
+    });
     if ((await Promise.race([this.exited, grace])) === "late")
       this.child.kill("SIGKILL");
     await this.exited;
+    // A timer left running would hold this process open for the rest of the 30 s.
+    clearTimeout(timer);
   }
 
   residentKb() {
@@ -505,7 +521,11 @@ function timed(url, init, seconds) {
     const started = performance.now();
     const request = httpRequest(
       url,
-      { method: init.method ?? "GET", headers: init.headers ?? {} },
+      {
+        method: init.method ?? "GET",
+        headers: init.headers ?? {},
+        agent: false,
+      },
       (response) => {
         const firstByte = (performance.now() - started) / 1000;
         const chunks = [];
@@ -765,6 +785,130 @@ function runFactsMeasure(values, root) {
   };
 }
 
+/** Dynamic keys (node ids, sessions) and array positions fold into one path. */
+const pathStep = (key) =>
+  typeof key === "number"
+    ? "[]"
+    : /^[a-z][a-z_]*$/u.test(key)
+      ? `.${key}`
+      : ".*";
+
+/** Every place two JSON values disagree, by path: missing, extra or changed. */
+function compareValues(baseline, other, path, groups) {
+  const note = (kind) => {
+    const name = `${kind} ${path || "."}`;
+    groups.set(name, (groups.get(name) ?? 0) + 1);
+  };
+  if (baseline === other) return;
+  if (
+    typeof baseline !== "object" ||
+    typeof other !== "object" ||
+    baseline === null ||
+    other === null ||
+    Array.isArray(baseline) !== Array.isArray(other)
+  ) {
+    note("changed");
+    return;
+  }
+  if (Array.isArray(baseline)) {
+    for (let at = 0; at < Math.max(baseline.length, other.length); at += 1) {
+      if (at >= other.length) note(`missing ${pathStep(at)}`);
+      else if (at >= baseline.length) note(`extra ${pathStep(at)}`);
+      else compareValues(baseline[at], other[at], path + pathStep(at), groups);
+    }
+    return;
+  }
+  for (const key of new Set([
+    ...Object.keys(baseline),
+    ...Object.keys(other),
+  ])) {
+    if (key === "observed_at") continue;
+    const step = path + pathStep(key);
+    if (!(key in other)) {
+      const name = `missing ${step}`;
+      groups.set(name, (groups.get(name) ?? 0) + 1);
+    } else if (!(key in baseline)) {
+      const name = `extra ${step}`;
+      groups.set(name, (groups.get(name) ?? 0) + 1);
+    } else compareValues(baseline[key], other[key], step, groups);
+  }
+}
+
+/** The answer one server gives, with its prototype switches. */
+async function contentRead(values, root, scratch, prototype, name) {
+  const dir = join(scratch, name);
+  mkdirSync(dir, { recursive: true });
+  const view = values.measure.slice("content-".length);
+  const server = new Server({ ...values, prototype }, root, dir);
+  const budget = Number(values.timeout);
+  try {
+    const origin = await server.listening();
+    if (view === "status") {
+      const read = await timed(
+        `${origin}/api/v2/runs/${values.run}/status`,
+        {},
+        budget,
+      );
+      if (read.status !== 200) fail(`status: ${read.status} ${read.body}`);
+      return { seconds: read.seconds, value: JSON.parse(read.body) };
+    }
+    const node =
+      view === "node"
+        ? (values.node ?? firstNodeOf(root, values.run))
+        : undefined;
+    const posted = await timed(
+      `${origin}/api/v2/subscriptions`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ view: VIEWS[view](values.run, node) }),
+      },
+      budget,
+    );
+    if (posted.status !== 201)
+      fail(`subscribe: ${posted.status} ${posted.body}`);
+    return {
+      seconds: posted.seconds,
+      value: JSON.parse(posted.body).initial.snapshot.visible,
+    };
+  } finally {
+    await server.stop();
+  }
+}
+
+async function contentMeasure(values, root, scratch) {
+  const baselineRead = await contentRead(
+    values,
+    root,
+    scratch,
+    values["baseline-prototype"],
+    "baseline",
+  );
+  const otherRead = await contentRead(
+    values,
+    root,
+    scratch,
+    values.prototype,
+    "prototype",
+  );
+  const groups = new Map();
+  compareValues(baselineRead.value, otherRead.value, "", groups);
+  return {
+    wall_seconds: baselineRead.seconds + otherRead.seconds,
+    baseline_prototype: values["baseline-prototype"] ?? null,
+    baseline_seconds: baselineRead.seconds,
+    prototype_seconds: otherRead.seconds,
+    baseline_bytes: JSON.stringify(baselineRead.value).length,
+    prototype_bytes: JSON.stringify(otherRead.value).length,
+    equal: groups.size === 0,
+    differences: [...groups]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 60)
+      .map(([path, count]) => ({ path, count })),
+    difference_groups: groups.size,
+  };
+}
+
 async function statusMeasure(values, server, origin) {
   const budget = Number(values.timeout);
   const url = `${origin}/api/v2/runs/${values.run}/status`;
@@ -1012,6 +1156,8 @@ async function main() {
     else if (values.measure === "cli-status") result = cliStatus(values, root);
     else if (values.measure === "cli-unpublished")
       result = cliUnpublished(values, scratch);
+    else if (values.measure.startsWith("content-"))
+      result = await contentMeasure(values, root, scratch);
     else if (values.measure === "run-facts")
       result = runFactsMeasure(values, root);
     else if (values.measure === "checkouts") result = checkouts(values);
