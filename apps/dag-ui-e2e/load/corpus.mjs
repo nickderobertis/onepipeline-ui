@@ -18,6 +18,7 @@
  * text (`output.mjs`), so it compresses as a real host's does.
  */
 
+import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -119,7 +120,15 @@ class Journal {
     const call = this.calls % CALLS_PER_SESSION;
     this.calls += 1;
     const history_session = `${this.stream}-${node}-${session}`;
-    const history_id = `${this.stream}-${node}-${session}-id`;
+    // The engine reads a reference's id as a UUID, and refuses any other at once.
+    const digest = createHash("md5").update(history_session).digest("hex");
+    const history_id = [
+      digest.slice(0, 8),
+      digest.slice(8, 12),
+      digest.slice(12, 16),
+      digest.slice(16, 20),
+      digest.slice(20, 32),
+    ].join("-");
     const project = "load-history-project";
     const dir = join(this.transcriptStore, project);
     mkdirSync(dir, { recursive: true });
