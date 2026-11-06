@@ -1,0 +1,49 @@
+# A catalog with different units, measures and commands, most without the job's label.
+schema_version: 1
+budgets:
+  - id: demo-bundle-bytes
+    measure: reported
+    command: [bash, -c, 'echo "$ONEBUDGETSPEC_BUDGET_ID" >> "$JOURNEY_COUNTS"; echo "{\"value\": $(cat bundle-size)}" > "$ONEBUDGETSPEC_RESULT"']
+    unit: bytes
+    direction: max
+    threshold: 1000
+  - id: demo-coverage-percent
+    measure: reported
+    command: [node, measure-coverage.mjs]
+    unit: percent
+    direction: min
+    threshold: 80
+  - id: demo-host-reads
+    labels: [ci-report]
+    measure: reported
+    command: [bash, -c, 'echo "$ONEBUDGETSPEC_BUDGET_ID" >> "$JOURNEY_COUNTS"; gh api repos/owner/repo/commits/main > /dev/null; echo "{\"value\": 1}" > "$ONEBUDGETSPEC_RESULT"']
+    unit: requests
+    direction: max
+    threshold: 5
+  - id: demo-walltime
+    measure: elapsed
+    command: [bash, -c, 'echo "$ONEBUDGETSPEC_BUDGET_ID" >> "$JOURNEY_COUNTS"']
+    unit: seconds
+    direction: max
+    threshold: 60
+  # Over its line, and report-only because it carries one of the job's excluded labels.
+  - id: demo-laptop-figure
+    labels: [host-variable]
+    measure: reported
+    command: [bash, -c, 'echo "$ONEBUDGETSPEC_BUDGET_ID" >> "$JOURNEY_COUNTS"; echo "{\"value\": 50}" > "$ONEBUDGETSPEC_RESULT"']
+    unit: count
+    direction: max
+    threshold: 10
+  - id: demo-needs-cargo
+    labels: [ci-report]
+    measure: reported
+    command: [cargo, run, --quiet, -p, measure]
+    unit: count
+    direction: max
+    threshold: 10
+  - id: demo-needs-telemetry
+    measure: reported
+    command: [node, measure-coverage.mjs, dist/telemetry/journey.json]
+    unit: percent
+    direction: min
+    threshold: 80

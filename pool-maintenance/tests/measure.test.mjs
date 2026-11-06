@@ -101,11 +101,11 @@ function fixture({ feature = true, view = true } = {}) {
 }
 
 /** Run the script as onebudgetspec would, reporting to a file of the fixture's. */
-function measure(root) {
+function measure(root, args = []) {
   const result = join(root, "result.json");
   const env = { ...process.env, ONEBUDGETSPEC_RESULT: result };
   delete env.CARGO_TARGET_DIR;
-  const run = spawnSync(join(root, "pool-maintenance", "measure.sh"), [], {
+  const run = spawnSync(join(root, "pool-maintenance", "measure.sh"), args, {
     cwd: tmpdir(),
     env,
     encoding: "utf8",
@@ -159,6 +159,14 @@ test("a tree with no browser view is refused before anything is built", () => {
   assert.match(run.stderr, /apps\/dag-ui\/dist holds no browser view/);
   assert.match(run.stderr, /ACTION: run 'just build' first/);
   assert.equal(existsSync(run.result), false);
+  assert.equal(existsSync(join(root, "target")), false);
+});
+
+test("the view the budget's command names is the one it needs", () => {
+  const root = fixture();
+  const run = measure(root, ["../apps/dag-ui/dist/absent.html"]);
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /apps\/dag-ui\/dist holds no browser view/);
   assert.equal(existsSync(join(root, "target")), false);
 });
 

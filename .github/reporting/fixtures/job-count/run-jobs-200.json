@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "run_id": 200,
+  "jobs": [
+    {
+      "run_id": 200,
+      "name": "release-plz",
+      "workflow_name": "Release-plz",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_name": "GitHub Actions 1",
+      "runner_os": "Linux",
+      "started_at": "2026-11-05T10:00:00Z",
+      "completed_at": "2026-11-05T10:10:00Z"
+    }
+  ],
+  "cost": {
+    "rest_requests": 1,
+    "requests": [
+      "GET replayed"
+    ]
+  }
+}

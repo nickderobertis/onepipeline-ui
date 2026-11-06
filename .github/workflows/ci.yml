@@ -1,15 +1,19 @@
 name: CI
 
-# Pull requests only. A push to `main` re-runs none of these: branch protection
-# requires the four jobs below without requiring a branch to be up to date, so a
-# merge that breaks `main` is caught by `ci-cache.yml`'s warm jobs, which fail
-# when `main` does not build (AGENTS.md, "Commits, releases, and merging").
+# Pull requests run all five jobs. A push to `main` runs only `budgets`, which saves
+# that commit's results as the history pull requests compare with, and re-runs none
+# of the four others: branch protection requires them without requiring a branch to
+# be up to date, so a merge that breaks `main` is caught by `ci-cache.yml`'s warm
+# jobs, which fail when `main` does not build (AGENTS.md, "Commits, releases, and
+# merging").
 on:
   pull_request:
     # GitHub's default three, without `ready_for_review`: a draft's runs already
     # report on its head commit, and lifting it changes no commit, so a run on
     # the lift would only repeat them.
     types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
 
 # Least privilege: most jobs only need to read the repo.
 permissions:
@@ -17,10 +21,11 @@ permissions:
 
 # Branch protection rules on a pull request's head alone, so a run its next push
 # superseded decides nothing and would only hold one of the account's shared
-# job slots.
+# job slots. A push to `main` is never cancelled by the next: each is a commit of
+# the base history.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The one variable rust-cache hashes into its key that these jobs set, and
 # `ci-cache.yml` sets it alike, so the key it saves is the key these restore.
@@ -35,7 +40,7 @@ jobs:
   # a pull request touching nothing a platform tests finishes that job quickly.
   # None waits on another: a pull request's wait is its slowest job, and each
   # job's runner slot is one of the account-wide limit every repository shares.
-  # They are the whole of a pull request's CI, and the four contexts branch
+  # With `budgets` below they are the whole of a pull request's CI, and the contexts branch
   # protection requires.
   #
   # Each restores the Rust build `ci-cache.yml` saves on `main` for its OS and
@@ -46,6 +51,7 @@ jobs:
   # dependency audit, the judged lint and the visual docs — and the advisories
   # report, which posts a status of its own and never fails this job.
   lint:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # What this job writes while VISUAL_DOCS_PUBLISH is off: the suppressions
@@ -326,6 +332,7 @@ jobs:
   # it is the sweep: every project, with the host-labelled budgets, and the
   # wheel the release journeys' rehearsal builds, installs and runs.
   test-linux:
+    if: github.event_name == 'pull_request'
     permissions:
       contents: read
       checks: write
@@ -480,6 +487,7 @@ jobs:
   # the suite against a real binary, without the Linux-only coverage floor), the
   # release's browser build, and the documented install.
   test-windows:
+    if: github.event_name == 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 30
     defaults:
@@ -575,6 +583,7 @@ jobs:
   # The platform-sensitive tiers and install, with proven results replayed on
   # release branches through the same Nx step every pull request runs.
   test-macos:
+    if: github.event_name == 'pull_request'
     runs-on: macos-latest
     timeout-minutes: 30
     defaults:
@@ -666,3 +675,32 @@ jobs:
           path: ${{ runner.temp }}/nx-cache-report
           retention-days: 7
       - cancel: nx-cache
+
+  # The released report action, once the four jobs have ended however they ended, on
+  # every pull request and every push to `main`. It builds and tests nothing: each
+  # budget whose command can run here runs once through ordinary `onebudgetspec
+  # check`, and only an ordinary budget verdict fails it. The release-tail and
+  # host-variable budgets are report-only here, as they are everywhere they run
+  # outside the tail and the gate. The full history lets local git prove each saved
+  # base commit's ancestry, and the group serializes comment writers.
+  budgets:
+    needs: [lint, test-linux, test-windows, test-macos]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+    concurrency:
+      group: budget-report-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: nickderobertis/onebudgetspec-github-action@v0.1.1
+        with:
+          token: ${{ github.token }}
+          enforcement-exclude-labels: release-tail,host-variable

@@ -8,7 +8,7 @@ budgets:
       post-run pass holds one of this repository's warm-pool slots out of
       service on a host running several dispatches.
     measure: reported
-    command: [./measure.sh]
+    command: [./measure.sh, ../apps/dag-ui/dist/index.html]
     unit: seconds
     direction: max
     threshold: 20

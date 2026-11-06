@@ -5,12 +5,15 @@
 // .github/tests/ci-jobs.test.mjs, .github/tests/advisories.test.mjs).
 //
 // Blocking: REQUIRED_CONTEXTS, the status contexts branch protection on `main`
-// requires, by the name each job reports under — ci.yml's four jobs, with
+// requires, by the name each job reports under — ci.yml's five jobs, with
 // branches not required to be up to date (the user's decision of 2026-10-18).
 // They block every change request, and a release too: a release ships the head
-// of release-plz's pull request, which merges only past the same four, and
+// of release-plz's pull request, which merges only past the same five, and
 // release.yml re-runs no tests (its jobs' failures demote the Release, never
-// gate a merge). A check that must block is a step of one of the four.
+// gate a merge). A check that must block is a step of one of the five. This is
+// the desired declaration: `budgets` is applied to protection only after its job
+// has landed on `main`, because until then a pull request would wait on a check
+// nothing reports.
 //
 // Informational: INFORMATIONAL_CONTEXTS report and must never be required, and
 // no job in any workflow may need them or wait on their result.
@@ -33,6 +36,7 @@ export const REQUIRED_CONTEXTS = [
   "test-linux",
   "test-windows",
   "test-macos",
+  "budgets",
 ];
 // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
 

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "tag": "v0.69.0",
+  "commit": "cccccccccccccccccccccccccccccccccccccccc",
+  "commits": [
+    {
+      "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "change": 7
+    }
+  ],
+  "changes": [
+    {
+      "number": 7,
+      "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "merged_at": "2026-11-05T11:00:00Z",
+      "merge_commit_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ],
+  "cost": {
+    "rest_requests": 3,
+    "requests": [
+      "GET replayed",
+      "GET replayed",
+      "GET replayed"
+    ]
+  }
+}

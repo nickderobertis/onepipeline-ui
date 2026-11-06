@@ -273,6 +273,7 @@ function recorded() {
       (run) =>
         ["push", "release"].includes(run.event) &&
         run.name !== "CI cache" &&
+        run.name !== "CI" &&
         run.conclusion !== "skipped",
     )
     .map((run) => ({ ...run, jobs: jobsOf(run.id) }));
