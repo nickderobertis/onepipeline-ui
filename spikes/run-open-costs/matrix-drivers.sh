@@ -73,6 +73,8 @@ m final.graph.live "${R[@]}" --run "$live" --measure graph "${slow[@]}"
 m final.overall.live "${R[@]}" --run "$live" --measure overall "${slow[@]}"
 m final.status.live "${R[@]}" --run "$live" --measure status
 m final.node.live "${R[@]}" --run "$live" --measure node "${slow[@]}"
+m final.status.largest.profiled "${R[@]}" --run "$largest" --measure status --prototype status-no-providers --profile
+m final.graph.live.profiled "${R[@]}" --run "$live" --measure graph --profile "${slow[@]}"
 m final.human-items "${R[@]}" --measure human-items
 m final.checkouts --measure checkouts --cwd "$(dirname "$root")"
 echo drivers done
