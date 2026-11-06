@@ -574,11 +574,18 @@ test("each GitHub read is made once across the seven, and the read figures are t
     run.requests.length,
     `a read was made twice: ${run.requests}`,
   );
-  // Every recording was asked for, and nothing else.
+  // Every recording was asked for, and nothing else: the jobs of a `CI` run at the
+  // release commit are the one read --exclude-workflow CI leaves out.
+  const { records, releaseCommit } = recorded();
+  const excluded = at(records, new RegExp(`head_sha=${releaseCommit}$`))
+    .workflow_runs.filter((r) => r.name === "CI")
+    .map((r) => `/actions/runs/${r.id}/jobs?`);
+  assert.ok(excluded.length > 0, "the recording holds a CI run at the release");
   assert.deepEqual(
     [...run.requests].sort(),
     recordings()
       .map((r) => r.path)
+      .filter((path) => !excluded.some((jobs) => path.includes(jobs)))
       .sort(),
   );
   const release = recorded();
