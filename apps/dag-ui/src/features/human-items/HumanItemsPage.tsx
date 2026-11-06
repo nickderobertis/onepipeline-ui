@@ -382,7 +382,7 @@ function HumanItemCard({
   const open = item.state === "open";
   const blocked = blockedSummary(view);
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: SPIKE
+    // biome-ignore lint/a11y/useKeyWithClickEvents: the card's keyboard path is its Details action in the card-action group; this click is the pointer's shortcut to the same thing.
     <article
       aria-labelledby={titleId}
       className="spike-card"

@@ -433,7 +433,17 @@ async function spikeTask(page: Page): Promise<void> {
 
 const SURFACES: readonly Surface[] = [
   { name: "b1-cards", title: "SPIKE-before cards", open: spikeActionItems },
-  { name: "b6-nav", title: "SPIKE-before nav", open: spikeNav },
+  // Only when a deployed baseline's digest does not match: rendered on the base's own
+  // source and fixture, under the name the deployed baseline would have supplied.
+  { name: "b6-nav", title: "SPIKE-base-nav", open: spikeNav },
+  {
+    name: "b7-updates",
+    title: "SPIKE-base-updates",
+    open: async (page) => {
+      await page.goto(`/?list=runs&run=${runs().live}&view=overall`);
+      await settleReads(page);
+    },
+  },
   { name: "b8-task", title: "SPIKE-before task", open: spikeTask },
   { name: "a1-cards", title: "SPIKE-after cards", open: spikeActionItems },
   {
