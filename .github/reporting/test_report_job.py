@@ -267,7 +267,6 @@ class ProductionCatalog(unittest.TestCase):
 
         base_files = journey.host.artifact_files(base.run_id)
         pull_files = journey.host.artifact_files(pull_request.run_id)
-        # The same results, and the base's rolling file beside them.
         self.assertEqual(set(base_files) - set(pull_files), {'rolling-history.json'})
         self.assertEqual(set(pull_files) - set(base_files), set())
         own = {r['id']: r for r in json.loads(base_files['budget-run.json'])['results']['results']}[OWN_BUDGET]
@@ -282,7 +281,6 @@ class ProductionCatalog(unittest.TestCase):
         self.assertEqual(saved_own['actual'], own['actual'])
         self.assertIsInstance(saved_own['actual'], (int, float))
 
-        # The later pull request reads that saved figure as one baseline sample for that budget.
         [read] = pull_request.saved('comparison-input.json')['baseline']
         self.assertEqual(read['head_sha'], base.sha)
         read_own = {r['id']: r for r in read['results']['results']}[OWN_BUDGET]
