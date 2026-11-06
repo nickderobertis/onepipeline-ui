@@ -18,6 +18,16 @@ m() {
 slow=(--timeout 1800)
 if [ "$lane" = real ]; then
   R=(--runs-root "$root" --cwd "$(dirname "$root")")
+  # The release the brief measured: its wall alone, since it carries no spans.
+  installed="$(dirname "$root")/node_modules/onepipeline-api-cli-linux-x64/bin/onepipeline-api"
+  for label in small live largest; do
+    run=${!label}
+    m "installed.status.$label" "${R[@]}" --run "$run" --measure status --binary "$installed"
+    for view in graph overall node; do
+      m "installed.$view.$label" "${R[@]}" --run "$run" --measure "$view" --binary "$installed" "${slow[@]}"
+    done
+    m "installed.page-graph.$label" "${R[@]}" --run "$run" --measure page-graph --binary "$installed" "${slow[@]}"
+  done
   m checkouts --measure checkouts --cwd "$(dirname "$root")"
   m human-items "${R[@]}" --measure human-items
   m cli-unpublished --measure cli-unpublished --cwd "$(dirname "$root")" --timeout 300
@@ -42,7 +52,7 @@ if [ "$lane" = real ]; then
     for view in graph overall node; do
       m "$view.$label" "${R[@]}" --run "$run" --measure "$view" "${slow[@]}"
       m "$view.$label.lazy" "${R[@]}" --run "$run" --measure "$view" --prototype lazy-activity "${slow[@]}"
-      m "$view.$label.index" "${R[@]}" --run "$run" --measure "$view" --prototype session-index "${slow[@]}"
+      [ "$label" = live ] && m "$view.$label.index" "${R[@]}" --run "$run" --measure "$view" --prototype session-index "${slow[@]}"
       m "$view.$label.index.heap" "${R[@]}" --run "$run" --measure "$view" --prototype session-index,heap-merge "${slow[@]}"
       m "$view.$label.checkpoint" "${R[@]}" --run "$run" --measure "$view" --prototype checkpoint-first,lazy-activity "${slow[@]}"
       m "page-$view.$label" "${R[@]}" --run "$run" --measure "page-$view" "${slow[@]}"

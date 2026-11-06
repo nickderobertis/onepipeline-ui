@@ -527,9 +527,18 @@ function eventsHeader(origin, subscription, seconds) {
   });
 }
 
+/**
+ * The node a reader opens: the last one dispatched. A retried node runs under a new id,
+ * so the plan's first task may be nothing the graph shows.
+ */
 function firstNodeOf(root, run) {
-  const plan = JSON.parse(readFileSync(join(root, run, "plan.json"), "utf8"));
-  return plan.tasks?.[0]?.id ?? fail(`${run} has no task to open`);
+  const lines = readFileSync(join(root, run, "events.jsonl"), "utf8").split("\n");
+  for (let at = lines.length - 1; at >= 0; at -= 1) {
+    if (!lines[at].includes('"node-dispatched"')) continue;
+    const node = JSON.parse(lines[at]).labels?.node;
+    if (node) return node;
+  }
+  return fail(`${run} has dispatched no node to open`);
 }
 
 async function subscribeMeasure(values, server, origin, root) {
@@ -780,7 +789,7 @@ async function pageMeasure(values, server, origin, root) {
           : page.getByRole("region", { name: /^Timeline for / }).first();
     await shown.waitFor({ timeout: budget }).catch(async (error) => {
       const text = await page.locator("body").innerText();
-      fail(`no ${view} view within the budget: ${error.message}\n${text.slice(0, 400)}`);
+      fail(`no ${view} view within the budget: ${error.message}\n${text.slice(-700)}`);
     });
     const wall = since();
     return {

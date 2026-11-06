@@ -20,7 +20,6 @@ R=(--runs-root "$root" --cwd "$(dirname "$root")")
 for label in small live largest; do
   run=${!label}
   m "facts.$label" "${R[@]}" --run "$run" --measure run-facts
-  m "exec.status.$label" "${R[@]}" --run "$run" --measure status --trace-exec
   m "exec.status.$label.no-providers" "${R[@]}" --run "$run" --measure status --prototype status-no-providers --trace-exec
 done
 m exec.cli-unpublished --measure cli-unpublished --cwd "$(dirname "$root")" --timeout 600 --trace-exec
