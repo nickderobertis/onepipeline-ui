@@ -65,6 +65,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { createRequire } from "node:module";
 import { cpus, loadavg, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -470,37 +471,60 @@ function hotFrames(path) {
   return { samples, inclusive: named };
 }
 
-async function timed(url, init, seconds) {
-  const started = performance.now();
-  const response = await fetch(url, {
-    ...init,
-    signal: AbortSignal.timeout(seconds * 1000),
+/**
+ * One request over `node:http`: `fetch` gives up at 300 s without the response's headers,
+ * which is shorter than the reads this measures.
+ */
+function timed(url, init, seconds) {
+  return new Promise((done, refuse) => {
+    const started = performance.now();
+    const request = httpRequest(
+      url,
+      { method: init.method ?? "GET", headers: init.headers ?? {} },
+      (response) => {
+        const firstByte = (performance.now() - started) / 1000;
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("error", refuse);
+        response.on("end", () => {
+          const body = Buffer.concat(chunks);
+          done({
+            status: response.statusCode,
+            seconds: (performance.now() - started) / 1000,
+            first_byte_seconds: firstByte,
+            bytes: body.length,
+            body: body.toString("utf8"),
+          });
+        });
+      },
+    );
+    request.setTimeout(seconds * 1000, () =>
+      request.destroy(new Error(`no answer from ${url} within ${seconds} s`)),
+    );
+    request.on("error", refuse);
+    request.end(init.body);
   });
-  const firstByte = (performance.now() - started) / 1000;
-  const body = await response.text();
-  return {
-    status: response.status,
-    seconds: (performance.now() - started) / 1000,
-    first_byte_seconds: firstByte,
-    bytes: Buffer.byteLength(body),
-    body,
-  };
 }
 
-async function eventsHeader(origin, subscription, seconds) {
-  const started = performance.now();
-  const abort = new AbortController();
-  const limit = setTimeout(() => abort.abort(), seconds * 1000);
-  const response = await fetch(
-    `${origin}/api/v2/events?subscription=${subscription}`,
-    { signal: abort.signal, headers: { accept: "text/event-stream" } },
-  );
-  const reader = response.body.getReader();
-  const opened = (performance.now() - started) / 1000;
-  clearTimeout(limit);
-  await reader.cancel();
-  abort.abort();
-  return { status: response.status, seconds: opened };
+/** How long the event stream takes to answer, closed as soon as it has. */
+function eventsHeader(origin, subscription, seconds) {
+  return new Promise((done, refuse) => {
+    const started = performance.now();
+    const request = httpRequest(
+      `${origin}/api/v2/events?subscription=${subscription}`,
+      { headers: { accept: "text/event-stream" } },
+      (response) => {
+        const opened = (performance.now() - started) / 1000;
+        response.destroy();
+        done({ status: response.statusCode, seconds: opened });
+      },
+    );
+    request.setTimeout(seconds * 1000, () =>
+      request.destroy(new Error(`no event stream within ${seconds} s`)),
+    );
+    request.on("error", refuse);
+    request.end();
+  });
 }
 
 function firstNodeOf(root, run) {
