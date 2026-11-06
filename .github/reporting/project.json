@@ -21,7 +21,8 @@
       "//registry-end": "llmlint: ignore-end[external_service_suite_stays_out_of_the_affected_tier]"
     },
     "budgets": {
-      "command": "PATH=\"$PWD/.github/reporting/.telemetry/tools:$PATH\" onebudgetspec check .github/reporting/budgets.yaml",
+      "command": "mkdir -p target/budget-results && PATH=\"$PWD/.github/reporting/.telemetry/tools:$PATH\" onebudgetspec check .github/reporting/budgets.yaml --output json > target/budget-results/report-job.json",
+      "outputs": ["{workspaceRoot}/target/budget-results/report-job.json"],
       "dependsOn": ["test"],
       "cache": false
     }

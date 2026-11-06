@@ -453,6 +453,30 @@ jobs:
       - name: Gate, install and wheel (affected projects; every project on the release PR)
         run: just ci-test-linux --tier "${{ steps.tier.outputs.tier }}"
 
+      # THROWAWAY (spike-saved-results): what the targets left, and its upload, timed.
+      - name: SPIKE list saved budget results
+        if: always()
+        run: |
+          date +%s.%N > "$RUNNER_TEMP/spike-upload-start"
+          mkdir -p target/budget-results
+          ls -la --time-style=full-iso target/budget-results || true
+          sha256sum target/budget-results/* || true
+          for file in target/budget-results/*.json; do
+            [ -f "$file" ] || continue
+            jq -r --arg f "$file" '.results[] | [$f, .id, .verdict, .actual, .threshold, .started_at, .ended_at] | @tsv' "$file" || true
+          done
+          du -sb target/budget-results || true
+      - name: SPIKE upload saved budget results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: budget-check-results-test-linux
+          path: target/budget-results/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: SPIKE upload seconds
+        if: always()
+        run: echo "SPIKE upload bracket seconds $(echo "$(date +%s.%N) - $(cat "$RUNNER_TEMP/spike-upload-start")" | bc)"
       - name: Report cache entries and task executions
         if: always()
         shell: bash
@@ -700,6 +724,36 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # THROWAWAY (spike-saved-results): the download and the merged run's reads the plan's
+      # action will make, timed and counted beside the job rather than inside its telemetry.
+      - name: SPIKE download start
+        if: github.event_name == 'pull_request'
+        run: date +%s.%N > "$RUNNER_TEMP/spike-download-start"
+      - name: SPIKE download saved budget results
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: budget-check-results-*
+          path: ${{ runner.temp }}/spike-saved-results
+      - name: SPIKE read what arrived and the merged pull request's run
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "SPIKE download bracket seconds $(echo "$(date +%s.%N) - $(cat "$RUNNER_TEMP/spike-download-start")" | bc)"
+          find "$RUNNER_TEMP/spike-saved-results" -type f -printf '%p %s bytes\n' || true
+          for file in $(find "$RUNNER_TEMP/spike-saved-results" -name '*.json'); do
+            jq -r --arg f "$(basename "$file")" '.results[] | [$f, .id, .verdict, .actual, .threshold, .ended_at] | @tsv' "$file" || true
+          done
+          echo "== merged pull request #663, squash commit"
+          bash spike/saved-results/merged-run-reads.sh 7d264e133e67627141c920fcb581c76efbbc8a99 budget-results "$RUNNER_TEMP/spike-merged"
+          echo "== a commit of main with no pull request"
+          bash spike/saved-results/merged-run-reads.sh dba6013adcad1affc3bb629abcc572df80607f36 budget-results "$RUNNER_TEMP/spike-no-pr"
+          echo "== this run's jobs, the CI-time read"
+          GH_DEBUG=api gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" --jq '[.jobs[] | {name,status,conclusion}]' 2> "$RUNNER_TEMP/spike-jobs.log" || true
+          echo "CI-time requests: $(grep -c '^\* Request to https://api\.github\.com/' "$RUNNER_TEMP/spike-jobs.log")"
       - uses: nickderobertis/onebudgetspec-github-action@v0.1.2
         with:
           token: ${{ github.token }}

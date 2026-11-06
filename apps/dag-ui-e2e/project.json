@@ -76,7 +76,8 @@
     },
     "budgets": {
       "//": "Telemetry-only: the budgets read what test-load recorded and measure nothing themselves.",
-      "command": "node_modules/.bin/onebudgetspec check apps/dag-ui-e2e/budgets.yaml",
+      "command": "mkdir -p target/budget-results && node_modules/.bin/onebudgetspec check apps/dag-ui-e2e/budgets.yaml --output json > target/budget-results/dag-ui-e2e.json",
+      "outputs": ["{workspaceRoot}/target/budget-results/dag-ui-e2e.json"],
       "inputs": [
         "{projectRoot}/budgets.yaml",
         "{projectRoot}/request-load-budget.mjs",

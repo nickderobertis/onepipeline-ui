@@ -69,7 +69,10 @@
       "dependsOn": ["bootstrap"]
     },
     "budgets": {
-      "command": "node .github/check-budgets.mjs",
+      "command": "mkdir -p target/budget-results && node_modules/.bin/onebudgetspec check .github/budgets.yaml --output json > target/budget-results/github-workflows.json",
+      "outputs": [
+        "{workspaceRoot}/target/budget-results/github-workflows.json"
+      ],
       "dependsOn": ["test"],
       "cache": false
     },
