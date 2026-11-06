@@ -452,7 +452,7 @@ function spikeGroups(views: readonly HumanItemView[], field: string) {
 const REFUSAL =
   "Re-read the current document: the design document changed after this approval was raised, so a replacement item now holds the approval.";
 const NO_UNDO =
-  "Reopen is unavailable: this item's completion script declares no undo, so the approval it recorded cannot be taken back here.";
+  "Reopen is unavailable: this item's completion script declares no undo, so what it did cannot be taken back here.";
 
 interface Toast {
   readonly action: "complete" | "dismiss";
