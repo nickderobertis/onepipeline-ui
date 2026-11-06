@@ -18,6 +18,23 @@ import { appendLines } from "../load/journal.ts";
 import { thisHost } from "./this-host.mjs";
 
 /** The in-flight run every graph, node and timeline journey opens. */
+const SPIKE_TASK = `## What
+
+Build the live dashboard that lets a reader follow a run from a phone. It reads the \`GET /api/v2/events\` stream and **never polls**. See [the read API contract](https://github.com/nickderobertis/onepipeline-ui/blob/main/docs/contract.md) and [issue #589](https://github.com/nickderobertis/onepipeline-ui/issues/589).
+
+### Why
+
+The person supervising several runs does it between other things, so:
+
+1. the page has to read at a glance;
+2. a resolved card must leave at once;
+3. nothing may scroll sideways, even for <https://github.com/nickderobertis/onepipeline-ui/blob/main/apps/dag-ui-e2e/fixtures/a-very-long-unbroken-path-that-has-to-wrap-inside-its-panel.mjs>.
+
+## Acceptance criteria
+
+- Users can inspect transcripts
+- A journey at phone width asserts nothing leaves its panel`;
+
 export const LIVE_RUN = "dag-ui-live";
 /** A settled run, so the navigation has a second launching session to group. */
 export const HISTORY_RUN = "dag-ui-history";
@@ -3285,23 +3302,6 @@ function writeChannelRun(root) {
 }
 
 /** Write every run this fixture serves, oldest first. */
-const SPIKE_TASK = `## What
-
-Build the live dashboard that lets a reader follow a run from a phone. It reads the \`GET /api/v2/events\` stream and **never polls**. See [the read API contract](https://github.com/nickderobertis/onepipeline-ui/blob/main/docs/contract.md) and [issue #589](https://github.com/nickderobertis/onepipeline-ui/issues/589).
-
-### Why
-
-The person supervising several runs does it between other things, so:
-
-1. the page has to read at a glance;
-2. a resolved card must leave at once;
-3. nothing may scroll sideways, even for <https://github.com/nickderobertis/onepipeline-ui/blob/main/apps/dag-ui-e2e/fixtures/a-very-long-unbroken-path-that-has-to-wrap-inside-its-panel.mjs>.
-
-## Acceptance criteria
-
-- Users can inspect transcripts
-- A journey at phone width asserts nothing leaves its panel`;
-
 export function buildRuns(
   root,
   workspace,
