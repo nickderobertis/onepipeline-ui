@@ -2,7 +2,7 @@
 title: 'Spike spike-visual report: action items and navigation mock'
 project: action-items-ui-2026-11-06
 metadata:
-  "onetaskgraph.template": {"template":"onepipeline:spike-report","digest":"sha256:f9de4090ff78d96a56b1f1d831f2d5d77c9c15e335379fefcb78a96b03caa354","body_digest":"sha256:5138f1011ad198b8b79d9ad11e03f2011f6168b8bcb622e7e0a26f3c7cefae9f","answers_digest":"sha256:82bf78f093c232a17baf2375a6bde48b8fc0d0d54123b414d265fcd93afcc5d4"}
+  "onetaskgraph.template": {"template":"onepipeline:spike-report","digest":"sha256:f9de4090ff78d96a56b1f1d831f2d5d77c9c15e335379fefcb78a96b03caa354","body_digest":"sha256:1388edfe187e7072fbb8e7393405e8f241f58ae3f00e8e7a8c6875e68c78184f","answers_digest":"sha256:c6285d221ce81bd5cb398e73ade18b48496fc70b1af2d261569c62da0e603eef"}
 ---
 # Spike `spike-visual`
 
@@ -23,7 +23,7 @@ A throwaway mock inside the real `apps/dag-ui`, driven through the repository's 
 
 **The fixture.** The mock's fixture gains kinds on six runs and a long markdown task on `dashboard`. The task appears in both pictures of change 8. The kinds appear only in the afters of changes 6 and 7, because the baseline's fixture has none.
 
-**Checks.** This spike owes none, and nothing here lands. No lint and none of the repository's test suites ran, and the mock's new surfaces are not expected to pass those tests. These did run: `npx tsc -p apps/dag-ui/tsconfig.json --noEmit` twice while building the mock's first commit, the first run reporting one error in `HumanItemsPage.tsx`, fixed, and the second none, and not again after the later commits; `just spike-visual-screens`, whose Playwright specs only take pictures: its run on 9a65520 exited 1 because `aria-disabled` on the greyed Reopen's wrapper also disabled the question mark inside it, which was fixed, and its last run, on the tree committed as d30edb7, exited 0; `playwright test --list`, showing the fallback's two surfaces resolve at both widths without running them; `cmp` of the images against the last capture's files: all four befores byte-identical to the images stored before that run, and the eight afters changed; and `onepipeline template check spike-report --item` on this report after each of its last three replacements, reporting ok.
+**Checks.** This spike owes none, and nothing here lands. No lint and none of the repository's test suites ran, and the mock's new surfaces are not expected to pass those tests. These did run: `npx tsc -p apps/dag-ui/tsconfig.json --noEmit` twice while building the mock's first commit, the first run reporting one error in `HumanItemsPage.tsx`, fixed, and the second none, and not again after the later commits; `just spike-visual-screens`, whose Playwright specs only take pictures: its first run exited 1 because the mock's fixture read its task text before declaring it, which was fixed; its run on 9a65520 exited 1 because `aria-disabled` on the greyed Reopen's wrapper also disabled the question mark inside it, which was fixed; and its last run, on the tree committed as c043d35, exited 0; `playwright test --list`, showing the fallback's two surfaces resolve at both widths without running them; `cmp` of the last capture's images against those stored before it: the four toast images changed and the other eight, all four befores among them, byte-identical; and `onepipeline template check spike-report --item` on this report after every replacement but the first, each reporting ok.
 
 
 ## Candidate budgets
@@ -64,25 +64,25 @@ Cards gain group headings with counts, rendered markdown with formatted links, a
 
 ### The toast after Dismiss
 
-Dismiss acts at once with no dialog. The card leaves and a toast offers Restore and Add reason. On a wide screen it sits at the bottom right; on a phone it stays across the bottom.
+Dismiss acts at once with no dialog. The card leaves and a toast offers Restore and Add reason. On a wide screen it sits at the bottom right; on a phone it stays across the bottom. The toast is a muted green, for success.
 
 ![The toast after Dismiss](./a2-dismiss-toast.png)
 
 ### The toast after Complete
 
-Complete acts at once. The card leaves and a toast offers Reopen and Add comment. On a wide screen it sits at the bottom right; on a phone it stays across the bottom.
+Complete acts at once. The card leaves and a toast offers Reopen and Add comment. On a wide screen it sits at the bottom right; on a phone it stays across the bottom. The toast is a muted green, for success.
 
 ![The toast after Complete](./a3-complete-toast.png)
 
 ### Reopen greyed, with its reason open
 
-Where an item cannot be reopened, Reopen is greyed with a small question mark on its text, as a superscript. Pressing the question mark opens the reason, which also works on a phone; on desktop hovering shows it too. Shown after completing an item whose script declares no undo.
+Where an item cannot be reopened, Reopen is greyed with a small question mark on its text, as a superscript. Pressing the question mark opens the reason, which also works on a phone; on desktop hovering shows it too. Shown after completing an item whose script declares no undo. The completion succeeded, so its toast is green.
 
 ![Reopen greyed, with its reason open](./a4-reopen-greyed.png)
 
 ### A failed write
 
-The card stays in its place with the reason on it, and the toast names what did not happen and why. On a phone the toast covers the bottom of the card, as the findings say; on a wide screen it sits at the bottom right, clear of this card. The refusal text is mock wording.
+The card stays in its place with the reason on it, and the toast, a muted red, names what did not happen and why. On a phone the toast covers the bottom of the card, as the findings say; on a wide screen it sits at the bottom right, clear of this card. The refusal text is mock wording.
 
 ![A failed write](./a5-failed-write.png)
 
@@ -153,7 +153,7 @@ method: |
 
   **The fixture.** The mock's fixture gains kinds on six runs and a long markdown task on `dashboard`. The task appears in both pictures of change 8. The kinds appear only in the afters of changes 6 and 7, because the baseline's fixture has none.
 
-  **Checks.** This spike owes none, and nothing here lands. No lint and none of the repository's test suites ran, and the mock's new surfaces are not expected to pass those tests. These did run: `npx tsc -p apps/dag-ui/tsconfig.json --noEmit` twice while building the mock's first commit, the first run reporting one error in `HumanItemsPage.tsx`, fixed, and the second none, and not again after the later commits; `just spike-visual-screens`, whose Playwright specs only take pictures: its run on 9a65520 exited 1 because `aria-disabled` on the greyed Reopen's wrapper also disabled the question mark inside it, which was fixed, and its last run, on the tree committed as d30edb7, exited 0; `playwright test --list`, showing the fallback's two surfaces resolve at both widths without running them; `cmp` of the images against the last capture's files: all four befores byte-identical to the images stored before that run, and the eight afters changed; and `onepipeline template check spike-report --item` on this report after each of its last three replacements, reporting ok.
+  **Checks.** This spike owes none, and nothing here lands. No lint and none of the repository's test suites ran, and the mock's new surfaces are not expected to pass those tests. These did run: `npx tsc -p apps/dag-ui/tsconfig.json --noEmit` twice while building the mock's first commit, the first run reporting one error in `HumanItemsPage.tsx`, fixed, and the second none, and not again after the later commits; `just spike-visual-screens`, whose Playwright specs only take pictures: its first run exited 1 because the mock's fixture read its task text before declaring it, which was fixed; its run on 9a65520 exited 1 because `aria-disabled` on the greyed Reopen's wrapper also disabled the question mark inside it, which was fixed; and its last run, on the tree committed as c043d35, exited 0; `playwright test --list`, showing the fallback's two surfaces resolve at both widths without running them; `cmp` of the last capture's images against those stored before it: the four toast images changed and the other eight, all four befores among them, byte-identical; and `onepipeline template check spike-report --item` on this report after every replacement but the first, each reporting ok.
 spike: spike-visual
 visual_changes:
 - name: Action items cards, grouped by Priority
@@ -161,16 +161,16 @@ visual_changes:
   before: b1-cards.png
   after: a1-cards.png
 - name: The toast after Dismiss
-  description: Dismiss acts at once with no dialog. The card leaves and a toast offers Restore and Add reason. On a wide screen it sits at the bottom right; on a phone it stays across the bottom.
+  description: Dismiss acts at once with no dialog. The card leaves and a toast offers Restore and Add reason. On a wide screen it sits at the bottom right; on a phone it stays across the bottom. The toast is a muted green, for success.
   after: a2-dismiss-toast.png
 - name: The toast after Complete
-  description: Complete acts at once. The card leaves and a toast offers Reopen and Add comment. On a wide screen it sits at the bottom right; on a phone it stays across the bottom.
+  description: Complete acts at once. The card leaves and a toast offers Reopen and Add comment. On a wide screen it sits at the bottom right; on a phone it stays across the bottom. The toast is a muted green, for success.
   after: a3-complete-toast.png
 - name: Reopen greyed, with its reason open
-  description: Where an item cannot be reopened, Reopen is greyed with a small question mark on its text, as a superscript. Pressing the question mark opens the reason, which also works on a phone; on desktop hovering shows it too. Shown after completing an item whose script declares no undo.
+  description: Where an item cannot be reopened, Reopen is greyed with a small question mark on its text, as a superscript. Pressing the question mark opens the reason, which also works on a phone; on desktop hovering shows it too. Shown after completing an item whose script declares no undo. The completion succeeded, so its toast is green.
   after: a4-reopen-greyed.png
 - name: A failed write
-  description: The card stays in its place with the reason on it, and the toast names what did not happen and why. On a phone the toast covers the bottom of the card, as the findings say; on a wide screen it sits at the bottom right, clear of this card. The refusal text is mock wording.
+  description: The card stays in its place with the reason on it, and the toast, a muted red, names what did not happen and why. On a phone the toast covers the bottom of the card, as the findings say; on a wide screen it sits at the bottom right, clear of this card. The refusal text is mock wording.
   after: a5-failed-write.png
 - name: Left navigation
   description: Projects become compact rows with counts, collapsed except the selected run's project. Each run is a row of state dot, name and kind tag, and the Open links are gone. One Run kinds dropdown, shown open here, replaces the checkboxes. On a phone the tag takes a second line. The before is the deployed baseline, whose fixture has no run kinds, so it does not show the checkboxes being replaced; on a host with kinds they sit above the project list.
