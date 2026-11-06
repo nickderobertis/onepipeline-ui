@@ -1271,6 +1271,7 @@ impl Hub {
         let shared = &self.0;
         let mut run = lock(live);
         let run = &mut *run;
+        let _refresh = span("poll.refresh");
         let started = Instant::now();
         // Only what a subscription shows is kept current: a payload a view
         // switch left behind is let go rather than rebuilt on every change.
@@ -1403,6 +1404,7 @@ impl Hub {
                 }
             }
             for (scope, key, timeline) in timelines.iter_mut() {
+                let _span = span("poll.timeline_refreshed");
                 let before = timeline.payload.rendered();
                 let ops = timeline.payload.refreshed(
                     view,

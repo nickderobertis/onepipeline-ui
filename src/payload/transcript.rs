@@ -257,6 +257,13 @@ fn location(fields: &Value) -> Option<Transcript> {
 /// What one relayed record's content reads as, or `None` for a record that
 /// carries no turn content.
 pub(crate) fn read(event: &Envelope, sources: Option<&dyn Candidates>) -> Option<Read> {
+    let reading = crate::open_trace::timer();
+    let read = read_traced(event, sources);
+    crate::open_trace::add("transcript.read_all", reading);
+    read
+}
+
+fn read_traced(event: &Envelope, sources: Option<&dyn Candidates>) -> Option<Read> {
     let reference = match TranscriptRef::of(&event.kind.0, &event.payload)? {
         Ok(reference) => reference,
         Err(unresolved) => return Some(Read::Unavailable(unresolved)),

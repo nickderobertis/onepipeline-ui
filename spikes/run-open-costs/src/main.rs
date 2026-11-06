@@ -15,7 +15,10 @@ fn main() {
     let Cli { command } = Cli::parse();
     let Command::Serve(args) = command;
     let session = args.acting_session().expect("a session");
-    std::env::set_var(onepipeline_ui::store::RUNS_DIR_ENV, args.runs_root.as_path());
+    std::env::set_var(
+        onepipeline_ui::store::RUNS_DIR_ENV,
+        args.runs_root.as_path(),
+    );
     if let Some(session) = &session {
         std::env::set_var(onepipeline_ui::cli::SESSION_ENV, session.as_str());
     }
@@ -38,9 +41,7 @@ fn main() {
         .expect("a runtime");
     let store = RunStore::new_polling_every(&args.runs_root, args.poll_interval_ms)
         .acting_as(session.as_ref());
-    let listener = runtime
-        .block_on(server::bind(args.bind))
-        .expect("the bind");
+    let listener = runtime.block_on(server::bind(args.bind)).expect("the bind");
     let stop = runtime.block_on(async { server::StopSignal::install() });
     println!(
         "onepipeline-api: serving on http://{}",

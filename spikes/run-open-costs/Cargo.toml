@@ -26,7 +26,7 @@ debug = "line-tables-only"
 lto = "thin"
 codegen-units = 16
 
-# The released engine with `RunView::open_current` made public, which is the one edit
+# The released engine with `engine.patch` applied, which
 # `scripts/spike-run-open-costs-build.sh` makes to its copy under `target/spike/`.
 [patch.crates-io]
 onepipeline = { path = "../../target/spike/engine" }

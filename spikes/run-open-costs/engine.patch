@@ -1,0 +1,160 @@
+diff -ruN a/src/journal.rs b/src/journal.rs
+--- a/src/journal.rs	2026-11-06 08:24:38.620215429 -0600
++++ b/src/journal.rs	2026-11-06 08:24:38.946430219 -0600
+@@ -860,6 +860,26 @@
+         *queue = ordered.into();
+     }
+ 
++    // Spike prototype `heap-merge`: the same order, the earliest head by `(ts,
++    // stream)`, from a heap rather than a scan of every stream per record.
++    if std::env::var("ONEPIPELINE_UI_SPIKE").is_ok_and(|on| on.split(',').any(|p| p == "heap-merge")) {
++        let mut heads: std::collections::BinaryHeap<std::cmp::Reverse<(&_, &str)>> = streams
++            .iter()
++            .filter_map(|(stream, queued)| {
++                queued.front().map(|index| std::cmp::Reverse((&events[*index].ts, *stream)))
++            })
++            .collect();
++        let mut order = Vec::with_capacity(events.len());
++        while let Some(std::cmp::Reverse((_, stream))) = heads.pop() {
++            let queued = streams.get_mut(stream).expect("a stream with a head");
++            order.push(queued.pop_front().expect("the head this popped"));
++            if let Some(next) = queued.front() {
++                heads.push(std::cmp::Reverse((&events[*next].ts, stream)));
++            }
++        }
++        return order;
++    }
++
+     let mut order = Vec::with_capacity(events.len());
+     // Each pass takes the earliest record still at the head of any stream. A
+     // stream's head is its next `seq`, so its own order is never in question;
+diff -ruN a/src/views.rs b/src/views.rs
+--- a/src/views.rs	2026-11-06 08:24:38.633281789 -0600
++++ b/src/views.rs	2026-11-06 08:24:38.942962394 -0600
+@@ -1945,7 +1945,7 @@
+     /// never handed to a reader of the store: those open the run with
+     /// [`open`](Self::open). A [`refresh`](Self::refresh) of one re-reads the run
+     /// whole, as `open` does.
+-    pub(crate) fn open_current(paths: &RunPaths) -> crate::Result<Self> {
++    pub fn open_current(paths: &RunPaths) -> crate::Result<Self> {
+         if !paths.exists() {
+             return Err(crate::Error::NoSuchRun {
+                 run: paths.run.clone(),
+diff -ruN a/src/views_transcript.rs b/src/views_transcript.rs
+--- a/src/views_transcript.rs	2026-11-06 08:24:38.633866169 -0600
++++ b/src/views_transcript.rs	2026-11-06 08:24:38.948171252 -0600
+@@ -353,6 +353,34 @@
+         Ok(None) | Err(_) => return Err(unresolved(Why::Unreadable)),
+     };
+     let history_id = location.history_id.to_string();
++    // Spike prototype `session-index`: an activity entry looked up in one parse of
++    // its whole session file rather than a parse up to it per reference.
++    if let Some(wanted) = index {
++        if std::env::var("ONEPIPELINE_UI_SPIKE")
++            .is_ok_and(|on| on.split(',').any(|p| p == "session-index"))
++        {
++            if let Some(raw) = session_index::entry(&path, &history_id, wanted.index) {
++                let event: oneharness_core::domain::events::ActionEvent =
++                    serde_json::from_value(raw).map_err(|_| unresolved(Why::Unreadable))?;
++                let same_call = match (wanted.tool_call_id.as_deref(), event.tool_call_id.as_deref()) {
++                    (Some(expected), Some(found)) => expected == found,
++                    _ => true,
++                };
++                if same_call {
++                    return Ok(described(match event.kind.as_str() {
++                        "message" => Text::Message(event.output.unwrap_or_default()),
++                        "reasoning" => Text::Reasoning(event.output.unwrap_or_default()),
++                        kind => Text::Tool {
++                            kind: ToolKind::of(kind),
++                            name: event.name,
++                            input: event.input.filter(|input| !input.is_null()),
++                            output: event.output,
++                        },
++                    }));
++                }
++            }
++        }
++    }
+     let mut reader = std::io::BufReader::new(file);
+     let mut line = String::new();
+     let mut unreadable = false;
+@@ -463,6 +491,79 @@
+     }))
+ }
+ 
++/// Spike prototype: each session file's activity entries, by run and index, from one
++/// parse of it, the most recent sessions kept. The stamp is the file's length and
++/// modification time, so a file that grew is parsed again.
++mod session_index {
++    use serde_json::Value;
++    use std::collections::{HashMap, VecDeque};
++    use std::path::{Path, PathBuf};
++    use std::sync::{Arc, Mutex, OnceLock};
++    use std::time::SystemTime;
++
++    type Entries = HashMap<(String, u64), Value>;
++    type Held = (u64, Option<SystemTime>, Arc<Entries>);
++    const SESSIONS: usize = 256;
++
++    #[derive(Default)]
++    struct Cache {
++        held: HashMap<PathBuf, Held>,
++        order: VecDeque<PathBuf>,
++    }
++
++    fn parsed(path: &Path) -> Option<Entries> {
++        let text = std::fs::read_to_string(path).ok()?;
++        let mut entries = HashMap::new();
++        for line in text.split_inclusive('\n') {
++            if !line.ends_with('\n') {
++                break;
++            }
++            let Ok(mut entry) = serde_json::from_str::<Value>(line.trim_end()) else {
++                continue;
++            };
++            if entry.get("type").and_then(Value::as_str) != Some("event") {
++                continue;
++            }
++            let run = entry.get("run_id").and_then(Value::as_str).map(str::to_owned);
++            let event = entry.get_mut("event").map(Value::take);
++            let at = event.as_ref().and_then(|raw| raw.get("index")).and_then(Value::as_u64);
++            if let (Some(run), Some(event), Some(at)) = (run, event, at) {
++                entries.entry((run, at)).or_insert(event);
++            }
++        }
++        Some(entries)
++    }
++
++    pub(super) fn entry(path: &Path, run: &str, index: u64) -> Option<Value> {
++        static CACHE: OnceLock<Mutex<Cache>> = OnceLock::new();
++        let about = std::fs::metadata(path).ok()?;
++        let (len, modified) = (about.len(), about.modified().ok());
++        let cache = CACHE.get_or_init(Mutex::default);
++        let mut cache = cache.lock().ok()?;
++        let fresh = cache
++            .held
++            .get(path)
++            .filter(|(held_len, held_at, _)| *held_len == len && *held_at == modified)
++            .map(|(_, _, entries)| Arc::clone(entries));
++        let entries = match fresh {
++            Some(entries) => entries,
++            None => {
++                let entries = Arc::new(parsed(path)?);
++                if cache.held.insert(path.to_path_buf(), (len, modified, Arc::clone(&entries))).is_none() {
++                    cache.order.push_back(path.to_path_buf());
++                }
++                while cache.order.len() > SESSIONS {
++                    if let Some(oldest) = cache.order.pop_front() {
++                        cache.held.remove(&oldest);
++                    }
++                }
++                entries
++            }
++        };
++        entries.get(&(run.to_owned(), index)).cloned()
++    }
++}
++
+ /// Read a record's content straight off its payload: [`TranscriptRef::of`]
+ /// then [`resolve`], with a malformed reference answered as unresolved.
+ #[must_use]

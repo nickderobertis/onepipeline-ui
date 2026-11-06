@@ -22,6 +22,8 @@
  *   human-items      GET /api/human-items per filter the page sends, right after the
  *                    journal of a scratch COPY of the root moved by one real record
  *   provider-probe   `oneharness usage --harness <--harness>`, no server at all
+ *   cli-status       `onepipeline status <run>` from the installed CLI (--cli), no
+ *                    server at all, with --no-providers when that option is given
  *
  * Options: --cwd DIR (the server's working directory, where oneharness discovers its
  * configuration), --binary PATH, --ui-dist DIR, --prototype a,b (the branch's
@@ -113,6 +115,8 @@ function options() {
       profile: { type: "boolean", default: false },
       "keep-provider-env": { type: "boolean", default: false },
       concurrent: { type: "string", default: "1" },
+      cli: { type: "string", default: "onepipeline" },
+      "no-providers": { type: "boolean", default: false },
       harness: { type: "string", default: "claude-code" },
       timeout: { type: "string", default: "580" },
     },
@@ -126,10 +130,14 @@ function options() {
     "page-node",
     "human-items",
     "provider-probe",
+    "cli-status",
   ];
   if (!known.includes(values.measure))
     fail(`no measure ${values.measure}: one of ${known.join(", ")}`);
-  if (values.measure !== "provider-probe" && !values["runs-root"])
+  if (
+    !["provider-probe"].includes(values.measure) &&
+    !values["runs-root"]
+  )
     fail("--runs-root names the root to serve");
   const runless = ["sidebar", "human-items", "provider-probe"];
   if (!runless.includes(values.measure) && !values.run)
@@ -266,8 +274,16 @@ function causes(wall, measure, spans) {
       shadow,
       "span status.shadow_render_without_providers",
     );
+    add(
+      "the harness's own extra render, which an untraced read does not pay",
+      "this harness",
+      shadow,
+      "span status.shadow_render_without_providers, paid once more than the read needs",
+    );
   } else {
     const transcripts = total(spans, "activity.transcript_read");
+    const allReads = total(spans, "transcript.read_all");
+    const rowReads = Math.max(0, allReads - transcripts);
     const detail = total(spans, "ensure.detail_build");
     const timeline = total(spans, "ensure.timeline_build");
     add(
@@ -277,16 +293,25 @@ function causes(wall, measure, spans) {
       "running total activity.transcript_read",
     );
     add(
+      "transcript read for a timeline row or a conversation's turn",
+      "onepipeline-ui (asks per record) / onepipeline (whole-file resolve)",
+      rowReads,
+      "running total transcript.read_all minus activity.transcript_read",
+    );
+    // Reads sit inside either build; each build's remainder is what it did besides.
+    const inBuilds = transcripts + rowReads;
+    const detailReads = Math.min(inBuilds, detail);
+    add(
       "detail document apart from those reads",
       "onepipeline-ui",
-      detail - Math.min(transcripts, detail),
-      "span ensure.detail_build minus the reads",
+      detail - detailReads,
+      "span ensure.detail_build minus the reads it held",
     );
     add(
       "timeline apart from those reads",
       "onepipeline-ui",
-      timeline - Math.max(0, transcripts - detail),
-      "span ensure.timeline_build minus any reads it held",
+      timeline - Math.min(inBuilds - detailReads, timeline),
+      "span ensure.timeline_build minus the reads it held",
     );
     add(
       "timeline re-enveloped",
@@ -405,6 +430,27 @@ async function subscribeMeasure(values, server, origin, root) {
   };
 }
 
+function cliStatus(values, root) {
+  const started = performance.now();
+  const env = serverEnv(values["keep-provider-env"]);
+  env.ONEPIPELINE_RUNS_DIR = root;
+  const args = ["status", values.run];
+  if (values["no-providers"]) args.push("--no-providers");
+  const read = spawnSync(values.cli, args, {
+    cwd: values.cwd ?? dirname(root),
+    env,
+    encoding: "utf8",
+    timeout: Number(values.timeout) * 1000,
+    maxBuffer: 1 << 28,
+  });
+  return {
+    wall_seconds: (performance.now() - started) / 1000,
+    exit: read.status,
+    no_providers: values["no-providers"],
+    bytes: Buffer.byteLength(read.stdout ?? ""),
+  };
+}
+
 async function statusMeasure(values, server, origin) {
   const budget = Number(values.timeout);
   const url = `${origin}/api/v2/runs/${values.run}/status`;
@@ -479,7 +525,12 @@ async function pageMeasure(values, server, origin, root) {
 }
 
 /** What the page's filters send: the default view and each state it offers. */
-const HUMAN_ITEM_QUERIES = ["", "?state=open", "?state=resolved", "?state=dismissed"];
+const HUMAN_ITEM_QUERIES = [
+  "",
+  "?state=answered",
+  "?state=completed",
+  "?state=dismissed",
+];
 
 function itemsById(body) {
   return new Map(
@@ -510,17 +561,24 @@ async function humanItemsMeasure(values, scratch) {
   try {
     const origin = await server.listening();
     const budget = Number(values.timeout);
-    const before = await timed(`${origin}/api/human-items`, {}, budget);
-    if (before.status !== 200) fail(`human-items: ${before.status} ${before.body}`);
+    const every = async () => {
+      const reads = await Promise.all(
+        HUMAN_ITEM_QUERIES.map((query) =>
+          timed(`${origin}/api/human-items${query}`, {}, budget),
+        ),
+      );
+      const refused = reads.find((read) => read.status !== 200);
+      if (refused) fail(`human-items: ${refused.status} ${refused.body}`);
+      return new Map(reads.flatMap((read) => [...itemsById(read.body)]));
+    };
+    const was = await every();
     appendFileSync(journal, `${lines.at(-1)}\n`);
     const views = [];
     for (const query of HUMAN_ITEM_QUERIES) {
       const read = await timed(`${origin}/api/human-items${query}`, {}, budget);
       views.push({ query, status: read.status, seconds: read.seconds, bytes: read.bytes });
     }
-    const after = await timed(`${origin}/api/human-items`, {}, budget);
-    const was = itemsById(before.body);
-    const now = itemsById(after.body);
+    const now = await every();
     const changed = [...now].filter(([id, item]) => was.get(id) !== item);
     return {
       journal_records: lines.length,
@@ -530,7 +588,7 @@ async function humanItemsMeasure(values, scratch) {
         : 0,
       items: now.size,
       views,
-      whole_list_bytes: after.bytes,
+      whole_list_bytes: views[0].bytes,
       items_changed_by_the_write: changed.length,
       patch_bytes: changed.reduce((sum, [, item]) => sum + item.length, 0),
       wall_seconds: Math.max(...views.map((view) => view.seconds)),
@@ -591,6 +649,7 @@ async function main() {
   let hot = null;
   try {
     if (values.measure === "provider-probe") result = providerProbe(values);
+    else if (values.measure === "cli-status") result = cliStatus(values, root);
     else if (values.measure === "human-items")
       result = await humanItemsMeasure(values, scratch);
     else {
@@ -628,6 +687,25 @@ async function main() {
           load_before: before,
           load_after: load(),
           ...result,
+          after_answer: spans.length
+            ? {
+                poll_refresh_seconds: total(spans, "poll.refresh"),
+                poll_timeline_refreshed_seconds: total(
+                  spans,
+                  "poll.timeline_refreshed",
+                ),
+              }
+            : null,
+          memory_steps_kb: spans
+            .filter((span) => span.span && span.rss_kb_after - span.rss_kb_before > 20_480)
+            .map((span) => ({
+              span: span.span,
+              grew_kb: span.rss_kb_after - span.rss_kb_before,
+              minor_faults: span.minor_faults,
+              wall_ms: Math.round(span.wall_ms),
+              cpu_ms: Math.round(span.cpu_ms),
+              runqueue_ms: Math.round(span.runqueue_ms),
+            })),
           attribution,
           hot,
         },

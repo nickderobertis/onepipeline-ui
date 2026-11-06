@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Build the server `scripts/spike-run-open-costs.mjs` measures: this branch's library,
-# symbolled, under `pprof`, over the locked engine with `RunView::open_current` made
-# public so the checkpoint prototypes can call it. Its own target directory, so the
-# crate's other builds are untouched.
+# symbolled, under `pprof`, over the locked engine with `spikes/run-open-costs/engine.patch`
+# applied: `RunView::open_current` made public for the checkpoint prototypes, and the
+# `heap-merge` and `session-index` prototypes, each off until `ONEPIPELINE_UI_SPIKE` names
+# it. Its own target directory, so the crate's other builds are untouched.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 version=$(awk '/^name = "onepipeline"$/ { getline; gsub(/[^0-9.]/, ""); print; exit }' Cargo.lock)
@@ -13,8 +14,7 @@ rm -rf "$engine"
 mkdir -p target/spike
 cp -r "$source" "$engine"
 chmod -R u+w "$engine"
-sed -i 's/pub(crate) fn open_current(/pub fn open_current(/' "$engine/src/views.rs"
-grep -q 'pub fn open_current(' "$engine/src/views.rs"
+patch --silent -p1 -d "$engine" < spikes/run-open-costs/engine.patch
 cp Cargo.lock spikes/run-open-costs/Cargo.lock
 cd spikes/run-open-costs
 CARGO_TARGET_DIR=../../target/spike cargo build --release
