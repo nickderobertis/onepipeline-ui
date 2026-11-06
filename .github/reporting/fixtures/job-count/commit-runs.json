@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "commit": "cccccccccccccccccccccccccccccccccccccccc",
+  "runs": [
+    {
+      "id": 200,
+      "workflow_name": "Release-plz",
+      "event": "push",
+      "conclusion": "success"
+    },
+    {
+      "id": 201,
+      "workflow_name": "Release",
+      "event": "release",
+      "conclusion": "success"
+    },
+    {
+      "id": 202,
+      "workflow_name": "CI cache",
+      "event": "push",
+      "conclusion": "success"
+    },
+    {
+      "id": 203,
+      "workflow_name": "CI",
+      "event": "push",
+      "conclusion": "success"
+    }
+  ],
+  "cost": {
+    "rest_requests": 1,
+    "requests": [
+      "GET replayed"
+    ]
+  }
+}

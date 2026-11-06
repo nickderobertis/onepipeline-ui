@@ -69,7 +69,8 @@ export function jobProblems(workflows) {
       );
     if (job["runs-on"] !== runner)
       problems.push(`job ${id} runs on ${job["runs-on"]}, not ${runner}`);
-    const allowed = undefined;
+    // A push to `main` runs only `budgets`, so each of these is held to pull requests.
+    const allowed = "github.event_name == 'pull_request'";
     if (job.if !== allowed)
       problems.push(`job ${id} has the condition ${JSON.stringify(job.if)}`);
     const recipe = `just ci-${id}`;
@@ -146,7 +147,10 @@ export function jobProblems(workflows) {
 // Each context branch protection requires (../required-contexts.mjs), and the
 // job that reports it: a job id with no name override reports under its id.
 const REQUIRED = Object.fromEntries(
-  Object.keys(FOUR).map((job) => [job, { file: "ci.yml", job }]),
+  [...Object.keys(FOUR), "budgets"].map((job) => [
+    job,
+    { file: "ci.yml", job },
+  ]),
 );
 
 export function requiredContextProblems(workflows) {

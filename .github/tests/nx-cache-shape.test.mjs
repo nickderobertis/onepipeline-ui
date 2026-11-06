@@ -57,13 +57,15 @@ function cacheSteps(job) {
 }
 test("the four existing CI jobs record and upload trusted cache receipts around their Nx runs", () => {
   const ci = workflow("ci");
-  assert.deepEqual(Object.keys(ci.jobs).sort(), [
+  // `budgets` runs no Nx task, so it records no receipt.
+  const { budgets: _noNx, ...nxJobs } = ci.jobs;
+  assert.deepEqual(Object.keys(nxJobs).sort(), [
     "lint",
     "test-linux",
     "test-macos",
     "test-windows",
   ]);
-  for (const [name, job] of Object.entries(ci.jobs)) {
+  for (const [name, job] of Object.entries(nxJobs)) {
     const { steps, ready } = cacheSteps(job);
     const nx = steps.findIndex((step) =>
       step.run?.includes(`just ci-${name === "lint" ? "lint" : name}`),
@@ -157,7 +159,8 @@ test("release-tail selects both registered budgets and fetches every published p
     assert.equal(budget.threshold, threshold);
   }
   const ci = workflow("ci");
-  for (const job of Object.values(ci.jobs)) {
+  const { budgets: _reportJob, ...nxJobs } = ci.jobs;
+  for (const job of Object.values(nxJobs)) {
     assert.equal(
       job.env.NX_BASE,
       expression("github.event.pull_request.base.sha"),

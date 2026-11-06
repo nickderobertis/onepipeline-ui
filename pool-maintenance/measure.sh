@@ -38,6 +38,11 @@ on_error() {
 }
 trap 'on_error $?' ERR
 
+# The browser view the alternative build compiles in, relative to this script. The
+# budget's command names it, so a checkout without one reads as lacking that input
+# rather than as a measurement that broke.
+view="$(cd "$(dirname "$0")" && pwd)/${1:-../apps/dag-ui/dist/index.html}"
+
 cd "$(dirname "$0")/.."
 
 # Keep the builds' own output to signal, as the justfile does for its recipes.
@@ -53,7 +58,7 @@ UNIT_DIRS=(deps .fingerprint build incremental)
 BACKDATE="200001010000"
 EVIDENCE="target/pool-maintenance"
 
-if [ ! -f apps/dag-ui/dist/index.html ]; then
+if [ ! -f "$view" ]; then
   echo "measure.sh: apps/dag-ui/dist holds no browser view, and the alternative build (--features bundled-ui) refuses to compile without one" >&2
   echo "ACTION: run 'just build' first, or run this through 'just budgets', which builds it" >&2
   exit 1

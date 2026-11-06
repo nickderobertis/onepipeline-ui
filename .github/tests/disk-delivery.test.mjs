@@ -19,8 +19,9 @@ import { parse } from "yaml";
 
 const workflow = parse(await readFile(".github/workflows/ci.yml", "utf8"));
 test("Linux reporting steps use the job token with checks write and bracket the restore", () => {
-  for (const job of Object.values(workflow.jobs).filter((job) =>
-    job["runs-on"].startsWith("ubuntu"),
+  // `budgets` restores no Rust build: a checkout and the report action are all of it.
+  for (const job of Object.values(workflow.jobs).filter(
+    (job) => job["runs-on"].startsWith("ubuntu") && !job.needs,
   )) {
     assert.equal(job.permissions.checks, "write");
     const index = job.steps.findIndex((step) =>

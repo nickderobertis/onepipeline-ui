@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The checks one of ci.yml's four jobs runs, as one Nx invocation a developer can
+# The checks one of ci.yml's four Nx jobs runs, as one Nx invocation a developer can
 # run too: `just ci-lint`, `just ci-test-linux`, `just ci-test-windows` and
 # `just ci-test-macos` are this script, and each job's step calls its recipe.
 #

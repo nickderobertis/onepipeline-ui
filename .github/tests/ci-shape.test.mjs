@@ -3,13 +3,14 @@
 // graph the macOS budget reads (../workflow-graph.mjs), triggers, job
 // conditions and reusable calls included.
 //
-//   - a pull request's `opened`, `synchronize` and `reopened`: ci.yml's four jobs
+//   - a pull request's `opened`, `synchronize` and `reopened`: ci.yml's five jobs
 //     and nothing else, including a release-plz branch;
-//   - a push to `main`: release-plz.yml, visual-docs.yml's canonical gallery and
-//     ci-cache.yml's warm jobs and informational advisories report;
-//   - the release commit (the push merging release-plz's pull request): release-plz.yml,
-//     the warmer's Linux and Windows jobs and the advisories report, never
-//     visual-docs.yml or a Mac job;
+//   - a push to `main`: ci.yml's `budgets` alone of its jobs, release-plz.yml,
+//     visual-docs.yml's canonical gallery and ci-cache.yml's warm jobs and
+//     informational advisories report;
+//   - the release commit (the push merging release-plz's pull request): `budgets`,
+//     release-plz.yml, the warmer's Linux and Windows jobs and the advisories report,
+//     never visual-docs.yml or a Mac job;
 //   - the Release: release.yml alone.
 //
 // It also holds visual-docs.yml to its remaining triggers, and the set of
@@ -45,7 +46,7 @@ const load = () =>
       document: parse(readFileSync(`.github/workflows/${file}`, "utf8")),
     }));
 
-const FOUR = ["lint", "test-linux", "test-windows", "test-macos"];
+const FIVE = ["lint", "test-linux", "test-windows", "test-macos", "budgets"];
 const RELEASE_MERGE = {
   message: "chore: release v0.64.0 (#564)",
   changed: ["CHANGELOG.md", "Cargo.toml", "Cargo.lock"],
@@ -93,11 +94,11 @@ export function shapeProblems(workflows) {
   for (const action of ["opened", "synchronize", "reopened"]) {
     expect(
       pr(action),
-      FOUR.map((job) => `ci.yml ${job}`),
+      FIVE.map((job) => `ci.yml ${job}`),
     );
     expect(
       pr(action, "release-plz-2026-11-01T03-00-00Z"),
-      FOUR.map((job) => `ci.yml ${job}`),
+      FIVE.map((job) => `ci.yml ${job}`),
     );
   }
   const pushWorkflows = (scenario) =>
@@ -107,15 +108,26 @@ export function shapeProblems(workflows) {
   const ordinary = pushWorkflows(push(ORDINARY_MERGE));
   if (
     JSON.stringify(ordinary) !==
-    JSON.stringify(["ci-cache.yml", "release-plz.yml", "visual-docs.yml"])
+    JSON.stringify([
+      "ci-cache.yml",
+      "ci.yml",
+      "release-plz.yml",
+      "visual-docs.yml",
+    ])
   )
     problems.push(`a push to main starts ${JSON.stringify(ordinary)}`);
   expect(push(RELEASE_MERGE), [
     "ci-cache.yml advisories",
     "ci-cache.yml warm-linux",
     "ci-cache.yml warm-windows",
+    "ci.yml budgets",
     "release-plz.yml release-plz",
   ]);
+  const onCi = started(workflows, push(ORDINARY_MERGE)).filter((row) =>
+    row.startsWith("ci.yml "),
+  );
+  if (JSON.stringify(onCi) !== JSON.stringify(["ci.yml budgets"]))
+    problems.push(`a push to main starts ${JSON.stringify(onCi)} of ci.yml`);
   const releaseRun = started(workflows, {
     id: "release-published",
     event: "release",
@@ -169,7 +181,7 @@ export function shapeProblems(workflows) {
 const RELEASE_PLZ_SHA256 =
   "b9c57fdf35411e913df499ae0dee958a93a3eeb31ab8d9dbb7a992dafc4856a3";
 
-test("a pull request runs the four jobs, main and the release commit run only what they name", () => {
+test("a pull request runs the five jobs, main and the release commit run only what they name", () => {
   assert.deepEqual(shapeProblems(load()), []);
 });
 
@@ -197,9 +209,15 @@ test("another workflow or job on a pull request or the release commit, or a lost
     ],
     [
       edit("ci.yml", (d) => {
-        d.on.push = { branches: ["main"] };
+        delete d.jobs.lint.if;
       }),
-      /^a push to main starts .*"ci\.yml"/,
+      /^a push to main starts .*ci\.yml lint.* of ci\.yml$/,
+    ],
+    [
+      edit("ci.yml", (d) => {
+        delete d.on.push;
+      }),
+      /^a push to main starts \["ci-cache\.yml","release-plz\.yml","visual-docs\.yml"\]/,
     ],
     [
       edit("visual-docs.yml", (d) => {

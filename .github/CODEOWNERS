@@ -78,3 +78,4 @@
 /pool-maintenance/       @nickderobertis
 /tests/tiers/versions/   @nickderobertis
 /.github/tests/nx-cache/ @nickderobertis
+/.github/reporting/ @nickderobertis

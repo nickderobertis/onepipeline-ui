@@ -134,7 +134,7 @@ compiled from that exact commit and never fetched, because the commit still
 reports the last release's version: the binary is stamped with the lock's source
 and its own digest, and a same-version build from anywhere else is replaced.
 
-**Pull-request CI is four jobs, each one recipe, and they are all of it.**
+**Pull-request CI is four jobs, each one recipe, and a report job after them.**
 `lint`, `test-linux`, `test-windows` and `test-macos`, and their caps (36 minutes
 for Linux, 30 for the others), are an interface other work builds against
 (`.github/tests/ci-jobs.test.mjs`); speed a job up by cutting its work, never by
@@ -146,7 +146,17 @@ is off, which keeps that job inside its cap: no pull request gets a gallery
 preview or the visual-docs comment, though the capture and both gates still
 block) — and `.github/tests/ci-shape.test.mjs`
 resolves every workflow to hold that, and what a push to `main` and the release
-commit start.
+commit start. The fifth, `budgets`, is the released `onebudgetspec-github-action`
+under `needs` and `if: always()`, on every pull request and alone of `ci.yml` on
+every push to `main`: it builds and tests nothing, gives each production budget one
+row, and fails only on an ordinary budget verdict. A budget whose input the job
+lacks reads as unavailable because its `command` names that input, so name a
+budget's saved telemetry or required file there, or its absence reads as a broken
+measurement; `release-tail` and `host-variable` are report-only here
+(`enforcement-exclude-labels`) because they measure elsewhere.
+`.github/reporting` holds the job's journeys and its own budget. Until action v0.1.1
+is replaced, a base push saves no rolling history while the job's own budget is
+its only measurement, so this tree's rows read `baseline unavailable`.
 
 **A security advisory blocks only the change that brings it in.** A database
 update publishes advisories against versions `main` already resolves, and an
@@ -217,6 +227,18 @@ to `oneagentgraph`'s own declaration of it rather than to a second reading of th
 wire. `just deps-check` is deliberately outside the gate: it needs a network
 advisory database, and the gate stays offline and deterministic.
 
+**Budget reports.** Approved budget thresholds alone decide failures: the required
+`budgets` check goes red only on an ordinary budget verdict, and the budget stays the
+requirement. CI artifacts retain the base branch's recent measurements for informational
+comparison, and each report states their provenance, retention and coverage. A stored
+measurement is never a line to hold.
+
+1. When a performance problem appears that a failing budget check does not already identify (for example a CI timeout), read the PR report first through `onevcs change comments` or the host PR view. If the failing check already identifies it, skip the duplicate read. Read earlier PR comments and job results when several changes may contribute.
+2. Never time base versus branch on a shared host. Profile to investigate, and use CI comparisons through the repository's existing publication path.
+3. When reading a report or seeing a failing budget check, fix the regression as part of the work. For an adverse change of at least one standard deviation shown in a report being read (a `max` budget rising, a `min` budget falling), make the change cheaper or make room in existing code, profiling to find where. Improvements show numbers without flags, in a row's history too, and are no reason to optimize further, and other figures need no work. Informational flags do not fail a check or start other work.
+4. Stay inside existing budgets. Make room for new tests and code by speeding up existing work; never raise limits or timeouts.
+5. Suspect the current change first when something degrades, before intermittent slowness or the outside world.
+
 **Bootstrap installs no Git hooks.** Local pushes run no capture or classification;
 CI owns verification. Existing `core.hooksPath` settings are left alone so unrelated
 hooks remain active. `just gate` remains a deliberate manual check.
@@ -235,12 +257,12 @@ fans one uniformly-named target across all of them.
   protected: merge and rebase merging are off, so one PR is one squash commit
   whose subject is the PR title. Queue with `gh pr merge --auto --squash`. Admins
   may bypass in a break-glass.
-- **Branch protection requires exactly the four jobs** — `lint`, `test-linux`,
-  `test-windows`, `test-macos` (`.github/required-contexts.mjs`, which also names
+- **Branch protection requires exactly the five jobs** — `lint`, `test-linux`,
+  `test-windows`, `test-macos`, `budgets` (`.github/required-contexts.mjs`, which also names
   the informational `advisories` status that must never be required) — and does not
   require a branch to be up to date (the user's decision of 2026-10-18). There is
   no verdict job ruling on others: a check that must block a merge is a step of
-  one of the four, which is why `test-linux` builds the release's x86_64 wheel
+  one of them, which is why `test-linux` builds the release's x86_64 wheel
   (v0.16.0's wheels failed with every required check green). The trade is that
   nothing re-runs the tests on a push to `main`, so two merges that pass apart
   can break together; `ci-cache.yml`'s warm jobs, which fail when `main` does not

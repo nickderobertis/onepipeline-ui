@@ -10,12 +10,14 @@
 #                  header is the source's own). The seven host figures use
 #                  onevcs's read-only queries; cache-use reads CI and promotion
 #                  artifacts through GitHub's API directly. The CD figures leave out `CI cache`, the main-push
-#                  cache warmer, which delivers nothing to a release.
+#                  cache warmer, and `CI`, whose push run at the release commit is only the
+#                  `budgets` report job: neither delivers anything to a release.
 #   host-variable  `just gate` on a development machine, as a warning: the
 #                  recipe records its own start and end, then checks this label.
 #
 # Any other check of this file excludes both labels; at pull-request time each
-# CI job's `timeout-minutes: 30` is what fails a check that runs over.
+# CI job's `timeout-minutes: 30` is what fails a check that runs over. ci.yml's
+# `budgets` job reports both labels' budgets without enforcing them.
 schema_version: 1
 budgets:
   # Workload: one release carrying 1 to 3 merged PRs, each PR's last commit running
@@ -48,7 +50,7 @@ budgets:
       check), in seconds. Holds each CD job to 30 minutes, the actionable unit
       inside the release cycle.
     measure: reported
-    command: [bash, scripts/actions-budget-figures.sh, longest-job, --stage, cd, --exclude-workflow, CI cache]
+    command: [bash, scripts/actions-budget-figures.sh, longest-job, --stage, cd, --exclude-workflow, CI cache, --exclude-workflow, CI]
     unit: seconds
     direction: max
     threshold: 1800
@@ -72,9 +74,10 @@ budgets:
     labels: [release-tail]
   # Workload: one release carrying 1 to 3 merged PRs, each PR's last commit running
   # the 4 CI jobs; 54 releases and 140 merged PRs, 85 of them not release PRs, in
-  # 31 days (2026-09-15 to 10-16). Basis: design; 4 is the user's ruling for a
-  # cross-platform repository, `lint` plus one test job per platform. Today: 19
-  # jobs median at a current-shape PR head.
+  # 31 days (2026-09-15 to 10-16). Basis: arithmetic; 4 is the user's ruling for a
+  # cross-platform repository, `lint` plus one test job per platform, and the one
+  # `budgets` report job makes 4 + 1 = 5. Today: 19 jobs median at a current-shape
+  # PR head.
   - id: onepipeline-ui-ci-job-count
     description: >-
       The most counted jobs any one pull request's last-commit `pull_request`
@@ -85,7 +88,7 @@ budgets:
     command: [bash, scripts/actions-budget-figures.sh, job-count, --stage, pr]
     unit: jobs
     direction: max
-    threshold: 4
+    threshold: 5
     labels: [release-tail]
   # Workload: one release's CD runs, 6 jobs: release-plz, build-linux,
   # build-linux-arm64, build-macos, build-windows and publish; 54 releases and
@@ -100,7 +103,7 @@ budgets:
       the job running this check. Holds the share of the account-wide 20-job
       concurrency limit this repository's CD takes.
     measure: reported
-    command: [bash, scripts/actions-budget-figures.sh, job-count, --stage, cd, --exclude-workflow, CI cache]
+    command: [bash, scripts/actions-budget-figures.sh, job-count, --stage, cd, --exclude-workflow, CI cache, --exclude-workflow, CI]
     unit: jobs
     direction: max
     threshold: 6
@@ -121,7 +124,7 @@ budgets:
       Holds the tail's GitHub reads for the release itself, apart from the reads
       each pull request adds.
     measure: reported
-    command: [bash, scripts/actions-budget-figures.sh, release-read-requests, --exclude-workflow, CI cache]
+    command: [bash, scripts/actions-budget-figures.sh, release-read-requests, --exclude-workflow, CI cache, --exclude-workflow, CI]
     unit: requests
     direction: max
     threshold: 6

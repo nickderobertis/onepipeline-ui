@@ -35,7 +35,7 @@ const events = [
   ["manual-default", "workflow_dispatch", null],
   ["manual-opt-in", "workflow_dispatch", null],
 ];
-// What protection requires: ci.yml's four jobs, by the names they report under.
+// What protection requires: ci.yml's five jobs, by the names they report under.
 const protectedNames = [...REQUIRED_CONTEXTS];
 // What a push to main carries, which decides two conditions there: visual-docs.yml
 // skips a push changing only the release's manifests, and ci-cache.yml's macOS

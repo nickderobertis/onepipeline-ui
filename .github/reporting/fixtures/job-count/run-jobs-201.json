@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "run_id": 201,
+  "jobs": [
+    {
+      "run_id": 201,
+      "name": "build-linux",
+      "workflow_name": "Release",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_name": "GitHub Actions 1",
+      "runner_os": "Linux",
+      "started_at": "2026-11-05T10:00:00Z",
+      "completed_at": "2026-11-05T10:10:00Z"
+    },
+    {
+      "run_id": 201,
+      "name": "build-linux-arm64",
+      "workflow_name": "Release",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_name": "GitHub Actions 1",
+      "runner_os": "Linux",
+      "started_at": "2026-11-05T10:00:00Z",
+      "completed_at": "2026-11-05T10:10:00Z"
+    },
+    {
+      "run_id": 201,
+      "name": "build-macos",
+      "workflow_name": "Release",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_name": "GitHub Actions 1",
+      "runner_os": "Linux",
+      "started_at": "2026-11-05T10:00:00Z",
+      "completed_at": "2026-11-05T10:10:00Z"
+    },
+    {
+      "run_id": 201,
+      "name": "build-windows",
+      "workflow_name": "Release",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_name": "GitHub Actions 1",
+      "runner_os": "Linux",
+      "started_at": "2026-11-05T10:00:00Z",
+      "completed_at": "2026-11-05T10:10:00Z"
+    },
+    {
+      "run_id": 201,
+      "name": "publish",
+      "workflow_name": "Release",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_name": "GitHub Actions 1",
+      "runner_os": "Linux",
+      "started_at": "2026-11-05T10:00:00Z",
+      "completed_at": "2026-11-05T10:10:00Z"
+    }
+  ],
+  "cost": {
+    "rest_requests": 1,
+    "requests": [
+      "GET replayed"
+    ]
+  }
+}
