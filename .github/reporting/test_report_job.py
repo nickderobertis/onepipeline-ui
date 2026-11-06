@@ -13,7 +13,6 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
 import platform
 import shutil
 import subprocess
@@ -22,6 +21,7 @@ import tarfile
 import tempfile
 import unittest
 import urllib.request
+from pathlib import Path
 
 import yaml
 
