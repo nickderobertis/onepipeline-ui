@@ -95,7 +95,7 @@ const CALLS_PER_SESSION = 1_400;
 
 /** A journal written whole, one record at a time, on one stream. */
 class Journal {
-  constructor(runId, at, transcriptStore = null) {
+  constructor(runId, at, transcriptStore = null, recordsPerStream = null) {
     this.runId = runId;
     this.stream = streamOf(runId);
     this.at = at;
@@ -103,6 +103,10 @@ class Journal {
     this.turns = new Map();
     this.transcriptStore = transcriptStore;
     this.calls = 0;
+    // The spike's `streams=N` driver: a real run's records arrive on one short stream per
+    // dispatched process, which is what the engine's merge scans per record.
+    this.recordsPerStream = recordsPerStream;
+    this.seqs = new Map();
   }
 
   /**
@@ -150,12 +154,18 @@ class Journal {
   }
 
   emit(source, kind, labels, payload = {}) {
+    const stream =
+      this.recordsPerStream === null
+        ? this.stream
+        : `node-scope-${Math.floor(this.lines.length / this.recordsPerStream)}`;
+    const seq = this.seqs.get(stream) ?? 0;
+    this.seqs.set(stream, seq + 1);
     this.lines.push(
       JSON.stringify({
         v: 1,
         ts: stamp(this.at),
-        stream: this.stream,
-        seq: this.lines.length,
+        stream,
+        seq,
         source,
         kind,
         labels: { run_id: this.runId, ...labels },
@@ -287,13 +297,14 @@ function writeRun(
   stepMs,
   extra = 0,
   transcriptStore = null,
+  recordsPerStream = null,
 ) {
   const dir = join(root, runId);
   mkdirSync(dir, { recursive: true });
   const plan = planOf(nodes);
   writeJson(join(dir, "plan.json"), plan);
   writeJson(join(dir, "launch.json"), launch(runId, project, stamp(startMs)));
-  const journal = new Journal(runId, startMs, transcriptStore);
+  const journal = new Journal(runId, startMs, transcriptStore, recordsPerStream);
   declareGraph(root, journal.stream, startMs);
   journal.emit("pipeline", "run-started", {}, { plan });
   // Live runs leave their last node running; the others settle every node.
@@ -359,7 +370,7 @@ const SCALES = {
 export function buildLoadCorpus(
   root,
   scaleName = "host",
-  { transcriptStore = false } = {},
+  { transcriptStore = false, streams = null } = {},
 ) {
   const scale = SCALES[scaleName];
   if (scale === undefined) throw new Error(`no corpus scale ${scaleName}`);
@@ -391,6 +402,7 @@ export function buildLoadCorpus(
     Math.floor(day / scale.openLiveRecords),
     extra,
     history,
+    streams === null ? null : Math.floor(scale.openLiveRecords / streams),
   );
   for (const runId of otherLiveRuns) {
     writeRun(
@@ -452,21 +464,27 @@ if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  const [root, scale = "host", driver] = process.argv.slice(2);
+  const [root, scale = "host", ...drivers] = process.argv.slice(2);
+  const streams = /^streams=(\d+)$/u.exec(
+    drivers.find((driver) => driver.startsWith("streams=")) ?? "",
+  );
   if (
     root === undefined ||
     !(scale in SCALES) ||
-    (driver !== undefined && driver !== "transcript-store")
+    drivers.some(
+      (driver) => driver !== "transcript-store" && !/^streams=\d+$/u.test(driver),
+    )
   ) {
     console.error(
-      "usage: corpus.mjs ROOT [host|host-850|journey] [transcript-store]",
+      "usage: corpus.mjs ROOT [host|host-850|journey] [transcript-store] [streams=N]",
     );
     process.exit(2);
   }
   console.log(
     JSON.stringify(
       buildLoadCorpus(root, scale, {
-        transcriptStore: driver === "transcript-store",
+        transcriptStore: drivers.includes("transcript-store"),
+        streams: streams === null ? null : Number(streams[1]),
       }),
     ),
   );

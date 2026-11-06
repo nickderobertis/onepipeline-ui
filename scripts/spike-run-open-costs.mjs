@@ -27,6 +27,8 @@
  *                    --no-providers when that option is given
  *   cli-unpublished  `onepipeline unpublished --host` (--cli), no server at all, and
  *                    whether it refused with `Argument list too long`
+ *   run-facts        a run's journal, no server: its streams, its records by kind, and what
+ *                    resolving every transcript reference would read
  *   checkouts        each checkout `onevcs repos` registers: its ref count and the time
  *                    to list them, as counts only, no name
  *
@@ -41,6 +43,9 @@
  * costs here), --server-path PATH (the server's PATH, so a host with no provider CLI can
  * be stood in for; the stub goes in front of it), --keep-profile PATH (copy the folded
  * stacks out). --concurrent also applies to a subscription, which then attributes nothing.
+ *
+ * --trace-exec (strace every process the server or `cli-unpublished` starts: counts by
+ * program and refusals by E2BIG, so whether a read reaches git or onevcs is measured).
  *
  * `spikes/run-open-costs/matrix.sh` is every measurement the spike's report states.
  */
@@ -134,6 +139,7 @@ function options() {
       "stub-provider-seconds": { type: "string" },
       "keep-profile": { type: "string" },
       "server-path": { type: "string" },
+      "trace-exec": { type: "boolean", default: false },
     },
   });
   if (!values.measure) fail("--measure names what to measure");
@@ -148,6 +154,7 @@ function options() {
     "cli-status",
     "cli-unpublished",
     "checkouts",
+    "run-facts",
   ];
   if (!known.includes(values.measure))
     fail(`no measure ${values.measure}: one of ${known.join(", ")}`);
@@ -220,7 +227,12 @@ class Server {
       writeFileSync(join(bin, "claude"), script, { mode: 0o755 });
       env.PATH = `${bin}:${env.PATH}`;
     }
-    this.child = spawn(binary, args, {
+    this.tracePid = values["trace-exec"];
+    this.execPath = join(scratch, "exec.strace");
+    const [program, argv] = this.tracePid
+      ? ["strace", ["-f", "-qq", "-e", "trace=execve", "-o", this.execPath, binary, ...args]]
+      : [binary, args];
+    this.child = spawn(program, argv, {
       cwd: values.cwd ?? dirname(root),
       env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -258,6 +270,7 @@ class Server {
   }
 
   residentKb() {
+    if (this.tracePid) return null;
     const status = readFileSync(`/proc/${this.child.pid}/status`, "utf8");
     const of = (name) =>
       Number(new RegExp(`${name}:\\s+(\\d+)`, "u").exec(status)?.[1] ?? 0);
@@ -265,6 +278,7 @@ class Server {
   }
 
   cpuSeconds() {
+    if (this.tracePid) return null;
     const stat = readFileSync(`/proc/${this.child.pid}/stat`, "utf8");
     const after = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
     return (Number(after[11]) + Number(after[12])) / 100;
@@ -554,22 +568,45 @@ function cliStatus(values, root) {
   };
 }
 
-function cliUnpublished(values) {
+/** What an `strace -e execve` log says was started, and what the kernel refused. */
+function execCounts(path) {
+  if (!existsSync(path)) return null;
+  const programs = {};
+  let tooLong = 0;
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    const named = /execve\("([^"]+)"/u.exec(line);
+    if (!named) continue;
+    if (line.includes("E2BIG")) {
+      tooLong += 1;
+    }
+    if (/= -1 /u.test(line)) continue;
+    const name = named[1].split("/").at(-1);
+    programs[name] = (programs[name] ?? 0) + 1;
+  }
+  return { programs, argument_list_too_long: tooLong };
+}
+
+function cliUnpublished(values, scratch) {
   const started = performance.now();
-  const read = spawnSync(values.cli, ["unpublished", "--host"], {
+  const trace = join(scratch, "exec.strace");
+  const [program, prefix] = values["trace-exec"]
+    ? ["strace", ["-f", "-qq", "-e", "trace=execve", "-o", trace, values.cli]]
+    : [values.cli, []];
+  const read = spawnSync(program, [...prefix, "unpublished", "--host"], {
     cwd: values.cwd ?? process.cwd(),
     env: serverEnv(values["keep-provider-env"]),
     encoding: "utf8",
     timeout: Number(values.timeout) * 1000,
     maxBuffer: 1 << 28,
   });
-  const stderr = read.stderr ?? "";
+  const stderr = `${read.stderr ?? ""}${read.stdout ?? ""}`;
   return {
     wall_seconds: (performance.now() - started) / 1000,
     exit: read.status,
     timed_out: read.error?.code === "ETIMEDOUT",
     argument_list_too_long: /Argument list too long/u.test(stderr),
-    unresolved_lines: stderr.split("\n").filter(Boolean).length,
+    output_lines: stderr.split("\n").filter(Boolean).length,
+    execs: execCounts(trace),
   };
 }
 
@@ -607,6 +644,60 @@ function checkouts(values) {
       seconds: Math.round(row.seconds * 1000) / 1000,
     })),
     total_refs: rows.reduce((sum, row) => sum + row.refs, 0),
+  };
+}
+
+function runFactsMeasure(values, root) {
+  const started = performance.now();
+  const streams = new Map();
+  const kinds = new Map();
+  const files = new Map();
+  let references = 0;
+  const count = (map, key) => map.set(key, (map.get(key) ?? 0) + 1);
+  const text = readFileSync(join(root, values.run, "events.jsonl"), "utf8");
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    count(streams, record.stream);
+    count(kinds, record.kind);
+    const reference = record.payload?.transcript;
+    if (reference?.history_session) {
+      references += 1;
+      count(
+        files,
+        join(
+          reference.history_dir ?? "",
+          reference.history_project ?? "",
+          `${reference.history_session}.jsonl`,
+        ),
+      );
+    }
+  }
+  let bytes = 0;
+  let largest = 0;
+  for (const [path, times] of files) {
+    const size = existsSync(path) ? statSync(path).size : 0;
+    bytes += size * times;
+    largest = Math.max(largest, size);
+  }
+  return {
+    wall_seconds: (performance.now() - started) / 1000,
+    streams: streams.size,
+    records_per_stream: Math.round(
+      [...streams.values()].reduce((sum, n) => sum + n, 0) / Math.max(streams.size, 1),
+    ),
+    kinds: [...kinds].sort((a, b) => b[1] - a[1]).slice(0, 6),
+    transcript_references: references,
+    session_files: files.size,
+    largest_session_mb: Math.round(largest / 1e4) / 100,
+    reference_weighted_session_mb:
+      Math.round(bytes / Math.max(references, 1) / 1e4) / 100,
+    gb_read_if_each_reference_reads_its_file: Math.round(bytes / 1e8) / 10,
   };
 }
 
@@ -836,7 +927,8 @@ async function main() {
   try {
     if (values.measure === "provider-probe") result = providerProbe(values);
     else if (values.measure === "cli-status") result = cliStatus(values, root);
-    else if (values.measure === "cli-unpublished") result = cliUnpublished(values);
+    else if (values.measure === "cli-unpublished") result = cliUnpublished(values, scratch);
+    else if (values.measure === "run-facts") result = runFactsMeasure(values, root);
     else if (values.measure === "checkouts") result = checkouts(values);
     else if (values.measure === "human-items")
       result = await humanItemsMeasure(values, scratch);
@@ -856,9 +948,11 @@ async function main() {
       }
       spans = server.spans();
       hot = hotFrames(server.profilePath);
+      if (values["trace-exec"]) result.execs = execCounts(server.execPath);
     }
     const attribution =
-      spans.length > 0 && Number(values.concurrent) === 1
+      // A page subscribes more than once, so its spans do not sum to its wall.
+      spans.length > 0 && Number(values.concurrent) === 1 && !values.measure.startsWith("page-")
         ? causes(result.wall_seconds, values.measure, spans)
         : null;
     console.log(
