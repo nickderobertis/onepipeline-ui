@@ -11,7 +11,7 @@ budgets:
   # duration being judged. Basis: design; the spike's prototype took 38.55 s including a
   # 10.49 s install over zero typed scalar archive bytes and simulated posting, so 120 s is
   # a provisional requirement rather than a measured cost. The reader is estimated at 1 s.
-  # llmlint: ignore[budgets_track_product_owner_outcomes] The issue explicitly requires the new last job to have its own latency budget beside the existing maximum-CI-job budget.
+  # The issue explicitly requires the new last job to have its own latency budget beside the existing maximum-CI-job budget.
   - id: onepipeline-ui-budget-report-command-seconds
     description: >-
       The budget report job from its cold install through the checks, the history read, the
