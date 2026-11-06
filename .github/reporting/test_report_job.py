@@ -8,6 +8,7 @@ tag. Scalars in seeded history and the job-count answers are synthetic or replay
 
 `test_record_a_complete_job` saves `.telemetry/report-job.json`, which `report-job:budgets` reads.
 """
+import ast
 import hashlib
 import importlib.util
 import io
@@ -111,11 +112,12 @@ class Released:
 RELEASED = None
 SCRATCH = None
 RUNNER_PATH = None
+BUS_REQUESTS = None
 
 
 def setUpModule():
     """One fetch of the release, and what a hosted runner has for a budget command."""
-    global RELEASED, SCRATCH, RUNNER_PATH
+    global RELEASED, SCRATCH, RUNNER_PATH, BUS_REQUESTS
     SCRATCH = tempfile.TemporaryDirectory()
     scratch = Path(SCRATCH.name)
     (scratch / 'action').mkdir()
@@ -124,12 +126,39 @@ def setUpModule():
     binaries.mkdir()
     # No uv, cargo, just, bun or onevcs: this job installs none of them.
     (binaries / 'node').symlink_to(Path(shutil.which('node')).resolve())
+    # Ahead of /usr/bin, so that no job can start a real bus, whatever it was given.
+    BUS_REQUESTS = record_bus_requests(binaries)
     RUNNER_PATH = f'{binaries}{os.pathsep}/usr/bin{os.pathsep}/bin'
     TELEMETRY.mkdir(exist_ok=True)
 
 
 def tearDownModule():
+    asked = requests_for_a_bus(BUS_REQUESTS)
     SCRATCH.cleanup()
+    assert asked == 0, f'jobs asked for a session bus {asked} times: every job takes runner_environment()'
+
+
+def record_bus_requests(directory):
+    """A `dbus-launch` that starts nothing: it notes the ask and fails. Returns where it notes."""
+    record = Path(directory) / 'bus-requests'
+    recorder = Path(directory) / 'dbus-launch'
+    recorder.write_text(f"#!/bin/sh\necho asked >> '{record}'\nexit 1\n")
+    recorder.chmod(0o755)
+    return record
+
+
+def requests_for_a_bus(record):
+    return len(record.read_text().splitlines()) if record.exists() else 0
+
+
+def runner_environment(**variables):
+    """What a job's steps run in, ahead of what the harness gives them.
+
+    gh takes GH_TOKEN for the harness's `github.localhost`, but for any other host, or with no
+    token, it looks in the keyring, and on a host with no session bus that autolaunches a daemon
+    nothing stops. The variable forbids it.
+    """
+    return {'DBUS_SESSION_BUS_ADDRESS': 'disabled:', 'PATH': RUNNER_PATH, **variables}
 
 
 def job_inputs():
@@ -174,14 +203,13 @@ class Journey:
         self.next_run += 1
         self.counts.unlink(missing_ok=True)
         job = self.harness.Job(self.host, self.repository, event_name, sha, inputs=job_inputs(),
-                               run_id=self.next_run, environment={
-                                   'JOURNEY_COUNTS': str(self.counts),
-                                   'PATH': RUNNER_PATH,
+                               run_id=self.next_run, environment=runner_environment(
+                                   JOURNEY_COUNTS=str(self.counts),
                                    # What a runner sets for every step, which the figures script reads.
-                                   'GITHUB_REPOSITORY': self.harness.REPOSITORY,
-                                   'GITHUB_RUN_ID': str(self.next_run),
-                                   'RUNNER_NAME': 'hosted-runner',
-                               }, **options)
+                                   GITHUB_REPOSITORY=self.harness.REPOSITORY,
+                                   GITHUB_RUN_ID=str(self.next_run),
+                                   RUNNER_NAME='hosted-runner',
+                               ), **options)
         self.case.addCleanup(job.close)
         return job.run()
 
@@ -219,6 +247,47 @@ def verdicts(job):
 
 def unavailable(job):
     return {entry['id']: entry['reason'] for entry in job.saved('budget-run.json')['unavailable']}
+
+
+class SessionBus(unittest.TestCase):
+    def test_every_job_is_given_the_runner_environment(self):
+        """Read off the source, because `journey_tools` builds a job only when no tools are kept."""
+        jobs = [node for node in ast.walk(ast.parse(Path(__file__).read_text()))
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'Job']
+        self.assertTrue(jobs)
+        for job in jobs:
+            given = [keyword.value for keyword in job.keywords if keyword.arg == 'environment']
+            self.assertTrue(given and isinstance(given[0], ast.Call) and given[0].func.id == 'runner_environment',
+                            f'line {job.lineno}: a harness.Job takes environment=runner_environment(...)')
+
+    def test_a_jobs_real_gh_asks_for_no_session_bus(self):
+        if platform.system() != 'Linux':
+            self.skipTest('gh autolaunches a session bus only on Linux')
+        if shutil.which('gh') is None:
+            self.skipTest('gh is not installed, so nothing here can ask for a bus')
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        record = record_bus_requests(scratch.name)
+        # As the harness composes a step's environment, with the action's token, and a target that
+        # token does not apply to: `github.localhost` is the one host this gh would not ask about.
+        # gh looks in the keyring before it connects, so a closed loopback port is enough to ask with.
+        url = 'http://127.0.0.1:9'
+        job = {'HOME': scratch.name, **RELEASED.harness.real_gh_environment(url, scratch.name),
+               'GH_TOKEN': 'test-token', **runner_environment()}
+
+        def gh(environment):
+            return subprocess.run(['gh', 'api', f'{url}/repos/owner/repo'],
+                                  env={**environment, 'PATH': f'{scratch.name}{os.pathsep}{environment["PATH"]}'},
+                                  capture_output=True, text=True, timeout=60, check=False)
+
+        control = gh({name: value for name, value in job.items() if name != 'DBUS_SESSION_BUS_ADDRESS'})
+        if requests_for_a_bus(record) == 0:
+            self.skipTest('this gh asks for no bus without the variable, so none can leak')
+        self.assertEqual(requests_for_a_bus(record), 1, 'the control asks for a bus exactly once')
+        record.unlink()
+        held = gh(job)
+        self.assertEqual(requests_for_a_bus(record), 0, 'runner_environment() must set DBUS_SESSION_BUS_ADDRESS=disabled:')
+        self.assertEqual((held.returncode, held.stdout), (control.returncode, control.stdout), held.stderr)
 
 
 class ReleasedContract(unittest.TestCase):
@@ -532,7 +601,7 @@ def journey_tools():
     try:
         repository.write('budgets.yaml', harness.budgets_yaml([]))
         job = harness.Job(host, repository, 'push', repository.commit('tools'), inputs=job_inputs(), run_id=1,
-                          environment={'PATH': RUNNER_PATH})
+                          environment=runner_environment())
         job.run()
         keep_tools(job)
         job.close()

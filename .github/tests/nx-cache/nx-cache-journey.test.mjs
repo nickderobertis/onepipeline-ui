@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
-import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { parse } from "yaml";
 import { evaluate } from "../../workflow-graph.mjs";
 import {
   cacheSession,
@@ -10,6 +20,7 @@ import {
   recordedREST,
   reportZip,
   run,
+  sessionEnvironment,
   sidecarCheckout,
   sourceMetadata,
 } from "./nx-cache-journey.mjs";
@@ -768,5 +779,70 @@ test("cache-use under onebudgetspec measures real executions behind simulated re
   } finally {
     await cache.close();
     rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// The daemon gh's keyring lookup autolaunches outlives every test that started
+// it, and enough of them use up a host's inotify instances. A `dbus-launch` that
+// only records and fails stands first on gh's PATH, so even a failure starts none.
+// gh looks in the keyring before it connects, so a closed loopback port is enough
+// to ask with, and the journeys above still own what gh receives from the fake.
+test("the session's real gh asks for no session bus", (t) => {
+  if (process.platform !== "linux")
+    return t.skip("gh autolaunches a session bus only on Linux");
+  if (spawnSync("gh", ["--version"]).error)
+    return t.skip("gh is not installed, so nothing here can ask for a bus");
+  const scratch = mkdtempSync(
+    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(), "session-bus-"),
+  );
+  try {
+    const record = join(scratch, "asked");
+    const recorder = join(scratch, "dbus-launch");
+    writeFileSync(
+      recorder,
+      `#!/bin/sh\necho asked >> ${JSON.stringify(record)}\nexit 1\n`,
+    );
+    chmodSync(recorder, 0o755);
+    const asked = () =>
+      existsSync(record)
+        ? readFileSync(record, "utf8").trim().split("\n").length
+        : 0;
+    const url = "http://127.0.0.1:9";
+    const { DBUS_SESSION_BUS_ADDRESS: _ambient, ...inherited } = process.env;
+    const session = sessionEnvironment({
+      cwd: scratch,
+      cache: { url },
+      temp: scratch,
+      payload: payload("maintainer"),
+      document: parse(readFileSync(".github/workflows/ci.yml", "utf8")),
+      job: "test-linux",
+      inherited,
+    });
+    const gh = (env) =>
+      spawnSync("gh", ["api", "--method", "GET", `${url}/repos/owner/repo`], {
+        encoding: "utf8",
+        env: { ...env, PATH: `${scratch}:${env.PATH}` },
+        timeout: 60000,
+      });
+
+    const { DBUS_SESSION_BUS_ADDRESS: _site, ...bare } = session;
+    const control = gh(bare);
+    if (asked() === 0)
+      return t.skip(
+        "this gh asks for no bus without the variable, so none can leak",
+      );
+    assert.equal(asked(), 1, "the control asks for a bus exactly once");
+
+    rmSync(record);
+    const held = gh(session);
+    assert.equal(
+      asked(),
+      0,
+      "cacheSession's environment must set DBUS_SESSION_BUS_ADDRESS=disabled:",
+    );
+    assert.equal(held.status, control.status, held.stderr);
+    assert.equal(held.stdout, control.stdout);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 });
