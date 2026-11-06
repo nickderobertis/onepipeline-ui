@@ -13,6 +13,8 @@
 //
 //   node scripts/cache-contents.mjs --snapshot    after rust-cache restores
 //   node scripts/cache-contents.mjs --attribute   after the tools are installed
+//   node scripts/cache-contents.mjs --pruner      instead of --attribute, in the
+//                                                 `pruner (<os>)` jobs
 //
 // Every figure is printed as `CACHE-CONTENTS <json>`, one record a line.
 //
@@ -32,6 +34,8 @@
 //              less the line's base_seconds, its run over the restored family,
 //              because a pull request's run compiles the workspace crates anyway
 //   proof      the stale units removed and every warm line re-run
+//   pruner     cargo-prune-superseded run for real on a fresh restore: the archive
+//              before and after, then every warm line's seconds
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -737,6 +741,37 @@ function attribute() {
   }
 }
 
+/** The pruner this repository already installs, run for real, then every warm line. */
+function pruner() {
+  const { target, cargo } = JSON.parse(readFileSync(snapshotFile, "utf8"));
+  const allCargo = cargo.map((f) => f.path);
+  const before = archiveBytes(
+    target.map((f) => f.path),
+    allCargo,
+  );
+  const run = shell("cargo-prune-superseded --json --keep-within 1s target");
+  const outcome = JSON.parse(run.stdout || "{}");
+  const left = walk(join(root, "target"), root);
+  const after = archiveBytes(
+    left.map((f) => f.path),
+    allCargo,
+  );
+  record("pruner", {
+    status: run.status,
+    builds_removed: outcome.targets?.[0]?.builds_removed,
+    bytes_freed: outcome.targets?.[0]?.bytes_freed,
+    skipped: outcome.targets?.[0]?.skipped?.length,
+    archive_bytes_before: before,
+    archive_bytes_after: after,
+    raw_bytes_after: sum(left) + sum(cargo),
+  });
+  const warm = timed(`bash scripts/ci-warm.sh ${os}`);
+  record("pruner_warm", {
+    all_warm_lines_seconds: warm.seconds,
+    status: warm.status,
+  });
+}
+
 function gh(args) {
   const result = spawnSync("gh", args, {
     encoding: "utf8",
@@ -819,10 +854,11 @@ function drive(platform) {
 const [argument] = process.argv.slice(2);
 if (argument === "--snapshot") snapshot();
 else if (argument === "--attribute") attribute();
+else if (argument === "--pruner") pruner();
 else if (OSES.includes(argument)) drive(argument);
 else {
   console.error(
-    `usage: cache-contents.mjs ${OSES.join("|")} | --snapshot | --attribute; got '${argument ?? ""}'`,
+    `usage: cache-contents.mjs ${OSES.join("|")} | --snapshot | --attribute | --pruner; got '${argument ?? ""}'`,
   );
   console.error("ACTION: name the platform whose family to size");
   process.exit(2);

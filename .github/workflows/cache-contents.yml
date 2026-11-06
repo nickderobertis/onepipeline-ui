@@ -19,11 +19,12 @@ env:
 
 jobs:
   contents:
-    name: contents (${{ matrix.os }})
+    name: ${{ matrix.mode }} (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [linux, windows]
+        mode: [contents, pruner]
     runs-on: ${{ matrix.os == 'linux' && 'ubuntu-latest' || 'windows-latest' }}
     timeout-minutes: 120
     defaults:
@@ -62,4 +63,8 @@ jobs:
       - name: Build the browser view the binary embeds
         run: just build
       - name: Attribute and price the family
+        if: matrix.mode == 'contents'
         run: node scripts/cache-contents.mjs --attribute
+      - name: Prune the family and re-run every warm line
+        if: matrix.mode == 'pruner'
+        run: node scripts/cache-contents.mjs --pruner
