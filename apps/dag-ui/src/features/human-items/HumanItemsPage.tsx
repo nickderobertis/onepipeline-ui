@@ -506,7 +506,7 @@ function SpikeToast({
       </div>
       <div className="spike-toast-actions">
         {noUndo ? (
-          <span aria-disabled="true" className="spike-greyed">
+          <span className="spike-greyed">
             {dismissed ? "Restore" : "Reopen"}
             <button
               aria-expanded={help}
