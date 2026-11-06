@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SPIKE, nothing here lands: re-capture the action-items visual spike's screenshots into
 # shots/local/spike-visual/{before,after}. "before" renders apps/dag-ui/src as the base
-# commit has it, or takes the deployed baseline where its digest matches ours.
+# commit has it, or takes the deployed baseline where its digest matches ours. Then
+# shots/local/spike-visual/report/ holds the one phone-over-desktop image per report entry.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 base="${SPIKE_BASE:-7acfdc80c24c00e2c1777c0d6ee1557783831959}"
@@ -27,4 +28,8 @@ for size in 390x844 1440x900; do
   curl -fsS "$gallery/01-run-list-overall-$size.png" -o "$out/before/b7-updates-$size.png"
 done
 rm "$out/deployed.json"
+# One image per report entry, in the browser image the captures rendered in.
+docker run --rm --user "$(id -u):$(id -g)" --volume "$PWD:/work" --workdir /work --env HOME=/tmp \
+  "mcr.microsoft.com/playwright:v$(node -p 'require("./apps/dag-ui-e2e/package.json").devDependencies["@playwright/test"]')-noble" \
+  node scripts/spike-visual-compose.mjs
 echo "spike-visual: captures in $out"
