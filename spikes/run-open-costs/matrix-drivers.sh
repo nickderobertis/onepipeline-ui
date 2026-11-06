@@ -23,13 +23,12 @@ for label in small live largest; do
   m "exec.status.$label.no-providers" "${R[@]}" --run "$run" --measure status --prototype status-no-providers --trace-exec
 done
 m exec.cli-unpublished --measure cli-unpublished --cwd "$(dirname "$root")" --timeout 600 --trace-exec
-for variant in streams both calibrated; do
+for variant in streams both; do
   dir="$out/$variant"
   if [ ! -f "$dir.facts.json" ]; then
     mkdir -p "$dir"
     driver=(streams=2000)
     [ "$variant" = both ] && driver+=(transcript-store)
-    [ "$variant" = calibrated ] && driver+=(transcript-store session-calls=14000)
     start=$(date +%s)
     node --experimental-strip-types "$repo/apps/dag-ui-e2e/load/corpus.mjs" "$dir/runs" host-850 "${driver[@]}" >"$dir.facts.json" 2>"$dir.facts.err"
     echo "$(($(date +%s) - start))" >"$dir.seconds"

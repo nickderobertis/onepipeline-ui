@@ -96,13 +96,7 @@ const CALLS_PER_SESSION = 1_400;
 
 /** A journal written whole, one record at a time, on one stream. */
 class Journal {
-  constructor(
-    runId,
-    at,
-    transcriptStore = null,
-    recordsPerStream = null,
-    callsPerSession = CALLS_PER_SESSION,
-  ) {
+  constructor(runId, at, transcriptStore = null, recordsPerStream = null) {
     this.runId = runId;
     this.stream = streamOf(runId);
     this.at = at;
@@ -114,7 +108,6 @@ class Journal {
     // dispatched process, which is what the engine's merge scans per record.
     this.recordsPerStream = recordsPerStream;
     this.seqs = new Map();
-    this.callsPerSession = callsPerSession;
   }
 
   /**
@@ -123,17 +116,18 @@ class Journal {
    * the record's description means reading the file.
    */
   recordedCall(node, index) {
-    const session = Math.floor(this.calls / this.callsPerSession);
-    const call = this.calls % this.callsPerSession;
+    const session = Math.floor(this.calls / CALLS_PER_SESSION);
+    const call = this.calls % CALLS_PER_SESSION;
     this.calls += 1;
     const history_session = `${this.stream}-${node}-${session}`;
-    // The engine reads a reference's id as a UUID, and refuses any other at once.
+    // The engine reads a reference's id as a UUID v7, and refuses any other at once,
+    // without opening the file: the version and variant nibbles have to say so.
     const digest = createHash("md5").update(history_session).digest("hex");
     const history_id = [
       digest.slice(0, 8),
       digest.slice(8, 12),
-      digest.slice(12, 16),
-      digest.slice(16, 20),
+      `7${digest.slice(13, 16)}`,
+      `8${digest.slice(17, 20)}`,
       digest.slice(20, 32),
     ].join("-");
     const project = "load-history-project";
@@ -314,20 +308,13 @@ function writeRun(
   extra = 0,
   transcriptStore = null,
   recordsPerStream = null,
-  callsPerSession = CALLS_PER_SESSION,
 ) {
   const dir = join(root, runId);
   mkdirSync(dir, { recursive: true });
   const plan = planOf(nodes);
   writeJson(join(dir, "plan.json"), plan);
   writeJson(join(dir, "launch.json"), launch(runId, project, stamp(startMs)));
-  const journal = new Journal(
-    runId,
-    startMs,
-    transcriptStore,
-    recordsPerStream,
-    callsPerSession,
-  );
+  const journal = new Journal(runId, startMs, transcriptStore, recordsPerStream);
   declareGraph(root, journal.stream, startMs);
   journal.emit("pipeline", "run-started", {}, { plan });
   // Live runs leave their last node running; the others settle every node.
@@ -393,7 +380,7 @@ const SCALES = {
 export function buildLoadCorpus(
   root,
   scaleName = "host",
-  { transcriptStore = false, streams = null, sessionCalls = CALLS_PER_SESSION } = {},
+  { transcriptStore = false, streams = null } = {},
 ) {
   const scale = SCALES[scaleName];
   if (scale === undefined) throw new Error(`no corpus scale ${scaleName}`);
@@ -426,7 +413,6 @@ export function buildLoadCorpus(
     extra,
     history,
     streams === null ? null : Math.floor(scale.openLiveRecords / streams),
-    sessionCalls,
   );
   for (const runId of otherLiveRuns) {
     writeRun(
@@ -498,11 +484,11 @@ if (
     !(scale in SCALES) ||
     drivers.some(
       (driver) =>
-        driver !== "transcript-store" && !/^(streams|session-calls)=\d+$/u.test(driver),
+        driver !== "transcript-store" && !/^streams=\d+$/u.test(driver),
     )
   ) {
     console.error(
-      "usage: corpus.mjs ROOT [host|host-850|journey] [transcript-store] [streams=N] [session-calls=N]",
+      "usage: corpus.mjs ROOT [host|host-850|journey] [transcript-store] [streams=N]",
     );
     process.exit(2);
   }
@@ -511,7 +497,6 @@ if (
       buildLoadCorpus(root, scale, {
         transcriptStore: drivers.includes("transcript-store"),
         streams: numbered("streams") ?? null,
-        sessionCalls: numbered("session-calls") ?? CALLS_PER_SESSION,
       }),
     ),
   );
