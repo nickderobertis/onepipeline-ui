@@ -978,8 +978,11 @@ function runFacts(root, run) {
   const fd = openSync(journal, "r");
   const chunk = Buffer.alloc(1 << 20);
   let records = 0;
-  for (let read; (read = readSync(fd, chunk)) > 0; )
+  let read = readSync(fd, chunk);
+  while (read > 0) {
     for (let at = 0; at < read; at += 1) if (chunk[at] === 10) records += 1;
+    read = readSync(fd, chunk);
+  }
   closeSync(fd);
   const plan = JSON.parse(readFileSync(join(root, run, "plan.json"), "utf8"));
   return {
