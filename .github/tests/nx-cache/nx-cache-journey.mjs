@@ -257,22 +257,19 @@ export async function sidecarCheckout(root = process.cwd()) {
   );
   return action;
 }
-export async function cacheSession(
+// What the workflow's steps, the vendored script and its `gh` run in.
+export function sessionEnvironment({
   cwd,
   cache,
   temp,
   payload,
   extra = {},
-  workflow = "ci",
-  job = "test-linux",
-) {
-  mkdirSync(temp, { recursive: true });
-  const document = parse(
-    readFileSync(`.github/workflows/${workflow}.yml`, "utf8"),
-  );
-  const steps = document.jobs[job].steps;
-  const env = {
-    ...process.env,
+  document,
+  job,
+  inherited = process.env,
+}) {
+  return {
+    ...inherited,
     GITHUB_ACTIONS: "true",
     ...Object.fromEntries(
       Object.entries({ ...document.env, ...document.jobs[job].env }).map(
@@ -296,6 +293,9 @@ export async function cacheSession(
     GITHUB_TOKEN: "test-token",
     GH_TOKEN: "test-token",
     GITHUB_API_URL: cache.url,
+    // gh does not apply GH_TOKEN to a loopback host, so it looks in the keyring,
+    // and on a host with no session bus that autolaunches a daemon nothing stops.
+    DBUS_SESSION_BUS_ADDRESS: "disabled:",
     ACTIONS_CACHE_SERVICE_V2: "true",
     ACTIONS_RESULTS_URL: `${cache.url}/`,
     RUNNER_TEMP: temp,
@@ -306,6 +306,30 @@ export async function cacheSession(
     NX_ISOLATE_PLUGINS: "false",
     ...extra,
   };
+}
+export async function cacheSession(
+  cwd,
+  cache,
+  temp,
+  payload,
+  extra = {},
+  workflow = "ci",
+  job = "test-linux",
+) {
+  mkdirSync(temp, { recursive: true });
+  const document = parse(
+    readFileSync(`.github/workflows/${workflow}.yml`, "utf8"),
+  );
+  const steps = document.jobs[job].steps;
+  const env = sessionEnvironment({
+    cwd,
+    cache,
+    temp,
+    payload,
+    extra,
+    document,
+    job,
+  });
   env.ACTIONS_RUNTIME_TOKEN = env.GITHUB_REF;
   writeFileSync(env.GITHUB_EVENT_PATH, JSON.stringify(payload));
   const execute = (command) =>
