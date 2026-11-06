@@ -505,20 +505,22 @@ function SpikeToast({
         {close}
       </div>
       <div className="spike-toast-actions">
-        <button disabled={noUndo} type="button">
-          {dismissed ? "Restore" : "Reopen"}
-        </button>
-        {noUndo && (
-          <button
-            aria-expanded={help}
-            aria-label="Why can't this be reopened?"
-            className="spike-help"
-            onClick={() => setHelp((value) => !value)}
-            title={NO_UNDO}
-            type="button"
-          >
-            ?
-          </button>
+        {noUndo ? (
+          <span aria-disabled="true" className="spike-greyed">
+            {dismissed ? "Restore" : "Reopen"}
+            <button
+              aria-expanded={help}
+              aria-label="Why can't this be reopened?"
+              className="spike-help"
+              onClick={() => setHelp((value) => !value)}
+              title={NO_UNDO}
+              type="button"
+            >
+              ?
+            </button>
+          </span>
+        ) : (
+          <button type="button">{dismissed ? "Restore" : "Reopen"}</button>
         )}
         <button type="button">{dismissed ? "Add reason" : "Add comment"}</button>
       </div>

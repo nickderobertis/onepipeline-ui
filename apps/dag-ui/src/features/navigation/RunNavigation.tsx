@@ -95,7 +95,7 @@ export function RunNavigation({
           )}
           <div className="spike-nav-update">
             <UpdateSetting
-              initial="interval"
+              initial="30"
               intervalWaiting={3}
               label="Navigation updates"
               offWaiting={3}

@@ -483,7 +483,12 @@ const SURFACES: readonly Surface[] = [
     open: async (page) => {
       await page.goto(`/?list=runs&run=${runs().live}&view=overall`);
       await settleReads(page);
-      await page.getByRole("button", { name: "Main area updates off" }).click();
+      const main = page.getByRole("region", { name: "Main area updates" });
+      await main.locator("summary").click();
+      await main.getByRole("menuitemradio", { name: "Off" }).click();
+      // Both open, so the picture shows what each dropdown holds.
+      await main.locator("summary").click();
+      await page.locator(".spike-nav-update summary").click();
     },
   },
   { name: "a8-task", title: "SPIKE-after task", open: spikeTask },
