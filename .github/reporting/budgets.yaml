@@ -11,7 +11,8 @@ budgets:
   # duration being judged. Basis: design; the spike's prototype took 38.55 s including a
   # 10.49 s install over zero typed scalar archive bytes and simulated posting, so 120 s is
   # a provisional requirement rather than a measured cost. The reader is estimated at 1 s.
-  # The issue explicitly requires the new last job to have its own latency budget beside the existing maximum-CI-job budget.
+  # Beside `onepipeline-ui-ci-job-count` on purpose: that holds how many jobs a pull request
+  # starts, and this how long the last of them takes.
   - id: onepipeline-ui-budget-report-command-seconds
     description: >-
       The budget report job from its cold install through the checks, the history read, the
