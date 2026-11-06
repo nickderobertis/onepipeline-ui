@@ -154,9 +154,9 @@ lacks reads as unavailable because its `command` names that input, so name a
 budget's saved telemetry or required file there, or its absence reads as a broken
 measurement; `release-tail` and `host-variable` are report-only here
 (`enforcement-exclude-labels`) because they measure elsewhere.
-`.github/reporting` holds the job's journeys and its own budget. Until action v0.1.1
-is replaced, a base push saves no rolling history while the job's own budget is
-its only measurement, so this tree's rows read `baseline unavailable`.
+`.github/reporting` holds the job's journeys and its own budget. A base push saves
+rolling history even when the job's own budget is its only measurement, and a pull
+request reads it back as that budget's baseline samples.
 
 **A security advisory blocks only the change that brings it in.** A database
 update publishes advisories against versions `main` already resolves, and an
