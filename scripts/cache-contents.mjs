@@ -18,20 +18,22 @@
 //
 //   bucket     a directory's raw bytes and its own zstd archive bytes
 //   family     the whole restored family recompressed the way actions/cache
-//              compresses it (tar | zstd -T0 --long=30), beside the listing's size
+//              saves it (tar --posix | zstd -T0, read off a warm job's save log:
+//              `zstdmt` on Linux, `zstd -T0` on Windows; neither passes --long)
 //   line       a compile line's first run over the restored tree, and how many
 //              non-workspace units it had to rebuild
 //   units      target/debug's units split by which compile lines reach them
-//   marginal   the archive bytes the family loses without one part. This is the
-//              saving: --long=30 dedupes across directories, so a part's own
-//              archive size overstates what leaving saves
+//   marginal   the archive bytes the family loses without one part: the saving
 //   stale      units in a directory no compile line read (by atime, Linux only)
-//   overlap    units a second tree holds with target/debug's hash and size
+//   overlap    libraries of target/llvm-cov-target's current units byte-identical
+//              to target/debug's, which is what sharing one build would need
+//   marginal_after_prune  as marginal, over the family with every stale unit gone
 //   price      a part removed and its compile line re-run. added_seconds is that
 //              less the line's base_seconds, its run over the restored family,
 //              because a pull request's run compiles the workspace crates anyway
 //   proof      the stale units removed and every warm line re-run
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -41,9 +43,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
-  utimesSync,
   writeFileSync,
-  writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative, sep } from "node:path";
@@ -119,7 +119,7 @@ function archiveBytes(targetFiles, cargoFiles = []) {
       .join(""),
   );
   const result = shell(
-    `set -o pipefail; { tar -cf - -T "$TARGET_LIST"; ( cd "$CARGO_ROOT" && tar -cf - -T "$CARGO_LIST" ); } | zstd -T0 --long=30 -c | wc -c`,
+    `set -o pipefail; { tar --posix -cf - -T "$TARGET_LIST"; ( cd "$CARGO_ROOT" && tar --posix -cf - -T "$CARGO_LIST" ); } | zstd -T0 -c | wc -c`,
     {
       env: {
         TARGET_LIST: targetList,
@@ -284,6 +284,10 @@ function debugLines() {
 
 const COVERED = `cargo llvm-cov nextest --locked --no-report -E 'none()' --no-tests=pass`;
 const WHEEL = `just wheel-linux ${WHEEL_TARGET} .tools/wheel-smoke`;
+
+function digest(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
 
 function hashesOf(message) {
   const hashes = [];
@@ -580,24 +584,86 @@ function attribute() {
       base_seconds: wheelBase.seconds,
     });
 
-    // Instrumented units with an uninstrumented twin could share one build.
-    const debugSizes = new Map(
-      [...debugUnits].map(([unit, files]) => [unit, sum(files)]),
+    // Instrumented units with an uninstrumented twin could share one build. The
+    // libraries alone are compared: a .d file's text names its target directory.
+    const covLibs = covFiles.filter(
+      (f) =>
+        /\.(rlib|rmeta|so)$/.test(f.path) &&
+        covRead.has(unitOf(f.path.slice(covPrefix.length))),
     );
-    const twins = [...covUnits.entries()].filter(
-      ([unit, files]) => debugSizes.get(unit) === sum(files),
-    );
-    const sameHash = [...covUnits.keys()].filter((unit) =>
-      debugSizes.has(unit),
-    ).length;
+    let same = 0;
+    let sameBytes = 0;
+    for (const file of covLibs) {
+      const twin = join(root, debugPrefix, file.path.slice(covPrefix.length));
+      if (!existsSync(twin) || lstatSync(twin).size !== file.bytes) continue;
+      if (digest(twin) === digest(join(root, file.path))) {
+        same += 1;
+        sameBytes += file.bytes;
+      }
+    }
     record("overlap", {
       tree: "target/llvm-cov-target/debug",
-      units_total: covUnits.size,
-      same_hash_as_debug: sameHash,
-      same_hash_and_bytes: twins.length,
-      raw_bytes_same: sum(twins.flatMap(([, files]) => files)),
+      libraries_current: covLibs.length,
+      raw_bytes_current: sum(covLibs),
+      identical_to_debug: same,
+      raw_bytes_identical: sameBytes,
     });
   }
+
+  // What each part saves once the stale units are gone, the family a prune leaves.
+  const staleAll = new Set([...staleDebug, ...staleOther]);
+  const prunedTarget = allTarget.filter((p) => !staleAll.has(p));
+  const pruned = archiveBytes(prunedTarget, allCargo);
+  record("marginal", {
+    part: "(family with every stale unit gone)",
+    files: staleAll.size,
+    raw_bytes: sum(target.filter((f) => staleAll.has(f.path))),
+    archive_bytes: pruned,
+    archive_bytes_saved:
+      whole === null || pruned === null ? null : whole - pruned,
+  });
+  const afterPrune = (part, removed) => {
+    const gone = new Set(removed);
+    const size = archiveBytes(
+      prunedTarget.filter((p) => !gone.has(p)),
+      allCargo.filter((p) => !gone.has(p)),
+    );
+    record("marginal_after_prune", {
+      part,
+      raw_bytes: sum(
+        [...target, ...cargo].filter(
+          (f) => gone.has(f.path) && !staleAll.has(f.path),
+        ),
+      ),
+      archive_bytes_saved:
+        size === null || pruned === null ? null : pruned - size,
+    });
+  };
+  const groupPaths = new Map();
+  for (const [unit, files] of debugUnits) {
+    const ids = claimedBy.get(unit);
+    if (ids.length === 0) continue;
+    const key = ids.join(" + ");
+    if (!groupPaths.has(key)) groupPaths.set(key, []);
+    groupPaths.get(key).push(...files.map((f) => f.path));
+  }
+  for (const [key, paths] of groupPaths)
+    afterPrune(`target/debug: units reached by ${key}`, paths);
+  for (const [dir, paths] of topDirs) {
+    if (paths.length > 10) afterPrune(dir, paths);
+  }
+  afterPrune(
+    "target/debug",
+    debugFiles.map((f) => f.path),
+  );
+  afterPrune(
+    "~/.cargo/registry",
+    allCargo.filter((p) => p.startsWith("registry/")),
+  );
+  afterPrune(
+    "~/.cargo/bin",
+    allCargo.filter((p) => p.startsWith("bin/")),
+  );
 
   // The stale units go for good: every warm line then has to find what it needs.
   remove([...staleDebug, ...staleOther]);
@@ -630,6 +696,22 @@ function attribute() {
         line.base_seconds,
       );
   }
+  const baseSum = (ids) =>
+    lines
+      .filter((line) => ids.includes(line.id))
+      .reduce((total, line) => total + line.base_seconds, 0);
+  const chain = (ids) =>
+    lines
+      .filter((line) => ids.includes(line.id))
+      .map((line) => line.price)
+      .join(" && ");
+  for (const [key, paths] of groupPaths) {
+    const ids = key.split(" + ");
+    if (ids.length > 1)
+      price(`units reached by ${key}`, paths, chain(ids), baseSum(ids));
+  }
+  const debugIds = debugLines().map((line) => line.id);
+  price("target/debug", ["target/debug"], chain(debugIds), baseSum(debugIds));
   if (os === "linux") {
     const baseOf = (id) => lines.find((line) => line.id === id).base_seconds;
     price(
