@@ -39,12 +39,16 @@ for variant in streams both; do
   m "$variant.status.bare.stub20" "${C[@]}" --measure status --server-path /usr/bin:/bin --stub-provider-seconds 20
   m "$variant.status.bare.heap" "${C[@]}" --measure status --server-path /usr/bin:/bin --prototype heap-merge
   m "$variant.status.bare.checkpoint" "${C[@]}" --measure status --server-path /usr/bin:/bin --prototype status-checkpoint
+  m "$variant.cli-status" "${C[@]}" --measure cli-status --cli onepipeline
+  m "$variant.cli-status.no-providers" "${C[@]}" --measure cli-status --cli onepipeline --no-providers
   for view in graph overall node; do
     m "$variant.$view" "${C[@]}" --measure "$view" "${slow[@]}"
     m "$variant.$view.index.heap" "${C[@]}" --measure "$view" --prototype session-index,heap-merge "${slow[@]}"
     m "$variant.$view.checkpoint" "${C[@]}" --measure "$view" --prototype checkpoint-first,lazy-activity "${slow[@]}"
     m "$variant.page-$view" "${C[@]}" --measure "page-$view" "${slow[@]}"
     m "$variant.page-$view.index.heap" "${C[@]}" --measure "page-$view" --prototype session-index,heap-merge "${slow[@]}"
+    m "$variant.page-$view.checkpoint" "${C[@]}" --measure "page-$view" --prototype checkpoint-first,lazy-activity "${slow[@]}"
+    m "$variant.page-$view.all" "${C[@]}" --measure "page-$view" --prototype session-index,heap-merge,lazy-activity "${slow[@]}"
   done
 done
 # Every full-history prototype together, the fastest complete first view tried.
@@ -68,6 +72,7 @@ m final.node.largest "${R[@]}" --run "$largest" --measure node "${slow[@]}"
 m final.graph.live "${R[@]}" --run "$live" --measure graph "${slow[@]}"
 m final.overall.live "${R[@]}" --run "$live" --measure overall "${slow[@]}"
 m final.status.live "${R[@]}" --run "$live" --measure status
+m final.node.live "${R[@]}" --run "$live" --measure node "${slow[@]}"
 m final.human-items "${R[@]}" --measure human-items
 m final.checkouts --measure checkouts --cwd "$(dirname "$root")"
 echo drivers done
