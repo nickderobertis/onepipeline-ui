@@ -15,6 +15,7 @@
         "{projectRoot}/**/*",
         "{workspaceRoot}/.github/workflows/ci.yml",
         "{workspaceRoot}/.github/project.json",
+        "{workspaceRoot}/pool-maintenance/project.json",
         "{workspaceRoot}/.github/macos-budget.mjs",
         "{workspaceRoot}/.github/workflow-graph.mjs",
         "{workspaceRoot}/.github/tests/graph.test.mjs",

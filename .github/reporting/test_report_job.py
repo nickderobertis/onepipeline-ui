@@ -83,8 +83,11 @@ OMITTED_LINE = (f'{len(OMITTED)} budgets are left out because a pull request can
                 '(label not-measured-on-pr).')
 SHOWN = {OWN_BUDGET, *CI_TIME, *SAVED, POOL}
 CI_TIME_ID = 'onepipeline-ui-ci-check-time'
-# The `budgets` targets of the projects these journeys select, and what each saves.
-SAVING_TARGETS = {'.github/project.json': 'github-workflows.json', '.github/reporting/project.json': 'report-job.json'}
+# The targets the tier selects for these journeys' changes, and the one only a release pull request adds.
+SAVING_TARGETS = {'.github/project.json': 'budgets', '.github/reporting/project.json': 'budgets'}
+RELEASE_TIER_TARGETS = {'pool-maintenance/project.json': 'budgets-host'}
+SAVED_FILES = {'github-workflows.json', 'report-job.json'}
+RECORDED_POOL_SECONDS = 7.5
 RESULTS_ARTIFACT = 'budget-check-results-test-linux'
 
 
@@ -258,14 +261,14 @@ class Journey:
             self.host.merge_pull_request(self.base_sha, merged_head)
         return self.run('push', self.base_sha)
 
-    def pull_request(self, files=None, draft=False, head_repository=None, targets_saved_from=None):
+    def pull_request(self, files=None, draft=False, head_repository=None, targets_saved_from=None, release_tier=False):
         self.repository.git('checkout', '--quiet', '-B', 'change', self.base_sha)
         for relative, content in (files or {}).items():
             self.repository.write(relative, content)
         head = self.repository.commit('change')
         self.host.head = head
         if targets_saved_from:
-            self.test_linux(self.next_run + 1, head, targets_saved_from)
+            self.test_linux(self.next_run + 1, head, targets_saved_from, release_tier)
         pull_request = {'head_repository': head_repository} if head_repository else {}
         event = self.harness.event_pull_request(1, head, self.base_sha, draft=draft, **pull_request)
         return self.run('pull_request', head, event=event, base_ref='main', register=False)
@@ -277,9 +280,15 @@ class Journey:
         """What this run's job handed the interpreters a budget's command names."""
         return self.commands.read_text() if self.commands.exists() else ''
 
-    def test_linux(self, run_id, head, earlier_job):
+    def test_linux(self, run_id, head, earlier_job, release_tier=False):
         """The job before `budgets`, in its own checkout: its targets' commands, then its upload step."""
         tree = Path(self.repository.path)
+        targets = {**SAVING_TARGETS, **(RELEASE_TIER_TARGETS if release_tier else {})}
+        if release_tier:
+            # One recorded pass in place of the real prune, which needs a superseded cargo build:
+            # what this holds is the target's saving and the row after it, not the pass.
+            (tree / 'pool-maintenance/measure.sh').write_text(
+                f'#!/bin/sh\necho \'{{"value": {RECORDED_POOL_SECONDS}}}\' > "$ONEBUDGETSPEC_RESULT"\n')
         # Ignored, as a bootstrap leaves it, so the policy telemetry's digest of the tree holds.
         with (tree / '.git/info/exclude').open('a') as exclude:
             exclude.write('/node_modules\n')
@@ -293,8 +302,8 @@ class Journey:
         shutil.copytree(earlier_job.temp / 'onebudgetspec-action/tools', reporting / 'tools')
         (reporting / 'report-job.json').write_text(json.dumps(earlier_job.saved('report-job.json')))
         self.target_results = {}
-        for project, _ in SAVING_TARGETS.items():
-            command = json.loads((tree / project).read_text())['targets']['budgets']['command']
+        for project, target in targets.items():
+            command = json.loads((tree / project).read_text())['targets'][target]['command']
             ran = subprocess.run(['bash', '-c', command], cwd=tree, capture_output=True, text=True, check=False)
             self.target_results[project] = ran.returncode
         self.upload_saved_results(run_id, head)
@@ -304,6 +313,7 @@ class Journey:
                 ephemeral.unlink()
             else:
                 shutil.rmtree(ephemeral)
+        self.repository.git('checkout', '--quiet', '--', 'pool-maintenance/measure.sh')
 
     def upload_saved_results(self, run_id, head):
         """`test-linux`'s own upload step, read off the workflow, through the real action's code."""
@@ -471,11 +481,11 @@ class ProductionCatalog(unittest.TestCase):
 class SavedResults(unittest.TestCase):
     """What `test-linux`'s targets saved, read back through its upload and the job's own download."""
 
-    def job_after_test_linux(self, files=None):
+    def job_after_test_linux(self, files=None, release_tier=False):
         journey = Journey(self, tree=True)
         earlier = journey.base_push()
         keep_tools(earlier)
-        return journey, journey.pull_request(files, targets_saved_from=earlier)
+        return journey, journey.pull_request(files, targets_saved_from=earlier, release_tier=release_tier)
 
     def saved_in(self, journey, job):
         members = journey.host.artifact_files(job.run_id, RESULTS_ARTIFACT)
@@ -489,7 +499,7 @@ class SavedResults(unittest.TestCase):
         self.assertEqual(journey.target_results, {project: 0 for project in SAVING_TARGETS})
         self.assertEqual(job.exit_code, 0, job.stdout)
         members, saved = self.saved_in(journey, job)
-        self.assertEqual(set(members), set(SAVING_TARGETS.values()), 'what the targets saved, as they name it')
+        self.assertEqual(set(members), SAVED_FILES, 'what the targets saved, as they name it')
         rows = job.rows()
         self.assertEqual(sorted(rows), sorted(SHOWN))
         found = verdicts(job)
@@ -516,6 +526,18 @@ class SavedResults(unittest.TestCase):
         self.assertIn(OMITTED_LINE, journey.host.comments[0]['body'])
         for budget in OMITTED:
             self.assertNotIn(budget, journey.host.comments[0]['body'], budget)
+
+    def test_the_release_tier_saves_the_pool_figure_and_its_row_shows_it(self):
+        journey, job = self.job_after_test_linux(release_tier=True)
+        self.assertEqual(journey.target_results['pool-maintenance/project.json'], 0)
+        self.assertEqual(job.exit_code, 0, job.stdout)
+        members, saved = self.saved_in(journey, job)
+        self.assertEqual(set(members), {*SAVED_FILES, 'pool-maintenance.json'})
+        self.assertEqual(saved[POOL]['actual'], RECORDED_POOL_SECONDS)
+        self.assertEqual(job.rows()[POOL]['current'], RECORDED_POOL_SECONDS)
+        self.assertEqual(job.rows()[POOL]['verdict'], saved[POOL]['verdict'])
+        self.assertNotIn(POOL, unavailable(job))
+        self.assertNotIn('measure.sh', journey.commands_run(), 'a saved figure runs no command')
 
     def test_a_target_that_ran_over_still_uploads_and_fails_this_job_with_its_figure(self):
         over = yaml.safe_load((ROOT / '.github/budgets.yaml').read_text())
