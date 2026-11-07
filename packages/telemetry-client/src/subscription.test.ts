@@ -1,5 +1,10 @@
 import { readFileSync } from "node:fs";
-import { humanItemListSchema } from "@onepipeline-ui/dag-model";
+import {
+  type HumanItemDetail,
+  humanItemDetailSchema,
+  humanItemListSchema,
+  type SubscriptionView,
+} from "@onepipeline-ui/dag-model";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { type LiveCause, type LiveState, TelemetryClient } from "./index.js";
@@ -532,6 +537,93 @@ test("patches a human-items view, and refuses what would leave it no such view",
   });
   expect(states).toHaveLength(2);
   expect(errors[0]?.message).toMatch(/patched human items failed/u);
+});
+
+test("refuses a human-items detail of any item but the one the view names", async () => {
+  const detail = humanItemDetailSchema.parse(
+    JSON.parse(
+      readFileSync(
+        new URL("../../../tests/fixtures/human-item.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
+  const view = { type: "human-items" as const, item: detail.item.id };
+  const subscribed = (
+    asked: SubscriptionView,
+    held: HumanItemDetail | null,
+  ) => {
+    const harnessed = harness();
+    harnessed.answer = () =>
+      new Response(
+        JSON.stringify({
+          subscription: SUBSCRIPTION,
+          view: asked,
+          initial: {
+            type: "snapshot",
+            snapshot: {
+              id: id(1),
+              sidebar: [],
+              visible: { type: "human-items", items: [], detail: held },
+            },
+          },
+        }),
+        { status: 201 },
+      );
+    return harnessed;
+  };
+
+  // A snapshot answering for another item, or for no item at all.
+  for (const asked of [
+    { ...view, item: "hi-asked" },
+    { type: "human-items" as const },
+  ]) {
+    const answered = subscribed(asked, detail);
+    const refused: Error[] = [];
+    answered.client.live({
+      view: asked,
+      onState: () => {
+        throw new Error("no state is taken from another item's detail");
+      },
+      onError: (error) => refused.push(error),
+    });
+    await vi.waitFor(() => expect(refused).toHaveLength(1));
+    expect(refused[0]?.message).toMatch(/the detail of another item/u);
+  }
+
+  // The item's own detail is held, and may go null and come back.
+  const held = subscribed(view, detail);
+  const states: LiveState[] = [];
+  const errors: Error[] = [];
+  held.client.live({
+    view,
+    onState: (state) => states.push(state),
+    onError: (error) => errors.push(error),
+  });
+  await vi.waitFor(() => expect(states).toHaveLength(1));
+  const source = held.sources[0];
+  if (source === undefined) throw new Error("no stream was opened");
+  source.frame("human-items.patch", {
+    id: id(2),
+    base: id(1),
+    ops: [{ p: ["detail"], v: null }],
+  });
+  source.frame("human-items.patch", {
+    id: id(3),
+    base: id(2),
+    ops: [{ p: ["detail"], v: detail }],
+  });
+  expect(states).toHaveLength(3);
+  expect(errors).toEqual([]);
+
+  // A patch that makes it another item's, valid as that detail is, is refused.
+  source.frame("human-items.patch", {
+    id: id(4),
+    base: id(3),
+    ops: [{ p: ["detail", "item", "id"], v: "hi-another" }],
+  });
+  expect(states).toHaveLength(3);
+  expect(errors[0]?.message).toMatch(/moved its detail to another item/u);
 });
 
 test("refuses a human-items answer about another item, and a patch to a tab showing none", async () => {

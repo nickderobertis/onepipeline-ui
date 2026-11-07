@@ -316,7 +316,7 @@ export class LiveView {
     }
     let next: LiveState;
     try {
-      next = { ...applyFrame(state, frame), applied: frame.id };
+      next = { ...applyFrame(state, frame, this.#view), applied: frame.id };
     } catch (caught) {
       this.#fail(new Error(`A patch could not be applied: ${message(caught)}`));
       return;
@@ -336,6 +336,7 @@ export class LiveView {
 function applyFrame(
   state: LiveState,
   frame: Exclude<SubscriptionFrame, ResetFrame>,
+  asked: SubscriptionView,
 ): Omit<LiveState, "applied"> {
   switch (frame.type) {
     case "run.changed": {
@@ -352,7 +353,10 @@ function applyFrame(
         visible: state.visible,
       };
     default:
-      return { sidebar: state.sidebar, visible: patched(state.visible, frame) };
+      return {
+        sidebar: state.sidebar,
+        visible: patched(state.visible, frame, asked),
+      };
   }
 }
 
@@ -392,18 +396,22 @@ function patched(
         | "human-items.patch";
     }
   >,
+  asked: SubscriptionView,
 ): VisibleState {
   const refused = (what: string) =>
     new Error(`a ${frame.type} for ${what} this tab does not show`);
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the plan names this package as what delivers the view: `docs/contract.md`'s subscription protocol is one closed set of frames, each applied here to the payload it names and read back through that payload's schema, exactly as the run views' are in the same function; the record schema it reads through lives with the human-item domain in `@onepipeline-ui/dag-model`.
   if (frame.type === "human-items.patch") {
     if (visible.type !== "human-items") throw refused("human items");
-    return patchedAs(
+    const next = patchedAs(
       humanItemsVisibleSchema,
       visible,
       frame.ops,
       "human items",
     );
+    if (detailOfAnotherItem(asked, next))
+      throw new Error("a human-items.patch moved its detail to another item");
+    return next;
   }
   if (
     visible.type === "sidebar" ||
@@ -499,8 +507,21 @@ function filterKey(filter: unknown): string | undefined {
 }
 
 /**
- * What a snapshot shows that `asked` does not: another view's state, or a
- * payload of another run — or `undefined` when it is `asked`'s throughout.
+ * Whether a human-items state holds a detail of anything but the item `asked`
+ * names: a detail is that item's or `null`, and a view naming none holds `null`.
+ */
+function detailOfAnotherItem(
+  asked: SubscriptionView,
+  visible: Extract<VisibleState, { type: "human-items" }>,
+): boolean {
+  if (visible.detail === null) return false;
+  return !("item" in asked) || visible.detail.item.id !== asked.item;
+}
+
+/**
+ * What a snapshot shows that `asked` does not: another view's state, a detail
+ * of another item, or a payload of another run — or `undefined` when it is
+ * `asked`'s throughout.
  */
 function stateDisagreement(
   asked: SubscriptionView,
@@ -508,8 +529,11 @@ function stateDisagreement(
 ): string | undefined {
   const visible = snapshot.visible;
   if (identity(visible) !== identity(asked)) return "the state of another view";
-  if (visible.type === "sidebar" || visible.type === "human-items")
-    return undefined;
+  if (visible.type === "human-items")
+    return detailOfAnotherItem(asked, visible)
+      ? "the detail of another item"
+      : undefined;
+  if (visible.type === "sidebar") return undefined;
   const runs = [
     visible.detail.run.run_id,
     "timeline" in visible ? visible.timeline.run_id : visible.run_id,
