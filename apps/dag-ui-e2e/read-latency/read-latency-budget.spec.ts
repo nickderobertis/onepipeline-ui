@@ -206,3 +206,18 @@ test("the budgets file names this runner's metrics, with no host label", () => {
     );
   expect(text).not.toMatch(/labels:/u);
 });
+
+test("the budgets file states the workload workload.json records", () => {
+  const text = readFileSync(
+    join(import.meta.dirname, "budgets.yaml"),
+    "utf8",
+  ).replace(/\s+/gu, " ");
+  const kilobytes = Math.round(workload.human_item_bytes_at_start / 1000);
+  for (const stated of [
+    `a server over ${workload.runs} run directories`,
+    `a human-item journal starting at ${workload.human_item_events_at_start} events and ${kilobytes} KB`,
+    `and ${workload.writes} raises, answers, completions and dismissals`,
+    `spaced ${workload.write_spacing_s} s apart`,
+  ])
+    expect(text.split(stated)).toHaveLength(3);
+});

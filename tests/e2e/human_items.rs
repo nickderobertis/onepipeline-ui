@@ -2855,6 +2855,25 @@ fn a_stale_human_items_cursor_is_reset_to_what_the_routes_answer() {
     resumed.until_current(&server);
 }
 
+/// A filter that selects by nothing is no filter: the answer names none, and the
+/// view is the unfiltered one, the same list as a subscription that named none.
+#[test]
+fn an_empty_human_items_filter_is_normalized_away() {
+    let world = World::new();
+    raised(&world, "listed", "task");
+    let server = world.serve(Some("manager-of-items"));
+    let unfiltered = json!({ "type": "human-items" });
+    let subscribed = subscribe(
+        &server,
+        &json!({ "view": { "type": "human-items", "filter": {} } }),
+    );
+    assert_eq!(subscribed["view"], unfiltered);
+    assert_eq!(
+        subscribed["initial"]["snapshot"]["visible"],
+        routes_answer(&server, &unfiltered)
+    );
+}
+
 /// A malformed selector is refused like every other view; an item that no
 /// longer reads is `detail: null` rather than a refusal, and one that vanishes
 /// under an open tab patches `detail` to `null`.
