@@ -9,6 +9,9 @@
  *   node apps/dag-ui-e2e/read-latency/read-latency-budget.mjs \
  *     --telemetry apps/dag-ui-e2e/read-latency/telemetry/read-latency.json \
  *     --metric human-items-requests|human-items-lag
+ *
+ * Exits 0 having reported the figure, 1 when the telemetry is absent or does not
+ * state the workload, and 2 on a usage error.
  */
 
 import { existsSync, readFileSync } from "node:fs";

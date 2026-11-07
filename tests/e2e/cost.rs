@@ -804,18 +804,6 @@ fn now() -> f64 {
         .as_secs_f64()
 }
 
-/// A run is recorded, and its session served, without reading an index or
-/// walking the history store — on a store a long-lived host really holds.
-///
-/// Every run a dispatch records goes through the core this binary links, and
-/// the core it linked before re-read the whole legacy index and walked every
-/// session file on each one: a host with gigabytes of history queued every
-/// worker behind one lock. The linked core records into a dated segment
-/// instead, and the server resolves a session by the project and file its
-/// pointer names. Both halves are held here against the kernel's own record of
-/// every open and listing the test process and the server it starts make —
-/// granted or refused, because a reader that tries an index it cannot open and
-/// falls back to a walk has done the forbidden thing on its first attempt.
 /// A traced server with human items on over an empty journal, and that journal.
 fn serving_human_items() -> (Traced, std::path::PathBuf) {
     let (workspace, runs) = fixture_run::workspace();
@@ -934,6 +922,18 @@ fn a_subscription_without_action_items_never_looks_at_their_journal() {
     );
 }
 
+/// A run is recorded, and its session served, without reading an index or
+/// walking the history store — on a store a long-lived host really holds.
+///
+/// Every run a dispatch records goes through the core this binary links, and
+/// the core it linked before re-read the whole legacy index and walked every
+/// session file on each one: a host with gigabytes of history queued every
+/// worker behind one lock. The linked core records into a dated segment
+/// instead, and the server resolves a session by the project and file its
+/// pointer names. Both halves are held here against the kernel's own record of
+/// every open and listing the test process and the server it starts make —
+/// granted or refused, because a reader that tries an index it cannot open and
+/// falls back to a walk has done the forbidden thing on its first attempt.
 #[test]
 fn a_session_is_recorded_and_served_without_reading_an_index_or_walking_the_store() {
     use crate::cost_support::{Reach, Watch};
