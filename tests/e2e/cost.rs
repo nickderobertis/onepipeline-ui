@@ -816,6 +816,124 @@ fn now() -> f64 {
 /// every open and listing the test process and the server it starts make —
 /// granted or refused, because a reader that tries an index it cannot open and
 /// falls back to a walk has done the forbidden thing on its first attempt.
+/// A traced server with human items on over an empty journal, and that journal.
+fn serving_human_items() -> (Traced, std::path::PathBuf) {
+    let (workspace, runs) = fixture_run::workspace();
+    let journal = runs.join(onepipeline::human_items::JOURNAL_PATH);
+    std::fs::create_dir_all(journal.parent().expect("the journal's directory"))
+        .expect("the journal's directory");
+    std::fs::write(&journal, "").expect("an empty journal");
+    let config = workspace.path().join("config");
+    std::fs::create_dir_all(config.join("onepipeline")).expect("the config directory");
+    std::fs::write(
+        config.join("onepipeline/config.yaml"),
+        "human_items:\n  enabled: true\n",
+    )
+    .expect("the human-items configuration");
+    let serving = Traced::start_with_environment(
+        workspace,
+        TRACED_POLL_MS,
+        &[("XDG_CONFIG_HOME", config.as_path())],
+    );
+    (serving, journal)
+}
+
+/// A subscription to the view of type `view`; answers its id.
+fn subscribe_to(serving: &Traced, view: &str) -> String {
+    let answer = http::post(
+        serving.address,
+        "/api/v2/subscriptions",
+        &format!(r#"{{"view":{{"type":"{view}"}}}}"#),
+    );
+    assert_eq!(answer.status, 201, "{}", answer.body);
+    answer.json()["subscription"]
+        .as_str()
+        .expect("a subscription id")
+        .to_owned()
+}
+
+/// Wait for the server to have polled `ticks` more times since `marker`.
+fn wait_for_ticks(serving: &Traced, marker: &str, ticks: usize) {
+    let root = serving.runs_root();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while serving.cost_so_far().since(marker).listings_of(&root) < ticks {
+        assert!(Instant::now() < deadline, "the poller stopped");
+        std::thread::sleep(Duration::from_millis(TRACED_POLL_MS));
+    }
+}
+
+#[test]
+fn action_items_read_their_journal_once_per_view_and_only_when_it_moved() {
+    let (serving, journal) = serving_human_items();
+
+    let first = serving.mark("marker-first-tab");
+    let subscription = subscribe_to(&serving, "human-items");
+    let stream = http::stream(
+        serving.address,
+        &format!("/api/v2/events?subscription={subscription}"),
+        None,
+    );
+    let second = serving.mark("marker-second-tab");
+    subscribe_to(&serving, "human-items");
+    let idle = serving.mark("marker-journal-idle");
+    wait_for_ticks(&serving, &idle, 5);
+    let moved = serving.mark("marker-journal-moved");
+    std::fs::File::options()
+        .append(true)
+        .open(&journal)
+        .and_then(|file| file.set_modified(std::time::SystemTime::now() + Duration::from_secs(5)))
+        .expect("move the journal's stamp");
+    wait_for_ticks(&serving, &moved, 5);
+    drop(stream);
+    let cost = serving.finish();
+
+    let one_read = cost.between(&first, &second).under(&journal).opens;
+    assert!(one_read > 0, "the first tab read no journal");
+    assert_eq!(
+        cost.between(&second, &idle).under(&journal).opens,
+        0,
+        "a second tab on a view already held read the journal again"
+    );
+    let untouched = cost.between(&idle, &moved);
+    assert_eq!(
+        (
+            untouched.under(&journal).opens,
+            untouched.under(&journal).bytes
+        ),
+        (0, 0),
+        "a tick over an untouched journal read it"
+    );
+    assert!(
+        untouched.under(&journal).lookups > 0,
+        "the poller never looked at the journal"
+    );
+    assert_eq!(
+        cost.since(&moved).under(&journal).opens,
+        one_read,
+        "two tabs on one view read the moved journal more than once"
+    );
+}
+
+#[test]
+fn a_subscription_without_action_items_never_looks_at_their_journal() {
+    let (serving, journal) = serving_human_items();
+    let subscription = subscribe_to(&serving, "sidebar");
+    let stream = http::stream(
+        serving.address,
+        &format!("/api/v2/events?subscription={subscription}"),
+        None,
+    );
+    let marker = serving.mark("marker-sidebar-only");
+    wait_for_ticks(&serving, &marker, 5);
+    drop(stream);
+    let counts = serving.finish().under(&journal);
+    assert_eq!(
+        (counts.lookups, counts.opens, counts.bytes),
+        (0, 0, 0),
+        "a sidebar subscription touched the human-item journal"
+    );
+}
+
 #[test]
 fn a_session_is_recorded_and_served_without_reading_an_index_or_walking_the_store() {
     use crate::cost_support::{Reach, Watch};
