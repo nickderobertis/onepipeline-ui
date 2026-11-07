@@ -680,6 +680,11 @@ test("cache-use under onebudgetspec measures real executions behind simulated re
     assert.match(evicted.stdout, /aggregate: 1\/2 remote hits/);
     assert.match(evicted.stdout, /evicted/);
     assert.match(evicted.stdout, /— over/);
+    assert.equal(
+      evicted.code,
+      1,
+      "over its line, the release tail's step goes red",
+    );
     const local = await advance("local", { clearLocal: false });
     assert.equal(
       json(join(local.session.temp, "nx-cache-report/executions.json")).tasks[0]

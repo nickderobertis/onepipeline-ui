@@ -3,7 +3,20 @@
 // resolved through the same workflow graph as the rest of CI: what it runs after,
 // when it runs, and the budget records it owns.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
 import { resolveWorkflow, triggered } from "../workflow-graph.mjs";
@@ -77,6 +90,35 @@ export function reportJobProblems(workflow) {
   // cannot be taken here; `host` budgets name their input instead.
   if (excluded.includes("host"))
     problems.push("host budgets lost their enforcement");
+  if (step.with?.["saved-results-artifacts"] !== "budget-check-results-*")
+    problems.push("budgets does not read what test-linux saved");
+  if (step.with?.["omit-labels"] !== "not-measured-on-pr")
+    problems.push("budgets shows budgets a pull request cannot measure");
+  return problems;
+}
+
+// `test-linux` alone hands the job its targets' results, whatever those targets did.
+export function resultsUploadProblems(workflow) {
+  const job = workflow.jobs?.["test-linux"];
+  const uploads = (job?.steps ?? []).filter(
+    (step) =>
+      step.uses?.startsWith("actions/upload-artifact@") &&
+      step.with?.name === "budget-check-results-test-linux",
+  );
+  if (uploads.length !== 1)
+    return [`test-linux has ${uploads.length} saved-results uploads`];
+  const problems = [];
+  if (uploads[0].if !== "always()")
+    problems.push(`the saved results upload if ${uploads[0].if}`);
+  if (uploads[0].with.path !== "target/budget-results/")
+    problems.push(`the upload reads ${uploads[0].with.path}`);
+  const gate = job.steps.findIndex((step) =>
+    step.run?.includes("just ci-test-linux"),
+  );
+  if (gate < 0 || job.steps.indexOf(uploads[0]) < gate)
+    problems.push("the saved results upload runs before the gate");
+  if (job.if !== "github.event_name == 'pull_request'")
+    problems.push(`test-linux runs if ${job.if}`);
   return problems;
 }
 
@@ -114,6 +156,14 @@ test("a job that parts from the shape or the released definition is refused", ()
         (actionStep(w.jobs.budgets).with["enforcement-exclude-labels"] =
           "release-tail,host-variable,host"),
       /host budgets lost/,
+    ],
+    [
+      (w) => delete actionStep(w.jobs.budgets).with["saved-results-artifacts"],
+      /does not read what test-linux saved/,
+    ],
+    [
+      (w) => delete actionStep(w.jobs.budgets).with["omit-labels"],
+      /cannot measure/,
     ],
   ];
   for (const [mutate, expected] of cases) {
@@ -248,4 +298,273 @@ test("the budgets the job adds and changes are as recorded, and no other limit m
     "onepipeline-ui-nx-cache-use": 100,
     "onepipeline-ui-cache-headroom": 5.5,
   });
+});
+
+test("test-linux uploads its targets' results whatever they did, and on a pull request alone", () => {
+  assert.deepEqual(resultsUploadProblems(ci()), []);
+  const uploadOf = (workflow) =>
+    workflow.jobs["test-linux"].steps.find(
+      (step) => step.with?.name === "budget-check-results-test-linux",
+    );
+  for (const [mutate, expected] of [
+    [(w) => (uploadOf(w).if = "success()"), /upload if success/],
+    [(w) => (uploadOf(w).with.path = "target/"), /reads target/],
+    [(w) => (uploadOf(w).with.name = "other"), /0 saved-results uploads/],
+    [(w) => delete w.jobs["test-linux"].if, /test-linux runs if undefined/],
+    [
+      (w) => {
+        const steps = w.jobs["test-linux"].steps;
+        steps.unshift(steps.splice(steps.indexOf(uploadOf(w)), 1)[0]);
+      },
+      /before the gate/,
+    ],
+  ]) {
+    const workflow = clone(ci());
+    mutate(workflow);
+    assert.ok(
+      resultsUploadProblems(workflow).some((p) => expected.test(p)),
+      String(expected),
+    );
+  }
+});
+
+test("each target that test-linux runs saves its results under the directory it uploads", () => {
+  for (const [project, target, saved] of [
+    [".github/project.json", "budgets", "github-workflows"],
+    [".github/reporting/project.json", "budgets", "report-job"],
+    ["pool-maintenance/project.json", "budgets-host", "pool-maintenance"],
+  ]) {
+    const declared = JSON.parse(readFileSync(project, "utf8")).targets[target];
+    const file = `target/budget-results/${saved}.json`;
+    assert.match(declared.command, new RegExp(` --save-results ${file}$`));
+    assert.deepEqual(declared.outputs, [`{workspaceRoot}/${file}`], project);
+  }
+});
+
+const OMITTED = [
+  "onepipeline-ui-cd-job-time",
+  "onepipeline-ui-release-cycle-time",
+  "onepipeline-ui-cd-job-count",
+  "onepipeline-ui-release-read-requests",
+  "onepipeline-ui-pr-read-requests",
+  "onepipeline-ui-nx-cache-use",
+  "onepipeline-ui-gate-time",
+  "dag-ui-settled-requests-per-minute",
+  "dag-ui-live-requests-per-minute",
+  "dag-ui-live-update-lag-seconds",
+  "dag-ui-wire-megabytes-per-minute",
+  "dag-ui-server-cpu-cores-per-live-tab",
+];
+
+test("exactly the budgets a pull request cannot move carry the label, beside their own", () => {
+  const every = [
+    "budgets.yaml",
+    ".github/budgets.yaml",
+    ".github/reporting/budgets.yaml",
+    "pool-maintenance/budgets.yaml",
+    "apps/dag-ui-e2e/budgets.yaml",
+  ].flatMap((file) => read(file).budgets);
+  assert.deepEqual(
+    every
+      .filter((budget) => budget.labels?.includes("not-measured-on-pr"))
+      .map((budget) => budget.id)
+      .sort(),
+    [...OMITTED].sort(),
+  );
+  const labels = Object.fromEntries(
+    every.map((budget) => [budget.id, budget.labels]),
+  );
+  for (const id of OMITTED.filter((id) => id.startsWith("onepipeline-ui-")))
+    assert.deepEqual(
+      labels[id],
+      [
+        id === "onepipeline-ui-gate-time" ? "host-variable" : "release-tail",
+        "not-measured-on-pr",
+      ],
+      id,
+    );
+  assert.deepEqual(labels["dag-ui-server-cpu-cores-per-live-tab"], [
+    "host",
+    "not-measured-on-pr",
+  ]);
+});
+
+// The one target that enforced the dag-ui figures, its own command, over a copy of
+// its committed record with one figure raised.
+const DAG_UI = [
+  [
+    "dag-ui-settled-requests-per-minute",
+    (v) => (v.settled.requests_per_min = 1000),
+  ],
+  [
+    "dag-ui-live-requests-per-minute",
+    (v) => (v.live.requests_per_min = 100000),
+  ],
+  ["dag-ui-live-update-lag-seconds", (v) => (v.live.lag.p95_s = 100000)],
+  ["dag-ui-wire-megabytes-per-minute", (v) => (v.live.mb_per_min = 100000)],
+  [
+    "dag-ui-server-cpu-cores-per-live-tab",
+    (v) => {
+      for (const variant of Object.values(v.all))
+        if (variant.server_cpu) variant.server_cpu.cores_per_tab = 1000;
+    },
+  ],
+];
+
+test("dag-ui-e2e:budgets still fails on each figure over its line", () => {
+  const scratch = mkdtempSync(
+    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(), "dag-ui-over-"),
+  );
+  const tree = join(scratch, "apps/dag-ui-e2e");
+  try {
+    cpSync("apps/dag-ui-e2e/load", join(tree, "load"), { recursive: true });
+    for (const file of ["budgets.yaml", "request-load-budget.mjs"])
+      cpSync(`apps/dag-ui-e2e/${file}`, join(tree, file));
+    mkdirSync(join(tree, "telemetry"));
+    symlinkSync(resolve("node_modules"), join(scratch, "node_modules"), "dir");
+    const { command } = JSON.parse(
+      readFileSync("apps/dag-ui-e2e/project.json", "utf8"),
+    ).targets.budgets;
+    const committed = readFileSync(
+      "apps/dag-ui-e2e/telemetry/request-load.json",
+      "utf8",
+    );
+    const check = (record) => {
+      writeFileSync(join(tree, "telemetry/request-load.json"), record);
+      return spawnSync("bash", ["-c", `${command} --json`], {
+        cwd: scratch,
+        encoding: "utf8",
+      });
+    };
+    const held = check(committed);
+    const before = Object.fromEntries(
+      JSON.parse(held.stdout).results.map((result) => [result.id, result]),
+    );
+    assert.deepEqual(
+      Object.keys(before).sort(),
+      DAG_UI.map(([id]) => id).sort(),
+      held.stderr,
+    );
+    for (const [id, raise] of DAG_UI) {
+      const record = JSON.parse(committed);
+      const of = (kind) =>
+        Object.values(record.variants).find((v) => v.kind === kind);
+      raise({
+        settled: of("settled"),
+        live: of("live"),
+        all: record.variants,
+      });
+      const over = check(JSON.stringify(record));
+      const results = JSON.parse(over.stdout).results;
+      assert.equal(over.status, 1, `${id}: ${over.stderr}`);
+      assert.equal(
+        results.find((result) => result.id === id).verdict,
+        "over",
+        id,
+      );
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+// This pull request's own run, replayed at the figures script's `gh` boundary, under the
+// environment a runner gives the step.
+function ownRun(
+  id,
+  { jobs = JOBS(), status = 0, event = "pull_request" } = {},
+) {
+  const bin = mkdtempSync(
+    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(), "own-run-"),
+  );
+  try {
+    writeFileSync(join(bin, "answer.json"), JSON.stringify(jobs));
+    writeFileSync(
+      join(bin, "gh"),
+      `#!/bin/sh\necho "$*" >> "${bin}/asked"\n[ ${status} -eq 0 ] || { echo refused >&2; exit ${status}; }\ncat "${bin}/answer.json"\n`,
+    );
+    chmodSync(join(bin, "gh"), 0o755);
+    const ran = spawnSync(
+      "node_modules/.bin/onebudgetspec",
+      ["check", "budgets.yaml", "--id", id, "--json"],
+      {
+        encoding: "utf8",
+        env: {
+          PATH: `${bin}:${process.env.PATH}`,
+          HOME: process.env.HOME,
+          GITHUB_EVENT_NAME: event,
+          GITHUB_RUN_ID: "42255859378",
+          GITHUB_REPOSITORY: "nickderobertis/onepipeline-ui",
+        },
+      },
+    );
+    const asked = existsSync(join(bin, "asked"))
+      ? readFileSync(join(bin, "asked"), "utf8").trim().split("\n")
+      : [];
+    return {
+      ...ran,
+      asked,
+      result: JSON.parse(ran.stdout).results[0],
+    };
+  } finally {
+    rmSync(bin, { recursive: true, force: true });
+  }
+}
+const JOBS = () =>
+  JSON.parse(
+    readFileSync(".github/reporting/fixtures/own-run/jobs.json", "utf8"),
+  );
+const CHECK_TIME = "onepipeline-ui-ci-check-time";
+const JOB_COUNT = "onepipeline-ui-ci-job-count";
+
+test("a pull request's CI-time figures are its own run's jobs, from one read", () => {
+  const longest = ownRun(CHECK_TIME);
+  const count = ownRun(JOB_COUNT);
+  for (const [id, { result, asked, status }, figure] of [
+    [CHECK_TIME, longest, 981],
+    [JOB_COUNT, count, 5],
+  ]) {
+    console.error(
+      `replayed jobs: ${id} ${result.actual} of ${result.threshold}, verdict ${result.verdict}`,
+    );
+    assert.equal(result.actual, figure, id);
+    assert.equal(result.verdict, "within", id);
+    assert.equal(status, 0, id);
+    assert.deepEqual(
+      asked,
+      [
+        "api repos/nickderobertis/onepipeline-ui/actions/runs/42255859378/jobs?per_page=100&filter=latest",
+      ],
+      id,
+    );
+  }
+  assert.match(longest.result.detail, /test-windows/);
+  assert.match(count.result.detail, /CI: 5/);
+});
+
+test("each CI-time figure over its line is the ordinary verdict, and a refused read has none", () => {
+  const six = JOBS();
+  six.jobs.push({ ...six.jobs[0], name: "another" });
+  six.total_count = 6;
+  const many = ownRun(JOB_COUNT, { jobs: six });
+  assert.equal(many.result.actual, 6);
+  assert.equal(many.result.verdict, "over");
+  assert.equal(many.status, 1);
+
+  const slow = JOBS();
+  slow.jobs[0].started_at = "2026-11-06T16:00:00Z";
+  const long = ownRun(CHECK_TIME, { jobs: slow });
+  assert.equal(long.result.verdict, "over");
+  assert.equal(long.status, 1);
+
+  const refused = ownRun(CHECK_TIME, { status: 1 });
+  assert.equal(refused.result.verdict, "error");
+  assert.equal(refused.status, 3);
+  assert.match(refused.result.error, /check that GH_TOKEN can read/);
+});
+
+test("off a pull request's own run the same commands ask nothing of this run", () => {
+  const release = ownRun(CHECK_TIME, { event: "release" });
+  assert.deepEqual(release.asked, []);
+  assert.equal(release.result.verdict, "error");
 });

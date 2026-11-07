@@ -482,6 +482,16 @@ jobs:
         run: echo "tier=$(bash scripts/ci-tier.sh)" >> "$GITHUB_OUTPUT"
       - name: Gate, install and wheel (affected projects; every project on the release PR)
         run: just ci-test-linux --tier "${{ steps.tier.outputs.tier }}"
+      # What each `budgets` target this job ran saved, which the `budgets` job's rows read.
+      # Uploaded even after a failure, so the rest of the report keeps its figures, and
+      # absent when this change reached no budget.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: budget-check-results-test-linux
+          path: target/budget-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Report cache entries and task executions
         if: always()
@@ -752,7 +762,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: nickderobertis/onebudgetspec-github-action@v0.1.2
+      - uses: nickderobertis/onebudgetspec-github-action@v0.2.0
         with:
           token: ${{ github.token }}
           enforcement-exclude-labels: release-tail,host-variable
+          # What `test-linux`'s targets saved: those rows show that figure, and their
+          # commands do not run here.
+          saved-results-artifacts: budget-check-results-*
+          # Budgets a pull request cannot measure or move leave the table for one
+          # counted line; whatever checks each elsewhere is unchanged.
+          omit-labels: not-measured-on-pr

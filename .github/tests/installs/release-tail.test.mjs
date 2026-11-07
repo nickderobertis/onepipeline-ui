@@ -427,6 +427,7 @@ function step(dir, extra = {}) {
     ...Object.fromEntries(
       Object.entries(last.env ?? {}).map(([k, v]) => [k, placeholder(v)]),
     ),
+    GITHUB_EVENT_NAME: "release",
     GITHUB_REPOSITORY: REPOSITORY,
     GITHUB_RUN_ID: String(RELEASE_RUN),
     GITHUB_REF_TYPE: "tag",
@@ -628,6 +629,34 @@ test("each budget whose threshold lies below its recorded figure turns the step 
     for (const other of SEVEN.filter((o) => o !== id))
       assert.equal(verdicts[other].verdict, "within", `${other} beside ${id}`);
   }
+});
+
+test("the budgets a pull request's report leaves out stay in this step, with the verdict their figures earn", () => {
+  const budgets = parse(
+    readFileSync(join(ROOT, "budgets.yaml"), "utf8"),
+  ).budgets;
+  const left = budgets.filter(
+    (budget) =>
+      budget.labels.includes("not-measured-on-pr") &&
+      budget.labels.includes("release-tail"),
+  );
+  const run = realRun();
+  const figures = report(run.stdout);
+  // The sixth, cache use, over its line is nx-cache-journey's: this release predates its
+  // reports, so it stays selected and errors, which keeps the step red.
+  const measured = left.filter((b) => b.id !== "onepipeline-ui-nx-cache-use");
+  assert.equal(measured.length, 5);
+  assert.match(run.stdout, /onepipeline-ui-nx-cache-use:.*error/);
+  for (const budget of measured) {
+    const figure = figures[budget.id];
+    assert.equal(figure.threshold, budget.threshold, budget.id);
+    assert.equal(
+      figure.verdict,
+      figure.actual > budget.threshold ? "over" : "within",
+      budget.id,
+    );
+  }
+  // Below their recorded figures, each is `over` and red in the test beside this one.
 });
 
 test("a GitHub that answers an error status turns the step red", () => {

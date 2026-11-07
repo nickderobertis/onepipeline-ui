@@ -148,15 +148,12 @@ block) — and `.github/tests/ci-shape.test.mjs`
 resolves every workflow to hold that, and what a push to `main` and the release
 commit start. The fifth, `budgets`, is the released `onebudgetspec-github-action`
 under `needs` and `if: always()`, on every pull request and alone of `ci.yml` on
-every push to `main`: it builds and tests nothing, gives each production budget one
-row, and fails only on an ordinary budget verdict. A budget whose input the job
-lacks reads as unavailable because its `command` names that input, so name a
-budget's saved telemetry or required file there, or its absence reads as a broken
-measurement; `release-tail` and `host-variable` are report-only here
-(`enforcement-exclude-labels`) because they measure elsewhere.
-`.github/reporting` holds the job's journeys and its own budget. A base push saves
-rolling history even when the job's own budget is its only measurement, and a pull
-request reads it back as that budget's baseline samples.
+every push to `main`: it builds and tests nothing and fails only on an ordinary budget
+verdict. `release-tail` and `host-variable` are report-only here
+(`enforcement-exclude-labels`) because they measure elsewhere, and a budget a pull
+request cannot measure or move carries `not-measured-on-pr`, which takes it out of the
+table and changes nothing that checks it elsewhere, so a new budget's label says which
+it is. `.github/reporting/AGENTS.md` holds what a row reads and how a budget reaches it.
 
 **A security advisory blocks only the change that brings it in.** A database
 update publishes advisories against versions `main` already resolves, and an
@@ -312,9 +309,9 @@ fans one uniformly-named target across all of them.
   `timeout-minutes` is the line; any other check of the root file excludes both
   labels. The seven host figures reach GitHub through `onevcs host`; cache-use reads
   CI reports and promotion receipts, and cache-headroom the live cache listing, through
-  GitHub's API directly. All use
-  `scripts/actions-budget-figures.sh`, a copy of dero-skills' create-repo source
-  that is edited only there.
+  GitHub's API directly, and on a pull request's own run the budgets job's two CI-time
+  figures read its jobs through `gh`. All use `scripts/actions-budget-figures.sh`, a
+  copy of dero-skills' create-repo source that is edited only there.
 <!-- llmlint: ignore-end[agents_md_durable_and_terse] -->
 - **Each release job's work is one recipe, and two rules hold the release
   together** (`scripts/release.mjs` says what each phase does): every target is
