@@ -48,6 +48,9 @@ jobs:
             /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
             { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
           ' >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.tool-pins.outputs.node }}
       - name: Take rust-cache's state before anything is installed
         run: node scripts/warm-demo.mjs state
       - uses: Swatinem/rust-cache@v2.9.2
@@ -65,9 +68,6 @@ jobs:
         if: matrix.os == 'linux'
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ steps.tool-pins.outputs.node }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json

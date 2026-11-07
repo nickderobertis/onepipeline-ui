@@ -32,7 +32,7 @@ function dead(extra) {
 function capture() {
   execFileSync("git", ["clone", "-q", "--depth", "1", "-b", "v2.9.2", "https://github.com/Swatinem/rust-cache", action]);
   for (const file of ["dead-env", "dead-output", "dead-state"]) writeFileSync(join(temp, file), "");
-  const done = spawnSync(process.execPath, [join(action, "dist/restore/index.js")], { env: dead(), encoding: "utf8" });
+  const done = spawnSync(process.execPath, [join(action, "dist/restore.js")], { env: dead(), encoding: "utf8" });
   console.log(done.stdout.slice(-1500), done.stderr.slice(-500));
   const text = readFileSync(join(temp, "dead-state"), "utf8");
   const match = text.match(/^RUST_CACHE_CONFIG<<(\S+)\n([\s\S]*?)\n\1$/m);
@@ -43,7 +43,7 @@ function capture() {
 
 function save() {
   const state = readFileSync(stateFile, "utf8");
-  const done = spawnSync(process.execPath, [join(action, "dist/save/index.js")], {
+  const done = spawnSync(process.execPath, [join(action, "dist/save.js")], {
     env: dead({ STATE_RUST_CACHE_CONFIG: state, RUNNER_DEBUG: "1" }),
     encoding: "utf8",
     maxBuffer: 2 * 1024 * 1024 * 1024,
