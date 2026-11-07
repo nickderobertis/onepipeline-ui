@@ -1,0 +1,275 @@
+name: spike-opnx-cache
+# llmlint: ignore-file[work_goes_through_command_surface] these legs need only the Node workspace that scripts/workspace-install.sh (the install `just bootstrap` runs first) provides; `just bootstrap` would also provision the Rust sibling CLI, which no step here runs, and this copy is kept as the experiment that actually ran.
+# llmlint: ignore-file[contracts_have_one_source_or_a_drift_gate] a `uses:` ref must be a literal, so each leg repeats op-nx/github-cache's commit; harness.test.mjs holds every one to measure.mjs's PINNED_COMMIT, and this copy runs only from a throwaway pull request, never from this path or this repository's gate.
+
+# Not under .github/workflows: this repository's ci-shape test admits only its
+# five workflows, so this experiment runs only from a throwaway pull request that
+# copies it there, and it never lands.
+#
+# Throwaway experiment of spike `spike-opnx-audit` (plan ci-release-test-cache):
+# the measurements behind its report, taken on real runners.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Install the workspace
+        run: bash scripts/workspace-install.sh
+      - name: Context
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          echo "event=$GITHUB_EVENT_NAME ref=$GITHUB_REF workspace=$GITHUB_WORKSPACE pwd=$PWD cache_mode=${ACTIONS_CACHE_MODE:-unset}"
+          echo "head=$HEAD_REPOSITORY base=$GITHUB_REPOSITORY"
+      - name: Pre-set the Nx client's variables
+        run: |
+          echo "NX_SELF_HOSTED_REMOTE_CACHE_SERVER=http://127.0.0.1:3000" >> "$GITHUB_ENV"
+          token="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+          echo "::add-mask::${token}"
+          echo "NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=${token}" >> "$GITHUB_ENV"
+      - uses: op-nx/github-cache/start-cache-server@91839c24885842cac86567c30e23b37fb85f7e33
+        id: cache-server
+        background: true
+        with:
+          port: "3000"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The plan's fork rule: a head outside this repository is read-only.
+          CACHE_READ_ONLY: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'fork' || '' }}
+      - name: Measure each task through the sidecar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          while read -r task; do
+            [ -n "$task" ] || continue
+            node scripts/spike-opnx/measure.mjs --sidecar external --task "$task" \
+              --label "linux first $task" --out "$RUNNER_TEMP/measure-linux-first-${task//:/-}.json"
+          done < scripts/spike-opnx/ci-tasks.txt
+      - name: Ask again for the same tasks in the same run
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          while read -r task; do
+            [ -n "$task" ] || continue
+            node scripts/spike-opnx/measure.mjs --sidecar external --task "$task" \
+              --label "linux again $task" --out "$RUNNER_TEMP/measure-linux-again-${task//:/-}.json"
+          done < scripts/spike-opnx/ci-tasks.txt
+      - cancel: cache-server
+      # A second sidecar as a fork's head would get it: the plan's workflow sets
+      # CACHE_READ_ONLY when the head repository is not this one.
+      - uses: op-nx/github-cache/start-cache-server@91839c24885842cac86567c30e23b37fb85f7e33
+        id: cache-server-fork
+        background: true
+        with:
+          port: "3001"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CACHE_READ_ONLY: fork
+      - name: A fork's head, as the plan's workflow would mark it
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3001
+        run: |
+          for task in dag-model:test timeline-categories:test; do
+            node scripts/spike-opnx/measure.mjs --sidecar external --task "$task" \
+              --label "linux fork-read-only $task" --out "$RUNNER_TEMP/measure-linux-fork-${task//:/-}.json"
+          done
+      - cancel: cache-server-fork
+      - name: No token reaches the sidecar
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ""
+        run: |
+          node scripts/spike-opnx/measure.mjs --task dag-model:test \
+            --label "linux no-token" --out "$RUNNER_TEMP/measure-linux-no-token.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: measure-linux
+          path: ${{ runner.temp }}/measure-*.json
+
+  # The token a no-write pull request gets (a Dependabot head's is read-only):
+  # no repository write permission. Whether the cache still accepts writes is
+  # what this leg measures.
+  linux-no-write-token:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Install the workspace
+        run: bash scripts/workspace-install.sh
+      - name: Pre-set the Nx client's variables
+        run: |
+          echo "NX_SELF_HOSTED_REMOTE_CACHE_SERVER=http://127.0.0.1:3000" >> "$GITHUB_ENV"
+          token="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+          echo "::add-mask::${token}"
+          echo "NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=${token}" >> "$GITHUB_ENV"
+      - uses: op-nx/github-cache/start-cache-server@91839c24885842cac86567c30e23b37fb85f7e33
+        id: cache-server
+        background: true
+        with:
+          port: "3000"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: A token with contents read and no other permission
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/spike-opnx/measure.mjs --sidecar external --task telemetry-client:test \
+            --label "linux no-write-token" --out "$RUNNER_TEMP/measure-linux-no-write-token.json"
+      - cancel: cache-server
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: measure-linux-no-write-token
+          path: ${{ runner.temp }}/measure-*.json
+
+  # onepipeline's test-windows copies the workspace onto a Dev Drive and runs
+  # there, away from GITHUB_WORKSPACE; this leg does the same.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: samypr100/setup-dev-drive@v3
+        with:
+          drive-size: 60GB
+          drive-format: ReFS
+          drive-type: Dynamic
+          trusted-dev-drive: true
+          workspace-copy: true
+          env-mapping: |
+            TEMP,{{ DEV_DRIVE }}/tmp
+            TMP,{{ DEV_DRIVE }}/tmp
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Install the workspace on the Dev Drive
+        working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}
+        run: bash scripts/workspace-install.sh
+      - name: Context
+        working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}
+        run: |
+          echo "event=$GITHUB_EVENT_NAME ref=$GITHUB_REF workspace=$GITHUB_WORKSPACE pwd=$PWD dev_drive=$DEV_DRIVE_WORKSPACE cache_mode=${ACTIONS_CACHE_MODE:-unset}"
+          ls "$GITHUB_WORKSPACE/nx.json" "$PWD/nx.json"
+      - name: Pre-set the Nx client's variables
+        run: |
+          echo "NX_SELF_HOSTED_REMOTE_CACHE_SERVER=http://127.0.0.1:3000" >> "$GITHUB_ENV"
+          token="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+          echo "::add-mask::${token}"
+          echo "NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=${token}" >> "$GITHUB_ENV"
+      - uses: op-nx/github-cache/start-cache-server@91839c24885842cac86567c30e23b37fb85f7e33
+        id: cache-server
+        background: true
+        with:
+          port: "3000"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CACHE_READ_ONLY: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'fork' || '' }}
+      - name: Measure each task through the sidecar, from the Dev Drive
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}
+        run: |
+          while read -r task; do
+            [ -n "$task" ] || continue
+            node scripts/spike-opnx/measure.mjs --sidecar external --task "$task" \
+              --label "windows first $task" --out "$RUNNER_TEMP/measure-windows-first-${task//:/-}.json"
+          done < scripts/spike-opnx/ci-tasks.txt
+      - cancel: cache-server
+      - name: A sidecar started from the Dev Drive rather than as an action
+        continue-on-error: true
+        working-directory: ${{ env.DEV_DRIVE_WORKSPACE }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/spike-opnx/measure.mjs --task dag-model:test \
+            --label "windows sidecar-on-dev-drive" --out "$RUNNER_TEMP/measure-windows-dev-drive-sidecar.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: measure-windows
+          path: ${{ runner.temp }}/measure-*.json
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Install the workspace
+        run: bash scripts/workspace-install.sh
+      - name: Pre-set the Nx client's variables
+        run: |
+          echo "NX_SELF_HOSTED_REMOTE_CACHE_SERVER=http://127.0.0.1:3000" >> "$GITHUB_ENV"
+          token="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+          echo "::add-mask::${token}"
+          echo "NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN=${token}" >> "$GITHUB_ENV"
+      - uses: op-nx/github-cache/start-cache-server@91839c24885842cac86567c30e23b37fb85f7e33
+        id: cache-server
+        background: true
+        with:
+          port: "3000"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CACHE_READ_ONLY: ${{ github.event.pull_request.head.repo.full_name != github.repository && 'fork' || '' }}
+      - name: Measure each task through the sidecar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          while read -r task; do
+            [ -n "$task" ] || continue
+            node scripts/spike-opnx/measure.mjs --sidecar external --task "$task" \
+              --label "macos first $task" --out "$RUNNER_TEMP/measure-macos-first-${task//:/-}.json"
+          done < scripts/spike-opnx/ci-tasks.txt
+      - cancel: cache-server
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: measure-macos
+          path: ${{ runner.temp }}/measure-*.json
