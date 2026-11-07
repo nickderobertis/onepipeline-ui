@@ -12,12 +12,13 @@ import {
 const expression = (body) => `$${"{{"} ${body} }}`;
 const workflow = (name) =>
   parse(readFileSync(`.github/workflows/${name}.yml`, "utf8"));
-// Remote cache and cache prune: dero-skills 270bea5d287f6fe6a844fd6b882922eacadf6ecf.
+// Remote cache, version 10: dero-skills 27a6b4950bd7582363eebdfbb8b93a0daf85fc21.
+// Cache prune: dero-skills 270bea5d287f6fe6a844fd6b882922eacadf6ecf.
 // Version-free inputs: dero-skills 63e071b72420bd6737226a50cb8a7a7760cc73a4.
 // Figures, version 13: dero-skills afc6829981.
 const upstream = {
   "scripts/nx-remote-cache.mjs":
-    "88c72d76565a53bb7c09702255d8fe2be72165d1abcbca48bc125984d140fcf7",
+    "21a6ba436f59d7bd21d1659bf928b0123a6ac0003d5993747e9f216b020d3526",
   "scripts/nx-version-free-inputs.mjs":
     "fdd4f59fc98a0073dbefdbaa0f08f4b58432bbf8e55d315865f951e0151b19b2",
   "scripts/actions-budget-figures.sh":
