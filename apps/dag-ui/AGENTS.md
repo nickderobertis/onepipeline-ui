@@ -106,9 +106,10 @@ however long it lasts, and a timer here is never allowed to send anything: no re
 runs on one, and the load tier's traffic budgets do not know the settings exist.
 `rows` is what says which runs exist and `navigationRows` what the list shows; a
 reader of the first must not be moved to the second, or a hold on the navigation
-would hold what the rest of the page knows. A person's own act is what crosses a
-hold, and every write reaches it through `TelemetryClient.onWrite`, so a new write
-goes through `#write` or it will sit behind a held area.
+would hold what the rest of the page knows. A person's own view change or
+Refresh is what crosses a hold. A write never does: its result is shown from its
+own receipt (Action items keep it over the held list until that catches up), so
+releasing the hold to show it would also show changes nobody on this page made.
 
 ## What the backend cannot answer
 

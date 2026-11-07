@@ -31,13 +31,6 @@ import { useHeldArea } from "../../lib/useHeldArea";
 // What only a broken peer reaches — a frame that fails validation, a patch that
 // does not apply — is proven in App.test.tsx at the browser boundary.
 
-/**
- * How long after a person's write each area shows changes as they arrive: long
- * enough for the server's slowest push of what the write moved, a run's row,
- * which it sends at most once every 10 polls of 500 ms.
- */
-const OWN_WRITE_FOLLOWED_MS = 10_000;
-
 /** Which of a run's views the page shows. */
 export type RunViewKind = "graph" | "overall" | "node" | "channel";
 
@@ -120,7 +113,8 @@ export interface DagTelemetryState {
  * area shows its own copy as its setting says: row frames feed the navigation,
  * and the view's patches the main area, which on the Host page is fed the rows
  * as well, since it shows them. A person's own act shows at once: a change of
- * view answers its snapshot, Refresh shows everything, and a write is followed.
+ * view answers its snapshot and Refresh shows everything. A write's result is
+ * its own receipt's to show, which releases nothing either area holds.
  * With both areas off the stream is closed, and the applied cursor is what it
  * resumes from.
  */
@@ -133,7 +127,6 @@ export function useDagTelemetry(
   const latestRows = useRef<readonly SidebarRow[]>([]);
   const [rows, setRows] = useState<readonly SidebarRow[]>();
   const [navigationRows, setNavigationRows] = useState<readonly SidebarRow[]>();
-  const [followingWrite, setFollowingWrite] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>();
   const [error, setError] = useState<Error>();
   //: The stream dropped and has not delivered since — cleared by what it sends next.
@@ -170,14 +163,9 @@ export function useDagTelemetry(
   const live = useRef<LiveView | undefined>(undefined);
   const viewRef = useRef(view);
   viewRef.current = view;
-  const navigation = useHeldArea(
-    options.navigationUpdates,
-    followingWrite,
-    setNavigationRows,
-  );
+  const navigation = useHeldArea(options.navigationUpdates, setNavigationRows);
   const main = useHeldArea<MainCopy>(
     options.mainUpdates,
-    followingWrite,
     useCallback((copy) => {
       setState(copy.state);
       const { visible } = copy.state;
@@ -197,9 +185,7 @@ export function useDagTelemetry(
     }, []),
   );
   const streamWanted =
-    options.navigationUpdates !== "off" ||
-    options.mainUpdates !== "off" ||
-    followingWrite;
+    options.navigationUpdates !== "off" || options.mainUpdates !== "off";
   const wantsStream = useRef(streamWanted);
   wantsStream.current = streamWanted;
 
@@ -301,29 +287,11 @@ export function useDagTelemetry(
     else live.current?.pause();
   }, [streamWanted]);
 
-  // A person's accepted write shows at once in either area: what is held now,
-  // and, for a while, what the write moves as the server pushes it. With both
-  // areas off the stream opens for that while, from the applied cursor.
+  // Refresh is a person's act: both areas show what they hold, then the new read.
   const takeAll = useCallback(() => {
     navigation.take();
     main.take();
   }, [navigation.take, main.take]);
-  useEffect(() => {
-    let followed: ReturnType<typeof setTimeout> | undefined;
-    const stop = client.onWrite(() => {
-      takeAll();
-      setFollowingWrite(true);
-      clearTimeout(followed);
-      followed = setTimeout(
-        () => setFollowingWrite(false),
-        OWN_WRITE_FOLLOWED_MS,
-      );
-    });
-    return () => {
-      stop();
-      clearTimeout(followed);
-    };
-  }, [client, takeAll]);
 
   const refresh = useCallback(() => {
     setNotice(undefined);

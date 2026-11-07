@@ -130,9 +130,10 @@ or Off, and shows how many changes it is holding. These are the page's own: the 
 one subscription stream is applied as it arrives and each area shows its copy as its
 setting says, so what is held does not grow, and no read runs on a timer. A person's
 own act shows at once whatever the settings: a choice of view answers its snapshot,
-Refresh shows everything, and an accepted write shows what is held and then, for ten
-seconds, changes as they arrive. With both Off the stream is closed; turning either
-on (or a write) resumes it from the last applied event under `docs/contract.md`'s
+Refresh shows everything, and an accepted write shows its own receipt (an Action item
+completed, answered or dismissed leaves the list at once) without releasing anything
+either area holds. With both Off the stream is closed, and a write leaves it closed;
+turning either on resumes it from the last applied event under `docs/contract.md`'s
 rules, and Refresh takes its one read and leaves it closed.
 
 Select a run, then:

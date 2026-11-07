@@ -715,29 +715,3 @@ test("a view started paused answers its state with no stream until resumed", asy
   expect(h.sources).toHaveLength(1);
   live.close();
 });
-
-test("tells its listeners of an accepted write, and not of a refused one or a read", async () => {
-  let refuse = false;
-  const client = new TelemetryClient("http://localhost", {
-    fetch: (async () =>
-      refuse
-        ? Response.json(
-            { error: { code: "not_owner", message: "not yours" } },
-            { status: 409 },
-          )
-        : Response.json(served("run-stop.json"))) as unknown as typeof fetch, // As in `harness`: this answers the one call signature the client makes, not `fetch`'s overloads.
-  });
-  const told = vi.fn();
-  const stop = client.onWrite(told);
-  await client.stop("run-1");
-  expect(told).toHaveBeenCalledTimes(1);
-  await client.getChannel("run-1").catch(() => undefined);
-  expect(told).toHaveBeenCalledTimes(1);
-  refuse = true;
-  await expect(client.stop("run-1")).rejects.toThrow("not yours");
-  expect(told).toHaveBeenCalledTimes(1);
-  stop();
-  refuse = false;
-  await client.stop("run-1");
-  expect(told).toHaveBeenCalledTimes(1);
-});

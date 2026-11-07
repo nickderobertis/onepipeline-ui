@@ -9,19 +9,17 @@ import type { UpdateSetting } from "./update-settings";
  * this keeps one value and one count. A timer here only decides when that value
  * is shown, and asks the server for nothing.
  *
- * `apply` shows a value. `following` is whether a person's own write is being
- * followed, when a change is shown as it arrives whatever the setting.
+ * `apply` shows a value.
  */
 export function useHeldArea<T>(
   setting: UpdateSetting,
-  following: boolean,
   apply: (value: T) => void,
 ) {
   const [waiting, setWaiting] = useState(0);
   const held = useRef<{ readonly value: T } | undefined>(undefined);
   const applied = useRef(apply);
   applied.current = apply;
-  const asItArrives = setting === "live" || following;
+  const asItArrives = setting === "live";
   const passing = useRef(asItArrives);
   passing.current = asItArrives;
 

@@ -75,7 +75,7 @@ export function HumanItemsPage({
   readonly setSelectedId: (id: string | undefined) => void;
 }) {
   const [dismissing, setDismissing] = useState<HumanItemView>();
-  const items = useHumanItems(client, live, selectedId);
+  const items = useHumanItems(client, live, selectedId, choice.state);
   const listRef = useRef<HTMLUListElement>(null);
   const selected =
     items.items?.find(({ item }) => item.id === selectedId) ?? items.detail;

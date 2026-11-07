@@ -156,7 +156,6 @@ export class TelemetryClient {
   readonly #baseUrl: URL;
   readonly #fetch: Fetch;
   readonly #eventSource?: EventSourceFactory;
-  readonly #writeListeners = new Set<() => void>();
 
   constructor(baseUrl: string | URL, options: TelemetryClientOptions = {}) {
     this.#baseUrl = new URL(baseUrl);
@@ -333,17 +332,6 @@ export class TelemetryClient {
     );
   }
 
-  /**
-   * Be told each time a person's write this client sent has been accepted, so
-   * what it changed can be shown however long the page is otherwise holding
-   * changes. Answers the call that stops listening. A refused write changed
-   * nothing and tells nobody here: its caller reports the refusal.
-   */
-  onWrite(listener: () => void): () => void {
-    this.#writeListeners.add(listener);
-    return () => this.#writeListeners.delete(listener);
-  }
-
   /** `POST /api/v2/subscriptions`: the subscription and its initial state. */
   async createSubscription(body: {
     readonly view: SubscriptionView;
@@ -424,7 +412,7 @@ export class TelemetryClient {
     requireOpaqueId(runId, "run ID");
     const url = this.#url(API_V2_PATHS.channelNext(runId));
     if (filter !== undefined) url.searchParams.set(API_V2_QUERY.filter, filter);
-    return this.#write(url, channelNextSchema.parse, { method: "POST" });
+    return this.#request(url, channelNextSchema.parse, { method: "POST" });
   }
 
   /**
@@ -442,7 +430,7 @@ export class TelemetryClient {
     const url = this.#url(API_V2_PATHS.channelReply(runId));
     if (correlation !== undefined)
       url.searchParams.set(API_V2_QUERY.correlation, correlation);
-    return this.#write(url, replyReceiptSchema.parse, {
+    return this.#request(url, replyReceiptSchema.parse, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: envelope,
@@ -455,7 +443,7 @@ export class TelemetryClient {
     surface: { readonly kind: string; readonly message: string },
   ): Promise<Surfaced> {
     requireOpaqueId(runId, "run ID");
-    return this.#write(
+    return this.#request(
       this.#url(API_V2_PATHS.channelSurface(runId)),
       surfacedSchema.parse,
       json("POST", surface),
@@ -465,7 +453,7 @@ export class TelemetryClient {
   /** Attest a ready human action by its reference, as the planner's own `attest`. */
   async attest(runId: string, reference: string): Promise<ReplyReceipt> {
     requireOpaqueId(runId, "run ID");
-    return this.#write(
+    return this.#request(
       this.#url(API_V2_PATHS.attest(runId)),
       replyReceiptSchema.parse,
       json("POST", { reference }),
@@ -479,7 +467,7 @@ export class TelemetryClient {
    */
   async stop(runId: string, force = false): Promise<Stopped> {
     requireOpaqueId(runId, "run ID");
-    return this.#write(
+    return this.#request(
       this.#url(API_V2_PATHS.stop(runId)),
       stoppedSchema.parse,
       json("POST", { force }),
@@ -514,7 +502,7 @@ export class TelemetryClient {
   /** Answer an open question; the engine's receipt, or its refusal. */
   async answerHumanItem(id: string, text: string): Promise<HumanItemReceipt> {
     requireOpaqueId(id, "human-item ID");
-    return this.#write(
+    return this.#request(
       this.#url(HUMAN_ITEM_PATHS.answer(id)),
       humanItemReceiptSchema.parse,
       json("POST", { text }),
@@ -527,7 +515,7 @@ export class TelemetryClient {
    */
   async completeHumanItem(id: string): Promise<HumanItemReceipt> {
     requireOpaqueId(id, "human-item ID");
-    return this.#write(
+    return this.#request(
       this.#url(HUMAN_ITEM_PATHS.complete(id)),
       humanItemReceiptSchema.parse,
       json("POST", {}),
@@ -540,7 +528,7 @@ export class TelemetryClient {
     reason?: string,
   ): Promise<HumanItemReceipt> {
     requireOpaqueId(id, "human-item ID");
-    return this.#write(
+    return this.#request(
       this.#url(HUMAN_ITEM_PATHS.dismiss(id)),
       humanItemReceiptSchema.parse,
       json("POST", reason?.trim() ? { reason } : {}),
@@ -553,7 +541,7 @@ export class TelemetryClient {
     scope: HostShutdownScope,
     options: ShutdownOptions = {},
   ): Promise<ShutdownReport> {
-    return this.#write(
+    return this.#request(
       this.#url(API_V2_PATHS.shutdown),
       shutdownReportSchema.parse,
       json("POST", { scope, ...shutdownBody(options) }),
@@ -631,17 +619,6 @@ export class TelemetryClient {
         return new EventSource(sourceUrl);
       });
     return create(url.toString());
-  }
-
-  /** A person's write: a request whose acceptance the listeners are told of. */
-  async #write<T>(
-    url: URL,
-    parse: (value: unknown) => T,
-    init: RequestInit,
-  ): Promise<T> {
-    const answer = await this.#request(url, parse, init);
-    for (const listener of this.#writeListeners) listener();
-    return answer;
   }
 
   async #request<T>(

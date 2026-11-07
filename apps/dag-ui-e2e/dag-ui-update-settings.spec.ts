@@ -55,6 +55,7 @@ const worldFactsSchema = z.object({
   cwd: z.string(),
   environment: z.record(z.string(), z.string()),
   removed: z.array(z.string()),
+  runs: z.record(z.string(), z.string()),
 });
 
 let server: FixtureServer | undefined;
@@ -651,11 +652,19 @@ test("a person's write and a navigation choice show at once with both areas held
   await choose(page, MAIN, "Off");
   await expect.poll(() => wire.open).toBe(0);
 
+  const streamsBefore = wire.requests.filter((request) =>
+    request.includes(API_V2_PATHS.events),
+  ).length;
   await page.getByRole("button", { name: `Complete: ${title}` }).click();
   await expect(itemCard(page, title)).toHaveCount(0, {
     timeout: PUSH_PATIENCE,
   });
-  expect(wire.mostOpen).toBeLessThanOrEqual(1);
+  // Shown from the write's own receipt: with both off the stream stays closed.
+  await page.waitForTimeout(1_500);
+  expect(wire.open).toBe(0);
+  expect(
+    wire.requests.filter((request) => request.includes(API_V2_PATHS.events)),
+  ).toHaveLength(streamsBefore);
 
   // A filter is a person's act too: its answer shows, held or not.
   await page.getByLabel("Priority", { exact: true }).selectOption("low");
@@ -666,6 +675,55 @@ test("a person's write and a navigation choice show at once with both areas held
   await expect(
     page.getByRole("region", { name: "Host", exact: true }),
   ).toBeVisible();
+});
+
+test("a person's write shows at once while changes nobody made here stay held until released", async ({
+  page,
+}) => {
+  const served = await serveWorld();
+  const run = worldFactsSchema.parse(served.facts).runs.a;
+  if (run === undefined) throw new Error("the queue world launches a run");
+  await page.goto(`${served.origin}/human-items`);
+  const title = "Restore the build service";
+  await expect(itemCard(page, title)).toBeVisible();
+  await expandProjects(page);
+  // The navigation off, the main area on an interval far longer than the journey:
+  // the stream stays open, and both areas hold what it brings.
+  await choose(page, NAVIGATION, "Off");
+  await choose(page, MAIN, "Every 5 minutes");
+  const stateBefore = await rowState(page, run).getAttribute("aria-label");
+  expect(stateBefore).not.toBe("ended-stopped");
+
+  await page.getByRole("button", { name: `Complete: ${title}` }).click();
+  const wrote = Date.now();
+  await expect(itemCard(page, title)).toHaveCount(0);
+
+  // Within the ten seconds after the write, things change that this page did not do.
+  raise(served, "Raised by someone else");
+  stopRun(served, run);
+  await expect(waiting(page, MAIN)).toBeVisible({ timeout: PUSH_PATIENCE });
+  await expect(waiting(page, NAVIGATION)).toBeVisible({
+    timeout: PUSH_PATIENCE,
+  });
+  expect(Date.now() - wrote).toBeLessThan(10_000);
+  await expect(itemCard(page, "Raised by someone else")).toHaveCount(0);
+  await expect(rowState(page, run)).toHaveAccessibleName(stateBefore ?? "");
+  // And still held once any window the write might have opened has passed.
+  await page.waitForTimeout(Math.max(0, wrote + 11_000 - Date.now()));
+  await expect(itemCard(page, "Raised by someone else")).toHaveCount(0);
+  await expect(rowState(page, run)).toHaveAccessibleName(stateBefore ?? "");
+  await expect(itemCard(page, title)).toHaveCount(0);
+  await expect(waiting(page, MAIN)).toBeVisible();
+  await expect(waiting(page, NAVIGATION)).toBeVisible();
+
+  // Released by the person, each area shows what it held.
+  await choose(page, MAIN, "Live");
+  await expect(itemCard(page, "Raised by someone else")).toBeVisible();
+  await expect(itemCard(page, title)).toHaveCount(0);
+  await expect(waiting(page, MAIN)).toHaveCount(0);
+  await choose(page, NAVIGATION, "Live");
+  await expect(rowState(page, run)).toHaveAccessibleName("ended-stopped");
+  await expect(waiting(page, NAVIGATION)).toHaveCount(0);
 });
 
 test("a navigation choice shows the chosen run at once, and a manual Refresh applies what is held", async ({
