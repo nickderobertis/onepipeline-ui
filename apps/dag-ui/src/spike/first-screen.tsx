@@ -82,7 +82,11 @@ function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
     edges: nodes.flatMap((node) =>
       (node.task.deps ?? [])
         .filter((dep) => drawn.has(dep))
-        .map((dep) => ({ id: `${dep}->${node.id}`, source: dep, target: node.id })),
+        .map((dep) => ({
+          id: `${dep}->${node.id}`,
+          source: dep,
+          target: node.id,
+        })),
     ),
   });
   const width = Math.max(...layout.nodes.map((node) => node.x + node.width), 0);
@@ -91,6 +95,7 @@ function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
     0,
   );
   return (
+    // biome-ignore lint/a11y/useSemanticElements: a canvas of positioned cards, not a form group; `fieldset` is for controls.
     <div
       aria-label="DAG execution graph"
       className="first-graph"
@@ -153,7 +158,10 @@ function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
 
 const LANE_COLOURS = ["#5b8def", "#35b39a", "#c98b3b", "#b569c9", "#6f7a8c"];
 
-/** A plotted line over its whole axis, with any stretch not yet held hatched and labelled. */
+/**
+ * A plotted line over its whole axis. A first answer holds every span of the line, so no
+ * stretch is ever unheld and nothing here hatches; a source that held less would have to.
+ */
 function Plot({
   items,
   range,
@@ -161,7 +169,7 @@ function Plot({
 }: {
   readonly items: readonly {
     readonly id: string;
-    readonly laneId: string;
+    readonly laneId?: string;
     readonly start: number;
     readonly end?: number | null;
   }[];
@@ -372,7 +380,10 @@ async function start() {
   const nodeId = params.get("node");
   const answered = await fetch(
     `/api/v2/spike/first-screen?run=${encodeURIComponent(run)}`,
-    { method: "POST", body: view === "overall" ? "overall" : (nodeId ?? "graph") },
+    {
+      method: "POST",
+      body: view === "overall" ? "overall" : (nodeId ?? "graph"),
+    },
   );
   if (!answered.ok) throw new Error(`first answer: ${answered.status}`);
   const answer = (await answered.json()) as FirstAnswer;

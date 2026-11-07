@@ -206,7 +206,10 @@ test("the rest of the run arrives, and a page reads the same rows either side of
   assert.equal(run.code, 0, run.stderr);
   const report = JSON.parse(run.stdout);
   assert.ok(report.complete_read_seconds_after_first_answer > 0);
-  assert.equal(report.before.node_rows.source, "selective read of the node's records");
+  assert.equal(
+    report.before.node_rows.source,
+    "selective read of the node's records",
+  );
   assert.equal(report.after.node_rows.source, "complete read");
   assert.ok(report.before.node_rows.rows > 0);
   assert.deepEqual(report.node_rows_same_rows.differences, []);
@@ -215,6 +218,16 @@ test("the rest of the run arrives, and a page reads the same rows either side of
 });
 
 test("open_current's steps are attributed", async () => {
+  // A corpus holds no checkpoint until a read that resumes from one has written it.
+  const resumed = await harness([
+    "--run",
+    RUN,
+    "--measure",
+    "first-answer-graph",
+    "--first-query",
+    "checkpoint=1",
+  ]);
+  assert.equal(resumed.code, 0, resumed.stderr);
   const run = await harness(["--run", RUN, "--measure", "first-open-current"]);
   assert.equal(run.code, 0, run.stderr);
   const report = JSON.parse(run.stdout);
@@ -224,7 +237,12 @@ test("open_current's steps are attributed", async () => {
 });
 
 test("a run that is not there fails, says so, and leaves no server", async () => {
-  const run = await harness(["--run", "no-such-run", "--measure", "first-answer-graph"]);
+  const run = await harness([
+    "--run",
+    "no-such-run",
+    "--measure",
+    "first-answer-graph",
+  ]);
   assert.equal(run.code, 2);
   assert.match(run.stderr, /first answer: 404/u);
   assert.equal(run.stdout, "");

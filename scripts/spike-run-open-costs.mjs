@@ -1189,7 +1189,9 @@ async function firstPageMeasure(values, server, origin, root) {
       await warming.goto(`${origin}/healthz`);
       await warming.evaluate(async () => {
         const index = await (await fetch("/")).text();
-        const assets = [...index.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/gu)];
+        const assets = [
+          ...index.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/gu),
+        ];
         await Promise.all(assets.map(([, asset]) => fetch(asset)));
       });
       await warming.close();
@@ -1332,10 +1334,16 @@ function classifyFirst(first, complete, path, tally) {
     }
     return;
   }
-  for (const key of new Set([...Object.keys(first), ...Object.keys(complete)])) {
+  for (const key of new Set([
+    ...Object.keys(first),
+    ...Object.keys(complete),
+  ])) {
     if (FIRST_IGNORED.has(key)) continue;
-    const dynamic = path.endsWith(".node_status") || path.endsWith(".node_results") ||
-      path.endsWith(".node_gated_by") || path.endsWith(".node_details") ||
+    const dynamic =
+      path.endsWith(".node_status") ||
+      path.endsWith(".node_results") ||
+      path.endsWith(".node_gated_by") ||
+      path.endsWith(".node_details") ||
       path.endsWith(".node_control");
     const step = `${path}.${dynamic ? "*" : key}`;
     if (!(key in first)) {
@@ -1347,7 +1355,12 @@ function classifyFirst(first, complete, path, tally) {
 }
 
 function newTally() {
-  return { equal: 0, loading: new Map(), different: new Map(), absent: new Map() };
+  return {
+    equal: 0,
+    loading: new Map(),
+    different: new Map(),
+    absent: new Map(),
+  };
 }
 
 /** Spans by id, because a first answer may hold them in another order or fewer of them. */
@@ -1357,10 +1370,15 @@ function classifySpans(first, complete, tally, { eventsWindow }) {
   for (const span of first ?? []) {
     const other = byId.get(span.id);
     if (other === undefined) {
-      const entry = tally.different.get(".timeline.spans[] (only in the first answer)") ?? { count: 0 };
+      const entry = tally.different.get(
+        ".timeline.spans[] (only in the first answer)",
+      ) ?? { count: 0 };
       entry.count += 1;
       entry.sample ??= `${span.id} ${span.kind} ${span.started_at} .. ${span.ended_at}`;
-      tally.different.set(".timeline.spans[] (only in the first answer)", entry);
+      tally.different.set(
+        ".timeline.spans[] (only in the first answer)",
+        entry,
+      );
       continue;
     }
     seen.add(span.id);
@@ -1376,28 +1394,42 @@ function classifySpans(first, complete, tally, { eventsWindow }) {
       firstEvents.forEach((event, at) => {
         const same = held.get(event.journal_order);
         if (same === undefined) {
-          const entry = tally.different.get(".timeline.spans[].events[] (id not in the complete read)") ?? { count: 0 };
+          const entry = tally.different.get(
+            ".timeline.spans[].events[] (id not in the complete read)",
+          ) ?? { count: 0 };
           entry.count += 1;
           entry.sample ??= `${event.id} ${event.kind}`;
-          tally.different.set(".timeline.spans[].events[] (id not in the complete read)", entry);
+          tally.different.set(
+            ".timeline.spans[].events[] (id not in the complete read)",
+            entry,
+          );
         } else {
           if (tail[at]?.journal_order !== event.journal_order) {
-            const entry = tally.different.get(".timeline.spans[].events[] (not the latest rows)") ?? { count: 0 };
+            const entry = tally.different.get(
+              ".timeline.spans[].events[] (not the latest rows)",
+            ) ?? { count: 0 };
             entry.count += 1;
-            tally.different.set(".timeline.spans[].events[] (not the latest rows)", entry);
+            tally.different.set(
+              ".timeline.spans[].events[] (not the latest rows)",
+              entry,
+            );
           }
           classifyFirst(event, same, ".timeline.spans[].events[]", tally);
         }
       });
     } else if (completeEvents?.length) {
-      const entry = tally.absent.get(".timeline.spans[].events[]") ?? { count: 0 };
+      const entry = tally.absent.get(".timeline.spans[].events[]") ?? {
+        count: 0,
+      };
       entry.count += completeEvents.length;
       tally.absent.set(".timeline.spans[].events[]", entry);
     }
   }
   for (const span of complete ?? [])
     if (!seen.has(span.id)) {
-      const entry = tally.absent.get(".timeline.spans[] (only in the complete read)") ?? { count: 0, kinds: {} };
+      const entry = tally.absent.get(
+        ".timeline.spans[] (only in the complete read)",
+      ) ?? { count: 0, kinds: {} };
       entry.count += 1;
       entry.kinds[span.kind] = (entry.kinds[span.kind] ?? 0) + 1;
       entry.sample ??= `${span.id} ${span.kind} ${span.started_at} .. ${span.ended_at}`;
@@ -1443,11 +1475,19 @@ async function completeRead(origin, view, node, run, budget) {
 async function firstContentMeasure(values, server, origin, root) {
   const view = values.measure.slice("first-content-".length);
   const node =
-    view === "node" ? (values.node ?? firstNodeOf(root, values.run)) : undefined;
+    view === "node"
+      ? (values.node ?? firstNodeOf(root, values.run))
+      : undefined;
   const budget = Number(values.timeout);
   const firstRead = await firstAnswer(origin, values, view, node, budget);
   const first = JSON.parse(firstRead.body);
-  const completeReading = await completeRead(origin, view, node, values.run, budget);
+  const completeReading = await completeRead(
+    origin,
+    view,
+    node,
+    values.run,
+    budget,
+  );
   const visible = JSON.parse(completeReading.body).initial.snapshot.visible;
   if (values["keep-answers"]) {
     writeFileSync(`${values["keep-answers"]}.first.json`, firstRead.body);
@@ -1457,7 +1497,12 @@ async function firstContentMeasure(values, server, origin, root) {
     );
   }
   const tally = newTally();
-  classifyFirst(first.detail, visible.detail?.payload ?? visible.detail, ".detail", tally);
+  classifyFirst(
+    first.detail,
+    visible.detail?.payload ?? visible.detail,
+    ".detail",
+    tally,
+  );
   if (view !== "graph")
     classifySpans(
       first.timeline?.spans,
@@ -1491,8 +1536,16 @@ async function firstContentMeasure(values, server, origin, root) {
 async function firstAnswerMeasure(values, server, origin, root) {
   const view = values.measure.slice("first-answer-".length);
   const node =
-    view === "node" ? (values.node ?? firstNodeOf(root, values.run)) : undefined;
-  const read = await firstAnswer(origin, values, view, node, Number(values.timeout));
+    view === "node"
+      ? (values.node ?? firstNodeOf(root, values.run))
+      : undefined;
+  const read = await firstAnswer(
+    origin,
+    values,
+    view,
+    node,
+    Number(values.timeout),
+  );
   const { timings, ...served } = JSON.parse(read.body);
   const raw = Buffer.from(JSON.stringify(served));
   return {
@@ -1513,7 +1566,8 @@ async function firstRestMeasure(values, server, origin, root) {
   const first = await firstAnswer(origin, values, "overall", undefined, budget);
   const { timeline } = JSON.parse(first.body);
   const nodeSpans = timeline.spans.filter((span) => span.node_id === node);
-  const span = (nodeSpans.find((one) => one.kind === "node") ?? nodeSpans[0])?.id;
+  const span = (nodeSpans.find((one) => one.kind === "node") ?? nodeSpans[0])
+    ?.id;
   const page = async (query) => {
     const read = await timed(
       `${origin}/api/v2/spike/page?run=${encodeURIComponent(values.run)}&node=${encodeURIComponent(node)}&${query}`,
@@ -1533,7 +1587,13 @@ async function firstRestMeasure(values, server, origin, root) {
   };
   const spanQuery = `span=${encodeURIComponent(span)}&offset=0&limit=50`;
   const started = performance.now();
-  const complete = completeRead(origin, "overall", undefined, values.run, budget);
+  const complete = completeRead(
+    origin,
+    "overall",
+    undefined,
+    values.run,
+    budget,
+  );
   const before = {
     span_page: await page(spanQuery),
     node_rows: await page("limit=50"),
@@ -1557,8 +1617,14 @@ async function firstRestMeasure(values, server, origin, root) {
     first_answer_seconds: first.seconds,
     complete_read_seconds_after_first_answer: completeSeconds,
     complete_answer_bytes: finished.bytes,
-    before: { span_page: brief(before.span_page), node_rows: brief(before.node_rows) },
-    after: { span_page: brief(after.span_page), node_rows: brief(after.node_rows) },
+    before: {
+      span_page: brief(before.span_page),
+      node_rows: brief(before.node_rows),
+    },
+    after: {
+      span_page: brief(after.span_page),
+      node_rows: brief(after.node_rows),
+    },
     span_page_same_rows: same(before.span_page, after.span_page),
     node_rows_same_rows: same(before.node_rows, after.node_rows),
     server: server.residentKb(),
@@ -1566,7 +1632,7 @@ async function firstRestMeasure(values, server, origin, root) {
 }
 
 /** What `open_current` spends on this run, and what its checkpoint is made of. */
-async function firstOpenCurrentMeasure(values, server, origin, root) {
+async function firstOpenCurrentMeasure(values, _server, origin, root) {
   const read = await timed(
     `${origin}/api/v2/spike/open-current?run=${encodeURIComponent(values.run)}`,
     {},
@@ -1608,7 +1674,9 @@ function firstKinds(values, root) {
     wall_seconds: 0,
     streams: streams.size,
     kinds: Object.fromEntries(
-      Object.entries(kinds).sort((left, right) => right[1].bytes - left[1].bytes),
+      Object.entries(kinds).sort(
+        (left, right) => right[1].bytes - left[1].bytes,
+      ),
     ),
   };
 }
@@ -1818,17 +1886,17 @@ async function main() {
           ? await firstPageMeasure(values, server, origin, root)
           : values.measure.startsWith("first-answer-")
             ? await firstAnswerMeasure(values, server, origin, root)
-          : values.measure.startsWith("first-content-")
-            ? await firstContentMeasure(values, server, origin, root)
-            : values.measure === "first-rest"
-              ? await firstRestMeasure(values, server, origin, root)
-              : values.measure === "first-open-current"
-                ? await firstOpenCurrentMeasure(values, server, origin, root)
-                : values.measure.startsWith("page-")
-          ? await pageMeasure(values, server, origin, root)
-          : values.measure === "status"
-            ? await statusMeasure(values, server, origin)
-            : await subscribeMeasure(values, server, origin, root);
+            : values.measure.startsWith("first-content-")
+              ? await firstContentMeasure(values, server, origin, root)
+              : values.measure === "first-rest"
+                ? await firstRestMeasure(values, server, origin, root)
+                : values.measure === "first-open-current"
+                  ? await firstOpenCurrentMeasure(values, server, origin, root)
+                  : values.measure.startsWith("page-")
+                    ? await pageMeasure(values, server, origin, root)
+                    : values.measure === "status"
+                      ? await statusMeasure(values, server, origin)
+                      : await subscribeMeasure(values, server, origin, root);
       } finally {
         await server.stop();
       }

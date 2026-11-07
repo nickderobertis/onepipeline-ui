@@ -623,7 +623,7 @@ impl Hub {
         let began = Instant::now();
         let view_of_run =
             RunView::spike_selected(&paths, events, options.checkpoint, options.every_edge)
-            .map_err(|_| ApiError::RunNotFound(run.clone()))?;
+                .map_err(|_| ApiError::RunNotFound(run.clone()))?;
         timings.insert("state_ms".into(), millis(began));
 
         let began = Instant::now();

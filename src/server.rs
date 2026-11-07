@@ -167,10 +167,7 @@ async fn spike_first_screen(
 }
 
 #[cfg(feature = "spike-engine-open-current")]
-async fn spike_page(
-    State(serving): Store,
-    Query(raw): Query<HashMap<String, String>>,
-) -> Response {
+async fn spike_page(State(serving): Store, Query(raw): Query<HashMap<String, String>>) -> Response {
     let hub = serving.hub.clone();
     match tokio::task::spawn_blocking(move || hub.spike_page(&raw)).await {
         Ok(Ok(answer)) => Json(answer).into_response(),
