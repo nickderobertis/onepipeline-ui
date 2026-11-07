@@ -1,0 +1,14 @@
+{
+  "runs": 850,
+  "projects": 30,
+  "other_live_runs": 2,
+  "stopped_runs": 10,
+  "open_live_run_records_at_start": 1500,
+  "settled_big_records": 1000,
+  "settled_small_records": 40,
+  "human_item_events_at_start": 71,
+  "human_item_bytes_at_start": 112010,
+  "human_item_raises_at_start": 50,
+  "writes": 40,
+  "write_spacing_s": 3
+}

@@ -1,0 +1,64 @@
+{
+  "name": "dag-ui-read-latency",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/dag-ui-e2e/read-latency",
+  "tags": ["scope:e2e", "type:e2e"],
+  "implicitDependencies": ["dag-ui"],
+  "targets": {
+    "test": {
+      "//": "Fresh timings on a release build, with nothing beside them and its telemetry what `budgets` reads, so never cached: apiServerSurface is among its inputs because that is what it measures. Writes through the real CLI, so it provisions the sibling.",
+      "command": "cargo build --release --locked --features bundled-ui --bin onepipeline-api && npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts",
+      "cache": false,
+      "parallelism": false,
+      "inputs": [
+        "default",
+        "apiServerSurface",
+        "{workspaceRoot}/apps/dag-ui-e2e/load/corpus.mjs",
+        "{workspaceRoot}/apps/dag-ui-e2e/load/journal.ts",
+        "{workspaceRoot}/apps/dag-ui-e2e/load/output.mjs",
+        "platform"
+      ],
+      "outputs": ["{projectRoot}/telemetry/read-latency.json"],
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        },
+        {
+          "projects": ["dag-ui"],
+          "target": "build-api-server"
+        },
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
+        }
+      ]
+    },
+    "budgets": {
+      "//": "Telemetry-only: the budgets read what `test` just recorded and measure nothing themselves.",
+      "command": "node_modules/.bin/onebudgetspec check apps/dag-ui-e2e/read-latency/budgets.yaml",
+      "cache": false,
+      "dependsOn": ["test"]
+    },
+    "lint": {
+      "command": "node node_modules/@biomejs/biome/bin/biome check apps/dag-ui-e2e/read-latency && npx eslint --max-warnings 0 apps/dag-ui-e2e/read-latency",
+      "inputs": ["manifestText"]
+    },
+    "typecheck": {
+      "command": "npx tsc -p apps/dag-ui-e2e/read-latency/tsconfig.json --noEmit"
+    },
+    "format": {
+      "command": "node node_modules/@biomejs/biome/bin/biome check --write --linter-enabled=false apps/dag-ui-e2e/read-latency"
+    },
+    "format-check": {
+      "command": "node node_modules/@biomejs/biome/bin/biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false apps/dag-ui-e2e/read-latency",
+      "inputs": ["manifestText"]
+    },
+    "check": {
+      "//": "The default check plus budgets, so test-linux's tier reaches both by target name.",
+      "executor": "nx:noop",
+      "dependsOn": ["format-check", "lint", "typecheck", "test", "budgets"]
+    }
+  }
+}

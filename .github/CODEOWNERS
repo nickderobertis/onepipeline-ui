@@ -36,6 +36,7 @@
 /apps/dag-ui/            @nickderobertis
 # The journeys are their own project: they drive the built app rather than being
 # part of it, and they carry their own AGENTS.md.
+/apps/dag-ui-e2e/read-latency/ @nickderobertis
 /apps/dag-ui-e2e/        @nickderobertis
 # The bundle-cache proof: its own project so a crate-only change never selects it.
 /apps/dag-ui-build-cache/ @nickderobertis

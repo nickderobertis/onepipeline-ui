@@ -266,8 +266,9 @@ killed.
 
 The sidebar's **Action items** entry opens `/human-items`, a page of its own beside
 the Host page: the host-wide queue of tasks and questions the engine's human-item
-contract describes, read and written through the `/api/human-items` routes. Its
-layout, keyboard model, density target and what it is proven against are in
+contract describes. It is read as the `human-items` view of the tab's one subscription,
+so a change made anywhere arrives on the stream the tab already holds, and written
+through the `/api/human-items` routes. Its layout, keyboard model, density target and what it is proven against are in
 [`docs/human-items.md`](human-items.md); the journeys are
 `apps/dag-ui-e2e/dag-ui-human-items.spec.ts`.
 

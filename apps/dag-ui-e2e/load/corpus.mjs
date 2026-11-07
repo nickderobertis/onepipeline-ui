@@ -18,7 +18,7 @@
  * text (`output.mjs`), so it compresses as a real host's does.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { receiptFor } from "./journal.ts";
@@ -40,8 +40,8 @@ export const OTHER_LIVE_RUNS = Array.from(
 );
 export const LIVE_NODE = "dashboard";
 export const OTHER_LIVE_NODE = "work";
-export const projectOf = (index) =>
-  `local-md:load-project-${String(index % PROJECTS).padStart(2, "0")}`;
+export const projectOf = (index, projects = PROJECTS) =>
+  `local-md:load-project-${String(index % projects).padStart(2, "0")}`;
 
 const HOST = "a-recording-host";
 const stamp = (millis) => new Date(millis).toISOString();
@@ -290,10 +290,34 @@ const SCALES = {
   },
 };
 
-/** Write the whole corpus under `root`; returns what the harness needs to know. */
+/**
+ * A scale another tier's `workload.json` declares, read from its `path`: this
+ * generator's shapes and names at the size that tier's budgets are stated over.
+ */
+function scaleOfWorkload(path) {
+  const declared = JSON.parse(readFileSync(path, "utf8"));
+  return {
+    openLiveRecords: declared.open_live_run_records_at_start,
+    otherLive: declared.other_live_runs,
+    stopped: declared.stopped_runs,
+    runs: declared.runs,
+    projects: declared.projects,
+    settledBig: declared.settled_big_records,
+    settledSmall: declared.settled_small_records,
+  };
+}
+
+/**
+ * Write the whole corpus under `root`; returns what the harness needs to know.
+ * `scaleName` is one of {@link SCALES}, or the path of a `workload.json`.
+ */
 export function buildLoadCorpus(root, scaleName = "host") {
-  const scale = SCALES[scaleName];
+  const scale = scaleName.endsWith(".json")
+    ? scaleOfWorkload(scaleName)
+    : SCALES[scaleName];
   if (scale === undefined) throw new Error(`no corpus scale ${scaleName}`);
+  const projects = scale.projects ?? PROJECTS;
+  const projectOfRun = (at) => projectOf(at, projects);
   const otherLiveRuns = OTHER_LIVE_RUNS.slice(0, scale.otherLive);
   mkdirSync(root, { recursive: true });
   const now = Date.now();
@@ -313,7 +337,7 @@ export function buildLoadCorpus(root, scaleName = "host") {
   writeRun(
     root,
     OPEN_LIVE_RUN,
-    projectOf(index++),
+    projectOfRun(index++),
     "live",
     openNodes,
     perNode,
@@ -325,7 +349,7 @@ export function buildLoadCorpus(root, scaleName = "host") {
     writeRun(
       root,
       runId,
-      projectOf(index++),
+      projectOfRun(index++),
       "live",
       ["prepare", "build", OTHER_LIVE_NODE],
       scale === SCALES.host ? 400 : 20,
@@ -337,7 +361,7 @@ export function buildLoadCorpus(root, scaleName = "host") {
     writeRun(
       root,
       `load-stopped-${String(stopped).padStart(2, "0")}`,
-      projectOf(index++),
+      projectOfRun(index++),
       "stopped",
       ["prepare", "build", "publish"],
       // The opened stopped run is mid-sized; the rest are this host's median.
@@ -353,7 +377,7 @@ export function buildLoadCorpus(root, scaleName = "host") {
     writeRun(
       root,
       `load-settled-${String(settled).padStart(3, "0")}`,
-      projectOf(index++),
+      projectOfRun(index++),
       "settled",
       ["prepare", "build", "publish"],
       big ? scale.settledBig : scale.settledSmall,
@@ -363,7 +387,7 @@ export function buildLoadCorpus(root, scaleName = "host") {
   }
   return {
     runs: scale.runs,
-    projects: Math.min(PROJECTS, scale.runs),
+    projects: Math.min(projects, scale.runs),
     openLiveRun: OPEN_LIVE_RUN,
     openLiveRecords: scale.openLiveRecords,
     settledRun: SETTLED_OPEN_RUN,
@@ -382,8 +406,11 @@ if (
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
   const [root, scale = "host"] = process.argv.slice(2);
-  if (root === undefined || (scale !== "host" && scale !== "journey")) {
-    console.error("usage: corpus.mjs ROOT [host|journey]");
+  if (
+    root === undefined ||
+    (scale !== "host" && scale !== "journey" && !scale.endsWith(".json"))
+  ) {
+    console.error("usage: corpus.mjs ROOT [host|journey|WORKLOAD.json]");
     process.exit(2);
   }
   console.log(JSON.stringify(buildLoadCorpus(root, scale)));
