@@ -41,11 +41,16 @@ const budget = () =>
   );
 
 // GitHub's listing and deletion as these scripts use them: `key` filters by prefix, pages
-// hold 100, and a deleted id answers 404 from then on.
-async function github(entries) {
+// hold 100, and a deleted id answers 404 from then on. The options are what a pull request's
+// token and a real listing bring: `refused` answers those reads 403, and `ties` is the sort
+// fields GitHub reorders equal entries under from one request to the next, as it did to
+// same-size pages in onepipeline-ui's run 42365784060.
+async function github(entries, { refused = [], ties = [] } = {}) {
   const state = {
     entries: structuredClone(entries),
     deleted: [],
+    served: new Map(),
+    reads: 0,
     nextId: 90000000000,
     clock: Date.parse("2026-11-08T00:00:00Z"),
   };
@@ -59,26 +64,36 @@ async function github(entries) {
       response.end(body === undefined ? "" : JSON.stringify(body));
     };
     const base = `/repos/${REPO}/actions/cache`;
+    if (refused.includes(url.pathname.slice(base.length)))
+      return answer(403, { message: "Resource not accessible by integration" });
     if (url.pathname === `${base}/storage-limit`)
       return answer(200, recorded.storage_limit);
     if (url.pathname === `${base}s` && request.method === "GET") {
+      state.reads++;
       const key = url.searchParams.get("key") ?? "";
       const field = url.searchParams.get("sort");
       const descending = url.searchParams.get("direction") === "desc";
       const sized = field === "size_in_bytes";
+      const tieBreak = (entry) =>
+        ties.includes(field ?? "created_at")
+          ? entry.id * (state.reads % 2 ? 1 : -1)
+          : 0;
       const matched = state.entries
         .filter((entry) => entry.key.startsWith(key))
         .sort((a, b) => {
           const order = sized
             ? a.size_in_bytes - b.size_in_bytes
             : Date.parse(a.created_at) - Date.parse(b.created_at);
-          return descending ? -order : order;
+          return (descending ? -order : order) || tieBreak(a) - tieBreak(b);
         });
       const size = Number(url.searchParams.get("per_page") ?? 30);
       const page = Number(url.searchParams.get("page") ?? 1);
+      const listed = matched.slice((page - 1) * size, page * size);
+      for (const { id } of listed)
+        state.served.set(id, (state.served.get(id) ?? 0) + 1);
       return answer(200, {
         total_count: matched.length,
-        actions_caches: matched.slice((page - 1) * size, page * size),
+        actions_caches: listed,
       });
     }
     const id = Number(url.pathname.split("/").at(-1));
@@ -134,8 +149,12 @@ async function cleanup(name, host) {
 }
 async function headroom(host, scratch) {
   const out = join(scratch, `headroom-${Date.now()}-${Math.random()}.json`);
+  await runHeadroom(host, out);
+  return JSON.parse(readFileSync(out, "utf8"));
+}
+function runHeadroom(host, out) {
   const [command, ...args] = budget().command;
-  await run(command, args, {
+  return run(command, args, {
     env: {
       ...process.env,
       GITHUB_API_URL: host.api,
@@ -144,7 +163,6 @@ async function headroom(host, scratch) {
       ONEBUDGETSPEC_RESULT: out,
     },
   });
-  return JSON.parse(readFileSync(out, "utf8"));
 }
 
 test("a warm leg's own cleanup command deletes superseded copies and keeps main's newest", async () => {
@@ -308,6 +326,88 @@ test("the budget's own command reads 0 when a family it names holds more than a 
       after.value,
       Math.round(((10737418240 - listed) / 1e9) * 1000) / 1000,
     );
+  } finally {
+    await host.close();
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+// Entries the budget's command names no family for, all one size. Timestamps differ as real
+// ones do, down to the microsecond, unless `at` holds them equal too.
+const SHARED_SIZE = 5000000;
+const sameSize = (count, at = (index) => 1000 + index) =>
+  Array.from({ length: count }, (_, index) => ({
+    id: index + 1,
+    ref: "refs/heads/main",
+    key: `nx-cache-${(index + 1).toString(16).padStart(4, "0")}`,
+    version: "recorded-shape",
+    created_at: new Date(
+      Date.parse("2026-11-07T00:00:00Z") + at(index),
+    ).toISOString(),
+    last_accessed_at: "2026-11-07T12:00:00Z",
+    size_in_bytes: SHARED_SIZE,
+  }));
+const headroomScratch = () =>
+  mkdtempSync(
+    join(
+      process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(),
+      "cleanup-headroom-",
+    ),
+  );
+const STATED_ALLOWANCE =
+  /allowance: 10737418240 bytes \(GitHub's stated 10 GiB allowance; actions\/cache\/storage-limit answered HTTP 403\)/;
+
+test("the budget's own command writes a figure when the limit read is refused and a listing's sizes tie", async () => {
+  const scratch = headroomScratch();
+  const entries = sameSize(250);
+  const host = await github(entries, {
+    refused: ["/storage-limit"],
+    ties: ["size_in_bytes"],
+  });
+  try {
+    const { value, detail } = await headroom(host, scratch);
+    assert.equal(value, 9.487, detail);
+    assert.match(detail, STATED_ALLOWANCE);
+    assert.match(detail, /results: 250 entries, 1250000000 bytes/);
+    assert.deepEqual(
+      entries.map(({ id }) => host.state.served.get(id)),
+      entries.map(() => 1),
+      "every entry is read exactly once",
+    );
+  } finally {
+    await host.close();
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("the budget's own command counts each entry once when timestamps tie as well as sizes", async () => {
+  const scratch = headroomScratch();
+  const host = await github(
+    sameSize(250, () => 0),
+    {
+      refused: ["/storage-limit"],
+      ties: ["size_in_bytes", "created_at"],
+    },
+  );
+  try {
+    const { value, detail } = await headroom(host, scratch);
+    assert.equal(value, 9.487, detail);
+    assert.match(detail, /results: 250 entries, 1250000000 bytes/);
+  } finally {
+    await host.close();
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("the budget's own command writes no figure when the listing is refused along with the limit", async () => {
+  const scratch = headroomScratch();
+  const host = await github(sameSize(3), {
+    refused: ["/storage-limit", "s"],
+  });
+  const out = join(scratch, "headroom.json");
+  try {
+    await assert.rejects(runHeadroom(host, out), /answered HTTP 403/);
+    assert.equal(existsSync(out), false);
   } finally {
     await host.close();
     rmSync(scratch, { recursive: true, force: true });
