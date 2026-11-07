@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.70.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.69.0...v0.70.0) - 2026-11-07
+
+### Fixed
+
+- *(deps)* [**breaking**] state that the read API's surface follows the linked onepipeline release ([#678](https://github.com/nickderobertis/onepipeline-ui/pull/678))
+- *(deps)* link the engine that rewrites private-destination reference links ([#675](https://github.com/nickderobertis/onepipeline-ui/pull/675))
+
 ## [0.69.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.68.1...v0.69.0) - 2026-11-06
 
 ### Fixed
