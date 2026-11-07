@@ -10,6 +10,13 @@ one approval: `{"repository": "owner/name", "options": [...], "issues": {NAME:
 {"number": N, "title": T, "content": C, "metadata": {...}, "status": OPTION,
 "state": "OPEN" | "CLOSED", "reason": null | REASON, "parent": NAME | null}}}`.
 """
+import faulthandler
+
+# A board that has not listened after this long prints where it is to stderr, which
+# the test run shows beside its failure. The reader in `github_board.rs` waits longer:
+# this says where a stall was; that wait decides whether it is a hang.
+faulthandler.dump_traceback_later(10)
+
 import argparse
 import json
 import os
@@ -466,4 +473,5 @@ save()
 # reads it before its URL is in it.
 (root / "endpoint.partial").write_text(f"http://127.0.0.1:{server.server_port}")
 os.replace(root / "endpoint.partial", root / "endpoint")
+faulthandler.cancel_dump_traceback_later()
 server.serve_forever()
