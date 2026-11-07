@@ -26,6 +26,10 @@
     "blocked": {
       "total": 0,
       "plans": []
+    },
+    "reopen": {
+      "available": false,
+      "reason": "the item is open, so there is nothing to reopen"
     }
   },
   "event_id": "human-items:5"

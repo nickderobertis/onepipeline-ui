@@ -71,6 +71,19 @@ export type HumanItemAction =
       readonly actor: string;
       readonly on_behalf_of: string | null;
       readonly action: "dismiss";
+    }
+  | {
+      readonly id: string;
+      readonly actor: string;
+      readonly on_behalf_of: string | null;
+      readonly action: "reopen";
+    }
+  | {
+      readonly id: string;
+      readonly text: string;
+      readonly actor: string;
+      readonly on_behalf_of: string | null;
+      readonly action: "note";
     };
 export type HumanItemFilter = {
   readonly kind?: HumanItemKind | null;
@@ -85,11 +98,13 @@ export type HumanItemFilter = {
 export type HumanItemView = {
   readonly item: HumanItem;
   readonly blocked: HumanItemBlocked;
+  readonly reopen: HumanItemReopen;
 };
 export type HumanItemDetail = {
   readonly item: HumanItem;
   readonly blocked: HumanItemBlocked;
   readonly nodes: readonly HumanItemNode[];
+  readonly reopen: HumanItemReopen;
 };
 export type HumanItemReceipt = {
   readonly item: HumanItemView;
@@ -108,6 +123,7 @@ export type HumanItemEventPayload = {
   readonly action: HumanItemEventAction;
   readonly item: HumanItem;
   readonly resolution: HumanItemResolution | null;
+  readonly by?: HumanItemEventBy | null;
 };
 export type PhaseContext = {
   readonly schema_version?: number | null;
@@ -141,7 +157,13 @@ export type HumanItemEventAction =
   | "human-item-answered"
   | "human-item-completed"
   | "human-item-dismissed"
-  | "human-item-auto-resolved";
+  | "human-item-auto-resolved"
+  | "human-item-reopened"
+  | "human-item-noted";
+export type HumanItemEventBy = {
+  readonly actor: string;
+  readonly on_behalf_of: string | null;
+};
 export type HumanItemKind = "task" | "question";
 export type HumanItemNode = {
   readonly run: string;
@@ -152,6 +174,10 @@ export type HumanItemOwner = {
   readonly session: string;
   readonly run: string | null;
   readonly plan: string | null;
+};
+export type HumanItemReopen = {
+  readonly available: boolean;
+  readonly reason: string | null;
 };
 export type HumanItemResolution = {
   readonly actor: string;

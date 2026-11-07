@@ -33,6 +33,10 @@
     "blocked": {
       "total": 0,
       "plans": []
+    },
+    "reopen": {
+      "available": false,
+      "reason": "an answered question cannot be reopened"
     }
   },
   "event_id": "human-items:6"
