@@ -1,0 +1,96 @@
+name: Cache demonstration
+
+# DO NOT MERGE. The altered warm legs built cold, as a lock or toolchain move would build
+# them, measured and saving nothing: rust-cache `save-if: false`, setup-bun `no-cache`, and
+# the size comes from rust-cache's own save run against a dead address. No test runs, and
+# ci.yml is off on this branch.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  demo:
+    name: cold ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-latest
+            line: ci-warm-linux
+          - os: windows
+            runner: windows-latest
+            line: ci-warm-windows
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEMO_SHARED_KEY: test-${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Read the pinned tool versions
+        id: tool-pins
+        run: |
+          tr -d '\r' < .github/ci-tool-versions | awk '
+            /^#/ || !NF { next }
+            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
+            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
+          ' >> "$GITHUB_OUTPUT"
+      - name: Take rust-cache's state before anything is installed
+        run: node scripts/warm-demo.mjs state
+      - uses: Swatinem/rust-cache@v2.9.2
+        id: rust-cache
+        with:
+          shared-key: test-${{ matrix.os }}
+          save-if: false
+      - name: Drop the restored build, as an inexact restore does
+        run: rm -rf target
+      - name: Read the MSRV from Cargo.toml
+        if: matrix.os == 'linux'
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        if: matrix.os == 'linux'
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.tool-pins.outputs.node }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+          no-cache: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
+      - name: Bootstrap
+        run: just bootstrap
+      - name: Build the base commit's server
+        if: matrix.os == 'linux'
+        run: bash scripts/nx.sh run onepipeline-ui:ensure-baseline
+      - name: Build the browser view the binary embeds
+        run: just build
+      - name: Cold warm lines
+        run: just ${{ matrix.line }}
+      - name: rust-cache's own cleanup and archive, against a dead address
+        run: node scripts/warm-demo.mjs save
+      - name: What the kept tree holds
+        run: du -sh target target/* ~/.cargo/registry ~/.cargo/bin 2>/dev/null || true
+      - name: Remember each unit after the cleanup
+        run: node scripts/warm-demo.mjs snapshot
+      - name: Warm lines again over what would be restored
+        run: just ${{ matrix.line }}
+      - name: What that rebuilt
+        run: node scripts/warm-demo.mjs rebuilt
