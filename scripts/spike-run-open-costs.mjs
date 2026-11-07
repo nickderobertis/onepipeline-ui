@@ -59,6 +59,10 @@
  *                    the answer to the mark. --client today|trimmed (default trimmed),
  *                    --cache warm|cold (default warm: the bundle already in the HTTP cache),
  *                    --server warm|fresh (default warm: one sidebar read answered).
+ *                    The mark holds what is on screen to the complete read of a server of
+ *                    its own, stopped before the browser starts; --moving relaxes that for
+ *                    a run still appending, and --corrupt-answer NAME serves the browser
+ *                    one named value wrong, for the journeys that hold the mark to it.
  *   first-answer-graph, first-answer-overall, first-answer-node
  *                    that first answer alone, at the API: its seconds, bytes and steps.
  *   first-content-graph, first-content-overall, first-content-node
@@ -93,6 +97,7 @@ import { request as httpRequest } from "node:http";
 import { createRequire } from "node:module";
 import { cpus, loadavg, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { gzipSync } from "node:zlib";
 
@@ -142,6 +147,8 @@ const CAUSES = {
 const FIRST_PAGE_MEASURES = ["first-graph", "first-overall", "first-node"];
 /** The switches a first answer's server runs with; the complete read beside it too. */
 const FIRST_PROTOTYPES = "first-screen,session-index,heap-merge,lazy-activity";
+/** How many of a node's latest transcript rows its mark holds to the complete read. */
+const LATEST_ROWS_CHECKED = 10;
 
 /** Thrown, so the `finally` that stops the server this started still runs. */
 function fail(message) {
@@ -172,6 +179,8 @@ function options() {
       "trace-exec": { type: "boolean", default: false },
       "baseline-prototype": { type: "string" },
       client: { type: "string", default: "trimmed" },
+      moving: { type: "boolean", default: false },
+      "corrupt-answer": { type: "string" },
       cache: { type: "string", default: "warm" },
       server: { type: "string", default: "warm" },
       "first-query": { type: "string", default: "" },
@@ -1037,25 +1046,202 @@ async function pageMeasure(values, server, origin, root) {
 }
 
 /**
- * Runs in the page: resolves `window.__firstMark` the moment the rendered DOM shows the
- * view's first screen, on both clients. A hidden card is not a card: the flow canvas lays
- * its nodes out invisibly until it has measured them.
+ * What the mark must find on screen, from the complete read of a server of its own, stopped
+ * before the browser starts, through the real app's own view models. So the mark holds the
+ * client to the complete read rather than to the answer it drew from, on both clients, and
+ * the measured server has answered nothing it would not have.
  */
-function installMark({ view, run, cards }) {
+async function expectedAtMark(values, view, node, root, scratch) {
+  const started = performance.now();
+  const oracle = new Server(
+    { ...values, prototype: FIRST_PROTOTYPES },
+    root,
+    mkdtempSync(join(scratch, "oracle-")),
+  );
+  let visible;
+  try {
+    const origin = await oracle.listening();
+    // The complete read's own budget: a mark's timeout is about the page, not this.
+    const budget = Math.max(Number(values.timeout), 300);
+    const read = await completeRead(origin, view, node, values.run, budget);
+    visible = JSON.parse(read.body).initial.snapshot.visible;
+  } finally {
+    await oracle.stop();
+  }
+  const detail = visible.detail?.payload ?? visible.detail;
+  const timeline = visible.timeline?.payload ?? visible.timeline;
+  const models = await viewModels();
+  const expected = models.expect(view, node, detail, timeline);
+  await models.close();
+  return { expected, seconds: (performance.now() - started) / 1000 };
+}
+
+/** The app's own models, loaded the way its tests load them. */
+async function viewModels() {
+  const ui = join(REPO, "apps/dag-ui");
+  const require = createRequire(join(ui, "package.json"));
+  const { createServer } = await import(
+    pathToFileURL(require.resolve("vite")).href
+  );
+  const vite = await createServer({
+    root: ui,
+    configFile: join(ui, "vite.config.ts"),
+    appType: "custom",
+    logLevel: "silent",
+    optimizeDeps: { noDiscovery: true },
+    server: { middlewareMode: true, hmr: false, ws: false },
+  });
+  const load = (path) => vite.ssrLoadModule(path);
+  const run = await load("/src/lib/run-model.ts");
+  const time = await load("/src/lib/time.ts");
+  const line = await load("/src/features/timeline/graph-timeline.ts");
+  const model = await load("/src/features/timeline/timeline-model.ts");
+  const percent = (time_, range) =>
+    ((time_ - range[0]) / Math.max(range[1] - range[0], 1)) * 100;
+  const expect = (view, node, detail, timeline) => {
+    const nodes = run.nodeViews(detail);
+    if (view === "graph")
+      return {
+        cards: nodes.map((one) => ({
+          label: one.label,
+          state: one.status,
+          reason: run.isUnhealthy(one.status)
+            ? (run.nodeReason(one) ?? null)
+            : null,
+          awaits: run.awaitedLine(one) ?? null,
+        })),
+      };
+    if (view === "overall") {
+      const graph = line.graphTimeline(timeline, nodes);
+      const wall = detail.run.timing.wall_seconds;
+      return {
+        hero: detail.run.phase,
+        status: detail.run.state,
+        nodes: detail.run.nodes.length,
+        wall: wall === null ? "not measured" : time.formatDurationSeconds(wall),
+        wall_seconds: wall,
+        turns: detail.run.turns,
+        line: graph.line.items
+          .filter((item) => (item.end ?? graph.range[1]) > item.start)
+          .map((item) => ({
+            from: percent(item.start, graph.range),
+            to: percent(item.end ?? graph.range[1], graph.range),
+          })),
+      };
+    }
+    const opened = nodes.find((one) => one.id === node);
+    if (!opened) fail(`${node} is on no card of this run's graph`);
+    const projection = model.nodeTimelineV2(timeline, node);
+    return {
+      label: opened.label,
+      state: opened.status,
+      plotted_spans: projection.items.filter(
+        (item) => item.end !== undefined && item.end !== null,
+      ).length,
+      rows: model
+        .transcriptEntries(projection.tree, new Set())
+        .flatMap((entry) =>
+          entry.entryKind === "row" ? [entry.row.displayLabel] : [],
+        )
+        .slice(-LATEST_ROWS_CHECKED),
+    };
+  };
+  return { expect, close: () => vite.close() };
+}
+
+/**
+ * Runs in the page: resolves `window.__firstMark` the moment the rendered DOM shows the
+ * view's first screen with the values the complete read expects, on both clients. A hidden
+ * card is not a card: the flow canvas lays its nodes out invisibly until it has measured
+ * them. `window.__presenceMark` is when the view's parts first merely existed, which is all
+ * an earlier form of this mark asked, and what says whether strengthening it moved a figure.
+ * `moving` is a run still appending, whose values the page may read newer than the complete
+ * read did: there a settled node holds to its value and everything else to its direction.
+ */
+function installMark({ view, run, cards, expected, moving, readAt }) {
   const visible = (element) => {
     for (let at = element; at; at = at.parentElement)
       if (getComputedStyle(at).visibility === "hidden") return false;
     return true;
   };
-  const header = () =>
-    document.querySelector('[aria-label="Run header"] h2')?.textContent === run;
-  const checks = {
+  const text = (root, selector) =>
+    root?.querySelector(selector)?.textContent?.trim() ?? null;
+  const SETTLED = new Set([
+    "done",
+    "failed",
+    "skipped",
+    "blocked",
+    "complete-but-draft",
+    "complete-but-held",
+  ]);
+  /** The plotted spans of a plot on either client, as percent of its axis. */
+  const plotted = (root) => {
+    if (!root) return [];
+    const trimmed = [...root.querySelectorAll("[data-first-plot] rect")].map(
+      (rect) => {
+        const x = Number(rect.getAttribute("x"));
+        return {
+          from: x / 10,
+          to: (x + Number(rect.getAttribute("width"))) / 10,
+        };
+      },
+    );
+    if (trimmed.length > 0) return trimmed;
+    return [...root.querySelectorAll('[data-timeline-shape="span"]')].map(
+      (span) => {
+        const from = Number.parseFloat(span.parentElement?.style.left ?? "");
+        return { from, to: from + Number.parseFloat(span.style.width) };
+      },
+    );
+  };
+  const TOLERANCE = 0.6;
+  /** What is wrong with a line that has to run over the whole axis. */
+  const lineUnmet = (spans) => {
+    if (spans.length === 0) return ["the line has no spans"];
+    const sorted = [...spans].sort((a, b) => a.from - b.from);
+    const unmet = [];
+    if (sorted[0].from > TOLERANCE)
+      unmet.push(`the line starts at ${sorted[0].from.toFixed(1)}%`);
+    let reached = sorted[0].to;
+    for (const span of sorted) {
+      if (span.from - reached > 1)
+        unmet.push(
+          `the line has a gap at ${reached.toFixed(1)}% to ${span.from.toFixed(1)}%`,
+        );
+      reached = Math.max(reached, span.to);
+    }
+    if (reached < 100 - TOLERANCE)
+      unmet.push(`the line ends at ${reached.toFixed(1)}%`);
+    return unmet;
+  };
+  const metric = (metrics, name) => {
+    const tile = metrics?.querySelector(`[aria-label="${name}"] strong`);
+    const held =
+      tile ??
+      [...(metrics?.querySelectorAll("dl") ?? [])]
+        .find((one) => one.querySelector("dt")?.textContent === name)
+        ?.querySelector("dd");
+    return {
+      value: held?.textContent?.trim() ?? null,
+      loading: Boolean(held?.querySelector('[aria-busy="true"]')),
+    };
+  };
+  const seconds = (duration) => {
+    const units = { d: 86400, h: 3600, m: 60, s: 1 };
+    return [...(duration ?? "").matchAll(/(\d+)([dhms])/gu)].reduce(
+      (sum, [, count, unit]) => sum + Number(count) * units[unit],
+      0,
+    );
+  };
+  /** Whether a view's parts exist, whatever they say. */
+  const present = {
     graph: () => {
       const shown = [...document.querySelectorAll("article.dag-node")].filter(
         visible,
       );
       return (
-        header() &&
+        document.querySelector('[aria-label="Run header"] h2')?.textContent ===
+          run &&
         shown.length >= cards &&
         shown.every((card) => card.querySelector(".node-status")?.textContent)
       );
@@ -1074,26 +1260,184 @@ function installMark({ view, run, cards }) {
         )
       );
     },
-    node: () => {
-      const section = document.querySelector('[aria-label^="Timeline for "]');
-      return (
-        Boolean(section?.querySelector(".node-view-state")?.textContent) &&
-        Boolean(
-          document.querySelector(
-            '[aria-label="Node timeline"] svg, [aria-label="Node timeline"] button',
-          ),
-        ) &&
-        Boolean(
-          document.querySelector(
-            '[aria-label="Node transcript"] .transcript-item',
-          ),
-        )
+    node: () =>
+      Boolean(document.querySelector(".node-view-state")?.textContent) &&
+      Boolean(
+        document.querySelector(
+          '[aria-label="Node timeline"] svg, [aria-label="Node timeline"] button',
+        ),
+      ) &&
+      Boolean(
+        document.querySelector(
+          '[aria-label="Node transcript"] .transcript-item',
+        ),
+      ),
+  };
+  /** What the screen does not yet say of what it must. Empty is the mark. */
+  const unmet = {
+    graph: () => {
+      const problems = [];
+      if (
+        document.querySelector('[aria-label="Run header"] h2')?.textContent !==
+        run
+      )
+        problems.push("the run header");
+      const shown = new Map(
+        [...document.querySelectorAll("article.dag-node")]
+          .filter(visible)
+          .map((card) => [text(card, "strong"), card]),
       );
+      if (!moving && shown.size !== expected.cards.length)
+        problems.push(`${shown.size} of ${expected.cards.length} cards`);
+      for (const want of expected.cards) {
+        const card = shown.get(want.label);
+        if (!card) {
+          problems.push(`no card for ${want.label}`);
+          continue;
+        }
+        const state = text(card, ".node-status");
+        if (moving && !SETTLED.has(want.state)) {
+          if (!state) problems.push(`${want.label} has no state`);
+          continue;
+        }
+        if (state !== want.state)
+          problems.push(`${want.label} state ${state}, not ${want.state}`);
+        const reason = text(card, ".node-reason");
+        if (reason !== want.reason)
+          problems.push(`${want.label} reason ${reason}, not ${want.reason}`);
+        const awaits = text(card, ".node-awaits");
+        if (awaits !== want.awaits)
+          problems.push(`${want.label} awaits ${awaits}, not ${want.awaits}`);
+      }
+      return problems;
+    },
+    overall: () => {
+      const problems = [];
+      if (text(document, ".overall-hero h2") !== run)
+        problems.push("the hero's run");
+      if (
+        !moving &&
+        !document
+          .querySelector(".overall-hero")
+          ?.textContent?.includes(expected.hero)
+      )
+        problems.push(`the hero's phase ${expected.hero}`);
+      const metrics = document.querySelector('[aria-label="Run metrics"]');
+      const status = metric(metrics, "Status");
+      if (status.loading || !status.value) problems.push("Status has no value");
+      else if (!moving && status.value !== expected.status)
+        problems.push(`Status ${status.value}, not ${expected.status}`);
+      const count = metric(metrics, "Nodes");
+      if (
+        count.loading ||
+        !(moving
+          ? Number(count.value) >= expected.nodes
+          : Number(count.value) === expected.nodes && count.value !== null)
+      )
+        problems.push(`Nodes ${count.value}, not ${expected.nodes}`);
+      const wall = metric(metrics, "Wall time");
+      const elapsed = (Date.now() - readAt) / 1000;
+      if (
+        wall.loading ||
+        !(moving
+          ? seconds(wall.value) >= (expected.wall_seconds ?? 0) - 120 &&
+            seconds(wall.value) <= (expected.wall_seconds ?? 0) + elapsed + 120
+          : wall.value === expected.wall)
+      )
+        problems.push(`Wall time ${wall.value}, not ${expected.wall}`);
+      const turns = metric(metrics, "Turns");
+      if (!turns.loading) {
+        const shown = Number(turns.value);
+        if (
+          turns.value === null ||
+          turns.value === "" ||
+          !(moving ? shown >= expected.turns : shown === expected.turns)
+        )
+          problems.push(
+            `Turns ${turns.value}, neither ${expected.turns} nor marked loading`,
+          );
+      } else if (turns.value !== "loading")
+        problems.push(`Turns reads ${turns.value} while marked loading`);
+      const spans = plotted(document.querySelector(".graph-timeline"));
+      problems.push(...lineUnmet(spans));
+      if (!moving) {
+        if (spans.length !== expected.line.length)
+          problems.push(
+            `${spans.length} spans on the line, not ${expected.line.length}`,
+          );
+        const left = [...spans];
+        for (const want of expected.line) {
+          const at = left.findIndex(
+            (span) =>
+              Math.abs(span.from - want.from) <= TOLERANCE &&
+              Math.abs(span.to - want.to) <= TOLERANCE,
+          );
+          if (at === -1)
+            problems.push(
+              `no span at ${want.from.toFixed(1)}% to ${want.to.toFixed(1)}%`,
+            );
+          else left.splice(at, 1);
+        }
+      }
+      return problems;
+    },
+    node: () => {
+      const problems = [];
+      const section = document.querySelector(
+        `[aria-label="Timeline for ${expected.label}"]`,
+      );
+      if (!section) problems.push(`no timeline for ${expected.label}`);
+      if (text(section, ".breadcrumb-node") !== expected.label)
+        problems.push(`the heading is not ${expected.label}`);
+      const state = text(section, ".node-view-state");
+      if (
+        !state ||
+        ((!moving || SETTLED.has(expected.state)) && state !== expected.state)
+      )
+        problems.push(`state ${state}, not ${expected.state}`);
+      const plot = plotted(
+        section?.querySelector('[aria-label="Node timeline"]'),
+      );
+      if (
+        plot.length === 0 ||
+        (!moving && plot.length < expected.plotted_spans)
+      )
+        problems.push(
+          `${plot.length} spans on the plot, not ${expected.plotted_spans}`,
+        );
+      const rows = [
+        ...document.querySelectorAll(
+          '[aria-label="Node transcript"] .transcript-item',
+        ),
+      ].map((row) => row.getAttribute("aria-label"));
+      if (rows.length === 0 || expected.rows.length === 0)
+        problems.push("no transcript rows");
+      if (moving) {
+        // Newer rows may follow these: they have to be there, in their order.
+        let from = 0;
+        for (const want of expected.rows) {
+          const at = rows.indexOf(want, from);
+          if (at === -1) {
+            problems.push(`no latest row ${want}`);
+            break;
+          }
+          from = at + 1;
+        }
+      } else {
+        const tail = rows.slice(-expected.rows.length);
+        if (JSON.stringify(tail) !== JSON.stringify(expected.rows))
+          problems.push(
+            `latest rows ${JSON.stringify(tail)}, not ${JSON.stringify(expected.rows)}`,
+          );
+      }
+      return problems;
     },
   };
-  const check = checks[view];
   const look = () => {
-    if (window.__firstMark !== undefined || !check()) return;
+    if (window.__firstMark !== undefined || !present[view]()) return;
+    window.__presenceMark ??= performance.now();
+    window.__unmet = unmet[view]();
+    if (window.__unmet.length > 0) return;
     window.__firstMark = performance.now();
     window.__cardsAtMark = document.querySelectorAll("article.dag-node").length;
     observer.disconnect();
@@ -1109,6 +1453,122 @@ function installMark({ view, run, cards }) {
     if (window.__firstMark === undefined) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
+}
+
+/**
+ * A wrong or missing value in a read's answer, by name, for the journeys that hold the mark
+ * to refusing one. `parts` is the answer's `detail` and `timeline`, edited in place.
+ */
+const CORRUPTIONS = {
+  "graph-state": ({ detail }) => {
+    const [id] = Object.keys(detail.graph.node_status);
+    detail.graph.node_status[id] =
+      detail.graph.node_status[id] === "done" ? "running" : "done";
+  },
+  "graph-reason": ({ detail }) => {
+    detail.graph.node_gated_by = {};
+    for (const node of detail.run.nodes) {
+      delete node.failure;
+      delete node.outcome;
+    }
+    for (const result of Object.values(detail.graph.node_results ?? {})) {
+      delete result.blocked_by;
+      delete result.detail;
+      delete result.error;
+      delete result.outcome;
+    }
+    for (const result of Object.values(detail.graph.result?.results ?? {})) {
+      delete result.detail;
+      delete result.error;
+      delete result.outcome;
+    }
+  },
+  "graph-awaits": ({ detail }) => {
+    for (const result of Object.values(detail.graph.node_results ?? {}))
+      delete result.awaiting;
+  },
+  "overall-status": ({ detail }) => {
+    detail.run.state = "not-this-state";
+  },
+  "overall-nodes": ({ detail }) => {
+    detail.run.nodes.pop();
+  },
+  "overall-wall": ({ detail }) => {
+    detail.run.timing.wall_seconds += 3600;
+  },
+  "overall-turns": ({ detail }) => {
+    detail.run.turns = 987654;
+  },
+  "overall-short-line": ({ timeline }) => {
+    timeline.spans = timeline.spans.slice(
+      0,
+      Math.ceil(timeline.spans.length / 2),
+    );
+  },
+  "overall-no-line": ({ timeline }) => {
+    timeline.spans = [];
+  },
+  "node-state": ({ detail }, node) => {
+    detail.graph.node_status[node] =
+      detail.graph.node_status[node] === "done" ? "failed" : "done";
+  },
+  "node-heading": ({ detail }, node) => {
+    detail.graph.plan.tasks = detail.graph.plan.tasks.filter(
+      (task) => task.id !== node,
+    );
+  },
+  "node-latest-rows": ({ timeline }, node) => {
+    for (const span of timeline.spans)
+      if (span.node_id === node) span.events = span.events?.slice(0, -15);
+  },
+  "node-plot": ({ timeline }, node) => {
+    timeline.spans = timeline.spans.filter((span) => span.node_id !== node);
+  },
+};
+
+/** A client's defect rather than a read's, run in the page: a line that stops short. */
+function lineStopsShort() {
+  const cut = () => {
+    for (const rect of document.querySelectorAll("[data-first-plot] rect"))
+      if (
+        Number(rect.getAttribute("x")) + Number(rect.getAttribute("width")) >
+        500
+      )
+        rect.remove();
+  };
+  new MutationObserver(cut).observe(document, {
+    childList: true,
+    subtree: true,
+  });
+}
+
+/** Serve a browser's read of the run with one named value wrong. */
+async function corruptReads(page, name, node) {
+  if (name === "overall-line-stops-short") {
+    await page.addInitScript(lineStopsShort);
+    return;
+  }
+  const corrupt = CORRUPTIONS[name];
+  if (!corrupt)
+    fail(
+      `--corrupt-answer is one of ${Object.keys(CORRUPTIONS).join(", ")}, overall-line-stops-short, not ${name}`,
+    );
+  const unwrap = (part) => part?.payload ?? part;
+  await page.route(
+    /\/api\/v2\/(spike\/first-screen|subscriptions)/u,
+    async (route) => {
+      const answer = await route.fetch();
+      const body = await answer.json();
+      const parts = body.initial?.snapshot?.visible ?? body;
+      if (parts.detail) {
+        corrupt(
+          { detail: unwrap(parts.detail), timeline: unwrap(parts.timeline) },
+          node,
+        );
+      }
+      await route.fulfill({ response: answer, json: body });
+    },
+  );
 }
 
 /** What the mark's page shows, so a figure names the DOM state it timed. */
@@ -1147,8 +1607,21 @@ function shownAtMark({ view }) {
   };
 }
 
+/** How much of each kind of value a mark held to the complete read. */
+function checkedAtMark(view, expected) {
+  if (view === "graph")
+    return {
+      cards: expected.cards.length,
+      reasons: expected.cards.filter((card) => card.reason).length,
+      awaits: expected.cards.filter((card) => card.awaits).length,
+    };
+  if (view === "overall")
+    return { metrics: 4, line_spans: expected.line.length };
+  return { plotted_spans: expected.plotted_spans, rows: expected.rows.length };
+}
+
 /** One first-screen measurement: navigation start to the mark, in a real browser. */
-async function firstPageMeasure(values, server, origin, root) {
+async function firstPageMeasure(values, server, origin, root, scratch) {
   const require = createRequire(join(REPO, "apps/dag-ui-e2e/package.json"));
   const { chromium } = require("@playwright/test");
   const view = values.measure.slice("first-".length);
@@ -1164,6 +1637,8 @@ async function firstPageMeasure(values, server, origin, root) {
     ? (JSON.parse(readFileSync(planPath, "utf8")).tasks?.length ?? 0)
     : 1;
   const budget = Number(values.timeout) * 1000;
+  const oracle = await expectedAtMark(values, view, node, root, scratch);
+  const readAt = Date.now();
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext();
@@ -1197,7 +1672,16 @@ async function firstPageMeasure(values, server, origin, root) {
       await warming.close();
     }
     const page = await context.newPage();
-    await page.addInitScript(installMark, { view, run: values.run, cards });
+    if (values["corrupt-answer"])
+      await corruptReads(page, values["corrupt-answer"], node);
+    await page.addInitScript(installMark, {
+      view,
+      run: values.run,
+      cards,
+      expected: oracle.expected,
+      moving: values.moving,
+      readAt,
+    });
     const started = performance.now();
     await page.goto(`${origin}${address}`, { waitUntil: "commit" });
     await page
@@ -1207,7 +1691,13 @@ async function firstPageMeasure(values, server, origin, root) {
       })
       .catch(async (error) => {
         const text = await page.locator("body").innerText();
-        fail(`no ${view} mark: ${error.message}\n${text.slice(-500)}`);
+        const said = await page.evaluate(() => ({
+          present: window.__presenceMark !== undefined,
+          unmet: window.__unmet ?? [],
+        }));
+        fail(
+          `no ${view} mark: ${error.message}\nparts present: ${said.present}; unmet: ${JSON.stringify(said.unmet.slice(0, 8))}\n${text.slice(-500)}`,
+        );
       });
     const walled = (performance.now() - started) / 1000;
     const timing = await page.evaluate(() => {
@@ -1235,6 +1725,7 @@ async function firstPageMeasure(values, server, origin, root) {
         }));
       return {
         mark: window.__firstMark,
+        presence: window.__presenceMark,
         cards_at_mark: window.__cardsAtMark,
         reads,
         assets,
@@ -1264,7 +1755,12 @@ async function firstPageMeasure(values, server, origin, root) {
       client: values.client,
       cache: values.cache,
       server_state: values.server,
+      moving: values.moving,
       wall_seconds: seconds(timing.mark),
+      presence_mark_seconds: seconds(timing.presence),
+      mark_after_presence_seconds: seconds(timing.mark - timing.presence),
+      expected_read_seconds: oracle.seconds,
+      checked: checkedAtMark(view, oracle.expected),
       navigation_to_post_start_seconds: seconds(first.start),
       post_seconds: seconds(answered.end - first.start),
       answer_to_mark_seconds: seconds(timing.mark - answered.end),
@@ -1883,7 +2379,7 @@ async function main() {
         // The client's own first-fetch set-up is not the read's cost.
         await fetch(`${origin}/healthz`).then((answer) => answer.text());
         result = FIRST_PAGE_MEASURES.includes(values.measure)
-          ? await firstPageMeasure(values, server, origin, root)
+          ? await firstPageMeasure(values, server, origin, root, scratch)
           : values.measure.startsWith("first-answer-")
             ? await firstAnswerMeasure(values, server, origin, root)
             : values.measure.startsWith("first-content-")

@@ -4,17 +4,28 @@
 //   node --test spikes/first-screen/harness.test.mjs
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, test } from "node:test";
+import { pathToFileURL } from "node:url";
 
 const REPO = resolve(import.meta.dirname, "../..");
 const HARNESS = join(REPO, "scripts/spike-run-open-costs.mjs");
 const CORPUS = join(REPO, "apps/dag-ui-e2e/load/corpus.mjs");
+const FIXTURES = join(REPO, "apps/dag-ui-e2e/fixtures/runs.mjs");
 const RUN = "load-live-open";
 let work;
 let root;
+let fixtureRoot;
+let awaitingRun;
+let outcomesRun;
 
 /** One run of the command; what it printed and every server it left alive. */
 function harness(args) {
@@ -60,7 +71,7 @@ function serversOf(pid) {
   return alive;
 }
 
-before(() => {
+before(async () => {
   work = mkdtempSync(
     join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(), "first-screen-"),
   );
@@ -71,6 +82,13 @@ before(() => {
     { encoding: "utf8" },
   );
   assert.equal(written.status, 0, written.stderr);
+  // The app's own journey fixtures: runs whose nodes really hold a reason or await a release.
+  fixtureRoot = join(work, "fixture-runs");
+  mkdirSync(fixtureRoot, { recursive: true });
+  const fixtures = await import(pathToFileURL(FIXTURES).href);
+  fixtures.buildRuns(fixtureRoot, work);
+  awaitingRun = fixtures.AWAITING_RUN;
+  outcomesRun = fixtures.OUTCOMES_RUN;
 });
 
 after(() => rmSync(work, { recursive: true, force: true }));
@@ -157,6 +175,137 @@ test("today's client reaches the same marks through the complete read", async ()
       assert.equal(report.cards_at_mark, report.graph_cards);
     assert.deepEqual(run.leftAlive, []);
   }
+});
+
+/**
+ * A mark never reached over one wrong value, naming it, and reached again the moment the
+ * answer is restored: the same command, the same server code, the same browser.
+ */
+async function refusedThenRestored(args, wrong) {
+  for (const [name, says] of wrong) {
+    const run = await harness([
+      ...args,
+      "--corrupt-answer",
+      name,
+      "--timeout",
+      "4",
+    ]);
+    assert.notEqual(run.code, 0, `${name} reached its mark`);
+    assert.match(run.stderr, /no \w+ mark/u, name);
+    assert.match(run.stderr, says, name);
+    assert.deepEqual(run.leftAlive, [], name);
+  }
+  const restored = await harness(args);
+  assert.equal(restored.code, 0, restored.stderr);
+  assert.deepEqual(restored.leftAlive, []);
+  return JSON.parse(restored.stdout);
+}
+
+test("Graph's mark refuses a wrong state, and passes restored", async () => {
+  const report = await refusedThenRestored(
+    ["--run", RUN, "--measure", "first-graph"],
+    [["graph-state", /state \w+, not \w+/u]],
+  );
+  assert.ok(report.checked.cards > 0);
+});
+
+test("Graph's mark refuses a missing reason, and passes restored", async () => {
+  const report = await refusedThenRestored(
+    [
+      "--runs-root",
+      fixtureRoot,
+      "--run",
+      outcomesRun,
+      "--measure",
+      "first-graph",
+    ],
+    [["graph-reason", /reason .+, not /u]],
+  );
+  assert.ok(report.checked.reasons > 0, "the fixture holds a real reason");
+  assert.equal(report.shown.reasons, report.checked.reasons);
+});
+
+test("Graph's mark refuses a missing awaits line, and passes restored", async () => {
+  const report = await refusedThenRestored(
+    [
+      "--runs-root",
+      fixtureRoot,
+      "--run",
+      awaitingRun,
+      "--measure",
+      "first-graph",
+    ],
+    [["graph-awaits", /awaits null, not awaits /u]],
+  );
+  assert.ok(report.checked.awaits > 0, "the fixture holds a real awaits line");
+  assert.equal(report.shown.awaits, report.checked.awaits);
+});
+
+test("Overall's mark refuses wrong metrics and a line short of the axis, and passes restored", async () => {
+  const report = await refusedThenRestored(
+    ["--run", RUN, "--measure", "first-overall"],
+    [
+      ["overall-status", /Status not-this-state, not /u],
+      ["overall-nodes", /Nodes \d+, not \d+/u],
+      ["overall-wall", /Wall time .+, not /u],
+      ["overall-turns", /Turns 987654, neither \d+ nor marked loading/u],
+      ["overall-short-line", /spans on the line, not|no span at/u],
+      ["overall-no-line", /spans on the line, not/u],
+      ["overall-line-stops-short", /the line (ends at|has a gap)/u],
+    ],
+  );
+  assert.ok(report.checked.line_spans > 0);
+  assert.match(report.shown.metrics, /Turnsloading/u);
+});
+
+test("a node's mark refuses a wrong state, heading, plot or latest row, and passes restored", async () => {
+  const report = await refusedThenRestored(
+    ["--run", RUN, "--measure", "first-node"],
+    [
+      ["node-state", /state \w+, not \w+/u],
+      ["node-heading", /parts present: false/u],
+      ["node-plot", /parts present: false|spans on the plot/u],
+      ["node-latest-rows", /latest rows /u],
+    ],
+  );
+  assert.ok(report.checked.rows > 0);
+  assert.ok(report.checked.plotted_spans > 0);
+});
+
+test("today's client is held to the same values, and passes restored", async () => {
+  const report = await refusedThenRestored(
+    ["--run", RUN, "--measure", "first-overall", "--client", "today"],
+    [["overall-wall", /Wall time .+, not /u]],
+  );
+  assert.match(report.shown.metrics, /Turns\d+/u);
+});
+
+test("a node the run does not hold fails before a browser opens", async () => {
+  const run = await harness([
+    "--run",
+    RUN,
+    "--measure",
+    "first-node",
+    "--node",
+    "no-such-node",
+  ]);
+  assert.notEqual(run.code, 0);
+  assert.match(run.stderr, /no node no-such-node/u);
+  assert.deepEqual(run.leftAlive, []);
+});
+
+test("an unknown corruption is refused", async () => {
+  const run = await harness([
+    "--run",
+    RUN,
+    "--measure",
+    "first-graph",
+    "--corrupt-answer",
+    "nonsense",
+  ]);
+  assert.notEqual(run.code, 0);
+  assert.match(run.stderr, /--corrupt-answer is one of/u);
+  assert.deepEqual(run.leftAlive, []);
 });
 
 test("each first answer's values agree with the complete read, in the three groups", async () => {
@@ -249,7 +398,7 @@ test("a run that is not there fails, says so, and leaves no server", async () =>
   assert.deepEqual(run.leftAlive, []);
 });
 
-test("a browser that never reaches the mark fails and leaves no server", async () => {
+test("a run the complete read cannot answer fails before a browser opens", async () => {
   const run = await harness([
     "--run",
     "no-such-run",
@@ -259,7 +408,7 @@ test("a browser that never reaches the mark fails and leaves no server", async (
     "5",
   ]);
   assert.equal(run.code, 2);
-  assert.match(run.stderr, /no graph mark/u);
+  assert.match(run.stderr, /run_not_found/u);
   assert.deepEqual(run.leftAlive, []);
 });
 

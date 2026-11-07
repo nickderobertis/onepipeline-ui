@@ -2,7 +2,7 @@
 # Every measurement the first-screen report states, each one invocation of
 # scripts/spike-run-open-costs.mjs, written to OUT/<name>.json. A figure already written is
 # kept, so an interrupted pass resumes. One pass: each is taken once, with its load.
-#   matrix.sh first|content|today|extra|quiet OUT REAL_ROOT SMALL_RUN LIVE_RUN LARGEST_RUN CORPUS_ROOT LIVE_NODE [LARGEST_NODE REPLANNED_NODE]
+#   matrix.sh first|content|today|extra|quiet|strong OUT REAL_ROOT SMALL_RUN LIVE_RUN LARGEST_RUN CORPUS_ROOT LIVE_NODE [LARGEST_NODE REPLANNED_NODE]
 set -uo pipefail
 lane=$1 out=$2 root=$3 small=$4 live=$5 largest=$6 corpus=$7 live_node=$8 largest_node=${9:-} replanned_node=${10:-}
 repo=$(cd "$(dirname "$0")/../.." && pwd)
@@ -23,7 +23,7 @@ each() { # each _ FUNCTION: small, live, largest, corpus
     case $label in
       small) "$2" "$label" "${R[@]}" --run "$small" ;;
       # A running node of the graph: the last one dispatched may have been replanned away.
-      live) "$2" "$label" "${R[@]}" --run "$live" --node "$live_node" ;;
+      live) "$2" "$label" "${R[@]}" --run "$live" --node "$live_node" --moving ;;
       largest) "$2" "$label" "${R[@]}" --run "$largest" ;;
       corpus) "$2" "$label" "${C[@]}" --run "$corpus_run" ;;
     esac
@@ -81,7 +81,24 @@ quiet() {
   m first.overall.largest.quiet "${run[@]}" --measure first-overall --timeout 120
   m first.node.corpus.quiet "${C[@]}" --run "$corpus_run" --measure first-node --timeout 120
 }
+# Every view and run once on each client under the mark as strengthened: its report says when
+# the parts first existed and when the values were right, which is whether a figure moved.
+strong() {
+  local name
+  strong_views() {
+    name=$1; shift
+    for view in graph overall node; do
+      m "first.$view.$name" "$@" --measure "first-$view" --timeout 120
+      [ "${STRONG_TODAY:-1}" = 1 ] && m "today.$view.$name" "$@" --measure "first-$view" --client today --timeout 900
+    done
+  }
+  each x strong_views
+  local run=(--runs-root "$root" --cwd "$(dirname "$root")" --run "$largest")
+  m first.node.largest-node "${run[@]}" --node "$largest_node" --measure first-node --timeout 120
+  [ "${STRONG_TODAY:-1}" = 1 ] && m today.node.largest-node "${run[@]}" --node "$largest_node" --measure first-node --client today --timeout 900
+}
 case $lane in
+  strong) strong ;;
   quiet) quiet ;;
   extra) extra ;;
   first) each x views_first ;;
