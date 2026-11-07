@@ -8,6 +8,10 @@ import {
 import { expect, test } from "@playwright/test";
 import { startFixtureServer } from "./fixture-server";
 import { appendRecords } from "./load/journal";
+import {
+  expandProjects,
+  navigationTakesRowsLive,
+} from "./observatory-locators";
 
 test("groups effective labels and copy origins, filters open kinds in the URL, and orders by activity", async ({
   page,
@@ -53,12 +57,15 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
     expect(
       projects.projects.find((group) => group.project === main?.group)?.runs,
     ).toHaveLength(6);
+    await navigationTakesRowsLive(page);
     await page.goto(server.origin);
     await expect(page).toHaveURL(/run=project-follow-ups/);
     const nav = page.getByRole("navigation", { name: "Projects" });
-    await expect(
-      nav.getByRole("button", { name: "Open project-centric", exact: true }),
-    ).toBeVisible();
+    const openProject = nav.getByRole("button", {
+      name: /^project-centric \d+ shown runs$/,
+    });
+    await expect(openProject).toBeVisible();
+    await nav.getByText(/^Run kinds:/).click();
     await expect(
       nav.getByRole("group", { name: "Run kinds", exact: true }),
     ).toBeVisible();
@@ -79,7 +86,7 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
       name: "Project project-centric",
       exact: true,
     });
-    await expect(group.getByRole("button")).toHaveCount(7);
+    await expect(group.getByRole("button")).toHaveCount(8);
     await expect(group.getByRole("note")).toHaveText([
       "follow-ups",
       "design",
@@ -88,31 +95,31 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
       "spikes",
       "planning",
     ]);
-    await group.getByText("project-centric", { exact: true }).click();
+    // A reader may close the selected run's project; a Refresh leaves it closed.
+    await group
+      .getByRole("button", { name: "Collapse project-centric", exact: true })
+      .click();
     await expect(
-      group.getByRole("button", { name: "Open project-centric", exact: true }),
-    ).not.toBeVisible();
+      group.getByRole("button", { name: /project-main main/ }),
+    ).toHaveCount(0);
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(
-      group.getByRole("button", { name: "Open project-centric", exact: true }),
-    ).not.toBeVisible();
-    await group.getByText("project-centric", { exact: true }).click();
-    await expect(
-      group.getByRole("button", { name: "Open project-centric", exact: true }),
-    ).toBeVisible();
+      group.getByRole("button", { name: /project-main main/ }),
+    ).toHaveCount(0);
+    await group
+      .getByRole("button", { name: "Expand project-centric", exact: true })
+      .click();
     await expect(
       group.getByRole("button", { name: /project-main main/ }),
     ).toBeVisible();
-    const rows = await group.getByRole("button").allTextContents();
+    const rows = await group.locator(".run-link").allTextContents();
     expect(
-      rows
-        .slice(1)
-        .map(
-          (text) =>
-            text.match(
-              /^project-(follow-ups|design|finalize|main|spikes|planning)/,
-            )?.[1],
-        ),
+      rows.map(
+        (text) =>
+          text.match(
+            /^project-(follow-ups|design|finalize|main|spikes|planning)/,
+          )?.[1],
+      ),
     ).toEqual([
       "follow-ups",
       "design",
@@ -121,9 +128,7 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
       "spikes",
       "planning",
     ]);
-    await nav
-      .getByRole("button", { name: "Open project-centric", exact: true })
-      .focus();
+    await openProject.focus();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/run=project-follow-ups/);
     await page.getByText("Run details", { exact: true }).click();
@@ -145,6 +150,8 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
     filteredLanding.searchParams.delete("run");
     await page.goto(filteredLanding.href);
     await expect(page).toHaveURL(/run=project-design/);
+    await nav.getByText(/^Run kinds:/).click();
+    await expandProjects(page);
     for (const kind of ["planning", "spikes", "follow-ups"]) {
       await expect(
         nav.getByRole("checkbox", { name: kind, exact: true }),
@@ -173,9 +180,6 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
     ).toBeVisible();
     for (const kind of ["main", "finalize", "design"])
       await nav.getByRole("checkbox", { name: kind, exact: true }).uncheck();
-    await expect(
-      group.getByRole("button", { name: "Open project-centric", exact: true }),
-    ).toBeDisabled();
     await expect(group.getByRole("status")).toHaveText(
       "No runs of the shown kinds.",
     );
@@ -186,9 +190,7 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
         .first(),
     ).toBeVisible();
     await nav.getByRole("checkbox", { name: "design", exact: true }).check();
-    await expect(
-      group.getByRole("button", { name: "Open project-centric", exact: true }),
-    ).toBeEnabled();
+    await expect(group.getByRole("status")).toHaveCount(0);
     const ordering = nav.getByRole("group", {
       name: "Project ordering",
       exact: true,
@@ -201,16 +203,10 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
       "order-undated-old",
     ];
     for (const [index, id] of expectedOrder.entries())
-      await expect(ordering.getByRole("button").nth(index + 1)).toContainText(
-        id,
-      );
-    await ordering
-      .getByRole("button", { name: "Open ordering", exact: true })
-      .click();
+      await expect(ordering.locator(".run-link").nth(index)).toContainText(id);
+    await ordering.getByRole("button", { name: /shown runs$/ }).click();
     await expect(page).toHaveURL(/run=order-tied-active/);
-    await nav
-      .getByRole("button", { name: "Open project-centric", exact: true })
-      .click();
+    await openProject.click();
     const oldRun = join(server.workspace, "runs/project-planning/events.jsonl");
     appendRecords(oldRun, [
       {
@@ -228,10 +224,9 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
     await expect(
       nav.getByRole("group", { name: "Project project-centric", exact: true }),
     ).toBeVisible();
+    await nav.getByText(/^Run kinds:/).click();
     await nav.getByRole("checkbox", { name: "planning", exact: true }).check();
-    await nav
-      .getByRole("button", { name: "Open project-centric", exact: true })
-      .click();
+    await openProject.click();
     await expect(page).toHaveURL(/run=project-design/);
     const path = join(server.workspace, "runs/project-unfamiliar/events.jsonl");
     appendRecords(path, [
@@ -259,9 +254,7 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
     await expect(
       page.getByRole("alert").filter({ hasText: "Live telemetry issue" }),
     ).toHaveCount(0);
-    await expect(
-      nav.getByRole("button", { name: "Open project-centric", exact: true }),
-    ).toBeVisible();
+    await expect(openProject).toBeVisible();
   } finally {
     await server.stop();
   }

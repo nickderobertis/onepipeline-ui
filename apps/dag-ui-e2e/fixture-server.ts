@@ -87,6 +87,8 @@ export const exited = (child: ChildProcess): Promise<void> =>
 export async function startFixtureServer(
   name: string,
   corpusArgs: readonly string[],
+  /** Beside the fixture server's own environment: what this journey's server is told. */
+  env: Readonly<Record<string, string>> = {},
 ): Promise<FixtureServer> {
   // `dag-ui-e2e-…` directly under the temp root: the one shape
   // `serve-fixture.mjs` agrees to remove and rebuild.
@@ -150,7 +152,7 @@ export async function startFixtureServer(
         stdio: ["ignore", "pipe", "inherit"],
         // The main fixture retained the built server before any journeys started.
         // Cargo install can move its output away while this tier is still running.
-        env: { ...process.env, CARGO_TARGET_DIR: FIXTURE_WORKSPACE },
+        env: { ...process.env, CARGO_TARGET_DIR: FIXTURE_WORKSPACE, ...env },
       },
     );
     upstream = await announced(child, name);

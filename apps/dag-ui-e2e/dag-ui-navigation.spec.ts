@@ -15,7 +15,8 @@ import {
 } from "@onepipeline-ui/timeline-categories";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
-import { graphNodes } from "./observatory-locators";
+import { startFixtureServer } from "./fixture-server";
+import { expandProjects, graphNodes } from "./observatory-locators";
 import { DESKTOP, PHONE, VIEWPORTS, type Viewport } from "./viewports";
 
 /**
@@ -109,7 +110,11 @@ async function open(page: Page, size: Viewport, path: string): Promise<void> {
   // the run list beside it, which is the list one toggle away from the projects a
   // bare address opens on.
   await page.goto(`${path}&list=runs`);
-  await expect(navigation(page).locator(".run-link").first()).toBeVisible();
+  // On a phone the navigation is a drawer, closed until it is asked for.
+  if (size.width <= PHONE.width)
+    await expect(page.getByRole("tab", { name: "Graph" })).toBeVisible();
+  else
+    await expect(navigation(page).locator(".run-link").first()).toBeVisible();
 }
 
 for (const size of VIEWPORTS) {
@@ -200,22 +205,29 @@ for (const size of VIEWPORTS) {
 test("offers no kind filter when no served run carries a kind", async ({
   page,
 }) => {
-  await open(page, DESKTOP, `/?run=${runs().live}&view=graph`);
-  // The corpus this file shares records no `kind` label on any run, so a filter
-  // here would be a legend with nothing under it.
-  const served = projectListSchema.parse(
-    await (await page.request.get("/api/v2/projects")).json(),
-  );
-  expect(
-    served.projects.flatMap((group) =>
-      group.runs.flatMap((run) => (run.labels?.kind ? [run.labels.kind] : [])),
-    ),
-  ).toEqual([]);
-  await expect(navigation(page).getByRole("button").first()).toBeVisible();
-  await expect(
-    navigation(page).getByRole("group", { name: "Run kinds" }),
-  ).toHaveCount(0);
-  await expect(navigation(page).getByRole("checkbox")).toHaveCount(0);
+  const server = await startFixtureServer("no-kinds", [
+    "--live-updates-corpus",
+  ]);
+  try {
+    await page.goto(server.origin);
+    // This corpus records no `kind` label on any run, so a filter here would be a
+    // legend with nothing under it.
+    const served = projectListSchema.parse(
+      await (await page.request.get(`${server.origin}/api/v2/projects`)).json(),
+    );
+    expect(
+      served.projects.flatMap((group) =>
+        group.runs.flatMap((run) =>
+          run.labels?.kind ? [run.labels.kind] : [],
+        ),
+      ),
+    ).toEqual([]);
+    await expect(navigation(page).getByRole("button").first()).toBeVisible();
+    await expect(navigation(page).getByText(/^Run kinds/)).toHaveCount(0);
+    await expect(navigation(page).getByRole("checkbox")).toHaveCount(0);
+  } finally {
+    await server.stop();
+  }
 });
 
 for (const size of [DESKTOP, PHONE]) {
@@ -223,6 +235,9 @@ for (const size of [DESKTOP, PHONE]) {
     page,
   }) => {
     await open(page, size, `/?run=${runs().live}&view=graph`);
+    if (size === PHONE)
+      await page.getByRole("button", { name: "Open navigation" }).click();
+    await expandProjects(page);
     const links = navigation(page).locator(".run-link");
     await expect(links).toHaveCount(
       projectListSchema
@@ -230,11 +245,10 @@ for (const size of [DESKTOP, PHONE]) {
         .projects.reduce((count, group) => count + group.runs.length, 0),
     );
     // The run this reader is on is legible rather than ellipsized away: a list no run
-    // can be identified from is not a navigation, at any width. At 160px the id shares
-    // its row with a state pill and a chevron, which left `dag-ui-live` reading `d..`.
+    // can be identified from is not a navigation, at any width.
     const identifier = navigation(page)
       .getByRole("button", { name: RegExp(runs().live) })
-      .locator(".run-link-main span:last-child");
+      .locator(".run-link-name");
     await expect(identifier).toHaveText(runs().live);
     expect(
       await identifier.evaluate(
@@ -276,6 +290,7 @@ test("scrolls the working area without moving the run list", async ({
   // state the two regions have to scroll independently in.
   await open(page, DESKTOP, `/?run=${runs().live}&view=overall`);
   await page.setViewportSize({ width: 1024, height: 700 });
+  await expandProjects(page);
   await expect(page.getByText("Graph timeline")).toBeVisible();
   const workspace = page
     .locator(".overall-view [data-radix-scroll-area-viewport]")

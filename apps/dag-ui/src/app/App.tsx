@@ -229,7 +229,7 @@ export function App({
           drawerRef={drawer.drawer}
           updates={
             <UpdateSetting
-              caption="Navigation updates"
+              caption="Navigation"
               name="Navigation updates"
               onChange={updates.setNavigation}
               setting={updates.navigation}

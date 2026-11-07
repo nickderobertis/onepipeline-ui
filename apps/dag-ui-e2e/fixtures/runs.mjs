@@ -3315,6 +3315,23 @@ export function buildRuns(
   writeSiblingRun(root);
   writeNamedRun(root);
   writeLiveRun(root, checkOrigin);
+  // Kinds among the projects, so the navigation's kind dropdown has something to
+  // offer and its rows something to show.
+  for (const [run, kind] of [
+    [LIVE_RUN, "main"],
+    [SIBLING_RUN, "planning"],
+    [BUSY_RUN, "spikes"],
+    [NAMED_RUN, "follow-ups"],
+    [SUPERVISED_RUN, "main"],
+    [ELSEWHERE_RUN, "field-research"],
+  ])
+    writeJson(join(root, run, "labels.json"), {
+      schema_version: 1,
+      labels: { kind },
+      unlabel: [],
+      set_at: "2026-10-22T00:00:00Z",
+      set_by: { launcher: "journey", session: "journey" },
+    });
 }
 
 /** Everything the fixture wrote, published beside the runs it serves. */
@@ -4454,6 +4471,10 @@ export function writeFailedHeaderRun(root) {
 }
 
 /** A project's six kinds, a copy-origin main, an ungrouped run and an ended legacy run. */
+/** The project-centric corpus's run whose name and kind outgrow their row. */
+const LONG_NAMED_RUN =
+  "a-run-whose-name-is-far-longer-than-any-navigation-row-can-show";
+
 export function buildProjectCentricRuns(root) {
   mkdirSync(root, { recursive: true });
   const project = "local-md:project-centric";
@@ -4505,6 +4526,13 @@ export function buildProjectCentricRuns(root) {
     journal.emit("pipeline", "run-started", { run_id: id }, {});
     journal.write();
   }
+  // A name and a tag longer than a row: the row keeps them aligned on its one line.
+  writeEventlessRun(root, LONG_NAMED_RUN);
+  writeJson(join(root, LONG_NAMED_RUN, "launch.json"), {
+    ...launch(LONG_NAMED_RUN, "a-plain-shell", "", stamp(HISTORIC), 4248),
+    labels: { kind: "a-very-long-kind-of-run-that-outgrows-its-tag" },
+    group: "local-md:long-names",
+  });
   writeEventlessRun(root, "project-ungrouped");
   writeEventlessRun(root, "project-unfamiliar");
   const unfamiliar = join(root, "project-unfamiliar", "launch.json");
@@ -4543,6 +4571,7 @@ export function projectCentricFacts() {
   return {
     project: "local-md:project-centric",
     kinds: ["planning", "spikes", "main", "finalize", "design", "follow-ups"],
+    longNamedRun: LONG_NAMED_RUN,
   };
 }
 

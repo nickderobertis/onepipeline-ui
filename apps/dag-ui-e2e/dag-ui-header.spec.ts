@@ -10,7 +10,7 @@ import { expect, test } from "@playwright/test";
 import { z } from "zod";
 import { runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
-import { VIEWPORTS } from "./viewports";
+import { PHONE, VIEWPORTS } from "./viewports";
 
 /** Read the stream's current activity, then close exactly this subscription. */
 async function currentActivity(origin: string, run: string) {
@@ -101,11 +101,16 @@ for (const viewport of VIEWPORTS) {
       await expect(
         page.getByRole("button", { name: "Shut down the entire host" }),
       ).toHaveCount(0);
+      // The way to the host stays one drawer away on a phone.
+      const phone = viewport.width <= PHONE.width;
+      if (phone)
+        await page.getByRole("button", { name: "Open navigation" }).click();
       await expect(
         page
           .getByRole("navigation")
           .getByRole("button", { name: "Host", exact: true }),
       ).toBeVisible();
+      if (phone) await page.keyboard.press("Escape");
       // The call in the one line the server's resolver describes it in — the
       // command's head, cut to its bound — and never one assembled here.
       expect(namedActivity.description).toBe(`${command.slice(0, 119)}…`);
@@ -121,7 +126,11 @@ for (const viewport of VIEWPORTS) {
         .getByRole("tablist", { name: "DAG views" })
         .boundingBox();
       const headerBox = await header.boundingBox();
-      const controls = await header.getByRole("button").all();
+      // Refresh keeps to the strip of its own a phone gives it, under this row.
+      const controls = await header
+        .getByRole("button")
+        .filter({ hasNotText: "Refresh" })
+        .all();
       const runId = header.getByRole("heading", {
         name: runs().live,
         exact: true,

@@ -512,6 +512,7 @@ test("the sidebar's kinds stay on Action items and a run selected from it leaves
   await page.goto(`${server.origin}/?page=host`);
   const nav = page.getByRole("navigation", { name: "Projects" });
   const kinds = nav.getByRole("group", { name: "Run kinds", exact: true });
+  await nav.getByText(/^Run kinds:/).click();
   // A kind hidden before the page opens is still hidden on it.
   await kinds.getByRole("checkbox", { name: "planning" }).uncheck();
   await nav.getByRole("button", { name: "Action items" }).click();
@@ -529,7 +530,7 @@ test("the sidebar's kinds stay on Action items and a run selected from it leaves
     page.getByRole("heading", { name: "Action items" }),
   ).toBeVisible();
   await nav
-    .getByRole("button", { name: /^Open / })
+    .getByRole("button", { name: /shown runs$/ })
     .first()
     .click();
   await expect(page).not.toHaveURL(/human-items/u);

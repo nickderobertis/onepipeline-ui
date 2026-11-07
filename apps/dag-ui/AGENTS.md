@@ -98,6 +98,18 @@ status** — a run swept between the read that listed it and the read that fetch
 The list route's `missing` does not retire it: different route, and it says nothing
 about a detail read already out.
 
+## What the update settings may and may not do
+
+The stream is applied to the held state as it arrives; `useHeldArea` only decides
+when each area's copy is taken from it. So a hold keeps one value and one count
+however long it lasts, and a timer here is never allowed to send anything: no read
+runs on one, and the load tier's traffic budgets do not know the settings exist.
+`rows` is what says which runs exist and `navigationRows` what the list shows; a
+reader of the first must not be moved to the second, or a hold on the navigation
+would hold what the rest of the page knows. A person's own act is what crosses a
+hold, and every write reaches it through `TelemetryClient.onWrite`, so a new write
+goes through `#write` or it will sit behind a held area.
+
 ## What the backend cannot answer
 
 Some of the client's model has no record behind it. A surface needing one of

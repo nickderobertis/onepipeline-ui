@@ -2227,7 +2227,7 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   line-height: 18px;
   white-space: nowrap;
 }
-.run-nav > * .update-setting {
+.run-nav .update-setting {
   margin-top: 10px;
 }
 .main-updates {
@@ -2358,11 +2358,13 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
      under it, where neither can be pushed off its right edge. */
   .topbar,
   .run-topbar {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: auto minmax(0, auto) minmax(0, 1fr);
+    align-items: center;
     padding-bottom: 0;
   }
   .main-updates {
-    flex: 1 0 100%;
+    grid-column: 1 / -1;
     justify-content: space-between;
     margin: 0 -14px;
     padding: 6px 14px;
@@ -2370,13 +2372,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   }
   .main-updates > button {
     flex: none;
-  }
-  .run-topbar .topbar-title {
-    flex: 1 1 0;
-    max-width: none;
-  }
-  .run-topbar .topbar-actions {
-    flex: 0 1 auto;
   }
 }
 .run-header-details {

@@ -101,10 +101,14 @@ the API, or route those paths to it.
 
 **Projects are the sidebar's one list.** Groups come from `GET /api/v2/projects`,
 most recent activity first, and expand into runs by newest launch first, with undated launches last by activity.
-Opening a project selects its newest visible run. Effective `labels.kind` values
-populate the kind filter from data, including unfamiliar kinds; all are shown by
-default and hidden kinds are kept in repeated `hide-kind` URL parameters. A run
-without a kind carries no badge. Runs without a resolved group sit under **Other
+Each is one row with its count, collapsed but for the selected run's project; its
+chevron opens or closes it and its row selects its newest visible run and opens it.
+A run is one row of state dot, name and kind tag, with its counts in a hover title
+and, on the selected run's row, a second line. Rows that change order travel to
+their new places, unless the reader prefers reduced motion. Effective `labels.kind`
+values populate the one **Run kinds** dropdown from data, including unfamiliar kinds;
+all are shown by default and hidden kinds are kept in repeated `hide-kind` URL
+parameters. A run without a kind carries no badge. Runs without a resolved group sit under **Other
 runs** at the end. Copy-origin and overlay groups are resolved by the engine.
 
 There is no project landing or separate project page. The run id stays in `?run=`;
@@ -112,6 +116,24 @@ its launching session is in **Run details** in the header. **Host** opens the ho
 resources, provider health, dispatches, and runs. Its unwatched count is read on entry
 and **Refresh host**, never on a cadence. Host shutdown lives there alone, with a
 confirmation naming each owner and the number of runs it affects.
+
+At phone width (`max-width: 640px`) the navigation is a drawer over a scrim, closed
+until the top bar's menu button opens it, and the main area has the whole width.
+Choosing a run, Host or Action items closes it, as do Escape and the scrim; a project
+row leaves it open so its runs can be chosen.
+
+**Two update settings, each remembered per browser.** **Navigation updates**, under
+Run kinds, defaults to every 30 seconds, so rows do not jump while being read. **Main
+area updates**, beside Refresh, defaults to Live, so action items appear at once; it
+governs the run view, Action items and the Host page. Each offers Live, an interval
+or Off, and shows how many changes it is holding. These are the page's own: the tab's
+one subscription stream is applied as it arrives and each area shows its copy as its
+setting says, so what is held does not grow, and no read runs on a timer. A person's
+own act shows at once whatever the settings: a choice of view answers its snapshot,
+Refresh shows everything, and an accepted write shows what is held and then, for ten
+seconds, changes as they arrive. With both Off the stream is closed; turning either
+on (or a write) resumes it from the last applied event under `docs/contract.md`'s
+rules, and Refresh takes its one read and leaves it closed.
 
 Select a run, then:
 
@@ -625,7 +647,7 @@ it is the control the rendered gallery offers over them.
 | 1440x900 | a large laptop |
 | 1280x800 | a common laptop |
 | 1024x768 | the smallest desktop layout still in use |
-| 390x844 | a phone — the only entry where the shell's two columns stop fitting |
+| 390x844 | a phone — the only entry where the navigation is a drawer rather than a column |
 
 Both this table and the surface table below are **floors rather than snapshots**. An
 entry may be added to either; an entry removed is a width, or a screen, that the
