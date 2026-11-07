@@ -1,35 +1,34 @@
-import {
-  Badge,
-  Button,
-  cn,
-  ScrollArea,
-  Separator,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@oneharness/ui";
+import { Button, cn, ScrollArea, Separator } from "@oneharness/ui";
 import type { SidebarRow } from "@onepipeline-ui/dag-model";
-import { Activity } from "lucide-react";
+import { Activity, ChevronDown, ChevronRight } from "lucide-react";
+import { type ReactNode, type Ref, useRef } from "react";
 import { stateDotClass } from "../../lib/StateBadge";
 import { rowCountSummary } from "../../lib/sidebar-model";
 import { useProjectNavigation } from "./useProjectNavigation";
+import { ROW_KEY_ATTRIBUTE, useRowMotion } from "./useRowMotion";
 
 /** One project list, with kinds discovered from the engine's effective labels. */
 export function RunNavigation({
   rows,
   selectedRunId,
   onSelect,
+  onOpenProject,
   onHost,
   hostCurrent = false,
   onActionItems,
   actionItemsCurrent = false,
   hiddenKinds,
   onKindsChange,
+  updates,
+  drawerOpen = false,
+  drawerRef,
 }: {
-  /** The sidebar's trimmed rows, as the subscription holds them. */
+  /** The navigation's copy of the sidebar's rows, taken as its setting says. */
   readonly rows?: readonly SidebarRow[];
   readonly selectedRunId?: string;
   readonly onSelect: (runId: string) => void;
+  /** A project row's choice of its newest shown run, which leaves its runs in reach. */
+  readonly onOpenProject?: (runId: string) => void;
   readonly onHost: () => void;
   /** Whether the Host page is the one on screen. */
   readonly hostCurrent?: boolean;
@@ -38,10 +37,28 @@ export function RunNavigation({
   readonly actionItemsCurrent?: boolean;
   readonly hiddenKinds: readonly string[];
   readonly onKindsChange: (kinds: readonly string[]) => void;
+  /** The navigation's own update setting, under the kinds. */
+  readonly updates?: ReactNode;
+  /** Whether this is open over the page, where it is a drawer. */
+  readonly drawerOpen?: boolean;
+  readonly drawerRef?: Ref<HTMLElement>;
 }) {
-  const { kinds, groups } = useProjectNavigation(rows, hiddenKinds, onSelect);
+  const { kinds, groups } = useProjectNavigation(
+    rows,
+    hiddenKinds,
+    selectedRunId,
+    onOpenProject ?? onSelect,
+  );
+  const list = useRef<HTMLDivElement>(null);
+  useRowMotion(list, groups);
   return (
-    <nav aria-label="Projects" className="run-nav">
+    <nav
+      aria-label="Projects"
+      className="run-nav"
+      data-open={drawerOpen}
+      id="run-navigation"
+      ref={drawerRef}
+    >
       <ScrollArea className="h-full">
         <div className="px-[18px] py-6 max-sm:px-2">
           <div className="brand">
@@ -54,115 +71,143 @@ export function RunNavigation({
             </div>
           </div>
           <Separator className="my-[22px]" />
-          <Button
-            aria-current={hostCurrent ? "page" : undefined}
-            onClick={onHost}
-            variant="ghost"
-          >
-            Host
-          </Button>
-          {onActionItems && (
+          <div className="nav-pages">
             <Button
-              aria-current={actionItemsCurrent ? "page" : undefined}
-              onClick={onActionItems}
+              aria-current={hostCurrent ? "page" : undefined}
+              onClick={onHost}
               variant="ghost"
             >
-              Action items
+              Host
             </Button>
-          )}
+            {onActionItems && (
+              <Button
+                aria-current={actionItemsCurrent ? "page" : undefined}
+                onClick={onActionItems}
+                variant="ghost"
+              >
+                Action items
+              </Button>
+            )}
+          </div>
+          {/* In flow rather than a popup: `.run-nav` clips what leaves it. */}
           {kinds.length > 0 && (
-            <fieldset className="kind-filter">
-              <legend>Run kinds</legend>
-              {kinds.map((kind) => (
-                <label key={kind}>
-                  <input
-                    type="checkbox"
-                    checked={!hiddenKinds.includes(kind)}
-                    onChange={(event) =>
-                      onKindsChange(
-                        event.target.checked
-                          ? hiddenKinds.filter((value) => value !== kind)
-                          : [...hiddenKinds, kind],
-                      )
-                    }
-                  />{" "}
-                  {kind}
-                </label>
-              ))}
-            </fieldset>
+            <details className="kind-filter">
+              <summary>
+                <span>
+                  Run kinds:{" "}
+                  {kinds.filter((k) => !hiddenKinds.includes(k)).length} of{" "}
+                  {kinds.length}
+                </span>
+                <ChevronDown aria-hidden="true" size={14} />
+              </summary>
+              <fieldset>
+                <legend className="sr-only">Run kinds</legend>
+                {kinds.map((kind) => (
+                  <label key={kind}>
+                    <input
+                      type="checkbox"
+                      checked={!hiddenKinds.includes(kind)}
+                      onChange={(event) =>
+                        onKindsChange(
+                          event.target.checked
+                            ? hiddenKinds.filter((value) => value !== kind)
+                            : [...hiddenKinds, kind],
+                        )
+                      }
+                    />
+                    {kind}
+                  </label>
+                ))}
+              </fieldset>
+            </details>
           )}
+          {updates}
           {rows === undefined ? (
             <p role="status">Loading projects…</p>
           ) : (
-            groups.map((group) => {
-              const visible = group.runs;
-              return (
-                <details
+            <div className="nav-rows" ref={list}>
+              {groups.map((group) => (
+                <section
                   key={group.key}
-                  open
                   aria-label={`Project ${group.label}`}
                   className="project-group"
+                  role="group"
                 >
-                  <summary>{group.label}</summary>
-                  <Button
-                    className="project-link"
-                    disabled={visible.length === 0}
-                    onClick={group.open}
-                    variant="ghost"
+                  <div
+                    className="project-row"
+                    {...{ [ROW_KEY_ATTRIBUTE]: `project:${group.key}` }}
                   >
-                    Open {group.label}
-                  </Button>
-                  {visible.length === 0 && (
-                    <p role="status">No runs of the shown kinds.</p>
+                    <button
+                      aria-expanded={group.expanded}
+                      aria-label={`${group.expanded ? "Collapse" : "Expand"} ${group.label}`}
+                      className="project-toggle"
+                      onClick={group.toggle}
+                      type="button"
+                    >
+                      <ChevronRight
+                        aria-hidden="true"
+                        data-open={group.expanded}
+                        size={12}
+                      />
+                    </button>
+                    <button
+                      className="project-open"
+                      onClick={group.open}
+                      type="button"
+                    >
+                      <span className="project-name">{group.label}</span>
+                      <span className="project-count">
+                        {group.runs.length}
+                        <span className="sr-only"> shown runs</span>
+                      </span>
+                    </button>
+                  </div>
+                  {group.expanded && group.runs.length === 0 && (
+                    <p className="run-list-status" role="status">
+                      No runs of the shown kinds.
+                    </p>
                   )}
-                  <div className="run-list">
-                    {visible.map((run) => (
-                      <button
-                        aria-current={
-                          selectedRunId === run.id ? "page" : undefined
-                        }
-                        className="run-link"
-                        data-active={selectedRunId === run.id}
-                        key={run.id}
-                        onClick={() => onSelect(run.id)}
-                        type="button"
-                      >
-                        <span className="run-link-main">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span
-                                role="img"
-                                aria-label={run.state}
-                                className={cn(
-                                  "run-dot",
-                                  stateDotClass(run.state),
-                                )}
-                              />
-                            </TooltipTrigger>
-                            <TooltipContent>{run.state}</TooltipContent>
-                          </Tooltip>
-                          <span>{run.name}</span>
+                  {group.expanded &&
+                    group.runs.map((run) => {
+                      const selected = selectedRunId === run.id;
+                      const reading = [run.state, rowCountSummary(run)]
+                        .filter(Boolean)
+                        .join(" · ");
+                      return (
+                        <button
+                          aria-current={selected ? "page" : undefined}
+                          className="run-link"
+                          data-active={selected}
+                          key={run.id}
+                          onClick={() => onSelect(run.id)}
+                          title={reading}
+                          type="button"
+                          {...{ [ROW_KEY_ATTRIBUTE]: `run:${run.id}` }}
+                        >
+                          <span
+                            role="img"
+                            aria-label={run.state}
+                            className={cn("run-dot", stateDotClass(run.state))}
+                          />
+                          <span className="run-link-name">{run.name}</span>
                           {run.kind && (
-                            <Badge
+                            <span
                               aria-label={run.kind}
+                              className="run-link-tag"
                               role="note"
-                              variant="outline"
                             >
                               {run.kind}
-                            </Badge>
+                            </span>
                           )}
-                        </span>
-                        <span className="run-link-counts">
-                          {[run.state, rowCountSummary(run)]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </details>
-              );
-            })
+                          {selected && (
+                            <span className="run-link-counts">{reading}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                </section>
+              ))}
+            </div>
           )}
         </div>
       </ScrollArea>

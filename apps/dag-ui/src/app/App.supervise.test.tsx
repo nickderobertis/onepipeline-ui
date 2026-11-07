@@ -48,7 +48,7 @@ describe("projects", JOURNEY_TIMEOUT, () => {
     });
     await userEvent.click(
       await within(navigation).findByRole("button", {
-        name: `Open ${LIVE_PROJECT_NAME}`,
+        name: new RegExp(`^${LIVE_PROJECT_NAME}`),
       }),
     );
     await waitFor(() =>

@@ -672,3 +672,72 @@ test("refuses a human-items answer about another item, and a patch to a tab show
   expect(states).toHaveLength(1);
   expect(errors[0]?.message).toMatch(/human items this tab does not show/u);
 });
+
+test("a paused view closes its stream, keeps its cursor and subscription, and resumes from what it applied", async () => {
+  const h = harness();
+  const { live, states } = open(h);
+  await vi.waitFor(() => expect(h.sources).toHaveLength(1));
+  sourceAt(h, 0).frame("run.changed", {
+    id: id(2),
+    base: id(1),
+    row: row("settled"),
+  });
+  await vi.waitFor(() => expect(states).toHaveLength(2));
+
+  live.pause();
+  expect(sourceAt(h, 0).closed).toBe(true);
+  expect(h.deleted).toStrictEqual([]);
+  // Coming online opens nothing for a page holding everything.
+  globalThis.dispatchEvent?.(new Event("online"));
+  expect(h.sources).toHaveLength(1);
+
+  live.resume();
+  expect(h.sources).toHaveLength(2);
+  expect(new URL(sourceAt(h, 1).url).searchParams.get("after")).toBe(id(2));
+  expect(new URL(sourceAt(h, 1).url).searchParams.get("subscription")).toBe(
+    SUBSCRIPTION,
+  );
+  live.close();
+});
+
+test("a view started paused answers its state and changes view with no stream until resumed", async () => {
+  const h = harness();
+  const states: LiveState[] = [];
+  const live = h.client.live({
+    view: { type: "sidebar" },
+    paused: true,
+    onState: (state) => states.push(state),
+  });
+  await vi.waitFor(() => expect(states).toHaveLength(1));
+  await settle();
+  expect(h.sources).toHaveLength(0);
+  live.resume();
+  expect(h.sources).toHaveLength(1);
+  live.close();
+});
+
+test("tells its listeners of an accepted write, and not of a refused one or a read", async () => {
+  let refuse = false;
+  const client = new TelemetryClient("http://localhost", {
+    fetch: (async () =>
+      refuse
+        ? Response.json(
+            { error: { code: "not_owner", message: "not yours" } },
+            { status: 409 },
+          )
+        : Response.json(served("run-stop.json"))) as unknown as typeof fetch,
+  });
+  const told = vi.fn();
+  const stop = client.onWrite(told);
+  await client.stop("run-1");
+  expect(told).toHaveBeenCalledTimes(1);
+  await client.getChannel("run-1").catch(() => undefined);
+  expect(told).toHaveBeenCalledTimes(1);
+  refuse = true;
+  await expect(client.stop("run-1")).rejects.toThrow("not yours");
+  expect(told).toHaveBeenCalledTimes(1);
+  stop();
+  refuse = false;
+  await client.stop("run-1");
+  expect(told).toHaveBeenCalledTimes(1);
+});

@@ -159,18 +159,22 @@ p {
   font-size: 11px;
 }
 
+/* One structured line: the dot and the tag take what they need and the name the
+   rest, so neither a long name nor a tag leaves dead space. The selected run's
+   counts are a second line, under the name. */
 .run-link {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 14px;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
   align-items: center;
   width: 100%;
-  gap: 7px;
-  margin: 4px 0;
-  padding: 10px 8px;
+  gap: 2px 7px;
+  margin: 1px 0;
+  padding: 4px 8px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: inherit;
+  font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
@@ -185,37 +189,33 @@ p {
   box-shadow: inset 2px 0 var(--primary);
 }
 
-.run-link-main {
-  display: flex;
-  align-items: center;
+.run-link-name {
   min-width: 0;
-  gap: 7px;
-  font-size: 12px;
-}
-
-.run-link-main span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* The run's own state, then its nodes counted over the same statuses the graph
-   paints. Both span the whole row so the run id above them keeps its width. */
-.run-link-counts,
 .run-link-tag {
-  grid-column: 1 / -1;
+  max-width: 96px;
   overflow: hidden;
-  font-size: 10px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 15px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.run-link-tag {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  letter-spacing: 0.02em;
+.run-link-counts {
+  grid-column: 2 / -1;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The halo a still-moving run's mark carries. It takes the mark's own colour —
@@ -1923,7 +1923,7 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
  */
 @media (max-width: 640px) {
   .app-shell {
-    grid-template-columns: 160px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   /* The drawer stops being two thirds of a working area that no longer has room for
@@ -2010,18 +2010,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   .run-actions-badge {
     display: none;
   }
-
-  /* One column, so the run id keeps the width instead of sharing it with a state pill
-     and a decorative chevron — at 160px those left `dag-ui-live` reading as `d..`, and
-     a run list nobody can read a run out of is not a navigation. */
-  .run-link {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 3px;
-  }
-
-  .run-link > svg {
-    display: none;
-  }
 }
 
 /* A run's identity, liveness, Stop and activity share one bounded header row. */
@@ -2082,9 +2070,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   .run-topbar .run-actions,
   .run-topbar .topbar-actions {
     gap: 4px;
-  }
-  .run-topbar .topbar-actions > button:last-child:not(.last-activity) {
-    display: none;
   }
 }
 
@@ -2154,35 +2139,245 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   }
 }
 
-.kind-filter {
+.nav-pages {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 12px;
-  margin: 16px 0;
+  gap: 2px;
+}
+/* One dropdown, opening in flow and pushing the rows down. */
+.kind-filter {
+  margin-top: 10px;
   font-size: 12px;
 }
-.kind-filter legend {
-  margin-bottom: 8px;
-  color: var(--muted-foreground);
+.kind-filter > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  list-style: none;
+  cursor: pointer;
+}
+.kind-filter > summary::-webkit-details-marker {
+  display: none;
+}
+.kind-filter > summary > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kind-filter[open] > summary > svg {
+  transform: rotate(180deg);
+}
+.kind-filter fieldset {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 4px 0 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--popover);
 }
 .kind-filter label {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
+  min-width: 0;
+  gap: 6px;
+  line-height: 22px;
+  overflow-wrap: anywhere;
+}
+/* What one area shows beside how it takes its changes. */
+.update-setting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  gap: 4px 8px;
+  font-size: 12px;
+}
+.update-setting label {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.update-setting select {
+  min-width: 0;
+  height: 28px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 12px;
+}
+.update-waiting {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--foreground);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.run-nav > * .update-setting {
+  margin-top: 10px;
+}
+.main-updates {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+}
+.nav-rows {
+  margin-top: 10px;
 }
 .project-group {
-  margin-top: 14px;
+  margin-top: 2px;
 }
-.project-group summary {
+.project-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: stretch;
+  background: var(--sidebar, var(--background));
+  border-radius: 6px;
+}
+.project-toggle,
+.project-open {
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
-  font-weight: 600;
-  padding: 6px 0;
 }
-.project-group .project-link {
-  max-width: 100%;
-  white-space: normal;
-  height: auto;
+.project-toggle {
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+.project-toggle svg[data-open="true"] {
+  transform: rotate(90deg);
+}
+.project-open {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 6px 3px 2px;
+  font-size: 12.5px;
+  font-weight: 600;
   text-align: left;
+}
+.project-toggle:hover,
+.project-open:hover {
+  background: var(--accent);
+}
+.project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-count {
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+/* The menu button and the scrim belong to the drawer, which only a phone has. */
+.nav-menu,
+.nav-scrim {
+  display: none;
+}
+@media (max-width: 640px) {
+  /* The navigation leaves the flow and the main area takes the whole width. */
+  .run-nav {
+    position: fixed;
+    z-index: 50;
+    inset: 0 auto 0 0;
+    width: min(320px, 85vw);
+    background: var(--background);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform 180ms ease-out,
+      visibility 180ms;
+  }
+  .run-nav[data-open="true"] {
+    transform: none;
+    visibility: visible;
+  }
+  .nav-scrim {
+    position: fixed;
+    z-index: 49;
+    display: block;
+    inset: 0;
+    background: rgb(0 0 0 / 50%);
+  }
+  .nav-menu {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  /* Everything a thumb reaches here is at least 44 CSS px tall. */
+  .nav-pages > button,
+  .kind-filter > summary,
+  .kind-filter label,
+  .update-setting select,
+  .main-updates > button,
+  .project-open,
+  .run-link {
+    min-height: 44px;
+  }
+  .update-setting select {
+    height: 44px;
+  }
+  .nav-pages > button {
+    flex: 1;
+  }
+  .project-row {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+  .project-toggle {
+    min-height: 44px;
+  }
+  /* The main area's setting and Refresh leave the top bar for a strip directly
+     under it, where neither can be pushed off its right edge. */
+  .topbar,
+  .run-topbar {
+    flex-wrap: wrap;
+    padding-bottom: 0;
+  }
+  .main-updates {
+    flex: 1 0 100%;
+    justify-content: space-between;
+    margin: 0 -14px;
+    padding: 6px 14px;
+    border-top: 1px solid var(--border);
+  }
+  .main-updates > button {
+    flex: none;
+  }
+  .run-topbar .topbar-title {
+    flex: 1 1 0;
+    max-width: none;
+  }
+  .run-topbar .topbar-actions {
+    flex: 0 1 auto;
+  }
 }
 .run-header-details {
   padding: 8px 24px;
