@@ -22,6 +22,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - os: linux
+            runner: ubuntu-latest
+            line: ci-warm-linux
           - os: windows
             runner: windows-latest
             line: ci-warm-windows
@@ -81,10 +84,14 @@ jobs:
         run: just build
       - name: Cold warm lines
         run: just ${{ matrix.line }}
+      - name: Keep the runner's own tools aside
+        run: cp -a "$HOME/.cargo/bin" "$RUNNER_TEMP/cargo-bin"
       - name: rust-cache's own cleanup and archive, against a dead address
         run: node scripts/warm-demo.mjs save
       - name: What the kept tree holds
         run: du -sh target target/* ~/.cargo/registry ~/.cargo/bin 2>/dev/null || true
+      - name: Give the next job's runner tools back
+        run: cp -an "$RUNNER_TEMP/cargo-bin/." "$HOME/.cargo/bin/"
       - name: Remember each unit after the cleanup
         run: node scripts/warm-demo.mjs snapshot
       - name: Warm lines again over what would be restored
