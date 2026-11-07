@@ -146,6 +146,12 @@ test("at phone width the navigation is a drawer over a main area spanning the vi
   const mainSetting = page.getByRole("combobox", { name: "Main area updates" });
   await inside(refresh);
   await inside(mainSetting);
+  // And the run's name is still legible beside the menu button in the top bar.
+  const title = page.getByRole("heading", { name: runs().live, exact: true });
+  await expect(title).toBeVisible();
+  expect(
+    await title.evaluate((h) => h.scrollWidth - h.clientWidth),
+  ).toBeLessThanOrEqual(0);
 
   // Opening it: `min(320px, 85vw)` over a scrim.
   await menu(page).click();

@@ -83,7 +83,7 @@ malformed one is the engine's own.
 
 ### At the width it is actually read
 
-![The same overall view at phone width: the two columns of the shell stacked into one, the run's telemetry tiles wrapped to fit, and the graph timeline still plotted whole across the narrow column](docs/screens/01-run-list-overall-390x844.png)
+![The same overall view at phone width: the navigation closed behind a menu button so the main area has the whole width, the update setting and Refresh in a strip under the top bar, the run's telemetry tiles wrapped to fit, and the graph timeline still plotted whole](docs/screens/01-run-list-overall-390x844.png)
 
 The shell is exactly one viewport tall and every region inside it scrolls on its own,
 which is a thing that fails silently — a region that overflows reports nothing, it just

@@ -2249,8 +2249,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
   align-items: stretch;
-  background: var(--sidebar, var(--background));
-  border-radius: 6px;
 }
 .project-toggle,
 .project-open {
@@ -2362,9 +2360,12 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   .topbar,
   .run-topbar {
     display: grid;
-    grid-template-columns: auto minmax(0, auto) minmax(0, 1fr);
+    grid-template-columns: auto fit-content(35%) minmax(0, 1fr);
     align-items: center;
     padding-bottom: 0;
+  }
+  .run-topbar .topbar-title {
+    max-width: none;
   }
   .main-updates {
     grid-column: 1 / -1;
