@@ -216,6 +216,7 @@ enum FrameKind {
     DetailPatch,
     TimelinePatch,
     ChannelPatch,
+    // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, and the plan names this file's `FrameKind` as the one declaration of the frame; reading and diffing the view stay in the poller the frame goes out on, and the records stay the engine's.
     HumanItemsPatch,
     Reset,
 }
@@ -253,9 +254,11 @@ enum Change {
         run: RunId,
         ops: Vec<Op>,
     },
+    // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, and the plan names this file's `FrameKind` as the one declaration of the frame; this is that frame's payload, closed as the frames are.
     HumanItems {
         ops: Vec<Op>,
     },
+    // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 }
 
 impl Change {
@@ -338,6 +341,7 @@ enum Visible {
     Channel {
         run: RunId,
     },
+    // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, and the plan names this file's `FrameKind` as the one declaration of the frame; a subscription shows one of a closed set of views, and this is the one that frame patches.
     HumanItems(HumanItemsKey),
 }
 

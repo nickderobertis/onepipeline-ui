@@ -7,7 +7,7 @@
   "//workspace-end": "llmlint: ignore-end[projects_stay_in_one_js_workspace]",
   "tags": ["scope:e2e", "type:e2e"],
   "implicitDependencies": ["dag-ui"],
-  "//compile": "llmlint: ignore-block[new_projects_keep_the_graph_uniform] the manager approved this target apart from `build` on 2026-11-07: a `build` target would put a release compile no other task reads in every `build` sweep, and folding it into `test` holds every other task off for the compile under parallelism:false, which ran test-linux into its 36-minute cap.",
+  "//compile": "llmlint: ignore-block[new_projects_keep_the_graph_uniform] this target stays apart from `build`: a `build` target would put a release compile no other task reads in every `build` sweep, and folding it into `test` holds every other task off for the compile under parallelism:false, which ran test-linux into its 36-minute cap.",
   "targets": {
     "compile-release-server": {
       "//": "A target of its own so the compile overlaps the job's other tasks: only the timed journey in `test` holds them off. Named apart from `build` so no build sweep compiles a server nothing else reads.",
