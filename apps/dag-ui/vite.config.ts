@@ -31,7 +31,14 @@ const proxy = {
 export default defineConfig({
   root: import.meta.dirname,
   plugins: [react(), tailwindcss()],
-  build: { outDir: "dist", emptyOutDir: true },
+  // Spike `first-screen`: its own entry and its own directory, never the shipped bundle.
+  build: process.env.SPIKE_FIRST_SCREEN_OUT
+    ? {
+        outDir: process.env.SPIKE_FIRST_SCREEN_OUT,
+        emptyOutDir: true,
+        rollupOptions: { input: "first-screen.html" },
+      }
+    : { outDir: "dist", emptyOutDir: true },
   server: {
     port: 4173,
     proxy,

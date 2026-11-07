@@ -2780,6 +2780,79 @@ fn detail_document(
     Value::Object(payload)
 }
 
+/// Spike `first-screen`: the detail document over the records a selective read kept.
+#[cfg(feature = "spike-engine-open-current")]
+pub(crate) fn first_screen_detail(
+    view: &RunView,
+    declared: &DeclaredMembers,
+    inputs: &live::DetailInputs<'_>,
+) -> Value {
+    detail_document(
+        &Run::of(view),
+        declared,
+        false,
+        inputs.telemetry,
+        inputs.sdk_telemetry.clone(),
+        inputs.agents,
+        &EventFilter::default(),
+    )
+}
+
+/// Spike `first-screen`: what a first screen draws of the detail, from the run's state
+/// and no fold of its transcripts or telemetry. The wall clock is what the telemetry
+/// fold makes it, its first record's stamp to its last's.
+#[cfg(feature = "spike-engine-open-current")]
+pub(crate) fn first_screen_detail_cheap(view: &RunView, timings: &mut Map<String, Value>) -> Value {
+    let began = std::time::Instant::now();
+    let run = Run::of(view);
+    let statuses = node_statuses(&run);
+    let nodes: Vec<Value> = statuses
+        .iter()
+        .map(|(node, recorded)| {
+            let mut row = Map::new();
+            row.insert("node".into(), json!(node));
+            row.insert("status".into(), json!(status_word(&recorded.status)));
+            if let Some(outcome) = &recorded.outcome {
+                row.insert("outcome".into(), json!(outcome));
+            }
+            if let Some(class) = failure_class(&run, node, recorded) {
+                row.insert("failure".into(), json!({ "class": class }));
+            }
+            Value::Object(row)
+        })
+        .collect();
+    let wall = view
+        .events
+        .first()
+        .and_then(|first| millis_of(&first.ts))
+        .zip(view.events.last().and_then(|last| millis_of(&last.ts)))
+        .map(|(first, last)| (last - first) / 1_000);
+    let mut detail = Map::new();
+    detail.insert(
+        "run".into(),
+        json!({
+            "run_id": view.paths.run,
+            "state": state_word(&run),
+            "phase": phase_word(&run),
+            "last_event": last_event(&run),
+            "timing": { "wall_seconds": wall },
+            "nodes": nodes,
+        }),
+    );
+    timings.insert(
+        "detail_run_ms".into(),
+        json!(began.elapsed().as_secs_f64() * 1000.0),
+    );
+    let began = std::time::Instant::now();
+    detail.insert("graph".into(), graph_state(&run).unwrap_or(Value::Null));
+    timings.insert(
+        "detail_graph_ms".into(),
+        json!(began.elapsed().as_secs_f64() * 1000.0),
+    );
+    detail.insert("launch".into(), launch(&run));
+    Value::Object(detail)
+}
+
 /// `run_detail`, over everything `view` read: the whole merged store.
 #[must_use]
 pub fn run_detail(
@@ -5355,6 +5428,13 @@ impl Lens<'_> {
     fn items(&self, events: &[(usize, &Envelope)]) -> Vec<Value> {
         let mut ordered = events.to_vec();
         ordered.sort_by_key(|(index, event)| (millis_of(&event.ts), *index));
+        // Spike `first-screen`: only the window this thread asked for is rendered.
+        let window = crate::open_trace::ITEMS_WINDOW.with(std::cell::Cell::get);
+        if window != crate::open_trace::ItemsWindow::All {
+            ordered.retain(|(_, event)| self.filter.allows(event));
+            let (start, end) = window.range(ordered.len());
+            ordered = ordered[start..end].to_vec();
+        }
         ordered
             .iter()
             .filter(|(_, event)| self.filter.allows(event))
@@ -5477,8 +5557,19 @@ pub(crate) fn share_spans(
     ends: &Ends,
     rendered: &std::cell::RefCell<Rendered>,
 ) -> Vec<Value> {
-    let transcripts = Transcripts::of(view, declared);
-    let turns = turn_ids(view, &transcripts);
+    // Spike `first-screen`: a span's own fields read no transcript when it lists no event.
+    let nothing = crate::open_trace::ITEMS_WINDOW.with(std::cell::Cell::get)
+        == crate::open_trace::ItemsWindow::Nothing;
+    let transcripts = if nothing {
+        Transcripts::of(&view.over(&[]), declared)
+    } else {
+        Transcripts::of(view, declared)
+    };
+    let turns = if nothing {
+        Vec::new()
+    } else {
+        turn_ids(view, &transcripts)
+    };
     let lens = Lens {
         turns: &turns,
         filter,
@@ -5618,6 +5709,13 @@ pub(crate) fn timeline_harnesses_over(
     scope: &Scope<'_>,
     agents: &Agents,
 ) -> Value {
+    // Spike `first-screen`: a run's first answer holds no harness pointer. Each one reads
+    // its session file for its end, and its parent is a scan of every span.
+    if crate::open_trace::ITEMS_WINDOW.with(std::cell::Cell::get)
+        == crate::open_trace::ItemsWindow::Nothing
+    {
+        return payload;
+    }
     let Some(spans) = payload["spans"].as_array_mut() else {
         return payload;
     };

@@ -171,3 +171,42 @@ pub fn prototype(name: &str) -> bool {
     std::env::var("ONEPIPELINE_UI_SPIKE")
         .is_ok_and(|on| on.split(',').any(|prototype| prototype == name))
 }
+
+/// Spike `first-screen`: which of a span's events a timeline renders on this thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemsWindow {
+    /// All of them, as every read but the prototype's.
+    All,
+    /// None: the span's own fields alone.
+    Nothing,
+    /// The last `n`.
+    Latest(usize),
+    /// `limit` from `offset`.
+    Page {
+        /// How many to pass over.
+        offset: usize,
+        /// How many to keep.
+        limit: usize,
+    },
+}
+
+impl ItemsWindow {
+    /// The range of `len` events this window keeps.
+    #[must_use]
+    pub fn range(self, len: usize) -> (usize, usize) {
+        match self {
+            Self::All => (0, len),
+            Self::Nothing => (0, 0),
+            Self::Latest(count) => (len.saturating_sub(count), len),
+            Self::Page { offset, limit } => {
+                (offset.min(len), offset.saturating_add(limit).min(len))
+            }
+        }
+    }
+}
+
+thread_local! {
+    /// The window this thread's timeline build renders under.
+    pub static ITEMS_WINDOW: std::cell::Cell<ItemsWindow> =
+        const { std::cell::Cell::new(ItemsWindow::All) };
+}

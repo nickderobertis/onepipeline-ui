@@ -53,7 +53,25 @@
  * --trace-exec (strace every process the server or `cli-unpublished` starts: counts by
  * program and refusals by E2BIG, so whether a read reaches git or onevcs is measured).
  *
- * `spikes/run-open-costs/matrix.sh` is every measurement the spike's report states.
+ *   first-graph, first-overall, first-node
+ *                    one first-screen measurement: a real browser, from navigation start to
+ *                    the rendered mark, split into navigation to POST start, the POST, and
+ *                    the answer to the mark. --client today|trimmed (default trimmed),
+ *                    --cache warm|cold (default warm: the bundle already in the HTTP cache),
+ *                    --server warm|fresh (default warm: one sidebar read answered).
+ *   first-answer-graph, first-answer-overall, first-answer-node
+ *                    that first answer alone, at the API: its seconds, bytes and steps.
+ *   first-content-graph, first-content-overall, first-content-node
+ *                    every value of that view's first answer against the complete read, in
+ *                    three groups: equal, marked loading, different. --first-query adds to
+ *                    the first answer's query (`whole=1`, `no_stream_ends=1`, `checkpoint=1`).
+ *   first-rest       the first answer, then the complete read, with one page of a span's
+ *                    events and one node's rows read during it and after it.
+ *   first-open-current  what `RunView::open_current` spends on this run, step by step.
+ *   first-kinds      a run's journal: records and bytes by kind, no server.
+ *
+ * `spikes/run-open-costs/matrix.sh` is every measurement the run-open-costs report states,
+ * and `spikes/first-screen/matrix.sh` every one the first-screen report states.
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -76,6 +94,7 @@ import { createRequire } from "node:module";
 import { cpus, loadavg, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { gzipSync } from "node:zlib";
 
 const REPO = resolve(dirname(new URL(import.meta.url).pathname), "..");
 const DEFAULT_BINARY = join(
@@ -120,6 +139,10 @@ const CAUSES = {
   "subscribe.serialize": ["response serialization", "onepipeline-ui"],
 };
 
+const FIRST_PAGE_MEASURES = ["first-graph", "first-overall", "first-node"];
+/** The switches a first answer's server runs with; the complete read beside it too. */
+const FIRST_PROTOTYPES = "first-screen,session-index,heap-merge,lazy-activity";
+
 /** Thrown, so the `finally` that stops the server this started still runs. */
 function fail(message) {
   throw new Error(message);
@@ -148,6 +171,11 @@ function options() {
       "server-path": { type: "string" },
       "trace-exec": { type: "boolean", default: false },
       "baseline-prototype": { type: "string" },
+      client: { type: "string", default: "trimmed" },
+      cache: { type: "string", default: "warm" },
+      server: { type: "string", default: "warm" },
+      "first-query": { type: "string", default: "" },
+      "keep-answers": { type: "string" },
     },
   });
   if (!values.measure) fail("--measure names what to measure");
@@ -167,7 +195,25 @@ function options() {
     "content-overall",
     "content-node",
     "content-status",
+    "first-graph",
+    "first-overall",
+    "first-node",
+    "first-answer-graph",
+    "first-answer-overall",
+    "first-answer-node",
+    "first-content-graph",
+    "first-content-overall",
+    "first-content-node",
+    "first-rest",
+    "first-open-current",
+    "first-kinds",
   ];
+  if (!["trimmed", "today"].includes(values.client))
+    fail(`--client is today or trimmed, not ${values.client}`);
+  if (!["warm", "cold"].includes(values.cache))
+    fail(`--cache is warm or cold, not ${values.cache}`);
+  if (!["warm", "fresh"].includes(values.server))
+    fail(`--server is warm or fresh, not ${values.server}`);
   if (!known.includes(values.measure))
     fail(`no measure ${values.measure}: one of ${known.join(", ")}`);
   if (
@@ -221,13 +267,21 @@ class Server {
       "--session",
       `spike-run-open-costs-${process.pid}`,
     ];
-    if (values.measure.startsWith("page-")) args.push("--ui");
+    const firstPage = FIRST_PAGE_MEASURES.includes(values.measure);
+    if (values.measure.startsWith("page-") || firstPage) args.push("--ui");
     // The profiled build's embedded bundle is whatever `dist` held when it compiled.
     const bundle =
       values["ui-dist"] ??
-      (values.measure.startsWith("page-") && !values.binary
-        ? join(REPO, "apps/dag-ui/dist")
-        : undefined);
+      (firstPage
+        ? join(
+            REPO,
+            values.client === "today"
+              ? "apps/dag-ui/dist"
+              : "target/spike/first-dist",
+          )
+        : values.measure.startsWith("page-") && !values.binary
+          ? join(REPO, "apps/dag-ui/dist")
+          : undefined);
     if (bundle) args.push("--ui-dist", bundle);
     const env = serverEnv(values["keep-provider-env"]);
     env.ONEPIPELINE_UI_OPEN_TRACE = this.tracePath;
@@ -982,6 +1036,583 @@ async function pageMeasure(values, server, origin, root) {
   }
 }
 
+/**
+ * Runs in the page: resolves `window.__firstMark` the moment the rendered DOM shows the
+ * view's first screen, on both clients. A hidden card is not a card: the flow canvas lays
+ * its nodes out invisibly until it has measured them.
+ */
+function installMark({ view, run, cards }) {
+  const visible = (element) => {
+    for (let at = element; at; at = at.parentElement)
+      if (getComputedStyle(at).visibility === "hidden") return false;
+    return true;
+  };
+  const header = () =>
+    document.querySelector('[aria-label="Run header"] h2')?.textContent === run;
+  const checks = {
+    graph: () => {
+      const shown = [...document.querySelectorAll("article.dag-node")].filter(
+        visible,
+      );
+      return (
+        header() &&
+        shown.length >= cards &&
+        shown.every((card) => card.querySelector(".node-status")?.textContent)
+      );
+    },
+    overall: () => {
+      const metrics = document.querySelector('[aria-label="Run metrics"]');
+      return (
+        document.querySelector(".overall-hero h2")?.textContent === run &&
+        ["Status", "Nodes", "Wall time", "Turns"].every((name) =>
+          metrics?.textContent?.includes(name),
+        ) &&
+        Boolean(
+          document.querySelector(
+            ".graph-timeline [data-first-plot], .graph-timeline svg, .graph-timeline button",
+          ),
+        )
+      );
+    },
+    node: () => {
+      const section = document.querySelector('[aria-label^="Timeline for "]');
+      return (
+        Boolean(section?.querySelector(".node-view-state")?.textContent) &&
+        Boolean(
+          document.querySelector(
+            '[aria-label="Node timeline"] svg, [aria-label="Node timeline"] button',
+          ),
+        ) &&
+        Boolean(
+          document.querySelector(
+            '[aria-label="Node transcript"] .transcript-item',
+          ),
+        )
+      );
+    },
+  };
+  const check = checks[view];
+  const look = () => {
+    if (window.__firstMark !== undefined || !check()) return;
+    window.__firstMark = performance.now();
+    window.__cardsAtMark = document.querySelectorAll("article.dag-node").length;
+    observer.disconnect();
+  };
+  const observer = new MutationObserver(look);
+  observer.observe(document, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+  });
+  const tick = () => {
+    look();
+    if (window.__firstMark === undefined) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+/** What the mark's page shows, so a figure names the DOM state it timed. */
+function shownAtMark({ view }) {
+  const words = (selector) =>
+    [...document.querySelectorAll(selector)].map((one) =>
+      one.textContent.trim(),
+    );
+  if (view === "graph")
+    return {
+      cards: [...document.querySelectorAll("article.dag-node")].map((card) => ({
+        name: card.getAttribute("aria-label"),
+        reason: card.querySelector(".node-reason")?.textContent,
+        awaits: card.querySelector(".node-awaits")?.textContent,
+      })).length,
+      reasons: words(".node-reason").length,
+      awaits: words(".node-awaits").length,
+    };
+  if (view === "overall")
+    return {
+      metrics: document
+        .querySelector('[aria-label="Run metrics"]')
+        ?.textContent?.slice(0, 200),
+      plot_elements: document.querySelectorAll(
+        ".graph-timeline rect, .graph-timeline button",
+      ).length,
+    };
+  return {
+    state: document.querySelector(".node-view-state")?.textContent,
+    transcript_rows: document.querySelectorAll(
+      '[aria-label="Node transcript"] .transcript-item',
+    ).length,
+    plot_elements: document.querySelectorAll(
+      '[aria-label="Node timeline"] rect, [aria-label="Node timeline"] button',
+    ).length,
+  };
+}
+
+/** One first-screen measurement: navigation start to the mark, in a real browser. */
+async function firstPageMeasure(values, server, origin, root) {
+  const require = createRequire(join(REPO, "apps/dag-ui-e2e/package.json"));
+  const { chromium } = require("@playwright/test");
+  const view = values.measure.slice("first-".length);
+  const node =
+    view === "node" ? (values.node ?? firstNodeOf(root, values.run)) : null;
+  const address =
+    view === "node"
+      ? `/?run=${values.run}&view=graph&node=${node}`
+      : `/?run=${values.run}&view=${view}`;
+  // A floor for the mark: how many cards the graph really holds is asked after it.
+  const planPath = join(root, values.run, "plan.json");
+  const cards = existsSync(planPath)
+    ? (JSON.parse(readFileSync(planPath, "utf8")).tasks?.length ?? 0)
+    : 1;
+  const budget = Number(values.timeout) * 1000;
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    // The bundle into the HTTP cache and one sidebar read into the server, from a page
+    // that opens no run: the Action items page on today's client, no run on the trimmed.
+    const warmedBy = values.client === "today" ? "/human-items" : "/";
+    if (values.server === "warm") {
+      const warming =
+        values.cache === "warm"
+          ? await context.newPage()
+          : await (await browser.newContext()).newPage();
+      const sidebar = warming.waitForResponse(
+        (response) => response.url().endsWith("/api/v2/subscriptions"),
+        { timeout: budget },
+      );
+      await warming.goto(`${origin}${warmedBy}`);
+      await sidebar;
+      await warming.waitForLoadState("load");
+      await warming.close();
+    } else if (values.cache === "warm") {
+      // The bundle into the cache with nothing asked of the server: fetched, not run.
+      const warming = await context.newPage();
+      await warming.goto(`${origin}/healthz`);
+      await warming.evaluate(async () => {
+        const index = await (await fetch("/")).text();
+        const assets = [...index.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/gu)];
+        await Promise.all(assets.map(([, asset]) => fetch(asset)));
+      });
+      await warming.close();
+    }
+    const page = await context.newPage();
+    await page.addInitScript(installMark, { view, run: values.run, cards });
+    const started = performance.now();
+    await page.goto(`${origin}${address}`, { waitUntil: "commit" });
+    await page
+      .waitForFunction(() => window.__firstMark !== undefined, null, {
+        timeout: budget,
+        polling: 50,
+      })
+      .catch(async (error) => {
+        const text = await page.locator("body").innerText();
+        fail(`no ${view} mark: ${error.message}\n${text.slice(-500)}`);
+      });
+    const walled = (performance.now() - started) / 1000;
+    const timing = await page.evaluate(() => {
+      const reads = performance
+        .getEntriesByType("resource")
+        .filter(
+          (entry) =>
+            entry.name.includes("/api/v2/subscriptions") ||
+            entry.name.includes("/api/v2/spike/first-screen"),
+        )
+        .map((entry) => ({
+          start: entry.startTime,
+          end: entry.responseEnd,
+          transfer: entry.transferSize,
+          decoded: entry.decodedBodySize,
+        }));
+      const assets = performance
+        .getEntriesByType("resource")
+        .filter((entry) => entry.name.includes("/assets/"))
+        .map((entry) => ({
+          name: entry.name.split("/").at(-1),
+          transfer: entry.transferSize,
+          decoded: entry.decodedBodySize,
+          duration: Math.round(entry.duration),
+        }));
+      return {
+        mark: window.__firstMark,
+        cards_at_mark: window.__cardsAtMark,
+        reads,
+        assets,
+      };
+    });
+    const answered = timing.reads
+      .filter((read) => read.end <= timing.mark)
+      .at(-1);
+    if (!answered) fail("the mark was reached with no answer read");
+    const first = timing.reads[0];
+    const seconds = (ms) => Math.round(ms) / 1000;
+    const shown = await page.evaluate(shownAtMark, { view });
+    // How many cards the graph holds, asked of the first answer after the mark so the
+    // asking times nothing: a plan's file names fewer than a run that replanned.
+    let graphCards = null;
+    if (view === "graph") {
+      const held = await firstAnswer(origin, values, "graph", null, budget);
+      const { detail } = JSON.parse(held.body);
+      graphCards = detail.graph.plan.tasks.filter(
+        (task) => detail.graph.node_status[task.id] !== undefined,
+      ).length;
+      if (timing.cards_at_mark !== graphCards)
+        fail(`the mark drew ${timing.cards_at_mark} of ${graphCards} cards`);
+    }
+    return {
+      address,
+      client: values.client,
+      cache: values.cache,
+      server_state: values.server,
+      wall_seconds: seconds(timing.mark),
+      navigation_to_post_start_seconds: seconds(first.start),
+      post_seconds: seconds(answered.end - first.start),
+      answer_to_mark_seconds: seconds(timing.mark - answered.end),
+      harness_wall_seconds: Math.round(walled * 1000) / 1000,
+      reads: timing.reads.length,
+      answer_transfer_bytes: answered.transfer,
+      answer_decoded_bytes: answered.decoded,
+      assets: timing.assets,
+      cards_at_mark: timing.cards_at_mark,
+      graph_cards: graphCards,
+      shown,
+      server: server.residentKb(),
+      server_cpu_seconds: server.cpuSeconds(),
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+/** A path with every array index and record key that varies written as `[]`. */
+const FIRST_IGNORED = new Set(["observed_at", "timings"]);
+
+/** Classify every value of `first` against `complete`; absent from `first` is not a value. */
+function classifyFirst(first, complete, path, tally) {
+  const note = (group, value) => {
+    const entry = tally[group].get(path) ?? { count: 0 };
+    entry.count += 1;
+    if (value !== undefined && entry.sample === undefined) entry.sample = value;
+    tally[group].set(path, entry);
+  };
+  if (
+    first !== null &&
+    typeof first === "object" &&
+    !Array.isArray(first) &&
+    first.loading === true
+  ) {
+    note("loading", JSON.stringify(complete)?.slice(0, 120));
+    return;
+  }
+  if (first === complete) {
+    tally.equal += 1;
+    return;
+  }
+  if (
+    typeof first !== "object" ||
+    typeof complete !== "object" ||
+    first === null ||
+    complete === null ||
+    Array.isArray(first) !== Array.isArray(complete)
+  ) {
+    note(
+      "different",
+      `first answer ${JSON.stringify(first)?.slice(0, 120)}; complete read ${JSON.stringify(complete)?.slice(0, 120)}`,
+    );
+    return;
+  }
+  if (Array.isArray(first)) {
+    for (let at = 0; at < Math.max(first.length, complete.length); at += 1) {
+      const step = `${path}[]`;
+      if (at >= first.length) {
+        const entry = tally.absent.get(step) ?? { count: 0 };
+        entry.count += 1;
+        tally.absent.set(step, entry);
+      } else if (at >= complete.length)
+        classifyFirst(first[at], undefined, step, tally);
+      else classifyFirst(first[at], complete[at], step, tally);
+    }
+    return;
+  }
+  for (const key of new Set([...Object.keys(first), ...Object.keys(complete)])) {
+    if (FIRST_IGNORED.has(key)) continue;
+    const dynamic = path.endsWith(".node_status") || path.endsWith(".node_results") ||
+      path.endsWith(".node_gated_by") || path.endsWith(".node_details") ||
+      path.endsWith(".node_control");
+    const step = `${path}.${dynamic ? "*" : key}`;
+    if (!(key in first)) {
+      const entry = tally.absent.get(step) ?? { count: 0 };
+      entry.count += 1;
+      tally.absent.set(step, entry);
+    } else classifyFirst(first[key], complete[key], step, tally);
+  }
+}
+
+function newTally() {
+  return { equal: 0, loading: new Map(), different: new Map(), absent: new Map() };
+}
+
+/** Spans by id, because a first answer may hold them in another order or fewer of them. */
+function classifySpans(first, complete, tally, { eventsWindow }) {
+  const byId = new Map((complete ?? []).map((span) => [span.id, span]));
+  const seen = new Set();
+  for (const span of first ?? []) {
+    const other = byId.get(span.id);
+    if (other === undefined) {
+      const entry = tally.different.get(".timeline.spans[] (only in the first answer)") ?? { count: 0 };
+      entry.count += 1;
+      entry.sample ??= `${span.id} ${span.kind} ${span.started_at} .. ${span.ended_at}`;
+      tally.different.set(".timeline.spans[] (only in the first answer)", entry);
+      continue;
+    }
+    seen.add(span.id);
+    const { events: firstEvents, ...ownFirst } = span;
+    const { events: completeEvents, ...ownComplete } = other;
+    classifyFirst(ownFirst, ownComplete, ".timeline.spans[]", tally);
+    if (eventsWindow && firstEvents?.length) {
+      // By place in the store: a turn's records share one `id`.
+      const held = new Map(
+        (completeEvents ?? []).map((one) => [one.journal_order, one]),
+      );
+      const tail = (completeEvents ?? []).slice(-firstEvents.length);
+      firstEvents.forEach((event, at) => {
+        const same = held.get(event.journal_order);
+        if (same === undefined) {
+          const entry = tally.different.get(".timeline.spans[].events[] (id not in the complete read)") ?? { count: 0 };
+          entry.count += 1;
+          entry.sample ??= `${event.id} ${event.kind}`;
+          tally.different.set(".timeline.spans[].events[] (id not in the complete read)", entry);
+        } else {
+          if (tail[at]?.journal_order !== event.journal_order) {
+            const entry = tally.different.get(".timeline.spans[].events[] (not the latest rows)") ?? { count: 0 };
+            entry.count += 1;
+            tally.different.set(".timeline.spans[].events[] (not the latest rows)", entry);
+          }
+          classifyFirst(event, same, ".timeline.spans[].events[]", tally);
+        }
+      });
+    } else if (completeEvents?.length) {
+      const entry = tally.absent.get(".timeline.spans[].events[]") ?? { count: 0 };
+      entry.count += completeEvents.length;
+      tally.absent.set(".timeline.spans[].events[]", entry);
+    }
+  }
+  for (const span of complete ?? [])
+    if (!seen.has(span.id)) {
+      const entry = tally.absent.get(".timeline.spans[] (only in the complete read)") ?? { count: 0, kinds: {} };
+      entry.count += 1;
+      entry.kinds[span.kind] = (entry.kinds[span.kind] ?? 0) + 1;
+      entry.sample ??= `${span.id} ${span.kind} ${span.started_at} .. ${span.ended_at}`;
+      tally.absent.set(".timeline.spans[] (only in the complete read)", entry);
+    }
+}
+
+const sortedGroups = (groups) =>
+  [...groups]
+    .sort((left, right) => right[1].count - left[1].count)
+    .map(([path, entry]) => ({ path, ...entry }));
+
+/** A first answer read over a server's route, by itself. */
+async function firstAnswer(origin, values, view, node, budget) {
+  const query = values["first-query"] ? `&${values["first-query"]}` : "";
+  const read = await timed(
+    `${origin}/api/v2/spike/first-screen?run=${encodeURIComponent(values.run)}${query}`,
+    {
+      method: "POST",
+      body: view === "node" ? node : view,
+    },
+    budget,
+  );
+  if (read.status !== 200) fail(`first answer: ${read.status} ${read.body}`);
+  return read;
+}
+
+async function completeRead(origin, view, node, run, budget) {
+  const posted = await timed(
+    `${origin}/api/v2/subscriptions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ view: VIEWS[view](run, node) }),
+    },
+    budget,
+  );
+  if (posted.status !== 201) fail(`subscribe: ${posted.status} ${posted.body}`);
+  return posted;
+}
+
+/** Every value of a first answer against the complete read, field by field. */
+async function firstContentMeasure(values, server, origin, root) {
+  const view = values.measure.slice("first-content-".length);
+  const node =
+    view === "node" ? (values.node ?? firstNodeOf(root, values.run)) : undefined;
+  const budget = Number(values.timeout);
+  const firstRead = await firstAnswer(origin, values, view, node, budget);
+  const first = JSON.parse(firstRead.body);
+  const completeReading = await completeRead(origin, view, node, values.run, budget);
+  const visible = JSON.parse(completeReading.body).initial.snapshot.visible;
+  if (values["keep-answers"]) {
+    writeFileSync(`${values["keep-answers"]}.first.json`, firstRead.body);
+    writeFileSync(
+      `${values["keep-answers"]}.complete.json`,
+      JSON.stringify(visible),
+    );
+  }
+  const tally = newTally();
+  classifyFirst(first.detail, visible.detail?.payload ?? visible.detail, ".detail", tally);
+  if (view !== "graph")
+    classifySpans(
+      first.timeline?.spans,
+      (visible.timeline?.payload ?? visible.timeline)?.spans,
+      tally,
+      { eventsWindow: view === "node" },
+    );
+  const { timings, ...served } = first;
+  const raw = Buffer.from(JSON.stringify(served));
+  return {
+    view,
+    node: node ?? null,
+    wall_seconds: firstRead.seconds + completeReading.seconds,
+    first_answer_seconds: firstRead.seconds,
+    complete_read_seconds: completeReading.seconds,
+    first_answer_timings: timings,
+    first_answer_bytes: raw.length,
+    first_answer_gzip_bytes: gzipSync(raw).length,
+    complete_answer_bytes: completeReading.bytes,
+    declared_loading: first.loading,
+    equal: tally.equal,
+    loading: sortedGroups(tally.loading),
+    different: sortedGroups(tally.different).slice(0, 120),
+    different_groups: tally.different.size,
+    not_on_first_answer: sortedGroups(tally.absent).slice(0, 120),
+    server: server.residentKb(),
+  };
+}
+
+/** The first answer alone, at the API. */
+async function firstAnswerMeasure(values, server, origin, root) {
+  const view = values.measure.slice("first-answer-".length);
+  const node =
+    view === "node" ? (values.node ?? firstNodeOf(root, values.run)) : undefined;
+  const read = await firstAnswer(origin, values, view, node, Number(values.timeout));
+  const { timings, ...served } = JSON.parse(read.body);
+  const raw = Buffer.from(JSON.stringify(served));
+  return {
+    view,
+    node: node ?? null,
+    wall_seconds: read.seconds,
+    timings,
+    bytes: raw.length,
+    gzip_bytes: gzipSync(raw).length,
+    server: server.residentKb(),
+  };
+}
+
+/** The complete read's arrival after the first answer, and what a page reads either side of it. */
+async function firstRestMeasure(values, server, origin, root) {
+  const budget = Number(values.timeout);
+  const node = values.node ?? firstNodeOf(root, values.run);
+  const first = await firstAnswer(origin, values, "overall", undefined, budget);
+  const { timeline } = JSON.parse(first.body);
+  const nodeSpans = timeline.spans.filter((span) => span.node_id === node);
+  const span = (nodeSpans.find((one) => one.kind === "node") ?? nodeSpans[0])?.id;
+  const page = async (query) => {
+    const read = await timed(
+      `${origin}/api/v2/spike/page?run=${encodeURIComponent(values.run)}&node=${encodeURIComponent(node)}&${query}`,
+      {},
+      budget,
+    );
+    if (read.status !== 200) fail(`page: ${read.status} ${read.body}`);
+    const answer = JSON.parse(read.body);
+    return {
+      seconds: read.seconds,
+      source: answer.source,
+      rows: answer.rows.length,
+      bytes: read.bytes,
+      ids: answer.rows.map((row) => row.id),
+      answer_rows: answer.rows,
+    };
+  };
+  const spanQuery = `span=${encodeURIComponent(span)}&offset=0&limit=50`;
+  const started = performance.now();
+  const complete = completeRead(origin, "overall", undefined, values.run, budget);
+  const before = {
+    span_page: await page(spanQuery),
+    node_rows: await page("limit=50"),
+  };
+  const finished = await complete;
+  const completeSeconds = (performance.now() - started) / 1000;
+  const after = {
+    span_page: await page(spanQuery),
+    node_rows: await page("limit=50"),
+  };
+  const same = (one, other) => {
+    const groups = new Map();
+    compareValues(one.answer_rows, other.answer_rows, "", groups);
+    return { equal: groups.size === 0, differences: [...groups].slice(0, 20) };
+  };
+  const brief = ({ ids, answer_rows: _rows, ...rest }) => rest;
+  return {
+    node,
+    span,
+    wall_seconds: first.seconds + completeSeconds,
+    first_answer_seconds: first.seconds,
+    complete_read_seconds_after_first_answer: completeSeconds,
+    complete_answer_bytes: finished.bytes,
+    before: { span_page: brief(before.span_page), node_rows: brief(before.node_rows) },
+    after: { span_page: brief(after.span_page), node_rows: brief(after.node_rows) },
+    span_page_same_rows: same(before.span_page, after.span_page),
+    node_rows_same_rows: same(before.node_rows, after.node_rows),
+    server: server.residentKb(),
+  };
+}
+
+/** What `open_current` spends on this run, and what its checkpoint is made of. */
+async function firstOpenCurrentMeasure(values, server, origin, root) {
+  const read = await timed(
+    `${origin}/api/v2/spike/open-current?run=${encodeURIComponent(values.run)}`,
+    {},
+    Number(values.timeout),
+  );
+  if (read.status !== 200) fail(`open-current: ${read.status} ${read.body}`);
+  const checkpoint = JSON.parse(
+    readFileSync(join(root, values.run, "checkpoint.json"), "utf8"),
+  );
+  const sizes = (value) =>
+    Object.fromEntries(
+      Object.entries(value)
+        .map(([key, one]) => [key, JSON.stringify(one)?.length ?? 0])
+        .sort((left, right) => right[1] - left[1]),
+    );
+  return {
+    wall_seconds: read.seconds,
+    steps: JSON.parse(read.body),
+    document_bytes: sizes(checkpoint),
+    state_bytes: sizes(checkpoint.state ?? {}),
+  };
+}
+
+/** A journal's records and bytes by kind, and its streams. */
+function firstKinds(values, root) {
+  const kinds = {};
+  const streams = new Set();
+  const text = readFileSync(join(root, values.run, "events.jsonl"), "utf8");
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const kind = /"kind":"([^"]+)"/u.exec(line)?.[1] ?? "unknown";
+    const stream = /"stream":"([^"]+)"/u.exec(line)?.[1];
+    streams.add(stream);
+    kinds[kind] ??= { records: 0, bytes: 0 };
+    kinds[kind].records += 1;
+    kinds[kind].bytes += line.length + 1;
+  }
+  return {
+    wall_seconds: 0,
+    streams: streams.size,
+    kinds: Object.fromEntries(
+      Object.entries(kinds).sort((left, right) => right[1].bytes - left[1].bytes),
+    ),
+  };
+}
+
 /** What the page's filters send: the default view and each state it offers. */
 const HUMAN_ITEM_QUERIES = [
   "",
@@ -1163,13 +1794,37 @@ async function main() {
     else if (values.measure === "checkouts") result = checkouts(values);
     else if (values.measure === "human-items")
       result = await humanItemsMeasure(values, scratch);
+    else if (values.measure === "first-kinds")
+      result = firstKinds(values, root);
     else {
-      const server = new Server(values, root, scratch);
+      const firstMeasure = values.measure.startsWith("first-");
+      const trimmed = firstMeasure && values.client !== "today";
+      // Today's client on the unmodified read: only the prototype's routes are added,
+      // for the card count asked after its mark.
+      const server = new Server(
+        trimmed && !values.prototype
+          ? { ...values, prototype: FIRST_PROTOTYPES }
+          : firstMeasure && !values.prototype
+            ? { ...values, prototype: "first-screen" }
+            : values,
+        root,
+        scratch,
+      );
       try {
         const origin = await server.listening();
         // The client's own first-fetch set-up is not the read's cost.
         await fetch(`${origin}/healthz`).then((answer) => answer.text());
-        result = values.measure.startsWith("page-")
+        result = FIRST_PAGE_MEASURES.includes(values.measure)
+          ? await firstPageMeasure(values, server, origin, root)
+          : values.measure.startsWith("first-answer-")
+            ? await firstAnswerMeasure(values, server, origin, root)
+          : values.measure.startsWith("first-content-")
+            ? await firstContentMeasure(values, server, origin, root)
+            : values.measure === "first-rest"
+              ? await firstRestMeasure(values, server, origin, root)
+              : values.measure === "first-open-current"
+                ? await firstOpenCurrentMeasure(values, server, origin, root)
+                : values.measure.startsWith("page-")
           ? await pageMeasure(values, server, origin, root)
           : values.measure === "status"
             ? await statusMeasure(values, server, origin)
@@ -1185,7 +1840,8 @@ async function main() {
       // A page subscribes more than once, so its spans do not sum to its wall.
       spans.length > 0 &&
       Number(values.concurrent) === 1 &&
-      !values.measure.startsWith("page-")
+      !values.measure.startsWith("page-") &&
+      !values.measure.startsWith("first-")
         ? causes(result.wall_seconds, values.measure, spans)
         : null;
     console.log(

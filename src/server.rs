@@ -88,7 +88,7 @@ struct Serving {
 // body is parsed before a run is opened, the one body that is not parsed is handed to the
 // engine that rules on it, and no raw `String` reaches storage.
 fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<View>) -> Router {
-    Router::new()
+    first_screen_routes(Router::new())
         .route(routes::HEALTHZ, get(healthz))
         .route(routes::RUNS, get(runs))
         .route(routes::RUN, get(run))
@@ -133,6 +133,64 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .layer(axum::middleware::from_fn(crate::encoding::negotiate))
 }
 // llmlint: ignore-end[authorization_enforced_server_side]
+
+/// Spike `first-screen`: its read-only routes, when `ONEPIPELINE_UI_SPIKE` names it.
+#[cfg(feature = "spike-engine-open-current")]
+fn first_screen_routes(router: Router<Serving>) -> Router<Serving> {
+    if !crate::open_trace::prototype("first-screen") {
+        return router;
+    }
+    router
+        .route("/api/v2/spike/first-screen", post(spike_first_screen))
+        .route("/api/v2/spike/page", get(spike_page))
+        .route("/api/v2/spike/open-current", get(spike_open_current))
+}
+
+#[cfg(not(feature = "spike-engine-open-current"))]
+fn first_screen_routes(router: Router<Serving>) -> Router<Serving> {
+    router
+}
+
+#[cfg(feature = "spike-engine-open-current")]
+async fn spike_first_screen(
+    State(serving): Store,
+    Query(raw): Query<HashMap<String, String>>,
+    body: String,
+) -> Response {
+    let hub = serving.hub.clone();
+    let answered = tokio::task::spawn_blocking(move || hub.spike_first_screen(&raw, &body)).await;
+    match answered {
+        Ok(Ok(answer)) => Json(answer).into_response(),
+        Ok(Err(error)) => error.into_response(),
+        Err(_) => ApiError::Read("unexpected read failure".to_owned()).into_response(),
+    }
+}
+
+#[cfg(feature = "spike-engine-open-current")]
+async fn spike_page(
+    State(serving): Store,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Response {
+    let hub = serving.hub.clone();
+    match tokio::task::spawn_blocking(move || hub.spike_page(&raw)).await {
+        Ok(Ok(answer)) => Json(answer).into_response(),
+        Ok(Err(error)) => error.into_response(),
+        Err(_) => ApiError::Read("unexpected read failure".to_owned()).into_response(),
+    }
+}
+
+#[cfg(feature = "spike-engine-open-current")]
+async fn spike_open_current(
+    State(serving): Store,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Response {
+    let hub = serving.hub.clone();
+    match tokio::task::spawn_blocking(move || hub.spike_open_current(&raw)).await {
+        Ok(Ok(answer)) => Json(answer).into_response(),
+        Ok(Err(error)) => error.into_response(),
+        Err(_) => ApiError::Read("unexpected read failure".to_owned()).into_response(),
+    }
+}
 
 /// Take `address`, so a caller can report the port before the accept loop
 /// starts — and learn which port it was given when it asked for `:0`.

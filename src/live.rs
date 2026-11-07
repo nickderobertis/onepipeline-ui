@@ -43,6 +43,10 @@ use crate::contract::{
 use crate::error::ApiError;
 use crate::filter::EventFilter;
 use crate::open_trace::span;
+
+#[cfg(feature = "spike-engine-open-current")]
+#[path = "live/first_screen.rs"]
+pub(crate) mod first_screen;
 use crate::patch::Op;
 use crate::payload::live::{
     DetailInputs, Indexed, LiveDetail, LiveTimeline, TimelineScope, Touched,

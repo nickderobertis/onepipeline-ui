@@ -152,6 +152,20 @@ impl Indexed {
         touched
     }
 
+    /// Spike `first-screen`: where each kept record sits in the store a selective read
+    /// skimmed, in place of its place among the records kept.
+    #[cfg(feature = "spike-engine-open-current")]
+    pub(crate) fn rebase(
+        &mut self,
+        canonical: Vec<Option<usize>>,
+        canonical_len: usize,
+        last_seq: u64,
+    ) {
+        self.canonical = canonical;
+        self.canonical_len = canonical_len;
+        self.last_seq = last_seq;
+    }
+
     /// The nodes, in the order they first appeared.
     fn node_order(&self) -> impl Iterator<Item = &str> {
         self.nodes.iter().map(|(node, _)| node.as_str())

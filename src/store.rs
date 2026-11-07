@@ -634,7 +634,7 @@ impl RunStore {
     /// refuses the same run on every verb, and a refusal in its words about a
     /// run that does not exist would be the engine's account of a directory
     /// rather than the contract's answer.
-    fn present(&self, run: &RunId) -> Result<RunPaths, ApiError> {
+    pub(crate) fn present(&self, run: &RunId) -> Result<RunPaths, ApiError> {
         let paths = self.paths_of(run);
         if !paths.exists() {
             return Err(ApiError::RunNotFound(run.clone()));
