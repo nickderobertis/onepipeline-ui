@@ -57,8 +57,8 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
     expect(
       projects.projects.find((group) => group.project === main?.group)?.runs,
     ).toHaveLength(6);
-    await navigationTakesRowsLive(page);
     await page.goto(server.origin);
+    await navigationTakesRowsLive(page);
     await expect(page).toHaveURL(/run=project-follow-ups/);
     const nav = page.getByRole("navigation", { name: "Projects" });
     const openProject = nav.getByRole("button", {
@@ -112,7 +112,10 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
     await expect(
       group.getByRole("button", { name: /project-main main/ }),
     ).toBeVisible();
-    const rows = await group.locator(".run-link").allTextContents();
+    const rows = await group
+      .getByRole("list")
+      .getByRole("button")
+      .allTextContents();
     expect(
       rows.map(
         (text) =>
@@ -203,7 +206,9 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
       "order-undated-old",
     ];
     for (const [index, id] of expectedOrder.entries())
-      await expect(ordering.locator(".run-link").nth(index)).toContainText(id);
+      await expect(
+        ordering.getByRole("list").getByRole("button").nth(index),
+      ).toContainText(id);
     await ordering.getByRole("button", { name: /shown runs$/ }).click();
     await expect(page).toHaveURL(/run=order-tied-active/);
     await openProject.click();

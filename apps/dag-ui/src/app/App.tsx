@@ -47,8 +47,6 @@ import { ShutdownStatus } from "../features/shutdown/ShutdownStatus";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
 import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
-import { UpdateSetting } from "../features/updates/UpdateSetting";
-import { useUpdateSettings } from "../features/updates/update-settings";
 import { useHumanItemsRoute } from "../lib/humanItemsRoute";
 import { RecordDisclosure } from "../lib/RecordDisclosure";
 import {
@@ -61,6 +59,8 @@ import {
 import { StructuredFields } from "../lib/StructuredFields";
 import { sidebarGroups } from "../lib/sidebar-model";
 import { Timestamp } from "../lib/Timestamp";
+import { UpdateSetting } from "../lib/UpdateSetting";
+import { useUpdateSettings } from "../lib/update-settings";
 import {
   DETAIL_LEVELS,
   type DetailLevel,

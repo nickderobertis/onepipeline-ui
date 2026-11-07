@@ -725,7 +725,7 @@ test("tells its listeners of an accepted write, and not of a refused one or a re
             { error: { code: "not_owner", message: "not yours" } },
             { status: 409 },
           )
-        : Response.json(served("run-stop.json"))) as unknown as typeof fetch,
+        : Response.json(served("run-stop.json"))) as unknown as typeof fetch, // As in `harness`: this answers the one call signature the client makes, not `fetch`'s overloads.
   });
   const told = vi.fn();
   const stop = client.onWrite(told);

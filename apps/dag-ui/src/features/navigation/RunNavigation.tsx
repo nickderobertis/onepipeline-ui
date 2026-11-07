@@ -174,52 +174,61 @@ export function RunNavigation({
                       No runs of the shown kinds.
                     </p>
                   )}
-                  {group.expanded &&
-                    group.runs.map((run) => {
-                      const selected = selectedRunId === run.id;
-                      const reading = [run.state, rowCountSummary(run)]
-                        .filter(Boolean)
-                        .join(" · ");
-                      return (
-                        <button
-                          aria-current={selected ? "page" : undefined}
-                          className="run-link"
-                          data-active={selected}
-                          key={run.id}
-                          onClick={() => onSelect(run.id)}
-                          title={reading}
-                          type="button"
-                          {...{ [ROW_KEY_ATTRIBUTE]: `run:${run.id}` }}
-                        >
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span
-                                role="img"
-                                aria-label={run.state}
-                                className={cn(
-                                  "run-dot",
-                                  stateDotClass(run.state),
-                                )}
-                              />
-                            </TooltipTrigger>
-                            <TooltipContent>{run.state}</TooltipContent>
-                          </Tooltip>
-                          <span className="run-link-name">{run.name}</span>
-                          {run.kind && (
-                            <span
-                              aria-label={run.kind}
-                              className="run-link-tag"
-                              role="note"
+                  {group.expanded && group.runs.length > 0 && (
+                    <ul
+                      aria-label={`Runs of ${group.label}`}
+                      className="run-list"
+                    >
+                      {group.runs.map((run) => {
+                        const selected = selectedRunId === run.id;
+                        const reading = [run.state, rowCountSummary(run)]
+                          .filter(Boolean)
+                          .join(" · ");
+                        return (
+                          <li key={run.id}>
+                            <button
+                              aria-current={selected ? "page" : undefined}
+                              className="run-link"
+                              data-active={selected}
+                              onClick={() => onSelect(run.id)}
+                              title={reading}
+                              type="button"
+                              {...{ [ROW_KEY_ATTRIBUTE]: `run:${run.id}` }}
                             >
-                              {run.kind}
-                            </span>
-                          )}
-                          {selected && (
-                            <span className="run-link-counts">{reading}</span>
-                          )}
-                        </button>
-                      );
-                    })}
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span
+                                    role="img"
+                                    aria-label={run.state}
+                                    className={cn(
+                                      "run-dot",
+                                      stateDotClass(run.state),
+                                    )}
+                                  />
+                                </TooltipTrigger>
+                                <TooltipContent>{run.state}</TooltipContent>
+                              </Tooltip>
+                              <span className="run-link-name">{run.name}</span>
+                              {run.kind && (
+                                <span
+                                  aria-label={run.kind}
+                                  className="run-link-tag"
+                                  role="note"
+                                >
+                                  {run.kind}
+                                </span>
+                              )}
+                              {selected && (
+                                <span className="run-link-counts">
+                                  {reading}
+                                </span>
+                              )}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </fieldset>
               ))}
             </div>

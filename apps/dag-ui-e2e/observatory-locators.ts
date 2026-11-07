@@ -78,11 +78,11 @@ export async function expandProjects(page: Page): Promise<void> {
 }
 
 /**
- * Have the navigation take rows as they arrive, for every page this journey opens:
- * a journey about what a frame does to a row, rather than about holding it.
+ * Have the navigation take rows as they arrive, as a person chooses it, for a
+ * journey about what a frame does to a row rather than about holding it.
  */
 export async function navigationTakesRowsLive(page: Page): Promise<void> {
-  await page.addInitScript(() =>
-    window.localStorage.setItem("dag-ui.updates.navigation", "live"),
-  );
+  await page
+    .getByRole("combobox", { name: "Navigation updates" })
+    .selectOption({ label: "Live" });
 }

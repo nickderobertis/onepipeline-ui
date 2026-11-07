@@ -4470,11 +4470,11 @@ export function writeFailedHeaderRun(root) {
   return runId;
 }
 
-/** A project's six kinds, a copy-origin main, an ungrouped run and an ended legacy run. */
 /** The project-centric corpus's run whose name and kind outgrow their row. */
 const LONG_NAMED_RUN =
   "a-run-whose-name-is-far-longer-than-any-navigation-row-can-show";
 
+/** A project's six kinds, a copy-origin main, an ungrouped run and an ended legacy run. */
 export function buildProjectCentricRuns(root) {
   mkdirSync(root, { recursive: true });
   const project = "local-md:project-centric";

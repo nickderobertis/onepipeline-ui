@@ -20,7 +20,6 @@ export function useRowMotion(
   dependency: unknown,
 ): void {
   const positions = useRef(new Map<string, number>());
-  const order = useRef("");
   // biome-ignore lint/correctness/useExhaustiveDependencies: `dependency` is not read here — it is what says the rows may have moved; the rows themselves are read off the list.
   useLayoutEffect(() => {
     const root = list.current;
@@ -35,12 +34,12 @@ export function useRowMotion(
         row.getBoundingClientRect().top - origin,
       ]),
     );
-    const next = [...now.keys()].join("\n");
-    // The same rows in another order, or some gone or come: either way those
-    // still here that changed places are the ones to move.
+    // Rows come and go as a project opens or a kind is hidden; only those here
+    // both times, in another order, have changed places.
+    const before = [...positions.current.keys()].filter((key) => now.has(key));
+    const after = [...now.keys()].filter((key) => positions.current.has(key));
     const reordered =
-      order.current !== "" &&
-      order.current !== next &&
+      before.join("\n") !== after.join("\n") &&
       !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reordered)
       for (const row of rows) {
@@ -58,6 +57,5 @@ export function useRowMotion(
         );
       }
     positions.current = now;
-    order.current = next;
   }, [list, dependency]);
 }

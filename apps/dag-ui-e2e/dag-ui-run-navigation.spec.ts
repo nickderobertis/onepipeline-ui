@@ -30,6 +30,9 @@ const project = (page: Page, label: string): Locator =>
     name: `Project ${label}`,
     exact: true,
   });
+/** Every run row a project or the whole navigation is listing. */
+const runRows = (scope: Locator): Locator =>
+  scope.getByRole("list", { name: /^Runs of / }).getByRole("button");
 const runRow = (scope: Locator, run: string): Locator =>
   scope.getByRole("button", { name: new RegExp(run) });
 
@@ -40,7 +43,6 @@ async function servedProjects(request: APIRequestContext) {
   ).projects;
 }
 
-/** A box, read from the page. */
 async function box(locator: Locator) {
   const found = await locator.boundingBox();
   if (found === null) throw new Error("the element has no box");
@@ -48,9 +50,9 @@ async function box(locator: Locator) {
 }
 
 /** Dot, name and tag share one line: each one's vertical centre within a pixel or two. */
-async function expectOneLine(row: Locator): Promise<void> {
+async function expectOneLine(row: Locator, run: string): Promise<void> {
   const dot = await box(row.getByRole("img"));
-  const name = await box(row.locator(".run-link-name"));
+  const name = await box(row.getByText(run, { exact: true }));
   const tag = await box(row.getByRole("note"));
   const middle = (part: { y: number; height: number }) =>
     part.y + part.height / 2;
@@ -87,9 +89,7 @@ for (const size of [WIDE, PHONE] as const) {
       navigation(page).getByRole("group", { name: /^Project / }),
     ).toHaveCount(projects.length);
     // Only the selected run's project lists its runs, under a row with its count.
-    await expect(navigation(page).locator(".run-link")).toHaveCount(
-      holding.runs.length,
-    );
+    await expect(runRows(navigation(page))).toHaveCount(holding.runs.length);
     await expect(
       project(page, label(holding)).getByRole("button", {
         name: `${label(holding)} ${holding.runs.length} shown runs`,
@@ -116,9 +116,10 @@ for (const size of [WIDE, PHONE] as const) {
       "page",
     );
     // The first row it lists is the one it opened.
-    await expect(
-      project(page, label(other)).locator(".run-link").first(),
-    ).toHaveAttribute("aria-current", "page");
+    await expect(runRows(project(page, label(other))).first()).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 }
 
@@ -165,7 +166,7 @@ test("at phone width the navigation is a drawer over a main area spanning the vi
   await expect(scrim).toBeVisible();
 
   // A run row stays one line inside it.
-  await expectOneLine(runRow(navigation(page), runs().live));
+  await expectOneLine(runRow(navigation(page), runs().live), runs().live);
   const navSetting = page.getByRole("combobox", { name: "Navigation updates" });
   await inside(navSetting);
 
@@ -177,12 +178,18 @@ test("at phone width the navigation is a drawer over a main area spanning the vi
   const controls = [
     navigation(page).getByRole("button", { name: "Host" }),
     navigation(page).getByRole("button", { name: "Action items" }),
-    navigation(page).locator(".kind-filter summary"),
-    navigation(page).locator(".kind-filter label"),
+    navigation(page).getByText(/^Run kinds:/),
+    // A checkbox's own box is small; the label around it is what a thumb presses.
+    ...["field-research", "follow-ups", "main", "planning", "spikes"].map(
+      (kind) =>
+        navigation(page)
+          .getByRole("group", { name: "Run kinds", exact: true })
+          .getByText(kind, { exact: true }),
+    ),
     navSetting,
-    navigation(page).locator(".project-toggle"),
-    navigation(page).locator(".project-open"),
-    navigation(page).locator(".run-link"),
+    navigation(page).getByRole("button", { name: /^(Expand|Collapse) / }),
+    navigation(page).getByRole("button", { name: /shown runs$/ }),
+    runRows(navigation(page)),
   ];
   const boxes: { x: number; y: number; width: number; height: number }[] = [];
   for (const group of controls)
@@ -226,13 +233,13 @@ test("at phone width the navigation is a drawer over a main area spanning the vi
     .getByRole("button", { name: /shown runs$/ })
     .click();
   await expect(navigation(page)).toBeVisible();
-  await expect(project(page, label).locator(".run-link").first()).toBeVisible();
+  await expect(runRows(project(page, label)).first()).toBeVisible();
   await expect(page).not.toHaveURL(new RegExp(`run=${runs().live}`));
 
   // Choosing a run closes it and shows that run.
-  const chosen = project(page, label).locator(".run-link").last();
-  const name = await chosen.locator(".run-link-name").innerText();
-  await chosen.click();
+  const name = other.runs.at(-1)?.run_id;
+  if (name === undefined) throw new Error("the second project serves a run");
+  await runRow(project(page, label), name).click();
   await expect(navigation(page)).toHaveCount(0);
   await expect(page.getByRole("heading", { name })).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`run=${name}`));
@@ -266,6 +273,30 @@ test("at phone width the navigation is a drawer over a main area spanning the vi
       ).toBe(false);
 });
 
+test("growing past phone width closes an open drawer and leaves the main area usable", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: PHONE.width, height: PHONE.height });
+  await page.goto(`/?run=${runs().live}&view=graph`);
+  await menu(page).click();
+  await expect(navigation(page)).toBeVisible();
+  await expect(page.getByRole("main")).toHaveJSProperty("inert", true);
+
+  await page.setViewportSize({ width: WIDE.width, height: WIDE.height });
+  await expect(page.getByRole("main")).toHaveJSProperty("inert", false);
+  await expect(
+    page.getByRole("button", { name: "Close navigation" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Refresh", exact: true }),
+  ).toBeEnabled();
+
+  // Coming back it is closed, as a page at that width starts.
+  await page.setViewportSize({ width: PHONE.width, height: PHONE.height });
+  await expect(navigation(page)).toHaveCount(0);
+  await expect(menu(page)).toBeVisible();
+});
+
 const longFactsSchema = z.object({ longNamedRun: z.string().min(1) });
 
 test("a long name and tag stay aligned on one line, and only the selected run's row shows its counts", async ({
@@ -280,35 +311,34 @@ test("a long name and tag stay aligned on one line, and only the selected run's 
     await page.goto(`${server.origin}/?run=${longNamedRun}&view=graph`);
     const row = runRow(navigation(page), longNamedRun);
     await expect(row).toBeVisible();
-    await expectOneLine(row);
-    // Not a run's selection is what hides the second line, so read the name's width.
-    expect((await box(row.locator(".run-link-name"))).width).toBeGreaterThan(
-      60,
-    );
+    await expectOneLine(row, longNamedRun);
+    const name = row.getByText(longNamedRun, { exact: true });
+    // The name has the room the dot and the tag leave rather than dead space.
+    expect((await box(name)).width).toBeGreaterThan(60);
 
     await page.setViewportSize({ width: PHONE.width, height: PHONE.height });
     await menu(page).click();
     await expect(row).toBeVisible();
-    await expectOneLine(row);
+    await expectOneLine(row, longNamedRun);
     await page.keyboard.press("Escape");
     await page.setViewportSize({ width: WIDE.width, height: WIDE.height });
 
     // The selected row carries a second line with what its title says; another,
     // only the title.
-    const counts = row.locator(".run-link-counts");
+    const reading = await row.getAttribute("title");
+    if (reading === null) throw new Error("the selected row has no title");
+    const counts = row.getByText(reading, { exact: true });
     await expect(counts).toBeVisible();
-    expect(await row.getAttribute("title")).toBe(await counts.innerText());
-    expect((await box(counts)).y).toBeGreaterThan(
-      (await box(row.locator(".run-link-name"))).y,
-    );
+    expect((await box(counts)).y).toBeGreaterThan((await box(name)).y);
 
     const group = navigation(page).getByRole("group", {
       name: "Project project-centric",
     });
     await group.getByRole("button", { name: "Expand project-centric" }).click();
-    const other = group.locator(".run-link").first();
-    await expect(other).toHaveAttribute("title", /\S/);
-    await expect(other.locator(".run-link-counts")).toHaveCount(0);
+    const other = runRows(group).first();
+    const hover = await other.getAttribute("title");
+    if (hover === null) throw new Error("another row has no title");
+    await expect(other.getByText(hover, { exact: true })).toHaveCount(0);
     await expect(other).not.toHaveAttribute("aria-current", "page");
   } finally {
     await server.stop();
@@ -367,7 +397,7 @@ for (const motion of ["no-preference", "reduce"] as const) {
         .selectOption({ label: "Live" });
       const ordering = project(page, "ordering");
       await ordering.getByRole("button", { name: "Expand ordering" }).click();
-      const rows = ordering.locator(".run-link-name");
+      const rows = runRows(ordering);
       await expect(rows.nth(3)).toHaveText(UNDATED.first);
       await expect(rows.nth(4)).toHaveText(UNDATED.second);
 
@@ -385,14 +415,26 @@ for (const motion of ["no-preference", "reduce"] as const) {
         expect(started).toContain(`run:${UNDATED.second}`);
         expect(started).toContain(`run:${UNDATED.first}`);
       }
+      // A project opening pushes rows without their changing places: none travels.
+      const settled = started.length;
+      await page.waitForTimeout(400);
+      await project(page, "another-project")
+        .getByRole("button", { name: "Expand another-project" })
+        .click();
+      await expect(runRows(project(page, "another-project"))).toHaveCount(1);
+      expect(
+        await page.evaluate(
+          () =>
+            (window as unknown as { startedAnimations: string[] })
+              .startedAnimations.length,
+        ),
+      ).toBe(settled);
       // Nothing is left running once it has arrived.
       await expect
         .poll(() =>
-          ordering
-            .locator(".run-link")
-            .evaluateAll(
-              (all) => all.flatMap((row) => row.getAnimations()).length,
-            ),
+          runRows(ordering).evaluateAll(
+            (all) => all.flatMap((row) => row.getAnimations()).length,
+          ),
         )
         .toBe(0);
     } finally {
@@ -419,16 +461,14 @@ test("one dropdown selects kinds: the rows narrow, and the selection survives a 
   const main = kinds.getByRole("checkbox", { name: "main", exact: true });
   await expect(main).toBeChecked();
 
-  const rowsBefore = await nav.locator(".run-link").count();
+  const rowsBefore = await runRows(nav).count();
   await kinds
     .getByRole("checkbox", { name: "planning", exact: true })
     .uncheck();
   await expect(summary).not.toHaveText(/^Run kinds: (\d+) of \1$/);
   await expect(page).toHaveURL(/hide-kind=planning/);
   // Its run's row goes, wherever the project is opened.
-  await expect
-    .poll(() => nav.locator(".run-link").count())
-    .toBeLessThanOrEqual(rowsBefore);
+  await expect.poll(() => runRows(nav).count()).toBeLessThanOrEqual(rowsBefore);
   await expect(runRow(nav, runs().sibling)).toHaveCount(0);
 
   await page.reload();

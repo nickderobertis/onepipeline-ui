@@ -13,7 +13,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   API_V2_PATHS,
@@ -257,6 +257,34 @@ test("a first visit shows the defaults, and each setting survives a reload on it
   await expect(setting(page, MAIN)).toHaveValue("60");
 });
 
+test("a remembered word that is no setting, and storage the browser refuses, leave the defaults", async ({
+  page,
+}) => {
+  const { served } = await serveLive();
+  await page.addInitScript(() => {
+    window.localStorage.setItem("dag-ui.updates.navigation", "whenever");
+  });
+  await page.goto(served.origin);
+  await expect(setting(page, NAVIGATION)).toHaveValue("30");
+  await expect(setting(page, MAIN)).toHaveValue("live");
+
+  // A browser that refuses storage still gives the page its settings for the visit.
+  const refusing = await page.context().newPage();
+  await refusing.addInitScript(() => {
+    Object.defineProperty(window, "localStorage", {
+      get() {
+        throw new DOMException("refused", "SecurityError");
+      },
+    });
+  });
+  await refusing.goto(served.origin);
+  await expect(setting(refusing, NAVIGATION)).toHaveValue("30");
+  await choose(refusing, MAIN, "Off");
+  await expect(setting(refusing, MAIN)).toHaveValue("off");
+  await expect(refusing.getByRole("alert")).toHaveCount(0);
+  await refusing.close();
+});
+
 test("the navigation's setting holds its rows: live as they arrive, an interval until it elapses, off until turned on", async ({
   page,
 }) => {
@@ -362,7 +390,8 @@ test("the main area's setting holds its view: live as it arrives, an interval un
     cursor,
   );
 
-  // Off, with the navigation off too, closes the stream; turned back on below.
+  // Off: nothing shows however long it holds, and the stream stays open for the
+  // navigation, which is on.
   await choose(page, NAVIGATION, "Every minute");
   await choose(page, MAIN, "Off");
   recordActivity(served, run, node, "change under off");
@@ -807,6 +836,24 @@ test("the Host page's rows take a shown value from the stream, with no new run-l
       .slice(before)
       .filter((request) => request.includes(API_V2_PATHS.runs)),
   ).toStrictEqual([]);
+  expect(wire.requests.slice(before)).toStrictEqual([]);
+
+  // A run the listing was taken before is listed from its row; a removed one goes.
+  const gone = facts.stoppedRun;
+  const arrived = "a-run-after-the-listing";
+  await expect(listed.getByText(new RegExp(`^${gone} · `))).toBeVisible();
+  rmSync(join(served.workspace, "runs", gone), { recursive: true });
+  await expect(listed.getByText(new RegExp(`^${gone} · `))).toHaveCount(0, {
+    timeout: PUSH_PATIENCE,
+  });
+  cpSync(
+    join(served.workspace, "runs", other),
+    join(served.workspace, "runs", arrived),
+    { recursive: true },
+  );
+  await expect(listed.getByText(new RegExp(`^${arrived} · `))).toBeVisible({
+    timeout: PUSH_PATIENCE,
+  });
   expect(wire.requests.slice(before)).toStrictEqual([]);
 
   // The main area's setting holds them like any other view of it.

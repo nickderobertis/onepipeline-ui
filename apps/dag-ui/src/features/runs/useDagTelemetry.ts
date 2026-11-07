@@ -19,8 +19,8 @@ import type {
   LiveHumanItems,
 } from "../../lib/live-human-items";
 import { changedRowCount, newestRows } from "../../lib/sidebar-model";
-import type { UpdateSetting } from "../updates/update-settings";
-import { useHeldArea } from "../updates/useHeldArea";
+import type { UpdateSetting } from "../../lib/update-settings";
+import { useHeldArea } from "../../lib/useHeldArea";
 
 // llmlint: ignore-file[changed_behavior_has_e2e] The browser journeys in
 // apps/dag-ui-e2e/dag-ui-live-updates.spec.ts drive every branch a conforming

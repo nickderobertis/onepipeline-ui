@@ -4603,8 +4603,8 @@ test("keeps the list a reader scrolled to when a run moves", async ({
     )
       listReads.push(url.pathname + url.search);
   });
-  await navigationTakesRowsLive(page);
   await page.goto("/?list=runs&view=graph");
+  await navigationTakesRowsLive(page);
   const navigation = page.getByRole("navigation", { name: "Projects" });
   const viewport = navigation.locator("[data-radix-scroll-area-viewport]");
   await expandProjects(page);
@@ -4743,8 +4743,8 @@ test("stays quiet when the run it is opening is swept out from under it", async 
 });
 
 test("drops a run the server stops serving", async ({ page }) => {
-  await navigationTakesRowsLive(page);
   await openObservatory(page);
+  await navigationTakesRowsLive(page);
   await expandProjects(page);
   await expect(
     page.getByRole("button", { name: RegExp(runs().history) }),
@@ -4767,8 +4767,8 @@ test("drops a run the server stops serving", async ({ page }) => {
 });
 
 test("falls back to the empty state once no run is left", async ({ page }) => {
-  await navigationTakesRowsLive(page);
   await openObservatory(page);
+  await navigationTakesRowsLive(page);
   await expandProjects(page);
   await expect(
     page.getByRole("button", { name: RegExp(runs().live) }),

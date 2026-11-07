@@ -2245,6 +2245,11 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   padding: 0;
   border: 0;
 }
+.run-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 .project-row {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
@@ -2345,6 +2350,16 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   }
   .update-setting select {
     height: 44px;
+  }
+  /* The words are the summary's whole height, so pressing them is pressing it. */
+  .kind-filter > summary {
+    padding-block: 0;
+  }
+  .kind-filter > summary > span {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    min-height: 44px;
   }
   .nav-pages > button {
     flex: 1;
