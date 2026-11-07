@@ -149,21 +149,11 @@ resolves every workflow to hold that, and what a push to `main` and the release
 commit start. The fifth, `budgets`, is the released `onebudgetspec-github-action`
 under `needs` and `if: always()`, on every pull request and alone of `ci.yml` on
 every push to `main`: it builds and tests nothing and fails only on an ordinary budget
-verdict. A row shows what a `budgets` target saved in `test-linux`
-(`target/budget-results/`, uploaded as `budget-check-results-test-linux`) or a figure
-this job measures, and `<name>-ci-check-time` and `-ci-job-count` read this pull
-request's own run. A budget a pull request cannot measure or move carries
-`not-measured-on-pr`: it has no row, one line counts it, and whatever checks it
-elsewhere is unchanged, so a new budget's label says which it is. A saved target
-names its results with `--save-results` and its Nx `outputs`. A budget with neither
-reads `no saved result was found on this run`, which on a pull request a target the
-change did not select also reads; name a budget's saved telemetry or required file in
-its `command`, or its absence reads as a broken measurement. `release-tail` and
-`host-variable` are report-only here (`enforcement-exclude-labels`) because they
-measure elsewhere. `.github/reporting` holds the job's journeys and its own budget. A
-base push takes the merged pull request's figures for its rolling history, so a pull
-request's value and its baseline are one measurement; it runs no test job and none of
-those budgets' commands.
+verdict. `release-tail` and `host-variable` are report-only here
+(`enforcement-exclude-labels`) because they measure elsewhere, and a budget a pull
+request cannot measure or move carries `not-measured-on-pr`, which takes it out of the
+table and changes nothing that checks it elsewhere, so a new budget's label says which
+it is. `.github/reporting/AGENTS.md` holds what a row reads and how a budget reaches it.
 
 **A security advisory blocks only the change that brings it in.** A database
 update publishes advisories against versions `main` already resolves, and an
