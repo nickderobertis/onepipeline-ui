@@ -17,7 +17,7 @@ import { z } from "zod";
 import { runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
 import { appendRecords } from "./load/journal";
-import { DESKTOP, PHONE, type Viewport } from "./viewports";
+import { DESKTOP, PHONE } from "./viewports";
 
 const WIDE = { name: "1440x900", width: 1440, height: 900 } as const;
 
@@ -217,7 +217,7 @@ test("at phone width the navigation is a drawer over a main area spanning the vi
   const label = other.name ?? other.project ?? "Other runs";
   await menu(page).click();
   await project(page, label)
-    .getByRole("button", { name: new RegExp(`shown runs$`) })
+    .getByRole("button", { name: /shown runs$/ })
     .click();
   await expect(navigation(page)).toBeVisible();
   await expect(project(page, label).locator(".run-link").first()).toBeVisible();

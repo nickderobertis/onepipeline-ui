@@ -674,7 +674,7 @@ being photographed.
 | `08-conversation` | a conversation in the right panel |
 | `09-node-redirected` | a node reading as having a reachable turn, with the redirection that turn took open beside it |
 | `10-node-no-turn-to-reach` | a node whose run has no turn to reach, with the note that could only be deferred open beside it |
-| `11-project-list` | projects and their runs in one sidebar |
+| `11-project-list` | projects and their runs in one sidebar, the open drawer at phone width |
 | `12-host` | host resources, unwatched runs and host shutdown |
 | `21-remote` | publication, release and each check’s evidence |
 | `13-channel` | the channel: the queue, the composer and the surface form |

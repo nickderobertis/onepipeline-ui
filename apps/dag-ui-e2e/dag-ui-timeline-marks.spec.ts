@@ -136,9 +136,13 @@ for (const [where, url, region] of [
     const plot = timeline.getByLabel(
       "Timeline plot. Scroll to zoom or drag to select a range.",
     );
-    await plot.hover();
-    // Far past the narrowest window the view allows.
-    for (let step = 0; step < 60; step += 1) await page.mouse.wheel(0, -300);
+    // Far past the narrowest window the view allows. The wheel scrolls the page as
+    // well as zooming the plot, which can carry the plot out from under the pointer
+    // and leave the rest of the wheel scrolling nothing, so each step points at it.
+    for (let step = 0; step < 60; step += 1) {
+      await plot.hover();
+      await page.mouse.wheel(0, -300);
+    }
     await expect(
       timeline.getByRole("button", { name: "Reset timeline zoom" }),
     ).toBeEnabled();

@@ -510,16 +510,17 @@ async function holdsWithoutARequest(
   ] as const) {
     await choose(page, NAVIGATION, label);
     await choose(page, MAIN, label);
-    arrive((turn += 1));
+    turn += 1;
+    arrive(turn);
     for (let tick = 0; tick < 3; tick += 1)
       await page.clock.runFor(seconds * 1000);
   }
   await choose(page, NAVIGATION, "Off");
-  arrive((turn += 1));
+  arrive(turn + 1);
   await page.clock.runFor(600_000);
   await choose(page, NAVIGATION, "Every 10 seconds");
   await choose(page, MAIN, "Off");
-  arrive((turn += 1));
+  arrive(turn + 2);
   await page.clock.runFor(600_000);
   // Real time, for the frames that are arriving to reach a page that says nothing.
   await page.waitForTimeout(1_500);

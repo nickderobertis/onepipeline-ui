@@ -331,7 +331,7 @@ const SURFACES: readonly Surface[] = [
     open: async (page) => {
       await page.goto(`/?list=runs&run=${runs().live}&view=overall`);
       await settleReads(page);
-      await expect(page.getByText("DAG Observatory")).toBeVisible();
+      await expect(page.getByRole("main")).toBeVisible();
       await expect(metrics(page)).toHaveCount(4);
       await expect(
         page.getByRole("region", { name: "Graph timeline" }),
@@ -527,6 +527,11 @@ const SURFACES: readonly Surface[] = [
     open: async (page) => {
       await page.goto(`/?run=${runs().live}`);
       await settleReads(page);
+      // On a phone the list is a drawer, shown open here.
+      if ((page.viewportSize()?.width ?? 0) <= 640) {
+        await page.getByRole("button", { name: "Open navigation" }).click();
+        await settleReads(page);
+      }
       await expect(
         page
           .getByRole("navigation", { name: "Projects" })

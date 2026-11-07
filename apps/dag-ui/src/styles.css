@@ -2240,7 +2240,10 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   margin-top: 10px;
 }
 .project-group {
-  margin-top: 2px;
+  min-width: 0;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
 }
 .project-row {
   display: grid;

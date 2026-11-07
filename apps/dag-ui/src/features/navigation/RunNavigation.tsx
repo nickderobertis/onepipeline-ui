@@ -127,11 +127,10 @@ export function RunNavigation({
           ) : (
             <div className="nav-rows" ref={list}>
               {groups.map((group) => (
-                <section
+                <fieldset
                   key={group.key}
                   aria-label={`Project ${group.label}`}
                   className="project-group"
-                  role="group"
                 >
                   <div
                     className="project-row"
@@ -205,7 +204,7 @@ export function RunNavigation({
                         </button>
                       );
                     })}
-                </section>
+                </fieldset>
               ))}
             </div>
           )}
