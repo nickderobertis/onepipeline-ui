@@ -179,7 +179,7 @@ export function shapeProblems(workflows) {
 // release-plz.yml's digest: the release workflow is an interface other work builds
 // against, so any edit to it has to be made here too, on purpose.
 const RELEASE_PLZ_SHA256 =
-  "b9c57fdf35411e913df499ae0dee958a93a3eeb31ab8d9dbb7a992dafc4856a3";
+  "f90daa6bf545e9f9cf80ed89761ea84df5ce7017b1b8f3bc4cd1389576a99600";
 
 test("a pull request runs the five jobs, main and the release commit run only what they name", () => {
   assert.deepEqual(shapeProblems(load()), []);

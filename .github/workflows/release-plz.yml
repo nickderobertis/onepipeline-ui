@@ -124,8 +124,11 @@ jobs:
           retention-days: 7
       # GitHub accepts only cancel here; job teardown also stops the background step.
       - cancel: nx-cache
+      # Restores and never saves: ci-cache.yml is the only saver of Rust build caches.
       - uses: Swatinem/rust-cache@v2
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.guard.outputs.enabled == 'true'
+        with:
+          save-if: false
 
       # taiki-e/install-action verifies the downloaded archive's checksum before
       # unpacking it; a `curl | tar` pipeline would execute an unauthenticated

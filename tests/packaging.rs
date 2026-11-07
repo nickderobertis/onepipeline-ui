@@ -561,7 +561,7 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// comparison of the two above passes for any release both moved to together —
 /// including one whose adopted runs write their plan's home nothing. It moves
 /// with the `onepipeline` pin and [`STORE_RELEASE`], as one change.
-const ENGINE_RELEASE: &str = "0.101.4";
+const ENGINE_RELEASE: &str = "0.102.0";
 
 /// Where the lock must resolve [`ENGINE_RELEASE`] from: crates.io, which serves
 /// the release a crates.io consumer and the sibling CLI `just bootstrap`
@@ -728,7 +728,7 @@ fn the_same_engine_release_from_another_source_is_refused_naming_it() {
 /// a comparison of the two and still link a store whose closure handling nothing
 /// here was proven against. It moves with the `onepipeline` pin, as one change, to
 /// the store release that engine links.
-const STORE_RELEASE: &str = "0.14.3";
+const STORE_RELEASE: &str = "0.14.5";
 
 /// The members of the plan-store family the shipped binary cannot be without:
 /// the store itself, the plugin boundary, and the GitHub plugin a board is read
@@ -2208,6 +2208,13 @@ fn every_workflow_runs_the_node_major_package_json_requires() {
         "engines.node names `>={floor}`, which is not a major version"
     );
 
+    let tool_pins = read(".github/ci-tool-versions");
+    let tool_pin_major = tool_pins
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("node="))
+        .and_then(|version| version.split('.').next())
+        .expect(".github/ci-tool-versions pins node")
+        .to_string();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows");
     let mut pinned = 0;
     for entry in fs::read_dir(&root).expect("read .github/workflows") {
@@ -2218,8 +2225,16 @@ fn every_workflow_runs_the_node_major_package_json_requires() {
                 continue;
             };
             pinned += 1;
+            // A job that reads `.github/ci-tool-versions` runs the exact release pinned
+            // there, which has to be of the floor's major too.
+            let spelled = value.trim().trim_matches('"');
+            let major = if spelled == "${{ steps.tool-pins.outputs.node }}" {
+                tool_pin_major.as_str()
+            } else {
+                spelled
+            };
             assert_eq!(
-                value.trim().trim_matches('"'),
+                major,
                 floor,
                 "{}:{} pins Node {}, and package.json's engines.node floor is {floor}",
                 path.display(),
