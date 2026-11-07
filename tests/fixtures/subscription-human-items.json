@@ -43,6 +43,10 @@
               "blocked": {
                 "total": 0,
                 "plans": []
+              },
+              "reopen": {
+                "available": false,
+                "reason": "the item is open, so there is nothing to reopen"
               }
             }
           ],
@@ -74,7 +78,11 @@
               "total": 0,
               "plans": []
             },
-            "nodes": []
+            "nodes": [],
+            "reopen": {
+              "available": false,
+              "reason": "the item is open, so there is nothing to reopen"
+            }
           }
         }
       }
@@ -121,6 +129,14 @@
             "updated_at"
           ],
           "v": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "p": [
+            "detail",
+            "reopen",
+            "reason"
+          ],
+          "v": "an answered question cannot be reopened"
         }
       ]
     },
