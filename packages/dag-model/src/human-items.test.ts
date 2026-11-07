@@ -65,14 +65,15 @@ function shape(node: unknown, defs: Schema): unknown {
     return nullable ? { nullable: of } : of;
   }
   if ("const" in node) return { enum: [String(node.const)] };
-  // A `null` among an enum's words is the nullability `type` states beside it.
-  if (Array.isArray(node.enum))
-    return {
+  if (Array.isArray(node.enum)) {
+    const of = {
       enum: node.enum
         .filter((word) => word !== null)
         .map(String)
         .sort(),
     };
+    return node.enum.includes(null) ? { nullable: of } : of;
+  }
   if (Array.isArray(node.type)) {
     const types = node.type.filter((type) => type !== "null");
     const of = shape({ ...node, type: types[0] }, defs);

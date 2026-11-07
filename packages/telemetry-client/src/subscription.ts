@@ -395,6 +395,7 @@ function patched(
 ): VisibleState {
   const refused = (what: string) =>
     new Error(`a ${frame.type} for ${what} this tab does not show`);
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the plan names this package as what delivers the view: `docs/contract.md`'s subscription protocol is one closed set of frames, each applied here to the payload it names and read back through that payload's schema, exactly as the run views' are in the same function; the record schema it reads through lives with the human-item domain in `@onepipeline-ui/dag-model`.
   if (frame.type === "human-items.patch") {
     if (visible.type !== "human-items") throw refused("human items");
     return patchedAs(

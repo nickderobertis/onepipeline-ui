@@ -2073,7 +2073,9 @@ test("an item whose patch beats its receipt stays where it was until the receipt
   await expect(card(page, LAST_QUESTION).getByRole("status")).toHaveText(
     "Sending…",
   );
-  expect(await titles(list)).toEqual(expect.arrayContaining(order));
+  expect((await titles(list)).filter((title) => title !== later)).toEqual(
+    order,
+  );
   release();
   await expect(outcome(page)).toHaveText(`${LAST_QUESTION}: Answered`);
   await expect(card(page, LAST_QUESTION)).toHaveCount(0);

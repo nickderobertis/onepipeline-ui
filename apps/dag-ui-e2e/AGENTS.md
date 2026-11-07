@@ -27,16 +27,11 @@ can ask for without paying for the rest; `check` pays for all of it.
 
 ## `read-latency/`: a project of its own, for timings
 
-`dag-ui-read-latency` is the journey whose telemetry `budgets.yaml` beside it reads:
-how fast Action items follows what the real `onepipeline human-items` CLI writes, and
-what that costs the browser. Its `test` builds the release server, runs with
-`parallelism: false` so nothing times beside it, and is uncached, because its
-gitignored telemetry is what its `budgets` read; `test-linux`'s affected tier reaches
-both by target name. A change that adds a read budget extends its `workload.json`,
-`telemetry.ts` and `read-latency-budget.mjs`, and `load/corpus.mjs` is the one
-generator it sizes, run as a command rather than imported across the project line. A
-change to that generator alone selects `dag-ui-e2e`, not this project; the next
-change it is affected by reads it.
+`dag-ui-read-latency` records what its budgets read, so nothing may time beside it and
+no verdict of its is replayed. A new read budget extends its `workload.json`,
+`telemetry.ts` and `read-latency-budget.mjs`. `load/corpus.mjs` is the one generator it
+sizes, run as a command rather than imported across the project line, so a change to the
+generator alone selects `dag-ui-e2e` and not this project.
 
 ## Reaching the app
 

@@ -8,7 +8,9 @@
   "targets": {
     "test": {
       "//": "Fresh timings on a release build, with nothing beside them and its telemetry what `budgets` reads, so never cached: apiServerSurface is among its inputs because that is what it measures. Writes through the real CLI, so it provisions the sibling.",
+      "//compile": "llmlint: ignore-block[new_projects_keep_the_graph_uniform] the plan states this target's compile and journey as one command, as `dag-ui-e2e:test-load` has them: a release build is a prerequisite of this tier's timings alone, so a `build` target would put it in every `build` sweep, where nothing else reads it, and leave the affected tier compiling a server no other task runs.",
       "command": "cargo build --release --locked --features bundled-ui --bin onepipeline-api && npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts",
+      "//compile-end": "llmlint: ignore-end[new_projects_keep_the_graph_uniform]",
       "cache": false,
       "parallelism": false,
       "inputs": [
@@ -20,6 +22,7 @@
         "platform"
       ],
       "outputs": ["{projectRoot}/telemetry/read-latency.json"],
+      "//api-server": "llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the plan names `build-api-server` among this project's dependencies, the same edge `dag-ui-e2e:test` holds: in the tier that selects this project that task is already running for the browser journeys, so it costs nothing it would not, and it keeps the debug server current for anyone driving this journey's world by hand.",
       "dependsOn": [
         {
           "projects": ["dag-ui"],
@@ -33,7 +36,8 @@
           "projects": ["onepipeline-ui"],
           "target": "ensure-sibling"
         }
-      ]
+      ],
+      "//api-server-end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]"
     },
     "budgets": {
       "//": "Telemetry-only: the budgets read what `test` just recorded and measure nothing themselves.",
