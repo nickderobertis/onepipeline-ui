@@ -4,20 +4,23 @@
 # measured it.
 schema_version: 1
 budgets:
-  # Workload: one budget job with 100 catalog rows and one rolling file of up to 20
-  # eligible base commits, from cold install through checks, history, comment and main
-  # result upload; identical reruns are separate jobs. Inner measure: final self-judgment,
-  # persisting its own verdict and runner queue/setup/teardown cannot be inside the
-  # duration being judged. Basis: design; the spike's prototype took 38.55 s including a
-  # 10.49 s install over zero typed scalar archive bytes and simulated posting, so 120 s is
-  # a provisional requirement rather than a measured cost. The reader is estimated at 1 s.
-  # Beside `onepipeline-ui-ci-job-count` on purpose: that holds how many jobs a pull request
-  # starts, and this how long the last of them takes.
+  # Workload: one budgets job per pull request push or base push, with 18 catalog rows and
+  # one rolling file of up to 20 base commits, downloading one results artifact of 2,619 to
+  # 11,350 zipped bytes; a base push also reads the merged pull request's run. Inner measure:
+  # this job cannot include its own judgment, the comment post that carries it, or runner
+  # queue, setup and teardown in a figure it reports about itself, so the interval ends after
+  # the main upload; the post took 1.14 to 1.86 s on the spike's runs. Basis: arithmetic over
+  # parts spike-saved-results measured, not a measured whole job: five real jobs took 5.98 to
+  # 9.11 s and base push 42258558584 8.78 s, post inside; the added download 0.47 to 1.02 s
+  # and the lookup 1.24 to 1.87 s, so about 10.1 s on a pull request and 10.7 s on a base
+  # push. The reader is estimated at 1 s. The detail breaks the job into install, check,
+  # archive and render seconds and its request counts.
+  # llmlint: ignore[budgets_track_product_owner_outcomes] the report job's own time budget sits beside this repository's longest-CI-job budget, the overlap the design that added this job approved; narrowing its interval adds no overlap.
   - id: onepipeline-ui-budget-report-command-seconds
     description: >-
-      The budget report job from its cold install through the checks, the history read, the
-      comment and the main result upload. It protects the turnaround of the required check
-      every pull request waits on.
+      The budget report job from its cold install through the checks, the saved-results read,
+      the history read and the main result upload, the interval ending before the comment
+      post. It protects the turnaround of the required check every pull request waits on.
     labels: [ci-report]
     measure: reported
     command: [onebudgetspec-github-action, telemetry, --metric, report-command-seconds, --input, .telemetry/report-job.json]

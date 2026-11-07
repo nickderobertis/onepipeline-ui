@@ -6,7 +6,7 @@
 #                  `onebudgetspec check budgets.yaml --label release-tail`, after
 #                  the Release is settled. The GitHub figures, taken by
 #                  scripts/actions-budget-figures.sh (copied byte for byte
-#                  from dero-skills' create-repo at 63e071b, version 11, so its
+#                  from dero-skills' create-repo at afc6829, version 13, so its
 #                  header is the source's own). The seven host figures use
 #                  onevcs's read-only queries; cache-use reads CI and promotion
 #                  artifacts through GitHub's API directly. The CD figures leave out `CI cache`, the main-push
@@ -17,19 +17,30 @@
 #
 # Any other check of this file excludes both labels; at pull-request time each
 # CI job's `timeout-minutes: 30` is what fails a check that runs over. ci.yml's
-# `budgets` job reports both labels' budgets without enforcing them.
+# `budgets` job enforces neither label. It reports the two CI-time figures from its
+# own run, and omits the rest, labelled `not-measured-on-pr`: a pull request cannot
+# measure those or move their figures, and their check elsewhere is unchanged.
 schema_version: 1
 budgets:
   # Workload: one release carrying 1 to 3 merged PRs, each PR's last commit running
   # the 4 CI jobs; 54 releases and 140 merged PRs, 85 of them not release PRs, in
   # 31 days (2026-09-15 to 10-16). Basis: design; the 30-minute line is the
-  # user's requirement. Today: 1,294 s median, 1,800 s p90 (window).
+  # user's requirement. Today: 1,294 s median, 1,800 s p90 (window). On a pull request:
+  # one CI run of 5 jobs, read once when the budgets job runs, four jobs finished and
+  # itself in progress; one REST read, about 3 s, of runs it does not time. Run
+  # 42255859378's longest job, test-windows, took 981 s, the spike's five runs 975 to
+  # 1,408 s. Inner measure: jobs run in parallel, so the longest sets how long a pull
+  # request waits on its slowest check and is the unit an author can fix; the whole run
+  # also holds runner queueing no change controls, and this job cannot finish before it
+  # reads this figure.
   - id: onepipeline-ui-ci-check-time
     description: >-
       The longest counted job of each pull request's last-commit CI runs, over
       the pull requests one release carries, in seconds from GitHub's job
-      timestamps. Holds each check to 30 minutes, because one slow check holds
-      every change behind it; `timeout-minutes: 30` enforces it at PR time.
+      timestamps. A pull request reports its own run instead: the longest
+      finished job, the budgets job in progress left out. Holds each check to 30
+      minutes, because one slow check holds every change behind it;
+      `timeout-minutes: 30` enforces it at PR time.
     measure: reported
     command: [bash, scripts/actions-budget-figures.sh, longest-job, --stage, pr]
     unit: seconds
@@ -54,7 +65,7 @@ budgets:
     unit: seconds
     direction: max
     threshold: 1800
-    labels: [release-tail]
+    labels: [release-tail, not-measured-on-pr]
   # Workload: one release carrying 1 to 3 merged PRs, each PR's last commit running
   # the 4 CI jobs; 54 releases and 140 merged PRs, 85 of them not release PRs, in
   # 31 days (2026-09-15 to 10-16). Basis: design; the 90-minute line is the
@@ -71,18 +82,20 @@ budgets:
     unit: seconds
     direction: max
     threshold: 5400
-    labels: [release-tail]
+    labels: [release-tail, not-measured-on-pr]
   # Workload: one release carrying 1 to 3 merged PRs, each PR's last commit running
   # the 4 CI jobs; 54 releases and 140 merged PRs, 85 of them not release PRs, in
   # 31 days (2026-09-15 to 10-16). Basis: arithmetic; 4 is the user's ruling for a
   # cross-platform repository, `lint` plus one test job per platform, and the one
   # `budgets` report job makes 4 + 1 = 5. Today: 19 jobs median at a current-shape
-  # PR head.
+  # PR head. On a pull request: one CI run of 5 jobs, read once when the budgets job
+  # runs; one REST read, about 3 s, of jobs it does not start; 5 jobs measured.
   - id: onepipeline-ui-ci-job-count
     description: >-
       The most counted jobs any one pull request's last-commit `pull_request`
       runs started, every workflow, over the pull requests one release carries.
-      Holds this repository's share of the account-wide 20-job concurrency limit
+      A pull request reports its own run instead: that run's jobs, the
+      budgets job in progress counted. Holds this repository's share of the account-wide 20-job concurrency limit
       that every repository shares.
     measure: reported
     command: [bash, scripts/actions-budget-figures.sh, job-count, --stage, pr]
@@ -107,7 +120,7 @@ budgets:
     unit: jobs
     direction: max
     threshold: 6
-    labels: [release-tail]
+    labels: [release-tail, not-measured-on-pr]
   # Workload: one release of the CD shape (the task's five jobs, six with
   # build-linux-arm64 since 2026-10-20) whose pull request heads each run the one
   # CI workflow, its release commit carrying release-plz's push run and the
@@ -128,7 +141,7 @@ budgets:
     unit: requests
     direction: max
     threshold: 6
-    labels: [release-tail]
+    labels: [release-tail, not-measured-on-pr]
   # Workload: one release of the CD shape (the task's five jobs, six with
   # build-linux-arm64 since 2026-10-20) whose pull request heads each run the one
   # CI workflow; one release carrying 1 to 3 merged PRs, each PR's
@@ -146,7 +159,7 @@ budgets:
     unit: requests
     direction: max
     threshold: 2
-    labels: [release-tail]
+    labels: [release-tail, not-measured-on-pr]
   # Workload: one run of `just gate`, the repository's gate recipe, on a
   # development host such as a 14-core aarch64 machine, with the Nx cache as that
   # run finds it. Basis: design; the 30-minute line applies to development
@@ -163,7 +176,7 @@ budgets:
     unit: seconds
     direction: max
     threshold: 1800
-    labels: [host-variable]
+    labels: [host-variable, not-measured-on-pr]
 
   # Workload: one release carrying 1–3 merged PRs; 54 releases and 140 merged
   # PRs (85 non-release) in 31 days, 2026-09-15 to 10-16. About 32 merged PRs
@@ -183,4 +196,4 @@ budgets:
     unit: percent
     direction: min
     threshold: 100
-    labels: [release-tail]
+    labels: [release-tail, not-measured-on-pr]

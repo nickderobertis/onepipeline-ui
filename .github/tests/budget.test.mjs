@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   cpSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -203,19 +204,30 @@ test("the production budget gate accepts recorded workflow rows and rejects a du
       execFileSync("node", ["--input-type=module", "-e", generator], {
         cwd: scratch,
       });
+    // The target's own command, and the results it saves for test-linux's upload.
+    const { command, outputs } = JSON.parse(
+      readFileSync(".github/project.json", "utf8"),
+    ).targets.budgets;
+    const savedFile = join(scratch, outputs[0].replace("{workspaceRoot}/", ""));
+    const saved = () =>
+      Object.fromEntries(
+        JSON.parse(readFileSync(savedFile, "utf8")).results.map((result) => [
+          result.id,
+          result.verdict,
+        ]),
+      );
     const check = () =>
-      spawnSync("node", [".github/check-budgets.mjs"], {
+      spawnSync("bash", ["-c", command], {
         cwd: scratch,
         encoding: "utf8",
       });
     generate();
     const accepted = check();
     assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr);
-    assert.match(accepted.stdout, /onepipeline-ui-macos-jobs-per-run: within/);
-    assert.match(
-      accepted.stdout,
-      /onepipeline-ui-macos-runs-per-change: within/,
-    );
+    assert.deepEqual(saved(), {
+      "onepipeline-ui-macos-jobs-per-run": "within",
+      "onepipeline-ui-macos-runs-per-change": "within",
+    });
     const mutate = `import {readFileSync,writeFileSync} from "node:fs"; import {parse,stringify} from "yaml"; const file=".github/workflows/ci.yml";const workflow=parse(readFileSync(file,"utf8"));workflow.jobs["duplicate-macos"]=structuredClone(workflow.jobs["test-macos"]);writeFileSync(file,stringify(workflow));`;
     execFileSync("node", ["--input-type=module", "-e", mutate], {
       cwd: scratch,
@@ -223,11 +235,12 @@ test("the production budget gate accepts recorded workflow rows and rejects a du
     generate();
     const over = check();
     assert.equal(over.status, 1, over.stdout + over.stderr);
-    assert.match(over.stdout, /onepipeline-ui-macos-jobs-per-run: over/);
+    assert.equal(saved()["onepipeline-ui-macos-jobs-per-run"], "over");
     rmSync(join(scratch, ".github/.telemetry/macos-policy.json"));
     const missing = check();
-    assert.equal(missing.status, 1, missing.stdout + missing.stderr);
+    assert.equal(missing.status, 3, missing.stdout + missing.stderr);
     assert.match(missing.stdout + missing.stderr, /ENOENT|telemetry/);
+    assert.equal(saved()["onepipeline-ui-macos-jobs-per-run"], "error");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

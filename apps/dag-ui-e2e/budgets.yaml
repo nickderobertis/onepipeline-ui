@@ -6,6 +6,8 @@ schema_version: 1
 # runs, 10 stopped, 129 settled); the 10 other live runs each append 50 journal
 # records per minute with one 400-record burst in the window; each view held
 # 120 s after load; a fresh corpus and a fresh server for every variant.
+# `not-measured-on-pr`: the record is committed from a load test run by hand, so a pull
+# request's report cannot move a figure; `dag-ui-e2e:budgets` still enforces each.
 budgets:
   - id: dag-ui-settled-requests-per-minute
     description: >-
@@ -21,6 +23,7 @@ budgets:
     unit: requests/min
     direction: max
     threshold: 1
+    labels: [not-measured-on-pr]
   - id: dag-ui-live-requests-per-minute
     description: >-
       HTTP requests the Observatory's browser sends per minute with a live run
@@ -35,6 +38,7 @@ budgets:
     unit: requests/min
     direction: max
     threshold: 2
+    labels: [not-measured-on-pr]
   - id: dag-ui-live-update-lag-seconds
     description: >-
       The 95th-percentile time from a record being appended to the open live
@@ -50,6 +54,7 @@ budgets:
     unit: seconds
     direction: max
     threshold: 3
+    labels: [not-measured-on-pr]
   - id: dag-ui-wire-megabytes-per-minute
     description: >-
       Megabytes the Observatory's browser receives per minute (encoded bytes of
@@ -65,6 +70,7 @@ budgets:
     unit: mb/min
     direction: max
     threshold: 0.3
+    labels: [not-measured-on-pr]
   - id: dag-ui-server-cpu-cores-per-live-tab
     description: >-
       Maximum server-process-tree CPU seconds divided by the 120 observation
@@ -80,4 +86,4 @@ budgets:
     unit: cores/live-tab
     direction: max
     threshold: 0.5
-    labels: [host]
+    labels: [host, not-measured-on-pr]
