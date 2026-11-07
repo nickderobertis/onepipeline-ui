@@ -6,11 +6,32 @@
   "tags": ["scope:e2e", "type:e2e"],
   "implicitDependencies": ["dag-ui"],
   "targets": {
+    "manifest-inputs-for-affected": {
+      "//": "Carries only file-based affected edges for semantic manifest inputs; CI never runs this uncached no-op.",
+      "executor": "nx:noop",
+      "cache": false,
+      "inputs": [
+        "cargoManifestSelection",
+        "filesManifestSelection",
+        "npmManifestSelection",
+        "pythonManifestSelection"
+      ],
+      "outputs": []
+    },
+    "compile-release-server": {
+      "//": "A target of its own so the compile overlaps the job's other tasks: only the timed journey in `test` holds them off. Named apart from `build` so no build sweep compiles a server nothing else reads.",
+      "command": "cargo build --release --locked --features bundled-ui --bin onepipeline-api",
+      "cache": false,
+      "dependsOn": [
+        {
+          "projects": ["dag-ui"],
+          "target": "build"
+        }
+      ]
+    },
     "test": {
       "//": "Fresh timings on a release build, with nothing beside them and its telemetry what `budgets` reads, so never cached: apiServerSurface is among its inputs because that is what it measures. Writes through the real CLI, so it provisions the sibling.",
-      "//compile": "llmlint: ignore-block[new_projects_keep_the_graph_uniform] the plan states this target's compile and journey as one command, as `dag-ui-e2e:test-load` has them: a release build is a prerequisite of this tier's timings alone, so a `build` target would put it in every `build` sweep, where nothing else reads it, and leave the affected tier compiling a server no other task runs.",
-      "command": "cargo build --release --locked --features bundled-ui --bin onepipeline-api && npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts",
-      "//compile-end": "llmlint: ignore-end[new_projects_keep_the_graph_uniform]",
+      "command": "npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts",
       "cache": false,
       "parallelism": false,
       "inputs": [
@@ -24,10 +45,7 @@
       "outputs": ["{projectRoot}/telemetry/read-latency.json"],
       "//api-server": "llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the plan names `build-api-server` among this project's dependencies, the same edge `dag-ui-e2e:test` holds: in the tier that selects this project that task is already running for the browser journeys, so it costs nothing it would not, and it keeps the debug server current for anyone driving this journey's world by hand.",
       "dependsOn": [
-        {
-          "projects": ["dag-ui"],
-          "target": "build"
-        },
+        "compile-release-server",
         {
           "projects": ["dag-ui"],
           "target": "build-api-server"
