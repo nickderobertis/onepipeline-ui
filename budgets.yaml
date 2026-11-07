@@ -6,10 +6,10 @@
 #                  `onebudgetspec check budgets.yaml --label release-tail`, after
 #                  the Release is settled. The GitHub figures, taken by
 #                  scripts/actions-budget-figures.sh (copied byte for byte
-#                  from dero-skills' create-repo at 63e071b, version 11, so its
+#                  from dero-skills' create-repo at 270bea5, version 12, so its
 #                  header is the source's own). The seven host figures use
-#                  onevcs's read-only queries; cache-use reads CI and promotion
-#                  artifacts through GitHub's API directly. The CD figures leave out `CI cache`, the main-push
+#                  onevcs's read-only queries; cache-use and cache-headroom read
+#                  GitHub's API directly. The CD figures leave out `CI cache`, the main-push
 #                  cache warmer, and `CI`, whose push run at the release commit is only the
 #                  `budgets` report job: neither delivers anything to a release.
 #   host-variable  `just gate` on a development machine, as a warning: the
@@ -165,22 +165,85 @@ budgets:
     threshold: 1800
     labels: [host-variable]
 
-  # Workload: one release carrying 1–3 merged PRs; 54 releases and 140 merged
-  # PRs (85 non-release) in 31 days, 2026-09-15 to 10-16. About 32 merged PRs
-  # in GitHub's seven-day window, five open at once, three pushes per PR, with
-  # 100% of pushes changing crate inputs and four CI jobs per push (up to 58
-  # cacheable tasks at the spike baseline, coverage included). Promotion adds a base-scope copy and
-  # retains source scopes. Basis: design; revisit 100% after real tail figures.
+  # Workload: the newest release of this repository with evidence when the command
+  # runs, carrying 1 to 9 merged pull requests at 3 pushes each and 4 CI jobs per
+  # push, with 461 minutes at p90 from promotion to the release pull request.
+  # Basis: design, threshold unchanged by manager ruling
+  # c-3139a3760ceeae629b02b38b72219f14: 100 remains a design target revisited after
+  # release-tail observations. Over 30 days to 2026-11-06 a non-release merge moved
+  # the base under 9 of 128 pull requests, so a reading under 100 is expected and not
+  # alarming. Measurement source: telemetry, the executions.json and promotion receipts
+  # lint, test-linux, test-windows, test-macos and release-plz record through
+  # nx-remote-cache.mjs. About 60 seconds, carried from the ci-release-test-cache plan's
+  # estimate for reading metadata and artifacts for one release.
   - id: onepipeline-ui-nx-cache-use
     description: >-
       Remote hits as a percentage of attempt-qualified cacheable task/OS/hash
-      executions, excluding local hits. Measure the release PR and same-PR
-      retries and later pushes of the release's counted PRs from existing run
-      artifacts. Report misses, receipt age, promotion failures, unavailable
-      evidence, stored bytes and GitHub requests; absent evidence is not a pass.
+      executions, excluding local hits, with base_moved tasks counted as misses.
+      Detail: misses by class (throttled, failed, evicted, never_promoted,
+      base_moved), attempts whose evidence is unavailable, receipt ages and
+      requests.
     measure: reported
     command: [bash, scripts/actions-budget-figures.sh, cache-use]
     unit: percent
     direction: min
     threshold: 100
+    labels: [release-tail]
+
+  # Workload: one reading of this repository's real listing as it stands when the
+  # command runs, about 150 entries. The target is sized for one warm run saving three
+  # families beside the previous copy of each, 461 minutes at p90 and 1,775 at most from
+  # promotion to release pull request, and about 6 pushes a day at about 1 MB of results
+  # each. Basis: arithmetic over spike-cache-eviction's 8-hour watch to 2026-11-07 (229
+  # readings here) and warm logs since 2026-11-02. A run must save beside the old copies
+  # under 10 GiB: 2C + g + O + R <= L, with L 10.737, O 0.436, R 0.05 and g/C 1.176/8.792.
+  # So C <= 4.80 GB and the target is 10.737 - 0.436 - 4.80 = 5.50 GB. Eviction was
+  # observed only in onetaskgraph and is carried over by ruling.
+  # spike-onepipeline-ui-contents projects 6.72 GB (9.261 GB less 3.442 and 1.797). Ticket
+  # ai-orchestrator#2339's 0.5 GB is under a median saving run's 5.78 GB. Each warm
+  # workflow's concurrency group holds it to one run at a time, and each leg's cleanup
+  # runs before its save and keeps the newest copy, so a family holds at most two copies
+  # at any moment; that bound is 2C + g. Results now count in the figure, at most about
+  # 0.042 GB at 6 MB a day over GitHub's 7-day idle limit, within the 0.05 reserved. About
+  # 10 seconds: one request per 100 entries over every page, 5 to 8 requests measured at
+  # 588 entries and 12 to 24 at about 1,900. The outer figures, nx-cache-use and
+  # release-cycle-time, fall only after results are lost; this shows the cause before
+  # that, and names the family responsible.
+  - id: onepipeline-ui-cache-headroom
+    description: >-
+      Room left for one warm run's saves and test results: GitHub's stated
+      Actions-cache allowance, 10 GiB, minus the bytes of every entry, test results
+      (nx-cache-*) included, read over every page of the listing when the command
+      runs, in gigabytes of 10^9 bytes and negative when those bytes are over the
+      line. A family the command names counts only its newest entry, because a working
+      cleanup leaves the previous copy until the next push to main; when a named
+      family holds more than two entries the figure is 0, which reads over, because
+      two is the most a working cleanup leaves. Detail: the allowance, non-result
+      bytes per key family, older copies' bytes, any family over two entries, result
+      entries and bytes, the oldest result's age, the requests the read made and the
+      lowest rate-limit remaining.
+    measure: reported
+    command:
+      - bash
+      - scripts/actions-budget-figures.sh
+      - cache-headroom
+      - --family
+      - v0-rust-test-linux-Linux-x64-
+      - --family
+      - v0-rust-test-windows-Windows_NT-x64-
+      - --family
+      - v0-rust-test-macos-Darwin-arm64-
+      - --family
+      - onepipeline-cli-Linux-X64-
+      - --family
+      - onepipeline-cli-Windows-X64-
+      - --family
+      - onepipeline-cli-macOS-ARM64-
+      - --family
+      - onepipeline-api-baseline-Linux-X64-
+      - --family
+      - v0-rust-release-plz-Linux-x64-
+    unit: gigabytes
+    direction: min
+    threshold: 5.5
     labels: [release-tail]

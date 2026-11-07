@@ -27,6 +27,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
+import {
+  copyProblems,
+  LEG_FAMILIES,
+  parsePins,
+  pinProblems,
+  retentionProblems,
+} from "./cache-retention.mjs";
 
 const load = () =>
   Object.fromEntries(
@@ -796,4 +803,320 @@ test("the Linux warm drops the wheel smoke's old tree from what it saves, and it
     stuck.run.stderr,
     /^ACTION: make target\/wheel-smoke removable/m,
   );
+});
+
+// What keeps proven results in the Actions cache (cache-retention.mjs says what each holds).
+const readBudgets = () => parse(readFileSync("budgets.yaml", "utf8")).budgets;
+const forkPullRequest = () =>
+  JSON.parse(readFileSync(".github/tests/nx-cache/events/fork.json", "utf8"))
+    .pull_request;
+const retention = (workflows = load(), budgets = readBudgets()) =>
+  retentionProblems(workflows, budgets, forkPullRequest());
+const warmJob = (w, name) => w["ci-cache.yml"].jobs[name];
+const stepOf = (job, test) => job.steps.find(test);
+const uses = (prefix) => (step) => step.uses?.startsWith(prefix);
+
+test("the warm legs, the budget and the pull-request jobs hold the cache's room", () => {
+  assert.deepEqual(retention(), []);
+  assert.deepEqual(copyProblems((path) => readFileSync(path, "utf8")), []);
+});
+
+test("each way of losing that room is refused", () => {
+  const cases = [
+    [
+      "a leg's cleanup step is gone",
+      (w) => {
+        warmJob(w, "warm-macos").steps.pop();
+      },
+      /warm-macos has no cleanup step/,
+    ],
+    [
+      "a cleanup is no longer last",
+      (w) => {
+        warmJob(w, "warm-linux").steps.push({ run: "true" });
+      },
+      /warm-linux's cleanup is not its last ordinary step/,
+    ],
+    [
+      "a family leaves a cleanup",
+      (w) => {
+        const step = warmJob(w, "warm-windows").steps.at(-1);
+        step.run = step.run.replace(/--family onepipeline-cli-\S+/, "");
+      },
+      /warm-windows's cleanup names/,
+    ],
+    [
+      "the budget's families stop matching",
+      (_, budgets) => {
+        const budget = budgets.find(
+          (entry) => entry.id === "onepipeline-ui-cache-headroom",
+        );
+        budget.command = budget.command.slice(0, -2);
+      },
+      /the headroom budget names/,
+    ],
+    [
+      "a Rust step in ci.yml could save",
+      (w) => {
+        const step = stepOf(
+          w["ci.yml"].jobs["test-macos"],
+          uses("Swatinem/rust-cache@"),
+        );
+        delete step.with["save-if"];
+      },
+      /ci\.yml's test-macos could save a Rust cache/,
+    ],
+    [
+      "a pull-request job stops restoring",
+      (w) => {
+        const job = w["ci.yml"].jobs.lint;
+        job.steps = job.steps.filter((step) => !uses("Swatinem/rust-cache@")(step));
+      },
+      /ci\.yml's lint does not restore a Rust build/,
+    ],
+    [
+      "release.yml gains a Rust cache step",
+      (w) => {
+        w["release.yml"].jobs.publish.steps.push({
+          uses: "Swatinem/rust-cache@v2.9.2",
+          with: { "save-if": false },
+        });
+      },
+      /release\.yml's publish has a Rust cache step/,
+    ],
+    [
+      "the warm workflow runs on more than main",
+      (w) => {
+        w["ci-cache.yml"].on.pull_request = {};
+      },
+      /ci-cache\.yml runs on more than a push to main/,
+    ],
+    [
+      "the warm workflow's runs may overlap",
+      (w) => {
+        delete w["ci-cache.yml"].concurrency;
+      },
+      /ci-cache\.yml is not held to one run at a time/,
+    ],
+    [
+      "actions: write reaches a pull-request job",
+      (w) => {
+        w["ci.yml"].jobs["test-linux"].permissions.actions = "write";
+      },
+      /ci\.yml grants actions: write to test-linux/,
+    ],
+    [
+      "a pull-request workflow grants actions: write at its top",
+      (w) => {
+        w["visual-docs.yml"].permissions = { actions: "write" };
+      },
+      /visual-docs\.yml grants actions: write to its workflow/,
+    ],
+    [
+      "a leg's checkout persists credentials",
+      (w) => {
+        delete stepOf(warmJob(w, "warm-windows"), uses("actions/checkout@")).with[
+          "persist-credentials"
+        ];
+      },
+      /warm-windows's checkout persists credentials/,
+    ],
+    [
+      "another step is handed the token",
+      (w) => {
+        stepOf(warmJob(w, "warm-linux"), (step) =>
+          step.run?.includes("ci-warm-linux"),
+        ).env = { GITHUB_TOKEN: "${{ github.token }}" };
+      },
+      /warm-linux hands the token to 'Compile what lint and test-linux compile'/,
+    ],
+    [
+      "setup-bun's guard goes",
+      (w) => {
+        delete stepOf(w["ci.yml"].jobs["test-windows"], uses("oven-sh/setup-bun@"))
+          .with["no-cache"];
+      },
+      /test-windows writes a cache from a fork: oven-sh\/setup-bun/,
+    ],
+    [
+      "setup-uv's guard goes",
+      (w) => {
+        delete stepOf(w["ci.yml"].jobs.lint, uses("astral-sh/setup-uv@")).with[
+          "enable-cache"
+        ];
+      },
+      /lint writes a cache from a fork: astral-sh\/setup-uv/,
+    ],
+    [
+      "the sidecar stops being read-only for a fork",
+      (w) => {
+        delete stepOf(
+          w["ci.yml"].jobs["test-linux"],
+          uses("op-nx/github-cache/start-cache-server@"),
+        ).env.CACHE_READ_ONLY;
+      },
+      /test-linux writes a cache from a fork: op-nx/,
+    ],
+    [
+      "a setup action turns its own cache on",
+      (w) => {
+        stepOf(w["ci.yml"].jobs["test-macos"], uses("actions/setup-node@")).with.cache =
+          "npm";
+      },
+      /test-macos writes a cache from a fork: actions\/setup-node/,
+    ],
+    [
+      "a leg loses its target deletion",
+      (w) => {
+        const job = warmJob(w, "warm-macos");
+        job.steps = job.steps.filter((step) => !step.run?.includes("rm -rf target"));
+      },
+      /warm-macos does not delete target on its own inexact restore/,
+    ],
+    [
+      "the deletion reads another step's output",
+      (w) => {
+        stepOf(warmJob(w, "warm-linux"), (step) =>
+          step.run?.includes("rm -rf target"),
+        ).if = "steps.sibling.outputs.cache-hit != 'true'";
+      },
+      /warm-linux does not delete target on its own inexact restore/,
+    ],
+    [
+      "the deletion takes an exact restore too",
+      (w) => {
+        stepOf(warmJob(w, "warm-windows"), (step) =>
+          step.run?.includes("rm -rf target"),
+        ).if = "steps.rust-cache.outputs.cache-hit == 'false' || always()";
+      },
+      /warm-windows does not delete target on its own inexact restore/,
+    ],
+  ];
+  for (const [name, mutate, expected] of cases) {
+    const workflows = load();
+    const budgets = readBudgets();
+    mutate(workflows, budgets);
+    const problems = retention(workflows, budgets);
+    assert.ok(
+      problems.some((problem) => expected.test(problem)),
+      `${name}: ${JSON.stringify(problems)}`,
+    );
+  }
+});
+
+test("an altered copy of a shared script is refused", () => {
+  const real = (path) => readFileSync(path, "utf8");
+  for (const [path, change, expected] of [
+    [
+      "scripts/actions-cache-prune.mjs",
+      (text) => text.replace("const PER_PAGE = 100;", "const PER_PAGE = 99;"),
+      /actions-cache-prune\.mjs does not match its header/,
+    ],
+    [
+      "scripts/nx-remote-cache.mjs",
+      (text) => `${text}\n`,
+      /nx-remote-cache\.mjs does not match its header/,
+    ],
+    [
+      "scripts/actions-budget-figures.sh",
+      (text) => text.replace("set -euo pipefail", "set -eu"),
+      /actions-budget-figures\.sh does not match its header/,
+    ],
+    [
+      "scripts/actions-cache-prune.versions",
+      (text) => text.replace("1 ", "2 "),
+      /actions-cache-prune\.mjs is version 1, /,
+    ],
+  ]) {
+    const problems = copyProblems((file) =>
+      file === path ? change(real(file)) : real(file),
+    );
+    assert.ok(
+      problems.some((problem) => expected.test(problem)),
+      `${path}: ${JSON.stringify(problems)}`,
+    );
+  }
+});
+
+test("every tool ci.yml and ci-cache.yml install is at the tracked file's exact version", () => {
+  const pins = readFileSync(".github/ci-tool-versions", "utf8");
+  assert.deepEqual(pinProblems(load(), pins), []);
+  const justfile = readFileSync("justfile", "utf8");
+  const parsed = parsePins(pins);
+  for (const [pin, variable] of [
+    ["release-plz", "release-plz-version"],
+    ["cargo-cyclonedx", "cyclonedx-version"],
+  ])
+    assert.match(
+      justfile,
+      new RegExp(`^${variable} := "${parsed.get(pin).replaceAll(".", "\\.")}"$`, "m"),
+      `${pin}'s pin has left the justfile's ${variable}`,
+    );
+  for (const [name, mutate, expected] of [
+    [
+      "a tool loses its version",
+      (w) => {
+        const step = w["ci.yml"].jobs["test-linux"].steps.find((s) =>
+          s.uses?.startsWith("taiki-e/install-action@"),
+        );
+        step.with.tool = step.with.tool.replace(/^just@[^,]+/, "just");
+      },
+      /ci\.yml's test-linux installs just at , not its pin/,
+    ],
+    [
+      "a warm leg names a version of its own",
+      (w) => {
+        const step = w["ci-cache.yml"].jobs["warm-macos"].steps.find((s) =>
+          s.uses?.startsWith("taiki-e/install-action@"),
+        );
+        step.with.tool = step.with.tool.replace(
+          /nextest@[^,]+/,
+          "nextest@0.9.100",
+        );
+      },
+      /ci-cache\.yml's warm-macos installs nextest at 0\.9\.100, not its pin/,
+    ],
+    [
+      "node floats on its major",
+      (w) => {
+        w["ci.yml"].jobs.lint.steps.find((s) =>
+          s.uses?.startsWith("actions/setup-node@"),
+        ).with["node-version"] = "24";
+      },
+      /ci\.yml's lint installs node at 24, not its pin/,
+    ],
+    [
+      "a job installs before reading the file",
+      (w) => {
+        const job = w["ci-cache.yml"].jobs.advisories;
+        job.steps = job.steps.filter(
+          (s) => !s.run?.includes(".github/ci-tool-versions"),
+        );
+      },
+      /ci-cache\.yml's advisories installs before it reads the pins/,
+    ],
+  ]) {
+    const workflows = load();
+    mutate(workflows);
+    const problems = pinProblems(workflows, pins);
+    assert.ok(
+      problems.some((problem) => expected.test(problem)),
+      `${name}: ${JSON.stringify(problems)}`,
+    );
+  }
+  assert.ok(
+    pinProblems(load(), pins.replace("nextest=0.9.151", "nextest=latest")).some(
+      (problem) => /pin nextest is not exact/.test(problem),
+    ),
+  );
+  assert.ok(
+    pinProblems(load(), pins.replace(/^just=.*$/m, "")).some((problem) =>
+      /installs just at .* not its pin/.test(problem),
+    ),
+  );
+  assert.deepEqual(Object.keys(LEG_FAMILIES), [
+    "warm-linux",
+    "warm-windows",
+    "warm-macos",
+  ]);
 });

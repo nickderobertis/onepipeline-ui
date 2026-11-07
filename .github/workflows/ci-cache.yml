@@ -52,17 +52,40 @@ jobs:
   warm-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Deleting this family's superseded copies; only the cleanup step is handed the token.
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
           # The base server is built from the commit this push leaves `main` at,
           # resolved as `git merge-base HEAD origin/main`.
           fetch-depth: 0
+          # No step here reads a remote through this checkout, and the build runs
+          # beside a token that can delete caches.
+          persist-credentials: false
+      # The exact versions of the tools this job installs (.github/ci-tool-versions).
+      - name: Read the pinned tool versions
+        id: tool-pins
+        shell: bash
+        run: |
+          tr -d '\r' < .github/ci-tool-versions | awk '
+            /^#/ || !NF { next }
+            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
+            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
+          ' >> "$GITHUB_OUTPUT"
       # Ahead of the MSRV toolchain, as in ci.yml's `lint`: rust-cache hashes the
       # installed toolchains and dtolnay's CARGO_* exports into the key it saves.
       - uses: Swatinem/rust-cache@v2.9.2
+        id: rust-cache
         with:
           shared-key: test-linux
+      # A lock or toolchain move restores the previous copy, whose units for the old
+      # lock rust-cache would save again: build cold so the new copy holds this lock's.
+      - name: Drop a restored build that is not this key's own
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        run: rm -rf target
       - name: Read the MSRV from Cargo.toml
         id: msrv
         run: |
@@ -74,13 +97,13 @@ jobs:
           toolchain: ${{ steps.msrv.outputs.version }}
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: ${{ steps.tool-pins.outputs.node }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable
+          tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
       - name: What the provisioned binaries are built from
         id: pins
         run: |
@@ -127,27 +150,62 @@ jobs:
         run: just build
       - name: Compile what lint and test-linux compile
         run: just ci-warm-linux
+      # The last ordinary step, so it runs before rust-cache's post step saves and cannot
+      # see that save: each family keeps its previous copy until the next push's cleanup.
+      - name: Delete this leg's superseded cache copies
+        run: >-
+          node scripts/actions-cache-prune.mjs
+          --family v0-rust-test-linux-Linux-x64-
+          --family onepipeline-cli-Linux-X64-
+          --family onepipeline-api-baseline-Linux-X64-
+          --family v0-rust-release-plz-Linux-x64-
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   warm-windows:
     runs-on: windows-latest
     timeout-minutes: 60
+    # Deleting this family's superseded copies; only the cleanup step is handed the token.
+    permissions:
+      contents: read
+      actions: write
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        with:
+          # No step here reads a remote through this checkout, and the build runs
+          # beside a token that can delete caches.
+          persist-credentials: false
+      # The exact versions of the tools this job installs (.github/ci-tool-versions).
+      - name: Read the pinned tool versions
+        id: tool-pins
+        shell: bash
+        run: |
+          tr -d '\r' < .github/ci-tool-versions | awk '
+            /^#/ || !NF { next }
+            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
+            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
+          ' >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2.9.2
+        id: rust-cache
         with:
           shared-key: test-windows
+      # A lock or toolchain move restores the previous copy, whose units for the old
+      # lock rust-cache would save again: build cold so the new copy holds this lock's.
+      - name: Drop a restored build that is not this key's own
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        run: rm -rf target
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: ${{ steps.tool-pins.outputs.node }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable
+          tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
       - name: What the provisioned sibling is built from
         id: pins
         run: echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
@@ -173,6 +231,15 @@ jobs:
         run: just build
       - name: Compile what test-windows compiles
         run: just ci-warm-windows
+      # The last ordinary step, so it runs before rust-cache's post step saves and cannot
+      # see that save: each family keeps its previous copy until the next push's cleanup.
+      - name: Delete this leg's superseded cache copies
+        run: >-
+          node scripts/actions-cache-prune.mjs
+          --family v0-rust-test-windows-Windows_NT-x64-
+          --family onepipeline-cli-Windows-X64-
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   # Not on the push that merges release-plz's release pull request: that commit
   # changes the version and the changelog alone, and a Mac job there is one more
@@ -181,23 +248,47 @@ jobs:
     if: "!startsWith(github.event.head_commit.message, 'chore: release v')"
     runs-on: macos-latest
     timeout-minutes: 60
+    # Deleting this family's superseded copies; only the cleanup step is handed the token.
+    permissions:
+      contents: read
+      actions: write
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        with:
+          # No step here reads a remote through this checkout, and the build runs
+          # beside a token that can delete caches.
+          persist-credentials: false
+      # The exact versions of the tools this job installs (.github/ci-tool-versions).
+      - name: Read the pinned tool versions
+        id: tool-pins
+        shell: bash
+        run: |
+          tr -d '\r' < .github/ci-tool-versions | awk '
+            /^#/ || !NF { next }
+            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
+            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
+          ' >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2.9.2
+        id: rust-cache
         with:
           shared-key: test-macos
+      # A lock or toolchain move restores the previous copy, whose units for the old
+      # lock rust-cache would save again: build cold so the new copy holds this lock's.
+      - name: Drop a restored build that is not this key's own
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        run: rm -rf target
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: ${{ steps.tool-pins.outputs.node }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable
+          tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
       - name: What the provisioned sibling is built from
         id: pins
         run: echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
@@ -223,6 +314,15 @@ jobs:
         run: just build
       - name: Compile what test-macos compiles
         run: just ci-warm-macos
+      # The last ordinary step, so it runs before rust-cache's post step saves and cannot
+      # see that save: each family keeps its previous copy until the next push's cleanup.
+      - name: Delete this leg's superseded cache copies
+        run: >-
+          node scripts/actions-cache-prune.mjs
+          --family v0-rust-test-macos-Darwin-arm64-
+          --family onepipeline-cli-macOS-ARM64-
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   # The advisories report on `main` (.github/required-contexts.mjs). It stands
   # alone: no job needs it, so its red never holds a warm job or a release.
@@ -235,8 +335,18 @@ jobs:
           # The report reads the base (`git merge-base HEAD origin/main`, here
           # this commit) to say which advisories were already there.
           fetch-depth: 0
+      # The exact versions of the tools this job installs (.github/ci-tool-versions).
+      - name: Read the pinned tool versions
+        id: tool-pins
+        shell: bash
+        run: |
+          tr -d '\r' < .github/ci-tool-versions | awk '
+            /^#/ || !NF { next }
+            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
+            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
+          ' >> "$GITHUB_OUTPUT"
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,cargo-deny,cargo-machete
+          tool: just@${{ steps.tool-pins.outputs.just }},cargo-deny@${{ steps.tool-pins.outputs.cargo-deny }},cargo-machete@${{ steps.tool-pins.outputs.cargo-machete }}
       - name: Advisories report (informational)
         run: just advisories-report
