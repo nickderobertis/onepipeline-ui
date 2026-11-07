@@ -1967,13 +1967,7 @@ async function firstPageMeasure(values, server, origin, root, scratch) {
     ? (JSON.parse(readFileSync(planPath, "utf8")).tasks?.length ?? 0)
     : 1;
   const budget = Number(values.timeout) * 1000;
-  const complete = await completeReadForMark(
-    values,
-    view,
-    node,
-    root,
-    scratch,
-  );
+  const complete = await completeReadForMark(values, view, node, root, scratch);
   const models = await viewModels();
   const completeSays = models.say(view, node, complete.parts, values.client);
   if (view === "node" && completeSays.missing) {
