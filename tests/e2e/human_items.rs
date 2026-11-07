@@ -34,7 +34,7 @@ use crate::fixture_run;
 use crate::github_board::GitHubBoard;
 use crate::http;
 use crate::live_journal;
-use crate::serving::Serving;
+use crate::serving::{Serving, POLL_INTERVAL_FLAG};
 use crate::sibling;
 
 /// The plan-store source every journey's plans live in.
@@ -429,6 +429,25 @@ impl World {
             ),
             None => Serving::start_in_with_env_removing(served, &environment, &Self::foreign()),
         }
+    }
+
+    /// A server over this world's runs root, acting as `session`, whose poll
+    /// never comes round again once a journey is under way: what such a server
+    /// shows of a later write it read for some other reason.
+    fn serve_without_polling(&self, session: &str) -> Serving {
+        let (served, _) = self.workspace_view();
+        let environment = self.environment();
+        let environment: Vec<(&str, &str)> = environment
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        Serving::start_in_as_with_env_removing_and_args(
+            served,
+            session,
+            &environment,
+            &Self::foreign(),
+            &[POLL_INTERVAL_FLAG, "3600000"],
+        )
     }
 
     /// A workspace a [`Serving`] may own whose runs root, configuration and
@@ -2883,6 +2902,61 @@ fn a_bad_selector_is_refused_and_an_item_that_does_not_read_is_null() {
     assert_eq!(frame["type"], "human-items.patch");
     assert_eq!(open.state["visible"]["detail"], Value::Null);
     assert_eq!(open.state["visible"], routes_answer(&server, &open.view));
+}
+
+/// A reset answers what the routes answer at that moment, not what the poll last
+/// read, and what catching up for it moved is an ordinary frame to every tab on
+/// the view. Its read refused, the reset re-sends what was last read rather than
+/// failing, and the next read that can sends the rest.
+#[test]
+fn a_reset_catches_up_ahead_of_the_poll_and_rides_out_a_read_it_is_refused() {
+    let world = World::new();
+    raised(&world, "first", "task");
+    let server = world.serve_without_polling("manager-of-items");
+    let view = json!({ "type": "human-items" });
+    let tab = HumanItemsTab::open(&server, view.clone());
+    let mut beside = HumanItemsTab::open(&server, view.clone());
+    let reset = |tab: &HumanItemsTab| {
+        let (epoch, _) = tab.applied.split_once(':').expect("epoch:seq");
+        let mut stream = http::stream(
+            server.address,
+            &format!(
+                "/api/v2/events?subscription={}&after={epoch}:999999",
+                tab.subscription
+            ),
+            None,
+        );
+        let frame = stream.frame_within(PATIENCE).expect("a reset").json();
+        assert_eq!(frame["type"], "reset");
+        assert_eq!(frame["reason"], "unknown-cursor");
+        frame["snapshot"]["visible"].clone()
+    };
+
+    // No poll reads this write: the tabs hear nothing of it until a reset asks.
+    raised(&world, "behind-the-poll", "task");
+    assert!(beside.drain().is_empty(), "the poll came round");
+    let caught_up = routes_answer(&server, &view);
+    assert_eq!(reset(&tab), caught_up);
+    beside.receive(PATIENCE).expect("the catching up's patch");
+    assert_eq!(beside.state["visible"], caught_up);
+
+    // Every read refused, with a write it has not read: the reset says what it
+    // last read and the tab's subscription stays.
+    raised(&world, "behind-a-refusal", "task");
+    let written = routes_answer(&server, &view);
+    let directory = world.root.join("human-items");
+    let away = world.root.join("human-items.away");
+    std::fs::rename(&directory, &away).expect("take the items away");
+    std::fs::write(&directory, "not a directory").expect("a file in their place");
+    assert_eq!(reset(&tab), caught_up);
+
+    // Readable again: the next reset reads what the refused one could not.
+    std::fs::remove_file(&directory).expect("remove the file");
+    std::fs::rename(&away, &directory).expect("put the items back");
+    assert_eq!(reset(&tab), written);
+    assert_ne!(written, caught_up);
+    beside.receive(PATIENCE).expect("the recovery's patch");
+    assert_eq!(beside.state["visible"], written);
 }
 
 /// A journal that cannot be read under an open tab sends nothing and retires
