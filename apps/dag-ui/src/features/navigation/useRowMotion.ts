@@ -1,6 +1,6 @@
 import { type RefObject, useLayoutEffect, useRef } from "react";
 
-/** How long a row takes to travel from where it was to where it is. */
+/** Long enough to see where a row went, short enough to be over before the next read. */
 const TRAVEL_MS = 240;
 
 /** The attribute naming a row across renders. */
