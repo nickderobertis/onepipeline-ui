@@ -2315,9 +2315,11 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
       transform 180ms ease-out,
       visibility 180ms;
   }
+  /* Visible at once on opening, so focus can go into it as it slides in. */
   .run-nav[data-open="true"] {
     transform: none;
     visibility: visible;
+    transition: transform 180ms ease-out;
   }
   .nav-scrim {
     position: fixed;

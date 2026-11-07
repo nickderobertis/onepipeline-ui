@@ -157,6 +157,10 @@ test("at phone width the navigation is a drawer over a main area spanning the vi
   // Opening it: `min(320px, 85vw)` over a scrim.
   await menu(page).click();
   await expect(navigation(page)).toBeVisible();
+  // Focus goes in with it, to its first control.
+  await expect(
+    navigation(page).getByRole("button", { name: "Host" }),
+  ).toBeFocused();
   await expect.poll(async () => (await box(navigation(page))).x).toBe(0);
   expect((await box(navigation(page))).width).toBeCloseTo(
     Math.min(320, PHONE.width * 0.85),
@@ -470,6 +474,24 @@ test("one dropdown selects kinds: the rows narrow, and the selection survives a 
   // Its run's row goes, wherever the project is opened.
   await expect.poll(() => runRows(nav).count()).toBeLessThanOrEqual(rowsBefore);
   await expect(runRow(nav, runs().sibling)).toHaveCount(0);
+
+  // A project none of whose runs are of a shown kind opens to say so, choosing none.
+  for (const kind of ["main", "spikes", "follow-ups"])
+    await kinds.getByRole("checkbox", { name: kind, exact: true }).uncheck();
+  const emptied = project(page, "observe-live-run");
+  const emptiedRow = emptied.getByRole("button", {
+    name: /^observe-live-run 0 shown runs$/,
+  });
+  await expect(emptiedRow).toBeVisible();
+  await expect.poll(() => page.url()).not.toContain(`run=${runs().live}`);
+  const away = page.url();
+  await emptiedRow.click();
+  await expect(emptied.getByRole("status")).toHaveText(
+    "No runs of the shown kinds.",
+  );
+  expect(page.url()).toBe(away);
+  for (const kind of ["main", "spikes", "follow-ups"])
+    await kinds.getByRole("checkbox", { name: kind, exact: true }).check();
 
   await page.reload();
   await nav.getByText(/^Run kinds:/).click();

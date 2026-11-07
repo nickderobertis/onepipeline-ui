@@ -190,6 +190,14 @@ function stopRun(served: FixtureServer, run: string): void {
   ]);
 }
 
+/** The corpus's other live runs, which its schema holds to at least two. */
+function othersOf(facts: z.infer<typeof liveFactsSchema>): [string, string] {
+  const [one, two] = facts.otherLiveRuns;
+  if (one === undefined || two === undefined)
+    throw new Error("the corpus serves two other live runs");
+  return [one, two];
+}
+
 const navigation = (page: Page) =>
   page.getByRole("navigation", { name: "Projects" });
 const rowOf = (page: Page, run: string): Locator =>
@@ -289,7 +297,7 @@ test("the navigation's setting holds its rows: live as they arrive, an interval 
   page,
 }) => {
   const { served, facts } = await serveLive();
-  const [one, two] = facts.otherLiveRuns as [string, string];
+  const [one, two] = othersOf(facts);
   const three = facts.openLiveRun;
   const wire = await watch(page);
   await openClocked(
@@ -630,7 +638,7 @@ test("a navigation choice shows the chosen run at once, and a manual Refresh app
   const { served, facts } = await serveLive();
   const run = facts.openLiveRun;
   const node = facts.liveNode;
-  const [other] = facts.otherLiveRuns as [string];
+  const [other] = othersOf(facts);
   const wire = await watch(page);
   await page.goto(`${served.origin}${runViewPath(run, node)}`);
   await expect(setting(page, NAVIGATION)).toBeVisible();
@@ -816,7 +824,7 @@ test("the Host page's rows take a shown value from the stream, with no new run-l
   page,
 }) => {
   const { served, facts } = await serveLive();
-  const [other] = facts.otherLiveRuns as [string];
+  const [other] = othersOf(facts);
   const wire = await watch(page);
   await page.goto(`${served.origin}/?page=host`);
   const listed = page.getByRole("region", { name: "Runs on the host" });
@@ -838,6 +846,40 @@ test("the Host page's rows take a shown value from the stream, with no new run-l
   ).toStrictEqual([]);
   expect(wire.requests.slice(before)).toStrictEqual([]);
 
+  // The node counts a row carries replace the listing's: a node settles.
+  const open = facts.openLiveRun;
+  const openLine = listed.getByText(new RegExp(`^${open} · `));
+  const countsBefore = await openLine.innerText();
+  appendRecords(journalOf(served, open), [
+    {
+      v: 1,
+      ts: new Date().toISOString(),
+      stream: `a-recording-host-${open}`,
+      seq: nextSeq(served, open),
+      source: "pipeline",
+      kind: "node-settled",
+      labels: { run_id: open, node: facts.liveNode },
+      payload: { status: "done", outcome: "merged" },
+      artifacts: [],
+    },
+  ]);
+  await expect(openLine).not.toHaveText(countsBefore, {
+    timeout: PUSH_PATIENCE,
+  });
+  const answered = z
+    .object({
+      runs: z.array(
+        z.object({ node_counts: z.record(z.string(), z.number()) }),
+      ),
+    })
+    .parse(
+      await (
+        await fetch(`${served.origin}${API_V2_PATHS.runs}?select=${open}`)
+      ).json(),
+    );
+  const done = answered.runs[0]?.node_counts.done ?? 0;
+  await expect(openLine).toContainText(`${done} done`);
+
   // A run the listing was taken before is listed from its row; a removed one goes.
   const gone = facts.stoppedRun;
   const arrived = "a-run-after-the-listing";
@@ -858,7 +900,7 @@ test("the Host page's rows take a shown value from the stream, with no new run-l
 
   // The main area's setting holds them like any other view of it.
   await choose(page, MAIN, "Off");
-  const [, second] = facts.otherLiveRuns as [string, string];
+  const [, second] = othersOf(facts);
   stopRun(served, second);
   await expect(waiting(page, MAIN)).toBeVisible({ timeout: PUSH_PATIENCE });
   await expect(listed.getByText(new RegExp(`^${second} · `))).not.toContainText(
