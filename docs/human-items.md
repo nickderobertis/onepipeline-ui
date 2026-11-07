@@ -2,8 +2,9 @@
 
 The browser's **Action items** page, at `/human-items`, is the host-wide queue of
 human work — tasks to do and questions to answer — that the engine's human-item
-contract (`onepipeline::human_items`) describes. It reads and writes through the six
-`/api/human-items` routes `docs/contract.md` defines, and through nothing else. The
+contract (`onepipeline::human_items`) describes. It reads as the `human-items` view of
+the tab's one subscription and writes through the `/api/human-items` routes, both as
+`docs/contract.md` defines them, and through nothing else. The
 visual reference is `authoring:human-action-items-spike-visual-dense-report`, whose
 images illustrate this design; nothing here builds on that spike's throwaway branch,
 mock or harness.

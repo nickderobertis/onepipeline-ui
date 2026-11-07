@@ -54,7 +54,9 @@ impl GitHubBoard {
             url: String::new(),
             token,
         };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        // Only a hang guard: the macOS runner has taken over ten seconds to start a live
+        // board with the tiers running beside it. The board prints its stack at ten.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         while !board.dir.join("endpoint").is_file() {
             assert!(
                 board

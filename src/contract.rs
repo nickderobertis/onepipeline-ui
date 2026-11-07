@@ -7,6 +7,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use onepipeline::human_items::HumanItemFilter;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -157,6 +158,16 @@ pub const API_VERSION: u32 = 2;
 /// Every field 24 served is served with the same meaning and the same value; the
 /// version moves because a client written against 24 re-reads whole payloads on
 /// every change and has never seen `live_activity`.
+///
+/// The same subscription carries Action items as one more view, without moving
+/// the version: `{type: "human-items", filter?, item?}` answers a `visible` of
+/// `{type: "human-items", items, detail}`, where `items` is what
+/// `GET /api/human-items` answers under that filter and `detail` what
+/// `GET /api/human-items/{id}` answers for `item`, or `null` where none was asked
+/// for or the item no longer reads, and its stream carries the
+/// `human-items.patch` frame `{ops}` under `detail.patch`'s rules, patching that
+/// `visible`. No client written against 25 asks for that view, and no payload one
+/// reads changes.
 ///
 /// **Schema 26 is every turn read whole from its transcript.** A conversation's
 /// prompts, replies, words and tool calls are read through the engine's
@@ -1779,8 +1790,9 @@ pub enum ViewScope {
 /// run view.
 ///
 /// The Graph view selects `detail`, Overall `timeline` at run scope, a node's
-/// timeline `timeline` at node scope, and Channel `channel`. The Host page and a
-/// page with no run open select `sidebar` alone.
+/// timeline `timeline` at node scope, Channel `channel`, and Action items
+/// `human-items`. The Host page and a page with no run open select `sidebar`
+/// alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubscriptionView {
     /// The sidebar alone.
@@ -1808,6 +1820,16 @@ pub enum SubscriptionView {
         /// The run.
         run_id: RunId,
     },
+    // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views this enum declares; the plan names this enum as what gains the view, and its selectors and records stay the engine's and `src/human_items.rs`'s.
+    /// The host's human items: no run, and every item this filter selects.
+    HumanItems {
+        /// The selectors `GET /api/human-items` takes, with that route's
+        /// meaning: the default selects every open item.
+        filter: HumanItemFilter,
+        /// The item whose detail the view carries beside the list.
+        item: Option<HumanItemId>,
+    },
+    // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 }
 
 impl SubscriptionView {
@@ -1819,7 +1841,8 @@ impl SubscriptionView {
     /// `400 invalid_subscription` for a malformed view: an unknown `type`, a
     /// missing or extra member, a `scope` other than `run` or `node`, a node scope
     /// naming no node or a run scope naming one, or a filter or id that does not
-    /// parse.
+    /// parse — a human-item selector the engine's own `HumanItemFilter` does not
+    /// declare, or a value its vocabulary does not hold, among them.
     pub fn parse(value: &Value) -> Result<Self, ApiError> {
         let refused = |why: &str| ApiError::InvalidSubscription(format!("the view {why}"));
         let object = value
@@ -1884,16 +1907,35 @@ impl SubscriptionView {
                 allow(&["type", "run_id"])?;
                 Ok(Self::Channel { run_id: run_id()? })
             }
+            Some("human-items") => {
+                allow(&["type", "filter", "item"])?;
+                Ok(Self::HumanItems {
+                    filter: object
+                        .get("filter")
+                        .map(|filter| {
+                            serde_json::from_value(filter.clone()).map_err(|error| {
+                                refused(&format!("names a human-item filter that {error}"))
+                            })
+                        })
+                        .transpose()?
+                        .unwrap_or_default(),
+                    item: text("item")?
+                        .map(|item| {
+                            HumanItemId::try_from(item).map_err(|error| refused(&error.to_string()))
+                        })
+                        .transpose()?,
+                })
+            }
             Some(other) => Err(refused(&format!("names an unknown type {other:?}"))),
             None => Err(refused("names no type")),
         }
     }
 
-    /// The run this view reads, or `None` for the sidebar alone.
+    /// The run this view reads, or `None` for a view of no run.
     #[must_use]
     pub fn run_id(&self) -> Option<&RunId> {
         match self {
-            Self::Sidebar => None,
+            Self::Sidebar | Self::HumanItems { .. } => None,
             Self::Detail { run_id, .. }
             | Self::Timeline { run_id, .. }
             | Self::Channel { run_id } => Some(run_id),
@@ -1901,7 +1943,8 @@ impl SubscriptionView {
     }
 
     /// The view as it is served back: the same members, with the filter in its
-    /// normalized spelling and omitted where none was asked for.
+    /// normalized spelling and omitted where none was asked for. A human-item
+    /// filter that selects by nothing is the one no filter asks for.
     #[must_use]
     pub fn to_json(&self) -> Value {
         let filtered = |mut value: Value, filter: &Option<FilterSpec>| {
@@ -1933,6 +1976,16 @@ impl SubscriptionView {
                 filter,
             ),
             Self::Channel { run_id } => serde_json::json!({ "type": "channel", "run_id": run_id }),
+            Self::HumanItems { filter, item } => {
+                let mut value = serde_json::json!({ "type": "human-items" });
+                if *filter != HumanItemFilter::default() {
+                    value["filter"] = serde_json::json!(filter);
+                }
+                if let Some(item) = item {
+                    value["item"] = serde_json::json!(item);
+                }
+                value
+            }
         }
     }
 }

@@ -92,6 +92,7 @@ if [ "$os" = linux ]; then
   compile "just _tier-test-covered" \
     cargo llvm-cov nextest --locked --no-report -E 'none()' --no-tests=pass
   compile "nx dag-ui:build-api-server" bash scripts/nx.sh run dag-ui:build-api-server --skip-nx-cache
+  compile "nx dag-ui-read-latency:compile-release-server" bash scripts/nx.sh run dag-ui-read-latency:compile-release-server --skip-nx-cache
   compile "test tests/e2e/linked_report.rs" \
     cargo auditable build --offline --locked --bin onepipeline-api --config 'build.build-dir="target"' --target-dir target/auditable
   # The wheel smoke builds into .tools/wheel-smoke and the release rehearsal into

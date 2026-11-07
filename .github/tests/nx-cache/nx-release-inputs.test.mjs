@@ -69,6 +69,9 @@ test("real Nx replays release edits except targets whose tests read the version"
       "onepipeline-ui-nx-worker-startup:test-quick",
       "github-workflows-nx-cache:lint",
       "github-workflows-nx-cache:test",
+      "dag-ui-read-latency:format-check",
+      "dag-ui-read-latency:lint",
+      "dag-ui-read-latency:typecheck",
     ]);
     assert.deepEqual(
       Object.keys(before).sort(),

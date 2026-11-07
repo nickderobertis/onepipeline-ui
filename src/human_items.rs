@@ -98,6 +98,29 @@ impl HumanItems {
         readable(&self.engine()?, id)
     }
 
+    /// What one human-items subscription shows, from one store: the items
+    /// `filter` selects, and `item`'s detail where one was named and still reads.
+    ///
+    /// The list is read first, so a store that cannot be read at all is refused
+    /// here, and what is left of a refused `show` is an item that does not read:
+    /// `null` to the view rather than a refusal. `held`'s search of every state is
+    /// not owed, because nothing here tells a missing item from any other.
+    pub(crate) fn view(
+        &self,
+        filter: &HumanItemFilter,
+        item: Option<&HumanItemId>,
+    ) -> Result<(Vec<HumanItemView>, Option<HumanItemDetail>), ApiError> {
+        let engine = self.engine()?;
+        let items = engine.query(filter).map_err(refusal)?;
+        let detail = item.and_then(|id| engine.show(id.as_str()).ok());
+        Ok((items, detail))
+    }
+
+    /// The journal the engine keeps every item in, which moves on every write.
+    pub(crate) fn journal(&self) -> PathBuf {
+        self.root.join(onepipeline::human_items::JOURNAL_PATH)
+    }
+
     /// Raise an item owned by `session`.
     pub(crate) fn raise(
         &self,

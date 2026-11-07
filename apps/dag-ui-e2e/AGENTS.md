@@ -25,6 +25,14 @@ they stay out of each other's way, which costs more than everything else here
 together and answers one question nothing else asks. Each edge is what a reader
 can ask for without paying for the rest; `check` pays for all of it.
 
+## `read-latency/`: a project of its own, for timings
+
+`dag-ui-read-latency` records what its budgets read, so nothing may time beside it and
+no verdict of its is replayed. A new read budget extends its `workload.json`,
+`telemetry.ts` and `read-latency-budget.mjs`. `load/corpus.mjs` is the one generator it
+sizes, run as a command rather than imported across the project line, so a change to the
+generator alone selects `dag-ui-e2e` and not this project.
+
 ## Reaching the app
 
 Sibling dependencies here are `workspace:*`, as every one in this workspace is:

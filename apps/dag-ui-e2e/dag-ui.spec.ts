@@ -2192,7 +2192,7 @@ test("switches the reading between decisions and detailed activity", async ({
     const view = subscriptionViewSchema.parse(
       JSON.parse(request.postData).view,
     );
-    if ("filter" in view && view.filter !== undefined)
+    if ("filter" in view && typeof view.filter === "string")
       asked.push({ filter: view.filter, started: wallTime * 1000 });
   });
   // llmlint: ignore-end[tests_mirror_real_usage]
