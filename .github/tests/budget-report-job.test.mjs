@@ -246,5 +246,6 @@ test("the budgets the job adds and changes are as recorded, and no other limit m
     "onepipeline-ui-pr-read-requests": 2,
     "onepipeline-ui-gate-time": 1800,
     "onepipeline-ui-nx-cache-use": 100,
+    "onepipeline-ui-cache-headroom": 5.5,
   });
 });

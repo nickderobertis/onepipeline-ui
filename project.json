@@ -43,10 +43,12 @@
       "command": "just _crate-format"
     },
     "format-check": {
-      "command": "just _crate-fmt-check"
+      "command": "just _crate-fmt-check",
+      "inputs": ["crateInputs"]
     },
     "lint": {
       "command": "just _crate-lint",
+      "inputs": ["crateInputs"],
       "dependsOn": [
         {
           "projects": ["dag-ui"],
@@ -64,7 +66,7 @@
         }
       ],
       "inputs": [
-        "default",
+        "crateInputs",
         "servedGoldens",
         "{workspaceRoot}/docs/contract.md",
         "{workspaceRoot}/apps/dag-ui/src/**/*",
@@ -83,7 +85,7 @@
         }
       ],
       "inputs": [
-        "default",
+        "crateInputs",
         "servedGoldens",
         "{workspaceRoot}/docs/contract.md",
         "{workspaceRoot}/apps/dag-ui/src/**/*",
@@ -94,6 +96,7 @@
     },
     "doc": {
       "command": "just _crate-doc",
+      "inputs": ["crateInputs"],
       "dependsOn": [
         {
           "projects": ["dag-ui"],

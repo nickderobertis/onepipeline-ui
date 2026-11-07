@@ -1,0 +1,20 @@
+# Every tool a cached Nx target runs that CI installs, at its exact version. Each job of ci.yml
+# and ci-cache.yml reads this file into its step outputs right after its checkout and installs
+# from them, and the file is part of the `platform` input every cached target hashes, so a
+# result names the tools that proved it and a bump re-runs what they ran. Each version exists
+# on every runner the workflows install it on: ubuntu-latest, windows-latest and macos-latest.
+# rust-toolchain.toml holds the compiler, package.json's packageManager holds bun, which no
+# cached target runs, and scripts/setup-llmlint.sh holds llmlint and oneharness.
+# Comments start a line, and every other line is NAME=VERSION.
+just=1.59.0
+node=24.22.2
+uv=0.13.7
+nextest=0.9.151
+cargo-llvm-cov=0.9.1
+cargo-auditable=0.7.7
+cargo-deny=0.20.2
+cargo-machete=0.9.2
+# The justfile's release-plz-version and cyclonedx-version, which `just release-tools` compares
+# against; .github/tests/ci-warm.test.mjs holds the two places together.
+release-plz=0.3.158
+cargo-cyclonedx=0.5.7

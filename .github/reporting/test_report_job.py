@@ -61,6 +61,7 @@ PRODUCTION = {
     'onepipeline-ui-release-read-requests': ROOT_FIGURE,
     'onepipeline-ui-pr-read-requests': ROOT_FIGURE,
     'onepipeline-ui-nx-cache-use': 'no release',
+    'onepipeline-ui-cache-headroom': 'actions/cache/storage-limit',
     'onepipeline-ui-gate-time': '@onebudgetspec/sdk',
     'onepipeline-ui-macos-jobs-per-run': '.github/.telemetry/macos-policy.json',
     'onepipeline-ui-macos-runs-per-change': '.github/.telemetry/macos-policy.json',

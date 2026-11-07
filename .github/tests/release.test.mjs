@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { PLATFORMS, plan, TARGETS } from "../../scripts/release.mjs";
 import { evaluate, workflows } from "../workflow-graph.mjs";
+import { parsePins } from "./cache-retention.mjs";
 
 // The release's shape, read from the workflows themselves and from the plan of
 // what each release job produces (`just release-<job> plan`, scripts/release.mjs).
@@ -459,18 +460,22 @@ test("the tools the release recipes reach are pinned once for the workflows and 
   // The CI jobs that run the release journeys install both prebuilt, at these
   // pins, for `just release-tools` to copy rather than compile: a version that
   // drifted from the justfile's would be passed over and compiled again.
+  // They reach those jobs through .github/ci-tool-versions, read at the job's start.
+  const pins = parsePins(readFileSync(".github/ci-tool-versions", "utf8"));
   for (const job of ["test-linux"]) {
     const tools = workflow("ci.yml")
       .jobs[job].steps.filter((s) => s.uses === "taiki-e/install-action@v2")
-      .flatMap((s) => s.with.tool.split(/[,\s]+/));
-    assert.ok(
-      tools.includes(`release-plz@${pin("release-plz-version")}`),
-      `${job} installs release-plz ${pin("release-plz-version")}: ${tools}`,
-    );
-    assert.ok(
-      tools.includes(`cargo-cyclonedx@${pin("cyclonedx-version")}`),
-      `${job} installs cargo-cyclonedx ${pin("cyclonedx-version")}: ${tools}`,
-    );
+      .flatMap((s) => s.with.tool.split(","));
+    for (const [name, variable] of [
+      ["release-plz", "release-plz-version"],
+      ["cargo-cyclonedx", "cyclonedx-version"],
+    ]) {
+      assert.equal(pins.get(name), pin(variable), `${name}'s pin`);
+      assert.ok(
+        tools.includes(`${name}@$${"{{"} steps.tool-pins.outputs.${name} }}`),
+        `${job} installs ${name} from its pin: ${tools}`,
+      );
+    }
   }
   for (const job of BUILD_JOBS) {
     assert.ok(

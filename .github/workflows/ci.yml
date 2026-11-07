@@ -86,6 +86,15 @@ jobs:
           # This job's token can write, and the judge below runs harness agents
           # over the checkout: no credential is left in it for them to find.
           persist-credentials: false
+      - name: Read the pinned tool versions
+        id: tool-pins
+        shell: bash
+        run: |
+          tr -d '\r' < .github/ci-tool-versions | awk '
+            /^#/ || !NF { next }
+            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
+            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
+          ' >> "$GITHUB_OUTPUT"
       # Main's Linux build, which `ci-cache.yml`'s `warm-linux` saves for this job
       # and `test-linux` alike: restored, never saved from here. Ahead of the MSRV
       # toolchain, because rust-cache hashes every installed toolchain and the
@@ -124,7 +133,7 @@ jobs:
           toolchain: ${{ steps.msrv.outputs.version }}
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: ${{ steps.tool-pins.outputs.node }}
       - name: Decide cache trust and configure the sidecar
         id: nx-cache-trust
         shell: bash
@@ -149,12 +158,14 @@ jobs:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
           NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
         run: node scripts/nx-remote-cache.mjs ready
+      # A fork's run writes nothing to any cache: this action saves its own binary otherwise.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,cargo-deny,cargo-machete
+          tool: just@${{ steps.tool-pins.outputs.just }},cargo-deny@${{ steps.tool-pins.outputs.cargo-deny }},cargo-machete@${{ steps.tool-pins.outputs.cargo-machete }}
       - name: Formatting, lints, type checks, MSRV and audit (affected projects)
         if: ${{ !cancelled() }}
         run: just ci-lint
@@ -172,8 +183,12 @@ jobs:
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: just advisories-status "$HEAD_SHA" "$HEAD_REPO"
       # llmlint: ignore-end[diagnostics_error_or_absent]
+      # A fork's run writes nothing to any cache: this action saves its own otherwise.
       - uses: astral-sh/setup-uv@v6
         if: github.event_name == 'pull_request' && !cancelled()
+        with:
+          version: ${{ steps.tool-pins.outputs.uv }}
+          enable-cache: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
       # The judged tier, a blocking part of this check. Its harnesses are pinned
       # rather than floating, because an upstream release has taken this check
       # down for every pull request before: bump one deliberately, once a newer
@@ -346,6 +361,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Read the pinned tool versions
+        id: tool-pins
+        shell: bash
+        run: |
+          tr -d '\r' < .github/ci-tool-versions | awk '
+            /^#/ || !NF { next }
+            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
+            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
+          ' >> "$GITHUB_OUTPUT"
       # Main's Linux build, restored and never saved from here, as in `lint`.
       - name: Disk — Before Rust cache restore
         if: always()
@@ -371,7 +395,7 @@ jobs:
           bash .github/scripts/report-disk.sh "After Rust cache restore" || true
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: ${{ steps.tool-pins.outputs.node }}
       - name: Decide cache trust and configure the sidecar
         id: nx-cache-trust
         shell: bash
@@ -396,9 +420,11 @@ jobs:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
           NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
         run: node scripts/nx-remote-cache.mjs ready
+      # A fork's run writes nothing to any cache: this action saves its own binary otherwise.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
       # The release journeys' release-plz and cargo-cyclonedx, at the justfile's
       # pins, from their checksummed release archives: `just release-tools`
       # copies these into `.tools` rather than compiling them on every run.
@@ -406,7 +432,7 @@ jobs:
       # its fixture crates with; those journeys fail rather than skip without them.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable,cargo-deny,cargo-machete,release-plz@0.3.158,cargo-cyclonedx@0.5.7
+          tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }},cargo-deny@${{ steps.tool-pins.outputs.cargo-deny }},cargo-machete@${{ steps.tool-pins.outputs.cargo-machete }},release-plz@${{ steps.tool-pins.outputs.release-plz }},cargo-cyclonedx@${{ steps.tool-pins.outputs.cargo-cyclonedx }}
       # What `tests/e2e/cost.rs` counts with. Those journeys hold the bounds on
       # what a read may do to a runs root, counted from the kernel's own record
       # of the server rather than from a clock; they are Linux-only, this is the
@@ -415,7 +441,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y strace
       # The judged tier's journeys drive the real installed llmlint, with only
       # the paid model call stood in for, and fail rather than skip without it.
+      # A fork's run writes nothing to any cache: this action saves its own otherwise.
       - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ steps.tool-pins.outputs.uv }}
+          enable-cache: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
       - name: Install llmlint for the judged tier's journeys
         run: just setup-llmlint
       # What the two clone-local binaries below are built from, read where the
@@ -502,6 +532,15 @@ jobs:
           # The `ensure_baseline::` journeys resolve the commit this branch forked
           # from, which a shallow checkout does not have.
           fetch-depth: 0
+      - name: Read the pinned tool versions
+        id: tool-pins
+        shell: bash
+        run: |
+          tr -d '\r' < .github/ci-tool-versions | awk '
+            /^#/ || !NF { next }
+            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
+            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
+          ' >> "$GITHUB_OUTPUT"
       # Main's Windows build, which `ci-cache.yml`'s `warm-windows` saves:
       # restored, never saved from here.
       - uses: Swatinem/rust-cache@v2.9.2
@@ -510,7 +549,7 @@ jobs:
           save-if: false
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: ${{ steps.tool-pins.outputs.node }}
       - name: Decide cache trust and configure the sidecar
         id: nx-cache-trust
         shell: bash
@@ -535,12 +574,14 @@ jobs:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
           NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
         run: node scripts/nx-remote-cache.mjs ready
+      # A fork's run writes nothing to any cache: this action saves its own binary otherwise.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable
+          tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
       - name: What the provisioned sibling is built from
         id: pins
         run: echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
@@ -598,9 +639,18 @@ jobs:
           # The classifier diffs base and head; the `ensure_baseline::` journeys
           # resolve the commit this branch forked from.
           fetch-depth: 0
+      - name: Read the pinned tool versions
+        id: tool-pins
+        shell: bash
+        run: |
+          tr -d '\r' < .github/ci-tool-versions | awk '
+            /^#/ || !NF { next }
+            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
+            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
+          ' >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: ${{ steps.tool-pins.outputs.node }}
       # Main's macOS build, which `ci-cache.yml`'s `warm-macos` saves: restored,
       # never saved from here.
       - uses: Swatinem/rust-cache@v2.9.2
@@ -631,12 +681,14 @@ jobs:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
           NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
         run: node scripts/nx-remote-cache.mjs ready
+      # A fork's run writes nothing to any cache: this action saves its own binary otherwise.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,nextest,cargo-llvm-cov,cargo-auditable
+          tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
       - name: What the provisioned sibling is built from
         id: pins
         run: echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"

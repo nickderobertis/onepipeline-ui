@@ -5,6 +5,7 @@
   "namedInputs": {
     "workflowPolicy": [
       "{workspaceRoot}/scripts/nx-remote-cache.mjs",
+      "{workspaceRoot}/scripts/actions-cache-prune.mjs",
       "{workspaceRoot}/scripts/nx-version-free-inputs.mjs",
       "{workspaceRoot}/scripts/ci-job.sh",
       "sharedGlobals",
