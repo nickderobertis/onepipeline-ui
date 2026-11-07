@@ -2208,6 +2208,13 @@ fn every_workflow_runs_the_node_major_package_json_requires() {
         "engines.node names `>={floor}`, which is not a major version"
     );
 
+    let tool_pins = read(".github/ci-tool-versions");
+    let tool_pin_major = tool_pins
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("node="))
+        .and_then(|version| version.split('.').next())
+        .expect(".github/ci-tool-versions pins node")
+        .to_string();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows");
     let mut pinned = 0;
     for entry in fs::read_dir(&root).expect("read .github/workflows") {
@@ -2218,8 +2225,16 @@ fn every_workflow_runs_the_node_major_package_json_requires() {
                 continue;
             };
             pinned += 1;
+            // A job that reads `.github/ci-tool-versions` runs the exact release pinned
+            // there, which has to be of the floor's major too.
+            let spelled = value.trim().trim_matches('"');
+            let major = if spelled == "${{ steps.tool-pins.outputs.node }}" {
+                tool_pin_major.as_str()
+            } else {
+                spelled
+            };
             assert_eq!(
-                value.trim().trim_matches('"'),
+                major,
                 floor,
                 "{}:{} pins Node {}, and package.json's engines.node floor is {floor}",
                 path.display(),
