@@ -1,0 +1,70 @@
+name: Cache contents
+
+# Spike: what each Rust cache family holds. A draft pull request's push is the
+# only trigger; it restores the family `ci-cache.yml` saves on `main`, sizes it,
+# prices each part, and saves nothing (rust-cache's `save-if: false`, setup-bun's
+# `no-cache`). No test runs: ci.yml is disabled on this branch, and every compile
+# here is a warm line's own, run with no test.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+# ci-cache.yml's workflow environment: rust-cache hashes it into the key.
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  contents:
+    name: ${{ matrix.mode }} (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows]
+        mode: [contents, pruner]
+    runs-on: ${{ matrix.os == 'linux' && 'ubuntu-latest' || 'windows-latest' }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: What ~/.cargo/bin holds before the restore
+        run: ls "${CARGO_HOME:-$HOME/.cargo}/bin" > "$RUNNER_TEMP/cargo-bin-before"
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: test-${{ matrix.os }}
+          save-if: false
+      - name: Size the restored family
+        run: node scripts/cache-contents.mjs --snapshot
+      - name: Read the MSRV from Cargo.toml
+        if: matrix.os == 'linux'
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        if: matrix.os == 'linux'
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+          no-cache: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,nextest,cargo-llvm-cov,cargo-auditable
+      - name: Bootstrap
+        run: just bootstrap
+      - name: Build the browser view the binary embeds
+        run: just build
+      - name: Attribute and price the family
+        if: matrix.mode == 'contents'
+        run: node scripts/cache-contents.mjs --attribute
+      - name: Prune the family and re-run every warm line
+        if: matrix.mode == 'pruner'
+        run: node scripts/cache-contents.mjs --pruner
