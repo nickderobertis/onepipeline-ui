@@ -1,5 +1,4 @@
 name: CI
-# THROWAWAY demo push 1: a CI-only change.
 
 # Pull requests run all five jobs. A push to `main` runs only `budgets`, which saves
 # that commit's results as the history pull requests compare with, and re-runs none
