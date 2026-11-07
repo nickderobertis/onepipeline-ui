@@ -43,7 +43,7 @@ TARGETS = {('Linux', 'x86_64'): 'x86_64-unknown-linux-gnu', ('Linux', 'aarch64')
 
 # The workload of the job's own budget: this repository's catalog, one rolling file, and one
 # results artifact of a size real runs produced.
-ROWS = 18
+ROWS = 19
 COMMITS = 20
 SAVED_ARTIFACT_BYTES = (2619, 11350)
 PROVISIONAL_REQUESTS = 20
@@ -60,6 +60,8 @@ CI_TIME = {'onepipeline-ui-ci-check-time': 981, 'onepipeline-ui-ci-job-count': 5
 RECORDED_JOBS = json.loads((HERE / 'fixtures/own-run/jobs.json').read_text())
 SAVED = ('onepipeline-ui-macos-jobs-per-run', 'onepipeline-ui-macos-runs-per-change')
 POOL = 'onepipeline-ui-pool-maintenance-seconds'
+# Its command runs in this job: nothing saves it, and a pull request's job measures the live listing.
+HEADROOM = 'onepipeline-ui-cache-headroom'
 # A push reads no saved results, so a row its merged run holds no figure for keeps its catalog reason.
 PUSH_REASON = {
     **{budget: 'its command reads .github/.telemetry/macos-policy.json, which is not available in this job' for budget in SAVED},
@@ -81,7 +83,7 @@ OMITTED = {
 }
 OMITTED_LINE = (f'{len(OMITTED)} budgets are left out because a pull request cannot measure them '
                 '(label not-measured-on-pr).')
-SHOWN = {OWN_BUDGET, *CI_TIME, *SAVED, POOL}
+SHOWN = {OWN_BUDGET, *CI_TIME, *SAVED, POOL, HEADROOM}
 CI_TIME_ID = 'onepipeline-ui-ci-check-time'
 # The targets the tier selects for these journeys' changes, and the one only a release pull request adds.
 SAVING_TARGETS = {'.github/project.json': 'budgets', '.github/reporting/project.json': 'budgets'}
@@ -405,7 +407,7 @@ class ReleasedContract(unittest.TestCase):
 class ProductionCatalog(unittest.TestCase):
     """This repository's own tree as the job finds it, with nothing saved for it to read."""
 
-    def assert_six_rows_and_one_line(self, journey, job, reason=lambda budget: NO_SAVED_RESULT):
+    def assert_the_rows_and_one_line(self, journey, job, reason=lambda budget: NO_SAVED_RESULT):
         rows = job.rows()
         self.assertEqual(job.exit_code, 0, job.stdout)
         self.assertEqual(sorted(rows), sorted(SHOWN))
@@ -425,10 +427,10 @@ class ProductionCatalog(unittest.TestCase):
             self.assertNotIn(budget, report, budget)
             self.assertNotIn(command, journey.commands_run(), budget)
 
-    def test_a_pull_request_shows_six_rows_and_counts_what_it_left_out(self):
+    def test_a_pull_request_shows_its_rows_and_counts_what_it_left_out(self):
         journey = Journey(self, tree=True)
         base = journey.base_push()
-        self.assert_six_rows_and_one_line(journey, base, PUSH_REASON.__getitem__)
+        self.assert_the_rows_and_one_line(journey, base, PUSH_REASON.__getitem__)
         self.assertEqual(base.outcomes['final-upload'], 'success', base.stdout)
         # A push reads no run of its own, and with no merged pull request has no figure for these.
         for budget in CI_TIME:
@@ -436,7 +438,7 @@ class ProductionCatalog(unittest.TestCase):
 
         journey.host.clear_requests()
         pull_request = journey.pull_request(draft=True)
-        self.assert_six_rows_and_one_line(journey, pull_request)
+        self.assert_the_rows_and_one_line(journey, pull_request)
         rows = pull_request.rows()
         for budget, figure in CI_TIME.items():
             self.assertEqual(verdicts(pull_request)[budget]['actual'], figure, budget)
@@ -587,7 +589,11 @@ class BasePush(unittest.TestCase):
         journey.host.clear_requests()
         push = journey.base_push(merged_head=merged.sha)
         self.assertEqual(push.exit_code, 0, push.stdout)
-        self.assertEqual(journey.commands_run().count('actions-budget-figures.sh'), 0, journey.commands_run())
+        # The merged run held no figure for the headroom row (this host has no cache listing), so
+        # only its command runs here; every budget it held a figure for runs none.
+        ran = journey.commands_run()
+        self.assertEqual([line for line in ran.splitlines()
+                          if 'actions-budget-figures.sh' in line and 'cache-headroom' not in line], [], ran)
         self.assertEqual(journey.commands_run().count('macos-budget.mjs'), 0, journey.commands_run())
         self.assertEqual(journey.host.count(r'/actions/runs/\d+/jobs'), 0)
         self.assertEqual(journey.host.count(rf'/commits/{push.sha}/pulls'), 1)
