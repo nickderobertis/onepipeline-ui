@@ -694,8 +694,23 @@ test("a person's write shows at once while changes nobody made here stay held un
   const stateBefore = await rowState(page, run).getAttribute("aria-label");
   expect(stateBefore).not.toBe("ended-stopped");
 
-  await page.getByRole("button", { name: `Complete: ${title}` }).click();
+  // A write from an item's detail: the pane shows what the receipt says at once,
+  // though the list it was opened from is held.
+  const question = "Which region should the canary run in?";
+  await page.getByRole("button", { name: `Details: ${question}` }).click();
+  const pane = page.getByRole("complementary", { name: "Action item detail" });
+  const answer = pane.getByRole("textbox", {
+    name: `Answer in detail: ${question}`,
+  });
+  await answer.fill("eu-west");
+  await answer.press("Enter");
   const wrote = Date.now();
+  await expect(answer).toHaveCount(0);
+  await expect(pane.getByText(/· Answered$/)).toBeVisible();
+  await expect(itemCard(page, question)).toHaveCount(0);
+  await page.getByRole("button", { name: "Close detail" }).click();
+
+  await page.getByRole("button", { name: `Complete: ${title}` }).click();
   await expect(itemCard(page, title)).toHaveCount(0);
 
   // Within the ten seconds after the write, things change that this page did not do.
@@ -720,6 +735,7 @@ test("a person's write shows at once while changes nobody made here stay held un
   await choose(page, MAIN, "Live");
   await expect(itemCard(page, "Raised by someone else")).toBeVisible();
   await expect(itemCard(page, title)).toHaveCount(0);
+  await expect(itemCard(page, question)).toHaveCount(0);
   await expect(waiting(page, MAIN)).toHaveCount(0);
   await choose(page, NAVIGATION, "Live");
   await expect(rowState(page, run)).toHaveAccessibleName("ended-stopped");
