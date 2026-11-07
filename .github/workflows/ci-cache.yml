@@ -72,7 +72,6 @@ jobs:
           # No step here reads a remote through this checkout, and the build runs
           # beside a token that can delete caches.
           persist-credentials: false
-      # The exact versions of the tools this job installs (.github/ci-tool-versions).
       - name: Read the pinned tool versions
         id: tool-pins
         shell: bash
@@ -185,7 +184,6 @@ jobs:
           # No step here reads a remote through this checkout, and the build runs
           # beside a token that can delete caches.
           persist-credentials: false
-      # The exact versions of the tools this job installs (.github/ci-tool-versions).
       - name: Read the pinned tool versions
         id: tool-pins
         shell: bash
@@ -269,7 +267,6 @@ jobs:
           # No step here reads a remote through this checkout, and the build runs
           # beside a token that can delete caches.
           persist-credentials: false
-      # The exact versions of the tools this job installs (.github/ci-tool-versions).
       - name: Read the pinned tool versions
         id: tool-pins
         shell: bash
@@ -343,7 +340,6 @@ jobs:
           # The report reads the base (`git merge-base HEAD origin/main`, here
           # this commit) to say which advisories were already there.
           fetch-depth: 0
-      # The exact versions of the tools this job installs (.github/ci-tool-versions).
       - name: Read the pinned tool versions
         id: tool-pins
         shell: bash

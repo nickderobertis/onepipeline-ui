@@ -86,7 +86,6 @@ jobs:
           # This job's token can write, and the judge below runs harness agents
           # over the checkout: no credential is left in it for them to find.
           persist-credentials: false
-      # The exact versions of the tools this job installs (.github/ci-tool-versions).
       - name: Read the pinned tool versions
         id: tool-pins
         shell: bash
@@ -362,7 +361,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # The exact versions of the tools this job installs (.github/ci-tool-versions).
       - name: Read the pinned tool versions
         id: tool-pins
         shell: bash
@@ -534,7 +532,6 @@ jobs:
           # The `ensure_baseline::` journeys resolve the commit this branch forked
           # from, which a shallow checkout does not have.
           fetch-depth: 0
-      # The exact versions of the tools this job installs (.github/ci-tool-versions).
       - name: Read the pinned tool versions
         id: tool-pins
         shell: bash
@@ -642,7 +639,6 @@ jobs:
           # The classifier diffs base and head; the `ensure_baseline::` journeys
           # resolve the commit this branch forked from.
           fetch-depth: 0
-      # The exact versions of the tools this job installs (.github/ci-tool-versions).
       - name: Read the pinned tool versions
         id: tool-pins
         shell: bash
