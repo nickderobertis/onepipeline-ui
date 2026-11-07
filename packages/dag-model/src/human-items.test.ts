@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   humanItemDetailSchema,
+  humanItemFilterSchema,
   humanItemReceiptSchema,
   humanItemViewSchema,
 } from "./human-items.js";
@@ -64,7 +65,14 @@ function shape(node: unknown, defs: Schema): unknown {
     return nullable ? { nullable: of } : of;
   }
   if ("const" in node) return { enum: [String(node.const)] };
-  if (Array.isArray(node.enum)) return { enum: node.enum.map(String).sort() };
+  // A `null` among an enum's words is the nullability `type` states beside it.
+  if (Array.isArray(node.enum))
+    return {
+      enum: node.enum
+        .filter((word) => word !== null)
+        .map(String)
+        .sort(),
+    };
   if (Array.isArray(node.type)) {
     const types = node.type.filter((type) => type !== "null");
     const of = shape({ ...node, type: types[0] }, defs);
@@ -118,6 +126,7 @@ describe("the browser's human-item parsers", () => {
     ["HumanItemView", humanItemViewSchema],
     ["HumanItemDetail", humanItemDetailSchema],
     ["HumanItemReceipt", humanItemReceiptSchema],
+    ["HumanItemFilter", humanItemFilterSchema],
   ] as const)("have the engine's %s shape", (name, parser) => {
     expect(parserShape(parser)).toEqual(engineShape(name));
   });

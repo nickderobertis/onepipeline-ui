@@ -2039,6 +2039,47 @@ test("an open page follows what the CLI writes, reads nothing to do it, and hold
   expect(seen.humanItemReads()).toEqual([]);
 });
 
+test("an item whose patch beats its receipt stays where it was until the receipt lands", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const list = await open(page, served);
+  const order = await titles(list);
+  // The write is made and committed; only its receipt is held on its way back,
+  // so the stream carries the change before the page hears its own answer.
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let committed: () => void = () => {};
+  const made = new Promise<void>((resolve) => {
+    committed = resolve;
+  });
+  await page.route("**/api/human-items/*/answer", async (route) => {
+    const response = await route.fetch();
+    committed();
+    await held;
+    await route.fulfill({ response });
+  });
+  await answerBox(page, LAST_QUESTION).fill("Reuse it");
+  await answerBox(page, LAST_QUESTION).press("Enter");
+  await made;
+  expect(stored(served, idOf(served, "cache")).state).toBe("answered");
+  // A later change reaching the page proves the stream got past the commit,
+  // and the answered card holds its place, still sending, beside it.
+  const later = "Raised after the answer was committed";
+  raise(served, later, "task");
+  await expect(card(page, later)).toBeVisible();
+  await expect(card(page, LAST_QUESTION).getByRole("status")).toHaveText(
+    "Sending…",
+  );
+  expect(await titles(list)).toEqual(expect.arrayContaining(order));
+  release();
+  await expect(outcome(page)).toHaveText(`${LAST_QUESTION}: Answered`);
+  await expect(card(page, LAST_QUESTION)).toHaveCount(0);
+  await expect(card(page, later)).toBeVisible();
+});
+
 test("an open item that vanishes reads as resolved rather than as a load error", async ({
   page,
 }) => {

@@ -12,7 +12,6 @@ import workload from "./workload.json" with { type: "json" };
 /** Each page the human-item budgets are the slowest of, as the page sets it. */
 export const PAGES = ["unfiltered", "filtered"] as const;
 
-/** A measured figure: finite and never negative. */
 const figure = z.number().finite().nonnegative();
 const seconds = figure.nullable();
 const count = z.number().int().nonnegative();
@@ -70,8 +69,26 @@ const pageSchema = z
     const bytes = workload.human_item_bytes_at_start;
     if (Math.abs(page.journal_at_start.bytes - bytes) > bytes * 0.05)
       refuse(`a page starts on a journal of about ${bytes} bytes`);
-    if (page.lag.writes !== workload.writes || page.lag.never_shown !== 0)
-      refuse("a page renders every write in its window");
+    const { lag } = page;
+    if (
+      lag.writes !== workload.writes ||
+      lag.never_shown !== 0 ||
+      lag.shown !== lag.writes ||
+      [lag.p50_s, lag.p95_s, lag.max_s].includes(null)
+    )
+      refuse("a page renders every write in its window, and times each");
+    const routed = Object.values(page.requests_by_route);
+    if (routed.reduce((sum, held) => sum + held, 0) !== page.requests)
+      refuse("a page's requests are the ones it counts by route");
+    const perMinute = (page.requests / page.window_s) * 60;
+    if (Math.abs(page.requests_per_min - perMinute) > 1e-6)
+      refuse("a page's request rate is its requests over its window");
+  });
+
+/** What each page's filter selects: the page's whole point. */
+const selecting = (selected: (filter: Record<string, unknown>) => boolean) =>
+  pageSchema.refine(({ filter }) => selected(filter), {
+    message: "a page measures the filter it is named for",
   });
 
 export const telemetrySchema = z.object({
@@ -84,8 +101,8 @@ export const telemetrySchema = z.object({
     write_spacing_s: z.literal(workload.write_spacing_s),
   }),
   human_items: z.object({
-    unfiltered: pageSchema,
-    filtered: pageSchema,
+    unfiltered: selecting((filter) => Object.keys(filter).length === 0),
+    filtered: selecting((filter) => Object.keys(filter).length > 0),
   }),
 });
 export type Telemetry = z.infer<typeof telemetrySchema>;

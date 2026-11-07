@@ -57,13 +57,18 @@ const page = (requests: number, p95: number) => ({
   },
 });
 
+const FILTERED = { priority: "high" };
+
 const telemetry = (overrides: object = {}) => ({
   schema_version: 1,
   recorded_at: "2026-11-07T00:00:00.000Z",
   commit: "a".repeat(40),
   dirty: false,
   workload: { runs: workload.runs, write_spacing_s: workload.write_spacing_s },
-  human_items: { unfiltered: page(0, 0.8), filtered: page(4, 1.5) },
+  human_items: {
+    unfiltered: page(0, 0.8),
+    filtered: { ...page(4, 1.5), filter: FILTERED },
+  },
   ...overrides,
 });
 
@@ -152,33 +157,32 @@ test("names the target to run when the telemetry is absent", () => {
 });
 
 test("refuses telemetry that was not recorded over the stated workload", () => {
+  const filteredAs = (changed: object) =>
+    telemetry({
+      human_items: {
+        unfiltered: page(0, 0.8),
+        filtered: { ...page(0, 0.8), filter: FILTERED, ...changed },
+      },
+    });
+  const clean = page(0, 0.8).lag;
   for (const unrealistic of [
     telemetry({ workload: { runs: 10, write_spacing_s: 3 } }),
-    telemetry({
-      human_items: {
-        unfiltered: page(0, 0.8),
-        filtered: {
-          ...page(0, 0.8),
-          journal_at_start: { events: 1, bytes: 100 },
-        },
-      },
+    filteredAs({ journal_at_start: { events: 1, bytes: 100 } }),
+    filteredAs({
+      writes_by_kind: { raise: 40, answer: 0, complete: 0, dismiss: 0 },
     }),
+    filteredAs({ lag: { ...clean, shown: 39, never_shown: 1 } }),
+    // Counts that contradict each other, each of which reads as a pass.
+    filteredAs({ lag: { ...clean, shown: 0 } }),
+    filteredAs({ lag: { ...clean, p95_s: null } }),
+    filteredAs({ requests: 4, requests_per_min: 0 }),
+    filteredAs({ requests: 4, requests_per_min: 2, requests_by_route: {} }),
+    // An unfiltered reading passed off as the filtered page's, and the reverse.
+    filteredAs({ filter: {} }),
     telemetry({
       human_items: {
-        unfiltered: page(0, 0.8),
-        filtered: {
-          ...page(0, 0.8),
-          writes_by_kind: { raise: 40, answer: 0, complete: 0, dismiss: 0 },
-        },
-      },
-    }),
-    telemetry({
-      human_items: {
-        unfiltered: page(0, 0.8),
-        filtered: {
-          ...page(0, 0.8),
-          lag: { ...page(0, 0.8).lag, shown: 39, never_shown: 1 },
-        },
+        unfiltered: { ...page(0, 0.8), filter: FILTERED },
+        filtered: { ...page(0, 0.8), filter: FILTERED },
       },
     }),
   ]) {
