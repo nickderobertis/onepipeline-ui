@@ -10,11 +10,6 @@
 # ("Commits, releases, and merging") records the model; this is the one place a
 # build is told which side of it it is on.
 #
-# Kept for that reason, at a measured price: `test-linux` took 1,563 to 1,698 s on the
-# release pull requests of 2026-11-05 and 11-06 against about 800 to 1,000 s on an
-# affected run. Dropping it would lose the only whole-gate run of the commit that ships,
-# which only the user can rule on. Replayed results are what bring its cost down.
-#
 # The release pull request is the one release-plz opens, which it names
 # `release-plz-<timestamp>` — release-plz.toml leaves `pr_branch_prefix` at that
 # default, and `tests/e2e/ci_tier.rs` holds the two to each other.

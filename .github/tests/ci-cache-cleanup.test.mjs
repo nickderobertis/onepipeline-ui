@@ -147,7 +147,7 @@ async function headroom(host, scratch) {
   return JSON.parse(readFileSync(out, "utf8"));
 }
 
-test("a warm leg's own cleanup command leaves superseded copies and keeps main's newest", async () => {
+test("a warm leg's own cleanup command deletes superseded copies and keeps main's newest", async () => {
   const entries = structuredClone(recorded.actions_caches);
   const prefix = "onepipeline-api-baseline-Linux-X64-";
   const held = entries.filter((entry) => entry.key.startsWith(prefix));
