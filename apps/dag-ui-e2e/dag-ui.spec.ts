@@ -2855,6 +2855,7 @@ test("lands on the run as a whole, with every deep link still opening", async ({
   // The node cannot survive a move to a run that never recorded it, so leaving one
   // this way lands on the run as a whole — the reading a bare address gets — rather
   // than on the graph the node bookmark was being read through.
+  await expandProjects(page);
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
   await expect(page.getByRole("tab", { name: "Overall" })).toHaveAttribute(
     "aria-selected",
@@ -3913,7 +3914,10 @@ test("tells each outcome apart by the palette's semantic tones", async ({
   // engine reads off the run-end hook as `ended-stopped`: a real state with no
   // outcome in it. The list says the word and paints its mark with no meaning in
   // it rather than borrowing one of the tones above.
-  await expect(runRow(runs().sibling)).toContainText("ended-stopped");
+  await expect(runRow(runs().sibling)).toHaveAttribute(
+    "title",
+    /ended-stopped/,
+  );
   await expect(runMark(runs().sibling)).toHaveCSS(
     "color",
     await tokenColor(page, "--muted-foreground"),

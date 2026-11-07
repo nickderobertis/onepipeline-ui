@@ -590,7 +590,9 @@ test("a person's write and a navigation choice show at once with both areas held
 
   // As is a navigation choice: the Host page, then a run from its row.
   await navigation(page).getByRole("button", { name: "Host" }).click();
-  await expect(page.getByRole("region", { name: "Host" })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Host", exact: true }),
+  ).toBeVisible();
 });
 
 test("a navigation choice shows the chosen run at once, and a manual Refresh applies what is held", async ({

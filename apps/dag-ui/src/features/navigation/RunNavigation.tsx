@@ -1,4 +1,12 @@
-import { Button, cn, ScrollArea, Separator } from "@oneharness/ui";
+import {
+  Button,
+  cn,
+  ScrollArea,
+  Separator,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@oneharness/ui";
 import type { SidebarRow } from "@onepipeline-ui/dag-model";
 import { Activity, ChevronDown, ChevronRight } from "lucide-react";
 import { type ReactNode, type Ref, useRef } from "react";
@@ -183,11 +191,19 @@ export function RunNavigation({
                           type="button"
                           {...{ [ROW_KEY_ATTRIBUTE]: `run:${run.id}` }}
                         >
-                          <span
-                            role="img"
-                            aria-label={run.state}
-                            className={cn("run-dot", stateDotClass(run.state))}
-                          />
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span
+                                role="img"
+                                aria-label={run.state}
+                                className={cn(
+                                  "run-dot",
+                                  stateDotClass(run.state),
+                                )}
+                              />
+                            </TooltipTrigger>
+                            <TooltipContent>{run.state}</TooltipContent>
+                          </Tooltip>
                           <span className="run-link-name">{run.name}</span>
                           {run.kind && (
                             <span
