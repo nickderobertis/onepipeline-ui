@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.70.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.70.1...v0.70.2) - 2026-11-07
+
+### Added
+
+- push action-item changes to the Action items page ([#674](https://github.com/nickderobertis/onepipeline-ui/pull/674))
+
 ## [0.70.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.70.0...v0.70.1) - 2026-11-07
 
 ### Fixed
