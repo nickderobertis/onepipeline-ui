@@ -63,7 +63,10 @@
     },
     "budgets": {
       "//": "Telemetry-only: the budgets read what `test` just recorded and measure nothing themselves.",
-      "command": "node_modules/.bin/onebudgetspec check apps/dag-ui-e2e/read-latency/budgets.yaml",
+      "command": "node_modules/.bin/onebudgetspec check apps/dag-ui-e2e/read-latency/budgets.yaml --save-results target/budget-results/dag-ui-read-latency.json",
+      "outputs": [
+        "{workspaceRoot}/target/budget-results/dag-ui-read-latency.json"
+      ],
       "cache": false,
       "dependsOn": ["test"]
     },

@@ -10,7 +10,7 @@ import { taskHashes, workspaceFixture } from "./nx-fixture.mjs";
 // Node, npm and biome tasks over the frontend and the release tests' own formatting, none
 // of which opens a Cargo file. `repoFile`'s walk only tests the root manifest's existence.
 const NOT_CARGO_READERS =
-  /^(dag-layout|dag-model|dag-ui|telemetry-client|timeline-categories|docs|pool-maintenance):|^dag-ui-e2e:(budgets|format-check|lint|typecheck)$|^onepipeline-ui-release:lint$/;
+  /^(dag-layout|dag-model|dag-ui|telemetry-client|timeline-categories|docs|pool-maintenance):|^dag-ui-e2e:(budgets|format-check|lint|typecheck)$|^dag-ui-read-latency:(format-check|lint|typecheck)$|^onepipeline-ui-release:lint$/;
 const moved = (before, after) =>
   Object.keys(before).filter((id) => before[id].hash !== after[id].hash);
 const edit = (cwd, file, change, body) => {
