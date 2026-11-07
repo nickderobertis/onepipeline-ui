@@ -17,7 +17,10 @@
       "dependsOn": ["test"]
     },
     "budgets-host": {
-      "command": "node_modules/.bin/onebudgetspec check pool-maintenance/budgets.yaml --label host",
+      "command": "node_modules/.bin/onebudgetspec check pool-maintenance/budgets.yaml --label host --save-results target/budget-results/pool-maintenance.json",
+      "outputs": [
+        "{workspaceRoot}/target/budget-results/pool-maintenance.json"
+      ],
       "dependsOn": [
         "bootstrap",
         {

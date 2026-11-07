@@ -1656,6 +1656,65 @@ fn a_long_body_is_served_and_printed_in_full() {
     }
 }
 
+/// What the engine writes after a resolution is served as it wrote it: a note on a
+/// completed task is the completion's comment, a reopen takes the resolution back,
+/// and every read says whether the item can be reopened. A note on an open item is
+/// refused and leaves what the route serves alone.
+#[test]
+fn a_note_and_a_reopen_are_served_as_the_engine_wrote_them() {
+    let world = World::new();
+    let owner = "manager-reopen";
+    let id = world.raise(
+        owner,
+        &input(owner, "reopen", "task", "low", json!({"scope": "nothing"})),
+    );
+    let server = world.serve(Some(owner));
+    let path = format!("/api/human-items/{id}");
+    let open = http::get(server.address, &path).json();
+    assert_eq!(open["reopen"]["available"], false);
+    assert_eq!(
+        open["reopen"]["reason"],
+        "the item is open, so there is nothing to reopen"
+    );
+
+    let refused = world.cli(
+        Some(owner),
+        &["human-items", "note", &id, "--text", "Too early."],
+    );
+    assert!(
+        !refused.status.success(),
+        "a note on an open item is refused"
+    );
+    assert_eq!(http::get(server.address, &path).json(), open);
+
+    world.ok(Some(owner), &["human-items", "complete", &id]);
+    let completed = http::get(server.address, &path).json();
+    assert_eq!(completed["item"]["state"], "completed");
+    assert_eq!(completed["item"]["resolution"]["text"], Value::Null);
+    assert_eq!(
+        completed["reopen"],
+        json!({"available": true, "reason": null})
+    );
+
+    world.ok(
+        Some(owner),
+        &["human-items", "note", &id, "--text", "Done by hand."],
+    );
+    let noted = http::get(server.address, &path).json();
+    assert_eq!(noted["item"]["state"], "completed");
+    assert_eq!(noted["item"]["resolution"]["text"], "Done by hand.");
+    assert_eq!(noted["reopen"], json!({"available": true, "reason": null}));
+
+    world.ok(Some(owner), &["human-items", "reopen", &id]);
+    let reopened = http::get(server.address, &path).json();
+    assert_eq!(reopened["item"]["state"], "open");
+    assert_eq!(reopened["item"]["resolution"], Value::Null);
+    assert_eq!(reopened["reopen"], open["reopen"]);
+    let listed = http::get(server.address, "/api/human-items").json();
+    assert_eq!(listed["items"][0]["item"]["id"], id.as_str());
+    assert_eq!(listed["items"][0]["reopen"], open["reopen"]);
+}
+
 /// Content and writes belong to the owning session: another session is
 /// served neither its content nor any write to it, an unattributed server owns
 /// nothing, and a raise as anyone but the acting session is refused — all

@@ -115,7 +115,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -232,7 +236,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -349,7 +357,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -466,7 +478,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -588,7 +604,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -705,7 +725,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -817,7 +841,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -929,7 +957,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -1046,7 +1078,11 @@
             "node": "build",
             "title": "Build the release binaries"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -1163,7 +1199,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -1280,7 +1320,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -1397,7 +1441,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -1438,6 +1486,10 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
         }
       }
     },
@@ -1479,6 +1531,10 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
         }
       }
     },
@@ -1515,6 +1571,10 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
         }
       }
     },
@@ -1556,6 +1616,10 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
         }
       }
     },
@@ -1597,6 +1661,10 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
         }
       }
     },
@@ -1638,6 +1706,10 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
         }
       }
     },
@@ -1682,6 +1754,10 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
         }
       }
     },
@@ -1723,13 +1799,17 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": true,
+          "reason": null
         }
       }
     },
     {
-      "name": "a completion with text",
+      "name": "a completion with a comment",
       "type": "HumanItemView",
-      "accept": false,
+      "accept": true,
       "record": {
         "item": {
           "schema_version": 1,
@@ -1764,6 +1844,10 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": true,
+          "reason": null
         }
       }
     },
@@ -1805,6 +1889,10 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": true,
+          "reason": null
         }
       }
     },
@@ -1846,6 +1934,10 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": true,
+          "reason": null
         }
       }
     },
@@ -1887,6 +1979,10 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": true,
+          "reason": null
         }
       }
     },
@@ -1966,6 +2062,10 @@
               ]
             }
           ]
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
         }
       }
     },
@@ -2084,7 +2184,11 @@
             "title": "Photograph every surface"
           }
         ],
-        "extra": 1
+        "extra": 1,
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -2202,7 +2306,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -2320,7 +2428,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -2438,7 +2550,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -2556,7 +2672,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -2674,7 +2794,11 @@
             "node": "screens",
             "title": "Photograph every surface"
           }
-        ]
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        }
       }
     },
     {
@@ -2716,6 +2840,10 @@
         "blocked": {
           "total": 0,
           "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
         }
       }
     },
@@ -2758,6 +2886,926 @@
           "total": 0,
           "plans": [],
           "extra": 1
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
+        }
+      }
+    },
+    {
+      "name": "a view with no reopen",
+      "type": "HumanItemView",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "task",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "completed",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": null,
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        }
+      }
+    },
+    {
+      "name": "a detail with no reopen",
+      "type": "HumanItemDetail",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "task-design",
+          "dedup_key": "dedup-task-design",
+          "kind": "task",
+          "title": "Review the action-items design",
+          "body": "Read the action-items design document and complete this task once its layout and keyboard flow look right to you.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "design"
+          },
+          "approval": {
+            "board_copy": "docs/design/action-items.md",
+            "key": "sha256:5d1c0a"
+          },
+          "state": "open",
+          "resolution": null,
+          "tracker": {
+            "task": "ONE-412",
+            "url": "https://linear.app/onepipeline/issue/ONE-412"
+          },
+          "created_at": "2026-10-29T09:10:00Z",
+          "updated_at": "2026-10-29T09:10:00Z"
+        },
+        "blocked": {
+          "total": 7,
+          "plans": [
+            {
+              "plan": "plan-a",
+              "count": 5,
+              "preview": [
+                {
+                  "run": "run-a",
+                  "node": "build",
+                  "title": "Build the release binaries"
+                },
+                {
+                  "run": "run-a",
+                  "node": "test",
+                  "title": "Run the release journeys"
+                },
+                {
+                  "run": "run-a",
+                  "node": "lint",
+                  "title": "Lint the changed files"
+                }
+              ]
+            },
+            {
+              "plan": "plan-b",
+              "count": 2,
+              "preview": [
+                {
+                  "run": "run-b",
+                  "node": "docs",
+                  "title": "Rewrite the operator guide"
+                },
+                {
+                  "run": "run-b",
+                  "node": "screens",
+                  "title": "Photograph every surface"
+                }
+              ]
+            }
+          ]
+        },
+        "nodes": [
+          {
+            "run": "run-a",
+            "node": "build",
+            "title": "Build the release binaries"
+          },
+          {
+            "run": "run-a",
+            "node": "test",
+            "title": "Run the release journeys"
+          },
+          {
+            "run": "run-a",
+            "node": "lint",
+            "title": "Lint the changed files"
+          },
+          {
+            "run": "run-a",
+            "node": "package",
+            "title": "Package the wheels"
+          },
+          {
+            "run": "run-a",
+            "node": "publish",
+            "title": "Publish to the registries"
+          },
+          {
+            "run": "run-b",
+            "node": "docs",
+            "title": "Rewrite the operator guide"
+          },
+          {
+            "run": "run-b",
+            "node": "screens",
+            "title": "Photograph every surface"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a reopen with a field it does not declare",
+      "type": "HumanItemView",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "task",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "completed",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": null,
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": true,
+          "reason": null,
+          "extra": 1
+        }
+      }
+    },
+    {
+      "name": "an available reopen with a reason",
+      "type": "HumanItemView",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "task",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "completed",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": null,
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": true,
+          "reason": "because"
+        }
+      }
+    },
+    {
+      "name": "an unavailable reopen with no reason",
+      "type": "HumanItemView",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "question",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "answered",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": "eu-west",
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "an unavailable reopen with a blank reason",
+      "type": "HumanItemView",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "question",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "answered",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": "eu-west",
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "  "
+        }
+      }
+    },
+    {
+      "name": "an open detail offering a reopen",
+      "type": "HumanItemDetail",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "task-design",
+          "dedup_key": "dedup-task-design",
+          "kind": "task",
+          "title": "Review the action-items design",
+          "body": "Read the action-items design document and complete this task once its layout and keyboard flow look right to you.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "design"
+          },
+          "approval": {
+            "board_copy": "docs/design/action-items.md",
+            "key": "sha256:5d1c0a"
+          },
+          "state": "open",
+          "resolution": null,
+          "tracker": {
+            "task": "ONE-412",
+            "url": "https://linear.app/onepipeline/issue/ONE-412"
+          },
+          "created_at": "2026-10-29T09:10:00Z",
+          "updated_at": "2026-10-29T09:10:00Z"
+        },
+        "blocked": {
+          "total": 7,
+          "plans": [
+            {
+              "plan": "plan-a",
+              "count": 5,
+              "preview": [
+                {
+                  "run": "run-a",
+                  "node": "build",
+                  "title": "Build the release binaries"
+                },
+                {
+                  "run": "run-a",
+                  "node": "test",
+                  "title": "Run the release journeys"
+                },
+                {
+                  "run": "run-a",
+                  "node": "lint",
+                  "title": "Lint the changed files"
+                }
+              ]
+            },
+            {
+              "plan": "plan-b",
+              "count": 2,
+              "preview": [
+                {
+                  "run": "run-b",
+                  "node": "docs",
+                  "title": "Rewrite the operator guide"
+                },
+                {
+                  "run": "run-b",
+                  "node": "screens",
+                  "title": "Photograph every surface"
+                }
+              ]
+            }
+          ]
+        },
+        "nodes": [
+          {
+            "run": "run-a",
+            "node": "build",
+            "title": "Build the release binaries"
+          },
+          {
+            "run": "run-a",
+            "node": "test",
+            "title": "Run the release journeys"
+          },
+          {
+            "run": "run-a",
+            "node": "lint",
+            "title": "Lint the changed files"
+          },
+          {
+            "run": "run-a",
+            "node": "package",
+            "title": "Package the wheels"
+          },
+          {
+            "run": "run-a",
+            "node": "publish",
+            "title": "Publish to the registries"
+          },
+          {
+            "run": "run-b",
+            "node": "docs",
+            "title": "Rewrite the operator guide"
+          },
+          {
+            "run": "run-b",
+            "node": "screens",
+            "title": "Photograph every surface"
+          }
+        ],
+        "reopen": {
+          "available": true,
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "an answered question offering a reopen",
+      "type": "HumanItemView",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "question",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "answered",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": "eu-west",
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": true,
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "a plain completed task refusing a reopen",
+      "type": "HumanItemView",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "task",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "completed",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": null,
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "its approval adapter declares no undo, so the recorded approval cannot be taken back"
+        }
+      }
+    },
+    {
+      "name": "a dismissed question refusing a reopen",
+      "type": "HumanItemView",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "question",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "dismissed",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": null,
+            "reason": "why"
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "its approval adapter declares no undo, so the recorded approval cannot be taken back"
+        }
+      }
+    },
+    {
+      "name": "a completed approval whose adapter declares an undo",
+      "type": "HumanItemView",
+      "accept": true,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "task",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": {
+            "board_copy": "copy",
+            "key": "key"
+          },
+          "state": "completed",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": null,
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": true,
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "a completed approval whose adapter declares no undo",
+      "type": "HumanItemView",
+      "accept": true,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "task",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": {
+            "board_copy": "copy",
+            "key": "key"
+          },
+          "state": "completed",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": null,
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "its approval adapter declares no undo, so the recorded approval cannot be taken back"
+        }
+      }
+    },
+    {
+      "name": "a task the engine resolved",
+      "type": "HumanItemView",
+      "accept": true,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "task",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "completed",
+          "resolution": {
+            "actor": "engine",
+            "on_behalf_of": null,
+            "text": null,
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "the engine resolved this item, so no person's resolution can be taken back"
+        }
+      }
+    },
+    {
+      "name": "a task the engine resolved offering a reopen",
+      "type": "HumanItemView",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "task",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "completed",
+          "resolution": {
+            "actor": "engine",
+            "on_behalf_of": null,
+            "text": null,
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": true,
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "a completed human step",
+      "type": "HumanItemView",
+      "accept": true,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "run:r1#n1",
+          "kind": "task",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "r1",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "r1",
+            "node": "n1"
+          },
+          "approval": null,
+          "state": "completed",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": null,
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "this item stands for a human step: completing it attested the step and dismissing it dropped the step, and neither can be taken back here"
+        }
+      }
+    },
+    {
+      "name": "a completed human step offering a reopen",
+      "type": "HumanItemView",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "run:r1#n1",
+          "kind": "task",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "r1",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "r1",
+            "node": "n1"
+          },
+          "approval": null,
+          "state": "completed",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": null,
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": true,
+          "reason": null
+        }
+      }
+    },
+    {
+      "name": "a completion with a blank comment",
+      "type": "HumanItemView",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "task",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "completed",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": "   ",
+            "reason": null
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": true,
+          "reason": null
         }
       }
     }

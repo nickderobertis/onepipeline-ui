@@ -39,6 +39,7 @@ files:
     # Upstream-owned copies, held byte-identical to their dero-skills commits by
     # .github/tests/nx-cache-shape.test.mjs; their directives name upstream rules.
     - "scripts/nx-remote-cache.mjs"
+    - "scripts/actions-cache-prune.mjs"
     - "scripts/nx-version-free-inputs.mjs"
 rationales: true
 # No `agents` block: the harness/model are NOT pinned here. `oneharness.toml`

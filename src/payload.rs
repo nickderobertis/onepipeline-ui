@@ -8125,6 +8125,11 @@ pub fn rendered(run: &RunId, rendered: String) -> Value {
 /// `verbs::status(Some(run))`, projected: the run's driver liveness, its unread
 /// surfaces, every node's status as the run last settled it, its one-line
 /// summary, and the text `onepipeline status RUN` prints.
+///
+/// It takes the engine's own [`onepipeline::verbs::RunStatus`], so this crate's
+/// public surface follows the linked `onepipeline` release's types here too;
+/// [`ApiError::from_engine`](crate::error::ApiError::from_engine) says why
+/// moving that requirement across a pre-1.0 minor breaks this crate.
 #[must_use]
 pub fn status(run: &RunId, status: &onepipeline::verbs::RunStatus, rendered: String) -> Value {
     let (count, oldest_seconds) = status.view.unread_surfaces();
