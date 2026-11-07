@@ -19,6 +19,13 @@ import { startFixtureServer } from "./fixture-server";
 import { appendRecords } from "./load/journal";
 import { DESKTOP, PHONE } from "./viewports";
 
+declare global {
+  interface Window {
+    /** What `rows that swap order` records of every row animation as it starts. */
+    startedAnimations?: string[];
+  }
+}
+
 const WIDE = { name: "1440x900", width: 1440, height: 900 } as const;
 
 const navigation = (page: Page): Locator =>
@@ -385,7 +392,7 @@ for (const motion of ["no-preference", "reduce"] as const) {
         // What a reader of a moving list would have seen: every animation a row
         // started, caught as it starts rather than raced for once it is running.
         const started: string[] = [];
-        Object.assign(window, { startedAnimations: started });
+        window.startedAnimations = started;
         const animate = Element.prototype.animate;
         Element.prototype.animate = function (...args) {
           const running = animate.apply(this, args);
@@ -409,11 +416,7 @@ for (const motion of ["no-preference", "reduce"] as const) {
       await expect(rows.nth(3)).toHaveText(UNDATED.second, { timeout: 20_000 });
       await expect(rows.nth(4)).toHaveText(UNDATED.first);
 
-      const started = await page.evaluate(
-        () =>
-          (window as unknown as { startedAnimations: string[] })
-            .startedAnimations,
-      );
+      const started = await page.evaluate(() => window.startedAnimations ?? []);
       if (motion === "reduce") expect(started).toStrictEqual([]);
       else {
         expect(started).toContain(`run:${UNDATED.second}`);
@@ -427,11 +430,7 @@ for (const motion of ["no-preference", "reduce"] as const) {
         .click();
       await expect(runRows(project(page, "another-project"))).toHaveCount(1);
       expect(
-        await page.evaluate(
-          () =>
-            (window as unknown as { startedAnimations: string[] })
-              .startedAnimations.length,
-        ),
+        await page.evaluate(() => (window.startedAnimations ?? []).length),
       ).toBe(settled);
       // Nothing is left running once it has arrived.
       await expect

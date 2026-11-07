@@ -782,6 +782,15 @@ test("a held replay waits for an interval's next tick, and a Live one shows at o
   await expect(activity(page, node, "replayed at a tick")).toHaveCount(0);
   await page.clock.runFor(10_000);
   await expect(activity(page, node, "replayed at a tick")).toBeVisible();
+
+  // Closed again, then turned on as Live: the replay shows with the clock still.
+  await choose(page, MAIN, "Off");
+  recordActivity(served, run, node, "replayed live");
+  await page.waitForTimeout(1_500);
+  await choose(page, MAIN, "Live");
+  await expect(activity(page, node, "replayed live")).toBeVisible({
+    timeout: PUSH_PATIENCE,
+  });
 });
 
 test("past a disconnected subscription's expiry, turning a setting on recreates the view with resume and renders the reset", async ({

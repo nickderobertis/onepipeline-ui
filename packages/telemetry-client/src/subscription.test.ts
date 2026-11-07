@@ -700,7 +700,7 @@ test("a paused view closes its stream, keeps its cursor and subscription, and re
   live.close();
 });
 
-test("a view started paused answers its state and changes view with no stream until resumed", async () => {
+test("a view started paused answers its state with no stream until resumed", async () => {
   const h = harness();
   const states: LiveState[] = [];
   const live = h.client.live({
