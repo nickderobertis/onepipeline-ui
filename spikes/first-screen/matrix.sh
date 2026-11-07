@@ -91,10 +91,12 @@ strong() {
       m "first.$view.$name" "$@" --measure "first-$view" --timeout 120
       [ "${STRONG_TODAY:-1}" = 1 ] && m "today.$view.$name" "$@" --measure "first-$view" --client today --timeout 900
     done
+    m "content.node.$name" "$@" --measure first-content-node --timeout 1500
   }
   each x strong_views
   local run=(--runs-root "$root" --cwd "$(dirname "$root")" --run "$largest")
   m first.node.largest-node "${run[@]}" --node "$largest_node" --measure first-node --timeout 120
+  m content.node.largest-node "${run[@]}" --node "$largest_node" --measure first-content-node --timeout 1500
   [ "${STRONG_TODAY:-1}" = 1 ] && m today.node.largest-node "${run[@]}" --node "$largest_node" --measure first-node --client today --timeout 900
 }
 case $lane in

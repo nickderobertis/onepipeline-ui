@@ -636,9 +636,10 @@ impl Hub {
         timings.insert("declared_ms".into(), millis(began));
 
         let began = Instant::now();
-        // Only the whole document under comparison reads the sessions' pointer file: a
-        // first answer holds no harness pointer, and marks them loading.
-        let agents = if options.whole {
+        // A node's rows include its sessions, so its first answer reads the pointer file. So
+        // does the whole document under comparison. Overall's first answer holds no harness
+        // pointer, 2.8 MB of them on the largest run, and marks them loading.
+        let agents = if options.whole || matches!(view, FirstView::Node(_)) {
             verbs::agents(&paths, AgentScope::Run).ok()
         } else {
             Some(onepipeline::agents::Agents::default())
@@ -703,7 +704,7 @@ impl Hub {
             .iter()
             .map(|path| format!("detail.{path}"))
             .collect();
-        if !matches!(view, FirstView::Graph) {
+        if matches!(view, FirstView::Overall) {
             loading.push("timeline.spans[harness_scope]".to_owned());
         }
         answer.insert("loading".into(), json!(loading));

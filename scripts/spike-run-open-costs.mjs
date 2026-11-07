@@ -1098,6 +1098,39 @@ async function viewModels() {
   const model = await load("/src/features/timeline/timeline-model.ts");
   const percent = (time_, range) =>
     ((time_ - range[0]) / Math.max(range[1] - range[0], 1)) * 100;
+  /**
+   * A line's spans wide enough to see, and the stretches it leaves blank. Below 0.1% of the
+   * axis is under a pixel of a wide screen, and which of those hairlines a line keeps depends
+   * on what its compaction was given, so they are counted here and not held.
+   */
+  const lineExpected = (graph, timeline) => {
+    const place = (item) => ({
+      from: percent(item.start, graph.range),
+      to: percent(item.end ?? graph.range[1], graph.range),
+    });
+    const items = graph.line.items.map((item) => ({
+      ...place(item),
+      session_link: item.payload?.countsAsWork === false,
+    }));
+    const sorted = [...items].sort((one, other) => one.from - other.from);
+    const gaps = [];
+    let reached = sorted[0]?.to ?? 0;
+    for (const item of sorted) {
+      if (item.from > reached) gaps.push({ from: reached, to: item.from });
+      reached = Math.max(reached, item.to);
+    }
+    const wide = items.filter((item) => item.to - item.from > 0.1);
+    return {
+      line: wide,
+      // Every span of every row: which of them a line keeps depends on what else it was given.
+      line_known: graph.rows.flatMap((row) => row.items.map(place)),
+      line_gaps: gaps,
+      line_hairlines: items.length - wide.length,
+      session_links: (timeline?.spans ?? []).filter(
+        (span) => span.harness_scope !== undefined,
+      ).length,
+    };
+  };
   const expect = (view, node, detail, timeline) => {
     const nodes = run.nodeViews(detail);
     if (view === "graph")
@@ -1121,23 +1154,19 @@ async function viewModels() {
         wall: wall === null ? "not measured" : time.formatDurationSeconds(wall),
         wall_seconds: wall,
         turns: detail.run.turns,
-        line: graph.line.items
-          .filter((item) => (item.end ?? graph.range[1]) > item.start)
-          .map((item) => ({
-            from: percent(item.start, graph.range),
-            to: percent(item.end ?? graph.range[1], graph.range),
-          })),
+        ...lineExpected(graph, timeline),
       };
     }
     const opened = nodes.find((one) => one.id === node);
     if (!opened) fail(`${node} is on no card of this run's graph`);
     const projection = model.nodeTimelineV2(timeline, node);
+    const spanIds = new Set((timeline?.spans ?? []).map((span) => span.id));
     return {
       label: opened.label,
       state: opened.status,
-      plotted_spans: projection.items.filter(
-        (item) => item.end !== undefined && item.end !== null,
-      ).length,
+      // The plot's spans; a first answer holds only the latest of the events marked on them.
+      plotted_spans: projection.items.filter((item) => spanIds.has(item.id))
+        .length,
       rows: model
         .transcriptEntries(projection.tree, new Set())
         .flatMap((entry) =>
@@ -1195,8 +1224,8 @@ function installMark({ view, run, cards, expected, moving, readAt }) {
     );
   };
   const TOLERANCE = 0.6;
-  /** What is wrong with a line that has to run over the whole axis. */
-  const lineUnmet = (spans) => {
+  /** What is wrong with a line that has to run over the whole axis, as the complete read's does. */
+  const lineUnmet = (spans, allowedGaps) => {
     if (spans.length === 0) return ["the line has no spans"];
     const sorted = [...spans].sort((a, b) => a.from - b.from);
     const unmet = [];
@@ -1204,7 +1233,12 @@ function installMark({ view, run, cards, expected, moving, readAt }) {
       unmet.push(`the line starts at ${sorted[0].from.toFixed(1)}%`);
     let reached = sorted[0].to;
     for (const span of sorted) {
-      if (span.from - reached > 1)
+      if (
+        span.from - reached > 1 &&
+        !allowedGaps.some(
+          (gap) => gap.from - 1 <= reached && span.from <= gap.to + 1,
+        )
+      )
         unmet.push(
           `the line has a gap at ${reached.toFixed(1)}% to ${span.from.toFixed(1)}%`,
         );
@@ -1359,25 +1393,40 @@ function installMark({ view, run, cards, expected, moving, readAt }) {
       } else if (turns.value !== "loading")
         problems.push(`Turns reads ${turns.value} while marked loading`);
       const spans = plotted(document.querySelector(".graph-timeline"));
-      problems.push(...lineUnmet(spans));
+      problems.push(...lineUnmet(spans, expected.line_gaps));
+      const client = document.querySelector("[data-first-plot]");
+      if (
+        client &&
+        expected.session_links > 0 &&
+        !document.querySelector('.graph-timeline [aria-busy="true"]')
+      )
+        problems.push(
+          `${expected.session_links} session links, neither drawn nor marked loading`,
+        );
       if (!moving) {
-        if (spans.length !== expected.line.length)
-          problems.push(
-            `${spans.length} spans on the line, not ${expected.line.length}`,
-          );
-        const left = [...spans];
+        const near = (span, want) =>
+          Math.abs(span.from - want.from) <= TOLERANCE &&
+          Math.abs(span.to - want.to) <= TOLERANCE;
+        const wide = spans.filter((span) => span.to - span.from > 0.1);
+        // Session links marked loading are the one thing a line may not yet draw.
+        const marked = Boolean(
+          document.querySelector('.graph-timeline [aria-busy="true"]'),
+        );
         for (const want of expected.line) {
-          const at = left.findIndex(
-            (span) =>
-              Math.abs(span.from - want.from) <= TOLERANCE &&
-              Math.abs(span.to - want.to) <= TOLERANCE,
-          );
-          if (at === -1)
+          if (want.session_link && marked) continue;
+          if (!wide.some((span) => near(span, want)))
             problems.push(
               `no span at ${want.from.toFixed(1)}% to ${want.to.toFixed(1)}%`,
             );
-          else left.splice(at, 1);
         }
+        for (const span of wide)
+          if (
+            !expected.line.some((want) => near(span, want)) &&
+            !expected.line_known.some((want) => near(span, want))
+          )
+            problems.push(
+              `a span at ${span.from.toFixed(1)}% to ${span.to.toFixed(1)}% the complete read does not hold`,
+            );
       }
       return problems;
     },
@@ -1526,6 +1575,20 @@ const CORRUPTIONS = {
   },
 };
 
+/** A client's defect rather than a read's: session links neither drawn nor marked. */
+function sessionLinksUnmarked() {
+  const cut = () => {
+    for (const mark of document.querySelectorAll(
+      '.graph-timeline [aria-busy="true"]',
+    ))
+      mark.parentElement?.remove();
+  };
+  new MutationObserver(cut).observe(document, {
+    childList: true,
+    subtree: true,
+  });
+}
+
 /** A client's defect rather than a read's, run in the page: a line that stops short. */
 function lineStopsShort() {
   const cut = () => {
@@ -1548,10 +1611,14 @@ async function corruptReads(page, name, node) {
     await page.addInitScript(lineStopsShort);
     return;
   }
+  if (name === "overall-session-links-unmarked") {
+    await page.addInitScript(sessionLinksUnmarked);
+    return;
+  }
   const corrupt = CORRUPTIONS[name];
   if (!corrupt)
     fail(
-      `--corrupt-answer is one of ${Object.keys(CORRUPTIONS).join(", ")}, overall-line-stops-short, not ${name}`,
+      `--corrupt-answer is one of ${Object.keys(CORRUPTIONS).join(", ")}, overall-line-stops-short, overall-session-links-unmarked, not ${name}`,
     );
   const unwrap = (part) => part?.payload ?? part;
   await page.route(
@@ -1616,7 +1683,13 @@ function checkedAtMark(view, expected) {
       awaits: expected.cards.filter((card) => card.awaits).length,
     };
   if (view === "overall")
-    return { metrics: 4, line_spans: expected.line.length };
+    return {
+      metrics: 4,
+      line_spans: expected.line.length,
+      line_blank_stretches: expected.line_gaps.length,
+      line_hairlines_not_held: expected.line_hairlines,
+      session_links: expected.session_links,
+    };
   return { plotted_spans: expected.plotted_spans, rows: expected.rows.length };
 }
 

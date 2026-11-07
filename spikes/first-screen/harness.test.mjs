@@ -26,6 +26,7 @@ let root;
 let fixtureRoot;
 let awaitingRun;
 let outcomesRun;
+let sessionsRun;
 
 /** One run of the command; what it printed and every server it left alive. */
 function harness(args) {
@@ -89,6 +90,7 @@ before(async () => {
   fixtures.buildRuns(fixtureRoot, work);
   awaitingRun = fixtures.AWAITING_RUN;
   outcomesRun = fixtures.OUTCOMES_RUN;
+  sessionsRun = fixtures.LIVE_RUN;
 });
 
 after(() => rmSync(work, { recursive: true, force: true }));
@@ -249,13 +251,36 @@ test("Overall's mark refuses wrong metrics and a line short of the axis, and pas
       ["overall-nodes", /Nodes \d+, not \d+/u],
       ["overall-wall", /Wall time .+, not /u],
       ["overall-turns", /Turns 987654, neither \d+ nor marked loading/u],
-      ["overall-short-line", /spans on the line, not|no span at/u],
-      ["overall-no-line", /spans on the line, not/u],
+      ["overall-short-line", /no span at|the complete read does not hold/u],
+      ["overall-no-line", /no span at|the line has no spans/u],
       ["overall-line-stops-short", /the line (ends at|has a gap)/u],
     ],
   );
   assert.ok(report.checked.line_spans > 0);
   assert.match(report.shown.metrics, /Turnsloading/u);
+});
+
+test("Overall's mark refuses session links neither drawn nor marked, and passes restored", async () => {
+  const report = await refusedThenRestored(
+    [
+      "--runs-root",
+      fixtureRoot,
+      "--run",
+      sessionsRun,
+      "--measure",
+      "first-overall",
+    ],
+    [
+      [
+        "overall-session-links-unmarked",
+        /session links, neither drawn nor marked/u,
+      ],
+    ],
+  );
+  assert.ok(
+    report.checked.session_links > 0,
+    "the fixture holds session links",
+  );
 });
 
 test("a node's mark refuses a wrong state, heading, plot or latest row, and passes restored", async () => {
