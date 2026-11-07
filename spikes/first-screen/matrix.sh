@@ -2,9 +2,9 @@
 # Every measurement the first-screen report states, each one invocation of
 # scripts/spike-run-open-costs.mjs, written to OUT/<name>.json. A figure already written is
 # kept, so an interrupted pass resumes. One pass: each is taken once, with its load.
-#   matrix.sh first|content|today OUT REAL_ROOT SMALL_RUN LIVE_RUN LARGEST_RUN CORPUS_ROOT
+#   matrix.sh first|content|today OUT REAL_ROOT SMALL_RUN LIVE_RUN LARGEST_RUN CORPUS_ROOT LIVE_NODE
 set -uo pipefail
-lane=$1 out=$2 root=$3 small=$4 live=$5 largest=$6 corpus=$7
+lane=$1 out=$2 root=$3 small=$4 live=$5 largest=$6 corpus=$7 live_node=$8
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 mkdir -p "$out"
 corpus_run=load-live-open
@@ -22,7 +22,8 @@ each() { # each _ FUNCTION: small, live, largest, corpus
   for label in small live largest corpus; do
     case $label in
       small) "$2" "$label" "${R[@]}" --run "$small" ;;
-      live) "$2" "$label" "${R[@]}" --run "$live" ;;
+      # A running node of the graph: the last one dispatched may have been replanned away.
+      live) "$2" "$label" "${R[@]}" --run "$live" --node "$live_node" ;;
       largest) "$2" "$label" "${R[@]}" --run "$largest" ;;
       corpus) "$2" "$label" "${C[@]}" --run "$corpus_run" ;;
     esac
