@@ -15,7 +15,9 @@ budgets:
   # and the lookup 1.24 to 1.87 s, so about 10.1 s on a pull request and 10.7 s on a base
   # push. The reader is estimated at 1 s. The detail breaks the job into install, check,
   # archive and render seconds and its request counts.
-  # llmlint: ignore[budgets_track_product_owner_outcomes] the report job's own time budget sits beside this repository's longest-CI-job budget, the overlap the design that added this job approved; narrowing its interval adds no overlap.
+  # Beside `onepipeline-ui-ci-check-time` on purpose: the report job's own time budget sits by
+  # this repository's longest-CI-job budget, the overlap the design that added this job approved,
+  # and narrowing its interval adds no overlap.
   - id: onepipeline-ui-budget-report-command-seconds
     description: >-
       The budget report job from its cold install through the checks, the saved-results read,
