@@ -461,3 +461,119 @@ test("refuses a frame from another epoch, and a patch moving a payload to anothe
     "A patch could not be applied: a detail.patch moved its payload to another run",
   ]);
 });
+
+test("patches a human-items view, and refuses what would leave it no such view", async () => {
+  const harnessed = harness();
+  const { items } = JSON.parse(
+    readFileSync(
+      new URL("../../../tests/fixtures/human-items.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const [first, second] = items;
+  const view = {
+    type: "human-items" as const,
+    filter: { state: "open", kind: "task" } as const,
+    item: "hi-a",
+  };
+  harnessed.answer = () =>
+    new Response(
+      JSON.stringify({
+        subscription: SUBSCRIPTION,
+        // The server writes a filter's members back in the engine's order.
+        view: {
+          type: "human-items",
+          filter: { kind: "task", state: "open" },
+          item: "hi-a",
+        },
+        initial: {
+          type: "snapshot",
+          snapshot: {
+            id: id(1),
+            sidebar: [],
+            visible: { type: "human-items", items: [first], detail: null },
+          },
+        },
+      }),
+      { status: 201 },
+    );
+  const states: LiveState[] = [];
+  const errors: Error[] = [];
+  harnessed.client.live({
+    view,
+    onState: (state) => states.push(state),
+    onError: (error) => errors.push(error),
+  });
+  await vi.waitFor(() => expect(states).toHaveLength(1));
+  expect(errors).toEqual([]);
+  const source = harnessed.sources[0];
+  if (source === undefined) throw new Error("no stream was opened");
+
+  source.frame("human-items.patch", {
+    id: id(2),
+    base: id(1),
+    ops: [{ p: ["items"], a: [second] }],
+  });
+  expect(states).toHaveLength(2);
+  expect(states[1]?.visible).toEqual({
+    type: "human-items",
+    items: [first, second],
+    detail: null,
+  });
+
+  // A patch that applies but leaves no such view is refused, never published.
+  source.frame("human-items.patch", {
+    id: id(3),
+    base: id(2),
+    ops: [{ p: ["items", 0, "item", "state"], v: "maybe" }],
+  });
+  expect(states).toHaveLength(2);
+  expect(errors[0]?.message).toMatch(/patched human items failed/u);
+});
+
+test("refuses a human-items answer about another item, and a patch to a tab showing none", async () => {
+  const answered = harness();
+  answered.answer = () =>
+    new Response(
+      JSON.stringify({
+        subscription: SUBSCRIPTION,
+        view: { type: "human-items", item: "hi-other" },
+        initial: {
+          type: "snapshot",
+          snapshot: {
+            id: id(1),
+            sidebar: [],
+            visible: { type: "human-items", items: [], detail: null },
+          },
+        },
+      }),
+      { status: 201 },
+    );
+  const refused: Error[] = [];
+  answered.client.live({
+    view: { type: "human-items", item: "hi-asked" },
+    onState: () => {
+      throw new Error("no state is taken from another item's answer");
+    },
+    onError: (error) => refused.push(error),
+  });
+  await vi.waitFor(() => expect(refused).toHaveLength(1));
+  expect(refused[0]?.message).toMatch(/another item/u);
+
+  const sidebar = harness();
+  const errors: Error[] = [];
+  const states: LiveState[] = [];
+  sidebar.client.live({
+    view: { type: "sidebar" },
+    onState: (state) => states.push(state),
+    onError: (error) => errors.push(error),
+  });
+  await vi.waitFor(() => expect(states).toHaveLength(1));
+  sidebar.sources[0]?.frame("human-items.patch", {
+    id: id(2),
+    base: id(1),
+    ops: [{ p: ["items"], v: [] }],
+  });
+  expect(states).toHaveLength(1);
+  expect(errors[0]?.message).toMatch(/human items this tab does not show/u);
+});

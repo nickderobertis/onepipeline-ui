@@ -13,10 +13,10 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   useId,
-  useMemo,
   useRef,
   useState,
 } from "react";
+import type { LiveHumanItems } from "../runs/useDagTelemetry";
 import {
   BLOCKING_CHOICES,
   blockedGroups,
@@ -26,7 +26,6 @@ import {
   isBlocking,
   KIND_CHOICES,
   kindLabel,
-  NO_FILTER,
   oneOf,
   PRIORITY_CHOICES,
   PRIORITY_OPTIONS,
@@ -36,7 +35,6 @@ import {
   STATE_OPTIONS,
   sourceWords,
   stateLabel,
-  toFilter,
   trackerProvider,
 } from "./human-items-model";
 import {
@@ -62,21 +60,30 @@ type Write = (view: HumanItemView, change: HumanItemWrite) => void;
  */
 export function HumanItemsPage({
   client,
-  refresh,
+  live,
+  choice,
+  setChoice,
+  selectedId,
+  setSelectedId,
 }: {
   readonly client: TelemetryClient;
-  /** Counts the header's Refresh presses; each one reads the list again. */
-  readonly refresh: number;
+  /** What the tab's one subscription holds of this page. */
+  readonly live: LiveHumanItems;
+  readonly choice: FilterChoice;
+  readonly setChoice: (choice: FilterChoice) => void;
+  readonly selectedId: string | undefined;
+  readonly setSelectedId: (id: string | undefined) => void;
 }) {
-  const [choice, setChoice] = useState<FilterChoice>(NO_FILTER);
-  const [selectedId, setSelectedId] = useState<string>();
   const [dismissing, setDismissing] = useState<HumanItemView>();
-  const filter = useMemo(() => toFilter(choice), [choice]);
-  const items = useHumanItems(client, filter, selectedId, refresh);
+  const items = useHumanItems(client, live, selectedId);
   const listRef = useRef<HTMLUListElement>(null);
   const selected =
-    items.items?.find(({ item }) => item.id === selectedId) ??
-    (items.detail === undefined ? undefined : items.detail);
+    items.items?.find(({ item }) => item.id === selectedId) ?? items.detail;
+  // What the pane last showed of the open item, for when it no longer reads.
+  const lastShown = useRef<HumanItemView>(undefined);
+  if (selected !== undefined) lastShown.current = selected;
+  else if (lastShown.current?.item.id !== selectedId)
+    lastShown.current = undefined;
 
   const ask = (view: HumanItemView, change: HumanItemWrite) => {
     if (change.action === "dismiss") setDismissing(view);
@@ -147,6 +154,8 @@ export function HumanItemsPage({
             draft={items.drafts[selectedId] ?? ""}
             error={items.detailError}
             detail={items.detail}
+            gone={items.gone}
+            lastShown={lastShown.current}
             onClose={() => setSelectedId(undefined)}
             onDraft={(text) => items.setDraft(selectedId, text)}
             onWrite={ask}
@@ -510,6 +519,8 @@ function WriteStatus({ state }: { readonly state?: WriteState }) {
 function DetailPane({
   view,
   detail,
+  gone,
+  lastShown,
   error,
   state,
   draft,
@@ -519,6 +530,9 @@ function DetailPane({
 }: {
   readonly view?: HumanItemView;
   readonly detail?: HumanItemDetail;
+  /** The item no longer reads: whatever became of it, it is no one's to act on. */
+  readonly gone: boolean;
+  readonly lastShown?: HumanItemView;
   readonly error?: string;
   readonly state?: WriteState;
   readonly draft: string;
@@ -526,6 +540,24 @@ function DetailPane({
   readonly onWrite: Write;
   readonly onClose: () => void;
 }) {
+  if (gone && view === undefined)
+    return (
+      <aside aria-label="Action item detail" className="human-item-detail">
+        <header className="human-item-detail-head">
+          {lastShown && <h2>{lastShown.item.title}</h2>}
+          <Button
+            aria-label="Close detail"
+            onClick={onClose}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <X size={14} />
+          </Button>
+        </header>
+        <p role="status">Resolved: this item needs nothing more from you.</p>
+      </aside>
+    );
   const shown = detail ?? view;
   if (shown === undefined)
     return (

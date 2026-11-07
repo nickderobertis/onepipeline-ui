@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  HUMAN_ITEM_PRIORITIES,
+  type HumanItemFilter,
+  humanItemDetailSchema,
+  humanItemViewSchema,
+} from "./human-items.js";
 
 // llmlint: ignore-file[contracts_have_one_source_or_a_drift_gate] docs/contract.md is the
 // authoritative API contract and assigns these exported schemas to this package; the Rust read
@@ -2530,7 +2536,28 @@ export const eventIdSchema = z
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(0|[1-9][0-9]*)$/u,
   );
 
-/** What a tab shows besides the sidebar: nothing, or one run view. */
+/**
+ * The selectors `GET /api/human-items` takes, as a `human-items` view names them:
+ * the engine's `HumanItemFilter`, closed as it is, with the words its own
+ * vocabulary holds.
+ */
+export const humanItemFilterSchema: z.ZodType<HumanItemFilter> = z.strictObject(
+  {
+    kind: z.enum(["task", "question"]).nullable().optional(),
+    blocking: z.boolean().nullable().optional(),
+    priority: z.enum(HUMAN_ITEM_PRIORITIES).nullable().optional(),
+    state: z
+      .enum(["open", "answered", "completed", "dismissed"])
+      .nullable()
+      .optional(),
+    session: z.string().nullable().optional(),
+    run: z.string().nullable().optional(),
+    plan: z.string().nullable().optional(),
+    host: z.boolean().nullable().optional(),
+  },
+);
+
+/** What a tab shows besides the sidebar: nothing, one run view, or Action items. */
 export const subscriptionViewSchema = z.union([
   z.strictObject({ type: z.literal("sidebar") }),
   z.strictObject({
@@ -2552,6 +2579,11 @@ export const subscriptionViewSchema = z.union([
     filter: z.string().min(1).optional(),
   }),
   z.strictObject({ type: z.literal("channel"), run_id: z.string().min(1) }),
+  z.strictObject({
+    type: z.literal("human-items"),
+    filter: humanItemFilterSchema.optional(),
+    item: z.string().min(1).optional(),
+  }),
 ]);
 
 /**
@@ -2575,6 +2607,17 @@ export const sidebarRowSchema = z.strictObject({
 });
 /** The fields a sidebar row carries, in the order the contract lists them. */
 export const SIDEBAR_ROW_FIELDS = Object.keys(sidebarRowSchema.shape);
+
+/**
+ * Action items as a subscription holds them: what `GET /api/human-items` answers
+ * under the view's filter, and what `GET /api/human-items/{id}` answers for its
+ * item — `null` where none was asked for or the item no longer reads.
+ */
+export const humanItemsVisibleSchema = z.strictObject({
+  type: z.literal("human-items"),
+  items: z.array(humanItemViewSchema),
+  detail: humanItemDetailSchema.nullable(),
+});
 
 export const visibleStateSchema = z.union([
   z.strictObject({ type: z.literal("sidebar") }),
@@ -2604,6 +2647,7 @@ export const visibleStateSchema = z.union([
     detail: runDetailSchema,
     channel: channelQueueSchema,
   }),
+  humanItemsVisibleSchema,
 ]);
 
 export const subscriptionSnapshotSchema = z.strictObject({
@@ -2675,6 +2719,11 @@ export const subscriptionFrameSchema = z.union([
     run_id: z.string().min(1),
     ops: z.array(patchOpSchema),
   }),
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("human-items.patch"),
+    ops: z.array(patchOpSchema),
+  }),
 ]);
 /** Every frame type a subscription stream carries, as its SSE event name. */
 export const SUBSCRIPTION_FRAME_TYPES = [
@@ -2684,6 +2733,7 @@ export const SUBSCRIPTION_FRAME_TYPES = [
   "detail.patch",
   "timeline.patch",
   "channel.patch",
+  "human-items.patch",
 ] as const;
 
 /** `201` to `POST /api/v2/subscriptions`. */

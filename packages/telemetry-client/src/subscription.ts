@@ -4,6 +4,7 @@ import {
   API_V2_QUERY,
   applyPatch,
   channelQueueSchema,
+  humanItemsVisibleSchema,
   type ResetFrame,
   runDetailSchema,
   runTimelineSchema,
@@ -383,12 +384,31 @@ function patched(
   visible: VisibleState,
   frame: Extract<
     SubscriptionFrame,
-    { type: "detail.patch" | "timeline.patch" | "channel.patch" }
+    {
+      type:
+        | "detail.patch"
+        | "timeline.patch"
+        | "channel.patch"
+        | "human-items.patch";
+    }
   >,
 ): VisibleState {
   const refused = (what: string) =>
     new Error(`a ${frame.type} for ${what} this tab does not show`);
-  if (visible.type === "sidebar" || visible.run_id !== frame.run_id)
+  if (frame.type === "human-items.patch") {
+    if (visible.type !== "human-items") throw refused("human items");
+    return patchedAs(
+      humanItemsVisibleSchema,
+      visible,
+      frame.ops,
+      "human items",
+    );
+  }
+  if (
+    visible.type === "sidebar" ||
+    visible.type === "human-items" ||
+    visible.run_id !== frame.run_id
+  )
     throw refused("a run");
   // A patch keeps its payload the run's: one that moved it to another run is
   // no patch of this view.
@@ -448,22 +468,28 @@ function identity(view: {
   return [view.type, view.run_id, view.scope, view.node].join("\u0000");
 }
 
+/** `value` with every object's members in key order. */
+function sorted(value: unknown): unknown {
+  return Array.isArray(value)
+    ? value.map(sorted)
+    : typeof value === "object" && value !== null
+      ? Object.fromEntries(
+          Object.entries(value)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, member]) => [key, sorted(member)]),
+        )
+      : value;
+}
+
 /**
  * A filter as the server writes it back: a profile by its name, and an inline
- * spec as its parsed members in key order — the server re-serializes one.
+ * spec or a human-item view's selectors as their members in key order — the
+ * server re-serializes both.
  */
-function filterKey(filter: string | undefined): string | undefined {
-  if (filter === undefined || !filter.startsWith("{")) return filter;
-  const sorted = (value: unknown): unknown =>
-    Array.isArray(value)
-      ? value.map(sorted)
-      : typeof value === "object" && value !== null
-        ? Object.fromEntries(
-            Object.entries(value)
-              .sort(([left], [right]) => left.localeCompare(right))
-              .map(([key, member]) => [key, sorted(member)]),
-          )
-        : value;
+function filterKey(filter: unknown): string | undefined {
+  if (filter === undefined) return undefined;
+  if (typeof filter !== "string") return JSON.stringify(sorted(filter));
+  if (!filter.startsWith("{")) return filter;
   try {
     return JSON.stringify(sorted(JSON.parse(filter)));
   } catch {
@@ -481,7 +507,8 @@ function stateDisagreement(
 ): string | undefined {
   const visible = snapshot.visible;
   if (identity(visible) !== identity(asked)) return "the state of another view";
-  if (visible.type === "sidebar") return undefined;
+  if (visible.type === "sidebar" || visible.type === "human-items")
+    return undefined;
   const runs = [
     visible.detail.run.run_id,
     "timeline" in visible ? visible.timeline.run_id : visible.run_id,
@@ -505,6 +532,9 @@ function disagreement(
     "filter" in view ? view.filter : undefined;
   if (filterKey(filterOf(answer.view)) !== filterKey(filterOf(asked)))
     return "another filter";
+  const itemOf = (view: SubscriptionView) =>
+    "item" in view ? view.item : undefined;
+  if (itemOf(answer.view) !== itemOf(asked)) return "another item";
   return stateDisagreement(asked, answer.initial.snapshot);
 }
 

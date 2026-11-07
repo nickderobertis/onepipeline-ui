@@ -92,6 +92,15 @@ const approvalSchema = z.object({
   actor: z.string(),
   on_behalf_of: z.string().nullable(),
 });
+const subscribeBodySchema = z.object({
+  view: z.object({
+    type: z.string(),
+    filter: z.record(z.string(), z.unknown()).optional(),
+  }),
+});
+const receiptSchema = z.object({
+  item: z.object({ item: z.object({ id: z.string() }) }),
+});
 const listSchema = z.object({
   items: z.array(
     z.object({ item: z.object({ title: z.string(), priority: z.string() }) }),
@@ -359,6 +368,83 @@ function writes(page: Page): Request[] {
       seen.push(request);
   });
   return seen;
+}
+
+/** The human-item selectors a subscription request names, `{}` for none. */
+function selectorsOf(request: Request): Record<string, unknown> | undefined {
+  if (
+    request.method() !== "POST" ||
+    new URL(request.url()).pathname !== "/api/v2/subscriptions"
+  )
+    return undefined;
+  const { view } = subscribeBodySchema.parse(request.postDataJSON());
+  return view.type === "human-items" ? (view.filter ?? {}) : undefined;
+}
+
+/** The page asking for the human-items view that selects by `selectors`. */
+function subscribedTo(page: Page, selectors: Record<string, unknown>) {
+  return page.waitForRequest(
+    (request) =>
+      JSON.stringify(selectorsOf(request)) === JSON.stringify(selectors),
+  );
+}
+
+/**
+ * Every request the page sends to the API, and the event streams it holds open:
+ * a stream ends in the browser's eyes when it finishes or the page closes it.
+ */
+function recordRequests(page: Page) {
+  const requests: { readonly method: string; readonly path: string }[] = [];
+  const streams = new Set<Request>();
+  const isStream = (request: Request) =>
+    new URL(request.url()).pathname === "/api/v2/events";
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (!url.pathname.startsWith("/api/")) return;
+    requests.push({ method: request.method(), path: url.pathname });
+    if (isStream(request)) streams.add(request);
+  });
+  const ended = (request: Request) => {
+    streams.delete(request);
+  };
+  page.on("requestfinished", ended);
+  page.on("requestfailed", ended);
+  return {
+    requests,
+    streams,
+    /** Every `GET` the page sent to a human-item route. */
+    humanItemReads: () =>
+      requests.filter(
+        ({ method, path }) =>
+          method === "GET" && path.startsWith("/api/human-items"),
+      ),
+  };
+}
+
+/** What `human-items raise` takes, of an item that blocks nothing. */
+function raise(served: FixtureServer, title: string, kind: string): string {
+  const facts = factsOf(served);
+  const input = join(facts.cwd, `raise-${title.replaceAll(" ", "-")}.json`);
+  writeFileSync(
+    input,
+    JSON.stringify({
+      schema_version: 1,
+      dedup_key: title.replaceAll(" ", "-"),
+      kind,
+      title,
+      body: `What ${title} needs from a person.`,
+      priority: "medium",
+      owner: { session: SUPERVISOR, run: null, plan: null },
+      block: { scope: "nothing" },
+      approval: null,
+    }),
+  );
+  const receipt = receiptSchema.parse(
+    JSON.parse(
+      cli(served, ["human-items", "raise", "--input", input], SUPERVISOR),
+    ),
+  );
+  return receipt.item.item.id;
 }
 
 /** A rendered element's height and its one-line resting height. */
@@ -724,32 +810,32 @@ test("every filter narrows the list on its own, on the wire's vocabulary", async
   const served = await serveWorld("queue");
   const list = await open(page, served);
   const filters = page.getByRole("group", { name: "Filter action items" });
-  const choose = async (label: string, value: string, query: string) => {
-    const read = page.waitForRequest(
-      (request) =>
-        new URL(request.url()).pathname === "/api/human-items" &&
-        new URL(request.url()).search === query,
-    );
+  const choose = async (
+    label: string,
+    value: string,
+    selector: Record<string, unknown>,
+  ) => {
+    const asked = subscribedTo(page, selector);
     await filters.getByLabel(label, { exact: true }).selectOption(value);
-    await read;
+    await asked;
   };
   const reset = async (label: string, value: string) =>
-    choose(label, value, "");
+    choose(label, value, {});
   /** What the engine's CLI selects across the host. */
   const selected = (args: string[]) =>
     listed(served, args).map(({ item }) => item.title);
 
-  await choose("Kind", "question", "?kind=question");
+  await choose("Kind", "question", { kind: "question" });
   await expect.poll(() => titles(list)).toEqual(QUESTIONS);
   expect(selected(["--kind", "question"])).toEqual(QUESTIONS);
   await reset("Kind", "");
 
-  await choose("Blocking", "yes", "?blocking=true");
+  await choose("Blocking", "yes", { blocking: true });
   await expect
     .poll(() => titles(list))
     .toEqual(DECLARED.slice(0, 3).map(({ title }) => title));
   expect(selected(["--blocking", "yes"])).toEqual(await titles(list));
-  await choose("Blocking", "no", "?blocking=false");
+  await choose("Blocking", "no", { blocking: false });
   await expect
     .poll(() => titles(list))
     .toEqual(DECLARED.slice(3).map(({ title }) => title));
@@ -757,7 +843,7 @@ test("every filter narrows the list on its own, on the wire's vocabulary", async
   await reset("Blocking", "");
 
   // Critical on the page is urgent on the wire.
-  await choose("Priority", "urgent", "?priority=urgent");
+  await choose("Priority", "urgent", { priority: "urgent" });
   await expect
     .poll(() => titles(list))
     .toEqual([
@@ -769,24 +855,24 @@ test("every filter narrows the list on its own, on the wire's vocabulary", async
   await expect(list.getByText("Critical", { exact: true })).toHaveCount(3);
   await reset("Priority", "");
 
-  await choose("State", "answered", "?state=answered");
+  await choose("State", "answered", { state: "answered" });
   await expect
     .poll(() => titles(list))
     .toEqual(["Which changelog section holds the fix?"]);
-  await choose("State", "dismissed", "?state=dismissed");
+  await choose("State", "dismissed", { state: "dismissed" });
   await expect
     .poll(() => titles(list))
     .toEqual(["Re-run the flaky screenshot job"]);
   // A state nothing is in is an empty list, said so.
-  await choose("State", "completed", "?state=completed");
+  await choose("State", "completed", { state: "completed" });
   await expect(
     listRegion(page).getByRole("status").filter({
       hasText: "No action items match these filters.",
     }),
   ).toBeVisible();
-  await choose("State", "open", "");
+  await choose("State", "open", {});
 
-  await choose("Source", "host", "?host=true");
+  await choose("Source", "host", { host: true });
   await expect.poll(() => titles(list)).toEqual(["Restore the build service"]);
   await reset("Source", "");
 
@@ -811,13 +897,9 @@ test("every filter narrows the list on its own, on the wire's vocabulary", async
     ],
   ] as const) {
     await filters.getByLabel("Source", { exact: true }).selectOption(source);
-    const read = page.waitForRequest(
-      (request) =>
-        new URL(request.url()).pathname === "/api/human-items" &&
-        new URL(request.url()).searchParams.get(source) === id,
-    );
+    const asked = subscribedTo(page, { [source]: id });
     await filters.getByLabel("Source identifier").fill(id);
-    await read;
+    await asked;
     await expect.poll(() => titles(list)).toEqual([...expected]);
     expect(selected([`--${source}`, id])).toEqual([...expected]);
   }
@@ -1485,7 +1567,7 @@ test("the list says it is reading until the first read lands", async ({
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/human-items", async (route) => {
+  await page.route("**/api/v2/subscriptions", async (route) => {
     await held;
     await route.continue();
   });
@@ -1514,7 +1596,6 @@ test("ending its run retires the items holding that run's work, and leaves host 
   const facts = factsOf(served);
   const run = facts.runs.a ?? "";
   cli(served, ["stop", run], SUPERVISOR);
-  await page.getByRole("button", { name: "Refresh" }).click();
   // The run's own question, which held its work, is retired; the host hold,
   // the plan hold on a plan it never ran, and the manager's question raised
   // outside any run all survive it.
@@ -1779,62 +1860,71 @@ test("a hold of one step says so, and a plan hold lists the steps it reaches", a
   await expect(steps.getByRole("listitem")).toHaveText(nodes);
 });
 
-test("a read overtaken by a newer one never replaces what the newer one showed", async ({
+test("a subscription overtaken by a newer one never replaces what the newer one showed", async ({
   page,
 }) => {
   const served = await serveWorld("queue");
   const list = await open(page, served);
   const filters = page.getByRole("group", { name: "Filter action items" });
 
-  // The list: the read for tasks is held while the read for questions lands;
-  // when the tasks' answer finally arrives it is dropped.
+  // The list: the subscription for tasks is held while the one for questions
+  // lands; when the tasks' answer finally arrives it is dropped and retired.
   let releaseTasks: () => void = () => {};
   const tasksHeld = new Promise<void>((resolve) => {
     releaseTasks = resolve;
   });
-  await page.route("**/api/human-items?kind=task", async (route) => {
-    await tasksHeld;
+  await page.route("**/api/v2/subscriptions", async (route) => {
+    if (selectorsOf(route.request())?.kind === "task") await tasksHeld;
     await route.continue();
   });
-  const tasksAsked = page.waitForRequest((request) =>
-    request.url().endsWith("/api/human-items?kind=task"),
-  );
+  const tasksAsked = subscribedTo(page, { kind: "task" });
   await filters.getByLabel("Kind", { exact: true }).selectOption("task");
   await tasksAsked;
   await filters.getByLabel("Kind", { exact: true }).selectOption("question");
   await expect.poll(() => titles(list)).toEqual(QUESTIONS);
-  const tasksAnswered = page.waitForResponse((response) =>
-    response.url().endsWith("/api/human-items?kind=task"),
+  const tasksAnswered = page.waitForResponse(
+    (response) => selectorsOf(response.request())?.kind === "task",
+  );
+  const overtakenRetired = page.waitForRequest(
+    (request) =>
+      request.method() === "DELETE" &&
+      new URL(request.url()).pathname.startsWith("/api/v2/subscriptions/"),
   );
   releaseTasks();
   await tasksAnswered;
+  await overtakenRetired;
   await expect(list.getByRole("article")).toHaveCount(QUESTIONS.length);
   expect(await titles(list)).toEqual(QUESTIONS);
-  await page.unroute("**/api/human-items?kind=task");
+  await page.unroute("**/api/v2/subscriptions");
 
-  // The detail: the first item's read is held while the second item opens;
-  // the first's late answer does not take the pane back.
+  // The detail: the first item's subscription is held while the second item
+  // opens; its late answer does not take the pane back.
   const region = idOf(served, "region");
   let releaseFirst: () => void = () => {};
   const firstHeld = new Promise<void>((resolve) => {
     releaseFirst = resolve;
   });
-  await page.route(`**/api/human-items/${region}`, async (route) => {
-    await firstHeld;
+  const namesRegion = (request: Request) =>
+    selectorsOf(request) !== undefined &&
+    JSON.stringify(request.postDataJSON()).includes(region);
+  await page.route("**/api/v2/subscriptions", async (route) => {
+    if (namesRegion(route.request())) await firstHeld;
     await route.continue();
   });
+  const regionAsked = page.waitForRequest(namesRegion);
   await page
     .getByRole("button", {
       name: "Details: Which region should the canary run in?",
     })
     .click();
+  await regionAsked;
   await page.getByRole("button", { name: `Details: ${LAST_QUESTION}` }).click();
   const pane = detailPane(page);
   await expect(pane.getByRole("heading", { level: 2 })).toHaveText(
     LAST_QUESTION,
   );
   const firstAnswered = page.waitForResponse((response) =>
-    response.url().endsWith(`/api/human-items/${region}`),
+    namesRegion(response.request()),
   );
   releaseFirst();
   await firstAnswered;
@@ -1844,6 +1934,139 @@ test("a read overtaken by a newer one never replaces what the newer one showed",
   await expect(pane.getByRole("region", { name: "Blocked steps" })).toHaveCount(
     0,
   );
+});
+
+test("an open page follows what the CLI writes, reads nothing to do it, and holds one stream", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const seen = recordRequests(page);
+  const list = await open(page, served);
+  const filters = page.getByRole("group", { name: "Filter action items" });
+  // The opening: what the page asked for once it stood on its stream.
+  await expect.poll(() => seen.streams.size).toBe(1);
+  const opening = seen.requests.length;
+
+  // Unfiltered: raised, answered, completed and dismissed elsewhere, each seen
+  // with no reload and no click, on the one stream the page already holds.
+  const asked = "Should the CLI's question appear?";
+  const askedId = raise(served, asked, "question");
+  await expect(card(page, asked)).toBeVisible();
+  cli(served, ["human-items", "answer", askedId, "--text", "It did"]);
+  await expect(card(page, asked)).toHaveCount(0);
+  const done = "Finish the CLI's task";
+  const doneId = raise(served, done, "task");
+  await expect(card(page, done)).toBeVisible();
+  cli(served, ["human-items", "complete", doneId]);
+  await expect(card(page, done)).toHaveCount(0);
+  const dropped = "Drop the CLI's task";
+  const droppedId = raise(served, dropped, "task");
+  await expect(card(page, dropped)).toBeVisible();
+  cli(served, ["human-items", "dismiss", droppedId, "--reason", "not needed"]);
+  await expect(card(page, dropped)).toHaveCount(0);
+  expect(seen.requests.slice(opening)).toEqual([]);
+  expect(seen.streams.size).toBe(1);
+
+  // A change of filter replaces the subscription; the page holds one stream on
+  // it, and shows what that filter selects of what is written next.
+  const replaced = subscribedTo(page, { kind: "question" });
+  await filters.getByLabel("Kind", { exact: true }).selectOption("question");
+  await replaced;
+  await expect.poll(() => titles(list)).toEqual(QUESTIONS);
+  await expect.poll(() => seen.streams.size).toBe(1);
+  const filtered = seen.requests.length;
+  const excluded = "A task this filter excludes";
+  const excludedId = raise(served, excluded, "task");
+  const included = "A question this filter selects";
+  const includedId = raise(served, included, "question");
+  await expect(card(page, included)).toBeVisible();
+  await expect(card(page, excluded)).toHaveCount(0);
+  cli(served, ["human-items", "answer", includedId, "--text", "Selected"]);
+  await expect(card(page, included)).toHaveCount(0);
+  expect(seen.requests.slice(filtered)).toEqual([]);
+  expect(seen.streams.size).toBe(1);
+
+  // An item open in the pane that another client resolves reads as resolved,
+  // not as a failure, and offers nothing more to do.
+  const resolvedElsewhere = "Resolved by someone else";
+  const resolvedId = raise(served, resolvedElsewhere, "question");
+  await page
+    .getByRole("button", { name: `Details: ${resolvedElsewhere}` })
+    .click();
+  const pane = detailPane(page);
+  await expect(pane.getByRole("heading", { level: 2 })).toHaveText(
+    resolvedElsewhere,
+  );
+  await expect.poll(() => seen.streams.size).toBe(1);
+  const detailed = seen.requests.length;
+  cli(served, ["human-items", "answer", resolvedId, "--text", "Handled"]);
+  await expect(pane).toContainText("Question · Answered");
+  await expect(card(page, resolvedElsewhere)).toHaveCount(0);
+  await expect(pane.getByRole("alert")).toHaveCount(0);
+  await expect(pane.getByRole("textbox")).toHaveCount(0);
+  await expect(pane.getByRole("button", { name: /^Dismiss/u })).toHaveCount(0);
+  expect(seen.requests.slice(detailed)).toEqual([]);
+  await pane.getByRole("button", { name: "Close detail" }).click();
+  await expect(pane).toHaveCount(0);
+
+  // A write from this page: its one POST, and its result arrives on the stream.
+  await expect.poll(() => seen.streams.size).toBe(1);
+  const beforeWrite = seen.requests.length;
+  await answerBox(page, LAST_QUESTION).fill("Reuse it");
+  await answerBox(page, LAST_QUESTION).press("Enter");
+  await expect(outcome(page)).toHaveText(`${LAST_QUESTION}: Answered`);
+  await expect(card(page, LAST_QUESTION)).toHaveCount(0);
+  expect(seen.requests.slice(beforeWrite)).toEqual([
+    {
+      method: "POST",
+      path: `/api/human-items/${idOf(served, "cache")}/answer`,
+    },
+  ]);
+
+  // The header's Refresh, a person's explicit press, re-creates the
+  // subscription, and that reads no item route either.
+  const beforeRefresh = seen.requests.length;
+  const recreated = subscribedTo(page, { kind: "question" });
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await recreated;
+  await expect.poll(() => seen.streams.size).toBe(1);
+  await expect
+    .poll(() => seen.requests.slice(beforeRefresh).map(({ method }) => method))
+    .toEqual(expect.arrayContaining(["POST", "GET"]));
+
+  // The excluded task was there all along: the filter shaped what was shown.
+  expect(stored(served, excludedId).state).toBe("open");
+  expect(seen.humanItemReads()).toEqual([]);
+});
+
+test("an open item that vanishes reads as resolved rather than as a load error", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  await open(page, served);
+  const seen = recordRequests(page);
+  const region = "Which region should the canary run in?";
+  await page.getByRole("button", { name: `Details: ${region}` }).click();
+  const pane = detailPane(page);
+  await expect(
+    pane.getByRole("region", { name: "Blocked steps" }).getByRole("listitem"),
+  ).toHaveCount(5);
+  // Every item goes from under the server: its journal moved aside, leaving a
+  // host with none — which the engine reads, as it reads a fresh host.
+  const dir = factsOf(served).journal;
+  renameSync(dir, `${dir}.gone`);
+  await expect(pane.getByRole("status")).toHaveText(
+    "Resolved: this item needs nothing more from you.",
+  );
+  await expect(pane.getByRole("heading", { level: 2 })).toHaveText(region);
+  await expect(pane.getByRole("alert")).toHaveCount(0);
+  await expect(pane.getByRole("textbox")).toHaveCount(0);
+  await expect(
+    listRegion(page).getByRole("status").filter({
+      hasText: "No action items match these filters.",
+    }),
+  ).toBeVisible();
+  expect(seen.humanItemReads()).toEqual([]);
 });
 
 test("a host that has not enabled human items says so on the page", async ({

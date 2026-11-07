@@ -1,5 +1,5 @@
-//! Subscriptions: the sidebar and at most one visible run view per tab, kept
-//! current by pushing what changed.
+//! Subscriptions: the sidebar and at most one visible view per tab, kept current
+//! by pushing what changed.
 //!
 //! `docs/contract.md` states the protocol; this is its one implementation. A tab
 //! creates a subscription with `POST /api/v2/subscriptions` and is answered with
@@ -23,6 +23,12 @@
 //! again once something moved: on the first tick at least [`TELEMETRY_REFOLD`]
 //! after the last fold that carries no change, or once it is twice that behind
 //! on a run that never goes quiet — so no change waits on it.
+//!
+//! Action items is one more view on the same subscription and the same poller,
+//! over no run at all. While a tab holds it, each tick looks at the metadata of
+//! the engine's human-item journal, and only once that moved reads each distinct
+//! view through the engine and sends what differs. Without such a tab, none of it
+//! runs.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -32,13 +38,15 @@ use std::time::{Duration, Instant, SystemTime};
 
 use axum::response::sse::Event;
 use onepipeline::agents::{AgentScope, Agents};
+use onepipeline::human_items::HumanItemFilter;
 use onepipeline::views::{Refreshed, RunPaths, RunSummary, RunView};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use crate::contract::{
-    Envelope, EventId, RunId, SubscribeOrigin, SubscribeRequest, SubscriptionId, SubscriptionView,
-    ViewScope, API_VERSION, DISCONNECTED_GRACE, RETAINED_FRAMES, TELEMETRY_SCHEMA_VERSION,
+    Envelope, EventId, HumanItemId, RunId, SubscribeOrigin, SubscribeRequest, SubscriptionId,
+    SubscriptionView, ViewScope, API_VERSION, DISCONNECTED_GRACE, RETAINED_FRAMES,
+    TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
 use crate::filter::EventFilter;
@@ -97,6 +105,10 @@ struct Shared {
     looking: Mutex<()>,
     /// Each subscribed run's reading. The map is held only to look one up.
     runs: Mutex<HashMap<RunId, Arc<Mutex<LiveRun>>>>,
+    /// The human-item views subscriptions show. Taken where a run is — after the
+    /// sidebar and before the state — and held across the engine's reads of it,
+    /// so two looks never send one change twice.
+    human_items: Mutex<HumanItemsReading>,
     polling: AtomicBool,
     trace: Option<PathBuf>,
     refold: Duration,
@@ -130,6 +142,27 @@ struct Subscription {
     boundary: u64,
     frames: VecDeque<Retained>,
     link: Link,
+}
+
+impl Subscription {
+    /// Why a stream asking for the frames after `after` is answered with a reset
+    /// rather than a replay, or `None` where what is retained answers it.
+    fn reset_reason(&self, after: Option<EventId>, epoch: uuid::Uuid) -> Option<ResetReason> {
+        let after = after?;
+        if after.epoch != epoch {
+            return Some(ResetReason::ServerRestarted);
+        }
+        let seq = after.seq;
+        if seq > self.last || seq < self.first {
+            Some(ResetReason::UnknownCursor)
+        } else if seq < self.boundary {
+            Some(ResetReason::StaleCursor)
+        } else if seq == self.boundary || self.frames.iter().any(|frame| frame.seq == seq) {
+            None
+        } else {
+            Some(ResetReason::UnknownCursor)
+        }
+    }
 }
 
 /// Whether a subscription's stream is open: connected to the sender its
@@ -183,6 +216,7 @@ enum FrameKind {
     DetailPatch,
     TimelinePatch,
     ChannelPatch,
+    HumanItemsPatch,
     Reset,
 }
 
@@ -194,6 +228,7 @@ impl FrameKind {
             Self::DetailPatch => "detail.patch",
             Self::TimelinePatch => "timeline.patch",
             Self::ChannelPatch => "channel.patch",
+            Self::HumanItemsPatch => "human-items.patch",
             Self::Reset => "reset",
         }
     }
@@ -218,6 +253,9 @@ enum Change {
         run: RunId,
         ops: Vec<Op>,
     },
+    HumanItems {
+        ops: Vec<Op>,
+    },
 }
 
 impl Change {
@@ -228,6 +266,7 @@ impl Change {
             Self::Detail { .. } => FrameKind::DetailPatch,
             Self::Timeline { .. } => FrameKind::TimelinePatch,
             Self::Channel { .. } => FrameKind::ChannelPatch,
+            Self::HumanItems { .. } => FrameKind::HumanItemsPatch,
         }
     }
 
@@ -250,6 +289,7 @@ impl Change {
                 scope: TimelineScope::Node(node),
                 ops,
             } => json!({ "run_id": run, "scope": "node", "node": node, "ops": wire(ops) }),
+            Self::HumanItems { ops } => json!({ "ops": wire(ops) }),
         };
         let text = object.to_string();
         text[1..text.len() - 1].to_owned()
@@ -298,6 +338,26 @@ enum Visible {
     Channel {
         run: RunId,
     },
+    HumanItems(HumanItemsKey),
+}
+
+/// Which human-item view a subscription shows: tabs showing the same one share
+/// one reading of it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct HumanItemsKey {
+    /// The filter as the engine serializes it, which is the one spelling a
+    /// filter has.
+    filter: String,
+    item: Option<HumanItemId>,
+}
+
+impl HumanItemsKey {
+    fn of(filter: &HumanItemFilter, item: Option<&HumanItemId>) -> Self {
+        Self {
+            filter: json!(filter).to_string(),
+            item: item.cloned(),
+        }
+    }
 }
 
 impl Visible {
@@ -327,6 +387,9 @@ impl Visible {
             SubscriptionView::Channel { run_id } => Self::Channel {
                 run: run_id.clone(),
             },
+            SubscriptionView::HumanItems { filter, item } => {
+                Self::HumanItems(HumanItemsKey::of(filter, item.as_ref()))
+            }
         }
     }
 
@@ -336,7 +399,7 @@ impl Visible {
 
     fn run_id(&self) -> Option<&RunId> {
         match self {
-            Self::Sidebar => None,
+            Self::Sidebar | Self::HumanItems(_) => None,
             Self::Detail { run, .. } | Self::Timeline { run, .. } | Self::Channel { run } => {
                 Some(run)
             }
@@ -348,8 +411,34 @@ impl Visible {
     fn detail_filter(&self) -> FilterKey {
         match self {
             Self::Detail { filter, .. } | Self::Timeline { filter, .. } => filter.clone(),
-            Self::Sidebar | Self::Channel { .. } => FilterKey::default(),
+            Self::Sidebar | Self::Channel { .. } | Self::HumanItems(_) => FilterKey::default(),
         }
+    }
+}
+
+/// Every human-item view a subscription shows, and what the engine's journal
+/// looked like when they were last read.
+#[derive(Default)]
+struct HumanItemsReading {
+    stamp: Option<(u64, SystemTime)>,
+    views: HashMap<HumanItemsKey, HeldHumanItems>,
+    /// Whether the last read was refused, so a refusal is reported once per
+    /// spell rather than every tick it lasts.
+    failing: bool,
+}
+
+/// One human-item view: what it selects, and the `visible` its tabs hold.
+struct HeldHumanItems {
+    filter: HumanItemFilter,
+    item: Option<HumanItemId>,
+    visible: Value,
+}
+
+impl HeldHumanItems {
+    /// The `visible` this view shows now, as the engine reads it.
+    fn read(&self, items: &crate::human_items::HumanItems) -> Result<Value, ApiError> {
+        let (listed, detail) = items.view(&self.filter, self.item.as_ref())?;
+        Ok(json!({ "type": "human-items", "items": listed, "detail": detail }))
     }
 }
 
@@ -668,7 +757,8 @@ impl LiveRun {
         );
         let run = self.run.as_str();
         match visible {
-            Visible::Sidebar => Ok(json!({ "type": "sidebar" })),
+            // Views of no run, which no run is ever asked for.
+            Visible::Sidebar | Visible::HumanItems(_) => Ok(json!({ "type": "sidebar" })),
             Visible::Detail { .. } => {
                 Ok(json!({ "type": "detail", "run_id": run, "detail": detail }))
             }
@@ -847,6 +937,7 @@ impl Hub {
             sidebar: Mutex::new(Sidebar::default()),
             looking: Mutex::new(()),
             runs: Mutex::new(HashMap::new()),
+            human_items: Mutex::new(HumanItemsReading::default()),
             polling: AtomicBool::new(false),
             trace: std::env::var_os(TRACE_ENV).map(PathBuf::from),
             refold: std::env::var(TELEMETRY_REFOLD_ENV)
@@ -874,7 +965,8 @@ impl Hub {
     ///
     /// `404 run_not_found` for a run that is not under the root, `404
     /// node_not_found` for a node scope naming a node the run does not carry,
-    /// and the filter's refusal for a profile the run does not have.
+    /// the filter's refusal for a profile the run does not have, and the
+    /// engine's refusal for a human-item view on a host that cannot serve one.
     pub fn subscribe(&self, request: &SubscribeRequest) -> Result<Value, ApiError> {
         let shared = &self.0;
         let visible = Visible::of(&request.view);
@@ -895,6 +987,12 @@ impl Hub {
                 Some(live)
             }
         };
+        // A human-item view's first reading likewise: the engine may refuse it.
+        let human_items = human_items_view(&request.view);
+        if let Some(view) = &human_items {
+            let mut reading = lock(&shared.human_items);
+            self.ensure_human_items(&mut reading, view)?;
+        }
         // Then the publication boundary: the sidebar, the run and the
         // subscriptions locked together, so every change after the snapshot is
         // one this subscription is sent and none before it is.
@@ -907,9 +1005,11 @@ impl Hub {
         let mut sidebar = lock(&shared.sidebar);
         let added = missing.and_then(|(run, stamps, row)| sidebar.add(run, stamps, row));
         let mut run = live.as_ref().map(|live| lock(live));
-        let visible_state = match run.as_mut() {
-            Some(run) => run.ensure(&shared.store, &visible, spec)?,
-            None => json!({ "type": "sidebar" }),
+        let mut reading = human_items.as_ref().map(|_| lock(&shared.human_items));
+        let visible_state = match (run.as_mut(), &human_items, reading.as_mut()) {
+            (Some(run), _, _) => run.ensure(&shared.store, &visible, spec)?,
+            (None, Some(view), Some(reading)) => self.ensure_human_items(reading, view)?,
+            _ => json!({ "type": "sidebar" }),
         };
         let rows = sidebar.snapshot();
         let mut state = lock(&shared.state);
@@ -950,6 +1050,7 @@ impl Hub {
             },
         );
         drop(state);
+        drop(reading);
         drop(run);
         drop(sidebar);
         self.start_polling();
@@ -1019,38 +1120,46 @@ impl Hub {
         let live = visible
             .run_id()
             .and_then(|run| lock(&shared.runs).get(run).cloned());
+        let human_items = human_items_view(&view);
         let sidebar = lock(&shared.sidebar);
         let mut run = live.as_ref().map(|live| lock(live));
+        let mut reading = human_items.as_ref().map(|_| lock(&shared.human_items));
+        // A reset re-sends what the routes then answer, and what catching up for
+        // it moved is an ordinary frame to everyone showing the view. A resume
+        // takes no read: its stream is answered from what was retained.
+        if let Some(reading) = reading.as_mut() {
+            let resets = lock(&shared.state)
+                .subscriptions
+                .get(&subscription)
+                .and_then(|held| held.reset_reason(after, shared.epoch))
+                .is_some();
+            if resets {
+                // Refused, the reset re-sends what was last read, and the next
+                // look that can read sends the rest.
+                let _ = self.refresh_human_items(reading);
+            }
+        }
         let mut state = lock(&shared.state);
         let Some(held) = state.subscriptions.get(&subscription) else {
             return Err(Unavailable::Unknown);
         };
         let (sender, frames) = mpsc::channel(CONNECTION_BUFFER);
         let first = held.first;
-        let last = held.last;
-        let boundary = held.boundary;
         let resumable = after
             .filter(|after| after.epoch == shared.epoch)
             .map(|after| after.seq);
         let mut replay = Vec::new();
-        let reset_reason = match (after, resumable) {
-            (None, _) => None,
-            (Some(_), None) => Some(ResetReason::ServerRestarted),
-            (Some(_), Some(seq)) if seq > last || seq < first => Some(ResetReason::UnknownCursor),
-            (Some(_), Some(seq)) if seq < boundary => Some(ResetReason::StaleCursor),
-            (Some(_), Some(seq))
-                if seq == boundary || held.frames.iter().any(|frame| frame.seq == seq) =>
-            {
-                None
-            }
-            (Some(_), Some(_)) => Some(ResetReason::UnknownCursor),
-        };
+        let reset_reason = held.reset_reason(after, shared.epoch);
         match (reset_reason, after) {
             (Some(reason), Some(after)) => {
                 // One explicit re-send, named, and the new base from here on.
-                let visible_state = match run.as_mut() {
-                    Some(run) => run.ensure(&shared.store, &visible, spec_of(&view)).ok(),
-                    None => Some(json!({ "type": "sidebar" })),
+                let visible_state = match (run.as_mut(), &human_items, reading.as_ref()) {
+                    (Some(run), _, _) => run.ensure(&shared.store, &visible, spec_of(&view)).ok(),
+                    (None, Some(view), Some(reading)) => reading
+                        .views
+                        .get(&HumanItemsKey::of(&view.0, view.1.as_ref()))
+                        .map(|held| held.visible.clone()),
+                    _ => Some(json!({ "type": "sidebar" })),
                 };
                 let seq = state.next;
                 state.next += 1;
@@ -1087,6 +1196,7 @@ impl Hub {
             .expect("held above");
         held.link = Link::Connected(sender);
         drop(state);
+        drop(reading);
         drop(run);
         drop(sidebar);
         self.start_polling();
@@ -1202,6 +1312,125 @@ impl Hub {
         let runs: Vec<Arc<Mutex<LiveRun>>> = lock(&shared.runs).values().cloned().collect();
         for live in runs {
             self.refresh(&live);
+        }
+        // Under the lock a subscription is registered under, so one being made
+        // keeps its view; and with no view left, no file is looked at.
+        let mut reading = lock(&shared.human_items);
+        let wanted: Vec<Visible> = lock(&shared.state)
+            .subscriptions
+            .values()
+            .map(|held| Visible::of(&held.view))
+            .collect();
+        reading.views.retain(|key, _| {
+            wanted
+                .iter()
+                .any(|visible| matches!(visible, Visible::HumanItems(shown) if shown == key))
+        });
+        // Reported once a spell by the refresh itself, and tried again next tick.
+        let _ = self.refresh_human_items(&mut reading);
+    }
+
+    /// `view`'s `visible` as of now, read once if no subscription shows it yet.
+    fn ensure_human_items(
+        &self,
+        reading: &mut HumanItemsReading,
+        view: &(HumanItemFilter, Option<HumanItemId>),
+    ) -> Result<Value, ApiError> {
+        let (filter, item) = view;
+        let key = HumanItemsKey::of(filter, item.as_ref());
+        // A store that moved and cannot be read is refused here as a fresh read
+        // of it would be, rather than answered with what was last read.
+        self.refresh_human_items(reading)?;
+        if let Some(held) = reading.views.get(&key) {
+            return Ok(held.visible.clone());
+        }
+        let (items, _) = self.0.store.human_items();
+        if reading.views.is_empty() {
+            // Before the read, so a write landing during it is read again.
+            reading.stamp = file_stamp(&items.journal());
+        }
+        let mut held = HeldHumanItems {
+            filter: filter.clone(),
+            item: item.clone(),
+            visible: Value::Null,
+        };
+        held.visible = held.read(items)?;
+        let visible = held.visible.clone();
+        reading.views.insert(key, held);
+        Ok(visible)
+    }
+
+    /// Look at the engine's journal for the views subscriptions show, and only
+    /// once it moved read each of them and send what differs.
+    ///
+    /// # Errors
+    ///
+    /// The engine's refusal of a read, which is tried again on the next look.
+    fn refresh_human_items(&self, reading: &mut HumanItemsReading) -> Result<(), ApiError> {
+        if reading.views.is_empty() {
+            return Ok(());
+        }
+        let shared = &self.0;
+        let (items, _) = shared.store.human_items();
+        let stamp = file_stamp(&items.journal());
+        if stamp == reading.stamp {
+            reading.failing = false;
+            return Ok(());
+        }
+        let mut changes = Vec::new();
+        let mut refused = None;
+        for (key, held) in &mut reading.views {
+            match held.read(items) {
+                Ok(visible) => {
+                    let mut ops = Vec::new();
+                    if let Err(refused) = crate::patch::diff(&held.visible, &visible, &mut ops) {
+                        eprintln!("onepipeline-api: human items could not be patched: {refused}");
+                    }
+                    held.visible = visible;
+                    if !ops.is_empty() {
+                        changes.push((key.clone(), Change::HumanItems { ops }));
+                    }
+                }
+                Err(error) => refused = Some(error),
+            }
+        }
+        // The stamp is taken as read only once every view was: a read the engine
+        // refused is tried again on the next tick, not forgotten.
+        match &refused {
+            Some(error) => {
+                if !reading.failing {
+                    eprintln!(
+                        "onepipeline-api: human items could not be read, and are read again each tick: {error}"
+                    );
+                }
+                reading.failing = true;
+            }
+            None => {
+                reading.failing = false;
+                reading.stamp = stamp;
+            }
+        }
+        if !changes.is_empty() {
+            self.send_human_items(&changes);
+        }
+        refused.map_or(Ok(()), Err)
+    }
+
+    /// Send each change to every subscription showing the view it is of.
+    fn send_human_items(&self, changes: &[(HumanItemsKey, Change)]) {
+        let shared = &self.0;
+        let mut state = lock(&shared.state);
+        let reach: Vec<(SubscriptionId, Visible)> = state
+            .subscriptions
+            .iter()
+            .map(|(id, held)| (*id, Visible::of(&held.view)))
+            .collect();
+        for (id, visible) in reach {
+            for (key, change) in changes {
+                if matches!(&visible, Visible::HumanItems(shown) if shown == key) {
+                    self.emit(&mut state, id, change);
+                }
+            }
         }
     }
 
@@ -1499,6 +1728,14 @@ fn reaches(visible: &Visible, target: &Visible) -> bool {
                 && !matches!(visible, Visible::Sidebar)
         }
         other => visible == other,
+    }
+}
+
+/// What a human-item view selects, or `None` for any other view.
+fn human_items_view(view: &SubscriptionView) -> Option<(HumanItemFilter, Option<HumanItemId>)> {
+    match view {
+        SubscriptionView::HumanItems { filter, item } => Some((filter.clone(), item.clone())),
+        _ => None,
     }
 }
 

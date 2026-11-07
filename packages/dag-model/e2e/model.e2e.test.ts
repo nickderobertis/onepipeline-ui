@@ -12,6 +12,7 @@ import {
   humanItemDetailSchema,
   humanItemListSchema,
   humanItemReceiptSchema,
+  humanItemsVisibleSchema,
   launchProvenanceSchema,
   liveActivitySchema,
   nodeConversationsSchema,
@@ -1213,9 +1214,18 @@ test("the subscription and every frame type the server served parse through the 
       Object.keys(row).filter((key) => key !== "started_at"),
     ).toStrictEqual(SIDEBAR_ROW_FIELDS.filter((key) => key !== "started_at"));
   expect(snapshot.visible.type).toBe("detail");
-  const frames = z
-    .array(subscriptionFrameSchema)
-    .parse(await served("subscription-frames.json"));
+  const humanItems = z
+    .object({
+      subscribed: subscribedSchema,
+      frames: z.array(subscriptionFrameSchema),
+    })
+    .parse(await served("subscription-human-items.json"));
+  const frames = [
+    ...z
+      .array(subscriptionFrameSchema)
+      .parse(await served("subscription-frames.json")),
+    ...humanItems.frames,
+  ];
   expect(new Set(frames.map((frame) => frame.type))).toStrictEqual(
     new Set(SUBSCRIPTION_FRAME_TYPES),
   );
@@ -1229,6 +1239,16 @@ test("the subscription and every frame type the server served parse through the 
   ).not.toThrow();
   for (const frame of frames)
     if (frame.type !== "reset") expect(frame.base < frame.id).toBe(true);
+  // The human-items patches the served stream carried apply to the view the
+  // served snapshot holds, in turn, and each result is still that view.
+  const { initial } = humanItems.subscribed;
+  if (initial.type !== "snapshot") throw new Error("no snapshot was served");
+  const visible = humanItems.frames.reduce<unknown>((held, frame) => {
+    if (frame.type !== "human-items.patch")
+      throw new Error(`a human-items stream carried ${frame.type}`);
+    return humanItemsVisibleSchema.parse(applyPatch(held, frame.ops));
+  }, initial.snapshot.visible);
+  expect(humanItemsVisibleSchema.parse(visible).detail).toBeNull();
 });
 
 test("a patch the contract does not allow is refused rather than guessed at", () => {

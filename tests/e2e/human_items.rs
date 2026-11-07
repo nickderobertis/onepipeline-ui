@@ -26,12 +26,14 @@ use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
 use onepipeline::human_items::{HumanItemDetail, HumanItemReceipt, HumanItemView};
+use onepipeline_ui::patch::{self, Op};
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
 use crate::fixture_run;
 use crate::github_board::GitHubBoard;
 use crate::http;
+use crate::live_journal;
 use crate::serving::Serving;
 use crate::sibling;
 
@@ -2173,6 +2175,59 @@ fn every_human_item_route_serves_the_payload_its_golden_pins() {
     }
 }
 
+/// The human-items view's answer and its frame are what the golden pins, which
+/// `@onepipeline-ui/dag-model`'s journey reads through its own parsers: the
+/// answer naming an open item, a patch that resolves it, and one that takes it
+/// away.
+#[test]
+fn the_served_human_items_view_and_its_frame_are_the_golden_the_contract_pins() {
+    let world = World::new();
+    let item = raised(&world, "pinned", "question");
+    let server = world.serve(Some("manager-of-items"));
+    let view = json!({ "type": "human-items", "filter": { "kind": "question" }, "item": item });
+    let subscribed = subscribe(&server, &json!({ "view": view }));
+    let mut tab = HumanItemsTab::over(&server, view, &subscribed);
+    world.ok(
+        None,
+        &["human-items", "answer", &item, "--text", "go ahead"],
+    );
+    let resolved = tab.receive(PATIENCE).expect("the answer's patch");
+    let directory = world.root.join("human-items");
+    std::fs::rename(&directory, world.root.join("human-items.away")).expect("take the items away");
+    let vanished = tab.receive(PATIENCE).expect("the vanishing's patch");
+
+    let (epoch, _) = tab.applied.split_once(':').expect("epoch:seq");
+    let render = json!({ "subscribed": subscribed, "frames": [resolved, vanished] })
+        .to_string()
+        .replace(&tab.subscription, "00000000-0000-4000-8000-00000005ab00")
+        .replace(epoch, "00000000-0000-4000-8000-0000000e9c00");
+    let mut served: Value = serde_json::from_str(&render).expect("still JSON");
+    pin_clock(&mut served);
+    // A patch names the instant it moved as an op's value, not under its key.
+    for frame in served["frames"].as_array_mut().expect("frames") {
+        for op in frame["ops"].as_array_mut().expect("ops") {
+            if op["p"].as_array().and_then(|path| path.last()) == Some(&json!("updated_at")) {
+                op["v"] = json!("2026-01-01T00:00:00.000Z");
+            }
+        }
+    }
+    let served = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&served).expect("serialize")
+    );
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/subscription-human-items.json");
+    if std::env::var_os("UPDATE_CONTRACT_FIXTURES").is_some() {
+        std::fs::write(&path, &served).expect("write the golden");
+    }
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap_or_default(),
+        served,
+        "the human-items view differs from its golden; rerun with UPDATE_CONTRACT_FIXTURES=1 if \
+         the change is deliberate"
+    );
+}
+
 /// Every timestamp the clock chose, pinned.
 fn pin_clock(value: &mut Value) {
     match value {
@@ -2188,4 +2243,600 @@ fn pin_clock(value: &mut Value) {
         Value::Array(values) => values.iter_mut().for_each(pin_clock),
         _ => {}
     }
+}
+
+/// How long a stream gets to send a frame before a journey fails: only a stream
+/// that never sends one fails, because how long the server takes is not what a
+/// journey holds it to.
+const PATIENCE: Duration = Duration::from_secs(60);
+/// How long a stream is watched to say it sent nothing: several polls.
+const QUIET: Duration = Duration::from_secs(2);
+
+/// A tab's one subscription to a view, holding the state its frames patch.
+struct HumanItemsTab {
+    subscription: String,
+    /// Its open stream, or `None` while it is disconnected.
+    stream: Option<http::Stream>,
+    applied: String,
+    state: Value,
+    view: Value,
+}
+
+impl HumanItemsTab {
+    fn open(server: &Serving, view: Value) -> Self {
+        let subscribed = subscribe(server, &json!({ "view": view }));
+        assert_eq!(subscribed["initial"]["type"], "snapshot");
+        Self::over(server, view, &subscribed)
+    }
+
+    fn over(server: &Serving, view: Value, subscribed: &Value) -> Self {
+        let state = subscribed["initial"]["snapshot"].clone();
+        let subscription = subscribed["subscription"]
+            .as_str()
+            .expect("a subscription id")
+            .to_owned();
+        let applied = state["id"].as_str().expect("a snapshot id").to_owned();
+        let mut tab = Self {
+            subscription,
+            stream: None,
+            applied,
+            state,
+            view,
+        };
+        tab.connect(server);
+        tab
+    }
+
+    /// Open the stream from the last frame this tab applied.
+    fn connect(&mut self, server: &Serving) {
+        let stream = http::stream(
+            server.address,
+            &format!(
+                "/api/v2/events?subscription={}&after={}",
+                self.subscription, self.applied
+            ),
+            None,
+        );
+        assert_eq!(stream.status, 200);
+        self.stream = Some(stream);
+    }
+
+    /// The next frame within `patience`, checked against its framing and applied.
+    fn receive(&mut self, patience: Duration) -> Option<Value> {
+        let frame = self
+            .stream
+            .as_mut()
+            .expect("a connected tab")
+            .frame_within(patience)?;
+        let data = frame.json();
+        assert_eq!(frame.id, data["id"], "the SSE id is the frame's id");
+        assert_eq!(
+            frame.event, data["type"],
+            "the SSE event is the frame's type"
+        );
+        assert_eq!(data["subscription"], self.subscription.as_str());
+        assert_eq!(
+            data["base"],
+            self.applied.as_str(),
+            "each frame names the last"
+        );
+        match data["type"].as_str() {
+            Some("human-items.patch") => {
+                assert_eq!(
+                    data.as_object().expect("a frame").len(),
+                    5,
+                    "id, base, subscription, type and ops, and no run: {data}"
+                );
+                let ops: Vec<Op> = data["ops"]
+                    .as_array()
+                    .expect("ops")
+                    .iter()
+                    .map(|op| Op::from_json(op).expect("an op the contract allows"))
+                    .collect();
+                patch::apply(&mut self.state["visible"], &ops).expect("the patch applies");
+            }
+            Some("run.changed" | "run.removed") => {}
+            other => panic!("a human-items stream sent {other:?}: {data}"),
+        }
+        self.applied = data["id"].as_str().expect("an id").to_owned();
+        Some(data)
+    }
+
+    /// Read until the view holds what `server`'s routes now answer; a stream
+    /// that goes quiet before then has lost a change.
+    fn until_current(&mut self, server: &Serving) {
+        let wanted = routes_answer(server, &self.view);
+        while self.state["visible"] != wanted {
+            assert!(
+                self.receive(PATIENCE).is_some(),
+                "the stream went quiet with the view at {} and the routes at {wanted}",
+                self.state["visible"],
+            );
+        }
+    }
+
+    /// Every human-item frame read until the stream goes quiet.
+    fn drain(&mut self) -> Vec<Value> {
+        let mut read = Vec::new();
+        while let Some(frame) = self.receive(QUIET) {
+            if frame["type"] == "human-items.patch" {
+                read.push(frame);
+            }
+        }
+        read
+    }
+}
+
+fn subscribe(server: &Serving, body: &Value) -> Value {
+    let response = http::post(server.address, "/api/v2/subscriptions", &body.to_string());
+    assert_eq!(response.status, 201, "{body}: {}", response.body);
+    response.json()
+}
+
+/// What `view`'s `visible` should hold, as the two human-item routes answer it.
+fn routes_answer(server: &Serving, view: &Value) -> Value {
+    let mut query = String::new();
+    for (selector, value) in view["filter"].as_object().into_iter().flatten() {
+        let value = value
+            .as_str()
+            .map_or_else(|| value.to_string(), str::to_owned);
+        query.push_str(&format!("{selector}={value}&"));
+    }
+    let list = http::get(server.address, &format!("/api/human-items?{query}"));
+    assert_eq!(list.status, 200, "{}", list.body);
+    let detail = view["item"].as_str().map_or(Value::Null, |id| {
+        let read = http::get(server.address, &format!("/api/human-items/{id}"));
+        if read.status == 404 {
+            Value::Null
+        } else {
+            assert_eq!(read.status, 200, "{}", read.body);
+            read.json()
+        }
+    });
+    json!({ "type": "human-items", "items": list.json()["items"], "detail": detail })
+}
+
+/// An owned item of `kind`, raised through the real CLI.
+fn raised(world: &World, dedup: &str, kind: &str) -> String {
+    let session = "manager-of-items";
+    world.raise(
+        session,
+        &input(session, dedup, kind, "medium", json!({"scope": "nothing"})),
+    )
+}
+
+/// The view's snapshot and every frame after it are what the routes answer, as
+/// the real CLI raises, answers, completes and dismisses, whichever view a tab
+/// holds, and a tab whose filter excludes a change is sent nothing for it.
+#[test]
+fn a_human_items_view_follows_every_cli_write_to_what_the_routes_answer() {
+    let world = World::new();
+    let question = raised(&world, "opening", "question");
+    let server = world.serve(Some("manager-of-items"));
+
+    let mut unfiltered = HumanItemsTab::open(&server, json!({ "type": "human-items" }));
+    assert_eq!(
+        unfiltered.state["visible"],
+        routes_answer(&server, &unfiltered.view),
+        "the snapshot is the routes' answer"
+    );
+    assert_eq!(
+        unfiltered.state["visible"]["items"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(unfiltered.state["visible"]["detail"], Value::Null);
+    assert!(
+        unfiltered.state["sidebar"].is_array(),
+        "it still carries the sidebar"
+    );
+    let mut questions = HumanItemsTab::open(
+        &server,
+        json!({ "type": "human-items", "filter": { "kind": "question" } }),
+    );
+    let mut opened =
+        HumanItemsTab::open(&server, json!({ "type": "human-items", "item": question }));
+    assert_eq!(
+        opened.state["visible"]["detail"]["item"]["id"],
+        question.as_str()
+    );
+    assert_eq!(
+        opened.state["visible"],
+        routes_answer(&server, &opened.view)
+    );
+    let mut answered = HumanItemsTab::open(
+        &server,
+        json!({ "type": "human-items", "filter": { "state": "answered" } }),
+    );
+
+    assert!(
+        unfiltered.drain().is_empty(),
+        "a journal untouched sends nothing"
+    );
+
+    // A task, which the question filter and the answered filter both exclude.
+    let task = raised(&world, "second", "task");
+    unfiltered.until_current(&server);
+    assert_eq!(
+        unfiltered.state["visible"]["items"]
+            .as_array()
+            .map(Vec::len),
+        Some(2)
+    );
+    opened.until_current(&server);
+    assert!(
+        questions.drain().is_empty(),
+        "the filter excludes that change"
+    );
+    assert!(
+        answered.drain().is_empty(),
+        "the filter excludes that change"
+    );
+
+    world.ok(
+        None,
+        &["human-items", "answer", &question, "--text", "go ahead"],
+    );
+    unfiltered.until_current(&server);
+    assert_eq!(
+        unfiltered.state["visible"]["items"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    questions.until_current(&server);
+    assert_eq!(
+        questions.state["visible"]["items"].as_array().map(Vec::len),
+        Some(0)
+    );
+    answered.until_current(&server);
+    assert_eq!(
+        answered.state["visible"]["items"].as_array().map(Vec::len),
+        Some(1)
+    );
+    opened.until_current(&server);
+    assert_eq!(
+        opened.state["visible"]["detail"]["item"]["state"],
+        "answered"
+    );
+
+    world.ok(None, &["human-items", "complete", &task]);
+    unfiltered.until_current(&server);
+    let dismissed = raised(&world, "third", "task");
+    unfiltered.until_current(&server);
+    world.ok(
+        None,
+        &["human-items", "dismiss", &dismissed, "--reason", "not now"],
+    );
+    unfiltered.until_current(&server);
+    assert_eq!(
+        unfiltered.state["visible"]["items"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+
+    // A write through this server's own route arrives the same way.
+    let another = raised(&world, "fourth", "question");
+    unfiltered.until_current(&server);
+    let answer = http::post(
+        server.address,
+        &format!("/api/human-items/{another}/answer"),
+        &json!({ "text": "through the route" }).to_string(),
+    );
+    assert_eq!(answer.status, 200, "{}", answer.body);
+    unfiltered.until_current(&server);
+
+    // A view replaced for another: the old stream ends, the new view holds.
+    let replaced = subscribe(
+        &server,
+        &json!({
+            "view": { "type": "human-items", "filter": { "state": "completed" } },
+            "replaces": unfiltered.subscription,
+        }),
+    );
+    assert_eq!(
+        replaced["view"],
+        json!({ "type": "human-items", "filter": { "state": "completed" } }),
+        "the view is served back as it was asked for"
+    );
+    let completed = HumanItemsTab::over(
+        &server,
+        json!({ "type": "human-items", "filter": { "state": "completed" } }),
+        &replaced,
+    );
+    assert_eq!(
+        completed.state["visible"],
+        routes_answer(&server, &completed.view)
+    );
+}
+
+/// A sidebar or run-view subscription carries no human-item state, is sent no
+/// human-item frame, and reads nothing for them: the engine's first read of a
+/// host's items makes their directory, so no such directory means no read.
+#[test]
+fn only_a_human_items_view_is_sent_human_items_and_only_it_reads_them() {
+    let world = World::new();
+    fixture_run::write(&world.root, fixture_run::RUN_ID);
+    let server = world.serve(Some("manager-of-items"));
+    let directory = world.root.join("human-items");
+    let mut sidebar = http::stream(
+        server.address,
+        &format!(
+            "/api/v2/events?subscription={}",
+            subscribe(&server, &json!({ "view": { "type": "sidebar" } }))["subscription"]
+                .as_str()
+                .expect("an id")
+        ),
+        None,
+    );
+    let run_view = subscribe(
+        &server,
+        &json!({ "view": { "type": "detail", "run_id": fixture_run::RUN_ID } }),
+    );
+    let snapshot = &run_view["initial"]["snapshot"]["visible"];
+    assert!(snapshot.get("items").is_none(), "{snapshot}");
+    let mut detail = http::stream(
+        server.address,
+        &format!(
+            "/api/v2/events?subscription={}",
+            run_view["subscription"].as_str().expect("an id")
+        ),
+        None,
+    );
+    while sidebar.frame_within(QUIET).is_some() {}
+    assert!(
+        !directory.exists(),
+        "a server no tab of which shows human items read them"
+    );
+
+    // The CLI writes while those tabs are connected, beside a tab that shows them.
+    raised(&world, "beside", "task");
+    let mut shown = HumanItemsTab::open(&server, json!({ "type": "human-items" }));
+    raised(&world, "beside-too", "task");
+    shown.until_current(&server);
+    for stream in [&mut sidebar, &mut detail] {
+        while let Some(frame) = stream.frame_within(QUIET) {
+            assert_ne!(frame.event, "human-items.patch", "{}", frame.json());
+        }
+    }
+}
+
+/// A reconnect loses no change and replays none; a cursor the subscription
+/// cannot resume from is one reset to what the routes then answer, patches
+/// following; and a tab whose subscription is gone is reset by recreating it.
+#[test]
+fn a_human_items_stream_resumes_every_change_or_resets_to_what_the_routes_answer() {
+    let world = World::new();
+    raised(&world, "first", "task");
+    let server = world.serve(Some("manager-of-items"));
+    let mut tab = HumanItemsTab::open(&server, json!({ "type": "human-items" }));
+
+    // Written while no stream is open, and replayed once it is.
+    tab.stream = None;
+    raised(&world, "while-away", "task");
+    // Twice, so a reconnect has more than one frame to replay: each write waits
+    // on a fresh subscriber's frame, so the away tab has recorded it too.
+    let mut witness = HumanItemsTab::open(&server, json!({ "type": "human-items" }));
+    raised(&world, "while-away-too", "task");
+    witness.until_current(&server);
+    tab.connect(&server);
+    let mut replayed = 0;
+    while tab.state["visible"] != routes_answer(&server, &tab.view) {
+        tab.receive(PATIENCE).expect("every change it missed");
+        replayed += 1;
+    }
+    assert!(replayed >= 2, "{replayed} frames replayed");
+    assert!(tab.drain().is_empty(), "nothing replayed twice");
+
+    // A cursor it never issued, with a change it has not been sent.
+    raised(&world, "behind-the-cursor", "task");
+    witness.until_current(&server);
+    let (epoch, _) = tab.applied.split_once(':').expect("epoch:seq");
+    let refused = format!("{epoch}:999999");
+    let mut reset = http::stream(
+        server.address,
+        &format!(
+            "/api/v2/events?subscription={}&after={refused}",
+            tab.subscription
+        ),
+        None,
+    );
+    let frame = reset.frame_within(PATIENCE).expect("a reset").json();
+    assert_eq!(frame["type"], "reset");
+    assert_eq!(frame["reason"], "unknown-cursor");
+    assert_eq!(frame["base"], refused.as_str());
+    assert_eq!(
+        frame["snapshot"]["visible"],
+        routes_answer(&server, &tab.view)
+    );
+    tab.stream = Some(reset);
+    tab.state = frame["snapshot"].clone();
+    tab.applied = frame["id"].as_str().expect("an id").to_owned();
+    let after_reset = raised(&world, "after-the-reset", "task");
+    tab.until_current(&server);
+    assert!(
+        tab.state["visible"]["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .any(|view| view["item"]["id"] == after_reset.as_str()),
+        "patches follow the reset"
+    );
+
+    // The subscription is gone: its recreation answers a reset of its own.
+    let cursor = tab.applied.clone();
+    let retired = http::delete(
+        server.address,
+        &format!("/api/v2/subscriptions/{}", tab.subscription),
+    );
+    assert_eq!(retired.status, 204);
+    let recreated = subscribe(
+        &server,
+        &json!({ "view": { "type": "human-items" }, "resume": cursor }),
+    );
+    assert_eq!(recreated["initial"]["type"], "reset");
+    assert_eq!(recreated["initial"]["reason"], "unknown-cursor");
+    assert_eq!(
+        recreated["initial"]["snapshot"]["visible"],
+        routes_answer(&server, &tab.view)
+    );
+}
+
+/// A cursor older than what the subscription retains is a `stale-cursor` reset
+/// to what the routes then answer, with patches following it.
+#[test]
+fn a_stale_human_items_cursor_is_reset_to_what_the_routes_answer() {
+    let world = World::new();
+    // Sidebar rows are the cheapest frames a subscription records: a run going
+    // away and coming back with the summary its journal matches, as the same
+    // journey over a sidebar view makes them.
+    let runs: Vec<String> = (0..64)
+        .map(|index| format!("retained-{index:02}"))
+        .collect();
+    for run in &runs {
+        fixture_run::write(&world.root, run);
+        live_journal::receipt_for(&world.root.join(run).join("events.jsonl"));
+    }
+    let grace = Duration::from_secs(24 * 60 * 60).as_millis().to_string();
+    let environment: Vec<(String, String)> = world.environment();
+    let mut environment: Vec<(&str, &str)> = environment
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    environment.push((onepipeline_ui::live::DISCONNECTED_GRACE_ENV, &grace));
+    let (served, _) = world.workspace_view();
+    let server = Serving::start_in_as_with_env_removing(
+        served,
+        "manager-of-items",
+        &environment,
+        &World::foreign(),
+    );
+    let subscribed = subscribe(&server, &json!({ "view": { "type": "human-items" } }));
+    let cursor = subscribed["initial"]["snapshot"]["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    let subscription = subscribed["subscription"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    // A second tab, connected, counts what the first records while away.
+    let mut counter = HumanItemsTab::open(&server, json!({ "type": "human-items" }));
+    let listed = |frames: &mut usize, counter: &mut HumanItemsTab, kind: &str| {
+        let mut seen = 0;
+        while seen < runs.len() {
+            let frame = counter.receive(PATIENCE).expect("a sidebar frame");
+            *frames += 1;
+            if frame["type"] == kind {
+                seen += 1;
+            }
+        }
+    };
+    let mut frames = 0;
+    let journals: Vec<(PathBuf, PathBuf)> = runs
+        .iter()
+        .map(|run| {
+            let journal = world.root.join(run).join("events.jsonl");
+            let away = journal.with_extension("jsonl.away");
+            (journal, away)
+        })
+        .collect();
+    while frames <= onepipeline_ui::contract::RETAINED_FRAMES {
+        for (journal, away) in &journals {
+            std::fs::rename(journal, away).expect("take a journal away");
+        }
+        listed(&mut frames, &mut counter, "run.removed");
+        for (journal, away) in &journals {
+            std::fs::rename(away, journal).expect("put a journal back");
+        }
+        listed(&mut frames, &mut counter, "run.changed");
+    }
+    raised(&world, "after-the-boundary", "task");
+    counter.until_current(&server);
+
+    let mut stream = http::stream(
+        server.address,
+        &format!("/api/v2/events?subscription={subscription}&after={cursor}"),
+        None,
+    );
+    let frame = stream.frame_within(PATIENCE).expect("a reset").json();
+    assert_eq!(frame["type"], "reset");
+    assert_eq!(frame["reason"], "stale-cursor");
+    let view = json!({ "type": "human-items" });
+    assert_eq!(frame["snapshot"]["visible"], routes_answer(&server, &view));
+    let mut resumed = HumanItemsTab {
+        subscription,
+        stream: Some(stream),
+        applied: frame["id"].as_str().expect("an id").to_owned(),
+        state: frame["snapshot"].clone(),
+        view,
+    };
+    raised(&world, "after-the-reset", "task");
+    resumed.until_current(&server);
+}
+
+/// A malformed selector is refused like every other view; an item that no
+/// longer reads is `detail: null` rather than a refusal, and one that vanishes
+/// under an open tab patches `detail` to `null`.
+#[test]
+fn a_bad_selector_is_refused_and_an_item_that_does_not_read_is_null() {
+    let world = World::new();
+    let item = raised(&world, "vanishing", "task");
+    let server = world.serve(Some("manager-of-items"));
+    for view in [
+        json!({ "type": "human-items", "filter": { "kind": "chore" } }),
+        json!({ "type": "human-items", "filter": { "priority": "whenever" } }),
+        json!({ "type": "human-items", "filter": { "state": "maybe" } }),
+        json!({ "type": "human-items", "filter": { "blocking": "yes" } }),
+        json!({ "type": "human-items", "filter": { "colour": "red" } }),
+        json!({ "type": "human-items", "filter": "kind=task" }),
+        json!({ "type": "human-items", "item": 7 }),
+        json!({ "type": "human-items", "item": "../outside" }),
+        json!({ "type": "human-items", "run_id": fixture_run::RUN_ID }),
+    ] {
+        let body = json!({ "view": view }).to_string();
+        let response = http::post(server.address, "/api/v2/subscriptions", &body);
+        assert_eq!(response.status, 400, "{body}: {}", response.body);
+        assert_eq!(
+            response.json()["error"]["code"],
+            "invalid_subscription",
+            "{body}"
+        );
+    }
+
+    let never = subscribe(
+        &server,
+        &json!({ "view": { "type": "human-items", "item": "hi-0000000000000000000a" } }),
+    );
+    assert_eq!(
+        never["initial"]["snapshot"]["visible"]["detail"],
+        Value::Null,
+        "an item that does not read is null, never a refused subscription"
+    );
+
+    let mut open = HumanItemsTab::open(&server, json!({ "type": "human-items", "item": item }));
+    assert_eq!(open.state["visible"]["detail"]["item"]["id"], item.as_str());
+    let directory = world.root.join("human-items");
+    std::fs::rename(&directory, world.root.join("human-items.away")).expect("take the items away");
+    let frame = open.receive(PATIENCE).expect("a patch");
+    assert_eq!(frame["type"], "human-items.patch");
+    assert_eq!(open.state["visible"]["detail"], Value::Null);
+    assert_eq!(open.state["visible"], routes_answer(&server, &open.view));
+}
+
+/// A host that has not enabled human items refuses the view as it refuses every
+/// human-item route, and still serves every other view.
+#[test]
+fn a_host_that_has_not_enabled_human_items_refuses_the_view() {
+    let world = World::configured(false);
+    let server = world.serve(Some("manager-off"));
+    let body = json!({ "view": { "type": "human-items" } }).to_string();
+    let refused = http::post(server.address, "/api/v2/subscriptions", &body);
+    assert_eq!(
+        error(&refused, 503, "human_items_unavailable"),
+        "human-items unavailable against live state"
+    );
+    subscribe(&server, &json!({ "view": { "type": "sidebar" } }));
 }
