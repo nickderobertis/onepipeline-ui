@@ -737,6 +737,35 @@ test("both off closes the stream; turning one on replays from the last applied e
   expect(wire.mostOpen).toBe(1);
 });
 
+test("a change held for a view the person moved away from is dropped rather than shown at the next tick", async ({
+  page,
+}) => {
+  const { served, facts } = await serveLive();
+  const run = facts.openLiveRun;
+  const node = facts.liveNode;
+  await openClocked(page, served.origin, `/?run=${run}&view=graph`);
+  await choose(page, MAIN, "Every 10 seconds");
+  recordActivity(served, run, node, "held for the graph");
+  await expect(waiting(page, MAIN)).toBeVisible({ timeout: PUSH_PATIENCE });
+
+  // Moving to Overall is a new subscription whose snapshot shows at once, and the
+  // count of what the graph held goes with the graph.
+  await page.getByRole("tab", { name: "Overall" }).click();
+  await expect(
+    page.getByRole("region", { name: "Graph timeline" }),
+  ).toBeVisible();
+  await expect(waiting(page, MAIN)).toHaveCount(0);
+  await page.clock.runFor(30_000);
+  await expect(
+    page.getByRole("region", { name: "Graph timeline" }),
+  ).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Overall" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(waiting(page, MAIN)).toHaveCount(0);
+});
+
 test("a held replay waits for an interval's next tick, and a Live one shows at once", async ({
   page,
 }) => {

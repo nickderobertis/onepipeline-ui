@@ -2308,18 +2308,13 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     z-index: 50;
     inset: 0 auto 0 0;
     width: min(320px, 85vw);
+    display: none;
     background: var(--background);
-    transform: translateX(-100%);
-    visibility: hidden;
-    transition:
-      transform 180ms ease-out,
-      visibility 180ms;
   }
-  /* Visible at once on opening, so focus can go into it as it slides in. */
+  /* Shown at once rather than eased in: a control that is still easing out of
+     `visibility: hidden` cannot take the focus the drawer hands it as it opens. */
   .run-nav[data-open="true"] {
-    transform: none;
-    visibility: visible;
-    transition: transform 180ms ease-out;
+    display: block;
   }
   .nav-scrim {
     position: fixed;
