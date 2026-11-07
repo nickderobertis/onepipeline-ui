@@ -4,7 +4,10 @@ import type {
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { HumanItemsView, LiveHumanItems } from "../runs/useDagTelemetry";
+import type {
+  HumanItemsView,
+  LiveHumanItems,
+} from "../../lib/live-human-items";
 import { type FilterChoice, NO_FILTER, toFilter } from "./human-items-model";
 
 /** A write a reader can make on an item, as the route names it. */

@@ -86,6 +86,16 @@
         "@playwright/test": "1.62.0",
       },
     },
+    "apps/dag-ui-e2e/read-latency": {
+      "name": "@onepipeline-ui/dag-ui-read-latency",
+      "version": "0.0.0-workspace",
+      "dependencies": {
+        "zod": "4.1.12",
+      },
+      "devDependencies": {
+        "@playwright/test": "1.62.0",
+      },
+    },
     "packages/dag-layout": {
       "name": "@onepipeline-ui/dag-layout",
       "version": "0.0.0-workspace",
@@ -468,6 +478,8 @@
     "@onepipeline-ui/dag-ui": ["@onepipeline-ui/dag-ui@workspace:apps/dag-ui"],
 
     "@onepipeline-ui/dag-ui-e2e": ["@onepipeline-ui/dag-ui-e2e@workspace:apps/dag-ui-e2e"],
+
+    "@onepipeline-ui/dag-ui-read-latency": ["@onepipeline-ui/dag-ui-read-latency@workspace:apps/dag-ui-e2e/read-latency"],
 
     "@onepipeline-ui/telemetry-client": ["@onepipeline-ui/telemetry-client@workspace:packages/telemetry-client"],
 

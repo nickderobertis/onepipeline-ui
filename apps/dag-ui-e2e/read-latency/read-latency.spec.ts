@@ -43,7 +43,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
-import { type Telemetry, telemetrySchema } from "./telemetry";
+import { telemetrySchema } from "./telemetry";
 import workload from "./workload.json" with { type: "json" };
 
 const REPO = resolve(import.meta.dirname, "../../..");
@@ -316,27 +316,28 @@ declare global {
 
 /** Watch the page's list from inside it, so a render is timed as it lands. */
 async function observe(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const list = document.querySelector('ul[aria-label="Action items"]');
-    if (list === null) throw new Error("no list to observe");
-    const rendered: Rendered = { shown: {}, gone: {} };
-    const look = () => {
-      const at = Date.now();
-      const titles = new Set(
-        [...list.querySelectorAll("h3")].map((title) => title.textContent),
-      );
-      for (const title of titles) rendered.shown[title] ??= at;
-      for (const title of Object.keys(rendered.shown))
-        if (!titles.has(title)) rendered.gone[title] ??= at;
-    };
-    look();
-    new MutationObserver(look).observe(list, {
-      childList: true,
-      subtree: true,
-      characterData: true,
+  await page
+    .getByRole("list", { name: "Action items" })
+    .evaluate((list: Element) => {
+      const rendered: Rendered = { shown: {}, gone: {} };
+      const look = () => {
+        const at = Date.now();
+        const titles = new Set(
+          // llmlint: ignore[e2e_uses_accessible_selectors] this runs inside the page on every mutation to timestamp a render as it lands, where Playwright's role engine does not exist; the list itself was located by role above, and awaiting a locator per write from outside would time the round trip rather than the render.
+          [...list.querySelectorAll("h3")].map((title) => title.textContent),
+        );
+        for (const title of titles) rendered.shown[title] ??= at;
+        for (const title of Object.keys(rendered.shown))
+          if (!titles.has(title)) rendered.gone[title] ??= at;
+      };
+      look();
+      new MutationObserver(look).observe(list, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+      window.readLatencyRendered = rendered;
     });
-    window.readLatencyRendered = rendered;
-  });
 }
 
 async function renderedOn(page: Page): Promise<Rendered> {
@@ -528,13 +529,17 @@ test("Action items follows the CLI's writes on the stream it already holds, filt
   const world = buildWorld();
   try {
     const grown = await growJournal(world);
-    const human_items = {} as Telemetry["human_items"];
-    for (const name of ["unfiltered", "filtered"] as const) {
+    const measureOn = async (name: "unfiltered" | "filtered") => {
       const context = await browser.newContext();
       const page = await context.newPage();
-      human_items[name] = await measurePage(page, world, grown, name);
+      const measured = await measurePage(page, world, grown, name);
       await context.close();
-    }
+      return measured;
+    };
+    const human_items = {
+      unfiltered: await measureOn("unfiltered"),
+      filtered: await measureOn("filtered"),
+    };
     const git = (args: string[]) =>
       execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
     const telemetry = telemetrySchema.parse({

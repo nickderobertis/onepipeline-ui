@@ -16,7 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { LiveHumanItems } from "../runs/useDagTelemetry";
+import type { LiveHumanItems } from "../../lib/live-human-items";
 import {
   BLOCKING_CHOICES,
   blockedGroups,

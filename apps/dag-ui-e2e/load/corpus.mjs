@@ -21,6 +21,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { z } from "zod";
 import { receiptFor } from "./journal.ts";
 import { toolOutput } from "./output.mjs";
 // The workload every budget is stated over, declared once for this writer,
@@ -295,7 +296,23 @@ const SCALES = {
  * generator's shapes and names at the size that tier's budgets are stated over.
  */
 function scaleOfWorkload(path) {
-  const declared = JSON.parse(readFileSync(path, "utf8"));
+  const count = z.number().int().nonnegative();
+  const declared = z
+    .looseObject({
+      runs: count.positive(),
+      projects: count.positive(),
+      other_live_runs: count.max(OTHER_LIVE_RUNS.length),
+      stopped_runs: count,
+      // Enough for the open run's fifteen nodes and their records.
+      open_live_run_records_at_start: count.min(30),
+      settled_big_records: count,
+      settled_small_records: count,
+    })
+    .refine(
+      (held) => held.runs > 1 + held.other_live_runs + held.stopped_runs,
+      "a workload's runs hold its open, live and stopped runs and a settled one",
+    )
+    .parse(JSON.parse(readFileSync(path, "utf8")));
   return {
     openLiveRecords: declared.open_live_run_records_at_start,
     otherLive: declared.other_live_runs,

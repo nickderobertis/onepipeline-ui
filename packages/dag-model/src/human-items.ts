@@ -4,6 +4,7 @@ import {
   HUMAN_ITEM_PRIORITIES,
   type HumanItem,
   type HumanItemDetail,
+  type HumanItemFilter,
   type HumanItemReceipt,
   type HumanItemView,
 } from "./human-items.generated.js";
@@ -214,3 +215,35 @@ export const humanItemListSchema = z.strictObject({
 });
 
 export type HumanItemList = z.infer<typeof humanItemListSchema>;
+
+/**
+ * The selectors `GET /api/human-items` takes, as a `human-items` view names them:
+ * the engine's `HumanItemFilter`, closed as it is, with the words its own
+ * vocabulary holds.
+ */
+export const humanItemFilterSchema: z.ZodType<HumanItemFilter> = z.strictObject(
+  {
+    kind: z.enum(["task", "question"]).nullable().optional(),
+    blocking: z.boolean().nullable().optional(),
+    priority: z.enum(HUMAN_ITEM_PRIORITIES).nullable().optional(),
+    state: z
+      .enum(["open", "answered", "completed", "dismissed"])
+      .nullable()
+      .optional(),
+    session: z.string().nullable().optional(),
+    run: z.string().nullable().optional(),
+    plan: z.string().nullable().optional(),
+    host: z.boolean().nullable().optional(),
+  },
+);
+
+/**
+ * Action items as a subscription holds them: what `GET /api/human-items` answers
+ * under the view's filter, and what `GET /api/human-items/{id}` answers for its
+ * item — `null` where none was asked for or the item no longer reads.
+ */
+export const humanItemsVisibleSchema = z.strictObject({
+  type: z.literal("human-items"),
+  items: z.array(humanItemViewSchema),
+  detail: humanItemDetailSchema.nullable(),
+});

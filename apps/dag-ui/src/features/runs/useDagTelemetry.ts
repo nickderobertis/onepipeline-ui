@@ -1,7 +1,5 @@
 import type {
   ChannelQueue,
-  HumanItemDetail,
-  HumanItemView,
   LiveActivity,
   RunDetail,
   RunTimeline,
@@ -16,6 +14,10 @@ import {
   TelemetryClientError,
 } from "@onepipeline-ui/telemetry-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  HumanItemsView,
+  LiveHumanItems,
+} from "../../lib/live-human-items";
 import { newestRows } from "../../lib/sidebar-model";
 
 // llmlint: ignore-file[changed_behavior_has_e2e] The browser journeys in
@@ -50,21 +52,6 @@ export interface DagTelemetryOptions {
    * subscription and still carries the sidebar.
    */
   readonly humanItems?: HumanItemsView;
-}
-
-/** A subscription to Action items, as `useHumanItemsSelection` names one. */
-export type HumanItemsView = Extract<SubscriptionView, { type: "human-items" }>;
-
-/** What the subscription currently holds of Action items. */
-export interface LiveHumanItems {
-  /** The items the view's filter selects, in the engine's order. */
-  readonly items?: readonly HumanItemView[];
-  /** The selected item's detail: `null` once it no longer reads. */
-  readonly detail?: HumanItemDetail | null;
-  /** The item `detail` is about: what the view named when it was served. */
-  readonly item?: string;
-  /** Why the view could not be served: the sidebar is carried on regardless. */
-  readonly error?: string;
 }
 
 export interface DagTelemetryState {

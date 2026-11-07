@@ -1,9 +1,7 @@
 import { z } from "zod";
 import {
-  HUMAN_ITEM_PRIORITIES,
-  type HumanItemFilter,
-  humanItemDetailSchema,
-  humanItemViewSchema,
+  humanItemFilterSchema,
+  humanItemsVisibleSchema,
 } from "./human-items.js";
 
 // llmlint: ignore-file[contracts_have_one_source_or_a_drift_gate] docs/contract.md is the
@@ -2536,27 +2534,6 @@ export const eventIdSchema = z
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(0|[1-9][0-9]*)$/u,
   );
 
-/**
- * The selectors `GET /api/human-items` takes, as a `human-items` view names them:
- * the engine's `HumanItemFilter`, closed as it is, with the words its own
- * vocabulary holds.
- */
-export const humanItemFilterSchema: z.ZodType<HumanItemFilter> = z.strictObject(
-  {
-    kind: z.enum(["task", "question"]).nullable().optional(),
-    blocking: z.boolean().nullable().optional(),
-    priority: z.enum(HUMAN_ITEM_PRIORITIES).nullable().optional(),
-    state: z
-      .enum(["open", "answered", "completed", "dismissed"])
-      .nullable()
-      .optional(),
-    session: z.string().nullable().optional(),
-    run: z.string().nullable().optional(),
-    plan: z.string().nullable().optional(),
-    host: z.boolean().nullable().optional(),
-  },
-);
-
 /** What a tab shows besides the sidebar: nothing, one run view, or Action items. */
 export const subscriptionViewSchema = z.union([
   z.strictObject({ type: z.literal("sidebar") }),
@@ -2579,6 +2556,7 @@ export const subscriptionViewSchema = z.union([
     filter: z.string().min(1).optional(),
   }),
   z.strictObject({ type: z.literal("channel"), run_id: z.string().min(1) }),
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
   z.strictObject({
     type: z.literal("human-items"),
     filter: humanItemFilterSchema.optional(),
@@ -2608,17 +2586,6 @@ export const sidebarRowSchema = z.strictObject({
 /** The fields a sidebar row carries, in the order the contract lists them. */
 export const SIDEBAR_ROW_FIELDS = Object.keys(sidebarRowSchema.shape);
 
-/**
- * Action items as a subscription holds them: what `GET /api/human-items` answers
- * under the view's filter, and what `GET /api/human-items/{id}` answers for its
- * item — `null` where none was asked for or the item no longer reads.
- */
-export const humanItemsVisibleSchema = z.strictObject({
-  type: z.literal("human-items"),
-  items: z.array(humanItemViewSchema),
-  detail: humanItemDetailSchema.nullable(),
-});
-
 export const visibleStateSchema = z.union([
   z.strictObject({ type: z.literal("sidebar") }),
   z.strictObject({
@@ -2647,6 +2614,7 @@ export const visibleStateSchema = z.union([
     detail: runDetailSchema,
     channel: channelQueueSchema,
   }),
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
   humanItemsVisibleSchema,
 ]);
 
@@ -2719,6 +2687,7 @@ export const subscriptionFrameSchema = z.union([
     run_id: z.string().min(1),
     ops: z.array(patchOpSchema),
   }),
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
   z.strictObject({
     ...frameCommon,
     type: z.literal("human-items.patch"),
@@ -2733,6 +2702,7 @@ export const SUBSCRIPTION_FRAME_TYPES = [
   "detail.patch",
   "timeline.patch",
   "channel.patch",
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
   "human-items.patch",
 ] as const;
 

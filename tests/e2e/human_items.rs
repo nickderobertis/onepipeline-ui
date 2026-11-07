@@ -2826,6 +2826,38 @@ fn a_bad_selector_is_refused_and_an_item_that_does_not_read_is_null() {
     assert_eq!(open.state["visible"], routes_answer(&server, &open.view));
 }
 
+/// A journal that cannot be read under an open tab sends nothing and retires
+/// nothing: the tab holds what it last showed, and the first poll that can read
+/// again sends what it missed, on the same stream, with no resubscription.
+#[test]
+fn an_open_view_rides_out_a_journal_it_cannot_read_and_catches_up_on_the_same_stream() {
+    let world = World::new();
+    raised(&world, "before", "task");
+    let server = world.serve(Some("manager-of-items"));
+    let mut tab = HumanItemsTab::open(&server, json!({ "type": "human-items" }));
+    let shown = tab.state["visible"].clone();
+
+    // The directory moved aside and a plain file left where it was, so every
+    // read the engine makes of it is refused, for several polls.
+    let directory = world.root.join("human-items");
+    let away = world.root.join("human-items.away");
+    std::fs::rename(&directory, &away).expect("take the items away");
+    std::fs::write(&directory, "not a directory").expect("a file in their place");
+    assert!(tab.drain().is_empty(), "a refused read sends nothing");
+    assert_eq!(tab.state["visible"], shown);
+
+    // Put back, with a change it has not read: a read that was refused was not
+    // forgotten, so the same stream carries it with nothing asked of the tab.
+    std::fs::remove_file(&directory).expect("remove the file");
+    std::fs::rename(&away, &directory).expect("put the items back");
+    raised(&world, "after", "task");
+    tab.until_current(&server);
+    assert_eq!(
+        tab.state["visible"]["items"].as_array().map(Vec::len),
+        Some(2)
+    );
+}
+
 /// A host that has not enabled human items refuses the view as it refuses every
 /// human-item route, and still serves every other view.
 #[test]

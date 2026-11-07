@@ -9,6 +9,7 @@
   },
   "workspaces": [
     "apps/*",
+    "apps/dag-ui-e2e/read-latency",
     "packages/*",
     ".github"
   ],
