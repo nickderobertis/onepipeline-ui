@@ -289,12 +289,15 @@ test("a node's mark refuses a wrong state, heading, plot or latest row, and pass
     [
       ["node-state", /state \w+, not \w+/u],
       ["node-heading", /parts present: false/u],
-      ["node-plot", /parts present: false|spans on the plot/u],
+      [
+        "node-plot",
+        /parts present: false|nothing on the plot|not under the plot/u,
+      ],
       ["node-latest-rows", /latest rows /u],
     ],
   );
   assert.ok(report.checked.rows > 0);
-  assert.ok(report.checked.plotted_spans > 0);
+  assert.ok(report.checked.plot_spans > 0);
 });
 
 test("today's client is held to the same values, and passes restored", async () => {

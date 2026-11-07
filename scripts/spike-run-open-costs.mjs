@@ -1098,6 +1098,14 @@ async function viewModels() {
   const model = await load("/src/features/timeline/timeline-model.ts");
   const percent = (time_, range) =>
     ((time_ - range[0]) / Math.max(range[1] - range[0], 1)) * 100;
+  const overOwnExtent = (spans) => {
+    const from = Math.min(...spans.map((span) => span.from));
+    const to = Math.max(...spans.map((span) => span.to));
+    return spans.map((span) => ({
+      from: percent(span.from, [from, to]),
+      to: percent(span.to, [from, to]),
+    }));
+  };
   /**
    * A line's spans wide enough to see, and the stretches it leaves blank. Below 0.1% of the
    * axis is under a pixel of a wide screen, and which of those hairlines a line keeps depends
@@ -1164,9 +1172,13 @@ async function viewModels() {
     return {
       label: opened.label,
       state: opened.status,
-      // The plot's spans; a first answer holds only the latest of the events marked on them.
-      plotted_spans: projection.items.filter((item) => spanIds.has(item.id))
-        .length,
+      // The plot's spans, over their own extent. A first answer holds only a node's latest
+      // events, so rows the complete read keeps apart can collapse into one that covers them.
+      plot: overOwnExtent(
+        projection.items
+          .filter((item) => spanIds.has(item.id))
+          .map((item) => ({ from: item.start, to: item.end ?? item.start })),
+      ),
       rows: model
         .transcriptEntries(projection.tree, new Set())
         .flatMap((entry) =>
@@ -1447,12 +1459,33 @@ function installMark({ view, run, cards, expected, moving, readAt }) {
       const plot = plotted(
         section?.querySelector('[aria-label="Node timeline"]'),
       );
-      if (
-        plot.length === 0 ||
-        (!moving && plot.length < expected.plotted_spans)
-      )
+      const from = Math.min(...plot.map((span) => span.from));
+      const to = Math.max(...plot.map((span) => span.to));
+      const spread = Math.max(to - from, 1e-9);
+      const held = plot
+        .map((span) => [
+          ((span.from - from) / spread) * 100,
+          ((span.to - from) / spread) * 100,
+        ])
+        .sort((one, other) => one[0] - other[0]);
+      const covered = [];
+      for (const [start, end] of held) {
+        const last = covered.at(-1);
+        if (last && start <= last[1] + TOLERANCE)
+          last[1] = Math.max(last[1], end);
+        else covered.push([start, end]);
+      }
+      const uncovered = expected.plot.filter(
+        (want) =>
+          !covered.some(
+            ([start, end]) =>
+              start <= want.from + TOLERANCE && end >= want.to - TOLERANCE,
+          ),
+      ).length;
+      if (plot.length === 0) problems.push("nothing on the plot");
+      else if (!moving && uncovered > 0)
         problems.push(
-          `${plot.length} spans on the plot, not ${expected.plotted_spans}`,
+          `${uncovered} of ${expected.plot.length} spans not under the plot`,
         );
       const rows = [
         ...document.querySelectorAll(
@@ -1690,7 +1723,7 @@ function checkedAtMark(view, expected) {
       line_hairlines_not_held: expected.line_hairlines,
       session_links: expected.session_links,
     };
-  return { plotted_spans: expected.plotted_spans, rows: expected.rows.length };
+  return { plot_spans: expected.plot.length, rows: expected.rows.length };
 }
 
 /** One first-screen measurement: navigation start to the mark, in a real browser. */

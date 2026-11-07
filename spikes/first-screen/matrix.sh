@@ -92,10 +92,15 @@ strong() {
       [ "${STRONG_TODAY:-1}" = 1 ] && m "today.$view.$name" "$@" --measure "first-$view" --client today --timeout 900
     done
     m "content.node.$name" "$@" --measure first-content-node --timeout 1500
+    # A node's answer changed with the mark, so its other two readings are retaken too.
+    m "first.node.$name.cold-cache" "$@" --measure first-node --cache cold --timeout 120
+    m "first.node.$name.fresh-server" "$@" --measure first-node --server fresh --timeout 300
   }
   each x strong_views
   local run=(--runs-root "$root" --cwd "$(dirname "$root")" --run "$largest")
   m first.node.largest-node "${run[@]}" --node "$largest_node" --measure first-node --timeout 120
+  m first.node.largest-node.cold-cache "${run[@]}" --node "$largest_node" --measure first-node --cache cold --timeout 120
+  m first.node.largest-node.fresh-server "${run[@]}" --node "$largest_node" --measure first-node --server fresh --timeout 300
   m content.node.largest-node "${run[@]}" --node "$largest_node" --measure first-content-node --timeout 1500
   [ "${STRONG_TODAY:-1}" = 1 ] && m today.node.largest-node "${run[@]}" --node "$largest_node" --measure first-node --client today --timeout 900
 }
