@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.70.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.70.0...v0.70.1) - 2026-11-07
+
+### Fixed
+
+- *(ci)* put real numbers in the onepipeline-ui budget report ([#676](https://github.com/nickderobertis/onepipeline-ui/pull/676))
+
 ## [0.70.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.69.0...v0.70.0) - 2026-11-07
 
 ### Fixed
