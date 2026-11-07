@@ -300,6 +300,14 @@ test("a node's mark refuses a wrong state, heading, plot or latest row, and pass
   assert.ok(report.checked.plot_spans > 0);
 });
 
+test("a moving run's mark still refuses a settled node's wrong state, and passes restored", async () => {
+  const report = await refusedThenRestored(
+    ["--run", RUN, "--measure", "first-graph", "--moving"],
+    [["graph-state", /state \w+, not \w+/u]],
+  );
+  assert.equal(report.moving, true);
+});
+
 test("today's client is held to the same values, and passes restored", async () => {
   const report = await refusedThenRestored(
     ["--run", RUN, "--measure", "first-overall", "--client", "today"],
