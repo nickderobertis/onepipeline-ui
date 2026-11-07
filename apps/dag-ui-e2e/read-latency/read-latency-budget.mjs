@@ -7,7 +7,8 @@
  * nothing: the threshold is the budgets file's. It runs no scenario.
  *
  *   node apps/dag-ui-e2e/read-latency/read-latency-budget.mjs \
- *     --metric human-items-requests|human-items-lag [--telemetry PATH]
+ *     --telemetry apps/dag-ui-e2e/read-latency/telemetry/read-latency.json \
+ *     --metric human-items-requests|human-items-lag
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -20,10 +21,12 @@ import { PAGES, telemetrySchema } from "./telemetry.ts";
 class UsageError extends Error {}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const RECORDED = resolve(HERE, "telemetry/read-latency.json");
+const ROOT = resolve(HERE, "../../..");
+const RECORDED = "apps/dag-ui-e2e/read-latency/telemetry/read-latency.json";
 const TARGET = "dag-ui-read-latency:test";
 
-function load(path) {
+function load(named) {
+  const path = resolve(ROOT, named);
   if (!existsSync(path))
     throw new Error(
       `no telemetry at ${path}; ACTION: run 'nx run ${TARGET}', which records it`,

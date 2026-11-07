@@ -17,7 +17,7 @@ budgets:
       human-items` CLI, spaced 3 s apart, none from this tab. Design requirement;
       telemetry analysis only, approximately 2 seconds.
     measure: reported
-    command: [node, read-latency-budget.mjs, --metric, human-items-requests]
+    command: [node, read-latency-budget.mjs, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, --metric, human-items-requests]
     unit: requests/min
     direction: max
     threshold: 0
@@ -34,7 +34,7 @@ budgets:
       `onepipeline human-items` CLI, spaced 3 s apart, none from this tab. Design
       bound; telemetry analysis only, approximately 2 seconds.
     measure: reported
-    command: [node, read-latency-budget.mjs, --metric, human-items-lag]
+    command: [node, read-latency-budget.mjs, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, --metric, human-items-lag]
     unit: seconds
     direction: max
     threshold: 3
