@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { humanItemListSchema } from "@onepipeline-ui/dag-model";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { type LiveCause, type LiveState, TelemetryClient } from "./index.js";
@@ -464,10 +465,12 @@ test("refuses a frame from another epoch, and a patch moving a payload to anothe
 
 test("patches a human-items view, and refuses what would leave it no such view", async () => {
   const harnessed = harness();
-  const { items } = JSON.parse(
-    readFileSync(
-      new URL("../../../tests/fixtures/human-items.json", import.meta.url),
-      "utf8",
+  const { items } = humanItemListSchema.parse(
+    JSON.parse(
+      readFileSync(
+        new URL("../../../tests/fixtures/human-items.json", import.meta.url),
+        "utf8",
+      ),
     ),
   );
   const [first, second] = items;
