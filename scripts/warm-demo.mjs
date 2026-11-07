@@ -11,7 +11,21 @@ const temp = process.env.RUNNER_TEMP;
 const action = join(temp, "rust-cache");
 const stateFile = join(temp, "rust-cache-state.json");
 const fingerprints = join(temp, "fingerprints.json");
-const INPUTS = { "INPUT_SHARED-KEY": process.env.DEMO_SHARED_KEY, "INPUT_SAVE-IF": "true" };
+// action.yml's defaults at v2.9.2, as the runner would hand them to the action.
+const INPUTS = {
+  "INPUT_PREFIX-KEY": "v0-rust",
+  "INPUT_SHARED-KEY": process.env.DEMO_SHARED_KEY,
+  "INPUT_ADD-JOB-ID-KEY": "true",
+  "INPUT_ADD-RUST-ENVIRONMENT-HASH-KEY": "true",
+  "INPUT_CACHE-TARGETS": "true",
+  "INPUT_CACHE-ALL-CRATES": "false",
+  "INPUT_CACHE-WORKSPACE-CRATES": "false",
+  "INPUT_SAVE-IF": "true",
+  "INPUT_CACHE-PROVIDER": "github",
+  "INPUT_CACHE-BIN": "true",
+  "INPUT_LOOKUP-ONLY": "false",
+  "INPUT_CMD-FORMAT": "{0}",
+};
 
 function dead(extra) {
   const { ACTIONS_RUNTIME_TOKEN: _token, ...env } = process.env;
