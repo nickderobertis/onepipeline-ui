@@ -117,14 +117,20 @@ const leg = (name) => workflow("ci-cache").jobs[name];
 // The step's own command and its own environment, as the runner would start them.
 async function cleanup(name, host) {
   const step = cleanupStep(leg(name));
-  return run("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run], {
-    env: {
-      PATH: process.env.PATH,
-      GITHUB_API_URL: host.api,
-      GITHUB_REPOSITORY: REPO,
-      GH_TOKEN: interpolate(step.env.GH_TOKEN, { github: { token: "token" } }),
+  return run(
+    "bash",
+    ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run],
+    {
+      env: {
+        PATH: process.env.PATH,
+        GITHUB_API_URL: host.api,
+        GITHUB_REPOSITORY: REPO,
+        GH_TOKEN: interpolate(step.env.GH_TOKEN, {
+          github: { token: "token" },
+        }),
+      },
     },
-  });
+  );
 }
 async function headroom(host, scratch) {
   const out = join(scratch, `headroom-${Date.now()}-${Math.random()}.json`);
@@ -156,8 +162,20 @@ test("a warm leg's own cleanup command leaves superseded copies and keeps main's
   // A later copy saved under a pull request's ref and a tag's must not count as the
   // newest: a pull request cannot restore those, and neither can main's next run.
   const foreign = [
-    { ...main, id: 1, key: `${rust}pull`, ref: "refs/pull/1/merge", created_at: "2026-11-07T10:00:00Z" },
-    { ...main, id: 2, key: `${rust}tag`, ref: "refs/heads/refs/tags/v0.69.0", created_at: "2026-11-07T11:00:00Z" },
+    {
+      ...main,
+      id: 1,
+      key: `${rust}pull`,
+      ref: "refs/pull/1/merge",
+      created_at: "2026-11-07T10:00:00Z",
+    },
+    {
+      ...main,
+      id: 2,
+      key: `${rust}tag`,
+      ref: "refs/heads/refs/tags/v0.69.0",
+      created_at: "2026-11-07T11:00:00Z",
+    },
   ];
   const host = await github([...entries, ...foreign]);
   try {
@@ -180,7 +198,8 @@ test("a warm leg's own cleanup command leaves superseded copies and keeps main's
     );
     // Only the families this leg names: another leg's copies and every result stay.
     assert.equal(
-      host.state.entries.filter((entry) => entry.key.startsWith("nx-cache-")).length,
+      host.state.entries.filter((entry) => entry.key.startsWith("nx-cache-"))
+        .length,
       results.length,
     );
     assert.equal(host.family("v0-rust-test-windows-").length, 1);
@@ -202,7 +221,10 @@ test("a failed cleanup deletes nothing and leaves the leg green", async () => {
 
 test("cycles of cleanup then save never leave a family over two copies, a cancelled run among them", async () => {
   const scratch = mkdtempSync(
-    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(), "cleanup-cycles-"),
+    join(
+      process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(),
+      "cleanup-cycles-",
+    ),
   );
   const host = await github(recorded.actions_caches);
   const legs = Object.keys(LEG_FAMILIES);
@@ -238,11 +260,14 @@ test("cycles of cleanup then save never leave a family over two copies, a cancel
     });
     await warmRun(3, { saved: allOf(...legs) });
     await warmRun(4, { saved: allOf("warm-linux", "warm-macos") });
-    for (const family of named) assert.ok(host.family(family).length > 0, family);
+    for (const family of named)
+      assert.ok(host.family(family).length > 0, family);
     // The newest copy of every family is the last one saved, so the next pull request
     // still restores it, and nothing here touched a test result.
     assert.ok(
-      host.family("v0-rust-test-linux-Linux-x64-").some((entry) => entry.key.endsWith("lock-4")),
+      host
+        .family("v0-rust-test-linux-Linux-x64-")
+        .some((entry) => entry.key.endsWith("lock-4")),
     );
     assert.deepEqual(
       host.state.deleted.filter((entry) => entry.key.startsWith("nx-cache-")),
@@ -260,20 +285,29 @@ test("cycles of cleanup then save never leave a family over two copies, a cancel
 
 test("the budget's own command reads 0 when a family it names holds more than a working cleanup leaves", async () => {
   const scratch = mkdtempSync(
-    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(), "cleanup-headroom-"),
+    join(
+      process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(),
+      "cleanup-headroom-",
+    ),
   );
   const host = await github(recorded.actions_caches);
   try {
     const { value, detail } = await headroom(host, scratch);
     assert.equal(value, 0);
-    assert.match(detail, /family onepipeline-api-baseline-Linux-X64- holds 4 entries/);
+    assert.match(
+      detail,
+      /family onepipeline-api-baseline-Linux-X64- holds 4 entries/,
+    );
     await cleanup("warm-linux", host);
     const after = await headroom(host, scratch);
     const listed = host.state.entries.reduce(
       (sum, entry) => sum + entry.size_in_bytes,
       0,
     );
-    assert.equal(after.value, Math.round(((10737418240 - listed) / 1e9) * 1000) / 1000);
+    assert.equal(
+      after.value,
+      Math.round(((10737418240 - listed) / 1e9) * 1000) / 1000,
+    );
   } finally {
     await host.close();
     rmSync(scratch, { recursive: true, force: true });
@@ -369,11 +403,14 @@ test("each warm leg deletes target on an inexact restore and keeps it on an exac
     const job = leg(name);
     const step = targetDeletion(job);
     const taken = (hit) =>
-      interpolate(`\${{ ${step.if} }}`, {
+      interpolate(`$${"{{"} ${step.if} }}`, {
         steps: { [rustCacheId(job)]: { outputs: { "cache-hit": hit } } },
       });
     const scratch = mkdtempSync(
-      join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(), "warm-target-"),
+      join(
+        process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(),
+        "warm-target-",
+      ),
     );
     try {
       for (const [hit, expected] of [
@@ -383,8 +420,14 @@ test("each warm leg deletes target on an inexact restore and keeps it on an exac
         mkdirSync(join(scratch, "target/debug"), { recursive: true });
         writeFileSync(join(scratch, "target/debug/unit"), "built");
         if (taken(hit))
-          await run("bash", ["--noprofile", "--norc", "-c", step.run], { cwd: scratch });
-        assert.equal(existsSync(join(scratch, "target")), expected, `${name}, cache-hit ${hit}`);
+          await run("bash", ["--noprofile", "--norc", "-c", step.run], {
+            cwd: scratch,
+          });
+        assert.equal(
+          existsSync(join(scratch, "target")),
+          expected,
+          `${name}, cache-hit ${hit}`,
+        );
       }
     } finally {
       rmSync(scratch, { recursive: true, force: true });

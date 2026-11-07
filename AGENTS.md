@@ -199,6 +199,18 @@ graph (`.github/tests/ci-warm.test.mjs`), so a recipe whose cargo arguments or
 target directory change must change its warm line too. Its macOS job is the one
 Mac run a merge adds, which the macOS runs-per-change budget accounts for.
 
+**Room for a warm run's saves is what keeps proven results.** GitHub evicts by last
+read once a save crosses 10 GiB, so a results entry goes the moment a Rust save lands
+without room, whatever cleanup runs after. A warm leg therefore builds cold after any
+restore that is not its key's own and deletes its families' superseded copies as its
+last ordinary step; `onepipeline-ui-cache-headroom` holds the room. A new family a
+warm run or `release-plz` saves joins a leg's cleanup and the budget's command
+together (`.github/tests/ci-warm.test.mjs`). A cached target runs tools at the exact
+versions in `.github/ci-tool-versions`, which the `platform` input hashes into every
+cached target, so a tool a job newly installs goes there rather than floating.
+`default` stops at the frontend's own inputs; a task that reads the crate's manifests
+names `crateInputs` or `cargoVersionFree`.
+
 **`.tools/` holds a second clone-local binary, and it is the server this branch
 forked from.** `tests/e2e/baseline.rs` asks whether every field the base commit
 served is served now — a question no fixture on a branch can answer, because a
@@ -287,18 +299,19 @@ fans one uniformly-named target across all of them.
   file installed and run before it publishes, and read back from its registry
   after.
 <!-- llmlint: ignore-block[agents_md_durable_and_terse] the budgets' ids and labels are named here on purpose: this is where a maintainer learns which label decides where each budget is checked (publish's last step or the gate) and that the release-tail ones block nothing, which budgets.yaml's entries cannot say about each other. -->
-- **Nine budgets hold CI, CD and the local gate to their lines** (root
-  `budgets.yaml`, read from telemetry). The eight `release-tail` ones —
+- **Ten budgets hold CI, CD and the local gate to their lines** (root
+  `budgets.yaml`, read from telemetry). The nine `release-tail` ones —
   `onepipeline-ui-ci-check-time`, `-cd-job-time`, `-release-cycle-time`,
-  `-ci-job-count`, `-cd-job-count`, `-release-read-requests` and
-  `-pr-read-requests` and `-nx-cache-use` — are reported by `publish`'s last step and read by
+  `-ci-job-count`, `-cd-job-count`, `-release-read-requests`,
+  `-pr-read-requests`, `-nx-cache-use` and `-cache-headroom` — are reported by `publish`'s last step and read by
   nothing, so an overrun turns that step red and never blocks, demotes or reverts
   a release. `onepipeline-ui-gate-time` (`host-variable`) is checked by `just
   gate` itself, whose whole body runs inside `scripts/gate-time.sh`: over is a
   warning, an unmeasurable budget fails the gate. At pull-request time a job's
   `timeout-minutes` is the line; any other check of the root file excludes both
   labels. The seven host figures reach GitHub through `onevcs host`; cache-use reads
-  CI reports and promotion receipts through GitHub's API directly. Both use
+  CI reports and promotion receipts, and cache-headroom the live cache listing, through
+  GitHub's API directly. All use
   `scripts/actions-budget-figures.sh`, a copy of dero-skills' create-repo source
   that is edited only there.
 <!-- llmlint: ignore-end[agents_md_durable_and_terse] -->

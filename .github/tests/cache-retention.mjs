@@ -22,13 +22,22 @@ export const LEG_FAMILIES = {
     "onepipeline-cli-macOS-ARM64-",
   ],
 };
-export const PULL_REQUEST_JOBS = ["lint", "test-linux", "test-windows", "test-macos"];
+export const PULL_REQUEST_JOBS = [
+  "lint",
+  "test-linux",
+  "test-windows",
+  "test-macos",
+];
 export const COPIES = [
   ["scripts/actions-cache-prune.mjs", "scripts/actions-cache-prune.versions"],
-  ["scripts/actions-budget-figures.sh", "scripts/actions-budget-figures.versions"],
+  [
+    "scripts/actions-budget-figures.sh",
+    "scripts/actions-budget-figures.versions",
+  ],
   ["scripts/nx-remote-cache.mjs", "scripts/nx-remote-cache.versions"],
 ];
 const CLEANUP = "actions-cache-prune.mjs";
+const expression = (body) => `$${"{{"} ${body} }}`;
 
 export const cleanupStep = (job) =>
   (job?.steps ?? []).find((step) => step.run?.includes(CLEANUP));
@@ -80,7 +89,10 @@ export function retentionProblems(workflows, budgets, forkPullRequest) {
   const warm = workflows["ci-cache.yml"];
   if (JSON.stringify(warm?.on) !== '{"push":{"branches":["main"]}}')
     problems.push("ci-cache.yml runs on more than a push to main");
-  if (!warm?.concurrency?.group || warm.concurrency["cancel-in-progress"] !== false)
+  if (
+    !warm?.concurrency?.group ||
+    warm.concurrency["cancel-in-progress"] !== false
+  )
     problems.push("ci-cache.yml is not held to one run at a time");
   for (const [name, families] of Object.entries(LEG_FAMILIES)) {
     const job = warm?.jobs?.[name];
@@ -95,21 +107,26 @@ export function retentionProblems(workflows, budgets, forkPullRequest) {
     const named = cleanupFamilies(cleanup);
     if (JSON.stringify(named) !== JSON.stringify(families))
       problems.push(`${name}'s cleanup names ${JSON.stringify(named)}`);
-    if (job.permissions?.actions !== "write" || job.permissions?.contents !== "read")
+    if (
+      job.permissions?.actions !== "write" ||
+      job.permissions?.contents !== "read"
+    )
       problems.push(`${name} does not hold exactly its cleanup's permissions`);
-    if (cleanup.env?.GH_TOKEN !== "${{ github.token }}")
+    if (cleanup.env?.GH_TOKEN !== expression("github.token"))
       problems.push(`${name}'s cleanup is not handed the token`);
     for (const step of steps)
       if (step !== cleanup && tokenHandedTo(step))
         problems.push(`${name} hands the token to '${step.name ?? step.uses}'`);
-    const checkout = steps.find((step) => step.uses?.startsWith("actions/checkout@"));
+    const checkout = steps.find((step) =>
+      step.uses?.startsWith("actions/checkout@"),
+    );
     if (checkout?.with?.["persist-credentials"] !== false)
       problems.push(`${name}'s checkout persists credentials`);
     const id = rustCacheId(job);
     const drop = targetDeletion(job);
     const takes = (hit) => {
       try {
-        return interpolate(`\${{ ${drop?.if} }}`, {
+        return interpolate(expression(drop?.if), {
           steps: { [id]: { outputs: { "cache-hit": hit } } },
         });
       } catch {
@@ -123,9 +140,13 @@ export function retentionProblems(workflows, budgets, forkPullRequest) {
       takes("true") !== false ||
       takes("false") !== true
     )
-      problems.push(`${name} does not delete target on its own inexact restore`);
+      problems.push(
+        `${name} does not delete target on its own inexact restore`,
+      );
   }
-  const budget = budgets.find((entry) => entry.id === "onepipeline-ui-cache-headroom");
+  const budget = budgets.find(
+    (entry) => entry.id === "onepipeline-ui-cache-headroom",
+  );
   const budgeted = (budget?.command ?? [])
     .filter((_, at, all) => all[at - 1] === "--family")
     .sort();
@@ -162,15 +183,22 @@ export function retentionProblems(workflows, budgets, forkPullRequest) {
     const on = workflow?.on;
     const pullRequest =
       on === "pull_request" ||
-      (Array.isArray(on) ? on.includes("pull_request") : on?.pull_request !== undefined);
+      (Array.isArray(on)
+        ? on.includes("pull_request")
+        : on?.pull_request !== undefined);
     if (!pullRequest) continue;
     const granted = [
       ["its workflow", workflow.permissions],
-      ...Object.entries(workflow.jobs ?? {}).map(([id, job]) => [id, job.permissions]),
+      ...Object.entries(workflow.jobs ?? {}).map(([id, job]) => [
+        id,
+        job.permissions,
+      ]),
     ];
     for (const [where, permissions] of granted)
       if (permissions === "write-all" || permissions?.actions === "write")
-        problems.push(`${file} grants actions: write to ${where}, which a pull request runs`);
+        problems.push(
+          `${file} grants actions: write to ${where}, which a pull request runs`,
+        );
   }
   return problems;
 }
@@ -193,7 +221,9 @@ export function copyProblems(read) {
     if (body !== header) problems.push(`${path} does not match its header`);
     const last = read(versions).trim().split("\n").at(-1);
     if (last !== `${version} ${header}`)
-      problems.push(`${path} is version ${version}, ${versions} ends at ${last}`);
+      problems.push(
+        `${path} is version ${version}, ${versions} ends at ${last}`,
+      );
   }
   return problems;
 }
@@ -208,7 +238,7 @@ export function parsePins(text) {
       .map((line) => line.split("=")),
   );
 }
-const pinned = (name) => `\${{ steps.tool-pins.outputs.${name} }}`;
+const pinned = (name) => expression(`steps.tool-pins.outputs.${name}`);
 
 // Every install in the workflows a cached test target's tools come through, each at the
 // tracked file's exact version and after the step that reads it.
@@ -216,7 +246,8 @@ export function pinProblems(workflows, pinsText) {
   const pins = parsePins(pinsText);
   const problems = [];
   for (const [name, version] of pins)
-    if (!EXACT.test(version)) problems.push(`pin ${name} is not exact: ${version}`);
+    if (!EXACT.test(version))
+      problems.push(`pin ${name} is not exact: ${version}`);
   const owed = (where, name, given) => {
     if (given !== pinned(name) || !pins.has(name))
       problems.push(`${where} installs ${name} at ${given}, not its pin`);

@@ -818,7 +818,10 @@ const uses = (prefix) => (step) => step.uses?.startsWith(prefix);
 
 test("the warm legs, the budget and the pull-request jobs hold the cache's room", () => {
   assert.deepEqual(retention(), []);
-  assert.deepEqual(copyProblems((path) => readFileSync(path, "utf8")), []);
+  assert.deepEqual(
+    copyProblems((path) => readFileSync(path, "utf8")),
+    [],
+  );
 });
 
 test("each way of losing that room is refused", () => {
@@ -870,7 +873,9 @@ test("each way of losing that room is refused", () => {
       "a pull-request job stops restoring",
       (w) => {
         const job = w["ci.yml"].jobs.lint;
-        job.steps = job.steps.filter((step) => !uses("Swatinem/rust-cache@")(step));
+        job.steps = job.steps.filter(
+          (step) => !uses("Swatinem/rust-cache@")(step),
+        );
       },
       /ci\.yml's lint does not restore a Rust build/,
     ],
@@ -915,9 +920,8 @@ test("each way of losing that room is refused", () => {
     [
       "a leg's checkout persists credentials",
       (w) => {
-        delete stepOf(warmJob(w, "warm-windows"), uses("actions/checkout@")).with[
-          "persist-credentials"
-        ];
+        delete stepOf(warmJob(w, "warm-windows"), uses("actions/checkout@"))
+          .with["persist-credentials"];
       },
       /warm-windows's checkout persists credentials/,
     ],
@@ -926,15 +930,17 @@ test("each way of losing that room is refused", () => {
       (w) => {
         stepOf(warmJob(w, "warm-linux"), (step) =>
           step.run?.includes("ci-warm-linux"),
-        ).env = { GITHUB_TOKEN: "${{ github.token }}" };
+        ).env = { GITHUB_TOKEN: `$${"{{"} github.token }}` };
       },
       /warm-linux hands the token to 'Compile what lint and test-linux compile'/,
     ],
     [
       "setup-bun's guard goes",
       (w) => {
-        delete stepOf(w["ci.yml"].jobs["test-windows"], uses("oven-sh/setup-bun@"))
-          .with["no-cache"];
+        delete stepOf(
+          w["ci.yml"].jobs["test-windows"],
+          uses("oven-sh/setup-bun@"),
+        ).with["no-cache"];
       },
       /test-windows writes a cache from a fork: oven-sh\/setup-bun/,
     ],
@@ -960,8 +966,10 @@ test("each way of losing that room is refused", () => {
     [
       "a setup action turns its own cache on",
       (w) => {
-        stepOf(w["ci.yml"].jobs["test-macos"], uses("actions/setup-node@")).with.cache =
-          "npm";
+        stepOf(
+          w["ci.yml"].jobs["test-macos"],
+          uses("actions/setup-node@"),
+        ).with.cache = "npm";
       },
       /test-macos writes a cache from a fork: actions\/setup-node/,
     ],
@@ -969,7 +977,9 @@ test("each way of losing that room is refused", () => {
       "a leg loses its target deletion",
       (w) => {
         const job = warmJob(w, "warm-macos");
-        job.steps = job.steps.filter((step) => !step.run?.includes("rm -rf target"));
+        job.steps = job.steps.filter(
+          (step) => !step.run?.includes("rm -rf target"),
+        );
       },
       /warm-macos does not delete target on its own inexact restore/,
     ],
@@ -1049,7 +1059,10 @@ test("every tool ci.yml and ci-cache.yml install is at the tracked file's exact 
   ])
     assert.match(
       justfile,
-      new RegExp(`^${variable} := "${parsed.get(pin).replaceAll(".", "\\.")}"$`, "m"),
+      new RegExp(
+        `^${variable} := "${parsed.get(pin).replaceAll(".", "\\.")}"$`,
+        "m",
+      ),
       `${pin}'s pin has left the justfile's ${variable}`,
     );
   for (const [name, mutate, expected] of [

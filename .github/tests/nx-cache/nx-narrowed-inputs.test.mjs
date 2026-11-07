@@ -42,7 +42,8 @@ test("a real dependency change moves every task that reads the crate's manifests
       ],
       [
         "Cargo.lock",
-        (text) => text.replace(/(name = "serde"\nversion = ")[^"]+/, "$11.0.999"),
+        (text) =>
+          text.replace(/(name = "serde"\nversion = ")[^"]+/, "$11.0.999"),
       ],
     ]) {
       const after = edit(cwd, file, change, () => taskHashes(cwd, ids));
@@ -108,7 +109,8 @@ test("a tool's version moves every cached target, explicit inputs that omit the 
       const after = edit(
         cwd,
         ".github/ci-tool-versions",
-        (text) => text.replace(new RegExp(`^${tool}=.*$`, "m"), `${tool}=9.9.9`),
+        (text) =>
+          text.replace(new RegExp(`^${tool}=.*$`, "m"), `${tool}=9.9.9`),
         () => taskHashes(cwd, ids),
       );
       assert.deepEqual(moved(before, after).sort(), [...ids].sort(), tool);

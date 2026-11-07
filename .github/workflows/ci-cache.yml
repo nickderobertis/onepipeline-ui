@@ -6,14 +6,21 @@ name: CI cache
 # OS's pull-request jobs compile (`scripts/ci-warm.sh` holds the list), runs no
 # test, and saves under the key those jobs restore — `test-linux` for `lint` and
 # `test-linux`, `test-windows` for `test-windows`, `test-macos` for `test-macos`.
-# Each restores its own previous save first, so a push rebuilds only what it
-# changed.
+# Each restores its own previous save first. An exact restore is reused, so a push
+# rebuilds only what it changed. Any other restore deletes `target` and builds cold:
+# a lock or toolchain move would otherwise save the old lock's units again, which
+# were 69% of Linux's bytes and 77% of Windows' when last measured.
+#
+# Each leg's last ordinary step deletes its families' superseded copies, keeping
+# the newest on `main`, so it never removes the only copy and a family holds at most
+# the previous copy and the one this run's post step saves. That cleanup comes before
+# the save, so room for the save is what `onepipeline-ui-cache-headroom` holds: GitHub
+# evicts whatever was read longest ago, test results included, once a save crosses
+# the line. Each leg holds `actions: write` for that step alone to be handed.
 #
 # The keys carry the names main's own builds were saved under before this
 # workflow existed, when each pull-request job saved its build keyed by its job
-# id (`v0-rust-test-linux-…`, `v0-rust-test-windows-…`). So a pull request opened
-# before this workflow first runs restores those, and the first push here
-# restores them too. rust-cache never re-saves a key it restored exactly, and
+# id (`v0-rust-test-linux-…`, `v0-rust-test-windows-…`). rust-cache never re-saves a key it restored exactly, and
 # drops the workspace's own crates before saving, so the entry it keeps is the
 # dependency build for one Cargo.lock: this workflow writes a new one each time
 # the lockfile or the toolchain moves.
@@ -243,7 +250,8 @@ jobs:
 
   # Not on the push that merges release-plz's release pull request: that commit
   # changes the version and the changelog alone, and a Mac job there is one more
-  # Mac run a release would start (.github/budgets.yaml).
+  # Mac run a release would start, which the macOS budget of 4 runs per change
+  # cannot hold (.github/budgets.yaml).
   warm-macos:
     if: "!startsWith(github.event.head_commit.message, 'chore: release v')"
     runs-on: macos-latest
