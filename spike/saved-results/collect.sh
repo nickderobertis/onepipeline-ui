@@ -3,7 +3,7 @@
 #   spike/saved-results/collect.sh <run-id> [out-dir]
 set -uo pipefail
 run="$1"; out="${2:-$(mktemp -d)}"; repo=nickderobertis/onepipeline-ui; mkdir -p "$out"
-echo "# run $run"; gh api "repos/$repo/actions/runs/$run" --jq '{event,head_sha:.head_sha[0:10],attempt:.run_attempt,status,conclusion,head_branch}' -c
+echo "# run $run"; gh api "repos/$repo/actions/runs/$run" --jq '[.event,.head_sha[0:10],.run_attempt,.status,.conclusion,.head_branch]|@tsv'
 gh api "repos/$repo/actions/runs/$run/jobs?per_page=100" > "$out/jobs.json"
 echo "## job seconds"
 jq -r '.jobs[] | [.name,.conclusion,(((.completed_at//.started_at)|fromdate)-(.started_at|fromdate))] | @tsv' "$out/jobs.json"
@@ -24,13 +24,15 @@ echo "## job's own telemetry"
 jq -c '.metrics|map_values(.value)' "$out/budget-results/report-job.json" 2>/dev/null
 jq -r '.metrics["report-command-seconds"].detail' "$out/budget-results/report-job.json" 2>/dev/null
 echo "## budget rows"
-jq -r '.results|to_entries[]|[.key,.value.verdict,.value.actual,.value.threshold]|@tsv' "$out/budget-results/budget-run.json" 2>/dev/null
-jq -r '.unavailable|to_entries[]|[.key,"unavailable",(.value.reason//.value|tostring)]|@tsv' "$out/budget-results/budget-run.json" 2>/dev/null
+jq -r '.results.results[]|[.id,.verdict,.actual,.threshold]|@tsv' "$out/budget-results/budget-run.json" 2>/dev/null
+jq -r '.unavailable[]|[.id,"unavailable",(.reason[0:90])]|@tsv' "$out/budget-results/budget-run.json" 2>/dev/null
 echo "## budgets tasks in the Nx cache report"
-grep -rhE 'budgets' "$out/nx-cache-entries-test-linux" 2>/dev/null | cut -c1-400
+jq -c '.tasks[]|select(.task|test("budgets"))|{task,hash,cacheable,result,remote_status}' "$out/nx-cache-entries-test-linux/executions.json" 2>/dev/null
+jq -c '[.tasks[].result]|group_by(.)|map({(.[0]):length})' "$out/nx-cache-entries-test-linux/executions.json" 2>/dev/null
+jq -c '{entries:(.entries|group_by(.source)|map({(.[0].source):length})),stored_bytes}' "$out/nx-cache-entries-test-linux/manifest.json" 2>/dev/null
 echo "## logs"
 gh api "repos/$repo/actions/runs/$run/jobs?per_page=100" --jq '.jobs[]|select(.name=="test-linux" or .name=="budgets")|[.id,.name]|@tsv' | while IFS=$'\t' read -r id name; do
-  gh api "repos/$repo/actions/jobs/$id/logs" > "$out/$name.log" 2>/dev/null
+  gh api --allow-escape-sequences "repos/$repo/actions/jobs/$id/logs" > "$out/$name.log" 2>/dev/null
   echo "### $name"
-  grep -E 'ci-job: |SPIKE|reads: |pulls: |runs: |artifacts: |archive: |TOTAL_REST|result: |CI-time requests|== |[a-z-]+:budgets|budgets-host|existing outputs match|Nx read the output|\.json .* bytes|target/budget-results|Artifact .* (uploaded|size)|download' "$out/$name.log" | cut -c29-300 | grep -v 'run: \|^ *#' | head -70
+  grep -E 'ci-job: |SPIKE (upload|download) bracket|reads: |TOTAL_REST|result: |CI-time requests|^.{28} == |Nx read the output|\.json [0-9]+ bytes|target/budget-results/[a-z-]+\.json|[0-9]+\s+target/budget-results|Artifact budget-check.*uploaded|existing outputs match|No files were found' "$out/$name.log" | cut -c29-420 | grep -v '36;1m'
 done
