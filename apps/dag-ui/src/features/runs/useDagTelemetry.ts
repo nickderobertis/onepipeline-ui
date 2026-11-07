@@ -14,13 +14,18 @@ import {
   TelemetryClientError,
 } from "@onepipeline-ui/telemetry-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  HumanItemsView,
+  LiveHumanItems,
+} from "../../lib/live-human-items";
 import { newestRows } from "../../lib/sidebar-model";
 
 // llmlint: ignore-file[changed_behavior_has_e2e] The browser journeys in
 // apps/dag-ui-e2e/dag-ui-live-updates.spec.ts drive every branch a conforming
 // server reaches against the real one: the opening snapshot, a run.changed row
 // for another run, a detail, timeline and channel patch for the open run, a
-// switch of view replacing the subscription, and a stream dropped and resumed.
+// switch of view replacing the subscription, and a stream dropped and resumed;
+// apps/dag-ui-e2e/dag-ui-human-items.spec.ts drives Action items on the same one.
 // What only a broken peer reaches — a frame that fails validation, a patch that
 // does not apply — is proven in App.test.tsx at the browser boundary.
 
@@ -42,6 +47,11 @@ export interface DagTelemetryOptions {
   readonly selectFirst: boolean;
   /** The Host page subscribes to the sidebar alone. */
   readonly host: boolean;
+  /**
+   * The view Action items shows, which takes the place of the sidebar-only
+   * subscription and still carries the sidebar.
+   */
+  readonly humanItems?: HumanItemsView;
 }
 
 export interface DagTelemetryState {
@@ -52,6 +62,7 @@ export interface DagTelemetryState {
   readonly detail?: RunDetail;
   readonly timeline?: RunTimeline;
   readonly channel?: ChannelQueue;
+  readonly humanItems: LiveHumanItems;
   /**
    * A timeline view the server would not subscribe, reported where the timeline
    * would have been, beside the detail already on screen.
@@ -99,14 +110,23 @@ export function useDagTelemetry(
           : undefined;
   const view = useMemo(
     () =>
+      options.humanItems ??
       subscriptionView(
         options.host ? undefined : runId,
         options.view,
         options.nodeId,
         options.filter,
       ),
-    [options.host, runId, options.view, options.nodeId, options.filter],
+    [
+      options.humanItems,
+      options.host,
+      runId,
+      options.view,
+      options.nodeId,
+      options.filter,
+    ],
   );
+  const [humanItems, setHumanItems] = useState<LiveHumanItems>({});
   const live = useRef<LiveView | undefined>(undefined);
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -118,6 +138,17 @@ export function useDagTelemetry(
       view: viewRef.current,
       onState: (next, cause) => {
         setState(next);
+        if (next.visible.type === "human-items") {
+          const { items, detail } = next.visible;
+          const shown = subscription.view;
+          setHumanItems({
+            items,
+            detail,
+            ...(shown.type === "human-items" && shown.item !== undefined
+              ? { item: shown.item }
+              : {}),
+          });
+        }
         setLastUpdated(new Date().toISOString());
         setError(undefined);
         setStreamError(undefined);
@@ -125,6 +156,17 @@ export function useDagTelemetry(
           setNotice(`The live view was re-sent whole: ${cause.reason}.`);
       },
       onError: (caught) => {
+        // Action items that cannot be served are the page's to say, in the
+        // engine's words and beside what it last showed, and the tab still
+        // carries the sidebar, as a host with none enabled must.
+        if (subscription.view.type === "human-items") {
+          setHumanItems((held) => ({
+            ...(held.items === undefined ? {} : { items: held.items }),
+            error: caught.message,
+          }));
+          subscription.change({ type: "sidebar" });
+          return;
+        }
         // A run the address names that is not served is not an error: the
         // sidebar is subscribed to instead, and the newest run is opened.
         if (
@@ -149,6 +191,8 @@ export function useDagTelemetry(
 
   useEffect(() => {
     live.current?.change(view);
+    if (view.type !== "human-items")
+      setHumanItems((held) => (Object.keys(held).length === 0 ? held : {}));
   }, [view]);
 
   const refresh = useCallback(() => {
@@ -160,6 +204,7 @@ export function useDagTelemetry(
   const shown =
     visible !== undefined &&
     visible.type !== "sidebar" &&
+    visible.type !== "human-items" &&
     visible.run_id === runId &&
     sameView(visible, view)
       ? visible
@@ -179,6 +224,7 @@ export function useDagTelemetry(
     detail,
     timeline: shown && "timeline" in shown ? shown.timeline : undefined,
     channel: shown && "channel" in shown ? shown.channel : undefined,
+    humanItems,
     timelineError: timelineRefused ? error : undefined,
     loading: state === undefined && error === undefined,
     lastUpdated,
@@ -220,7 +266,7 @@ function subscriptionView(
 
 /** Whether the visible state the server sent is the view the page asks for. */
 function sameView(
-  visible: Exclude<LiveState["visible"], { type: "sidebar" }>,
+  visible: Exclude<LiveState["visible"], { type: "sidebar" | "human-items" }>,
   view: SubscriptionView,
 ): boolean {
   if (view.type !== visible.type) return false;

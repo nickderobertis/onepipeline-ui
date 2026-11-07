@@ -34,6 +34,7 @@ import { DagGraph } from "../features/graph/DagGraph";
 import { HostPage } from "../features/host/HostPage";
 import { useHostListing } from "../features/host/useHostListing";
 import { HumanItemsPage } from "../features/human-items/HumanItemsPage";
+import { useHumanItemsSelection } from "../features/human-items/useHumanItems";
 import { RunNavigation } from "../features/navigation/RunNavigation";
 import { useDagTelemetry } from "../features/runs/useDagTelemetry";
 import {
@@ -98,9 +99,11 @@ export function App({
 }) {
   const selection = useUrlSelection();
   // The action-items page is a view of the host's attention rather than of a
-  // run, so while it is open nothing picks a run and the sidebar alone is read.
+  // run, so while it is open nothing picks a run: its subscription carries the
+  // sidebar and the items, and nothing of any run.
   const humanItems = useHumanItemsRoute();
   const runless = selection.host || humanItems.active;
+  const humanItemsSelection = useHumanItemsSelection(humanItems.active);
   // The reading the viewer asked for, as the filter profile the server names it
   // by. Every payload this app shows is read under it, so the graph, the
   // timeline and the pushed changes can never be three different slices of one
@@ -122,6 +125,7 @@ export function App({
     // page, which picks none itself; a run the address already names stays read.
     selectFirst: !runless,
     host: runless,
+    humanItems: humanItemsSelection.view,
   });
   const rows = telemetry.rows;
   const selectedRunId = telemetry.runId;
@@ -347,7 +351,14 @@ export function App({
             state={hostShutdowns.host.state}
           />
           {humanItems.active ? (
-            <HumanItemsPage client={client} refresh={hostRefresh} />
+            <HumanItemsPage
+              client={client}
+              live={telemetry.humanItems}
+              choice={humanItemsSelection.choice}
+              setChoice={humanItemsSelection.setChoice}
+              selectedId={humanItemsSelection.selectedId}
+              setSelectedId={humanItemsSelection.setSelectedId}
+            />
           ) : selection.host ? (
             <HostPage
               client={client}

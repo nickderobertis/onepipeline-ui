@@ -277,6 +277,15 @@ impl Traced {
 
     /// The same, over a workspace the caller already built, polling as it says.
     pub fn start_in(workspace: TempDir, poll_ms: u64) -> Self {
+        Self::start_with_environment(workspace, poll_ms, &[])
+    }
+
+    /// The same, with `environment` set on the server.
+    pub fn start_with_environment(
+        workspace: TempDir,
+        poll_ms: u64,
+        environment: &[(&str, &Path)],
+    ) -> Self {
         require_strace();
         let traces = tempfile::tempdir().expect("temp dir");
         let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
@@ -314,6 +323,7 @@ impl Traced {
                 onepipeline_ui::store::GRAPH_RECORDS_ENV,
                 fixture_run::graph_records_for(&runs),
             )
+            .envs(environment.iter().copied())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()

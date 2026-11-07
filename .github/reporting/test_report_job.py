@@ -43,7 +43,7 @@ TARGETS = {('Linux', 'x86_64'): 'x86_64-unknown-linux-gnu', ('Linux', 'aarch64')
 
 # The workload of the job's own budget: this repository's catalog, one rolling file, and one
 # results artifact of a size real runs produced.
-ROWS = 19
+ROWS = 21
 COMMITS = 20
 SAVED_ARTIFACT_BYTES = (2619, 11350)
 PROVISIONAL_REQUESTS = 20
@@ -60,12 +60,16 @@ CI_TIME = {'onepipeline-ui-ci-check-time': 981, 'onepipeline-ui-ci-job-count': 5
 RECORDED_JOBS = json.loads((HERE / 'fixtures/own-run/jobs.json').read_text())
 SAVED = ('onepipeline-ui-macos-jobs-per-run', 'onepipeline-ui-macos-runs-per-change')
 POOL = 'onepipeline-ui-pool-maintenance-seconds'
+# Saved only when the affected tier selects their project, so here, as nothing selects it, none is.
+READ_LATENCY = ('dag-ui-human-items-requests-per-minute', 'dag-ui-human-items-update-lag-seconds')
 # Its command runs in this job: nothing saves it, and a pull request's job measures the live listing.
 HEADROOM = 'onepipeline-ui-cache-headroom'
 # A push reads no saved results, so a row its merged run holds no figure for keeps its catalog reason.
 PUSH_REASON = {
     **{budget: 'its command reads .github/.telemetry/macos-policy.json, which is not available in this job' for budget in SAVED},
     POOL: 'its command reads ../apps/dag-ui/dist/index.html, which is not available in this job',
+    **{budget: 'its command reads apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, which is not available in this job'
+       for budget in READ_LATENCY},
 }
 OMITTED = {
     'onepipeline-ui-cd-job-time': 'actions-budget-figures.sh longest-job --stage cd',
@@ -83,7 +87,7 @@ OMITTED = {
 }
 OMITTED_LINE = (f'{len(OMITTED)} budgets are left out because a pull request cannot measure them '
                 '(label not-measured-on-pr).')
-SHOWN = {OWN_BUDGET, *CI_TIME, *SAVED, POOL, HEADROOM}
+SHOWN = {OWN_BUDGET, *CI_TIME, *SAVED, *READ_LATENCY, POOL, HEADROOM}
 CI_TIME_ID = 'onepipeline-ui-ci-check-time'
 # The targets the tier selects for these journeys' changes, and the one only a release pull request adds.
 SAVING_TARGETS = {'.github/project.json': 'budgets', '.github/reporting/project.json': 'budgets'}
@@ -412,7 +416,7 @@ class ProductionCatalog(unittest.TestCase):
         self.assertEqual(job.exit_code, 0, job.stdout)
         self.assertEqual(sorted(rows), sorted(SHOWN))
         self.assertEqual([r['id'] for r in verdicts(job).values() if r['verdict'] == 'error'], [])
-        for budget in (*SAVED, POOL):
+        for budget in (*SAVED, *READ_LATENCY, POOL):
             self.assertEqual(unavailable(job)[budget], reason(budget), budget)
             self.assertNotIn('verdict', rows[budget], budget)
         self.assertIn(rows[OWN_BUDGET].get('verdict'), (None, 'within', 'over'))

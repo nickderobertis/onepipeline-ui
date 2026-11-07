@@ -1,11 +1,14 @@
 import type {
-  HumanItemDetail,
-  HumanItemFilter,
   HumanItemReceipt,
   HumanItemView,
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  HumanItemsView,
+  LiveHumanItems,
+} from "../../lib/live-human-items";
+import { type FilterChoice, NO_FILTER, toFilter } from "./human-items-model";
 
 /** A write a reader can make on an item, as the route names it. */
 export type HumanItemWrite =
@@ -28,86 +31,82 @@ export interface Outcome {
   readonly failed: boolean;
 }
 
+/** A write out, and where its item stood in the list when it was sent. */
+interface Sending {
+  readonly view: HumanItemView;
+  readonly at: number;
+}
+
 const PAST: { readonly [A in HumanItemWrite["action"]]: string } = {
   answer: "Answered",
   complete: "Completed",
   dismiss: "Dismissed",
 };
 
+/** What the page holds apart from what the server pushes: its own selection. */
+export function useHumanItemsSelection(active: boolean) {
+  const [choice, setChoice] = useState<FilterChoice>(NO_FILTER);
+  const [selectedId, setSelectedId] = useState<string>();
+  const filterKey = JSON.stringify(toFilter(choice));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `filterKey` is the filter's value, so a choice rebuilt with the same selectors is not a new subscription.
+  const view = useMemo((): HumanItemsView | undefined => {
+    if (!active) return undefined;
+    const filter = toFilter(choice);
+    return {
+      type: "human-items",
+      ...(Object.keys(filter).length === 0 ? {} : { filter }),
+      ...(selectedId === undefined ? {} : { item: selectedId }),
+    };
+  }, [active, filterKey, selectedId]);
+  // Leaving the page leaves its filters and selection behind with it.
+  useEffect(() => {
+    if (active) return;
+    setChoice(NO_FILTER);
+    setSelectedId(undefined);
+  }, [active]);
+  return { choice, setChoice, selectedId, setSelectedId, view };
+}
+
 /**
- * The action-item list under `filter`, the selected item's detail, and the
- * writes a reader makes — all read through the client, against the server's
- * own records.
+ * The action-item list and the selected item's detail, as the tab's subscription
+ * holds them, and the writes a reader makes through the client.
  *
- * A write is refused here while one is pending for the same item, so a second
- * Enter or click cannot send a second request; the list is read again only once
- * the receipt (or the refusal) is in, so a pending item stays where it was.
- * Drafts are held apart from the reads, so a refusal or a re-read never takes a
- * reader's words away.
+ * Nothing here reads: every change, this page's own among them, arrives on the
+ * stream. A write is refused here while one is pending for the same item, so a
+ * second Enter or click cannot send a second request, and an item stays where it
+ * was until its receipt (or refusal) is in, even if the stream got there first.
+ * Drafts are held apart from what is pushed, so a refusal or a patch never takes
+ * a reader's words away.
  */
 export function useHumanItems(
   client: TelemetryClient,
-  filter: HumanItemFilter,
+  live: LiveHumanItems,
   selectedId: string | undefined,
-  refresh: number,
 ) {
-  const [items, setItems] = useState<readonly HumanItemView[]>();
-  const [listError, setListError] = useState<string>();
-  const [detail, setDetail] = useState<HumanItemDetail>();
-  const [detailError, setDetailError] = useState<string>();
-  const [generation, setGeneration] = useState(0);
   const [writes, setWrites] = useState<Readonly<Record<string, WriteState>>>(
     {},
   );
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
   const [outcome, setOutcome] = useState<Outcome>();
+  const [sending, setSending] = useState<readonly Sending[]>([]);
   const inFlight = useRef(new Set<string>());
-  const filterKey = JSON.stringify(filter);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `filterKey` is the filter's value, so a filter rebuilt each render with the same selectors is not a new read; `generation` is the re-read a settled write asks for, and `refresh` the one the header's Refresh asks for.
-  useEffect(() => {
-    let current = true;
-    client.listHumanItems(filter).then(
-      (list) => {
-        if (!current) return;
-        setItems(list.items);
-        setListError(undefined);
-      },
-      (error: unknown) => {
-        if (current) setListError(message(error));
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, [client, filterKey, generation, refresh]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `generation` re-reads the open detail once a write settles, and `refresh` on the header's Refresh.
-  useEffect(() => {
-    if (selectedId === undefined) {
-      setDetail(undefined);
-      setDetailError(undefined);
-      return;
-    }
-    let current = true;
-    client.getHumanItem(selectedId).then(
-      (read) => {
-        if (!current) return;
-        setDetail(read);
-        setDetailError(undefined);
-      },
-      (error: unknown) => {
-        if (!current) return;
-        // A reread that fails drops what an earlier read served: the item may
-        // now be another session's, so its content is no longer this one's.
-        setDetail(undefined);
-        setDetailError(message(error));
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, [client, selectedId, generation, refresh]);
+  const pushed = live.items;
+  const items = useMemo(() => {
+    if (pushed === undefined) return undefined;
+    const shown = [...pushed];
+    for (const { view, at } of sending)
+      if (!shown.some(({ item }) => item.id === view.item.id))
+        shown.splice(at, 0, view);
+    return shown;
+  }, [pushed, sending]);
+  // An error drops what an earlier reading served: the pane falls back to what
+  // the list last showed, beside the refusal.
+  const served =
+    live.error === undefined && live.item === selectedId
+      ? live.detail
+      : undefined;
+  const listed = useRef(pushed);
+  listed.current = pushed;
 
   const write = useCallback(
     (view: HumanItemView, change: HumanItemWrite) => {
@@ -115,6 +114,11 @@ export function useHumanItems(
       if (inFlight.current.has(id)) return;
       inFlight.current.add(id);
       setWrites((all) => ({ ...all, [id]: { pending: true } }));
+      const at = Math.max(
+        0,
+        listed.current?.findIndex(({ item }) => item.id === id) ?? 0,
+      );
+      setSending((all) => [...all, { view, at }]);
       const sent: Promise<HumanItemReceipt> =
         change.action === "answer"
           ? client.answerHumanItem(id, change.text)
@@ -143,7 +147,7 @@ export function useHumanItems(
         )
         .finally(() => {
           inFlight.current.delete(id);
-          setGeneration((value) => value + 1);
+          setSending((all) => all.filter(({ view }) => view.item.id !== id));
         });
     },
     [client],
@@ -155,9 +159,12 @@ export function useHumanItems(
 
   return {
     items,
-    listError,
-    detail: detail?.item.id === selectedId ? detail : undefined,
-    detailError,
+    listError:
+      selectedId === undefined || items === undefined ? live.error : undefined,
+    detail: served === null ? undefined : served,
+    // Asked for and no longer read: gone, which is resolved rather than an error.
+    gone: selectedId !== undefined && served === null,
+    detailError: selectedId === undefined ? undefined : live.error,
     writes,
     drafts,
     setDraft,

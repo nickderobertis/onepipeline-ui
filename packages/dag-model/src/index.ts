@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  humanItemFilterSchema,
+  humanItemsVisibleSchema,
+} from "./human-items.js";
 
 // llmlint: ignore-file[contracts_have_one_source_or_a_drift_gate] docs/contract.md is the
 // authoritative API contract and assigns these exported schemas to this package; the Rust read
@@ -2530,7 +2534,7 @@ export const eventIdSchema = z
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(0|[1-9][0-9]*)$/u,
   );
 
-/** What a tab shows besides the sidebar: nothing, or one run view. */
+/** What a tab shows besides the sidebar: nothing, one run view, or Action items. */
 export const subscriptionViewSchema = z.union([
   z.strictObject({ type: z.literal("sidebar") }),
   z.strictObject({
@@ -2552,6 +2556,12 @@ export const subscriptionViewSchema = z.union([
     filter: z.string().min(1).optional(),
   }),
   z.strictObject({ type: z.literal("channel"), run_id: z.string().min(1) }),
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
+  z.strictObject({
+    type: z.literal("human-items"),
+    filter: humanItemFilterSchema.optional(),
+    item: z.string().min(1).optional(),
+  }),
 ]);
 
 /**
@@ -2604,6 +2614,8 @@ export const visibleStateSchema = z.union([
     detail: runDetailSchema,
     channel: channelQueueSchema,
   }),
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
+  humanItemsVisibleSchema,
 ]);
 
 export const subscriptionSnapshotSchema = z.strictObject({
@@ -2675,6 +2687,12 @@ export const subscriptionFrameSchema = z.union([
     run_id: z.string().min(1),
     ops: z.array(patchOpSchema),
   }),
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("human-items.patch"),
+    ops: z.array(patchOpSchema),
+  }),
 ]);
 /** Every frame type a subscription stream carries, as its SSE event name. */
 export const SUBSCRIPTION_FRAME_TYPES = [
@@ -2684,6 +2702,8 @@ export const SUBSCRIPTION_FRAME_TYPES = [
   "detail.patch",
   "timeline.patch",
   "channel.patch",
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
+  "human-items.patch",
 ] as const;
 
 /** `201` to `POST /api/v2/subscriptions`. */

@@ -29,6 +29,9 @@ use crate::journal_schema;
 /// this bound exists to catch before a release does.
 pub const STOP_DEADLINE: Duration = Duration::from_secs(20);
 
+/// The flag that sets how often a server polls its runs root.
+pub const POLL_INTERVAL_FLAG: &str = "--poll-interval-ms";
+
 /// How often [`wait_within`] looks. Short enough that the assertion is about the
 /// server's shutdown rather than about this poll.
 const WAIT_POLL: Duration = Duration::from_millis(10);
@@ -219,6 +222,28 @@ impl Serving {
         )
     }
 
+    /// [`start_in_as_with_env_removing`](Self::start_in_as_with_env_removing),
+    /// with `arguments` after the ones every server here is started with.
+    pub fn start_in_as_with_env_removing_and_args(
+        workspace: TempDir,
+        session: &str,
+        environment: &[(&str, &str)],
+        removed: &[String],
+        arguments: &[&str],
+    ) -> Self {
+        let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
+        Self::spawn_from(
+            &binary,
+            workspace,
+            environment,
+            removed,
+            false,
+            None,
+            Some(session),
+            arguments,
+        )
+    }
+
     /// [`start_in_as_with_env_removing`](Self::start_in_as_with_env_removing)'s
     /// unattributed counterpart: a server that acts as nobody.
     pub fn start_in_with_env_removing(
@@ -318,9 +343,6 @@ impl Serving {
             .arg("--runs-root")
             .arg(&runs)
             .args(["--bind", "127.0.0.1:0"])
-            // Fast enough that a journey asserting on a live append finishes in
-            // about a second, and still a real poll of the real runs root.
-            .args(["--poll-interval-ms", "50"])
             // Unattributed unless the journey says otherwise: this suite runs
             // inside a planner's own dispatch, whose environment names that
             // planner's session, and a server that inherited it would own the
@@ -354,6 +376,12 @@ impl Serving {
             .env("PATH", path_without_harnesses());
         if let Some(session) = session {
             command.args(["--session", session]);
+        }
+        // Fast enough that a journey asserting on a live append finishes in
+        // about a second, and still a real poll of the real runs root. A journey
+        // naming its own is one that needs the poll out of its way.
+        if !arguments.contains(&POLL_INTERVAL_FLAG) {
+            command.args([POLL_INTERVAL_FLAG, "50"]);
         }
         command.args(arguments);
         match home {

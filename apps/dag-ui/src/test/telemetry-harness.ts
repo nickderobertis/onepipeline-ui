@@ -379,9 +379,14 @@ async function subscriptionResponder(
   const sidebar = projectListSchema
     .parse(await projects.json())
     .projects.flatMap((group) => group.runs.map(sidebarRowOf));
-  const filter = "filter" in view && view.filter ? { filter: view.filter } : {};
+  const filter =
+    "filter" in view && typeof view.filter === "string"
+      ? { filter: view.filter }
+      : {};
   let visible: Record<string, unknown> = { type: "sidebar" };
-  if (view.type !== "sidebar") {
+  if (view.type === "human-items") {
+    visible = { type: "human-items", items: [], detail: null };
+  } else if (view.type !== "sidebar") {
     const detail = await read(API_V2_PATHS.run(view.run_id), {
       [API_V2_QUERY.includeConversations]: "false",
       ...(view.type === "channel" ? {} : filter),
