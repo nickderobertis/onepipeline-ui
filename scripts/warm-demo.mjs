@@ -48,7 +48,7 @@ function capture() {
   for (const file of ["dead-env", "dead-output", "dead-state"]) writeFileSync(join(temp, file), "");
   const done = spawnSync(process.execPath, [join(action, "dist/restore.js")], { env: dead(), encoding: "utf8" });
   console.log(done.stdout.slice(-1500), done.stderr.slice(-500));
-  const text = readFileSync(join(temp, "dead-state"), "utf8");
+  const text = readFileSync(join(temp, "dead-state"), "utf8").replaceAll("\r\n", "\n");
   const match = text.match(/^RUST_CACHE_CONFIG<<(\S+)\n([\s\S]*?)\n\1$/m);
   if (!match) throw new Error(`rust-cache saved no state: ${text.slice(0, 300)}`);
   writeFileSync(stateFile, match[2]);

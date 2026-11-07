@@ -22,9 +22,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: linux
-            runner: ubuntu-latest
-            line: ci-warm-linux
           - os: windows
             runner: windows-latest
             line: ci-warm-windows
