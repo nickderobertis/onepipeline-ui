@@ -13,14 +13,28 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   API_V2_PATHS,
   type SubscriptionFrame,
   subscriptionFrameSchema,
 } from "@onepipeline-ui/dag-model";
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import {
+  chromium,
+  expect,
+  type Locator,
+  type Page,
+  test,
+} from "@playwright/test";
 import { z } from "zod";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
 import { appendRecords } from "./load/journal";
@@ -276,21 +290,43 @@ test("a remembered word that is no setting, and storage the browser refuses, lea
   await expect(setting(page, NAVIGATION)).toHaveValue("30");
   await expect(setting(page, MAIN)).toHaveValue("live");
 
-  // A browser that refuses storage still gives the page its settings for the visit.
-  const refusing = await page.context().newPage();
-  await refusing.addInitScript(() => {
-    Object.defineProperty(window, "localStorage", {
-      get() {
-        throw new DOMException("refused", "SecurityError");
-      },
-    });
+  // A browser set to keep no site data refuses the page its storage outright, both
+  // to read and to write: the page still has its settings for the visit.
+  const profile = mkdtempSync(join(tmpdir(), "dag-ui-e2e-no-site-data-"));
+  mkdirSync(join(profile, "Default"));
+  writeFileSync(
+    join(profile, "Default", "Preferences"),
+    JSON.stringify({
+      profile: { default_content_setting_values: { cookies: 2 } },
+    }),
+  );
+  const refusingBrowser = await chromium.launchPersistentContext(profile, {
+    channel: "chromium",
+    headless: true,
   });
-  await refusing.goto(served.origin);
-  await expect(setting(refusing, NAVIGATION)).toHaveValue("30");
-  await choose(refusing, MAIN, "Off");
-  await expect(setting(refusing, MAIN)).toHaveValue("off");
-  await expect(refusing.getByRole("alert")).toHaveCount(0);
-  await refusing.close();
+  try {
+    const refusing = await refusingBrowser.newPage();
+    await refusing.goto(served.origin);
+    expect(
+      await refusing.evaluate(() => {
+        try {
+          return window.localStorage.length >= 0;
+        } catch {
+          return false;
+        }
+      }),
+    ).toBe(false);
+    await expect(setting(refusing, NAVIGATION)).toHaveValue("30");
+    await choose(refusing, MAIN, "Off");
+    await expect(setting(refusing, MAIN)).toHaveValue("off");
+    await expect(refusing.getByRole("alert")).toHaveCount(0);
+    // Nothing was remembered, so a reload starts from the defaults again.
+    await refusing.reload();
+    await expect(setting(refusing, MAIN)).toHaveValue("live");
+  } finally {
+    await refusingBrowser.close();
+    rmSync(profile, { recursive: true, force: true });
+  }
 });
 
 test("the navigation's setting holds its rows: live as they arrive, an interval until it elapses, off until turned on", async ({
