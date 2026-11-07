@@ -147,8 +147,6 @@ const CAUSES = {
 const FIRST_PAGE_MEASURES = ["first-graph", "first-overall", "first-node"];
 /** The switches a first answer's server runs with; the complete read beside it too. */
 const FIRST_PROTOTYPES = "first-screen,session-index,heap-merge,lazy-activity";
-/** How many of a node's latest transcript rows its mark holds to the complete read. */
-const LATEST_ROWS_CHECKED = 10;
 
 /** Thrown, so the `finally` that stops the server this started still runs. */
 function fail(message) {
@@ -1046,37 +1044,56 @@ async function pageMeasure(values, server, origin, root) {
 }
 
 /**
- * What the mark must find on screen, from the complete read of a server of its own, stopped
- * before the browser starts, through the real app's own view models. So the mark holds the
- * client to the complete read rather than to the answer it drew from, on both clients, and
- * the measured server has answered nothing it would not have.
+ * The complete read for a mark to answer to, from a server of its own, stopped before the
+ * browser starts, so the measured server has answered nothing it would not have.
  */
-async function expectedAtMark(values, view, node, root, scratch) {
+async function completeReadForMark(values, view, node, root, scratch) {
   const started = performance.now();
   const oracle = new Server(
     { ...values, prototype: FIRST_PROTOTYPES },
     root,
     mkdtempSync(join(scratch, "oracle-")),
   );
-  let visible;
   try {
     const origin = await oracle.listening();
     // The complete read's own budget: a mark's timeout is about the page, not this.
     const budget = Math.max(Number(values.timeout), 300);
     const read = await completeRead(origin, view, node, values.run, budget);
-    visible = JSON.parse(read.body).initial.snapshot.visible;
+    return {
+      parts: partsOfAnswer(JSON.parse(read.body)),
+      seconds: (performance.now() - started) / 1000,
+    };
   } finally {
     await oracle.stop();
   }
-  const detail = visible.detail?.payload ?? visible.detail;
-  const timeline = visible.timeline?.payload ?? visible.timeline;
-  const models = await viewModels();
-  const expected = models.expect(view, node, detail, timeline);
-  await models.close();
-  return { expected, seconds: (performance.now() - started) / 1000 };
 }
 
-/** The app's own models, loaded the way its tests load them. */
+/** The `detail` and `timeline` of either read's answer, or nothing for another answer. */
+function partsOfAnswer(body) {
+  const held = body.initial?.snapshot?.visible ?? body;
+  const unwrap = (part) => part?.payload ?? part;
+  const detail = unwrap(held.detail);
+  if (!detail?.run) return null;
+  return {
+    detail,
+    timeline: unwrap(held.timeline),
+    loading: body.loading ?? [],
+  };
+}
+
+/** The floor each client draws a span at, and where each places it, as percent of the axis. */
+const TRIMMED_MIN_WIDTH = 0.05;
+const TODAY_MIN_WIDTH = 0.8;
+/** Floats through a style attribute: nothing here is a judgement about a value. */
+const SAME_PLACE = 0.02;
+/** How many of a node's latest transcript rows a screen is held to, row by row. */
+const ROWS_HELD = 40;
+
+/**
+ * The app's own models, loaded the way its tests load them, and what each view must say of
+ * one read's answer. `plot` is where the client under measure draws each span of it: every
+ * span, however short, at the width that client gives a short one.
+ */
 async function viewModels() {
   const ui = join(REPO, "apps/dag-ui");
   const require = createRequire(join(ui, "package.json"));
@@ -1096,56 +1113,48 @@ async function viewModels() {
   const time = await load("/src/lib/time.ts");
   const line = await load("/src/features/timeline/graph-timeline.ts");
   const model = await load("/src/features/timeline/timeline-model.ts");
-  const percent = (time_, range) =>
-    ((time_ - range[0]) / Math.max(range[1] - range[0], 1)) * 100;
-  const overOwnExtent = (spans) => {
-    const from = Math.min(...spans.map((span) => span.from));
-    const to = Math.max(...spans.map((span) => span.to));
-    return spans.map((span) => ({
-      from: percent(span.from, [from, to]),
-      to: percent(span.to, [from, to]),
-    }));
-  };
-  /**
-   * A line's spans wide enough to see, and the stretches it leaves blank. Below 0.1% of the
-   * axis is under a pixel of a wide screen, and which of those hairlines a line keeps depends
-   * on what its compaction was given, so they are counted here and not held.
-   */
-  const lineExpected = (graph, timeline) => {
-    const place = (item) => ({
-      from: percent(item.start, graph.range),
-      to: percent(item.end ?? graph.range[1], graph.range),
+  const spanLength = (range) => Math.max(range[1] - range[0], 1);
+  const percent = (at, range) => ((at - range[0]) / spanLength(range)) * 100;
+  /** `Plot` in `first-screen.tsx`: every item, an open one running to the axis's end. */
+  const trimmedPlot = (items, range) =>
+    items.map((item) => {
+      const from = percent(item.start, range);
+      return {
+        from,
+        width: Math.max(
+          percent(item.end ?? range[1], range) - from,
+          TRIMMED_MIN_WIDTH,
+        ),
+      };
     });
-    const items = graph.line.items.map((item) => ({
-      ...place(item),
-      session_link: item.payload?.countsAsWork === false,
-    }));
-    const sorted = [...items].sort((one, other) => one.from - other.from);
-    const gaps = [];
-    let reached = sorted[0]?.to ?? 0;
-    for (const item of sorted) {
-      if (item.from > reached) gaps.push({ from: reached, to: item.from });
-      reached = Math.max(reached, item.to);
-    }
-    const wide = items.filter((item) => item.to - item.from > 0.1);
-    return {
-      line: wide,
-      // Every span of every row: which of them a line keeps depends on what else it was given.
-      line_known: graph.rows.flatMap((row) => row.items.map(place)),
-      line_gaps: gaps,
-      line_hairlines: items.length - wide.length,
-      session_links: (timeline?.spans ?? []).filter(
-        (span) => span.harness_scope !== undefined,
-      ).length,
-    };
-  };
-  const expect = (view, node, detail, timeline) => {
+  /** `renderItem` in the `Timeline` today's client uses: a zero-length item is a point. */
+  const todayPlot = (items, range) =>
+    items.flatMap((item) => {
+      const end = item.end ?? item.start;
+      if (end <= item.start || end < range[0] || item.start > range[1])
+        return [];
+      const from = Math.max(0, percent(Math.max(item.start, range[0]), range));
+      return [
+        {
+          from,
+          width: Math.max(
+            TODAY_MIN_WIDTH,
+            percent(Math.min(end, range[1]), range) - from,
+          ),
+        },
+      ];
+    });
+  const say = (view, node, parts, client) => {
+    const { detail, timeline, loading } = parts;
     const nodes = run.nodeViews(detail);
     if (view === "graph")
       return {
         cards: nodes.map((one) => ({
           label: one.label,
           state: one.status,
+          settled: ["done", "failed", "skipped", "blocked"].includes(
+            one.status,
+          ),
           reason: run.isUnhealthy(one.status)
             ? (run.nodeReason(one) ?? null)
             : null,
@@ -1155,51 +1164,343 @@ async function viewModels() {
     if (view === "overall") {
       const graph = line.graphTimeline(timeline, nodes);
       const wall = detail.run.timing.wall_seconds;
+      const turns = detail.run.turns;
+      const piece = (item) => ({
+        id: item.id,
+        start: item.start,
+        end: item.end ?? null,
+        idle: item.payload?.kind === "idle",
+      });
       return {
         hero: detail.run.phase,
         status: detail.run.state,
         nodes: detail.run.nodes.length,
         wall: wall === null ? "not measured" : time.formatDurationSeconds(wall),
         wall_seconds: wall,
-        turns: detail.run.turns,
-        ...lineExpected(graph, timeline),
+        turns,
+        turns_loading: turns?.loading === true,
+        session_links_loading: loading.includes(
+          "timeline.spans[harness_scope]",
+        ),
+        session_links: (timeline?.spans ?? []).filter(
+          (span) => span.harness_scope !== undefined,
+        ).length,
+        range: graph.range,
+        plot:
+          client === "today"
+            ? todayPlot(graph.line.items, graph.range)
+            : trimmedPlot(graph.line.items, graph.range),
+        line: graph.line.items.map(piece),
+        // Every span of every row, before a line's compaction chooses among them. Session
+        // links are held to their own mark: they feed the compaction and count as no work.
+        pieces: graph.rows
+          .flatMap((row) => row.items)
+          .filter((item) => item.payload?.countsAsWork !== false)
+          .map(piece),
       };
     }
     const opened = nodes.find((one) => one.id === node);
-    if (!opened) fail(`${node} is on no card of this run's graph`);
+    if (!opened) return { missing: true };
     const projection = model.nodeTimelineV2(timeline, node);
-    const spanIds = new Set((timeline?.spans ?? []).map((span) => span.id));
+    const spans = (timeline?.spans ?? []).filter(
+      (span) => span.node_id === node,
+    );
+    const spanIds = new Set(spans.map((span) => span.id));
+    const shown = (items) => {
+      const markers = model.compactTimelineMarkers(
+        projection.markers,
+        projection.items,
+      );
+      const times = [
+        ...items.map((item) => item.start),
+        ...markers.map((marker) => marker.at),
+      ];
+      const first = Math.min(...times);
+      const last = Math.max(
+        ...items.map((item) => item.end ?? item.start),
+        ...markers.map((marker) => marker.at),
+      );
+      return [first, last > first ? last : first + 1];
+    };
+    const starts = projection.items.map((item) => item.start);
+    const ends = projection.items.map((item) => item.end ?? item.start);
+    const compact = model.compactTimelineItems(
+      projection.items,
+      projection.lanes,
+    );
     return {
       label: opened.label,
       state: opened.status,
-      // The plot's spans, over their own extent. A first answer holds only a node's latest
-      // events, so rows the complete read keeps apart can collapse into one that covers them.
-      plot: overOwnExtent(
-        projection.items
-          .filter((item) => spanIds.has(item.id))
-          .map((item) => ({ from: item.start, to: item.end ?? item.start })),
-      ),
+      plot:
+        client === "today"
+          ? todayPlot(compact, shown(compact))
+          : trimmedPlot(projection.items, [
+              Math.min(...starts),
+              Math.max(...ends, ...starts) + 1,
+            ]),
+      // What the plot draws that is no one span: the model's own groups of them.
+      aggregates: projection.items.filter((item) => !spanIds.has(item.id))
+        .length,
+      spans: spans.map((span) => ({
+        id: span.id,
+        kind: span.kind,
+        status: span.status,
+        start: span.started_at,
+        end: span.ended_at,
+        events: span.events?.length ?? 0,
+        last_event: span.events?.at(-1)?.id ?? null,
+        event_ids: (span.events ?? []).map((event) => event.id),
+      })),
       rows: model
         .transcriptEntries(projection.tree, new Set())
         .flatMap((entry) =>
           entry.entryKind === "row" ? [entry.row.displayLabel] : [],
-        )
-        .slice(-LATEST_ROWS_CHECKED),
+        ),
     };
   };
-  return { expect, close: () => vite.close() };
+  return { say, close: () => vite.close() };
+}
+
+/** Whether two sets of drawn spans are the same spans, wherever each list puts them. */
+function plotUnmet(shown, want) {
+  const problems = [];
+  if (shown.length !== want.length)
+    problems.push(`${shown.length} of ${want.length} spans on the plot`);
+  const left = [...shown];
+  for (const span of want) {
+    const at = left.findIndex(
+      (one) =>
+        Math.abs(one.from - span.from) <= SAME_PLACE &&
+        Math.abs(one.width - span.width) <= SAME_PLACE,
+    );
+    if (at === -1)
+      problems.push(
+        `no bar at ${span.from.toFixed(2)}%, ${span.width.toFixed(2)}% wide`,
+      );
+    else left.splice(at, 1);
+  }
+  for (const one of left.slice(0, 4))
+    problems.push(
+      `a bar at ${one.from.toFixed(2)}%, ${one.width.toFixed(2)}% wide that the answer does not hold`,
+    );
+  return problems;
 }
 
 /**
- * Runs in the page: resolves `window.__firstMark` the moment the rendered DOM shows the
- * view's first screen with the values the complete read expects, on both clients. A hidden
- * card is not a card: the flow canvas lays its nodes out invisibly until it has measured
- * them. `window.__presenceMark` is when the view's parts first merely existed, which is all
- * an earlier form of this mark asked, and what says whether strengthening it moved a figure.
- * `moving` is a run still appending, whose values the page may read newer than the complete
- * read did: there a settled node holds to its value and everything else to its direction.
+ * Snapshot-consistent rendering: what one DOM state says against what the answer the browser
+ * received says it must, exactly. The same on a moving run, because an answer does not move.
  */
-function installMark({ view, run, cards, expected, moving, readAt }) {
+function snapshotUnmet(view, facts, want, run) {
+  const problems = [];
+  if (view === "graph") {
+    if (facts.header !== run) problems.push("the run header");
+    if (facts.cards.length !== want.cards.length)
+      problems.push(`${facts.cards.length} of ${want.cards.length} cards`);
+    const shown = new Map(facts.cards.map((card) => [card.label, card]));
+    for (const card of want.cards) {
+      const drawn = shown.get(card.label);
+      if (!drawn) {
+        problems.push(`no card for ${card.label}`);
+        continue;
+      }
+      for (const field of ["state", "reason", "awaits"])
+        if (drawn[field] !== card[field])
+          problems.push(
+            `${card.label} ${field} ${drawn[field]}, not ${card[field]}`,
+          );
+    }
+    return problems;
+  }
+  if (view === "overall") {
+    if (facts.hero !== run) problems.push("the hero's run");
+    if (!facts.hero_text?.includes(want.hero))
+      problems.push(`the hero's phase ${want.hero}`);
+    const metric = (name, value) => {
+      const held = facts.metrics[name];
+      if (held?.loading || held?.value !== String(value))
+        problems.push(`${name} ${held?.value}, not ${value}`);
+    };
+    metric("Status", want.status);
+    metric("Nodes", want.nodes);
+    metric("Wall time", want.wall);
+    const turns = facts.metrics.Turns;
+    if (want.turns_loading) {
+      if (!turns?.loading || turns.value !== "loading")
+        problems.push(`Turns ${turns?.value}, not marked loading`);
+    } else if (turns?.loading || turns?.value !== String(want.turns))
+      problems.push(
+        `Turns ${turns?.value}, neither ${want.turns} nor marked loading`,
+      );
+    if (want.session_links_loading && !facts.line_marked_loading)
+      problems.push("session links, neither drawn nor marked loading");
+    problems.push(...plotUnmet(facts.plot, want.plot));
+    return problems;
+  }
+  if (want.missing) return ["the answer holds no card for this node"];
+  if (facts.section !== `Timeline for ${want.label}`)
+    problems.push(`no timeline for ${want.label}`);
+  if (facts.heading !== want.label)
+    problems.push(`the heading ${facts.heading}, not ${want.label}`);
+  if (facts.state !== want.state)
+    problems.push(`state ${facts.state}, not ${want.state}`);
+  problems.push(...plotUnmet(facts.plot, want.plot));
+  const tail = want.rows.slice(-ROWS_HELD);
+  if (
+    facts.rows.length === 0 ||
+    JSON.stringify(facts.rows.slice(-tail.length)) !== JSON.stringify(tail)
+  )
+    problems.push(
+      `latest rows ${JSON.stringify(facts.rows.slice(-3))}, not ${JSON.stringify(tail.slice(-3))}`,
+    );
+  return problems;
+}
+
+/**
+ * Complete-read correctness: the answer against the complete read, which a settled run's
+ * answer has to equal. A run still appending has no such read to equal, only an earlier one
+ * its answer has to extend: what had settled stays, counts only rise, and no row it held may
+ * go missing while the answer's window has room for it. Spans are compared before a line's
+ * compaction, which picks among them by what else it is given.
+ */
+function completeUnmet(view, answer, complete, moving) {
+  const problems = [];
+  if (view === "graph") {
+    const held = new Map(answer.cards.map((card) => [card.label, card]));
+    if (!moving && answer.cards.length !== complete.cards.length)
+      problems.push(
+        `${answer.cards.length} cards, not ${complete.cards.length}`,
+      );
+    for (const card of complete.cards) {
+      const got = held.get(card.label);
+      if (!got) {
+        problems.push(`no card for ${card.label}`);
+        continue;
+      }
+      if (moving && !card.settled) continue;
+      for (const field of ["state", "reason", "awaits"])
+        if (got[field] !== card[field])
+          problems.push(
+            `${card.label} ${field} ${got[field]}, not ${card[field]}`,
+          );
+    }
+    return problems;
+  }
+  if (view === "overall") {
+    if (!moving) {
+      if (answer.status !== complete.status)
+        problems.push(`Status ${answer.status}, not ${complete.status}`);
+      if (answer.wall !== complete.wall)
+        problems.push(`Wall time ${answer.wall}, not ${complete.wall}`);
+    } else if ((answer.wall_seconds ?? 0) < (complete.wall_seconds ?? 0))
+      problems.push(`Wall time ${answer.wall}, not ${complete.wall} or later`);
+    if (
+      moving ? answer.nodes < complete.nodes : answer.nodes !== complete.nodes
+    )
+      problems.push(`Nodes ${answer.nodes}, not ${complete.nodes}`);
+    if (
+      !answer.turns_loading &&
+      (moving ? answer.turns < complete.turns : answer.turns !== complete.turns)
+    )
+      problems.push(
+        `Turns ${answer.turns}, neither ${complete.turns} nor marked loading`,
+      );
+    if (
+      complete.session_links > 0 &&
+      answer.session_links === 0 &&
+      !answer.session_links_loading
+    )
+      problems.push(
+        `${complete.session_links} session links, neither held nor marked loading`,
+      );
+    // A range can start later by a session link it does not hold, and an open span ends at
+    // the moment of each read: those are the only allowances, and they are measured here.
+    const slack =
+      Math.abs(answer.range[0] - complete.range[0]) +
+      Math.abs(answer.range[1] - complete.range[1]) +
+      1;
+    const pieces = new Map(answer.pieces.map((piece) => [piece.id, piece]));
+    for (const piece of complete.pieces) {
+      if (piece.idle) continue;
+      if (moving && piece.end === null) continue;
+      const got = pieces.get(piece.id);
+      if (!got) {
+        problems.push(`no span ${piece.id} in the answer`);
+        continue;
+      }
+      if (
+        Math.abs(got.start - piece.start) > slack ||
+        (got.end === null) !== (piece.end === null) ||
+        Math.abs((got.end ?? 0) - (piece.end ?? 0)) > slack
+      )
+        problems.push(`span ${piece.id} is elsewhere in the answer`);
+    }
+    const ids = new Set(complete.pieces.map((piece) => piece.id));
+    if (!moving)
+      for (const piece of answer.pieces)
+        if (!piece.idle && !ids.has(piece.id))
+          problems.push(`a span ${piece.id} the complete read does not hold`);
+    return problems;
+  }
+  if (answer.missing || complete.missing)
+    return ["the answer holds no card for this node"];
+  if ((!moving || complete.state === "done") && answer.state !== complete.state)
+    problems.push(`state ${answer.state}, not ${complete.state}`);
+  const spans = new Map(answer.spans.map((span) => [span.id, span]));
+  if (!moving && answer.spans.length !== complete.spans.length)
+    problems.push(
+      `${answer.spans.length} spans of the node, not ${complete.spans.length}`,
+    );
+  for (const span of complete.spans) {
+    if (moving && span.end === null) continue;
+    const got = spans.get(span.id);
+    if (!got) {
+      problems.push(`no span ${span.id} in the answer`);
+      continue;
+    }
+    for (const field of ["kind", "status", "start", "end"])
+      if (got[field] !== span[field])
+        problems.push(
+          `span ${span.id} ${field} ${got[field]}, not ${span[field]}`,
+        );
+  }
+  if (moving) {
+    // The answer's window holds a span's latest events, so what the earlier read saw last is
+    // still there unless the window has filled with newer ones.
+    for (const span of complete.spans) {
+      const got = spans.get(span.id);
+      if (
+        got &&
+        span.events > 0 &&
+        got.events < FIRST_ANSWER_EVENTS_PER_SPAN &&
+        !got.event_ids.includes(span.last_event)
+      )
+        problems.push(`span ${span.id} lost its latest row in the answer`);
+    }
+  } else {
+    const held = Math.min(ROWS_CHECKED_AGAINST_COMPLETE, complete.rows.length);
+    if (
+      JSON.stringify(answer.rows.slice(-held)) !==
+      JSON.stringify(complete.rows.slice(-held))
+    )
+      problems.push(
+        `latest rows ${JSON.stringify(answer.rows.slice(-3))}, not ${JSON.stringify(complete.rows.slice(-3))}`,
+      );
+  }
+  return problems;
+}
+
+/** `LATEST_ROWS` in `src/live/first_screen.rs`. */
+const FIRST_ANSWER_EVENTS_PER_SPAN = 40;
+/** How many of a node's rows a first answer can be asked to share with the complete read. */
+const ROWS_CHECKED_AGAINST_COMPLETE = 10;
+
+/**
+ * Runs in the page: records what the screen says, with the time, each time it changes once
+ * the view's parts exist. Nothing is judged here: the answer it has to agree with is still
+ * arriving, and judging it would cost the page time the mark is measuring. A hidden card is
+ * not a card: the flow canvas lays its nodes out invisibly until it has measured them.
+ */
+function installMark({ view, run, cards }) {
   const visible = (element) => {
     for (let at = element; at; at = at.parentElement)
       if (getComputedStyle(at).visibility === "hidden") return false;
@@ -1207,62 +1508,22 @@ function installMark({ view, run, cards, expected, moving, readAt }) {
   };
   const text = (root, selector) =>
     root?.querySelector(selector)?.textContent?.trim() ?? null;
-  const SETTLED = new Set([
-    "done",
-    "failed",
-    "skipped",
-    "blocked",
-    "complete-but-draft",
-    "complete-but-held",
-  ]);
-  /** The plotted spans of a plot on either client, as percent of its axis. */
+  /** The drawn spans of a plot on either client, as percent of its axis. */
   const plotted = (root) => {
     if (!root) return [];
     const trimmed = [...root.querySelectorAll("[data-first-plot] rect")].map(
-      (rect) => {
-        const x = Number(rect.getAttribute("x"));
-        return {
-          from: x / 10,
-          to: (x + Number(rect.getAttribute("width"))) / 10,
-        };
-      },
+      (rect) => ({
+        from: Number(rect.getAttribute("x")) / 10,
+        width: Number(rect.getAttribute("width")) / 10,
+      }),
     );
     if (trimmed.length > 0) return trimmed;
     return [...root.querySelectorAll('[data-timeline-shape="span"]')].map(
-      (span) => {
-        const from = Number.parseFloat(span.parentElement?.style.left ?? "");
-        // Today's plot gives a short span a width a finger can hit, so its end can pass the axis.
-        return {
-          from,
-          to: Math.min(from + Number.parseFloat(span.style.width), 100),
-        };
-      },
+      (span) => ({
+        from: Number.parseFloat(span.parentElement?.style.left ?? ""),
+        width: Number.parseFloat(span.style.width),
+      }),
     );
-  };
-  const TOLERANCE = 0.6;
-  /** What is wrong with a line that has to run over the whole axis, as the complete read's does. */
-  const lineUnmet = (spans, allowedGaps) => {
-    if (spans.length === 0) return ["the line has no spans"];
-    const sorted = [...spans].sort((a, b) => a.from - b.from);
-    const unmet = [];
-    if (sorted[0].from > TOLERANCE)
-      unmet.push(`the line starts at ${sorted[0].from.toFixed(1)}%`);
-    let reached = sorted[0].to;
-    for (const span of sorted) {
-      if (
-        span.from - reached > 1 &&
-        !allowedGaps.some(
-          (gap) => gap.from - 1 <= reached && span.from <= gap.to + 1,
-        )
-      )
-        unmet.push(
-          `the line has a gap at ${reached.toFixed(1)}% to ${span.from.toFixed(1)}%`,
-        );
-      reached = Math.max(reached, span.to);
-    }
-    if (reached < 100 - TOLERANCE)
-      unmet.push(`the line ends at ${reached.toFixed(1)}%`);
-    return unmet;
   };
   const metric = (metrics, name) => {
     const tile = metrics?.querySelector(`[aria-label="${name}"] strong`);
@@ -1276,12 +1537,52 @@ function installMark({ view, run, cards, expected, moving, readAt }) {
       loading: Boolean(held?.querySelector('[aria-busy="true"]')),
     };
   };
-  const seconds = (duration) => {
-    const units = { d: 86400, h: 3600, m: 60, s: 1 };
-    return [...(duration ?? "").matchAll(/(\d+)([dhms])/gu)].reduce(
-      (sum, [, count, unit]) => sum + Number(count) * units[unit],
-      0,
-    );
+  const facts = {
+    graph: () => ({
+      header: document.querySelector('[aria-label="Run header"] h2')
+        ?.textContent,
+      cards: [...document.querySelectorAll("article.dag-node")]
+        .filter(visible)
+        .map((card) => ({
+          label: text(card, "strong"),
+          state: text(card, ".node-status"),
+          reason: text(card, ".node-reason"),
+          awaits: text(card, ".node-awaits"),
+        })),
+    }),
+    overall: () => {
+      const metrics = document.querySelector('[aria-label="Run metrics"]');
+      return {
+        hero: text(document, ".overall-hero h2"),
+        hero_text: document.querySelector(".overall-hero")?.textContent,
+        metrics: Object.fromEntries(
+          ["Status", "Nodes", "Wall time", "Turns"].map((name) => [
+            name,
+            metric(metrics, name),
+          ]),
+        ),
+        line_marked_loading: Boolean(
+          document.querySelector('.graph-timeline [aria-busy="true"]'),
+        ),
+        plot: plotted(document.querySelector(".graph-timeline")),
+      };
+    },
+    node: () => {
+      const section = document.querySelector('[aria-label^="Timeline for "]');
+      return {
+        section: section?.getAttribute("aria-label") ?? null,
+        heading: text(section, ".breadcrumb-node"),
+        state: text(section, ".node-view-state"),
+        plot: plotted(section?.querySelector('[aria-label="Node timeline"]')),
+        rows: [
+          ...document.querySelectorAll(
+            '[aria-label="Node transcript"] .transcript-item',
+          ),
+        ]
+          .slice(-200)
+          .map((row) => row.getAttribute("aria-label")),
+      };
+    },
   };
   /** Whether a view's parts exist, whatever they say. */
   const present = {
@@ -1323,230 +1624,27 @@ function installMark({ view, run, cards, expected, moving, readAt }) {
         ),
       ),
   };
-  /** What the screen does not yet say of what it must. Empty is the mark. */
-  const unmet = {
-    graph: () => {
-      const problems = [];
-      if (
-        document.querySelector('[aria-label="Run header"] h2')?.textContent !==
-        run
-      )
-        problems.push("the run header");
-      const shown = new Map(
-        [...document.querySelectorAll("article.dag-node")]
-          .filter(visible)
-          .map((card) => [text(card, "strong"), card]),
-      );
-      if (!moving && shown.size !== expected.cards.length)
-        problems.push(`${shown.size} of ${expected.cards.length} cards`);
-      for (const want of expected.cards) {
-        const card = shown.get(want.label);
-        if (!card) {
-          problems.push(`no card for ${want.label}`);
-          continue;
-        }
-        const state = text(card, ".node-status");
-        if (moving && !SETTLED.has(want.state)) {
-          if (!state) problems.push(`${want.label} has no state`);
-          continue;
-        }
-        if (state !== want.state)
-          problems.push(`${want.label} state ${state}, not ${want.state}`);
-        const reason = text(card, ".node-reason");
-        if (reason !== want.reason)
-          problems.push(`${want.label} reason ${reason}, not ${want.reason}`);
-        const awaits = text(card, ".node-awaits");
-        if (awaits !== want.awaits)
-          problems.push(`${want.label} awaits ${awaits}, not ${want.awaits}`);
-      }
-      return problems;
-    },
-    overall: () => {
-      const problems = [];
-      if (text(document, ".overall-hero h2") !== run)
-        problems.push("the hero's run");
-      if (
-        !moving &&
-        !document
-          .querySelector(".overall-hero")
-          ?.textContent?.includes(expected.hero)
-      )
-        problems.push(`the hero's phase ${expected.hero}`);
-      const metrics = document.querySelector('[aria-label="Run metrics"]');
-      const status = metric(metrics, "Status");
-      if (status.loading || !status.value) problems.push("Status has no value");
-      else if (!moving && status.value !== expected.status)
-        problems.push(`Status ${status.value}, not ${expected.status}`);
-      const count = metric(metrics, "Nodes");
-      if (
-        count.loading ||
-        !(moving
-          ? Number(count.value) >= expected.nodes
-          : Number(count.value) === expected.nodes && count.value !== null)
-      )
-        problems.push(`Nodes ${count.value}, not ${expected.nodes}`);
-      const wall = metric(metrics, "Wall time");
-      const elapsed = (Date.now() - readAt) / 1000;
-      if (
-        wall.loading ||
-        !(moving
-          ? seconds(wall.value) >= (expected.wall_seconds ?? 0) - 120 &&
-            seconds(wall.value) <= (expected.wall_seconds ?? 0) + elapsed + 120
-          : wall.value === expected.wall)
-      )
-        problems.push(`Wall time ${wall.value}, not ${expected.wall}`);
-      const turns = metric(metrics, "Turns");
-      if (!turns.loading) {
-        const shown = Number(turns.value);
-        if (
-          turns.value === null ||
-          turns.value === "" ||
-          !(moving ? shown >= expected.turns : shown === expected.turns)
-        )
-          problems.push(
-            `Turns ${turns.value}, neither ${expected.turns} nor marked loading`,
-          );
-      } else if (turns.value !== "loading")
-        problems.push(`Turns reads ${turns.value} while marked loading`);
-      const spans = plotted(document.querySelector(".graph-timeline"));
-      problems.push(...lineUnmet(spans, expected.line_gaps));
-      const client = document.querySelector("[data-first-plot]");
-      if (
-        client &&
-        expected.session_links > 0 &&
-        !document.querySelector('.graph-timeline [aria-busy="true"]')
-      )
-        problems.push(
-          `${expected.session_links} session links, neither drawn nor marked loading`,
-        );
-      if (!moving) {
-        const near = (span, want) =>
-          Math.abs(span.from - want.from) <= TOLERANCE &&
-          Math.abs(span.to - want.to) <= TOLERANCE;
-        // Today's plot widens a hairline to about 0.8% of the axis, so there it holds wider ones.
-        const hairline = client ? 0.1 : 1;
-        const wide = spans.filter((span) => span.to - span.from > hairline);
-        // Session links marked loading are the one thing a line may not yet draw.
-        const marked = Boolean(
-          document.querySelector('.graph-timeline [aria-busy="true"]'),
-        );
-        for (const want of expected.line) {
-          if (want.session_link && marked) continue;
-          if (want.to - want.from <= hairline) continue;
-          if (!wide.some((span) => near(span, want)))
-            problems.push(
-              `no span at ${want.from.toFixed(1)}% to ${want.to.toFixed(1)}%`,
-            );
-        }
-        for (const span of wide)
-          if (
-            !expected.line.some((want) => near(span, want)) &&
-            !expected.line_known.some((want) => near(span, want))
-          )
-            problems.push(
-              `a span at ${span.from.toFixed(1)}% to ${span.to.toFixed(1)}% the complete read does not hold`,
-            );
-      }
-      return problems;
-    },
-    node: () => {
-      const problems = [];
-      const section = document.querySelector(
-        `[aria-label="Timeline for ${expected.label}"]`,
-      );
-      if (!section) problems.push(`no timeline for ${expected.label}`);
-      if (text(section, ".breadcrumb-node") !== expected.label)
-        problems.push(`the heading is not ${expected.label}`);
-      const state = text(section, ".node-view-state");
-      if (
-        !state ||
-        ((!moving || SETTLED.has(expected.state)) && state !== expected.state)
-      )
-        problems.push(`state ${state}, not ${expected.state}`);
-      const plot = plotted(
-        section?.querySelector('[aria-label="Node timeline"]'),
-      );
-      const from = Math.min(...plot.map((span) => span.from));
-      const to = Math.max(...plot.map((span) => span.to));
-      const spread = Math.max(to - from, 1e-9);
-      const held = plot
-        .map((span) => [
-          ((span.from - from) / spread) * 100,
-          ((span.to - from) / spread) * 100,
-        ])
-        .sort((one, other) => one[0] - other[0]);
-      // Today's widened spans stretch the extent this is read over.
-      const reach = section?.querySelector("[data-first-plot]")
-        ? TOLERANCE
-        : 1.5;
-      const covered = [];
-      for (const [start, end] of held) {
-        const last = covered.at(-1);
-        if (last && start <= last[1] + reach) last[1] = Math.max(last[1], end);
-        else covered.push([start, end]);
-      }
-      const uncovered = expected.plot.filter(
-        (want) =>
-          !covered.some(
-            ([start, end]) =>
-              start <= want.from + reach && end >= want.to - reach,
-          ),
-      ).length;
-      if (plot.length === 0) problems.push("nothing on the plot");
-      else if (!moving && uncovered > 0)
-        problems.push(
-          `${uncovered} of ${expected.plot.length} spans not under the plot`,
-        );
-      const rows = [
-        ...document.querySelectorAll(
-          '[aria-label="Node transcript"] .transcript-item',
-        ),
-      ].map((row) => row.getAttribute("aria-label"));
-      if (rows.length === 0 || expected.rows.length === 0)
-        problems.push("no transcript rows");
-      if (moving) {
-        // Newer rows may follow these, and a read minutes old may have seen some of them
-        // merge into a later one: at least half have to be there, in their order.
-        let from = 0;
-        let found = 0;
-        for (const want of expected.rows) {
-          const at = rows.indexOf(want, from);
-          if (at === -1) continue;
-          found += 1;
-          from = at + 1;
-        }
-        if (found < Math.ceil(expected.rows.length / 2))
-          problems.push(
-            `${found} of the latest ${expected.rows.length} rows, in order`,
-          );
-      } else {
-        const tail = rows.slice(-expected.rows.length);
-        if (JSON.stringify(tail) !== JSON.stringify(expected.rows))
-          problems.push(
-            `latest rows ${JSON.stringify(tail)}, not ${JSON.stringify(expected.rows)}`,
-          );
-      }
-      return problems;
-    },
-  };
+  window.__facts = [];
+  let last = "";
   const look = () => {
-    if (window.__firstMark !== undefined || !present[view]()) return;
+    if (window.__stopFacts || !present[view]()) return;
     window.__presenceMark ??= performance.now();
-    window.__unmet = unmet[view]();
-    if (window.__unmet.length > 0) return;
-    window.__firstMark = performance.now();
-    window.__cardsAtMark = document.querySelectorAll("article.dag-node").length;
-    observer.disconnect();
+    const seen = facts[view]();
+    const key = JSON.stringify(seen);
+    if (key === last) return;
+    last = key;
+    window.__facts.push({ at: performance.now(), facts: seen });
+    window.__cardsAtFacts =
+      document.querySelectorAll("article.dag-node").length;
   };
-  const observer = new MutationObserver(look);
-  observer.observe(document, {
+  new MutationObserver(look).observe(document, {
     childList: true,
     subtree: true,
     attributes: true,
   });
   const tick = () => {
     look();
-    if (window.__firstMark === undefined) requestAnimationFrame(tick);
+    if (!window.__stopFacts) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
 }
@@ -1617,36 +1715,88 @@ const CORRUPTIONS = {
     for (const span of timeline.spans)
       if (span.node_id === node) span.events = span.events?.slice(0, -15);
   },
+  "overall-short-span-in-answer": ({ timeline }) => {
+    const length = (span) =>
+      Date.parse(span.ended_at ?? span.started_at) -
+      Date.parse(span.started_at);
+    const worked = timeline.spans.filter(
+      (span) => span.kind !== "run" && span.kind !== "node",
+    );
+    const shortest = worked.reduce((one, other) =>
+      length(other) < length(one) ? other : one,
+    );
+    timeline.spans = timeline.spans.filter((span) => span !== shortest);
+  },
+  "node-full-width-span": ({ timeline }, node) => {
+    const spans = timeline.spans.filter(
+      (span) => span.node_id === node && span.kind !== "node",
+    );
+    const from = spans.map((span) => span.started_at).sort()[0];
+    const to = spans
+      .map((span) => span.ended_at ?? span.started_at)
+      .sort()
+      .at(-1);
+    spans[0].started_at = from;
+    spans[0].ended_at = to;
+  },
   "node-plot": ({ timeline }, node) => {
     timeline.spans = timeline.spans.filter((span) => span.node_id !== node);
   },
 };
 
-/** A client's defect rather than a read's: session links neither drawn nor marked. */
-function sessionLinksUnmarked() {
-  const cut = () => {
+/** A client's defects rather than a read's, run in the page, each after every change. */
+const PAGE_DEFECTS = {
+  "overall-session-links-unmarked": () => {
     for (const mark of document.querySelectorAll(
       '.graph-timeline [aria-busy="true"]',
     ))
       mark.parentElement?.remove();
-  };
-  new MutationObserver(cut).observe(document, {
-    childList: true,
-    subtree: true,
-  });
-}
-
-/** A client's defect rather than a read's, run in the page: a line that stops short. */
-function lineStopsShort() {
-  const cut = () => {
+  },
+  "overall-line-stops-short": () => {
     for (const rect of document.querySelectorAll("[data-first-plot] rect"))
       if (
         Number(rect.getAttribute("x")) + Number(rect.getAttribute("width")) >
         500
       )
         rect.remove();
-  };
-  new MutationObserver(cut).observe(document, {
+  },
+  "overall-missing-short-span": () => {
+    const rects = [...document.querySelectorAll("[data-first-plot] rect")];
+    if (rects.length < 2 || document.body.dataset.cutShort) return;
+    document.body.dataset.cutShort = "1";
+    rects
+      .sort(
+        (one, other) =>
+          Number(one.getAttribute("width")) -
+          Number(other.getAttribute("width")),
+      )[0]
+      .remove();
+  },
+  "node-full-width-bar": () => {
+    const rects = [
+      ...document.querySelectorAll(
+        '[aria-label="Node timeline"] [data-first-plot] rect',
+      ),
+    ];
+    if (rects.length === 0 || rects[0].dataset.wrong) return;
+    for (const rect of rects.slice(1)) rect.remove();
+    rects[0].dataset.wrong = "1";
+    rects[0].setAttribute("x", "0");
+    rects[0].setAttribute("width", "1000");
+  },
+  "node-latest-row-missing": () => {
+    document
+      .querySelector(
+        '[aria-label="Node transcript"] .transcript-item:last-child',
+      )
+      ?.remove();
+  },
+};
+
+function installPageDefect(source) {
+  // biome-ignore lint/security/noGlobalEval: the harness's own source, in the page it drives.
+  const defect = globalThis.eval(source);
+  new MutationObserver(defect).observe(document, {
     childList: true,
     subtree: true,
   });
@@ -1654,18 +1804,17 @@ function lineStopsShort() {
 
 /** Serve a browser's read of the run with one named value wrong. */
 async function corruptReads(page, name, node) {
-  if (name === "overall-line-stops-short") {
-    await page.addInitScript(lineStopsShort);
-    return;
-  }
-  if (name === "overall-session-links-unmarked") {
-    await page.addInitScript(sessionLinksUnmarked);
+  if (PAGE_DEFECTS[name]) {
+    await page.addInitScript(
+      installPageDefect,
+      `(${PAGE_DEFECTS[name].toString()})`,
+    );
     return;
   }
   const corrupt = CORRUPTIONS[name];
   if (!corrupt)
     fail(
-      `--corrupt-answer is one of ${Object.keys(CORRUPTIONS).join(", ")}, overall-line-stops-short, overall-session-links-unmarked, not ${name}`,
+      `--corrupt-answer is one of ${Object.keys(CORRUPTIONS).join(", ")}, ${Object.keys(PAGE_DEFECTS).join(", ")}, not ${name}`,
     );
   const unwrap = (part) => part?.payload ?? part;
   await page.route(
@@ -1721,23 +1870,84 @@ function shownAtMark({ view }) {
   };
 }
 
-/** How much of each kind of value a mark held to the complete read. */
-function checkedAtMark(view, expected) {
+/** How much of each kind of value a mark held, and what the line drew unlike the complete read. */
+function checkedAtMark(view, answer, complete) {
   if (view === "graph")
     return {
-      cards: expected.cards.length,
-      reasons: expected.cards.filter((card) => card.reason).length,
-      awaits: expected.cards.filter((card) => card.awaits).length,
+      cards: answer.cards.length,
+      reasons: answer.cards.filter((card) => card.reason).length,
+      awaits: answer.cards.filter((card) => card.awaits).length,
     };
-  if (view === "overall")
+  if (view === "overall") {
+    const drawn = new Set(complete.line.map((piece) => piece.id));
     return {
       metrics: 4,
-      line_spans: expected.line.length,
-      line_blank_stretches: expected.line_gaps.length,
-      line_hairlines_not_held: expected.line_hairlines,
-      session_links: expected.session_links,
+      plot_spans: answer.plot.length,
+      pieces_against_complete_read: complete.pieces.length,
+      session_links_marked: answer.session_links_loading
+        ? complete.session_links
+        : 0,
+      line_spans_unlike_complete_read: answer.line.filter(
+        (piece) => !drawn.has(piece.id),
+      ).length,
     };
-  return { plot_spans: expected.plot.length, rows: expected.rows.length };
+  }
+  return {
+    plot_spans: answer.plot.length,
+    aggregates: answer.aggregates,
+    node_spans: complete.spans.length,
+    rows: answer.rows.length,
+  };
+}
+
+/**
+ * The mark: the first DOM state the page recorded that says what the answer it received
+ * says, on an answer that holds up against the complete read. Judged here, after the page
+ * has moved on, so the judging costs the measured page nothing.
+ */
+async function markAgainstAnswer(
+  page,
+  answers,
+  { view, node, values, models, completeSays, budget },
+) {
+  const deadline = performance.now() + budget;
+  let answer = null;
+  let looked = 0;
+  let seen = 0;
+  let last = ["no answer to the view's read"];
+  while (performance.now() < deadline) {
+    for (; looked < answers.length; looked += 1) {
+      const parts = partsOfAnswer(
+        JSON.parse((await answers[looked].body()).toString("utf8")),
+      );
+      if (parts) answer = models.say(view, node, parts, values.client);
+    }
+    if (answer) {
+      const wrong = completeUnmet(view, answer, completeSays, values.moving);
+      if (wrong.length > 0)
+        fail(
+          `no ${view} mark: the answer disagrees with the complete read: ${JSON.stringify(wrong.slice(0, 8))}`,
+        );
+      const fresh = await page.evaluate(
+        (from) => window.__facts.slice(from),
+        seen,
+      );
+      seen += fresh.length;
+      for (const state of fresh) {
+        last = snapshotUnmet(view, state.facts, answer, values.run);
+        if (last.length === 0) return { at: state.at, answer };
+      }
+      if (answer.missing) last = ["the answer holds no card for this node"];
+    }
+    await new Promise((done) => setTimeout(done, 25));
+  }
+  const text = await page.locator("body").innerText();
+  const present = await page.evaluate(
+    () => window.__presenceMark !== undefined,
+  );
+  return fail(
+    `no ${view} mark: parts present: ${present}; unmet: ${JSON.stringify(last.slice(0, 8))}\n${text.slice(-300)}`,
+  );
 }
 
 /** One first-screen measurement: navigation start to the mark, in a real browser. */
@@ -1757,8 +1967,19 @@ async function firstPageMeasure(values, server, origin, root, scratch) {
     ? (JSON.parse(readFileSync(planPath, "utf8")).tasks?.length ?? 0)
     : 1;
   const budget = Number(values.timeout) * 1000;
-  const oracle = await expectedAtMark(values, view, node, root, scratch);
-  const readAt = Date.now();
+  const complete = await completeReadForMark(
+    values,
+    view,
+    node,
+    root,
+    scratch,
+  );
+  const models = await viewModels();
+  const completeSays = models.say(view, node, complete.parts, values.client);
+  if (view === "node" && completeSays.missing) {
+    await models.close();
+    fail(`${node} is on no card of this run's graph`);
+  }
   const browser = await chromium.launch();
   try {
     const context = await browser.newContext();
@@ -1794,33 +2015,28 @@ async function firstPageMeasure(values, server, origin, root, scratch) {
     const page = await context.newPage();
     if (values["corrupt-answer"])
       await corruptReads(page, values["corrupt-answer"], node);
-    await page.addInitScript(installMark, {
-      view,
-      run: values.run,
-      cards,
-      expected: oracle.expected,
-      moving: values.moving,
-      readAt,
+    await page.addInitScript(installMark, { view, run: values.run, cards });
+    const answers = [];
+    page.on("response", (response) => {
+      if (
+        response.request().method() === "POST" &&
+        /\/api\/v2\/(spike\/first-screen|subscriptions)/u.test(response.url())
+      )
+        answers.push(response);
     });
     const started = performance.now();
     await page.goto(`${origin}${address}`, { waitUntil: "commit" });
-    await page
-      .waitForFunction(() => window.__firstMark !== undefined, null, {
-        timeout: budget,
-        polling: 50,
-      })
-      .catch(async (error) => {
-        const text = await page.locator("body").innerText();
-        const said = await page.evaluate(() => ({
-          present: window.__presenceMark !== undefined,
-          unmet: window.__unmet ?? [],
-        }));
-        fail(
-          `no ${view} mark: ${error.message}\nparts present: ${said.present}; unmet: ${JSON.stringify(said.unmet.slice(0, 8))}\n${text.slice(-500)}`,
-        );
-      });
+    const judged = await markAgainstAnswer(page, answers, {
+      view,
+      node,
+      values,
+      models,
+      completeSays,
+      budget,
+    });
     const walled = (performance.now() - started) / 1000;
     const timing = await page.evaluate(() => {
+      window.__stopFacts = true;
       const reads = performance
         .getEntriesByType("resource")
         .filter(
@@ -1844,13 +2060,13 @@ async function firstPageMeasure(values, server, origin, root, scratch) {
           duration: Math.round(entry.duration),
         }));
       return {
-        mark: window.__firstMark,
         presence: window.__presenceMark,
-        cards_at_mark: window.__cardsAtMark,
+        cards_at_mark: window.__cardsAtFacts,
         reads,
         assets,
       };
     });
+    timing.mark = judged.at;
     const answered = timing.reads
       .filter((read) => read.end <= timing.mark)
       .at(-1);
@@ -1879,8 +2095,9 @@ async function firstPageMeasure(values, server, origin, root, scratch) {
       wall_seconds: seconds(timing.mark),
       presence_mark_seconds: seconds(timing.presence),
       mark_after_presence_seconds: seconds(timing.mark - timing.presence),
-      expected_read_seconds: oracle.seconds,
-      checked: checkedAtMark(view, oracle.expected),
+      complete_read_seconds: complete.seconds,
+      checked: checkedAtMark(view, judged.answer, completeSays),
+      held_to_complete_read: values.moving ? "what had settled" : "all",
       navigation_to_post_start_seconds: seconds(first.start),
       post_seconds: seconds(answered.end - first.start),
       answer_to_mark_seconds: seconds(timing.mark - answered.end),
@@ -1897,6 +2114,7 @@ async function firstPageMeasure(values, server, origin, root, scratch) {
     };
   } finally {
     await browser.close();
+    await models.close();
   }
 }
 

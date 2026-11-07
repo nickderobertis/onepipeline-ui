@@ -251,12 +251,14 @@ test("Overall's mark refuses wrong metrics and a line short of the axis, and pas
       ["overall-nodes", /Nodes \d+, not \d+/u],
       ["overall-wall", /Wall time .+, not /u],
       ["overall-turns", /Turns 987654, neither \d+ nor marked loading/u],
-      ["overall-short-line", /no span at|the complete read does not hold/u],
-      ["overall-no-line", /no span at|the line has no spans/u],
-      ["overall-line-stops-short", /the line (ends at|has a gap)/u],
+      ["overall-short-line", /no span .+ in the answer/u],
+      ["overall-no-line", /no span .+ in the answer/u],
+      ["overall-short-span-in-answer", /no span .+ in the answer/u],
+      ["overall-missing-short-span", /of \d+ spans on the plot|no bar at/u],
+      ["overall-line-stops-short", /spans on the plot|no bar at/u],
     ],
   );
-  assert.ok(report.checked.line_spans > 0);
+  assert.ok(report.checked.plot_spans > 0);
   assert.match(report.shown.metrics, /Turnsloading/u);
 });
 
@@ -278,7 +280,7 @@ test("Overall's mark refuses session links neither drawn nor marked, and passes 
     ],
   );
   assert.ok(
-    report.checked.session_links > 0,
+    report.checked.session_links_marked > 0,
     "the fixture holds session links",
   );
 });
@@ -288,16 +290,29 @@ test("a node's mark refuses a wrong state, heading, plot or latest row, and pass
     ["--run", RUN, "--measure", "first-node"],
     [
       ["node-state", /state \w+, not \w+/u],
-      ["node-heading", /parts present: false/u],
-      [
-        "node-plot",
-        /parts present: false|nothing on the plot|not under the plot/u,
-      ],
+      ["node-heading", /no card for this node/u],
+      ["node-plot", /no span .+ in the answer|parts present: false/u],
+      ["node-full-width-bar", /no bar at|that the answer does not hold/u],
+      ["node-full-width-span", /span .+ (start|end) .+, not /u],
+      ["node-latest-row-missing", /latest rows /u],
       ["node-latest-rows", /latest rows /u],
     ],
   );
   assert.ok(report.checked.rows > 0);
   assert.ok(report.checked.plot_spans > 0);
+  assert.equal(report.held_to_complete_read, "all");
+});
+
+test("a moving run's mark refuses a screen unlike its answer, and missing latest rows either way, and passes restored", async () => {
+  const report = await refusedThenRestored(
+    ["--run", RUN, "--measure", "first-node", "--moving"],
+    [
+      ["node-latest-row-missing", /latest rows /u],
+      ["node-full-width-bar", /no bar at|that the answer does not hold/u],
+      ["node-latest-rows", /lost its latest row in the answer/u],
+    ],
+  );
+  assert.equal(report.held_to_complete_read, "what had settled");
 });
 
 test("a moving run's mark still refuses a settled node's wrong state, and passes restored", async () => {
