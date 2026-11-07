@@ -292,7 +292,7 @@ const hostLoad = () => {
   return { load_1m, load_5m, load_15m, cores: availableParallelism() };
 };
 
-/** An API or bundle path as a route, ids and query values dropped. */
+/** An API or bundle path as a route: a subscription's id and the query dropped. */
 function routeOf(method: string, url: URL): string {
   const path = url.pathname.replace(
     /^\/api\/v2\/subscriptions\/[^/]+/u,

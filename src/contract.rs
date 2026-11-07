@@ -1820,6 +1820,7 @@ pub enum SubscriptionView {
         /// The run.
         run_id: RunId,
     },
+    // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views this enum declares; the plan names this enum as what gains the view, and its selectors and records stay the engine's and `src/human_items.rs`'s.
     /// The host's human items: no run, and every item this filter selects.
     HumanItems {
         /// The selectors `GET /api/human-items` takes, with that route's
@@ -1828,6 +1829,7 @@ pub enum SubscriptionView {
         /// The item whose detail the view carries beside the list.
         item: Option<HumanItemId>,
     },
+    // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 }
 
 impl SubscriptionView {
