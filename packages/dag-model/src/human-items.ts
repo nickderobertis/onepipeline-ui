@@ -60,7 +60,8 @@ const resolution = z.strictObject({
  * Whether `item`'s kind, state, resolution and approval agree, as the engine's
  * own decoder rules: an open item has no resolution and a resolved one has one;
  * a task is completed and a question answered, never the reverse; an answer
- * carries text and no reason, a completion neither, a dismissal no text; and
+ * carries text and no reason, a completion no reason and any comment not blank,
+ * a dismissal no text; and
  * only a task carries an approval reference.
  */
 function lifecycleProblem(item: {
@@ -83,9 +84,11 @@ function lifecycleProblem(item: {
       ? undefined
       : "an answer is a question's, with text and no reason";
   if (state === "completed")
-    return kind === "task" && settled.text === null && settled.reason === null
+    return kind === "task" &&
+      (settled.text === null || /\S/u.test(settled.text)) &&
+      settled.reason === null
       ? undefined
-      : "a completion is a task's, with no text or reason";
+      : "a completion is a task's, with no reason and any comment not blank";
   return settled.text === null ? undefined : "a dismissal carries no text";
 }
 
@@ -158,10 +161,53 @@ function impactProblem(
     : "the blocked total is the plans' counts";
 }
 
+const reopen = z.strictObject({
+  available: z.boolean(),
+  reason: nullableString,
+});
+
+/**
+ * Whether `item` stands for a human step, as the engine reads one: its key names
+ * `run:<run>#<node>`, and both its block and its owner are that run's.
+ */
+function standsForStep({ dedup_key: key, block: at, owner: by }: HumanItem) {
+  return (
+    at.scope === "work" &&
+    key === `run:${at.run}#${at.node}` &&
+    by.run === at.run
+  );
+}
+
+/**
+ * Whether a reopen agrees with its item, as the engine's decoder rules: it states
+ * a reason exactly when it is unavailable; an open or answered item, one standing
+ * for a human step and one the engine resolved can never be reopened; and only a
+ * completed approval may go either way, on whether its adapter declares an undo,
+ * which the record cannot see. The reason's wording is the engine's to choose, so
+ * the browser shows it rather than holding a second copy of it to compare.
+ */
+function reopenProblem(
+  item: HumanItem,
+  { available, reason }: z.infer<typeof reopen>,
+): string | undefined {
+  if (available ? reason !== null : reason === null || !/\S/u.test(reason))
+    return "a reopen states a reason exactly when it is unavailable";
+  const refused =
+    item.state === "open" ||
+    item.state === "answered" ||
+    standsForStep(item) ||
+    item.resolution?.actor === "engine";
+  if (refused)
+    return available ? "this item's state cannot be reopened" : undefined;
+  return available || (item.state === "completed" && item.approval !== null)
+    ? undefined
+    : "nothing about this item's state refuses a reopen";
+}
+
 export const humanItemViewSchema: z.ZodType<HumanItemView> = z
-  .strictObject({ item: humanItemSchema, blocked })
-  .superRefine(({ item, blocked: impact }, context) => {
-    const problem = impactProblem(item, impact);
+  .strictObject({ item: humanItemSchema, blocked, reopen })
+  .superRefine(({ item, blocked: impact, reopen: answer }, context) => {
+    const problem = impactProblem(item, impact) ?? reopenProblem(item, answer);
     if (problem !== undefined)
       context.addIssue({ code: "custom", message: problem });
   });
@@ -195,10 +241,17 @@ function nodesProblem(detail: {
 }
 
 export const humanItemDetailSchema: z.ZodType<HumanItemDetail> = z
-  .strictObject({ item: humanItemSchema, blocked, nodes: z.array(node) })
+  .strictObject({
+    item: humanItemSchema,
+    blocked,
+    nodes: z.array(node),
+    reopen,
+  })
   .superRefine((detail, context) => {
     const problem =
-      impactProblem(detail.item, detail.blocked) ?? nodesProblem(detail);
+      impactProblem(detail.item, detail.blocked) ??
+      reopenProblem(detail.item, detail.reopen) ??
+      nodesProblem(detail);
     if (problem !== undefined)
       context.addIssue({ code: "custom", message: problem });
   });

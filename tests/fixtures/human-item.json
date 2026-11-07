@@ -74,5 +74,9 @@
       "node": "docs",
       "title": "Document the release"
     }
-  ]
+  ],
+  "reopen": {
+    "available": false,
+    "reason": "the item is open, so there is nothing to reopen"
+  }
 }
