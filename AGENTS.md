@@ -203,9 +203,10 @@ Mac run a merge adds, which the macOS runs-per-change budget accounts for.
 read once a save crosses 10 GiB, so a results entry goes the moment a Rust save lands
 without room, whatever cleanup runs after. A warm leg therefore builds cold after any
 restore that is not its key's own and deletes its families' superseded copies as its
-last ordinary step; `onepipeline-ui-cache-headroom` holds the room. A new family a
-warm run or `release-plz` saves joins a leg's cleanup and the budget's command
-together (`.github/tests/ci-warm.test.mjs`). A cached target runs tools at the exact
+last ordinary step; `onepipeline-ui-cache-headroom` holds the room. `ci-cache.yml` is the
+only saver of Rust build caches: every other workflow's Rust step restores, `release-plz`
+included, and a new family a warm run saves joins a leg's cleanup and the budget's
+command together (`.github/tests/ci-warm.test.mjs`). A cached target runs tools at the exact
 versions in `.github/ci-tool-versions`, which the `platform` input hashes into every
 cached target, so a tool a job newly installs goes there rather than floating.
 `default` stops at the frontend's own inputs; a task that reads the crate's manifests

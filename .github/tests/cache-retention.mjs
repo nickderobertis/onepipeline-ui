@@ -5,7 +5,8 @@ import { createHash } from "node:crypto";
 import { interpolate } from "../workflow-graph.mjs";
 
 // The family prefixes each warm leg's cleanup names. rust-cache's and the two binaries' keys
-// start with these; release-plz's own Rust save is the Linux leg's to clean.
+// start with these. release-plz only restores its family now; the Linux leg still cleans
+// it so copies saved before that stay covered.
 export const LEG_FAMILIES = {
   "warm-linux": [
     "v0-rust-test-linux-Linux-x64-",
@@ -157,18 +158,18 @@ export function retentionProblems(workflows, budgets, forkPullRequest) {
     problems.push(
       `the headroom budget names ${JSON.stringify(budgeted)}, the cleanups ${JSON.stringify(cleaned)}`,
     );
-  for (const [file, workflow] of [
-    ["ci.yml", workflows["ci.yml"]],
-    ["release.yml", workflows["release.yml"]],
-  ])
+  // ci-cache.yml is the only saver of Rust build caches, whatever workflow a step is in.
+  for (const [file, workflow] of Object.entries(workflows)) {
+    if (file === "ci-cache.yml") continue;
     for (const [id, job] of Object.entries(workflow?.jobs ?? {}))
       for (const step of job.steps ?? [])
         if (step.uses?.startsWith("Swatinem/rust-cache@")) {
           if (file === "release.yml")
             problems.push(`release.yml's ${id} has a Rust cache step`);
           else if (step.with?.["save-if"] !== false)
-            problems.push(`ci.yml's ${id} could save a Rust cache`);
+            problems.push(`${file}'s ${id} could save a Rust cache`);
         }
+  }
   for (const id of PULL_REQUEST_JOBS) {
     const job = workflows["ci.yml"]?.jobs?.[id];
     if (rustCacheAt(job) < 0)

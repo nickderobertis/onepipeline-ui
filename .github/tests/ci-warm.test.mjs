@@ -880,6 +880,26 @@ test("each way of losing that room is refused", () => {
       /ci\.yml's lint does not restore a Rust build/,
     ],
     [
+      "release-plz's Rust step saves by default",
+      (w) => {
+        delete stepOf(
+          w["release-plz.yml"].jobs["release-plz"],
+          uses("Swatinem/rust-cache@"),
+        ).with?.["save-if"];
+      },
+      /release-plz\.yml's release-plz could save a Rust cache/,
+    ],
+    [
+      "release-plz's Rust step saves outright",
+      (w) => {
+        stepOf(
+          w["release-plz.yml"].jobs["release-plz"],
+          uses("Swatinem/rust-cache@"),
+        ).with = { "save-if": true };
+      },
+      /release-plz\.yml's release-plz could save a Rust cache/,
+    ],
+    [
       "release.yml gains a Rust cache step",
       (w) => {
         w["release.yml"].jobs.publish.steps.push({
