@@ -1,0 +1,153 @@
+name: Cache price
+
+# SPIKE (spike-onepipeline-ui-coverage-and-cache), never landed. A draft pull
+# request's push is the only trigger. It saves nothing to the Actions cache:
+# rust-cache runs with `save-if: false`, actions/cache only restores, setup-bun
+# and setup-node cache nothing, and no Nx remote cache is configured. ci.yml's
+# pull-request trigger is off on this branch, so no test job runs.
+#
+#   price (<os>)      restores main's family for that OS leg read-only and sizes
+#                     it, then builds every warm line of `scripts/ci-warm.sh <os>`
+#                     cold and prices each (scripts/cache-price.mjs). Compiles
+#                     only; runs no test.
+#   coverage (linux)  times today's instrumented tiers and each prototyped
+#                     coverage shape on a hosted runner
+#                     (`node scripts/coverage-spike.mjs shapes`).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+# ci-cache.yml's workflow environment: rust-cache hashes it into the key, so the
+# family restored here is the one main saved.
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  price:
+    name: price (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, windows, macos]
+    runs-on: ${{ matrix.os == 'linux' && 'ubuntu-latest' || matrix.os == 'windows' && 'windows-latest' || 'macos-latest' }}
+    timeout-minutes: 240
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read the pinned tool versions
+        id: tool-pins
+        run: |
+          tr -d '\r' < .github/ci-tool-versions | awk '
+            /^#/ || !NF { next }
+            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
+            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
+          ' >> "$GITHUB_OUTPUT"
+      - name: Free disk the cold build needs
+        if: matrix.os == 'linux'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: What ~/.cargo/bin holds before the restore
+        run: ls "${CARGO_HOME:-$HOME/.cargo}/bin" > "$RUNNER_TEMP/cargo-bin-before"
+      # Where ci-cache.yml places it: ahead of the MSRV toolchain, so the key is
+      # main's. Restore only.
+      - uses: Swatinem/rust-cache@v2.9.2
+        id: rust-cache
+        with:
+          shared-key: test-${{ matrix.os }}
+          save-if: false
+      - name: Size the restored family
+        run: |
+          echo "exact hit: ${{ steps.rust-cache.outputs.cache-hit }}"
+          node scripts/cache-price.mjs --listed
+      - name: Read the MSRV from Cargo.toml
+        if: matrix.os == 'linux'
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        if: matrix.os == 'linux'
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.tool-pins.outputs.node }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+          no-cache: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
+      - name: Bootstrap
+        run: just bootstrap
+      - name: Build the browser view the binary embeds
+        run: just build
+      - name: Build every warm line cold and price each
+        run: node scripts/cache-price.mjs --price
+      - name: Disk at the end
+        if: always()
+        run: df -h . || true
+
+  coverage:
+    name: coverage (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read the pinned tool versions
+        id: tool-pins
+        run: |
+          tr -d '\r' < .github/ci-tool-versions | awk '
+            /^#/ || !NF { next }
+            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
+            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
+          ' >> "$GITHUB_OUTPUT"
+      # test-linux's own restore of main's Linux family, read-only, so the
+      # instrumented build starts where a pull request's does.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: test-linux
+          save-if: false
+      - name: Read the MSRV from Cargo.toml
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version *= *"\([^"]*\)".*/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.tool-pins.outputs.node }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+          no-cache: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
+      - name: What the provisioned sibling is built from
+        id: pins
+        run: echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"
+      - name: Restore the sibling CLI
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .tools/bin/onepipeline
+            .tools/bin/onepipeline.source
+          key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
+      - name: Bootstrap
+        run: just bootstrap
+      - name: Build the browser view the binary embeds
+        run: just build
+      - name: Today's tiers and both coverage shapes, timed
+        run: node scripts/coverage-spike.mjs shapes
