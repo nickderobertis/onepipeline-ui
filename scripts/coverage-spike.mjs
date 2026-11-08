@@ -27,8 +27,8 @@
 //                                                 leave unaffected
 //
 // Internal verbs the cache-hit prototype's Nx targets call:
-//   node scripts/coverage-spike.mjs tier <profile>   run one instrumented tier and
-//                                                    leave its LCOV and .profdata
+//   node scripts/coverage-spike.mjs export <profile> after a tier's tests, leave
+//                                                    its LCOV and .profdata
 //   node scripts/coverage-spike.mjs merge-a|merge-b  merge every tier's output and
 //                                                    hold it to 95%
 //
@@ -484,22 +484,21 @@ function measureDeterminism(out) {
 
 // ---- the Nx prototype -------------------------------------------------------
 
-// `tier <profile>`: what each tier's cacheable `test` target runs in the
-// prototype — today's recipe, then this tier's own profiles merged and exported,
-// leaving target/coverage-tiers/<tier>.lcov (shape a) and .profdata (shape b).
-function tierVerb(tier) {
+// `export <profile>`: the line the prototype appends to `_tier-test-covered`,
+// after the tier's tests: this tier's own profiles merged and exported, leaving
+// target/coverage-tiers/<tier>.lcov (shape a) and .profdata (shape b), the
+// prototype target's only outputs.
+function exportVerb(tier) {
   if (!TIERS.some(([, t]) => t === tier)) usage(`'${tier}' is not an instrumented tier`);
   const out = join(ROOT, 'target', 'coverage-tiers');
   mkdirSync(out, { recursive: true });
   rmSync(join(out, `${tier}.lcov`), { force: true });
   rmSync(join(out, `${tier}.profdata`), { force: true });
-  const test = tierTest(tier);
   const profdata = join(out, `${tier}.profdata`);
   const merge = mergeProfdata(profraws(tier), profdata);
   const exp = exportLcov(profdata, reportInvocation(), join(out, `${tier}.lcov`));
   record('tier', {
     tier,
-    test_seconds: test,
     export_seconds: round(merge + exp),
     lcov_bytes: bytes(join(out, `${tier}.lcov`)),
     profdata_bytes: bytes(profdata),
@@ -569,7 +568,8 @@ function prototype(clone) {
     const t = json.targets.test;
     const tier = TIERS.find(([p]) => p === project)[1];
     t.cache = true;
-    t.command = `node scripts/coverage-spike.mjs tier ${tier}`;
+    // The command stays `just _tier-test-covered <tier>` (the repository's own
+    // tests hold it there); the recipe exports.
     t.outputs = [
       `{workspaceRoot}/target/coverage-tiers/${tier}.lcov`,
       `{workspaceRoot}/target/coverage-tiers/${tier}.profdata`,
@@ -588,6 +588,11 @@ function prototype(clone) {
       dependsOn: TIERS.map(([projects]) => ({ projects: [projects], target: 'test' })),
     };
   writeFileSync(covPath, JSON.stringify(cov, null, 2) + '\n');
+  const justfile = join(clone, 'justfile');
+  const text = readFileSync(justfile, 'utf8');
+  const recipe = `      || { echo "the $1 tier failed — the failing tests are listed above" >&2; exit 1; }\n`;
+  if (!text.includes(recipe)) fail('the justfile no longer has the _tier-test-covered body this prototype extends', 'update prototype()');
+  writeFileSync(justfile, text.replace(recipe, `${recipe}    @node scripts/coverage-spike.mjs export "$1"\n`));
 }
 
 function projectJson(clone, project) {
@@ -643,7 +648,14 @@ function nxSweep(clone, cacheDir, { label, skipCache = false }) {
     '--outputStyle=static',
   ];
   if (skipCache) args.push('--skip-nx-cache');
-  const res = run('npx', args, { cwd: clone, env: nxEnv(cacheDir), capture: true });
+  let res = run('npx', args, { cwd: clone, env: nxEnv(cacheDir), capture: true, allowFail: true });
+  if (res.status !== 0) {
+    // A tier failing here is recorded, and the sweep run once more: a task that
+    // passed is then replayed from the cache in a cached sweep.
+    const failed = [...res.stdout.matchAll(/^- (\S+:test)$/gm)].map((m) => m[1]);
+    record('nx-sweep-retry', { label, failed, tail: res.stdout.slice(-3000) });
+    res = run('npx', args, { cwd: clone, env: nxEnv(cacheDir), capture: true });
+  }
   process.stdout.write(res.stdout.split('\n').filter((l) => /COVERAGE-SPIKE|local cache|Nx read the output|Successfully ran|nx run /.test(l)).join('\n') + '\n');
   const replayed = TIERS.filter(([p]) =>
     new RegExp(`nx run ${p}:test\\s+\\[(local cache|existing outputs match the cache)`).test(res.stdout),
@@ -938,9 +950,9 @@ switch (verb) {
   case 'reuse':
     measureReuse(out);
     break;
-  case 'tier':
-    if (positional.length !== 1) usage('tier needs one profile');
-    tierVerb(positional[0]);
+  case 'export':
+    if (positional.length !== 1) usage('export needs one profile');
+    exportVerb(positional[0]);
     break;
   case 'merge-a':
     mergeAVerb();
