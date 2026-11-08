@@ -3671,6 +3671,124 @@ test("a new write's toast starts afresh, with no editor open and nothing typed f
   expect(verbs(sent)).toEqual(["note"]);
 });
 
+test("a write or follow-up whose toast a newer write replaced lands on its item, never in the toast now showing", async ({
+  page,
+}) => {
+  const served = await serveWorld("undo");
+  await open(page, served);
+  const plain = "File the flaky-runner report";
+  const plainId = idOf(served, "plain");
+  const certificate = "Rotate the staging certificate";
+  const certificateId = idOf(served, "certificate");
+  const design = "Review the action-items design";
+  const final = "Approve the final release notes";
+  const finalId = idOf(served, "final");
+  /** Release a held request and wait until the page has its answer. */
+  const deliver = async (release: () => void, path: string) => {
+    const answered = page.waitForResponse((response) =>
+      new URL(response.url()).pathname.endsWith(path),
+    );
+    release();
+    await answered;
+  };
+  /** The toast still reads as `text` says, green and done, after a late answer. */
+  const stillShows = async (text: string) => {
+    // What a late answer would change has had every chance to: the page's own
+    // promise chain runs within a task of the response.
+    await page.waitForTimeout(500);
+    await expect(outcome(page)).toHaveText(text);
+    await expect(toast(page)).toHaveAttribute("data-tone", "success");
+    await expect(toast(page)).toHaveAttribute("data-phase", "done");
+  };
+
+  // An older Complete whose receipt lands after a Dismiss replaced its toast:
+  // the item is completed and stays off the list, and the Dismiss's toast is
+  // untouched.
+  const completePlain = `/api/human-items/${plainId}/complete`;
+  const releasePlain = await holdRequests(page, completePlain);
+  await card(page, plain)
+    .getByRole("button", { name: `Complete: ${plain}` })
+    .click();
+  await expect(outcome(page)).toHaveText(`Completing: ${plain}…`);
+  await card(page, certificate)
+    .getByRole("button", { name: `Dismiss: ${certificate}` })
+    .click();
+  await expect(outcome(page)).toHaveText(`Dismissed: ${certificate}`);
+  await deliver(releasePlain, completePlain);
+  await stillShows(`Dismissed: ${certificate}`);
+  expect(stored(served, plainId).state).toBe("completed");
+  await expect(card(page, plain)).toHaveCount(0);
+  await page.unroute(`**${completePlain}`);
+
+  // A Restore pressed on that toast and still on its way when a Complete
+  // replaces the toast: the certificate comes back, and the Complete's toast
+  // never says it was restored.
+  const reopenCertificate = `/api/human-items/${certificateId}/reopen`;
+  const releaseRestore = await holdRequests(page, reopenCertificate);
+  await toast(page).getByRole("button", { name: "Restore" }).click();
+  await card(page, design)
+    .getByRole("button", { name: `Complete: ${design}` })
+    .click();
+  await expect(outcome(page)).toHaveText(`Completed: ${design}`);
+  await deliver(releaseRestore, reopenCertificate);
+  await expect(card(page, certificate)).toBeVisible();
+  await stillShows(`Completed: ${design}`);
+  expect(stored(served, certificateId).state).toBe("open");
+  await page.unroute(`**${reopenCertificate}`);
+
+  // An older Complete the engine refuses after a Dismiss replaced its toast:
+  // the card comes back with the engine's reason on it, and the Dismiss's
+  // toast stays green rather than turning to that refusal.
+  const completeCertificate = `/api/human-items/${certificateId}/complete`;
+  const releaseRefused = await holdRequests(page, completeCertificate);
+  await card(page, certificate)
+    .getByRole("button", { name: `Complete: ${certificate}` })
+    .click();
+  await expect(outcome(page)).toHaveText(`Completing: ${certificate}…`);
+  await card(page, final)
+    .getByRole("button", { name: `Dismiss: ${final}` })
+    .click();
+  await expect(outcome(page)).toHaveText(`Dismissed: ${final}`);
+  const mend = breakJournal(served);
+  try {
+    await deliver(releaseRefused, completeCertificate);
+    await expect(card(page, certificate).getByRole("alert")).toBeVisible();
+  } finally {
+    mend();
+  }
+  await stillShows(`Dismissed: ${final}`);
+  expect(stored(served, certificateId).state).toBe("open");
+  await page.unroute(`**${completeCertificate}`);
+
+  // A reason on that Dismiss, refused while a Complete has replaced its toast:
+  // nothing is recorded, and the Complete's toast says only what it did.
+  const noteFinal = `/api/human-items/${finalId}/note`;
+  const releaseNote = await holdRequests(page, noteFinal);
+  await toast(page).getByRole("button", { name: "Add reason" }).click();
+  await toast(page)
+    .getByRole("textbox", { name: "Reason" })
+    .fill("Superseded by the published notes");
+  await toast(page).getByRole("button", { name: "Send" }).click();
+  await card(page, certificate)
+    .getByRole("button", { name: `Complete: ${certificate}` })
+    .click();
+  await expect(outcome(page)).toHaveText(`Completed: ${certificate}`);
+  const mendAgain = breakJournal(served);
+  try {
+    await deliver(releaseNote, noteFinal);
+    await page.waitForTimeout(500);
+  } finally {
+    mendAgain();
+  }
+  await stillShows(`Completed: ${certificate}`);
+  await expect(toast(page).getByRole("textbox")).toHaveCount(0);
+  expect(stored(served, finalId)).toMatchObject({
+    state: "dismissed",
+    resolution: { reason: null },
+  });
+  await page.unroute(`**${noteFinal}`);
+});
+
 test("a filter chosen while the page is ahead of the stream shows only what the filter selects", async ({
   page,
 }) => {
