@@ -1,4 +1,10 @@
-import { type FocusEvent, useEffect, useRef, useState } from "react";
+import {
+  type FocusEvent,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { Toast } from "./useHumanItems";
 
 /** How long a toast stays when nothing is holding it, in milliseconds. */
@@ -35,8 +41,12 @@ export function useToastLifecycle(
   // shown for the whole duration, however long the receipt took.
   const signature = `${key}:${phase}:${followUp?.kind ?? ""}:${followUp?.phase ?? ""}`;
 
+  // Armed as the new state commits, in the same task that puts it on screen: a
+  // passive effect runs in a later one, so a clock that moved between the two —
+  // a busy page, a test's — would start the duration only after part of it had
+  // already passed, and the toast would outstay it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the trigger — each new state of the toast is shown for the whole duration again.
-  useEffect(() => {
+  useLayoutEffect(() => {
     setExpired(false);
     if (persistent) return;
     const timer = setTimeout(() => setExpired(true), TOAST_MS);
