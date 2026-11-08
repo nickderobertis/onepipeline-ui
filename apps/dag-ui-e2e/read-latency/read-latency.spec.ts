@@ -314,30 +314,36 @@ declare global {
   }
 }
 
+/**
+ * The page's card list: one list per group heading under it while the cards are
+ * grouped, as they are by Priority from the start, so the region rather than any
+ * one list is what holds every card.
+ */
+const actionItemList = (page: Page) =>
+  page.getByRole("region", { name: "Action item list" });
+
 /** Watch the page's list from inside it, so a render is timed as it lands. */
 async function observe(page: Page): Promise<void> {
-  await page
-    .getByRole("list", { name: "Action items" })
-    .evaluate((list: Element) => {
-      const rendered: Rendered = { shown: {}, gone: {} };
-      const look = () => {
-        const at = Date.now();
-        const titles = new Set(
-          // llmlint: ignore[e2e_uses_accessible_selectors] this runs inside the page on every mutation to timestamp a render as it lands, where Playwright's role engine does not exist; the list itself was located by role above, and awaiting a locator per write from outside would time the round trip rather than the render.
-          [...list.querySelectorAll("h3")].map((title) => title.textContent),
-        );
-        for (const title of titles) rendered.shown[title] ??= at;
-        for (const title of Object.keys(rendered.shown))
-          if (!titles.has(title)) rendered.gone[title] ??= at;
-      };
-      look();
-      new MutationObserver(look).observe(list, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-      });
-      window.readLatencyRendered = rendered;
+  await actionItemList(page).evaluate((list: Element) => {
+    const rendered: Rendered = { shown: {}, gone: {} };
+    const look = () => {
+      const at = Date.now();
+      const titles = new Set(
+        // llmlint: ignore[e2e_uses_accessible_selectors] this runs inside the page on every mutation to timestamp a render as it lands, where Playwright's role engine does not exist; the list itself was located by role above, and awaiting a locator per write from outside would time the round trip rather than the render.
+        [...list.querySelectorAll("h3")].map((title) => title.textContent),
+      );
+      for (const title of titles) rendered.shown[title] ??= at;
+      for (const title of Object.keys(rendered.shown))
+        if (!titles.has(title)) rendered.gone[title] ??= at;
+    };
+    look();
+    new MutationObserver(look).observe(list, {
+      childList: true,
+      subtree: true,
+      characterData: true,
     });
+    window.readLatencyRendered = rendered;
+  });
 }
 
 async function renderedOn(page: Page): Promise<Rendered> {
@@ -427,7 +433,7 @@ async function measurePage(
   try {
     const journal_at_start = journalSize(world);
     await page.goto(`${origin}/human-items`);
-    const list = page.getByRole("list", { name: "Action items" });
+    const list = actionItemList(page);
     await expect(list.getByRole("listitem").first()).toBeVisible({
       timeout: NEVER,
     });
