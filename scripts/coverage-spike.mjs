@@ -928,7 +928,12 @@ function nxSweep(clone, cacheDir, { label, skipCache = false }) {
   const replayed = TIERS.filter(([p]) =>
     new RegExp(
       `nx run ${p}:test\\s+\\[(local cache|existing outputs match the cache)`,
-    ).test(res.stdout),
+    ).test(
+      res.stdout.replace(
+        new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"),
+        "",
+      ),
+    ),
   ).map(([, t]) => t);
   const ran = TIERS.map(([, t]) => t).filter((t) => !replayed.includes(t));
   const tierRecords = res.stdout
