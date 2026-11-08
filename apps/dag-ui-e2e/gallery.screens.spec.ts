@@ -931,9 +931,11 @@ const SURFACES: readonly Surface[] = [
       await expect(resultToast(page)).toContainText(
         "Re-read the current document",
       );
+      // The refused card comes back before the read that replaces it lands, so two
+      // share this title for a moment: one is the page having settled.
       await expect(
         list.getByRole("article", { name: "Review the dashboard layout" }),
-      ).toBeVisible();
+      ).toHaveCount(1);
     },
     point: holdToast,
   },
