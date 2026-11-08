@@ -1,3 +1,4 @@
+# llmlint: ignore-file[changed_behavior_has_e2e] A throwaway spike workflow: its hosted runs, cited in the spike report, are its only exercise and all it is for.
 # llmlint: ignore-file[contracts_have_one_source_or_a_drift_gate] Restates the warmer's cache keys to restore exactly the families main saved, once, on a branch that never lands.
 # llmlint: ignore-file[boundary_inputs_validated] A never-landed spike workflow reading the MSRV from this repository's own Cargo.toml.
 # llmlint: ignore-file[no_second_broader_sweep_over_an_already_gated_commit] This spike's job is to run the instrumented sweep several times on one commit: comparing those runs is the measurement.

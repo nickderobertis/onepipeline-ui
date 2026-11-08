@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// llmlint: ignore-file[work_goes_through_command_surface] Pricing a warm line needs its cargo invocation with --message-format=json, which no recipe prints; the plain recipe runs alongside and proves the same build. The harness never lands.
 // llmlint: ignore-file[boundary_inputs_validated] A never-landed measurement harness run by hand against CI output and GitHub responses the reader of its records checks; a bad value shows in a record, and nothing depends on it.
 // llmlint: ignore-file[changed_behavior_has_e2e] Throwaway spike harness, never landed: the hosted runs recorded in the spike report are what exercise it.
 // llmlint: ignore-file[cli_output_contract] Spike-only harness whose stdout records are read by the author of the report; a failed phase is reported as a record so the rest of a long measurement still lands.
