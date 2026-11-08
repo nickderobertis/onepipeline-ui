@@ -3433,6 +3433,30 @@ test("what is asked of a toast before its receipt waits for it, and is dropped w
     ["human-item-dismissed", certificateId],
     ["human-item-noted", certificateId],
   ]);
+
+  // Restore pressed again while the first is still waiting on Dismiss's
+  // receipt is the same request: one reopen reaches the server, after it.
+  const releaseRestored = await holdRequests(
+    page,
+    `/api/human-items/${plainId}/dismiss`,
+  );
+  await page.getByRole("button", { name: `Dismiss: ${plain}` }).click();
+  await toast(page).getByRole("button", { name: "Restore" }).click();
+  await toast(page)
+    .getByRole("button", { name: /^Restore/u })
+    .click();
+  await page.waitForTimeout(500);
+  expect(verbs(sent).slice(4)).toEqual(["dismiss"]);
+  releaseRestored();
+  await expect(outcome(page)).toHaveText(`Restored: ${plain}`);
+  await expect(card(page, plain)).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(verbs(sent).slice(4)).toEqual(["dismiss", "reopen"]);
+  expect(stored(served, plainId).state).toBe("open");
+  expect(watch(served, SUPERVISOR)).toEqual([
+    ["human-item-dismissed", plainId],
+    ["human-item-reopened", plainId],
+  ]);
 });
 
 test("a grouping this page does not know, or storage the browser refuses, groups by Priority and still groups as chosen", async ({

@@ -354,7 +354,10 @@ export function useHumanItems(
   };
 }
 
-/** `all` without `id`'s entry. */
+/**
+ * Returns `all` itself when it holds nothing for `id`, so a settle that has
+ * nothing to forget leaves the state unchanged and React skips the re-render.
+ */
 function forget(id: string) {
   return (all: Readonly<Record<string, Sending>>) => {
     if (all[id] === undefined) return all;
