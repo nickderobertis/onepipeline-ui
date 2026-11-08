@@ -129,8 +129,8 @@ const profraws = (tier) =>
         .map((f) => join(COV, f))
     : [];
 
-// The llvm-cov invocation `cargo llvm-cov report` makes, read from its -v
-// output, so a per-tier export reads exactly the objects and filters today's
+// The flags `cargo llvm-cov report -v` passes to llvm-cov over this checkout's objects,
+// returned as one argument array.
 // report reads. Returns { objects: [...], flags: [...] } — everything after the
 // subcommand but the format, profile and output.
 function reportInvocation() {
@@ -840,8 +840,8 @@ function nxEnv(cacheDir) {
   return env;
 }
 
-// One Nx sweep of the five tiers and one shape's aggregate in the clone, reading
-// which tasks Nx replayed from its terminal output.
+// One Nx sweep of the five tiers, then each shape's aggregate, reading which tasks Nx
+// replayed from its terminal output.
 function nxSweep(clone, cacheDir, { label, skipCache = false }) {
   // A fresh runner: no tier output left from an earlier run, so anything not
   // run is restored from the cache rather than left in place; and, as after
