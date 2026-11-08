@@ -69,8 +69,15 @@
       "cache": true,
       "outputs": []
     },
+    "budgets": {
+      "//": "Measures nothing: an edge, so `test` has a dependent. Nx starts the ready task with the most dependents first, and `test` reads the whole workspace, so it runs on every pull request for about sixteen minutes; with no dependent it started only once the crate's tiers had drained, and test-linux's timed `dag-ui-read-latency:test`, which runs with nothing beside it, then waited on it past the job's cap (run 42473859179). `budgets` because both of ci-job.sh's test-linux selections run that target (docs/linux-cold-cache-timing.md).",
+      "executor": "nx:noop",
+      "dependsOn": ["test"]
+    },
     "check": {
-      "executor": "nx:noop"
+      "//": "The default check's targets this project has, plus `budgets`, so test-linux's affected targets stay `check`'s selection (tests/e2e/ci_jobs.rs).",
+      "executor": "nx:noop",
+      "dependsOn": ["lint", "test", "budgets"]
     }
   }
 }
