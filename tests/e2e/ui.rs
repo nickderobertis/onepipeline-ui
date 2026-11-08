@@ -408,8 +408,21 @@ fn no_bundle_target() -> PathBuf {
 /// so the packaged tree costs its own crate rather than a second compile of that
 /// graph (docs/linux-cold-cache-timing.md). `scripts/ensure-baseline-api.sh`
 /// shares the same units with another commit's tree the same way.
+///
+/// Off Linux an executable's unit has no hash in its name, so building there
+/// would replace the suite's own `deps/onepipeline_api`, and the next tier's
+/// `cargo test --no-run` would re-link the `target/debug` binary a tier beside it
+/// is executing, which Windows refuses (CI job 128886005557). Those platforms
+/// use the install's build directory instead, which `scripts/ci-warm.sh` already
+/// compiles this graph into and no test tier builds in.
 fn shared_build_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("target")
+    let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("target");
+    if cfg!(target_os = "linux") {
+        target
+    } else {
+        // `_crate-install-build`'s non-Linux `build.build-dir`.
+        target.join("install-smoke/build")
+    }
 }
 
 /// Forwards `RUSTC_WORKSPACE_WRAPPER`'s call to the compiler it names.
@@ -585,9 +598,18 @@ fn a_build_without_the_bundle() -> PathBuf {
             toml::Value::String(shared_build_dir().display().to_string())
         ));
     run(build, "cargo build of the packaged crate");
-    target
+    let built = target
         .join("debug")
-        .join(format!("onepipeline-api{}", std::env::consts::EXE_SUFFIX))
+        .join(format!("onepipeline-api{}", std::env::consts::EXE_SUFFIX));
+    // Cargo hard-links that file to the unit in the build directory, which the
+    // install beside this tier may replace, and Windows refuses to replace an
+    // image being executed. A copy shares nothing with it.
+    let private = target.join(format!(
+        "onepipeline-api-no-bundle{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    fs::copy(&built, &private).expect("copy the binary built without the bundle");
+    private
 }
 
 /// A binary built without the bundle refuses `--ui` naming what is missing —
