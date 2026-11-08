@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
-use onepipeline::human_items::{HumanItemDetail, HumanItemReceipt, HumanItemView};
+use onepipeline::human_items::{HumanItemDetail, HumanItemReceipt, HumanItemState, HumanItemView};
 use onepipeline_ui::patch::{self, Op};
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -102,6 +102,7 @@ impl World {
             format!(
                 "human_items:\n  enabled: {enabled}\n  task_source: {BOARD}\n  \
                  approval_adapters:\n    approve-design:\n      command: [\"python3\", {adapter:?}, \
+                 {keys:?}, {log:?}]\n      undo: [\"python3\", {adapter:?}, \"--undo\", \
                  {keys:?}, {log:?}]\n  hooks:\n    - phase: {DESIGN_REVIEW}\n      kind: task\n      \
                  title: \"Review {{{{ document }}}}\"\n      body: \"Read {{{{ document }}}} as it \
                  stands and approve it, or say what to change.\"\n      priority: high\n      \
@@ -1111,8 +1112,8 @@ fn every_action_through_the_route_resolves_once_and_reaches_only_its_owners_watc
         assert_eq!(stored["state"], state);
         assert_eq!(
             stored["resolution"],
-            json!({"actor": format!("session:{owner}"), "on_behalf_of": null, "text": text, "reason": reason}),
-            "{verb} is the acting session's own, on nobody's behalf"
+            json!({"actor": format!("browser:session:{owner}"), "on_behalf_of": null, "text": text, "reason": reason}),
+            "{verb} is a press in the browser through the acting session, on nobody's behalf"
         );
         assert_eq!(serde_json::to_value(&receipt.item.item).unwrap(), stored);
         let kind = match verb {
@@ -1281,7 +1282,7 @@ fn completing_a_current_design_review_records_its_approval_through_each_surface(
     assert_eq!(
         world.approvals(),
         [
-            json!({"board_copy": "docs/design/action-items.md", "key": "sha256:5d1c0a", "actor": format!("session:{owner}"), "on_behalf_of": null}),
+            json!({"board_copy": "docs/design/action-items.md", "key": "sha256:5d1c0a", "actor": format!("browser:session:{owner}"), "on_behalf_of": null}),
             json!({"board_copy": "docs/design/dashboard.md", "key": "sha256:c4e2f9", "actor": format!("session:{owner}"), "on_behalf_of": format!("user:{USER}")}),
         ]
     );
@@ -1734,6 +1735,195 @@ fn a_note_and_a_reopen_are_served_as_the_engine_wrote_them() {
     assert_eq!(listed["items"][0]["reopen"], open["reopen"]);
 }
 
+/// Reopening and noting through the routes are a press in the browser: the
+/// engine's `Reopen` and `Note`, attributed `browser:session:<id>` — or `browser`
+/// through a server acting as no session — in the event's `by`, delivered to the
+/// owner's watch alone and leaving who resolved the item as it was. A design
+/// review's approval is taken back by its adapter's undo, and an undo that
+/// refuses leaves the task completed with the script's own words.
+#[test]
+fn reopen_and_note_through_the_routes_are_a_browser_press_and_run_the_adapters_undo() {
+    for session in [Some("manager-presses"), None] {
+        let world = World::new();
+        let owner = "manager-owns";
+        let actor = session.map_or_else(
+            || "browser".to_owned(),
+            |id| format!("browser:session:{id}"),
+        );
+        let task = world.raise(
+            owner,
+            &input(owner, "reopen", "task", "low", json!({"scope": "nothing"})),
+        );
+        let dismissed = world.raise(
+            owner,
+            &input(owner, "noted", "task", "low", json!({"scope": "nothing"})),
+        );
+        let server = world.serve(session);
+        let post = |id: &str, verb: &str, body: &str| {
+            http::post(
+                server.address,
+                &format!("/api/human-items/{id}/{verb}"),
+                body,
+            )
+        };
+        world.watch(owner);
+
+        // Nothing is resolved yet: both are the engine's refusals, in its words.
+        assert!(
+            error(&post(&task, "reopen", "{}"), 409, "human_item_conflict")
+                .contains("nothing to reopen")
+        );
+        error(
+            &post(&task, "note", r#"{"text":"Too early."}"#),
+            409,
+            "human_item_conflict",
+        );
+        // A body naming who acted, or a note without text, is refused unread.
+        for (verb, body) in [
+            ("reopen", r#"{"actor":"someone"}"#),
+            ("note", r#"{"text":"x","on_behalf_of":"someone"}"#),
+            ("note", "{}"),
+        ] {
+            error(&post(&task, verb, body), 422, "invalid_request");
+        }
+        assert!(world.watch(owner).is_empty(), "a refusal tells no one");
+
+        let response = post(&task, "complete", "");
+        assert_eq!(response.status, 200, "{}", response.body);
+        let noted = post(&task, "note", r#"{"text":"Done by hand."}"#);
+        assert_eq!(noted.status, 200, "{}", noted.body);
+        let receipt: HumanItemReceipt =
+            serde_json::from_value(noted.json()).expect("the engine's receipt");
+        assert_eq!(receipt.item.item.state, HumanItemState::Completed);
+        let stored = world.stored(&task);
+        assert_eq!(
+            stored["resolution"],
+            json!({"actor": actor, "on_behalf_of": null, "text": "Done by hand.", "reason": null}),
+            "a note is the comment; who resolved it stays who resolved it"
+        );
+        error(
+            &post(&task, "note", r#"{"text":"  "}"#),
+            409,
+            "human_item_conflict",
+        );
+        let reopened = post(&task, "reopen", "");
+        assert_eq!(reopened.status, 200, "{}", reopened.body);
+        assert_eq!(world.stored(&task)["state"], "open");
+        assert_eq!(world.stored(&task)["resolution"], Value::Null);
+
+        assert_eq!(post(&dismissed, "dismiss", "{}").status, 200);
+        let reason = post(
+            &dismissed,
+            "note",
+            r#"{"text":"Superseded by the new export"}"#,
+        );
+        assert_eq!(reason.status, 200, "{}", reason.body);
+        assert_eq!(
+            world.stored(&dismissed)["resolution"]["reason"],
+            "Superseded by the new export",
+            "a dismissed item's note is its reason"
+        );
+
+        let events = world.watch(owner);
+        assert_eq!(
+            delivered(&events),
+            [
+                ("human-item-completed".to_owned(), task.clone()),
+                ("human-item-noted".to_owned(), task.clone()),
+                ("human-item-reopened".to_owned(), task.clone()),
+                ("human-item-dismissed".to_owned(), dismissed.clone()),
+                ("human-item-noted".to_owned(), dismissed.clone()),
+            ]
+        );
+        for event in &events {
+            let after_the_fact = matches!(
+                event["kind"].as_str(),
+                Some("human-item-noted" | "human-item-reopened")
+            );
+            assert_eq!(
+                event["payload"].get("by").cloned(),
+                after_the_fact.then(|| json!({"actor": actor, "on_behalf_of": null})),
+                "{event}"
+            );
+        }
+
+        // A design review: reopening runs its adapter's undo, which takes the
+        // approval back; an undo with nothing to take back refuses in its words.
+        let review = world.raise_design(owner, "docs/design/action-items.md", "sha256:5d1c0a");
+        assert_eq!(post(&review, "complete", "{}").status, 200);
+        assert_eq!(world.approvals().len(), 1);
+        let view = http::get(server.address, &format!("/api/human-items/{review}")).json();
+        assert_eq!(view["reopen"], json!({"available": true, "reason": null}));
+        let undone = post(&review, "reopen", "{}");
+        assert_eq!(undone.status, 200, "{}", undone.body);
+        assert!(
+            world.approvals().is_empty(),
+            "the undo removed the approval"
+        );
+        assert_eq!(world.stored(&review)["state"], "open");
+        assert_eq!(post(&review, "complete", "{}").status, 200);
+        assert_eq!(world.approvals().len(), 1);
+        std::fs::write(world.base().join("approvals.ndjson"), "").expect("withdraw it elsewhere");
+        let refusal = error(&post(&review, "reopen", "{}"), 409, "human_item_conflict");
+        assert!(refusal.contains("nothing to take back"), "{refusal}");
+        assert_eq!(world.stored(&review)["state"], "completed");
+
+        error(
+            &post("hi-0000000000000000000a", "reopen", "{}"),
+            404,
+            "human_item_not_found",
+        );
+        error(
+            &post("hi-0000000000000000000a", "note", r#"{"text":"x"}"#),
+            404,
+            "human_item_not_found",
+        );
+    }
+}
+
+/// A person's press in the browser and a manager's own CLI action over the
+/// same journal are told apart by what each records.
+#[test]
+fn a_browser_press_and_a_managers_cli_action_record_different_actors() {
+    let world = World::new();
+    let owner = "manager-tells-apart";
+    let pressed = world.raise(
+        owner,
+        &input(owner, "pressed", "task", "low", json!({"scope": "nothing"})),
+    );
+    let commanded = world.raise(
+        owner,
+        &input(
+            owner,
+            "commanded",
+            "task",
+            "low",
+            json!({"scope": "nothing"}),
+        ),
+    );
+    let server = world.serve(Some(owner));
+    let response = http::post(
+        server.address,
+        &format!("/api/human-items/{pressed}/complete"),
+        "{}",
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    world.ok(Some(owner), &["human-items", "complete", &commanded]);
+    assert_eq!(
+        world.stored(&pressed)["resolution"]["actor"],
+        format!("browser:session:{owner}")
+    );
+    assert_eq!(
+        world.stored(&pressed)["resolution"]["on_behalf_of"],
+        Value::Null
+    );
+    assert_eq!(
+        world.stored(&commanded)["resolution"],
+        json!({"actor": format!("session:{owner}"), "on_behalf_of": format!("user:{USER}"), "text": null, "reason": null}),
+        "the manager's own action names its session, on the user's behalf"
+    );
+}
+
 /// Content and writes belong to the owning session: another session is
 /// served neither its content nor any write to it, an unattributed server owns
 /// nothing, and a raise as anyone but the acting session is refused — all
@@ -1744,7 +1934,10 @@ fn foreign_and_unattributed_servers_resolve_items_but_cannot_raise_for_another_o
         let world = World::new();
         let owner = "manager-owner";
         let server = world.serve(session);
-        let actor = session.map_or_else(|| "browser".to_owned(), |id| format!("session:{id}"));
+        let actor = session.map_or_else(
+            || "browser".to_owned(),
+            |id| format!("browser:session:{id}"),
+        );
         for (key, kind, verb, body, state, event) in [
             (
                 "question",
@@ -2227,6 +2420,22 @@ fn every_human_item_route_serves_the_payload_its_golden_pins() {
             http::post(
                 server.address,
                 &format!("/api/human-items/{host}/dismiss"),
+                "{}",
+            ),
+        ),
+        (
+            "human-item-note.json",
+            http::post(
+                server.address,
+                &format!("/api/human-items/{host}/note"),
+                r#"{"text":"The outage ended on its own."}"#,
+            ),
+        ),
+        (
+            "human-item-reopen.json",
+            http::post(
+                server.address,
+                &format!("/api/human-items/{host}/reopen"),
                 "{}",
             ),
         ),

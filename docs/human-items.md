@@ -58,8 +58,10 @@ mock or harness.
 - **Dismiss** asks for an optional reason in a dialog; an empty reason sends none.
 - **Every write is the reader's own.** Every owner’s items are visible and
   actionable, including design reviews, even through an unattributed server.
-  The engine records `session:<id>` for the server’s acting session or `browser`
-  without one, and `on_behalf_of: null`; the page sends neither. Owners and
+  The engine records `browser:session:<id>` for the server’s acting session or
+  `browser` without one, and `on_behalf_of: null`; the page sends neither. The
+  `browser` prefix is what tells a person's press here from a manager's own CLI
+  action over the same journal, which records `session:<id>`. Owners and
   delivery to their watches stay unchanged. Raising still requires the server
   to act as the owner. A manager
   completing a task on a user's behalf, after that user approved in the manager's

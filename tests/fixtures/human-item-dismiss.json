@@ -19,7 +19,7 @@
       "approval": null,
       "state": "dismissed",
       "resolution": {
-        "actor": "session:claude-code-supervising-session",
+        "actor": "browser:session:claude-code-supervising-session",
         "on_behalf_of": null,
         "text": null,
         "reason": null

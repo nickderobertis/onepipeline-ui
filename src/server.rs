@@ -39,9 +39,9 @@ use crate::api::RunApi;
 use crate::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId, EventsQuery,
     HumanItemAnswerRequest, HumanItemCompleteRequest, HumanItemDismissRequest, HumanItemId,
-    NextQuery, NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunsPage, RunsQuery,
-    ShutdownRequest, StopRequest, SubscribeRequest, SubscriptionId, SurfaceRequest, TimelineQuery,
-    TimelineScope, TranscriptQuery,
+    HumanItemNoteRequest, HumanItemReopenRequest, NextQuery, NodeId, PageLimit, ProjectId, RunId,
+    RunQuery, RunSelection, RunsPage, RunsQuery, ShutdownRequest, StopRequest, SubscribeRequest,
+    SubscriptionId, SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
@@ -123,6 +123,8 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::HUMAN_ITEM_ANSWER, post(answer_human_item))
         .route(routes::HUMAN_ITEM_COMPLETE, post(complete_human_item))
         .route(routes::HUMAN_ITEM_DISMISS, post(dismiss_human_item))
+        .route(routes::HUMAN_ITEM_REOPEN, post(reopen_human_item))
+        .route(routes::HUMAN_ITEM_NOTE, post(note_human_item))
         .fallback(fallback)
         .with_state(Serving {
             hub: Hub::new(store.clone(), Arc::clone(&stopping)),
@@ -993,5 +995,22 @@ async fn dismiss_human_item(
         body::<HumanItemDismissRequest>("{reason?}", &raw)
             .map(|request| Act::Dismiss(request.reason))
     };
+    act_on_human_item(serving, &id, act).await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] `docs/contract.md` deliberately permits host-wide resolutions, including approvals, without authentication or an acting session. `HumanItems::act` applies the engine’s validation and approval authority, including an approval adapter's undo, and supplies browser:session:<id> or browser attribution; the body cannot supply actor or on_behalf_of.
+async fn reopen_human_item(State(serving): Store, Path(id): Path<String>, raw: String) -> Response {
+    // An empty body is the `{}` this route takes, as a bare `complete` is.
+    let act = if raw.trim().is_empty() {
+        Ok(Act::Reopen)
+    } else {
+        body::<HumanItemReopenRequest>("{}", &raw).map(|_| Act::Reopen)
+    };
+    act_on_human_item(serving, &id, act).await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] `docs/contract.md` deliberately permits host-wide resolutions, including approvals, without authentication or an acting session. `HumanItems::act` applies the engine’s validation and supplies browser:session:<id> or browser attribution; the body cannot supply actor or on_behalf_of.
+async fn note_human_item(State(serving): Store, Path(id): Path<String>, raw: String) -> Response {
+    let act = body::<HumanItemNoteRequest>("{text}", &raw).map(|request| Act::Note(request.text));
     act_on_human_item(serving, &id, act).await
 }

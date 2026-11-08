@@ -416,6 +416,11 @@ pub mod routes {
     pub const HUMAN_ITEM_COMPLETE: &str = "/api/human-items/{id}/complete";
     /// Dismiss an open item, with an optional reason: `apply(Dismiss)`.
     pub const HUMAN_ITEM_DISMISS: &str = "/api/human-items/{id}/dismiss";
+    /// Take a completed or dismissed item's resolution back: `apply(Reopen)`.
+    pub const HUMAN_ITEM_REOPEN: &str = "/api/human-items/{id}/reopen";
+    /// Comment on a completed item, or state a dismissed item's reason, after
+    /// the fact: `apply(Note)`.
+    pub const HUMAN_ITEM_NOTE: &str = "/api/human-items/{id}/note";
 
     /// The HTTP method a route answers.
     ///
@@ -477,7 +482,7 @@ pub mod routes {
     }
 
     /// How many routes the contract defines.
-    pub const COUNT: usize = 35;
+    pub const COUNT: usize = 37;
 
     /// Every route above with its method, in the order `docs/contract.md`
     /// lists them.
@@ -517,6 +522,8 @@ pub mod routes {
         post(HUMAN_ITEM_ANSWER),
         post(HUMAN_ITEM_COMPLETE),
         post(HUMAN_ITEM_DISMISS),
+        post(HUMAN_ITEM_REOPEN),
+        post(HUMAN_ITEM_NOTE),
     ];
 
     /// Every route's path, in the same order — read off [`TABLE`] rather than
@@ -877,6 +884,26 @@ pub struct HumanItemDismissRequest {
     /// Why. Absent, `null` or blank is no reason, as the engine reads it.
     #[serde(default)]
     pub reason: Option<String>,
+}
+
+/// The body of `POST /api/human-items/{id}/reopen`: nothing.
+///
+/// A reopen takes no actor and no reason; an approval it takes back is undone
+/// by the configured adapter's own undo, which the item names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HumanItemReopenRequest {}
+
+/// The body of `POST /api/human-items/{id}/note`.
+///
+/// The note alone: a completed item's comment or a dismissed item's reason,
+/// replacing the stored one. The actor is the server's, never the body's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HumanItemNoteRequest {
+    /// The note. Blank once trimmed is the engine's refusal.
+    // llmlint: ignore[invalid_states_unrepresentable] the engine's `HumanItemAction::Note` declares its text a `String` and its own decoder and `apply` refuse a blank one in their own words; a type here that refused first would restate the engine's rule in this crate's words.
+    pub text: String,
 }
 
 /// Which runs `POST /api/v2/shutdown` acts on.

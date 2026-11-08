@@ -63,6 +63,10 @@ pub(crate) enum Act {
     Complete,
     /// Dismiss an item, with an optional reason.
     Dismiss(Option<String>),
+    /// Take a completed or dismissed item's resolution back.
+    Reopen,
+    /// Comment on a completed item, or state a dismissed one's reason.
+    Note(String),
 }
 
 impl HumanItems {
@@ -140,7 +144,7 @@ impl HumanItems {
         engine.apply(HumanItemAction::Raise(input)).map_err(refusal)
     }
 
-    /// Make `act` on any owner’s item `id`, attributed to this server.
+    /// Make `act` on any owner’s item `id`, attributed to a press in the browser.
     pub(crate) fn act(
         &self,
         session: Option<&SessionId>,
@@ -149,16 +153,15 @@ impl HumanItems {
     ) -> Result<HumanItemReceipt, ApiError> {
         let engine = self.engine()?;
         readable(&engine, id)?;
-        // Over HTTP a write is the user's own action through this server, so
-        // the actor names the acting session, or browser without one, and nobody
-        // is acted for: no body supplies `on_behalf_of` and no flag sets one. A manager
+        // Over HTTP a write is a person's press in the browser, so the actor
+        // says so — `browser:session:<id>` through a server acting as a
+        // session, `browser` through one acting as none — which tells it from
+        // a manager's own CLI action, recorded `session:<id>`. Nobody is acted
+        // for: no body supplies `on_behalf_of` and no flag sets one. A manager
         // completing on a user's behalf after that user approved in the
         // manager's chat is the CLI/runtime path's, where the manager running
         // the command supplies it (`docs/contract.md`, "Human items").
-        let actor = session.map_or_else(
-            || "browser".to_owned(),
-            |session| format!("session:{}", session.as_str()),
-        );
+        let actor = actor(session);
         let id = id.as_str().to_owned();
         let action = match act {
             Act::Answer(text) => HumanItemAction::Answer {
@@ -178,9 +181,29 @@ impl HumanItems {
                 actor,
                 on_behalf_of: None,
             },
+            Act::Reopen => HumanItemAction::Reopen {
+                id,
+                actor,
+                on_behalf_of: None,
+            },
+            Act::Note(text) => HumanItemAction::Note {
+                id,
+                text,
+                actor,
+                on_behalf_of: None,
+            },
         };
         engine.apply(action).map_err(refusal)
     }
+}
+
+/// Who a write through this server is recorded as: a press in the browser,
+/// suffixed with the session the server acts as when it acts as one.
+fn actor(session: Option<&SessionId>) -> String {
+    session.map_or_else(
+        || "browser".to_owned(),
+        |session| format!("browser:session:{}", session.as_str()),
+    )
 }
 
 /// Whether `session` may raise an item for `owner`; an unattributed server may not.
