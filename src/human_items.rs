@@ -153,14 +153,9 @@ impl HumanItems {
     ) -> Result<HumanItemReceipt, ApiError> {
         let engine = self.engine()?;
         readable(&engine, id)?;
-        // Over HTTP a write is a person's press in the browser, so the actor
-        // says so — `browser:session:<id>` through a server acting as a
-        // session, `browser` through one acting as none — which tells it from
-        // a manager's own CLI action, recorded `session:<id>`. Nobody is acted
-        // for: no body supplies `on_behalf_of` and no flag sets one. A manager
-        // completing on a user's behalf after that user approved in the
-        // manager's chat is the CLI/runtime path's, where the manager running
-        // the command supplies it (`docs/contract.md`, "Human items").
+        // Over HTTP a write is a person's press in the browser, recorded so
+        // it reads apart from a manager's own CLI action; nobody is acted for
+        // (`docs/contract.md`, "Human items").
         let actor = actor(session);
         let id = id.as_str().to_owned();
         let action = match act {
