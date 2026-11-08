@@ -174,7 +174,7 @@ onemessagebus = "0.9.1"
 # it cannot notice, because both sides' rustdoc still spells the path
 # `onepipeline::Error` while the type behind it changed identity, so
 # `scripts/semver-check.sh` refuses a release that moved this line while the
-# commits release-plz versions from announce no break. At `=0.102.2` this crate's
+# commits release-plz versions from announce no break. At `=0.102.3` this crate's
 # surface follows onepipeline 0.102's: `error::ApiError::from_engine` takes that
 # release's `onepipeline::Error`, which 0.101's is not.
 #
@@ -185,7 +185,7 @@ onemessagebus = "0.9.1"
 # The test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.102.2"
+onepipeline = "=0.102.3"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -248,9 +248,9 @@ predicates = "3"
 # journey in `tests/plan_linear_create.rs` that copies a plan into a loopback
 # Linear: the stand-in answers exactly the documents the linked plugin sends,
 # by the plugin's own constants rather than a second spelling of them.
-onetaskgraph-core = { version = "=0.14.5", features = ["linear"] }
-onetaskgraph-linear = "=0.14.5"
-onetaskgraph-plugin-api = "=0.14.5"
+onetaskgraph-core = { version = "=0.14.7", features = ["linear"] }
+onetaskgraph-linear = "=0.14.7"
+onetaskgraph-plugin-api = "=0.14.7"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # engine-driven journey over a panel-judged member reads the provider block it was
