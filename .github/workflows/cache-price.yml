@@ -102,8 +102,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
+      # As test-linux checks out: the repository machinery's journeys read history.
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Read the pinned tool versions
         id: tool-pins
@@ -132,9 +134,16 @@ jobs:
         with:
           bun-version-file: package.json
           no-cache: true
+      # test-linux's tools: the repository machinery's journeys audit with
+      # cargo-deny and cargo-machete and rehearse with release-plz and cargo-cyclonedx.
       - uses: taiki-e/install-action@v2
         with:
-          tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
+          tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }},cargo-deny@${{ steps.tool-pins.outputs.cargo-deny }},cargo-machete@${{ steps.tool-pins.outputs.cargo-machete }},release-plz@${{ steps.tool-pins.outputs.release-plz }},cargo-cyclonedx@${{ steps.tool-pins.outputs.cargo-cyclonedx }}
+      # Restore nothing and save nothing.
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ steps.tool-pins.outputs.uv }}
+          enable-cache: false
       - name: What the provisioned sibling is built from
         id: pins
         run: echo "onepipeline=$(just --evaluate onepipeline-version)-$(just --evaluate onepipeline-source | git hash-object --stdin | cut -c1-12)" >> "$GITHUB_OUTPUT"

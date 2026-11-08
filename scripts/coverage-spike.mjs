@@ -204,6 +204,28 @@ function exportLcov(profdata, invocation, out) {
   return res.seconds;
 }
 
+// llvm-cov's own summary — the basis `--fail-under-lines` holds — from an
+// `export -format=text -summary-only` document: every file's lines and covered.
+function gateBasis(jsonText) {
+  const data = JSON.parse(jsonText).data[0];
+  const perFile = {};
+  for (const f of data.files)
+    perFile[relative(f.filename.replaceAll('\\', '/'))] = {
+      lines: f.summary.lines.count,
+      covered: f.summary.lines.covered,
+    };
+  const t = data.totals.lines;
+  return { lines: t.count, covered: t.covered, percent: Math.round((t.covered / t.count) * 1e6) / 1e4, perFile };
+}
+
+function exportSummary(profdata, invocation) {
+  return gateBasis(
+    run(llvmTool('llvm-cov'), ['export', '-format=text', '-summary-only', `-instr-profile=${profdata}`, ...invocation], {
+      capture: true,
+    }).stdout,
+  );
+}
+
 // LCOV -> Map(file -> Map(line -> hits)).
 function readLcov(text) {
   const files = new Map();
@@ -318,7 +340,10 @@ function todayReport(out) {
   // TOTAL  regions missed cover  functions missed executed  lines missed cover ...
   const total = gate.stdout.split('\n').find((l) => l.startsWith('TOTAL'))?.trim().split(/\s+/) ?? [];
   run('cargo', ['llvm-cov', 'report', '--locked', '--lcov', '--output-path', out]);
+  const summaryPath = out.replace(/\.lcov$/, '-summary.json');
+  run('cargo', ['llvm-cov', 'report', '--locked', '--json', '--summary-only', '--output-path', summaryPath]);
   return {
+    gate_basis: gateBasis(readFileSync(summaryPath, 'utf8')),
     seconds: gate.seconds,
     status: gate.status,
     text_total: total.length >= 10 ? { lines: Number(total[7]), missed: Number(total[8]), cover: total[9] } : null,
@@ -362,7 +387,14 @@ function sweep(out, { label, time = true }) {
   }
   const today = todayReport(join(out, 'today.lcov'));
   const todayTotals = totals(readLcov(readFileSync(join(out, 'today.lcov'), 'utf8')));
-  record('today', { label, gate_seconds: today.seconds, gate_status: today.status, gate_text_total: today.text_total, ...summary(todayTotals) });
+  record('today', {
+    label,
+    gate_seconds: today.seconds,
+    gate_status: today.status,
+    gate_text_total: today.text_total,
+    gate_basis: summary(today.gate_basis),
+    lcov_basis: summary(todayTotals),
+  });
 
   // Shape (a): merge the five LCOV files.
   let started = process.hrtime.bigint();
@@ -377,15 +409,27 @@ function sweep(out, { label, time = true }) {
   exportLcov(merged, invocation, join(out, 'b-merged.lcov'));
   const bSeconds = Number(process.hrtime.bigint() - started) / 1e9;
   const bTotals = totals(readLcov(readFileSync(join(out, 'b-merged.lcov'), 'utf8')));
-  record('shape', { label, shape: 'a', merge_seconds: round(aSeconds), ...summary(aTotals) });
-  record('shape', { label, shape: 'b', merge_seconds: round(bSeconds), ...summary(bTotals) });
+  const bGate = exportSummary(merged, invocation);
+  // Shape (a) carries lines alone: llvm-cov's summary counts each function's
+  // lines (a closure's lines in it and in the function around it, an
+  // instantiation group at its best instantiation), which no line file holds.
+  record('shape', { label, shape: 'a', merge_seconds: round(aSeconds), gate_basis: null, lcov_basis: summary(aTotals) });
+  record('shape', { label, shape: 'b', merge_seconds: round(bSeconds), gate_basis: summary(bGate), lcov_basis: summary(bTotals) });
   for (const [shape, t] of [['a', aTotals], ['b', bTotals]])
-    record('differences', { label, base: 'today', shape, files: differences(todayTotals, t) });
+    record('differences', { label, basis: 'lcov', base: 'today', shape, files: differences(todayTotals, t) });
+  record('differences', { label, basis: 'gate', base: 'today', shape: 'b', files: differences(today.gate_basis, bGate) });
+  record('differences', {
+    label,
+    basis: 'gate against lcov',
+    base: 'today gate',
+    shape: 'today lcov',
+    files: differences(today.gate_basis, todayTotals),
+  });
   writeFileSync(
     join(out, 'totals.json'),
-    JSON.stringify({ label, build, tiers, today: todayTotals, a: aTotals, b: bTotals }, null, 1),
+    JSON.stringify({ label, build, tiers, today: todayTotals, todayGate: today.gate_basis, a: aTotals, b: bTotals, bGate }, null, 1),
   );
-  return { todayTotals, aTotals, bTotals, aFiles, tiers, time };
+  return { todayTotals, todayGate: today.gate_basis, aTotals, bTotals, bGate, aFiles, tiers, time };
 }
 
 const round = (n) => Math.round(n * 10) / 10;
@@ -486,9 +530,11 @@ function mergeBVerb() {
   const inv = reportInvocationFromObjects();
   exportLcov(merged, inv, join(out, 'merged-b.lcov'));
   const t = totals(readLcov(readFileSync(join(out, 'merged-b.lcov'), 'utf8')));
+  const g = exportSummary(merged, inv);
   writeFileSync(join(out, 'merged-b.json'), JSON.stringify(t, null, 1));
-  record('merged', { shape: 'b', build_seconds: build, ...summary(t) });
-  if (t.percent < FLOOR) process.exit(1);
+  writeFileSync(join(out, 'merged-b-gate.json'), JSON.stringify(g, null, 1));
+  record('merged', { shape: 'b', build_seconds: build, ...summary(t), gate_basis: summary(g) });
+  if (g.percent < FLOOR) process.exit(1);
 }
 
 // The objects cargo-llvm-cov would read, without needing any profile on disk:
@@ -574,8 +620,14 @@ function nxEnv(cacheDir) {
 // which tasks Nx replayed from its terminal output.
 function nxSweep(clone, cacheDir, { label, skipCache = false }) {
   // A fresh runner: no tier output left from an earlier run, so anything not
-  // run is restored from the cache rather than left in place.
+  // run is restored from the cache rather than left in place; and, as after
+  // rust-cache's restore, no build of the workspace crate itself, so the
+  // objects a report reads are this commit's alone.
   rmSync(join(clone, 'target', 'coverage-tiers'), { recursive: true, force: true });
+  run('cargo', ['clean', '--quiet', '-p', 'onepipeline-ui', '--target-dir', 'target/llvm-cov-target'], {
+    cwd: clone,
+    allowFail: true,
+  });
   for (const f of existsSync(join(clone, 'target', 'llvm-cov-target'))
     ? readdirSync(join(clone, 'target', 'llvm-cov-target'))
     : [])
@@ -611,8 +663,17 @@ function nxSweep(clone, cacheDir, { label, skipCache = false }) {
     );
     const line = m.stdout.split('\n').find((l) => l.startsWith('COVERAGE-SPIKE ') && l.includes('"merged"'));
     const merged = line ? JSON.parse(line.slice(15)) : { error: m.stdout.slice(-2000) + m.stderr.slice(-2000) };
-    const perFile = JSON.parse(readFileSync(join(clone, 'target', 'coverage-tiers', `merged-${shape}.json`), 'utf8'));
-    results[shape] = { merged, perFile, seconds: m.seconds, status: m.status };
+    const read = (name) => {
+      const path = join(clone, 'target', 'coverage-tiers', name);
+      return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : null;
+    };
+    results[shape] = {
+      merged,
+      perFile: read(`merged-${shape}.json`),
+      gate: shape === 'b' ? read('merged-b-gate.json') : null,
+      seconds: m.seconds,
+      status: m.status,
+    };
   }
   const outputs = {};
   for (const [, t] of TIERS)
@@ -699,13 +760,24 @@ function bumpVersionByHand(clone) {
 }
 
 function compare(label, hit, cold) {
-  for (const shape of ['a', 'b']) {
-    const files = differences(cold[shape].perFile, hit[shape].perFile);
+  for (const [shape, basis] of [
+    ['a', 'perFile'],
+    ['b', 'perFile'],
+    ['b', 'gate'],
+  ]) {
+    const x = hit[shape][basis];
+    const y = cold[shape][basis];
+    if (!x || !y) {
+      record('cache-hit-compare', { label, shape, basis: basis === 'gate' ? 'gate' : 'lcov', error: 'a merge wrote no totals' });
+      continue;
+    }
+    const files = differences(y, x);
     record('cache-hit-compare', {
       label,
       shape,
-      cached: summaryOf(hit[shape].perFile),
-      no_cache: summaryOf(cold[shape].perFile),
+      basis: basis === 'gate' ? 'gate' : 'lcov',
+      cached: summaryOf(x),
+      no_cache: summaryOf(y),
       agree: files.length === 0,
       files,
     });
@@ -715,28 +787,21 @@ const summaryOf = (t) => ({ lines: t.lines, covered: t.covered, percent: t.perce
 
 // ---- reuse over real pull requests -----------------------------------------
 
-// For each of the last 30 merged pull requests, which instrumented tiers the
+// For each of the last 30 merged pull requests: which instrumented tiers the
 // proposed inputs (each tier's `test` inputs today, plus this harness) leave
-// unaffected: no changed file is one of the tier's resolved input files
-// (`nx show target inputs`, read at HEAD), and no runtime input the tier
-// declares prints differently at the merge commit than at its parent.
+// unaffected, comparing the head its last test-linux run tested with the base
+// that run's selection compared against (its nx-cache-entries-test-linux
+// artifact's executions.json); and, from the same artifact, each tier's seconds
+// in that run where it ran. A tier is unaffected when no changed file is one of
+// its resolved input files (`nx show target inputs`, read at HEAD) and no runtime
+// input it declares prints differently at head than at base.
+const REPO = 'nickderobertis/onepipeline-ui';
 function measureReuse(out) {
   mkdirSync(out, { recursive: true });
-  const prs = JSON.parse(
-    execFileSync(
-      'gh',
-      [
-        'api',
-        'graphql',
-        '-f',
-        'query=query{repository(owner:"nickderobertis",name:"onepipeline-ui"){pullRequests(states:MERGED,first:45,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title mergedAt mergeCommit{oid}}}}}',
-      ],
-      { encoding: 'utf8' },
-    ),
-  )
+  const query = `query{repository(owner:"nickderobertis",name:"onepipeline-ui"){pullRequests(states:MERGED,first:45,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title mergedAt baseRefOid headRefOid mergeCommit{oid} commits(last:1){nodes{commit{checkSuites(first:10){nodes{workflowRun{databaseId workflow{name}}}}}}}}}}}`;
+  const prs = JSON.parse(execFileSync('gh', ['api', 'graphql', '-f', `query=${query}`], { encoding: 'utf8' }))
     .data.repository.pullRequests.nodes.sort((a, b) => b.mergedAt.localeCompare(a.mergedAt))
     .slice(0, 30);
-  run('git', ['fetch', '--quiet', 'origin', 'main']);
   const inputs = {};
   for (const [project, tier] of TIERS) {
     const res = run('npx', ['nx', 'show', 'target', 'inputs', `${project}:test`, '--json'], {
@@ -749,6 +814,13 @@ function measureReuse(out) {
   const scratch = join(out, 'checkout');
   rmSync(scratch, { recursive: true, force: true });
   run('git', ['clone', '--quiet', '--shared', '--no-checkout', ROOT, scratch]);
+  // Each pull request's own head, which squash merging leaves off main.
+  run('git', [
+    'fetch',
+    '--quiet',
+    `https://github.com/${REPO}.git`,
+    ...prs.map((p) => `+refs/pull/${p.number}/head:refs/pr/${p.number}`),
+  ], { cwd: scratch });
   const runtimeAt = new Map();
   const runtime = (commit, command) => {
     const key = `${commit} ${command}`;
@@ -765,38 +837,77 @@ function measureReuse(out) {
   };
   const rows = [];
   for (const pr of prs) {
-    const merge = pr.mergeCommit.oid;
-    const parent = git(ROOT, 'rev-parse', `${merge}^`);
-    const changed = git(ROOT, 'diff', '--name-only', parent, merge).split('\n').filter(Boolean);
-    const affected = {};
-    for (const [, tier] of TIERS) {
-      const files = changed.filter((f) => inputs[tier].files.has(f));
-      const commands = inputs[tier].runtime.filter((c) => runtime(parent, c) !== runtime(merge, c));
-      affected[tier] = files.length || commands.length ? { files: files.slice(0, 5), file_count: files.length, runtime: commands } : null;
+    // The last CI run on the head that carries test-linux's executions.
+    const runs = pr.commits.nodes
+      .flatMap((c) => c.commit.checkSuites.nodes)
+      .map((s) => s.workflowRun)
+      .filter((r) => r && r.workflow.name === 'CI')
+      .map((r) => r.databaseId)
+      .sort((a, b) => b - a);
+    let executions = null;
+    let runId = null;
+    for (const id of runs) {
+      const dir = join(out, 'artifacts', String(pr.number));
+      rmSync(dir, { recursive: true, force: true });
+      const res = spawnSync('gh', ['run', 'download', String(id), '-R', REPO, '-n', 'nx-cache-entries-test-linux', '-D', dir], {
+        encoding: 'utf8',
+      });
+      if (res.status === 0 && existsSync(join(dir, 'executions.json'))) {
+        executions = JSON.parse(readFileSync(join(dir, 'executions.json'), 'utf8'));
+        runId = id;
+        break;
+      }
     }
+    const head = executions?.head_sha ?? pr.headRefOid;
+    const base = executions?.selection?.base_sha ?? git(scratch, 'merge-base', pr.headRefOid, pr.baseRefOid);
+    const changed = git(scratch, 'diff', '--name-only', base, head).split('\n').filter(Boolean);
+    const tasks = executions ? Object.values(executions).find(Array.isArray) : [];
+    const seconds = (task) => {
+      const t = tasks.find((x) => x.task === task && x.result === 'executed');
+      return t ? Math.round((Date.parse(t.finished_at) - Date.parse(t.started_at)) / 1000) : null;
+    };
+    const affected = {};
+    const ranToday = {};
+    for (const [project, tier] of TIERS) {
+      const files = changed.filter((f) => inputs[tier].files.has(f));
+      const commands = inputs[tier].runtime.filter((c) => runtime(base, c) !== runtime(head, c));
+      affected[tier] = files.length || commands.length ? { files: files.slice(0, 5), file_count: files.length, runtime: commands } : null;
+      ranToday[tier] = seconds(`${project}:test`);
+    }
+    const unaffected = TIERS.map(([, t]) => t).filter((t) => !affected[t]);
+    const reusable = unaffected.filter((t) => ranToday[t] !== null);
     const rust = changed.filter((f) => /^src\/.*\.rs$/.test(f) || f === 'build.rs');
     const row = {
       pr: pr.number,
       title: pr.title,
-      merge,
+      run: runId ? `https://github.com/${REPO}/actions/runs/${runId}` : null,
+      tier: executions?.selection?.mode ?? null,
+      base,
+      head,
       changed_files: changed.length,
       rust_sources_changed: rust.length > 0,
-      unaffected: TIERS.map(([, t]) => t).filter((t) => !affected[t]),
+      unaffected,
+      ran_today_seconds: ranToday,
+      reusable_ran_today: reusable,
+      reusable_seconds: reusable.reduce((s, t) => s + ranToday[t], 0),
+      coverage_seconds: seconds('onepipeline-ui-coverage:coverage'),
       affected: Object.fromEntries(Object.entries(affected).filter(([, v]) => v)),
     };
     rows.push(row);
     record('reuse', row);
   }
-  const unaffectedTierRuns = rows.reduce((s, r) => s + r.unaffected.length, 0);
   record('reuse-summary', {
     prs: rows.length,
+    prs_with_artifact: rows.filter((r) => r.run).length,
     tier_runs: rows.length * TIERS.length,
-    unaffected_tier_runs: unaffectedTierRuns,
+    unaffected_tier_runs: rows.reduce((s, r) => s + r.unaffected.length, 0),
     prs_with_any_unaffected: rows.filter((r) => r.unaffected.length).length,
     prs_changing_rust_sources: rows.filter((r) => r.rust_sources_changed).length,
-    per_tier_unaffected: Object.fromEntries(
-      TIERS.map(([, t]) => [t, rows.filter((r) => r.unaffected.includes(t)).length]),
-    ),
+    per_tier_unaffected: Object.fromEntries(TIERS.map(([, t]) => [t, rows.filter((r) => r.unaffected.includes(t)).length])),
+    tier_runs_today: rows.reduce((s, r) => s + Object.values(r.ran_today_seconds).filter((x) => x !== null).length, 0),
+    tier_seconds_today: rows.reduce((s, r) => s + Object.values(r.ran_today_seconds).reduce((a, x) => a + (x ?? 0), 0), 0),
+    reusable_tier_runs: rows.reduce((s, r) => s + r.reusable_ran_today.length, 0),
+    reusable_seconds: rows.reduce((s, r) => s + r.reusable_seconds, 0),
   });
   writeFileSync(join(out, 'reuse.json'), JSON.stringify(rows, null, 1));
   rmSync(scratch, { recursive: true, force: true });
