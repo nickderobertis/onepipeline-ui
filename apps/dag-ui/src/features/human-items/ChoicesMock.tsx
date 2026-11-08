@@ -17,7 +17,8 @@ export type MockStage =
   | "detail"
   | "bar"
   | "refused"
-  | "answered";
+  | "answered"
+  | "long";
 
 // `before` is no longer drawn here: the before views are captured on the
 // starting head's own source (`just spike-action-items-before-screens`).
@@ -27,6 +28,7 @@ const STAGES: readonly MockStage[] = [
   "bar",
   "refused",
   "answered",
+  "long",
 ];
 
 export function mockStage(): MockStage | undefined {
@@ -55,7 +57,13 @@ function item(
   block: HumanItem["block"],
   state: HumanItem["state"] = "open",
   resolution: HumanItem["resolution"] = null,
+  extra: Partial<HumanItem> = {},
 ): HumanItemView {
+  const owner = extra.owner ?? {
+    session: "manager-question-items",
+    run: "release-0-45",
+    plan: "authoring:release-0-45",
+  };
   return {
     item: {
       schema_version: 1,
@@ -65,11 +73,7 @@ function item(
       title,
       body,
       priority,
-      owner: {
-        session: "manager-question-items",
-        run: "release-0-45",
-        plan: "authoring:release-0-45",
-      },
+      owner,
       block,
       approval: null,
       state,
@@ -77,6 +81,7 @@ function item(
       tracker: null,
       created_at: AT,
       updated_at: AT,
+      ...extra,
     },
     blocked:
       block.scope === "work" && state === "open"
@@ -84,12 +89,12 @@ function item(
             total: 2,
             plans: [
               {
-                plan: "authoring:release-0-45",
+                plan: owner.plan ?? "",
                 count: 2,
                 preview: [
-                  { run: "release-0-45", node: block.node, title },
+                  { run: owner.run ?? "", node: block.node, title },
                   {
-                    run: "release-0-45",
+                    run: owner.run ?? "",
                     node: "publish",
                     title: "Publish the release",
                   },
@@ -114,6 +119,48 @@ export const Q_WINDOWS = "hi-mock-q-windows";
 export const Q_FREE = "hi-mock-q-free";
 const T_TOKEN = "hi-mock-t-token";
 const T_DOCS = "hi-mock-t-docs";
+export const Q_LONG = "hi-mock-q-long";
+const T_LONG = "hi-mock-t-long";
+
+const LONG_OWNER: HumanItem["owner"] = {
+  session: "manager-question-items-2026-11-08-spike-visual-long-metadata-session-0001",
+  plan: "authoring:question-items-2026-11-08-release-workflow-registry-hold-policy",
+  run: "release-0-45-registry-hold-policy-spike-visual-long-metadata-run-2026-11-08",
+};
+
+/** The long-text items the `long` stage puts above the realistic ones. */
+function longItems(): HumanItemView[] {
+  return [
+    item(
+      Q_LONG,
+      "question",
+      "urgent",
+      "Should the release workflow keep publishing the platform-independent artifacts when one platform job fails, or hold every registry until all of them pass?",
+      "When build-windows failed on v0.41.2, build-linux, build-linux-arm64 and build-macos had already uploaded their wheels and npm platform packages, and publish held the crate, the launcher and the frontend back until a re-run finished the Windows leg. That kept every registry consistent, but it left PyPI serving three wheels of a version crates.io had never heard of for most of an afternoon, and a consumer pinning the launcher saw nothing at all. The alternative is to treat each registry on its own terms. Either way the release-status banner and the verify step keep working as they do now; what changes is which half of the release a reader can install while the failed platform is being repaired.",
+      work("publish-platform-independent-artifacts-after-every-platform-job"),
+      "open",
+      null,
+      {
+        owner: LONG_OWNER,
+        tracker: {
+          task: "nickderobertis/onepipeline-ui#712-release-registry-hold-policy",
+          url: "https://github.com/nickderobertis/onepipeline-ui/issues/712",
+        },
+      },
+    ),
+    item(
+      T_LONG,
+      "task",
+      "urgent",
+      "Approve the npm staged publish of onepipeline-api-cli-linux-arm64 0.45.0 so the launcher that pins it can go out to every registry today",
+      "npm took the upload and staged it rather than publishing it, so nothing serves the arm64 platform package yet and the publish job's check is waiting on it. Approve stage 7f3c-0451-arm64 with `npm stage approve`, then re-run publish, or approve while the re-run waits out its five-minute hold. Until then the launcher, the crate and the frontend stay unpublished and the Release stays a prerelease with its banner.",
+      { scope: "host" },
+      "open",
+      null,
+      { owner: LONG_OWNER },
+    ),
+  ];
+}
 
 const TITLES: Readonly<Record<string, string>> = {
   [Q_SDK]: "Which onepipeline SDK should 0.45 link?",
@@ -166,6 +213,7 @@ function liveItems(stage: MockStage): HumanItemView[] {
       { scope: "nothing" },
     ),
   ];
+  if (stage === "long") return [...longItems(), ...open];
   if (stage === "refused")
     // Two of the three answers went through, so those questions left the open list.
     return open.filter(({ item: { id } }) => id !== Q_SDK && id !== Q_FREE);
@@ -205,6 +253,26 @@ function liveItems(stage: MockStage): HumanItemView[] {
 }
 
 export const CHOICES: Readonly<Record<string, readonly Choice[]>> = {
+  [Q_LONG]: [
+    {
+      title:
+        "Hold every registry until all four platform jobs have published their own files",
+      description:
+        "Keep today's rule. Nothing platform-independent publishes until every platform's files are served, so a reader never sees a version on one registry that another has not got. The cost is a release that can sit half-published for hours while a single platform is repaired, with PyPI already serving the wheels that made it.",
+    },
+    {
+      title:
+        "Publish whatever succeeded and let a re-run of the one failed platform finish it",
+      description:
+        "Every registry takes what it can as soon as it can: the crate, the launcher and the frontend publish beside whichever platform packages exist, and the launcher's install falls back to building from source on the missing platform until the re-run fills it in. This needs a change to `scripts/release.mjs`'s ordering, a new journey in `tests/packaging.rs` for a launcher that pins a platform package npm does not serve yet, and a line in the release-status banner naming which platforms are still missing, so a reader of the Release can tell a partial publish from a finished one without opening the job log.",
+    },
+    {
+      title:
+        "Publish the crate and npm launcher first, then each platform as its job passes",
+      description:
+        "Invert the order: the platform-independent half goes out first and each platform follows on its own.",
+    },
+  ],
   [Q_SDK]: [
     {
       title: "Stay on 0.44.2",
@@ -270,6 +338,8 @@ function picks(stage: MockStage): Readonly<Record<string, number>> {
       return { [Q_CACHE]: 1 };
     case "answered":
       return { [Q_SDK]: 1 };
+    case "long":
+      return { [Q_LONG]: 1 };
     default:
       return {};
   }
@@ -375,7 +445,7 @@ export function ChoiceButtons({
   );
 }
 
-/** The expanded view's choices: each title and its whole description, one selected. */
+/** The expanded view's choices: each one the same compact title button, its whole description beneath it. */
 export function ChoiceList({
   id,
   stage,
@@ -390,21 +460,18 @@ export function ChoiceList({
     <fieldset className="mock-choice-list">
       <legend>Choices</legend>
       {choices.map((choice, index) => (
-        <label
-          className="mock-choice-option"
-          data-picked={picked === index}
-          key={choice.title}
-        >
-          <input
-            defaultChecked={picked === index}
-            name={`choice-${id}`}
-            type="radio"
-          />
-          <span>
-            <strong>{choice.title}</strong>
+        <div className="mock-choice-entry" key={choice.title}>
+          <button
+            aria-pressed={picked === index}
+            className="mock-choice"
+            type="button"
+          >
+            {choice.title}
+          </button>
+          <div className="mock-choice-description">
             <TaskMarkdown source={choice.description} />
-          </span>
-        </label>
+          </div>
+        </div>
       ))}
     </fieldset>
   );
@@ -439,12 +506,22 @@ export function AnsweredLine({
 }
 
 /** The sticky bar that sends every held draft at once. */
-export function SendBar({ stage }: { readonly stage: MockStage }) {
+export function SendBar({
+  stage,
+  inDetail = false,
+}: {
+  readonly stage: MockStage;
+  readonly inDetail?: boolean;
+}) {
   const count = draftCount(stage);
   if (count === 0 || stage === "answered") return null;
   const answers = count === 1 ? "1 answer" : `${count} answers`;
   return (
-    <section aria-label="Drafted answers" className="mock-send-bar">
+    <section
+      aria-label="Drafted answers"
+      className="mock-send-bar"
+      data-in-detail={inDetail}
+    >
       <span className="mock-send-bar-count">
         {stage === "refused"
           ? "2 sent · 1 refused, draft kept"
@@ -458,4 +535,9 @@ export function SendBar({ stage }: { readonly stage: MockStage }) {
       </Button>
     </section>
   );
+}
+
+/** A timestamp as the metadata block shows it. */
+export function mockTime(at: string): string {
+  return `${at.slice(0, 16).replace("T", " ")} UTC`;
 }

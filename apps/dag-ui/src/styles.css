@@ -3024,25 +3024,30 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 
 /* SPIKE (question-items-2026-11-08 spike-visual): the choices / drafts / send-bar
    mock, drawn only under `/human-items?mock=<stage>`. Not meant to land. */
+
+/* Compact choice buttons: one 30px line at every width, the card's 12px text,
+   8px apart, wrapping inside the button only when a title needs it. */
 .mock-choices {
   min-width: 0;
   padding: 0;
   border: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
+  gap: 8px;
+  margin: 4px 0 2px;
 }
 
 .mock-choice {
-  min-height: 26px;
-  padding: 2px 10px;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 5px 9px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 7px;
   background: var(--background);
   font-size: 12px;
   line-height: 18px;
   text-align: left;
+  overflow-wrap: anywhere;
 }
 
 .mock-choice[aria-pressed="true"] {
@@ -3052,27 +3057,35 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   font-weight: 600;
 }
 
-.mock-detail-answer {
-  display: grid;
-  flex: none;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  align-items: start;
-  gap: 10px;
+/* The card title wraps in full, never truncated. */
+.human-items-list[data-mock] .otg-card__title {
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
 }
 
-/* The question's body keeps its height above the choices; the pane scrolls. */
-.human-item-detail:has(.mock-detail-answer) {
+/* The detail reads top to bottom as one scroll: title, body, choices and answer,
+   actions, then the metadata block. */
+.human-item-detail[data-mock-detail] {
   overflow: auto;
 }
 
-.human-item-detail:has(.mock-detail-answer) .human-item-detail-body {
+.human-item-detail[data-mock-detail] .human-item-detail-body {
   flex: none;
   overflow: visible;
 }
 
+.mock-detail-answer {
+  display: grid;
+  flex: none;
+  gap: 10px;
+}
+
 .mock-choice-list {
   display: grid;
-  gap: 6px;
+  gap: 10px;
+  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
@@ -3085,29 +3098,54 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   font-weight: 600;
 }
 
-.mock-choice-option {
+.mock-choice-entry {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 12.5px;
-  line-height: 18px;
+  justify-items: start;
+  gap: 3px;
+  min-width: 0;
 }
 
-.mock-choice-option[data-picked="true"] {
-  border-color: var(--primary);
-  box-shadow: inset 2px 0 var(--primary);
-}
-
-.mock-choice-option .otg-markdown {
+.mock-choice-description,
+.mock-choice-description .otg-markdown {
   color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
 }
 
 .mock-detail-answer .human-item-answer {
-  min-height: 96px;
-  margin-top: 22px;
+  min-height: 64px;
+}
+
+.mock-detail-meta {
+  display: grid;
+  flex: none;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 12px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 16px;
+}
+
+.mock-detail-meta dt {
+  font-weight: 600;
+}
+
+.mock-detail-meta dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+
+.mock-detail-meta ul {
+  margin: 0;
+  padding-left: 14px;
 }
 
 .mock-answered {
@@ -3130,16 +3168,32 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   box-shadow: inset 2px 0 var(--destructive);
 }
 
+/* The send bar is pinned to the bottom of the list area, however short the list. */
+.human-items-list[data-mock] {
+  display: flex;
+  flex-direction: column;
+}
+
 .mock-send-bar {
   position: sticky;
   bottom: -12px;
   display: flex;
+  flex: none;
   align-items: center;
   gap: 8px;
-  margin: 8px -20px -12px;
+  margin: auto -20px -12px;
   padding: 8px 20px;
   border-top: 1px solid var(--border);
   background: var(--card);
+}
+
+.human-items-list[data-mock] > :not(.mock-send-bar) {
+  flex: none;
+}
+
+/* Its copy in the detail shows only on a phone, where the detail covers the list. */
+.mock-send-bar[data-in-detail="true"] {
+  display: none;
 }
 
 .mock-send-bar-count {
@@ -3149,23 +3203,15 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 }
 
 @media (max-width: 640px) {
-  .mock-choice {
-    min-height: 40px;
-    font-size: 13px;
-  }
-
-  .mock-detail-answer {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .mock-detail-answer .human-item-answer {
-    min-height: 64px;
-    margin-top: 0;
-  }
-
   .mock-send-bar {
-    margin: 8px -10px -12px;
+    margin: auto -10px -12px;
     padding: 8px 10px;
+  }
+
+  .mock-send-bar[data-in-detail="true"] {
+    display: flex;
+    margin: auto -20px -12px;
+    padding: 8px 20px;
   }
 
   .mock-send-bar button {

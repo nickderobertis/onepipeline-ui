@@ -604,9 +604,9 @@ dag-ui-screens *ARGS:
 # SPIKE (question-items-2026-11-08): re-capture the Action items choices mock (the
 # after views) at phone and desktop width into shots/local/action-items-mock.
 spike-action-items-screens:
-    @SHOTS_OUT=shots/local/action-items-mock bash scripts/visual-capture.sh --grep "at (390x844|1440x900) captures Action items mock 3[2-6]-"
+    @SHOTS_OUT=shots/local/action-items-mock bash scripts/visual-capture.sh --grep "at (390x844|1440x900) captures Action items mock (3[2-689]|40)-"
 
-# SPIKE: the two "before" views, captured with apps/dag-ui/src at the starting head
+# SPIKE: the "before" views (30, 31, 37), captured with apps/dag-ui/src at the starting head
 # (c5797b8) into shots/local/action-items-before, then restored.
 spike-action-items-before-screens:
     @bash scripts/spike-action-items-before.sh

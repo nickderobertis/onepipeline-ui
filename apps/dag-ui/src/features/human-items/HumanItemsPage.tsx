@@ -20,6 +20,7 @@ import {
   ChoiceList,
   mockHumanItems,
   mockStage,
+  mockTime,
   SendBar,
   showsChoices,
 } from "./ChoicesMock";
@@ -745,6 +746,117 @@ function DetailPane({
   const stage = mockStage();
   const open = item.state === "open";
   const phrases = blockedPhrases(shown);
+  // SPIKE: the detail leads with the item; its metadata is one block at the bottom.
+  if (showsChoices(stage) && stage)
+    return (
+      <aside
+        aria-label="Action item detail"
+        className="human-item-detail"
+        data-mock-detail="true"
+      >
+        <header className="human-item-detail-head">
+          <h2>{item.title}</h2>
+          <Button
+            aria-label="Close detail"
+            onClick={onClose}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <X size={14} />
+          </Button>
+        </header>
+        <section aria-label="Full body" className="human-item-detail-body">
+          <TaskMarkdown source={item.body} />
+        </section>
+        {item.kind === "question" && open && (
+          <div className="mock-detail-answer">
+            <ChoiceList id={item.id} stage={stage} />
+            <AnswerBox
+              draft={draft}
+              label={`Answer in detail: ${item.title}`}
+              onDraft={onDraft}
+              onSubmit={() => undefined}
+              pending={false}
+              placeholder="Add a note to the choice, or answer in your own words"
+            />
+          </div>
+        )}
+        {error && <p role="alert">{error}</p>}
+        {open && (
+          <div className="human-item-detail-actions">
+            {item.kind === "task" && (
+              <Button size="sm" type="button">
+                Complete
+              </Button>
+            )}
+            <Button size="sm" type="button" variant="outline">
+              Dismiss
+            </Button>
+            <WriteStatus state={state} />
+          </div>
+        )}
+        <dl aria-label="Details" className="mock-detail-meta">
+          <dt>Priority</dt>
+          <dd>{priorityLabel(item)}</dd>
+          <dt>Kind</dt>
+          <dd>{kindLabel(item)}</dd>
+          <dt>State</dt>
+          <dd>{stateLabel(item)}</dd>
+          <dt>Source</dt>
+          <dd>{item.owner.session}</dd>
+          {item.owner.plan !== null && (
+            <>
+              <dt>Plan</dt>
+              <dd>{item.owner.plan}</dd>
+            </>
+          )}
+          {item.owner.run !== null && (
+            <>
+              <dt>Run</dt>
+              <dd>{item.owner.run}</dd>
+            </>
+          )}
+          {phrases.length > 0 && (
+            <>
+              <dt>Blocks</dt>
+              <dd>{phrases.join("; ")}</dd>
+            </>
+          )}
+          {detail && detail.nodes.length > 0 && (
+            <>
+              <dt>Blocked steps</dt>
+              <dd>
+                <ul>
+                  {detail.nodes.map((node) => (
+                    <li key={`${node.run}/${node.node}`}>
+                      {node.run} / {node.node}: {node.title}
+                    </li>
+                  ))}
+                </ul>
+              </dd>
+            </>
+          )}
+          {item.tracker && (
+            <>
+              <dt>Tracker</dt>
+              <dd>
+                <a href={item.tracker.url}>{item.tracker.task}</a>
+              </dd>
+            </>
+          )}
+          <dt>Raised</dt>
+          <dd>{mockTime(item.created_at)}</dd>
+          {!open && (
+            <>
+              <dt>{item.state === "answered" ? "Answered" : "Resolved"}</dt>
+              <dd>{mockTime(item.updated_at)}</dd>
+            </>
+          )}
+        </dl>
+        {item.kind === "question" && <SendBar inDetail stage={stage} />}
+      </aside>
+    );
   return (
     <aside aria-label="Action item detail" className="human-item-detail">
       <header className="human-item-detail-head">

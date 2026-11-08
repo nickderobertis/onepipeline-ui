@@ -325,6 +325,12 @@ async function pointAtPlot(page: Page, timeline: Locator): Promise<void> {
   await expect(timeline.getByLabel("Timeline crosshair")).toBeVisible();
 }
 
+// SPIKE (question-items-2026-11-08 spike-visual): the items the mock views open.
+const SPIKE_SDK = "Which onepipeline SDK should 0.45 link?";
+const SPIKE_TASK = "Rotate PYPI_TOKEN to an account-scoped token";
+const SPIKE_LONG =
+  "Should the release workflow keep publishing the platform-independent artifacts when one platform job fails, or hold every registry until all of them pass?";
+
 const SURFACES: readonly Surface[] = [
   {
     name: "01-run-list-overall",
@@ -817,13 +823,17 @@ const SURFACES: readonly Surface[] = [
   // with `just spike-action-items-screens`.
   ...(
     [
-      ["30-action-items-before-card", "before", false],
-      ["31-action-items-before-detail", "before", true],
-      ["32-action-items-choice-card", "card", false],
-      ["33-action-items-choice-detail", "detail", true],
-      ["34-action-items-send-bar", "bar", false],
-      ["35-action-items-refused", "refused", false],
-      ["36-action-items-answered", "answered", false],
+      ["30-action-items-before-card", "before", null],
+      ["31-action-items-before-detail", "before", SPIKE_SDK],
+      ["32-action-items-choice-card", "card", null],
+      ["33-action-items-choice-detail", "detail", SPIKE_SDK],
+      ["34-action-items-send-bar", "bar", null],
+      ["35-action-items-refused", "refused", null],
+      ["36-action-items-answered", "answered", null],
+      ["37-action-items-before-task-detail", "before", SPIKE_TASK],
+      ["38-action-items-task-detail", "detail", SPIKE_TASK],
+      ["39-action-items-long-list", "long", null],
+      ["40-action-items-long-detail", "long", SPIKE_LONG],
     ] as const
   ).map(
     ([name, stage, detail]): Surface => ({
@@ -862,9 +872,12 @@ const SURFACES: readonly Surface[] = [
           await page.goto("/human-items");
         } else await page.goto(`/human-items?mock=${stage}`);
         const title =
-          stage === "refused"
+          detail ??
+          (stage === "refused"
             ? "Keep the Nx results cache across release PRs?"
-            : "Which onepipeline SDK should 0.45 link?";
+            : stage === "long"
+              ? SPIKE_LONG
+              : SPIKE_SDK);
         await page.getByText(title).first().waitFor();
         if (detail) {
           await page
@@ -874,6 +887,25 @@ const SURFACES: readonly Surface[] = [
             .getByRole("complementary", { name: "Action item detail" })
             .getByRole("heading", { name: title })
             .waitFor();
+        }
+        // SPIKE: an expanded after view, and the long-text list, grow the viewport
+        // to the height of what scrolls so one image holds all of it.
+        if (stage !== "before" && (detail || stage === "long")) {
+          for (let round = 0; round < 4; round += 1) {
+            const extra = await page.evaluate(() => {
+              const pane =
+                document.querySelector<HTMLElement>("[data-mock-detail]") ??
+                document.querySelector<HTMLElement>(".human-items-list");
+              return pane ? pane.scrollHeight - pane.clientHeight : 0;
+            });
+            if (extra <= 0) break;
+            const size = page.viewportSize();
+            if (!size) break;
+            await page.setViewportSize({
+              width: size.width,
+              height: size.height + extra,
+            });
+          }
         }
         if (stage === "refused")
           await page

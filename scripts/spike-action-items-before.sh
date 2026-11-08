@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPIKE (question-items-2026-11-08 spike-visual): capture the two "before" views of
+# SPIKE (question-items-2026-11-08 spike-visual): capture the "before" views of
 # Action items with the app's source exactly as the spike's starting head had it
 # (c5797b8), through the repository's capture path, then put the spike back.
 # Not meant to land.
@@ -15,4 +15,4 @@ git checkout "$base" -- apps/dag-ui/src
 # The starting head's own copy of the page, byte for byte.
 git diff --quiet "$base" -- apps/dag-ui/src/features/human-items/HumanItemsPage.tsx apps/dag-ui/src/styles.css
 SHOTS_OUT=shots/local/action-items-before bash scripts/visual-capture.sh \
-  --grep "at (390x844|1440x900) captures Action items mock 3[01]-"
+  --grep "at (390x844|1440x900) captures Action items mock (3[01]|37)-"
