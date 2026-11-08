@@ -184,8 +184,9 @@ it started 635 s into that run and about 800 s into the cancelled one. Two
 changes, held to Nx 23.1.3's own `TasksSchedule` driven over the branch's task
 graph with that run's task durations:
 
-- `.github/tests/nx-cache/project.json`: a no-op `budgets` follows `test` and
-  its `check` names it, so the suite has a dependent and a slot with the tiers
+- `.github/tests/nx-cache/project.json`: a no-op `prioritize` follows `test`,
+  test-linux's affected targets (`scripts/ci-job.sh`) and the project's `check`
+  name it, so the suite has a dependent and a slot with the tiers
   (it starts at 302 s rather than 692 s). On its own that moves the end only
   41 s: with `dag-ui-e2e:test` uncached, the browser tier then ends last.
 - `apps/dag-ui-e2e`: each action-items world is built once per run and copied

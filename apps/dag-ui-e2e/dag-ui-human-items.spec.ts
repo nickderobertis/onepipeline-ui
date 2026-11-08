@@ -2406,11 +2406,11 @@ async function holdRequests(page: Page, path: string): Promise<() => void> {
  * reader saw, so it is recorded in the page as it happens.
  */
 async function recordAlerts(page: Page): Promise<() => Promise<string[]>> {
-  // llmlint: ignore[e2e_uses_accessible_selectors] a locator can only ask what is on the page now; a transient alert has to be noticed by an observer inside the page as it appears, and `[role="alert"]` is the accessible role itself, read where no locator reaches.
   await page.addInitScript(() => {
     const seen: string[] = [];
     Object.assign(window, { __alerts: seen });
     new MutationObserver(() => {
+      // llmlint: ignore[e2e_uses_accessible_selectors] a locator can only ask what is on the page now; a transient alert has to be noticed by an observer inside the page as it appears, and `[role="alert"]` is the accessible role itself, read where no locator reaches.
       for (const element of document.querySelectorAll('[role="alert"]')) {
         const text = element.textContent ?? "";
         if (!seen.includes(text)) seen.push(text);

@@ -482,7 +482,8 @@ if arguments.resume:
         """An issue as this board keeps one: the fields every issue carries, each of a
         type this board answers with, and a parent the same state holds."""
         return (isinstance(held, dict)
-                and isinstance(held.get("title"), str) and isinstance(held.get("body"), str)
+                and {"title", "body", "number", "state", "reason", "status", "parent"} <= set(held)
+                and isinstance(held["title"], str) and isinstance(held["body"], str)
                 and type(held.get("number")) is int
                 and held.get("state") in STATES
                 and held.get("reason") in STATES[held["state"]]
