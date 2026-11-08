@@ -130,8 +130,6 @@ function archiveBytes(targetFiles, cargoFiles = []) {
   return Number(res.stdout.trim());
 }
 
-// ---- rust-cache v2.9.2's save-time cleanup, as a filter over file lists ------
-
 /** Non-workspace packages, as rust-cache's getPackagesOutsideWorkspaceRoot reads them. */
 function packages() {
   const res = spawnSync(
@@ -261,7 +259,6 @@ function keptCargo(files, pkgs, oldBins) {
     if (parts[0] === "registry") {
       if (parts[1] === "index") {
         if (parts[3] === ".git") return true;
-        // the index .cache keeps entries named like a dependency
         return parts.length > 3 && names.has(parts.at(-1));
       }
       if (parts[1] === "src") return sys.has(parts[3]);
@@ -714,8 +711,8 @@ function price() {
       status: [warm.status, dropped.status],
     });
   }
-  // The whole family gone: every line cold in plan order, as above, against
-  // every line warm.
+  // The whole family, every line warm in plan order; its cold side is the plan-order
+  // timing recorded above, which is what a family dropped would cost.
   clean();
   const allWarm = timed(`bash scripts/ci-warm.sh ${os}`);
   record("price", {

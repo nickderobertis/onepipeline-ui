@@ -631,7 +631,6 @@ function measureDeterminism(out) {
     lines_differing: lines.length,
     lines,
   });
-  // Per tier too: which tier's own report moves, under the chosen shape.
   for (const [, tier] of TIERS) {
     const a = readLcov(
       readFileSync(join(out, "first", "a", `${tier}.lcov`), "utf8"),
