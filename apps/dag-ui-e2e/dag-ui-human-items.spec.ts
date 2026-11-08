@@ -3307,23 +3307,25 @@ test("what is asked of a toast before its receipt waits for it, and is dropped w
   // the card returns with the reason.
   const plain = "File the flaky-runner report";
   const plainId = idOf(served, "plain");
-  let refuse: () => void = () => {};
-  const refused = new Promise<void>((resolve) => {
-    refuse = resolve;
-  });
-  await page.route(`**/api/human-items/${plainId}/complete`, async (route) => {
-    await refused;
-    await route.abort("connectionrefused");
-  });
+  // The write is held on its way, the server stops, and then the write goes on
+  // to a server that is no longer there.
+  const releasePlain = await holdRequests(
+    page,
+    `/api/human-items/${plainId}/complete`,
+  );
   await page.getByRole("button", { name: `Complete: ${plain}` }).click();
   await toast(page).getByRole("button", { name: "Reopen" }).click();
-  refuse();
+  await served.stopServing();
+  releasePlain();
   await expect(toast(page)).toHaveAttribute("data-tone", "failure");
-  await expect(card(page, plain).getByRole("alert")).toBeVisible();
+  await expect(card(page, plain).getByRole("alert")).toHaveText(
+    "Telemetry request failed",
+  );
   await page.waitForTimeout(500);
   expect(verbs(sent)).toEqual(["complete", "complete"]);
-  expect(stored(served, plainId).state).toBe("open");
   await page.unroute(`**/api/human-items/${plainId}/complete`);
+  await served.serveRebuilt();
+  expect(stored(served, plainId).state).toBe("open");
 
   // A reason written and sent before Dismiss's receipt goes after it.
   const certificate = "Rotate the staging certificate";
@@ -3401,4 +3403,61 @@ test("a grouping this page does not know, or storage the browser refuses, groups
   await second.getByRole("combobox", { name: "Group by" }).selectOption("kind");
   await expect(headings(second)).toHaveText(["Task (4)", "Question (3)"]);
   await refusing.close();
+});
+
+test("a new write's toast starts afresh, with no editor open and nothing typed from the last", async ({
+  page,
+}) => {
+  const served = await serveWorld("undo");
+  await open(page, served);
+  const certificate = "Rotate the staging certificate";
+  await page.getByRole("button", { name: `Dismiss: ${certificate}` }).click();
+  await expect(outcome(page)).toHaveText(`Dismissed: ${certificate}`);
+  await toast(page).getByRole("button", { name: "Add reason" }).click();
+  await toast(page)
+    .getByRole("textbox", { name: "Reason" })
+    .fill("half a thought");
+  // Another write while the reason is half written: its toast replaces this one.
+  const plain = "File the flaky-runner report";
+  await page.getByRole("button", { name: `Complete: ${plain}` }).click();
+  await expect(outcome(page)).toHaveText(`Completed: ${plain}`);
+  await expect(toast(page).getByRole("textbox")).toHaveCount(0);
+  await toast(page).getByRole("button", { name: "Add comment" }).click();
+  await expect(
+    toast(page).getByRole("textbox", { name: "Comment" }),
+  ).toHaveValue("");
+  // Nothing of the abandoned reason was sent.
+  expect(stored(served, idOf(served, "certificate")).resolution?.reason).toBe(
+    null,
+  );
+});
+
+test("a filter chosen while the page is ahead of the stream shows only what the filter selects", async ({
+  page,
+}) => {
+  const served = await serveWorld("undo");
+  await open(page, served);
+  // Changes wait for the reader: the stream's news of what this page does is held.
+  await page
+    .getByRole("combobox", { name: "Main area updates" })
+    .selectOption({ label: "Off" });
+  const plain = "File the flaky-runner report";
+  await page.getByRole("button", { name: `Complete: ${plain}` }).click();
+  await expect(outcome(page)).toHaveText(`Completed: ${plain}`);
+  await toast(page).getByRole("button", { name: "Reopen" }).click();
+  await expect(outcome(page)).toHaveText(`Reopened: ${plain}`);
+  // Back from the receipt alone, ahead of a stream the page is not showing.
+  await expect(card(page, plain)).toBeVisible();
+  // A filter that excludes it is a new list, which the page's receipts are not
+  // part of: only what the engine serves under it shows.
+  await page
+    .getByRole("combobox", { name: "Priority", exact: true })
+    .selectOption({ label: "High" });
+  await expect(card(page, "Review the action-items design")).toBeVisible();
+  await expect(card(page, plain)).toHaveCount(0);
+  expect((await titles(listRegion(page))).sort()).toEqual(
+    listed(served, ["--all", "--priority", "high"])
+      .map(({ item }) => item.title)
+      .sort(),
+  );
 });
