@@ -60,7 +60,6 @@ export function useToastLifecycle(
     setText("");
   }, [key]);
 
-  // A saved note is done with: its words are the item's now.
   useEffect(() => {
     if (followUp?.kind === "note" && followUp.phase === "done") {
       setWriting(false);
