@@ -10,9 +10,9 @@ name: Cache price
 #                     it, then builds every warm line of `scripts/ci-warm.sh <os>`
 #                     cold and prices each (scripts/cache-price.mjs). Compiles
 #                     only; runs no test.
-#   coverage (linux)  times today's instrumented tiers and each prototyped
-#                     coverage shape on a hosted runner
-#                     (`node scripts/coverage-spike.mjs shapes`).
+#   coverage (linux,  one measurement of `scripts/coverage-spike.mjs` on a hosted
+#    <measurement>)   runner: shapes, determinism, or cache-hit (real Nx over a
+#                     scratch clone; its cache is a local directory).
 
 on:
   pull_request:
@@ -57,7 +57,9 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
       - name: What ~/.cargo/bin holds before the restore
-        run: ls "${CARGO_HOME:-$HOME/.cargo}/bin" > "$RUNNER_TEMP/cargo-bin-before"
+        run: |
+          # macOS runners have no ~/.cargo until the first restore.
+          ls "${CARGO_HOME:-$HOME/.cargo}/bin" > "$RUNNER_TEMP/cargo-bin-before" 2>/dev/null || : > "$RUNNER_TEMP/cargo-bin-before"
       # Where ci-cache.yml places it: ahead of the MSRV toolchain, so the key is
       # main's. Restore only.
       - uses: Swatinem/rust-cache@v2.9.2
@@ -98,9 +100,16 @@ jobs:
         run: df -h . || true
 
   coverage:
-    name: coverage (linux)
+    name: coverage (linux, ${{ matrix.measurement }})
+    strategy:
+      fail-fast: false
+      matrix:
+        measurement: [shapes, determinism, cache-hit]
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 300
+    env:
+      # cache-hit's sweeps: nextest's default, one test per core on this runner.
+      SPIKE_TEST_THREADS: 4
     steps:
       # As test-linux checks out: the repository machinery's journeys read history.
       - uses: actions/checkout@v4
@@ -115,6 +124,15 @@ jobs:
             /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
             { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
           ' >> "$GITHUB_OUTPUT"
+      # The harness's scratch clone and copied instrumented build need the room.
+      - name: Free disk the cache-hit clone needs
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      # The clone's `origin` is this checkout, whose repository machinery journeys
+      # read main from history; a pull-request checkout has no local main.
+      - name: Name main in the checkout
+        run: git branch -f main origin/main
       # test-linux's own restore of main's Linux family, read-only, so the
       # instrumented build starts where a pull request's does.
       - uses: Swatinem/rust-cache@v2.9.2
@@ -158,5 +176,8 @@ jobs:
         run: just bootstrap
       - name: Build the browser view the binary embeds
         run: just build
-      - name: Today's tiers and both coverage shapes, timed
-        run: node scripts/coverage-spike.mjs shapes
+      - name: The measurement
+        run: node scripts/coverage-spike.mjs ${{ matrix.measurement }}
+      - name: Disk at the end
+        if: always()
+        run: df -h . || true

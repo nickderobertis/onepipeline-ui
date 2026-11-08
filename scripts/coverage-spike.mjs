@@ -805,6 +805,8 @@ function measureCacheHit(out) {
   });
   const clone = join(out, 'clone');
   const cacheDir = join(out, 'nx-cache');
+  // The instrumented build the clone copies below, where a fresh runner has none.
+  if (!existsSync(COV) || !existsSync(join(COV, 'debug'))) buildInstrumented();
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
   run('git', ['clone', '--quiet', '--shared', '--no-checkout', ROOT, clone]);
