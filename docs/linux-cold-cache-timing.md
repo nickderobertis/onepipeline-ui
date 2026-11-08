@@ -212,3 +212,14 @@ server in one, and `dag-ui-human-items` and `dag-ui-update-settings`, whose ever
 journey starts its own server, in the other. Those two were 695 of the tier's
 1851 s of journey time, so the tier's wall time falls by up to that share, about
 9 minutes on the runner; the same 284 journeys run.
+
+Run 42515808360 (080242f, job 128838449483) had both lanes and was still cancelled
+at the cap, with `dag-ui-e2e:test`, `:test-isolation`, `dag-ui-read-latency:test`
+and `:budgets` and `onepipeline-ui-release:test` unfinished and every finished task
+green. `dag-ui:build-api-server` ended 12.7 minutes into Nx, against 260 s on the
+last passing run (fda7038), which predates this branch's move of the linked
+`onepipeline` and replayed the browser tier. A pin move misses main's warm Rust
+cache for that crate in every target directory the job compiles, and a change to
+the app runs the browser tier. Reordering moves that work rather than removing it:
+the release tail already ended at the cap beside the browser tier. A pin move
+merged on its own lets the warm run compile it before the change that needs it.
