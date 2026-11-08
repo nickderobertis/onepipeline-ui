@@ -649,13 +649,20 @@ function nxSweep(clone, cacheDir, { label, skipCache = false }) {
     '--excludeTaskDependencies',
   ];
   if (skipCache) args.push('--skip-nx-cache');
-  let res = run('npx', args, { cwd: clone, env: nxEnv(cacheDir), capture: true, allowFail: true });
-  if (res.status !== 0) {
-    // A tier failing here is recorded, and the sweep run once more: a task that
-    // passed is then replayed from the cache in a cached sweep.
-    const failed = [...res.stdout.matchAll(/^- (\S+:test)$/gm)].map((m) => m[1]);
-    record('nx-sweep-retry', { label, failed, tail: res.stdout.slice(-3000) });
-    res = run('npx', args, { cwd: clone, env: nxEnv(cacheDir), capture: true });
+  // A tier failing here is recorded with the tests that failed, and the sweep
+  // run again, up to three attempts: a task that passed is then replayed from
+  // the cache in a cached sweep, which the record of the retry says.
+  let res;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    res = run('npx', args, { cwd: clone, env: nxEnv(cacheDir), capture: true, allowFail: attempt < 3 });
+    if (res.status === 0) break;
+    const plain = res.stdout.replace(/\x1b\[[0-9;]*m/g, '');
+    record('nx-sweep-retry', {
+      label,
+      attempt,
+      failed_tasks: [...plain.matchAll(/^- (\S+:test)\s*$/gm)].map((m) => m[1]),
+      failed_tests: [...new Set([...plain.matchAll(/^\s+FAIL \[[^\]]*\] \([^)]*\) (\S+ \S+)/gm)].map((m) => m[1]))],
+    });
   }
   process.stdout.write(res.stdout.split('\n').filter((l) => /COVERAGE-SPIKE|local cache|Nx read the output|Successfully ran|nx run /.test(l)).join('\n') + '\n');
   const replayed = TIERS.filter(([p]) =>

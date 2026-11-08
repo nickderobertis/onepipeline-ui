@@ -507,6 +507,26 @@ function price() {
       archive_bytes_saved: saved,
     });
   }
+  // Lines that share units leave together or not at all: for every set of
+  // lines that some units are reached by exactly, the units reached only from
+  // inside that set, and what the family loses without them.
+  const sets = [...new Set(shared.map((f) => reachedBy.get(unitKey(f.path, profiles)).join(' + ')))];
+  const insideSet = new Map();
+  for (const key of sets) {
+    const members = new Set(key.split(' + '));
+    const fs = kept.filter((f) => {
+      const by = reachedBy.get(unitKey(f.path, profiles));
+      return by.length > 0 && by.every((id) => members.has(id));
+    });
+    insideSet.set(key, fs);
+    const set = new Set(fs.map((f) => f.path));
+    record('marginal-set', {
+      lines: key,
+      jobs: [...new Set(plan.filter((l) => members.has(l.id)).map((l) => l.job))],
+      raw_bytes: sum(fs),
+      archive_bytes_saved: without((p) => set.has(p)),
+    });
+  }
   const sharedSet = new Set(shared.map((f) => f.path));
   const unSet = new Set(unattributed.map((f) => f.path));
   const sharedSaved = shared.length ? without((p) => sharedSet.has(p)) : 0;
@@ -554,6 +574,23 @@ function price() {
       without_own_units_seconds: dropped.seconds,
       added_seconds: dropped.seconds - warm.seconds,
       cold_in_plan_order_seconds: cold.get(line.id),
+      status: [warm.status, dropped.status],
+    });
+  }
+  for (const [key, fs] of insideSet) {
+    const members = plan.filter((l) => key.split(' + ').includes(l.id));
+    const script = members.map((l) => l.command).join(' && ');
+    clean();
+    const warm = timed(script);
+    clean();
+    for (const f of fs) rmSync(join(root, f.path), { force: true });
+    const dropped = timed(script);
+    record('price-set', {
+      lines: key,
+      jobs: [...new Set(members.map((l) => l.job))],
+      warm_seconds: warm.seconds,
+      without_set_units_seconds: dropped.seconds,
+      added_seconds: dropped.seconds - warm.seconds,
       status: [warm.status, dropped.status],
     });
   }
