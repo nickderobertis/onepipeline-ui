@@ -701,6 +701,7 @@ function nxSweep(clone, cacheDir, { label, skipCache = false }) {
       lcov_bytes: bytes(join(clone, 'target', 'coverage-tiers', `${t}.lcov`)),
       profdata_bytes: bytes(join(clone, 'target', 'coverage-tiers', `${t}.profdata`)),
     };
+  results.replayed = replayed;
   record('nx-sweep', {
     label,
     commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: clone, encoding: 'utf8' }).trim(),
@@ -718,6 +719,74 @@ function nxSweep(clone, cacheDir, { label, skipCache = false }) {
 
 function git(clone, ...args) {
   return execFileSync('git', args, { cwd: clone, encoding: 'utf8' }).trim();
+}
+
+// Every function a .profdata names, with its structural hash.
+function profileFunctions(profdata) {
+  const text = run(llvmTool('llvm-profdata'), ['show', '--all-functions', profdata], { capture: true }).stdout;
+  const out = new Map();
+  let name = null;
+  for (const line of text.split('\n')) {
+    const fn = /^  (\S.*):$/.exec(line);
+    if (fn) name = fn[1];
+    const h = /^    Hash: (0x[0-9a-f]+)/.exec(line);
+    if (h && name) out.set(name, h[1]);
+  }
+  return out;
+}
+
+// A legacy-mangled Rust symbol without its trailing `17h<hash>E`, which the
+// crate's -C metadata — and so its version — decides.
+const stripHash = (name) => name.replace(/17h[0-9a-f]{16}E$/, 'E');
+
+// Shape (b) across a version-only change: the cached tiers' profiles name the
+// old build's symbols. Rename each to the new build's symbol of the same
+// unhashed name, where that name is one function on each side with one
+// structural hash, and report what that recovers.
+function remapCheck(out, { replayed, ranDir, freshDir, oldDir, invocation, coldGate }) {
+  const fresh = new Map();
+  for (const [, t] of TIERS) for (const [n, h] of profileFunctions(join(freshDir, `${t}.profdata`))) fresh.set(n, h);
+  const byStripNew = new Map();
+  for (const [n, h] of fresh) {
+    const k = stripHash(n);
+    byStripNew.set(k, [...(byStripNew.get(k) ?? []), [n, h]]);
+  }
+  const lines = [];
+  const stats = { old_functions: 0, renamed: 0, same_name: 0, ambiguous: 0, hash_changed: 0, absent: 0 };
+  const inputs = [];
+  for (const t of replayed) {
+    const old = profileFunctions(join(oldDir, `${t}.profdata`));
+    const byStripOld = new Map();
+    for (const [n] of old) byStripOld.set(stripHash(n), (byStripOld.get(stripHash(n)) ?? 0) + 1);
+    for (const [n, h] of old) {
+      stats.old_functions++;
+      if (fresh.has(n)) {
+        stats.same_name++;
+        continue;
+      }
+      const cands = byStripNew.get(stripHash(n)) ?? [];
+      if (!cands.length) stats.absent++;
+      else if (cands.length > 1 || byStripOld.get(stripHash(n)) > 1) stats.ambiguous++;
+      else if (cands[0][1] !== h) stats.hash_changed++;
+      else {
+        stats.renamed++;
+        lines.push(`${n} ${cands[0][0]}`);
+      }
+    }
+  }
+  const map = join(out, 'remap.txt');
+  writeFileSync(map, [...new Set(lines)].join('\n') + '\n');
+  for (const t of replayed) {
+    const renamed = join(out, `remapped-${t}.profdata`);
+    run(llvmTool('llvm-profdata'), ['merge', '-sparse', `--remapping-file=${map}`, join(oldDir, `${t}.profdata`), '-o', renamed]);
+    inputs.push(renamed);
+  }
+  for (const [, t] of TIERS) if (!replayed.includes(t)) inputs.push(join(ranDir, `${t}.profdata`));
+  const merged = join(out, 'remapped-merged.profdata');
+  mergeProfdata(inputs, merged);
+  const g = exportSummary(merged, invocation);
+  const files = differences(coldGate, g);
+  record('remap-check', { ...stats, remapped_gate: summary(g), no_cache_gate: summary(coldGate), agree: files.length === 0, files });
 }
 
 function measureCacheHit(out) {
@@ -750,6 +819,12 @@ function measureCacheHit(out) {
 
   // C0: populate the cache with every tier (no hit possible: the cache is empty).
   nxSweep(clone, cacheDir, { label: 'c0-populate' });
+  const keep = (dir) => {
+    mkdirSync(dir, { recursive: true });
+    for (const [, t] of TIERS)
+      cpSync(join(clone, 'target', 'coverage-tiers', `${t}.profdata`), join(dir, `${t}.profdata`));
+  };
+  keep(join(out, 'c0-profdata'));
 
   // C1: a change only repo-tooling's inputs read.
   const own = 'scripts/release-status.sh';
@@ -767,8 +842,21 @@ function measureCacheHit(out) {
   run('cargo', ['update', '--workspace', '--offline'], { cwd: clone, capture: true });
   git(clone, 'commit', '--quiet', '-am', 'spike: version-only change');
   const hit2 = nxSweep(clone, cacheDir, { label: 'c2-cached' });
+  keep(join(out, 'c2-cached-profdata'));
   const cold2 = nxSweep(clone, cacheDir, { label: 'c2-no-cache', skipCache: true });
+  keep(join(out, 'c2-no-cache-profdata'));
   compare('c2', hit2, cold2);
+  if (cold2.b.gate && hit2.replayed.length) {
+    // Run in the clone, whose objects are the ones the version moved.
+    writeFileSync(join(out, 'c2-no-cache-gate.json'), JSON.stringify(cold2.b.gate));
+    const res = run(
+      'node',
+      ['scripts/coverage-spike.mjs', 'remap-check', '--out', out, '--replayed', hit2.replayed.join(',')],
+      { cwd: clone, capture: true, allowFail: true },
+    );
+    process.stdout.write(res.stdout.split('\n').filter((l) => l.startsWith('COVERAGE-SPIKE ')).join('\n') + '\n');
+    if (res.status !== 0) record('remap-check', { error: res.stderr.slice(-2000) });
+  }
 }
 
 function bumpVersionByHand(clone) {
@@ -962,6 +1050,19 @@ switch (verb) {
     if (positional.length !== 1) usage('export needs one profile');
     exportVerb(positional[0]);
     break;
+  case 'remap-check': {
+    const at = rest.indexOf('--replayed');
+    if (at < 0 || !outArg) usage('remap-check needs --out DIR --replayed T,T');
+    remapCheck(out, {
+      replayed: rest[at + 1].split(','),
+      ranDir: join(out, 'c2-cached-profdata'),
+      freshDir: join(out, 'c2-no-cache-profdata'),
+      oldDir: join(out, 'c0-profdata'),
+      invocation: reportInvocationFromObjects(),
+      coldGate: JSON.parse(readFileSync(join(out, 'c2-no-cache-gate.json'), 'utf8')),
+    });
+    break;
+  }
   case 'merge-a':
     mergeAVerb();
     break;
