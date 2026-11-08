@@ -875,7 +875,10 @@ const SURFACES: readonly Surface[] = [
     title: "Action items: an item's detail with its whole body",
     open: async (page) => {
       await openActionItems(page, "realistic");
-      await page.getByRole("button", { name: /^Details: / }).first().click();
+      await page
+        .getByRole("button", { name: /^Details: / })
+        .first()
+        .click();
       await expect(
         page.getByRole("complementary", { name: "Action item detail" }),
       ).toBeVisible();
@@ -886,7 +889,10 @@ const SURFACES: readonly Surface[] = [
     title: "Action items: the toast after Dismiss",
     open: async (page) => {
       const list = await openActionItems(page, "realistic");
-      await page.getByRole("button", { name: /^Dismiss: / }).first().click();
+      await page
+        .getByRole("button", { name: /^Dismiss: / })
+        .first()
+        .click();
       await expect(list.getByRole("article")).toHaveCount(5);
       await expect(
         resultToast(page).getByRole("button", { name: "Restore", exact: true }),
@@ -900,7 +906,10 @@ const SURFACES: readonly Surface[] = [
     title: "Action items: the toast after Complete, taking a comment",
     open: async (page) => {
       await openActionItems(page, "realistic");
-      await page.getByRole("button", { name: /^Complete: / }).first().click();
+      await page
+        .getByRole("button", { name: /^Complete: / })
+        .first()
+        .click();
       const toast = resultToast(page);
       await expect(
         toast.getByRole("button", { name: "Reopen", exact: true }),
