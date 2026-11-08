@@ -601,6 +601,11 @@ run *ARGS:
 dag-ui-screens *ARGS:
     @bash scripts/visual-capture.sh {{ARGS}}
 
+# SPIKE (question-items-2026-11-08): re-capture the Action items choices mock at
+# phone and desktop width into shots/local/action-items-mock. Not meant to land.
+spike-action-items-screens:
+    @SHOTS_OUT=shots/local/action-items-mock bash scripts/visual-capture.sh --grep "at (390x844|1440x900) captures Action items mock"
+
 # Reads the floor from Cargo.toml's `rust-version`; that toolchain must be
 # installed (`rustup toolchain install <version>`). Warnings are errors here too.
 # The `onepipeline-ui:msrv` target, which no `check` depends on: the floor needs a

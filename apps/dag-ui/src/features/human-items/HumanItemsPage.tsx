@@ -14,6 +14,15 @@ import {
   useState,
 } from "react";
 import type { LiveHumanItems } from "../../lib/live-human-items";
+import {
+  AnsweredLine,
+  ChoiceButtons,
+  ChoiceList,
+  mockHumanItems,
+  mockStage,
+  SendBar,
+  showsChoices,
+} from "./ChoicesMock";
 import { HumanItemToast } from "./HumanItemToast";
 import {
   BLOCKING_CHOICES,
@@ -83,13 +92,20 @@ export function HumanItemsPage({
   readonly selectedId: string | undefined;
   readonly setSelectedId: (id: string | undefined) => void;
 }) {
-  const items = useHumanItems(
+  const realItems = useHumanItems(
     client,
     live,
     selectedId,
     choice.state,
     JSON.stringify(choice),
   );
+  // SPIKE: `?mock=<stage>` swaps in the six-item fixture.
+  const stage = mockStage();
+  const items =
+    stage === undefined
+      ? realItems
+      : mockHumanItems(stage, realItems, selectedId);
+  if (stage === "answered") choice = { ...choice, state: "answered" };
   const { groupBy, setGroupBy } = useGroupBy();
   const [room, setRoom] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -133,7 +149,11 @@ export function HumanItemsPage({
         onGroupBy={setGroupBy}
       />
       <div className="human-items-body">
-        <section aria-label="Action item list" className="human-items-list">
+        <section
+          aria-label="Action item list"
+          className="human-items-list"
+          data-mock={stage}
+        >
           {items.listError && <p role="alert">{items.listError}</p>}
           {items.items === undefined && !items.listError && (
             <p role="status">Reading action items…</p>
@@ -174,6 +194,7 @@ export function HumanItemsPage({
               Card actions: use the arrow keys
             </button>
           )}
+          {showsChoices(stage) && stage && <SendBar stage={stage} />}
         </section>
         {selectedId !== undefined && (
           <DetailPane
@@ -482,6 +503,7 @@ function HumanItemCard({
   readonly onWrite: Write;
 }) {
   const { item } = view;
+  const stage = mockStage();
   const open = item.state === "open";
   const blocked = blockedSummary(view);
   const meta = [
@@ -516,10 +538,19 @@ function HumanItemCard({
       }}
       title={item.title}
     >
+      {showsChoices(stage) && stage && item.kind === "question" && open && (
+        <ChoiceButtons id={item.id} stage={stage} title={item.title} />
+      )}
+      {showsChoices(stage) && stage && item.state === "answered" && (
+        <AnsweredLine stage={stage} view={view} />
+      )}
       {item.kind === "question" && open && (
         <AnswerBox
           draft={draft}
           label={`Answer: ${item.title}`}
+          placeholder={
+            showsChoices(stage) ? "Or answer in your own words" : undefined
+          }
           onDraft={onDraft}
           onSubmit={(text) => onWrite(view, { action: "answer", text })}
           pending={state?.pending ?? false}
@@ -607,12 +638,14 @@ function AnswerBox({
   pending,
   onDraft,
   onSubmit,
+  placeholder,
 }: {
   readonly label: string;
   readonly draft: string;
   readonly pending: boolean;
   readonly onDraft: (text: string) => void;
   readonly onSubmit: (text: string) => void;
+  readonly placeholder?: string | undefined;
 }) {
   return (
     <textarea
@@ -626,7 +659,7 @@ function AnswerBox({
         event.preventDefault();
         if (!pending && draft.trim() !== "") onSubmit(draft);
       }}
-      placeholder="Answer, then press Enter"
+      placeholder={placeholder ?? "Answer, then press Enter"}
       readOnly={pending}
       rows={1}
       value={draft}
@@ -709,6 +742,7 @@ function DetailPane({
       </aside>
     );
   const { item } = shown;
+  const stage = mockStage();
   const open = item.state === "open";
   const phrases = blockedPhrases(shown);
   return (
@@ -762,8 +796,21 @@ function DetailPane({
       >
         <TaskMarkdown source={item.body} />
       </section>
+      {showsChoices(stage) && stage && item.kind === "question" && open && (
+        <div className="mock-detail-answer">
+          <ChoiceList id={item.id} stage={stage} />
+          <AnswerBox
+            draft={draft}
+            label={`Answer in detail: ${item.title}`}
+            onDraft={onDraft}
+            onSubmit={() => undefined}
+            pending={false}
+            placeholder="Add a note to the choice, or answer in your own words"
+          />
+        </div>
+      )}
       <div className="human-item-detail-actions">
-        {item.kind === "question" && open && (
+        {item.kind === "question" && open && !showsChoices(stage) && (
           <AnswerBox
             draft={draft}
             label={`Answer in detail: ${item.title}`}

@@ -3021,3 +3021,151 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 .remote-checks .check-failing td:nth-child(3)::after {
   content: " — failing";
 }
+
+/* SPIKE (question-items-2026-11-08 spike-visual): the choices / drafts / send-bar
+   mock, drawn only under `/human-items?mock=<stage>`. Not meant to land. */
+.mock-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.mock-choice {
+  min-height: 26px;
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--background);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+}
+
+.mock-choice[aria-pressed="true"] {
+  border-color: var(--primary);
+  background: color-mix(in oklab, var(--primary) 22%, var(--background));
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.mock-detail-answer {
+  display: grid;
+  flex: none;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 10px;
+}
+
+/* The question's body keeps its height above the choices; the pane scrolls. */
+.human-item-detail:has(.mock-detail-answer) {
+  overflow: auto;
+}
+
+.human-item-detail:has(.mock-detail-answer) .human-item-detail-body {
+  flex: none;
+  overflow: visible;
+}
+
+.mock-choice-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.mock-choice-list legend {
+  margin-bottom: 4px;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.mock-choice-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 18px;
+}
+
+.mock-choice-option[data-picked="true"] {
+  border-color: var(--primary);
+  box-shadow: inset 2px 0 var(--primary);
+}
+
+.mock-choice-option .otg-markdown {
+  color: var(--muted-foreground);
+}
+
+.mock-detail-answer .human-item-answer {
+  min-height: 96px;
+  margin-top: 22px;
+}
+
+.mock-answered {
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 18px;
+}
+
+.mock-answered p {
+  margin: 0;
+}
+
+.mock-answered-label {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.human-items-list[data-mock="refused"] [data-item-id="hi-mock-q-cache"] > .otg-card__surface {
+  border-color: var(--destructive);
+  box-shadow: inset 2px 0 var(--destructive);
+}
+
+.mock-send-bar {
+  position: sticky;
+  bottom: -12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px -20px -12px;
+  padding: 8px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+}
+
+.mock-send-bar-count {
+  flex: 1;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .mock-choice {
+    min-height: 40px;
+    font-size: 13px;
+  }
+
+  .mock-detail-answer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mock-detail-answer .human-item-answer {
+    min-height: 64px;
+    margin-top: 0;
+  }
+
+  .mock-send-bar {
+    margin: 8px -10px -12px;
+    padding: 8px 10px;
+  }
+
+  .mock-send-bar button {
+    min-height: 44px;
+  }
+}

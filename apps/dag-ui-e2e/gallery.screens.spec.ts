@@ -808,6 +808,48 @@ const SURFACES: readonly Surface[] = [
       ).toBeVisible();
     },
   },
+  // SPIKE (question-items-2026-11-08 spike-visual): the Action items choices
+  // mock, drawn by `/human-items?mock=<stage>` over a six-item fixture. `before`
+  // feeds the same fixture through today's unchanged card and detail. Re-capture
+  // with `just spike-action-items-screens`.
+  ...(
+    [
+      ["30-action-items-before-card", "before", false],
+      ["31-action-items-before-detail", "before", true],
+      ["32-action-items-choice-card", "card", false],
+      ["33-action-items-choice-detail", "detail", true],
+      ["34-action-items-send-bar", "bar", false],
+      ["35-action-items-refused", "refused", false],
+      ["36-action-items-answered", "answered", false],
+    ] as const
+  ).map(
+    ([name, stage, detail]): Surface => ({
+      name,
+      title: `Action items mock ${name}`,
+      open: async (page) => {
+        await page.goto(`/human-items?mock=${stage}`);
+        const title =
+          stage === "refused"
+            ? "Keep the Nx results cache across release PRs?"
+            : "Which onepipeline SDK should 0.45 link?";
+        await page.getByText(title).first().waitFor();
+        if (detail) {
+          await page
+            .getByRole("button", { name: `Details: ${title}` })
+            .click();
+          await page
+            .getByRole("complementary", { name: "Action item detail" })
+            .getByRole("heading", { name: title })
+            .waitFor();
+        }
+        if (stage === "refused")
+          await page
+            .getByRole("alert")
+            .filter({ hasText: "Not sent" })
+            .scrollIntoViewIfNeeded();
+      },
+    }),
+  ),
 ];
 
 /**
