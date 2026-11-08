@@ -147,6 +147,10 @@ The selected detail pane may narrow and wrap the list. This is the manager-appro
 target, recorded here for the user to tighten; `apps/dag-ui-e2e/dag-ui-human-items.spec.ts`
 holds the page to it with bounding-box assertions.
 
+The gallery photographs the page at every viewport (`26-action-items` to
+`32-action-items-reopen-unavailable` in `docs/dag-ui.md`): the cards, the filters,
+detail, and the success, refusal and Reopen-unavailable toasts.
+
 ## What this is proven against
 
 The page and the routes are proven against the engine's **live runtime**, the release

@@ -186,11 +186,11 @@ fi
 # --- the host half: build what is photographed -------------------------------
 # `dag-ui:build-api-server` depends on `dag-ui:build`, so this is the bundle and the
 # binary that embeds it, and it is deliberately the narrowest target that produces
-# both. The browser tier's own `test` target additionally provisions the sibling
-# `onepipeline` CLI into `.tools/`, because the journeys that hold what this server
-# serves to what that one prints cannot run without it — a capture never reads it, and
-# building it here would be minutes of cargo per photograph.
+# both. The sibling `onepipeline` CLI is provisioned into `.tools/` as well, because
+# the Action items surfaces are photographed over worlds that CLI builds; the
+# container reaches it through the mounted tree.
 bash "$script_dir/workspace-install.sh"
+bash "$script_dir/nx.sh" run onepipeline-ui:ensure-sibling
 bash "$script_dir/nx.sh" run dag-ui:build-api-server
 
 # --- the container half: render ----------------------------------------------

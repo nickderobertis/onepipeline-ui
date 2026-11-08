@@ -841,6 +841,41 @@ function buildRealistic(workspace, token) {
   return { ids, runs: {}, plans: {} };
 }
 
+/**
+ * The toasts the gallery photographs beyond a plain resolve: a design review whose
+ * document moved on, which the engine refuses and replaces, and one whose authority
+ * declares no undo. Owned by the acting session, so every word on the page is the
+ * same in every build of this world.
+ */
+function buildGalleryStates(workspace, token) {
+  const ids = {};
+  ids.dashboard = raiseDesign(workspace, token, {
+    dedup: "dashboard-layout",
+    title: "Review the dashboard layout",
+    body: "Read the dashboard design document and complete this task when the column widths and empty states read clearly.",
+    owner: owner(),
+    copy: "docs/design/dashboard.md",
+    key: "sha256:91aa07",
+  });
+  ids.final = raiseDesign(workspace, token, {
+    dedup: "final-release-notes",
+    title: "Approve the final release notes",
+    body: "Approve the release notes as published; the publisher keeps every approval it records.",
+    owner: owner(),
+    copy: "docs/release/notes.md",
+    key: "sha256:aa11b2",
+    phase: "final-review",
+  });
+  writeFileSync(
+    paths(workspace).keys,
+    JSON.stringify({
+      "docs/design/dashboard.md": "sha256:c4e2f9",
+      "docs/release/notes.md": "sha256:aa11b2",
+    }),
+  );
+  return { ids, runs: {}, plans: {} };
+}
+
 /** The manager sessions the sessions world is raised across. */
 export const SESSIONS = Array.from({ length: 10 }, (_, n) => `manager-${n}`);
 
@@ -882,6 +917,7 @@ const WORLDS = {
   undo: { plans: UNDO_PLANS, build: buildUndo },
   markdown: { plans: MARKDOWN_PLANS, build: buildMarkdown },
   realistic: { plans: {}, build: buildRealistic },
+  "gallery-states": { plans: {}, build: buildGalleryStates },
 };
 
 /**

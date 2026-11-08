@@ -3442,6 +3442,38 @@ function overlap(
   );
 }
 
+test("a bulleted body on a card keeps its bullets, and its clamp cuts between lines", async ({
+  page,
+}) => {
+  const served = await serveWorld("realistic");
+  const list = await open(page, served);
+  const bullets = list.getByRole("article").first().getByRole("listitem");
+  await expect(bullets).toHaveCount(3);
+  // llmlint: ignore[e2e_uses_accessible_selectors] the bullets are located by role; what is asserted is their computed marker and how each sits against the box the shared package clamps the body in, which is their list's parent and has no role of its own.
+  const reading = await bullets.evaluateAll((items) => {
+    const body = items[0]?.parentElement?.parentElement;
+    if (!body) throw new Error("the list has no body around it");
+    const style = getComputedStyle(body);
+    return {
+      line: Number.parseFloat(style.lineHeight),
+      bottom: body.getBoundingClientRect().bottom,
+      markers: items.map((item) => getComputedStyle(item).listStyleType),
+      boxes: items.map((item) => {
+        const { top, bottom } = item.getBoundingClientRect();
+        return { top, bottom };
+      }),
+    };
+  });
+  expect(reading.markers).toEqual(["disc", "disc", "disc"]);
+  for (const [index, { top, bottom }] of reading.boxes.entries()) {
+    const next = reading.boxes[index + 1];
+    if (next !== undefined) expect(next.top - top).toBe(reading.line);
+    // A line is either wholly inside the clamp or wholly below it.
+    if (top < reading.bottom)
+      expect(bottom).toBeLessThanOrEqual(reading.bottom + 0.5);
+  }
+});
+
 for (const [width, height] of [
   [1440, 900],
   [390, 844],

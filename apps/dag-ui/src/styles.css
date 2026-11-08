@@ -2543,7 +2543,9 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   font-weight: 400;
 }
 
-.human-items-groups ul {
+/* The page's own lists only: a task body rendered inside a card has lists of its own. */
+.human-items-groups > ul,
+.human-items-group > ul {
   display: grid;
   gap: 5px;
   margin: 0;
@@ -2938,11 +2940,16 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     display: none;
   }
 
+  /* Two label-and-control pairs a row, so no label is left at a row's end without
+     its control. */
   .human-items-filters {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
     padding: 0 10px 8px;
   }
 
   .human-items-filters :where(select, input) {
+    width: 100%;
     height: 36px;
   }
 
