@@ -601,10 +601,15 @@ run *ARGS:
 dag-ui-screens *ARGS:
     @bash scripts/visual-capture.sh {{ARGS}}
 
-# SPIKE (question-items-2026-11-08): re-capture the Action items choices mock at
-# phone and desktop width into shots/local/action-items-mock. Not meant to land.
+# SPIKE (question-items-2026-11-08): re-capture the Action items choices mock (the
+# after views) at phone and desktop width into shots/local/action-items-mock.
 spike-action-items-screens:
-    @SHOTS_OUT=shots/local/action-items-mock bash scripts/visual-capture.sh --grep "at (390x844|1440x900) captures Action items mock"
+    @SHOTS_OUT=shots/local/action-items-mock bash scripts/visual-capture.sh --grep "at (390x844|1440x900) captures Action items mock 3[2-6]-"
+
+# SPIKE: the two "before" views, captured with apps/dag-ui/src at the starting head
+# (c5797b8) into shots/local/action-items-before, then restored.
+spike-action-items-before-screens:
+    @bash scripts/spike-action-items-before.sh
 
 # Reads the floor from Cargo.toml's `rust-version`; that toolchain must be
 # installed (`rustup toolchain install <version>`). Warnings are errors here too.

@@ -11,6 +11,7 @@ import { CAPTURE_INSTANT_MS } from "./capture-clock";
 import { delayGraphMeasurements } from "./delayed-graph-measurements";
 import { fixture, runs } from "./fixture-facts";
 import recorded from "./fixtures/timeline-recorded.json" with { type: "json" };
+import actionItemsMock from "./fixtures/action-items-mock.json" with { type: "json" };
 import { graphNodes, metrics, timelineLane } from "./observatory-locators";
 import { VIEWPORTS, type Viewport } from "./viewports";
 
@@ -810,7 +811,9 @@ const SURFACES: readonly Surface[] = [
   },
   // SPIKE (question-items-2026-11-08 spike-visual): the Action items choices
   // mock, drawn by `/human-items?mock=<stage>` over a six-item fixture. `before`
-  // feeds the same fixture through today's unchanged card and detail. Re-capture
+  // is the unchanged page (no `?mock=`) with the same six items routed into the
+  // server's subscription answer, captured with the app code at the starting
+  // head (see `just spike-action-items-before-screens`). Re-capture
   // with `just spike-action-items-screens`.
   ...(
     [
@@ -827,7 +830,32 @@ const SURFACES: readonly Surface[] = [
       name,
       title: `Action items mock ${name}`,
       open: async (page) => {
-        await page.goto(`/human-items?mock=${stage}`);
+        if (stage === "before") {
+          // The unchanged page: no `?mock=`, and the six fixture items laid into
+          // the real server's subscription answer in place of its (empty) list.
+          await page.route("**/api/v2/subscriptions", async (route) => {
+            const body = route.request().postDataJSON() as {
+              view?: { type?: string; item?: string };
+            };
+            const response = await route.fetch();
+            if (body.view?.type !== "human-items")
+              return route.fulfill({ response });
+            const answer = await response.json();
+            const details = actionItemsMock.details as Record<string, unknown>;
+            const at =
+              answer.initial.snapshot;
+            at.visible = {
+              type: "human-items",
+              items: actionItemsMock.items,
+              detail:
+                body.view.item === undefined
+                  ? null
+                  : (details[body.view.item] ?? null),
+            };
+            return route.fulfill({ response, json: answer });
+          });
+          await page.goto("/human-items");
+        } else await page.goto(`/human-items?mock=${stage}`);
         const title =
           stage === "refused"
             ? "Keep the Nx results cache across release PRs?"

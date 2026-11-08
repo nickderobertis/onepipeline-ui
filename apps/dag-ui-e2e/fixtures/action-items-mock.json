@@ -1,0 +1,344 @@
+{
+  "items": [
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "hi-mock-q-sdk",
+        "dedup_key": "hi-mock-q-sdk",
+        "kind": "question",
+        "title": "Which onepipeline SDK should 0.45 link?",
+        "body": "0.44.2 is what the lock pins; 0.45.0 adds question choices but changes the receipt shape. Pick the engine this release ships against.",
+        "priority": "urgent",
+        "owner": {
+          "session": "manager-question-items",
+          "run": "release-0-45",
+          "plan": "authoring:release-0-45"
+        },
+        "block": {
+          "scope": "work",
+          "run": "release-0-45",
+          "node": "link-sdk"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-11-08T09:00:00.000Z",
+        "updated_at": "2026-11-08T09:00:00.000Z"
+      },
+      "blocked": {
+        "total": 2,
+        "plans": [
+          {
+            "plan": "authoring:release-0-45",
+            "count": 2,
+            "preview": [
+              {
+                "run": "release-0-45",
+                "node": "link-sdk",
+                "title": "Which onepipeline SDK should 0.45 link?"
+              },
+              {
+                "run": "release-0-45",
+                "node": "publish",
+                "title": "Publish the release"
+              }
+            ]
+          }
+        ]
+      },
+      "reopen": {
+        "available": false,
+        "reason": "the item is open"
+      }
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "hi-mock-q-cache",
+        "dedup_key": "hi-mock-q-cache",
+        "kind": "question",
+        "title": "Keep the Nx results cache across release PRs?",
+        "body": "Promoted entries replay test results on the release PR. Dropping them adds about six minutes to test-linux but rules out a stale replay.",
+        "priority": "high",
+        "owner": {
+          "session": "manager-question-items",
+          "run": "release-0-45",
+          "plan": "authoring:release-0-45"
+        },
+        "block": {
+          "scope": "work",
+          "run": "release-0-45",
+          "node": "release-pr"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-11-08T09:00:00.000Z",
+        "updated_at": "2026-11-08T09:00:00.000Z"
+      },
+      "blocked": {
+        "total": 2,
+        "plans": [
+          {
+            "plan": "authoring:release-0-45",
+            "count": 2,
+            "preview": [
+              {
+                "run": "release-0-45",
+                "node": "release-pr",
+                "title": "Keep the Nx results cache across release PRs?"
+              },
+              {
+                "run": "release-0-45",
+                "node": "publish",
+                "title": "Publish the release"
+              }
+            ]
+          }
+        ]
+      },
+      "reopen": {
+        "available": false,
+        "reason": "the item is open"
+      }
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "hi-mock-q-windows",
+        "dedup_key": "hi-mock-q-windows",
+        "kind": "question",
+        "title": "What should a Windows build do when strace is missing?",
+        "body": "The cost journeys need strace and Windows has none. Decide whether those journeys skip, fail, or move to the Linux leg only.",
+        "priority": "medium",
+        "owner": {
+          "session": "manager-question-items",
+          "run": "release-0-45",
+          "plan": "authoring:release-0-45"
+        },
+        "block": {
+          "scope": "work",
+          "run": "release-0-45",
+          "node": "test-windows"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-11-08T09:00:00.000Z",
+        "updated_at": "2026-11-08T09:00:00.000Z"
+      },
+      "blocked": {
+        "total": 2,
+        "plans": [
+          {
+            "plan": "authoring:release-0-45",
+            "count": 2,
+            "preview": [
+              {
+                "run": "release-0-45",
+                "node": "test-windows",
+                "title": "What should a Windows build do when strace is missing?"
+              },
+              {
+                "run": "release-0-45",
+                "node": "publish",
+                "title": "Publish the release"
+              }
+            ]
+          }
+        ]
+      },
+      "reopen": {
+        "available": false,
+        "reason": "the item is open"
+      }
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "hi-mock-q-free",
+        "dedup_key": "hi-mock-q-free",
+        "kind": "question",
+        "title": "What should the changelog call the Action items page?",
+        "body": "Release notes need one name for the page that lists questions and tasks. Write the words you want a reader of the changelog to see.",
+        "priority": "low",
+        "owner": {
+          "session": "manager-question-items",
+          "run": "release-0-45",
+          "plan": "authoring:release-0-45"
+        },
+        "block": {
+          "scope": "work",
+          "run": "release-0-45",
+          "node": "changelog"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-11-08T09:00:00.000Z",
+        "updated_at": "2026-11-08T09:00:00.000Z"
+      },
+      "blocked": {
+        "total": 2,
+        "plans": [
+          {
+            "plan": "authoring:release-0-45",
+            "count": 2,
+            "preview": [
+              {
+                "run": "release-0-45",
+                "node": "changelog",
+                "title": "What should the changelog call the Action items page?"
+              },
+              {
+                "run": "release-0-45",
+                "node": "publish",
+                "title": "Publish the release"
+              }
+            ]
+          }
+        ]
+      },
+      "reopen": {
+        "available": false,
+        "reason": "the item is open"
+      }
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "hi-mock-t-token",
+        "dedup_key": "hi-mock-t-token",
+        "kind": "task",
+        "title": "Rotate PYPI_TOKEN to an account-scoped token",
+        "body": "The project-scoped token cannot create onepipeline-api-cli. Make an account-scoped one and store it as PYPI_TOKEN in the repository secrets.",
+        "priority": "urgent",
+        "owner": {
+          "session": "manager-question-items",
+          "run": "release-0-45",
+          "plan": "authoring:release-0-45"
+        },
+        "block": {
+          "scope": "host"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-11-08T09:00:00.000Z",
+        "updated_at": "2026-11-08T09:00:00.000Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "reopen": {
+        "available": false,
+        "reason": "the item is open"
+      }
+    },
+    {
+      "item": {
+        "schema_version": 1,
+        "id": "hi-mock-t-docs",
+        "dedup_key": "hi-mock-t-docs",
+        "kind": "task",
+        "title": "Approve the Action items docs screenshots",
+        "body": "The gallery now carries the page at five widths. Look over the phone captures and approve them, or note the cards that need another pass.",
+        "priority": "low",
+        "owner": {
+          "session": "manager-question-items",
+          "run": "release-0-45",
+          "plan": "authoring:release-0-45"
+        },
+        "block": {
+          "scope": "nothing"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-11-08T09:00:00.000Z",
+        "updated_at": "2026-11-08T09:00:00.000Z"
+      },
+      "blocked": {
+        "total": 0,
+        "plans": []
+      },
+      "reopen": {
+        "available": false,
+        "reason": "the item is open"
+      }
+    }
+  ],
+  "details": {
+    "hi-mock-q-sdk": {
+      "item": {
+        "schema_version": 1,
+        "id": "hi-mock-q-sdk",
+        "dedup_key": "hi-mock-q-sdk",
+        "kind": "question",
+        "title": "Which onepipeline SDK should 0.45 link?",
+        "body": "0.44.2 is what the lock pins; 0.45.0 adds question choices but changes the receipt shape. Pick the engine this release ships against.",
+        "priority": "urgent",
+        "owner": {
+          "session": "manager-question-items",
+          "run": "release-0-45",
+          "plan": "authoring:release-0-45"
+        },
+        "block": {
+          "scope": "work",
+          "run": "release-0-45",
+          "node": "link-sdk"
+        },
+        "approval": null,
+        "state": "open",
+        "resolution": null,
+        "tracker": null,
+        "created_at": "2026-11-08T09:00:00.000Z",
+        "updated_at": "2026-11-08T09:00:00.000Z"
+      },
+      "blocked": {
+        "total": 2,
+        "plans": [
+          {
+            "plan": "authoring:release-0-45",
+            "count": 2,
+            "preview": [
+              {
+                "run": "release-0-45",
+                "node": "link-sdk",
+                "title": "Which onepipeline SDK should 0.45 link?"
+              },
+              {
+                "run": "release-0-45",
+                "node": "publish",
+                "title": "Publish the release"
+              }
+            ]
+          }
+        ]
+      },
+      "reopen": {
+        "available": false,
+        "reason": "the item is open"
+      },
+      "nodes": [
+        {
+          "run": "release-0-45",
+          "node": "link-sdk",
+          "title": "Which onepipeline SDK should 0.45 link?"
+        },
+        {
+          "run": "release-0-45",
+          "node": "publish",
+          "title": "Publish the release"
+        }
+      ]
+    }
+  }
+}
