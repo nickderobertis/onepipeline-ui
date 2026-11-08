@@ -2261,37 +2261,48 @@ test("a world copied for a later journey is the world as built, and its board go
     await server.stop();
     server = undefined;
 
-    // A template recorded for another workspace is never copied: the world is
-    // built afresh, and nothing the template held reaches it.
+    // A template recorded for another workspace, or kept longer than a world is
+    // copied for, is never copied: the world is built afresh, and nothing the
+    // template held reaches it.
     const about = join(templates, "queue", "template.json");
-    const record = JSON.parse(readFileSync(about, "utf8"));
-    writeFileSync(
-      about,
-      JSON.stringify({ ...record, workspace: `${record.workspace}-elsewhere` }),
-    );
-    writeFileSync(join(templates, "queue", "files", "copied-marker"), "");
-    server = await start();
-    expect(existsSync(join(server.workspace, "copied-marker"))).toBe(false);
+    const record = z
+      .object({ workspace: z.string(), builtAt: z.number() })
+      .parse(JSON.parse(readFileSync(about, "utf8")));
     // Built again, so the same items and issues, though not the same moments.
     const titles = (items: typeof built.items) =>
       items.map(({ item }) => [item.id, item.title]);
-    expect(titles(listed(server))).toEqual(titles(built.items));
     const issues = (held: typeof built.board) =>
       Object.entries(held.issues).map(([name, { title, state }]) => [
         name,
         title,
         state,
       ]);
-    expect(issues(board(server))).toEqual(issues(built.board));
+    for (const unusable of [
+      { ...record, workspace: `${record.workspace}-elsewhere` },
+      { ...record, builtAt: Date.now() - 11 * 60_000 },
+    ]) {
+      await server?.stop();
+      server = undefined;
+      writeFileSync(about, JSON.stringify(unusable));
+      writeFileSync(join(templates, "queue", "files", "copied-marker"), "");
+      const rebuilt = await start();
+      server = rebuilt;
+      expect(existsSync(join(rebuilt.workspace, "copied-marker"))).toBe(false);
+      expect(titles(listed(rebuilt))).toEqual(titles(built.items));
+      expect(issues(board(rebuilt))).toEqual(issues(built.board));
+      // Built again, it is kept as the template in place of the one refused.
+      expect(
+        existsSync(join(templates, "queue", "files", "copied-marker")),
+      ).toBe(false);
+    }
   } finally {
     rmSync(templates, { recursive: true, force: true });
   }
 });
 
-test("a board asked to resume where no board saved its state refuses to start", () => {
-  const root = mkdtempSync(join(tmpdir(), "dag-ui-e2e-board-"));
-  try {
-    const refused = spawnSync(
+test("a board asked to resume refuses to start without state a board saved", () => {
+  const resume = (root: string) =>
+    spawnSync(
       "python3",
       [
         join(import.meta.dirname, "../../tests/support/github_board.py"),
@@ -2304,13 +2315,38 @@ test("a board asked to resume where no board saved its state refuses to start", 
         timeout: 30_000,
       },
     );
-    expect(refused.status, refused.stderr).toBe(2);
-    expect(refused.stderr).toContain(
-      `--resume found no readable state in ${root}`,
-    );
-    expect(existsSync(join(root, "endpoint"))).toBe(false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+  for (const [saved, refusal] of [
+    // Nothing saved at all.
+    [undefined, "--resume found no readable state in"],
+    // Saved, but an issue no board keeps: it has no title.
+    [
+      {
+        repository: "generic/approval",
+        issues: {
+          I_1: {
+            body: "",
+            number: 1,
+            state: "OPEN",
+            reason: null,
+            parent: null,
+          },
+        },
+        requests: [],
+      },
+      "that no board over this seed saved",
+    ],
+  ] as const) {
+    const root = mkdtempSync(join(tmpdir(), "dag-ui-e2e-board-"));
+    try {
+      if (saved !== undefined)
+        writeFileSync(join(root, "state.json"), JSON.stringify(saved));
+      const refused = resume(root);
+      expect(refused.status, refused.stderr).toBe(2);
+      expect(refused.stderr).toContain(refusal);
+      expect(existsSync(join(root, "endpoint"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 
@@ -3111,6 +3147,11 @@ test("Reopen says why it cannot be offered, by hover and by its question mark, a
       mark.y < comment.y + comment.height &&
       comment.y < mark.y + mark.height;
     expect(overlaps).toBe(false);
+    // A second press puts it away again once the pointer has gone.
+    await why(label).click();
+    await expect(why(label)).toHaveAttribute("aria-expanded", "false");
+    await page.mouse.move(1, 1);
+    await expect(tip).toBeHidden();
     await toast(page).getByRole("button", { name: "Close" }).click();
   }
 
@@ -3410,8 +3451,8 @@ for (const [width, height] of [
         expect(outer.width).toBeGreaterThan(main.width - 24);
       // Nothing of the card — title, source, body, a long URL — leaves it: what
       // shows of each part, after whatever clips it inside the card.
-      // llmlint: ignore[e2e_uses_accessible_selectors] "nothing leaves its card" is a property of every rendered box inside it, text runs and inline code included, most of which carry no role; the walk reads each one's geometry, never selects by a class.
       const parts = await shown.evaluate((card) =>
+        // llmlint: ignore[e2e_uses_accessible_selectors] "nothing leaves its card" is a property of every rendered box inside it, text runs and inline code included, most of which carry no role; the walk reads each one's geometry, never selects by a class.
         [...card.querySelectorAll("*")].flatMap((part) => {
           if (part.getClientRects().length === 0) return [];
           let { left, top, right, bottom } = part.getBoundingClientRect();

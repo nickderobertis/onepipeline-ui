@@ -478,9 +478,23 @@ if arguments.resume:
         resumed = json.loads((root / "state.json").read_text())
     except (OSError, ValueError) as error:
         parser.error(f"--resume found no readable state in {root}: {error}")
+    def resumable(held, issues):
+        """An issue as this board keeps one: the fields every issue carries, each of a
+        type this board answers with, and a parent the same state holds."""
+        return (isinstance(held, dict)
+                and isinstance(held.get("title"), str) and isinstance(held.get("body"), str)
+                and type(held.get("number")) is int
+                and held.get("state") in STATES
+                and held.get("reason") in STATES[held["state"]]
+                and (held.get("status") is None or held["status"] in options)
+                and (held.get("parent") is None or held["parent"] in issues))
+
     if (not isinstance(resumed, dict) or set(resumed) != {"repository", "issues", "requests"}
             or resumed["repository"] != seed["repository"]
-            or not isinstance(resumed["issues"], dict) or not isinstance(resumed["requests"], list)):
+            or not isinstance(resumed["issues"], dict)
+            or not all(resumable(held, resumed["issues"]) for held in resumed["issues"].values())
+            or not isinstance(resumed["requests"], list)
+            or not all(isinstance(request, dict) for request in resumed["requests"])):
         parser.error(f"--resume found state in {root} that no board over this seed saved")
     state = resumed
 

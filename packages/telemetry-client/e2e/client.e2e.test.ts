@@ -544,6 +544,7 @@ test("a package consumer reopens and notes a human item and reads the engine's r
   const reopened = await golden("human-item-reopen.json");
   const noted = await golden("human-item-note.json");
   const received: { method: string; path: string; body: string }[] = [];
+  // llmlint: ignore-block[e2e_not_mocked] the layer under test is this package, a client of the read API, driven as a consumer drives it over a real socket, as every journey in this file is; the receipts it reads are the goldens `tests/e2e/human_items.rs` wrote from the real server, and the refusal is the error envelope `tests/contract.rs` holds every route to. The real reopen and note routes are driven over the real engine journal by `tests/e2e/human_items.rs` and by the browser journeys in `apps/dag-ui-e2e/dag-ui-human-items.spec.ts`.
   const server = await serveLoopback(async (request) => {
     const url = new URL(request.url);
     const body = await request.text();
@@ -567,6 +568,7 @@ test("a package consumer reopens and notes a human item and reads the engine's r
       { status: 404 },
     );
   });
+  // llmlint: ignore-end[e2e_not_mocked]
   try {
     const client = new TelemetryClient(`http://127.0.0.1:${server.port}`);
     expect((await client.reopenHumanItem("hi-1")).item.item.state).toBe("open");
