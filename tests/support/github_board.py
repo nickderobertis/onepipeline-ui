@@ -9,6 +9,8 @@ An optional second argument names a JSON seed replacing the default plan and its
 one approval: `{"repository": "owner/name", "options": [...], "issues": {NAME:
 {"number": N, "title": T, "content": C, "metadata": {...}, "status": OPTION,
 "state": "OPEN" | "CLOSED", "reason": null | REASON, "parent": NAME | null}}}`.
+With `--resume`, the board starts from the `state.json` an earlier board over the
+same root saved instead.
 """
 import faulthandler
 
@@ -35,6 +37,8 @@ def directory(value):
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("root", type=directory)
 parser.add_argument("seed", nargs="?", type=pathlib.Path)
+parser.add_argument("--resume", action="store_true",
+                    help="hold the state the last board over ROOT saved, rather than the seed's")
 arguments = parser.parse_args()
 root = arguments.root
 token = os.environ.get("CACHE_BOARD_TOKEN", "")
@@ -466,6 +470,19 @@ class LoopbackServer(HTTPServer):
         TCPServer.server_bind(self)
         self.server_name, self.server_port = self.server_address[:2]
 
+
+# A board resumed holds what the last one over this root saved — its issues and
+# the requests it answered — as a board that had stayed up would.
+if arguments.resume:
+    try:
+        resumed = json.loads((root / "state.json").read_text())
+    except (OSError, ValueError) as error:
+        parser.error(f"--resume found no readable state in {root}: {error}")
+    if (not isinstance(resumed, dict) or set(resumed) != {"repository", "issues", "requests"}
+            or resumed["repository"] != seed["repository"]
+            or not isinstance(resumed["issues"], dict) or not isinstance(resumed["requests"], list)):
+        parser.error(f"--resume found state in {root} that no board over this seed saved")
+    state = resumed
 
 server = LoopbackServer(("127.0.0.1", 0), Handler)
 save()

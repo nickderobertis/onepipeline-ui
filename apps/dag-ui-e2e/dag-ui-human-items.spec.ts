@@ -19,6 +19,7 @@ import {
 } from "@playwright/test";
 import { z } from "zod";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
+import { FIXTURE_WORKSPACE } from "./playwright.config";
 
 /**
  * The action-items page, driven in a real browser against the real read API
@@ -51,6 +52,7 @@ const factsSchema = z.object({
   approvals: z.string(),
   journal: z.string(),
   acting: z.string(),
+  board: z.string(),
 });
 type Facts = z.infer<typeof factsSchema>;
 
@@ -181,6 +183,9 @@ const LAST_QUESTION = "Should retries reuse the warm cache?";
 
 let server: FixtureServer | undefined;
 
+/** Where this run keeps each world it built, removed with the run's fixtures. */
+const WORLD_TEMPLATES = join(FIXTURE_WORKSPACE, "human-items-worlds");
+
 test.afterEach(async () => {
   await server?.stop();
   server = undefined;
@@ -188,11 +193,18 @@ test.afterEach(async () => {
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
+/**
+ * The world `name`, served for this journey: built by the first journey that asks
+ * for it and copied for the next (`human-items-world.mjs` says what is copied), so
+ * each starts from the world as built without the engine building it again.
+ */
 async function serveWorld(name: string): Promise<FixtureServer> {
-  server = await startFixtureServer(`human-items-${name}`, [
-    "--human-items-world",
-    name,
-  ]);
+  server = await startFixtureServer(
+    `human-items-${name}`,
+    ["--human-items-world", name],
+    { DAG_UI_E2E_WORLD_TEMPLATES: WORLD_TEMPLATES },
+    { samePath: true },
+  );
   return server;
 }
 
@@ -2189,6 +2201,117 @@ test("a host that has not enabled human items says so on the page", async ({
     "human-items unavailable against live state",
   );
   await expect(page.getByRole("article")).toHaveCount(0);
+});
+
+/** The loopback board's saved state: its issues and every request it answered. */
+const boardSchema = z.object({
+  repository: z.string(),
+  issues: z.record(
+    z.string(),
+    z.looseObject({
+      title: z.string(),
+      state: z.string(),
+      number: z.number(),
+    }),
+  ),
+  requests: z.array(z.unknown()),
+});
+
+function board(served: FixtureServer) {
+  return boardSchema.parse(
+    JSON.parse(readFileSync(factsOf(served).board, "utf8")),
+  );
+}
+
+test("a world copied for a later journey is the world as built, and its board goes on from where the build left it", async () => {
+  const templates = mkdtempSync(join(tmpdir(), "dag-ui-e2e-world-templates-"));
+  const start = () =>
+    startFixtureServer(
+      "human-items-copied",
+      ["--human-items-world", "queue"],
+      { DAG_UI_E2E_WORLD_TEMPLATES: templates },
+      { samePath: true },
+    );
+  try {
+    server = await start();
+    const built = { items: listed(server), board: board(server) };
+    const at = server.workspace;
+    await server.stop();
+    server = undefined;
+    expect(existsSync(join(templates, "queue", "template.json"))).toBe(true);
+
+    server = await start();
+    expect(server.workspace).toBe(at);
+    expect(listed(server)).toEqual(built.items);
+    expect(board(server)).toEqual(built.board);
+    // The board holds the issues the build's projections created and goes on
+    // from them: an item resolved on the copy is projected as the next issue.
+    const title = "Restore the build service";
+    cli(server, ["human-items", "complete", idOf(server, "build")]);
+    const after = board(server).issues;
+    expect(after).toMatchObject(built.board.issues);
+    const last = Math.max(
+      ...Object.values(built.board.issues).map(({ number }) => number),
+    );
+    expect(
+      Object.values(after)
+        .filter((issue) => issue.title === title && issue.state === "CLOSED")
+        .map(({ number }) => number),
+    ).toEqual([last + 1]);
+    await server.stop();
+    server = undefined;
+
+    // A template recorded for another workspace is never copied: the world is
+    // built afresh, and nothing the template held reaches it.
+    const about = join(templates, "queue", "template.json");
+    const record = JSON.parse(readFileSync(about, "utf8"));
+    writeFileSync(
+      about,
+      JSON.stringify({ ...record, workspace: `${record.workspace}-elsewhere` }),
+    );
+    writeFileSync(join(templates, "queue", "files", "copied-marker"), "");
+    server = await start();
+    expect(existsSync(join(server.workspace, "copied-marker"))).toBe(false);
+    // Built again, so the same items and issues, though not the same moments.
+    const titles = (items: typeof built.items) =>
+      items.map(({ item }) => [item.id, item.title]);
+    expect(titles(listed(server))).toEqual(titles(built.items));
+    const issues = (held: typeof built.board) =>
+      Object.entries(held.issues).map(([name, { title, state }]) => [
+        name,
+        title,
+        state,
+      ]);
+    expect(issues(board(server))).toEqual(issues(built.board));
+  } finally {
+    rmSync(templates, { recursive: true, force: true });
+  }
+});
+
+test("a board asked to resume where no board saved its state refuses to start", () => {
+  const root = mkdtempSync(join(tmpdir(), "dag-ui-e2e-board-"));
+  try {
+    const refused = spawnSync(
+      "python3",
+      [
+        join(import.meta.dirname, "../../tests/support/github_board.py"),
+        root,
+        "--resume",
+      ],
+      {
+        encoding: "utf8",
+        env: { ...process.env, CACHE_BOARD_TOKEN: "token" },
+        timeout: 30_000,
+      },
+    );
+    expect(refused.status, refused.stderr).toBe(2);
+    expect(refused.stderr).toContain(
+      `--resume found no readable state in ${root}`,
+    );
+    expect(existsSync(join(root, "endpoint"))).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("a world name the fixture does not define is refused before anything is built", () => {

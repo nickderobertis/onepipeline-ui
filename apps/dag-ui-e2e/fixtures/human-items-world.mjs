@@ -17,17 +17,22 @@
  * The world outlives the server: `serveRebuilt` starts a new server over the same
  * journal (and a fresh board, whose address the configuration is rewritten to), so
  * a journey can stop the server, change what it acts as, and start it again.
+ *
+ * A world is built once per run and copied for every later journey that asks for
+ * it (see {@link DAG_UI_E2E_WORLD_TEMPLATES}): the copy is the built workspace byte for byte,
+ * at the same path, with the board resumed from the state it had then.
  */
 
 import { execFileSync, spawn } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { graphRecordsFor, SUPERVISOR_SESSION } from "./runs.mjs";
@@ -63,6 +68,61 @@ const builtSchema = z.object({
     sessions: z.array(z.string()).optional(),
   }),
 });
+
+/**
+ * Where built worlds are kept for the rest of a run, one directory per world, when
+ * the caller names one: `DAG_UI_E2E_WORLD_TEMPLATES` in the environment, an absolute path.
+ *
+ * Building a world is the engine launching a run and raising, answering and
+ * dismissing items one CLI process at a time — two to four seconds a journey,
+ * and test-linux's browser tier ran past its cap with about fifty journeys each
+ * building one. A copy is what that build wrote, so a journey over it starts from
+ * the same journal, board and configuration. It is the same bytes only at the same
+ * path — a run's journal names its own directory — so a template is used only by
+ * the workspace it was built in, and rebuilt once it is older than
+ * {@link TEMPLATE_MS}, so no journey reads a world much older than a fresh one.
+ */
+const DAG_UI_E2E_WORLD_TEMPLATES = z
+  .string()
+  .refine(isAbsolute, "DAG_UI_E2E_WORLD_TEMPLATES is an absolute path")
+  .optional()
+  .parse(process.env.DAG_UI_E2E_WORLD_TEMPLATES);
+/** How long a built world is copied rather than built again. */
+const TEMPLATE_MS = 10 * 60_000;
+/** What a template records about the build it holds. */
+const templateSchema = z.object({
+  workspace: z.string().min(1),
+  builtAt: z.number(),
+});
+
+/** The template `name` built in `workspace` and still young enough, if any. */
+function usableTemplate(name, workspace) {
+  if (DAG_UI_E2E_WORLD_TEMPLATES === undefined) return undefined;
+  const dir = join(DAG_UI_E2E_WORLD_TEMPLATES, name);
+  const about = join(dir, "template.json");
+  if (!existsSync(about)) return undefined;
+  const held = templateSchema.parse(JSON.parse(readFileSync(about, "utf8")));
+  if (held.workspace !== workspace || Date.now() - held.builtAt > TEMPLATE_MS)
+    return undefined;
+  return join(dir, "files");
+}
+
+/** Keep what was just built in `workspace` as the template for `name`. */
+function keepTemplate(name, workspace, builtAt) {
+  if (DAG_UI_E2E_WORLD_TEMPLATES === undefined) return;
+  const dir = join(DAG_UI_E2E_WORLD_TEMPLATES, name);
+  rmSync(dir, { recursive: true, force: true });
+  // The board's address is its own process's; every start publishes a new one.
+  const endpoint = join(paths(workspace).board, "endpoint");
+  cpSync(workspace, join(dir, "files"), {
+    recursive: true,
+    filter: (source) => source !== endpoint,
+  });
+  writeFileSync(
+    join(dir, "template.json"),
+    JSON.stringify({ workspace, builtAt }),
+  );
+}
 
 /** The login a manager session acts on behalf of. */
 export const USER = "operator";
@@ -144,18 +204,25 @@ export function engine(workspace, token, args, session) {
   });
 }
 
-/** Start the loopback board over `dir`; answers its process and address. */
-function startBoard(dir, seed, token) {
+/**
+ * Start the loopback board over `dir`; answers its process and address. With
+ * `resume`, it holds the state the board last saved in `dir` rather than the seed's.
+ */
+function startBoard(dir, seed, token, resume = false) {
   mkdirSync(dir, { recursive: true });
   const endpoint = join(dir, "endpoint");
   // A world served again still holds the endpoint its last board published,
   // which names a port nothing listens on any more: wait for this board's own.
   rmSync(endpoint, { force: true });
   // llmlint: ignore[e2e_not_mocked] GitHub is the external tracker these journeys may double; the loopback answers only the requests the github-projects source sends, and everything of onepipeline under test is real.
-  const board = spawn("python3", [BOARD, dir, seed], {
-    env: { ...process.env, CACHE_BOARD_TOKEN: token },
-    stdio: ["ignore", "ignore", "inherit"],
-  });
+  const board = spawn(
+    "python3",
+    [BOARD, dir, seed, ...(resume ? ["--resume"] : [])],
+    {
+      env: { ...process.env, CACHE_BOARD_TOKEN: token },
+      stdio: ["ignore", "ignore", "inherit"],
+    },
+  );
   // However this process ends, the board it started ends with it.
   process.on("exit", () => board.kill("SIGKILL"));
   const deadline = Date.now() + 10_000;
@@ -830,6 +897,12 @@ export function humanItemsWorld(workspace, name) {
     );
   const at = paths(workspace);
   const built = join(workspace, BUILT);
+  // A template is copied in before anything reads the workspace, so from here a
+  // copied world is one served again, its board aside.
+  const template = existsSync(built)
+    ? undefined
+    : usableTemplate(name, workspace);
+  if (template !== undefined) cpSync(template, workspace, { recursive: true });
   const kept = existsSync(built)
     ? builtSchema.parse(JSON.parse(readFileSync(built, "utf8")))
     : undefined;
@@ -842,7 +915,14 @@ export function humanItemsWorld(workspace, name) {
       for (const dir of [at.runs, at.intents, at.work, at.state])
         mkdirSync(dir, { recursive: true });
       writeFileSync(at.seed, JSON.stringify(boardSeed(kind.plans)));
-      const started = startBoard(at.board, at.seed, token);
+      // A copied world's board resumes what the build left on it; a world served
+      // again starts its board from the seed, as it always has.
+      const started = startBoard(
+        at.board,
+        at.seed,
+        token,
+        template !== undefined,
+      );
       board = started.board;
       writeConfiguration(workspace, started.url);
       if (kept !== undefined) {
@@ -855,8 +935,10 @@ export function humanItemsWorld(workspace, name) {
         "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: oneharness\n    oneharness_config: ./child.toml\n",
       );
       writeFileSync(join(workspace, ACTING), SUPERVISOR_SESSION);
+      const builtAt = Date.now();
       world = kind.build(workspace, token);
       writeFileSync(built, JSON.stringify({ token, world }));
+      keepTemplate(name, workspace, builtAt);
     },
     facts: () => ({
       ...world,
