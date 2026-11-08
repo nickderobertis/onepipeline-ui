@@ -48,6 +48,8 @@ export interface LiveViewOptions {
   readonly onDisconnected?: () => void;
   /** The stream is connected again after a drop. */
   readonly onConnected?: () => void;
+  /** Start with the stream closed, until `resume`: the state is still answered. */
+  readonly paused?: boolean;
 }
 
 /** The parts of the client a live view needs. */
@@ -85,7 +87,9 @@ function seqOf(id: string): { epoch: string; seq: bigint } {
  * recreated with `resume`, and its explicit reset is applied once.
  *
  * `change` replaces the subscription for a new view and retires the old one, so
- * a view the tab stopped showing is no longer read; `close` retires it.
+ * a view the tab stopped showing is no longer read; `close` retires it. `pause`
+ * closes the stream alone, for a tab holding everything, and `resume` picks the
+ * applied cursor back up.
  */
 export class LiveView {
   readonly #transport: LiveTransport;
@@ -99,6 +103,8 @@ export class LiveView {
   #failed = false;
   /** Bumped by every `change`, so a creation it overtook is dropped. */
   #generation = 0;
+  /** Asked to keep its stream closed: nothing more arrives until `resume`. */
+  #paused: boolean;
   readonly #offline = () => {
     this.#disconnect();
     this.#options.onDisconnected?.();
@@ -111,6 +117,7 @@ export class LiveView {
     this.#transport = transport;
     this.#options = options;
     this.#view = options.view;
+    this.#paused = options.paused ?? false;
     globalThis.addEventListener?.("offline", this.#offline);
     globalThis.addEventListener?.("online", this.#online);
     globalThis.addEventListener?.("pagehide", this.#pagehide);
@@ -131,6 +138,29 @@ export class LiveView {
     void this.#create(
       this.#subscription === undefined ? {} : { replaces: this.#subscription },
     );
+  }
+
+  /**
+   * Close the stream and keep everything needed to come back: the subscription,
+   * which is left for the server to expire, and the applied cursor. A view
+   * changed meanwhile still answers its state; only its stream waits.
+   */
+  pause(): void {
+    if (this.#paused) return;
+    this.#paused = true;
+    this.#disconnect();
+  }
+
+  /**
+   * Open the stream again from the applied cursor, under the contract's own
+   * rules: a retained cursor replays every frame after it, one that is not is
+   * answered with a reset, and a subscription the server no longer serves is
+   * recreated with `resume`.
+   */
+  resume(): void {
+    if (!this.#paused) return;
+    this.#paused = false;
+    this.#connect();
   }
 
   /** End the subscription: its stream closes and the server stops reading for it. */
@@ -206,6 +236,7 @@ export class LiveView {
     if (
       this.#closed ||
       this.#failed ||
+      this.#paused ||
       this.#source !== undefined ||
       this.#subscription === undefined ||
       this.#state === undefined

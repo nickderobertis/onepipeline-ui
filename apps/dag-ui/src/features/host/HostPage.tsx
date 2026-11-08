@@ -1,5 +1,5 @@
 import { Button, ScrollArea } from "@oneharness/ui";
-import type { RunList } from "@onepipeline-ui/dag-model";
+import type { RunList, SidebarRow } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import type { ReactNode } from "react";
 import { nodeCountSummary } from "../../lib/run-model";
@@ -12,17 +12,60 @@ import { useHostReads } from "./useHostReads";
  */
 const DISPATCH_COLUMNS = ["Run", "Node", "Provider", "Age (ms)", "Proof"];
 
-/** Host reads are taken on entry and explicit refresh, never stream invalidation. */
+/**
+ * The listing's runs as the page shows them, kept current by the pushed rows
+ * wherever those carry what it shows: a run's state and the node counts a row
+ * holds. A run no row names any more was removed; one the listing was taken
+ * before is listed from its row. Everything else stays as the listing read it.
+ */
+function listedRuns(
+  list: RunList | undefined,
+  rows: readonly SidebarRow[] | undefined,
+) {
+  const runs = list?.runs ?? [];
+  if (rows === undefined) return runs;
+  const pushed = new Map(rows.map((row) => [row.id, row]));
+  const listed = new Set(runs.map((run) => run.run_id));
+  return [
+    ...runs.flatMap((run) => {
+      const row = pushed.get(run.run_id);
+      if (row === undefined) return [];
+      const { done, failed, running } = row.nodes;
+      return [
+        {
+          run_id: run.run_id,
+          state: row.state,
+          node_counts: { ...run.node_counts, done, failed, running },
+        },
+      ];
+    }),
+    ...(list === undefined ? [] : rows)
+      .filter((row) => !listed.has(row.id))
+      .map(({ id, state, nodes: { done, failed, running } }) => ({
+        run_id: id,
+        state,
+        node_counts: { done, failed, running },
+      })),
+  ];
+}
+
+/**
+ * Host reads are taken on entry and explicit refresh, never stream invalidation;
+ * only the listing's rows follow the stream, through what its frames carry.
+ */
 export function HostPage({
   client,
   onRefresh,
   list,
+  rows,
   listError,
   children,
 }: {
   readonly client: TelemetryClient;
   readonly onRefresh?: () => void;
   readonly list?: RunList;
+  /** The pushed rows, as the main area's update setting has taken them. */
+  readonly rows?: readonly SidebarRow[];
   /** The listing read that failed, reported where the listing would be. */
   readonly listError?: Error;
   readonly children?: ReactNode;
@@ -180,7 +223,7 @@ export function HostPage({
           {listError && (
             <p role="alert">Listing unavailable: {listError.message}</p>
           )}
-          {list?.runs.map((run) => (
+          {listedRuns(list, rows).map((run) => (
             <p key={run.run_id}>
               {[run.run_id, run.state, nodeCountSummary(run.node_counts)]
                 .filter(Boolean)

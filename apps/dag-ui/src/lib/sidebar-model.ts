@@ -79,3 +79,16 @@ export function rowCountSummary(row: SidebarRow): string {
   const { done, failed, running } = row.nodes;
   return nodeCountSummary({ done, failed, running });
 }
+
+/** How many runs' rows differ between two readings of the sidebar. */
+export function changedRowCount(
+  before: readonly SidebarRow[],
+  after: readonly SidebarRow[],
+): number {
+  const held = new Map(before.map((row) => [row.id, JSON.stringify(row)]));
+  const changed = after.filter(
+    (row) => held.get(row.id) !== JSON.stringify(row),
+  ).length;
+  const kept = new Set(after.map((row) => row.id));
+  return changed + before.filter((row) => !kept.has(row.id)).length;
+}

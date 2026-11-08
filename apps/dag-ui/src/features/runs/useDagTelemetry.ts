@@ -18,7 +18,9 @@ import type {
   HumanItemsView,
   LiveHumanItems,
 } from "../../lib/live-human-items";
-import { newestRows } from "../../lib/sidebar-model";
+import { changedRowCount, newestRows } from "../../lib/sidebar-model";
+import type { UpdateSetting } from "../../lib/update-settings";
+import { useHeldArea } from "../../lib/useHeldArea";
 
 // llmlint: ignore-file[changed_behavior_has_e2e] The browser journeys in
 // apps/dag-ui-e2e/dag-ui-live-updates.spec.ts drive every branch a conforming
@@ -52,11 +54,31 @@ export interface DagTelemetryOptions {
    * subscription and still carries the sidebar.
    */
   readonly humanItems?: HumanItemsView;
+  /** How the navigation takes the rows the stream delivers. */
+  readonly navigationUpdates: UpdateSetting;
+  /** How the main area takes the view's changes the stream delivers. */
+  readonly mainUpdates: UpdateSetting;
+}
+
+/** What the main area shows of one state: the view it was served for. */
+interface MainCopy {
+  readonly state: LiveState;
+  readonly view: SubscriptionView;
+  /** The whole re-send that produced it, if one did. */
+  readonly reset?: string;
 }
 
 export interface DagTelemetryState {
-  /** The sidebar's trimmed rows. */
+  /** The sidebar's trimmed rows, as of the last frame applied. */
   readonly rows?: readonly SidebarRow[];
+  /** The navigation's copy of those rows, taken as its setting says. */
+  readonly navigationRows?: readonly SidebarRow[];
+  /** The changes the navigation is holding. */
+  readonly navigationWaiting: number;
+  /** The Host page's copy of those rows, taken as the main area's setting says. */
+  readonly hostRows?: readonly SidebarRow[];
+  /** The changes the main area is holding. */
+  readonly mainWaiting: number;
   /** The run being shown: the requested one when it is served, else the newest. */
   readonly runId?: string;
   readonly detail?: RunDetail;
@@ -74,7 +96,7 @@ export interface DagTelemetryState {
   readonly error?: Error;
   /** An explicit re-send the server made, named, so the reader knows it happened. */
   readonly notice?: string;
-  /** Subscribe again, from scratch. */
+  /** Show what is held and subscribe again, from scratch. */
   readonly refresh: () => void;
 }
 
@@ -86,19 +108,31 @@ export interface DagTelemetryState {
  * another view replaces the subscription, so a view left behind is neither read
  * nor pushed; and every change arrives as a trimmed row or a patch of the
  * payload already on screen.
+ *
+ * What the stream delivers is applied to the held state as it arrives, and each
+ * area shows its own copy as its setting says: row frames feed the navigation,
+ * and the view's patches the main area, which on the Host page is fed the rows
+ * as well, since it shows them. A person's own act shows at once: a change of
+ * view answers its snapshot and Refresh shows everything. A write's result is
+ * its own receipt's to show, which releases nothing either area holds.
+ * With both areas off the stream is closed, and the applied cursor is what it
+ * resumes from.
  */
 export function useDagTelemetry(
   client: TelemetryClient,
   options: DagTelemetryOptions,
 ): DagTelemetryState {
   const [state, setState] = useState<LiveState>();
+  const [humanItems, setHumanItems] = useState<LiveHumanItems>({});
+  const latestRows = useRef<readonly SidebarRow[]>([]);
+  const [rows, setRows] = useState<readonly SidebarRow[]>();
+  const [navigationRows, setNavigationRows] = useState<readonly SidebarRow[]>();
   const [lastUpdated, setLastUpdated] = useState<string>();
   const [error, setError] = useState<Error>();
   //: The stream dropped and has not delivered since — cleared by what it sends next.
   const [streamError, setStreamError] = useState<Error>();
   const [notice, setNotice] = useState<string>();
   const [generation, setGeneration] = useState(0);
-  const rows = state?.sidebar;
   const requested = options.runId;
   const runId =
     rows === undefined
@@ -126,34 +160,78 @@ export function useDagTelemetry(
       options.filter,
     ],
   );
-  const [humanItems, setHumanItems] = useState<LiveHumanItems>({});
   const live = useRef<LiveView | undefined>(undefined);
   const viewRef = useRef(view);
   viewRef.current = view;
+  const navigation = useHeldArea(options.navigationUpdates, setNavigationRows);
+  const main = useHeldArea<MainCopy>(
+    options.mainUpdates,
+    useCallback((copy) => {
+      setState(copy.state);
+      const { visible } = copy.state;
+      if (visible.type === "human-items") {
+        const { items, detail } = visible;
+        setHumanItems({
+          items,
+          detail,
+          ...(copy.view.type === "human-items" && copy.view.item !== undefined
+            ? { item: copy.view.item }
+            : {}),
+        });
+      }
+      setLastUpdated(new Date().toISOString());
+      if (copy.reset !== undefined)
+        setNotice(`The live view was re-sent whole: ${copy.reset}.`);
+    }, []),
+  );
+  const streamWanted =
+    options.navigationUpdates !== "off" || options.mainUpdates !== "off";
+  const wantsStream = useRef(streamWanted);
+  wantsStream.current = streamWanted;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `generation` is not read here — bumping it is how a refresh asks for a new subscription; the view in effect is read off the ref so a view change replaces the subscription below rather than tearing this one down.
   useEffect(() => {
     setError(undefined);
+    let first = true;
     const subscription = client.live({
       view: viewRef.current,
+      paused: !wantsStream.current,
       onState: (next, cause) => {
-        setState(next);
-        if (next.visible.type === "human-items") {
-          const { items, detail } = next.visible;
-          const shown = subscription.view;
-          setHumanItems({
-            items,
-            detail,
-            ...(shown.type === "human-items" && shown.item !== undefined
-              ? { item: shown.item }
-              : {}),
-          });
-        }
-        setLastUpdated(new Date().toISOString());
+        // The rows as of the last frame applied, which is what says which runs
+        // exist, whatever either area is showing.
+        const before = latestRows.current;
+        latestRows.current = next.sidebar;
+        setRows(next.sidebar);
         setError(undefined);
         setStreamError(undefined);
-        if (cause.kind === "reset")
-          setNotice(`The live view was re-sent whole: ${cause.reason}.`);
+        const copy: MainCopy = {
+          state: next,
+          view: subscription.view,
+          ...(cause.kind === "reset" ? { reset: cause.reason } : {}),
+        };
+        if (cause.kind === "snapshot") {
+          // A person moved to this view, or the page or Refresh is taking
+          // everything: it shows. The rows are the navigation's only when this
+          // subscription has shown it none yet.
+          main.show(copy);
+          if (first) navigation.show(next.sidebar);
+          else if (before !== next.sidebar) {
+            const moved = changedRowCount(before, next.sidebar);
+            if (moved > 0) navigation.offer(next.sidebar, moved);
+          }
+          first = false;
+          return;
+        }
+        if (cause.kind === "reset") {
+          navigation.offer(next.sidebar);
+          main.offer(copy);
+          return;
+        }
+        const rowFrame =
+          cause.frame.type === "run.changed" ||
+          cause.frame.type === "run.removed";
+        if (rowFrame) navigation.offer(next.sidebar);
+        if (!rowFrame || next.visible.type === "sidebar") main.offer(copy);
       },
       onError: (caught) => {
         // Action items that cannot be served are the page's to say, in the
@@ -187,18 +265,39 @@ export function useDagTelemetry(
       subscription.close();
       if (live.current === subscription) live.current = undefined;
     };
-  }, [client, generation]);
+  }, [
+    client,
+    generation,
+    main.show,
+    main.offer,
+    navigation.show,
+    navigation.offer,
+  ]);
 
   useEffect(() => {
+    if (JSON.stringify(live.current?.view) !== JSON.stringify(view))
+      main.drop();
     live.current?.change(view);
     if (view.type !== "human-items")
       setHumanItems((held) => (Object.keys(held).length === 0 ? held : {}));
-  }, [view]);
+  }, [view, main.drop]);
+
+  useEffect(() => {
+    if (streamWanted) live.current?.resume();
+    else live.current?.pause();
+  }, [streamWanted]);
+
+  // Refresh is a person's act: both areas show what they hold, then the new read.
+  const takeAll = useCallback(() => {
+    navigation.take();
+    main.take();
+  }, [navigation.take, main.take]);
 
   const refresh = useCallback(() => {
     setNotice(undefined);
+    takeAll();
     setGeneration((current) => current + 1);
-  }, []);
+  }, [takeAll]);
 
   const visible = state?.visible;
   const shown =
@@ -220,6 +319,10 @@ export function useDagTelemetry(
     error !== undefined && view.type === "timeline" && detail !== undefined;
   return {
     rows,
+    navigationRows,
+    navigationWaiting: navigation.waiting,
+    hostRows: state?.sidebar,
+    mainWaiting: main.waiting,
     runId,
     detail,
     timeline: shown && "timeline" in shown ? shown.timeline : undefined,

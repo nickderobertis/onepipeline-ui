@@ -20,6 +20,7 @@ import {
 import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import {
   Inbox,
+  Menu,
   RefreshCw,
   Route,
   Satellite,
@@ -36,6 +37,7 @@ import { useHostListing } from "../features/host/useHostListing";
 import { HumanItemsPage } from "../features/human-items/HumanItemsPage";
 import { useHumanItemsSelection } from "../features/human-items/useHumanItems";
 import { RunNavigation } from "../features/navigation/RunNavigation";
+import { useNavigationDrawer } from "../features/navigation/useNavigationDrawer";
 import { useDagTelemetry } from "../features/runs/useDagTelemetry";
 import {
   HostShutdownButtons,
@@ -57,6 +59,8 @@ import {
 import { StructuredFields } from "../lib/StructuredFields";
 import { sidebarGroups } from "../lib/sidebar-model";
 import { Timestamp } from "../lib/Timestamp";
+import { UpdateSetting } from "../lib/UpdateSetting";
+import { useUpdateSettings } from "../lib/update-settings";
 import {
   DETAIL_LEVELS,
   type DetailLevel,
@@ -109,6 +113,8 @@ export function App({
   // timeline and the pushed changes can never be three different slices of one
   // run.
   const filter = DETAIL_LEVELS[selection.detail].profile;
+  const updates = useUpdateSettings();
+  const drawer = useNavigationDrawer();
   const telemetry = useDagTelemetry(client, {
     runId: selection.runId,
     view:
@@ -126,6 +132,8 @@ export function App({
     selectFirst: !runless,
     host: runless,
     humanItems: humanItemsSelection.view,
+    navigationUpdates: updates.navigation,
+    mainUpdates: updates.main,
   });
   const rows = telemetry.rows;
   const selectedRunId = telemetry.runId;
@@ -143,6 +151,8 @@ export function App({
   const [hostRefresh, setHostRefresh] = useState(0);
   const shuttingDown = hostShutdowns.host.state.phase === "sending";
   const rowChanges = useChangeCount(rows);
+  // The rows as of the last frame, not the navigation's copy: a hold on what the
+  // navigation shows does not hold a shutdown's progress.
   const { list: hostList, error: hostListError } = useHostListing(
     client,
     selection.host || shuttingDown,
@@ -196,23 +206,63 @@ export function App({
       <TimelinePopoverLayer />
       <div className="app-shell">
         <RunNavigation
-          rows={rows}
+          rows={telemetry.navigationRows}
           selectedRunId={selectedRunId}
-          onSelect={selection.selectRun}
-          onHost={selection.selectHost}
+          onSelect={(run) => {
+            selection.selectRun(run);
+            drawer.close();
+          }}
+          onOpenProject={selection.selectRun}
+          onHost={() => {
+            selection.selectHost();
+            drawer.close();
+          }}
           hostCurrent={selection.host && !humanItems.active}
-          onActionItems={humanItems.open}
+          onActionItems={() => {
+            humanItems.open();
+            drawer.close();
+          }}
           actionItemsCurrent={humanItems.active}
           hiddenKinds={selection.hiddenKinds}
           onKindsChange={selection.selectKinds}
+          drawerOpen={drawer.open}
+          drawerRef={drawer.drawer}
+          updates={
+            <UpdateSetting
+              caption="Navigation"
+              name="Navigation updates"
+              onChange={updates.setNavigation}
+              setting={updates.navigation}
+              waiting={telemetry.navigationWaiting}
+            />
+          }
         />
-        <main className="workspace">
+        {drawer.open && (
+          <button
+            aria-label="Close navigation"
+            className="nav-scrim"
+            onClick={drawer.close}
+            type="button"
+          />
+        )}
+        <main className="workspace" inert={drawer.open}>
           <section
             aria-label={
               selectedRunId && !runless ? "Run header" : "Workspace header"
             }
             className={`topbar${selectedRunId && !runless ? " run-topbar" : ""}`}
           >
+            <button
+              aria-controls="run-navigation"
+              aria-expanded={drawer.open}
+              aria-label="Open navigation"
+              className="nav-menu"
+              onClick={drawer.toggle}
+              ref={drawer.menuButton}
+              type="button"
+            >
+              <Menu aria-hidden="true" size={18} />
+            </button>
             <div className="topbar-title">
               <div>
                 <p className="eyebrow">Execution telemetry</p>
@@ -261,6 +311,15 @@ export function App({
                   {lastActivity.node}: {activityLine(lastActivity)}
                 </button>
               )}
+            </div>
+            <div className="main-updates">
+              <UpdateSetting
+                caption="Updates"
+                name="Main area updates"
+                onChange={updates.setMain}
+                setting={updates.main}
+                waiting={telemetry.mainWaiting}
+              />
               <Button
                 onClick={() => {
                   setHostRefresh((value) => value + 1);
@@ -365,6 +424,7 @@ export function App({
               listError={hostListError}
               onRefresh={() => setHostRefresh((value) => value + 1)}
               list={hostList}
+              rows={telemetry.hostRows}
             >
               <HostShutdownButtons
                 list={hostList}

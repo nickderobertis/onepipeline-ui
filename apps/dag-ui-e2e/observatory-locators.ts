@@ -60,3 +60,29 @@ export const timelineLane = (row: Locator, label: string): Locator =>
   row
     .getByLabel("Timeline plot. Scroll to zoom or drag to select a range.")
     .getByText(label, { exact: true });
+
+/**
+ * Open every collapsed project of the navigation, so a journey about runs can reach
+ * each of their rows: only the selected run's project starts open.
+ */
+export async function expandProjects(page: Page): Promise<void> {
+  const toggles = page
+    .getByRole("navigation", { name: "Projects" })
+    .getByRole("button", { name: /^Expand / });
+  await page
+    .getByRole("navigation", { name: "Projects" })
+    .getByRole("group", { name: /^Project / })
+    .first()
+    .waitFor();
+  while ((await toggles.count()) > 0) await toggles.first().click();
+}
+
+/**
+ * Have the navigation take rows as they arrive, as a person chooses it, for a
+ * journey about what a frame does to a row rather than about holding it.
+ */
+export async function navigationTakesRowsLive(page: Page): Promise<void> {
+  await page
+    .getByRole("combobox", { name: "Navigation updates" })
+    .selectOption({ label: "Live" });
+}

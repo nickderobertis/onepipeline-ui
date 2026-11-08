@@ -40,10 +40,12 @@ import {
 import { fixture, runs } from "./fixture-facts";
 import { SERVED_FROM_NAME } from "./fixtures/facts-file";
 import {
+  expandProjects,
   graphNodeList,
   graphNodes,
   metric as metricTile,
   metrics as metricTiles,
+  navigationTakesRowsLive,
   timelineLane,
 } from "./observatory-locators";
 import {
@@ -86,7 +88,7 @@ async function openObservatory(
   path = `/?list=runs&run=${runs().live}&view=graph`,
 ): Promise<void> {
   await page.goto(path);
-  await expect(page.getByText("DAG Observatory")).toBeVisible();
+  await expect(page.getByRole("main")).toBeVisible();
 }
 
 /** All pages the real server currently serves, including settled recordings. */
@@ -551,9 +553,10 @@ test("lists a run the strict fold cannot read at all", async ({ page }) => {
   // is what a run predating the journal looks like. The per-node derivation cannot
   // run, and its trimmed sidebar row carries the state the server read and counts
   // only what it could: the run is still listed, under its own state word.
+  await expandProjects(page);
   const row = page.getByRole("button", { name: RegExp(runs().legacy) });
   await expect(row).toBeVisible();
-  await expect(row).toContainText("active");
+  await expect(row).toHaveAttribute("title", /active/);
 });
 
 test("counts a run's own nodes on the row that opens it", async ({ page }) => {
@@ -1381,6 +1384,7 @@ test("opens a node from the keyboard-accessible node list and walks back", async
   // The run navigation precedes the workspace in the tab order, so the walk means
   // nothing until it has arrived: setting off first reached the node list only because
   // the fifty run links were still missing from it.
+  await expandProjects(page);
   await expect(
     page.getByRole("navigation", { name: "Projects" }).locator(".run-link"),
   ).toHaveCount((await allRunIds(page)).length);
@@ -2740,10 +2744,11 @@ test("navigates historical DAGs from the project sidebar", async ({ page }) => {
 
   // Every row states the run's own state and whether it is still moving, so the list
   // is readable without opening a run.
+  await expandProjects(page);
   const liveRow = page.getByRole("button", { name: RegExp(runs().live) });
   const historyRow = page.getByRole("button", { name: RegExp(runs().history) });
   await expect(liveRow).toContainText("active");
-  await expect(historyRow).toContainText("settled");
+  await expect(historyRow).toHaveAttribute("title", /settled/);
 
   // The state is carried a second time by the colour of the row's mark, and never
   // by that colour alone: an active run and a settled one are two different tones,
@@ -2829,6 +2834,7 @@ test("lands on the run as a whole, with every deep link still opening", async ({
 
   // Picking a second run is an operator comparing the two, so the reading they are
   // comparing them in survives the move — only the run under it changes.
+  await expandProjects(page);
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
   await expect
     .poll(() => new URL(page.url()).searchParams.get("run"))
@@ -2849,6 +2855,7 @@ test("lands on the run as a whole, with every deep link still opening", async ({
   // The node cannot survive a move to a run that never recorded it, so leaving one
   // this way lands on the run as a whole — the reading a bare address gets — rather
   // than on the graph the node bookmark was being read through.
+  await expandProjects(page);
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
   await expect(page.getByRole("tab", { name: "Overall" })).toHaveAttribute(
     "aria-selected",
@@ -2946,6 +2953,7 @@ test("restores node tabs and moves between them from the keyboard", async ({
   );
 
   await page.getByRole("tab", { name: "Task" }).click();
+  await expandProjects(page);
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
   await expect(page).not.toHaveURL(/tab=/);
 });
@@ -2998,6 +3006,7 @@ test("keeps launching sessions in run header details and out of the project side
   await expect(
     page.getByText(/Launching session: Codex session/),
   ).toBeVisible();
+  await expandProjects(page);
   await navigation
     .getByRole("button", { name: RegExp(runs().unattributed) })
     .click();
@@ -3022,6 +3031,7 @@ test("lists a run that has recorded no event beside the runs that have", async (
   // operator looking at "No DAG runs found" — the state this fixture would have
   // reproduced before `last_event` became nullable.
   const navigation = page.getByRole("navigation", { name: "Projects" });
+  await expandProjects(page);
   for (const runId of Object.values(runs())) {
     await expect(
       navigation.getByRole("button", { name: RegExp(runId) }),
@@ -3435,6 +3445,7 @@ test("frames a different run from scratch when the reader moves to it", async ({
 
   // A different run is a different clock, so none of that framing follows it there:
   // one run's zoom over another run's record would be a plot of nothing.
+  await expandProjects(page);
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
   await expect(graphLine(page)).toBeVisible();
   await expect(page.getByRole("region", { name: /\stimeline$/ })).toHaveCount(
@@ -3887,7 +3898,8 @@ test("tells each outcome apart by the palette's semantic tones", async ({
   const runRow = (runId: string): Locator =>
     page.getByRole("button", { name: RegExp(runId) });
   const runMark = (runId: string): Locator => runRow(runId).locator(".run-dot");
-  await expect(runRow(runs().history)).toContainText("settled");
+  await expandProjects(page);
+  await expect(runRow(runs().history)).toHaveAttribute("title", /settled/);
   await expect(runMark(runs().history)).toHaveCSS(
     "color",
     await tokenColor(page, "--success"),
@@ -3902,7 +3914,10 @@ test("tells each outcome apart by the palette's semantic tones", async ({
   // engine reads off the run-end hook as `ended-stopped`: a real state with no
   // outcome in it. The list says the word and paints its mark with no meaning in
   // it rather than borrowing one of the tones above.
-  await expect(runRow(runs().sibling)).toContainText("ended-stopped");
+  await expect(runRow(runs().sibling)).toHaveAttribute(
+    "title",
+    /ended-stopped/,
+  );
   await expect(runMark(runs().sibling)).toHaveCSS(
     "color",
     await tokenColor(page, "--muted-foreground"),
@@ -4589,8 +4604,10 @@ test("keeps the list a reader scrolled to when a run moves", async ({
       listReads.push(url.pathname + url.search);
   });
   await page.goto("/?list=runs&view=graph");
+  await navigationTakesRowsLive(page);
   const navigation = page.getByRole("navigation", { name: "Projects" });
   const viewport = navigation.locator("[data-radix-scroll-area-viewport]");
+  await expandProjects(page);
   await expect(navigation.locator(".run-link")).toHaveCount(
     (await allRunIds(page)).length,
   );
@@ -4675,6 +4692,7 @@ test("never renders one run's detail under another run's name", async ({
   );
   await page.goto(`/?list=runs&run=${runs().history}&view=graph`);
   await expect(graphNodes(page, "done")).toContainText("archive");
+  await expandProjects(page);
   await page.getByRole("button", { name: RegExp(runs().live) }).click();
   await page.getByRole("button", { name: RegExp(runs().history) }).click();
   await staleRead;
@@ -4726,6 +4744,8 @@ test("stays quiet when the run it is opening is swept out from under it", async 
 
 test("drops a run the server stops serving", async ({ page }) => {
   await openObservatory(page);
+  await navigationTakesRowsLive(page);
+  await expandProjects(page);
   await expect(
     page.getByRole("button", { name: RegExp(runs().history) }),
   ).toBeVisible();
@@ -4748,6 +4768,8 @@ test("drops a run the server stops serving", async ({ page }) => {
 
 test("falls back to the empty state once no run is left", async ({ page }) => {
   await openObservatory(page);
+  await navigationTakesRowsLive(page);
+  await expandProjects(page);
   await expect(
     page.getByRole("button", { name: RegExp(runs().live) }),
   ).toBeVisible();

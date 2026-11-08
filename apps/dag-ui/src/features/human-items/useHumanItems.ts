@@ -1,4 +1,5 @@
 import type {
+  HumanItem,
   HumanItemReceipt,
   HumanItemView,
 } from "@onepipeline-ui/dag-model";
@@ -82,6 +83,8 @@ export function useHumanItems(
   client: TelemetryClient,
   live: LiveHumanItems,
   selectedId: string | undefined,
+  /** The one state the list's filter selects. */
+  listedState: HumanItem["state"],
 ) {
   const [writes, setWrites] = useState<Readonly<Record<string, WriteState>>>(
     {},
@@ -89,22 +92,51 @@ export function useHumanItems(
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
   const [outcome, setOutcome] = useState<Outcome>();
   const [sending, setSending] = useState<readonly Sending[]>([]);
+  // What each accepted write's receipt says its item now is, until what the page
+  // is shown of the server has caught up with it.
+  const [settled, setSettled] = useState<
+    Readonly<Record<string, HumanItemView>>
+  >({});
   const inFlight = useRef(new Set<string>());
   const pushed = live.items;
   const items = useMemo(() => {
     if (pushed === undefined) return undefined;
-    const shown = [...pushed];
+    const shown = pushed.flatMap((view) => {
+      const own = settled[view.item.id];
+      if (own === undefined || !newer(own, view)) return [view];
+      return own.item.state === listedState ? [own] : [];
+    });
     for (const { view, at } of sending)
       if (!shown.some(({ item }) => item.id === view.item.id))
         shown.splice(at, 0, view);
     return shown;
-  }, [pushed, sending]);
+  }, [pushed, sending, settled, listedState]);
+  // A receipt is let go once what the page shows has caught up with it.
+  useEffect(() => {
+    if (pushed === undefined) return;
+    setSettled((all) => {
+      const kept = Object.entries(all).filter(([id, own]) => {
+        const view = pushed.find(({ item }) => item.id === id);
+        return view !== undefined && newer(own, view);
+      });
+      return kept.length === Object.keys(all).length
+        ? all
+        : Object.fromEntries(kept);
+    });
+  }, [pushed]);
   // An error drops what an earlier reading served: the pane falls back to what
   // the list last showed, beside the refusal.
-  const served =
+  const pushedDetail =
     live.error === undefined && live.item === selectedId
       ? live.detail
       : undefined;
+  const ownDetail = selectedId === undefined ? undefined : settled[selectedId];
+  const served =
+    pushedDetail &&
+    ownDetail !== undefined &&
+    newer(ownDetail, { item: pushedDetail.item })
+      ? { ...pushedDetail, item: ownDetail.item }
+      : pushedDetail;
   const listed = useRef(pushed);
   listed.current = pushed;
 
@@ -127,7 +159,8 @@ export function useHumanItems(
             : client.dismissHumanItem(id, change.reason);
       sent
         .then(
-          () => {
+          (receipt) => {
+            setSettled((all) => ({ ...all, [id]: receipt.item }));
             setWrites((all) => ({ ...all, [id]: { pending: false } }));
             setDrafts((all) =>
               Object.fromEntries(
@@ -171,6 +204,14 @@ export function useHumanItems(
     write,
     outcome,
   };
+}
+
+/** Whether a receipt says more recent things of its item than `view` does. */
+function newer(
+  own: HumanItemView,
+  view: { readonly item: HumanItemView["item"] },
+): boolean {
+  return Date.parse(own.item.updated_at) > Date.parse(view.item.updated_at);
 }
 
 function message(error: unknown): string {

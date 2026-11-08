@@ -98,6 +98,19 @@ status** — a run swept between the read that listed it and the read that fetch
 The list route's `missing` does not retire it: different route, and it says nothing
 about a detail read already out.
 
+## What the update settings may and may not do
+
+The stream is applied to the held state as it arrives; `useHeldArea` only decides
+when each area's copy is taken from it. So a hold keeps one value and one count
+however long it lasts, and a timer here is never allowed to send anything: no read
+runs on one, and the load tier's traffic budgets do not know the settings exist.
+`rows` is what says which runs exist and `navigationRows` what the list shows; a
+reader of the first must not be moved to the second, or a hold on the navigation
+would hold what the rest of the page knows. A person's own view change or
+Refresh is what crosses a hold. A write never does: its result is shown from its
+own receipt (Action items keep it over the held list until that catches up), so
+releasing the hold to show it would also show changes nobody on this page made.
+
 ## What the backend cannot answer
 
 Some of the client's model has no record behind it. A surface needing one of

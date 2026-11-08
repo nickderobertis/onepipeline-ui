@@ -26,3 +26,26 @@ Object.defineProperty(globalThis, "DOMMatrixReadOnly", {
     m22 = 1;
   },
 });
+
+// jsdom has no media queries: a width or a motion preference matches nothing here, as
+// a wide screen with no preference does.
+window.matchMedia ??= (query: string) =>
+  ({
+    matches: false,
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  }) as unknown as MediaQueryList;
+
+// Node's own global shadows jsdom's storage under this runner, leaving the window none.
+if (window.localStorage === undefined) {
+  const held = new Map<string, string>();
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => held.get(key) ?? null,
+      setItem: (key: string, value: string) => void held.set(key, value),
+      clear: () => held.clear(),
+    },
+  });
+}

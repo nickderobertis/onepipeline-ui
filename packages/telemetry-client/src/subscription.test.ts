@@ -672,3 +672,46 @@ test("refuses a human-items answer about another item, and a patch to a tab show
   expect(states).toHaveLength(1);
   expect(errors[0]?.message).toMatch(/human items this tab does not show/u);
 });
+
+test("a paused view closes its stream, keeps its cursor and subscription, and resumes from what it applied", async () => {
+  const h = harness();
+  const { live, states } = open(h);
+  await vi.waitFor(() => expect(h.sources).toHaveLength(1));
+  sourceAt(h, 0).frame("run.changed", {
+    id: id(2),
+    base: id(1),
+    row: row("settled"),
+  });
+  await vi.waitFor(() => expect(states).toHaveLength(2));
+
+  live.pause();
+  expect(sourceAt(h, 0).closed).toBe(true);
+  expect(h.deleted).toStrictEqual([]);
+  // Coming online opens nothing for a page holding everything.
+  globalThis.dispatchEvent?.(new Event("online"));
+  expect(h.sources).toHaveLength(1);
+
+  live.resume();
+  expect(h.sources).toHaveLength(2);
+  expect(new URL(sourceAt(h, 1).url).searchParams.get("after")).toBe(id(2));
+  expect(new URL(sourceAt(h, 1).url).searchParams.get("subscription")).toBe(
+    SUBSCRIPTION,
+  );
+  live.close();
+});
+
+test("a view started paused answers its state with no stream until resumed", async () => {
+  const h = harness();
+  const states: LiveState[] = [];
+  const live = h.client.live({
+    view: { type: "sidebar" },
+    paused: true,
+    onState: (state) => states.push(state),
+  });
+  await vi.waitFor(() => expect(states).toHaveLength(1));
+  await settle();
+  expect(h.sources).toHaveLength(0);
+  live.resume();
+  expect(h.sources).toHaveLength(1);
+  live.close();
+});

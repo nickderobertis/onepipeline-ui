@@ -111,6 +111,21 @@ const SERVED_STATUSES: readonly { node: string; status: string }[] = [
   { node: "publish", status: "failed" },
 ];
 
+/** Open every collapsed project, so all its runs can be reached by their rows. */
+async function expandProjects(): Promise<void> {
+  for (const toggle of await screen.findAllByRole("button", {
+    name: /^Expand /,
+  }))
+    fireEvent.click(toggle);
+}
+
+// These journeys are about what a frame does to a row, so the navigation takes rows
+// as they arrive; holding them is `dag-ui-update-settings.spec.ts`'s to drive.
+beforeEach(() => {
+  window.localStorage.setItem("dag-ui.updates.navigation", "live");
+});
+afterEach(() => window.localStorage.clear());
+
 describe("DAG application", JOURNEY_TIMEOUT, () => {
   // The graph is one reading of a run and no longer the one an empty address lands
   // on, so the journeys that are about it say so — exactly as an operator's own
@@ -1110,6 +1125,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       within(screen.getByRole("navigation")).queryByText(/session/),
     ).toBeNull();
 
+    await expandProjects();
     fireEvent.click(screen.getByRole("button", { name: RegExp(HISTORY_RUN) }));
     await waitFor(() =>
       expect(window.location.search).toContain(`run=${HISTORY_RUN}`),
@@ -1138,7 +1154,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     );
     expect(
       await screen.findByRole("button", { name: RegExp(LIVE_RUN) }),
-    ).toHaveTextContent("7 done");
+    ).toHaveAttribute("title", expect.stringContaining("7 done"));
     expect(listReads()).toBe(before);
   });
 
@@ -2064,6 +2080,7 @@ describe("a read that outlives the invalidation that arrived during it", () => {
 
       // The reader opens the live run, whose subscription is held, and moves back
       // to the other run before it answers.
+      await expandProjects();
       await userEvent.click(
         await screen.findByRole("button", { name: RegExp(LIVE_RUN) }),
       );
