@@ -70,7 +70,7 @@
       "outputs": []
     },
     "budgets": {
-      "//": "Measures nothing: an edge, so `test` has a dependent. Nx starts the ready task with the most dependents first, and `test` reads the whole workspace, so it runs on every pull request for about sixteen minutes; with no dependent it started only once the crate's tiers had drained, and test-linux's timed `dag-ui-read-latency:test`, which runs with nothing beside it, then waited on it past the job's cap (run 42473859179). `budgets` because both of ci-job.sh's test-linux selections run that target (docs/linux-cold-cache-timing.md).",
+      "//": "Measures nothing: it gives `test` a dependent, because Nx starts the ready task with the most dependents first and this whole-workspace suite otherwise started only after the crate tiers, holding up the timed journey that runs alone at the end (docs/linux-cold-cache-timing.md). `budgets` because both test-linux selections run that target.",
       "executor": "nx:noop",
       "dependsOn": ["test"]
     },

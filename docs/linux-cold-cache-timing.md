@@ -169,3 +169,34 @@ The estimate is the median's 28.7 minutes for the job this change was made for,
 at least 15% under the 36-minute cap; the worst measured case, 35.2 minutes,
 stays under it. The cap is unchanged. A hosted cold job over 30.5 minutes is
 outside every median figure above.
+
+## Later: the tail behind the timed journey (2026-11-08)
+
+On the action-items branch, test-linux was cancelled at its cap four times on
+fab12a3d (run 42458563223) and again on c5797b8c (run 42473859179, job
+128710690806) with every finished task green. Nx's own record of the last
+passing run (42451639631, `nx-cache-entries-test-linux`'s `executions.json`)
+gives each task's start and end. The job ends on `dag-ui-read-latency:test`,
+which has `parallelism: false` and so starts only once every other task is done.
+The last of those was `github-workflows-nx-cache:test`. It reads the whole
+workspace, so it runs on every pull request, for about 950 s. Having no dependent,
+it started 635 s into that run and about 800 s into the cancelled one. Two
+changes, held to Nx 23.1.3's own `TasksSchedule` driven over the branch's task
+graph with that run's task durations:
+
+- `.github/tests/nx-cache/project.json`: a no-op `budgets` follows `test` and
+  its `check` names it, so the suite has a dependent and a slot with the tiers
+  (it starts at 302 s rather than 692 s). On its own that moves the end only
+  41 s: with `dag-ui-e2e:test` uncached, the browser tier then ends last.
+- `apps/dag-ui-e2e`: each action-items world is built once per run and copied
+  for later journeys (`fixtures/human-items-world.mjs`). That spec's 54 world
+  starts took 177 s and now take 60 s on this host.
+
+With the edge in place and the browser tier 112–212 s shorter, the modelled end
+moves from 1899 s to 1746–1714 s. The same model puts the passing run's end at
+1820 s; it actually ended at 1843 s.
+
+`dag-ui-read-latency:compile-release-server` builds through `just wheel-linux`
+for the same reason. A host `cargo build --release` beside `wheel-smoke` and
+the rehearsal compiled a second release dependency graph that no warm cache
+held: 1420–1450 s on every recent branch, test-linux's longest task.
