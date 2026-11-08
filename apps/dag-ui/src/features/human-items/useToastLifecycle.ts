@@ -8,7 +8,8 @@ export const TOAST_MS = 15_000;
  * When a toast leaves, and what it holds meanwhile: the note being written, and
  * the height it reports so the list can keep that much room below its last card.
  *
- * It leaves {@link TOAST_MS} after each new state of the toast unless it is
+ * It leaves {@link TOAST_MS} after each new state of the toast — shown, its
+ * receipt or refusal in, a follow-up settled — unless it is
  * hovered, focused or being written in — then once that ends — and never while a
  * follow-up is sending or after one failed, until it is sent again or closed.
  */
@@ -23,10 +24,12 @@ export function useToastLifecycle(
   const [text, setText] = useState("");
   const [expired, setExpired] = useState(false);
   const ref = useRef<HTMLElement>(null);
-  const { key, followUp } = toast;
+  const { key, phase, followUp } = toast;
   const persistent =
     followUp?.phase === "failed" || followUp?.phase === "sending";
-  const signature = `${key}:${followUp?.kind ?? ""}:${followUp?.phase ?? ""}`;
+  // Each new state — the receipt or refusal landing, a follow-up settling — is
+  // shown for the whole duration, however long the receipt took.
+  const signature = `${key}:${phase}:${followUp?.kind ?? ""}:${followUp?.phase ?? ""}`;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the trigger — each new state of the toast is shown for the whole duration again.
   useEffect(() => {

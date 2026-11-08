@@ -2411,6 +2411,42 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await expect(toast(page)).toBeVisible();
   await answerBox(page, LAST_QUESTION).focus();
   await expect(toast(page)).toHaveCount(0);
+
+  // A receipt slow to come: what it says is shown for the whole duration from
+  // when it lands, however long the toast had already been up.
+  const slow = "Review the dashboard layout";
+  const dashboard = idOf(served, "dashboard");
+  const release = await holdRequests(
+    page,
+    `/api/human-items/${dashboard}/dismiss`,
+  );
+  await page.getByRole("button", { name: `Dismiss: ${slow}` }).click();
+  await expect(outcome(page)).toHaveText(`Dismissing: ${slow}…`);
+  await page.clock.runFor(10_000);
+  release();
+  await expect(outcome(page)).toHaveText(`Dismissed: ${slow}`);
+  await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
+  await expect(toast(page)).toBeVisible();
+  await page.clock.runFor(1_500);
+  await expect(toast(page)).toHaveCount(0);
+  await page.unroute(`**/api/human-items/${dashboard}/dismiss`);
+
+  // A refusal slow to come, the same: red for the whole duration once it lands.
+  const refused = "Keep the legacy export format?";
+  const exportId = idOf(served, "export");
+  const releaseRefusal = await holdRequests(
+    page,
+    `/api/human-items/${exportId}/dismiss`,
+  );
+  await page.getByRole("button", { name: `Dismiss: ${refused}` }).click();
+  await page.clock.runFor(10_000);
+  await served.stopServing();
+  releaseRefusal();
+  await expect(toast(page)).toHaveAttribute("data-tone", "failure");
+  await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
+  await expect(toast(page)).toBeVisible();
+  await page.clock.runFor(1_500);
+  await expect(toast(page)).toHaveCount(0);
 });
 
 for (const width of [1440, 390] as const)
@@ -3386,6 +3422,7 @@ test("a grouping this page does not know, or storage the browser refuses, groups
   // A browser that refuses this page its storage — as one blocking site data
   // does, throwing on every access — still groups this visit as asked.
   const refusing = await browser.newContext();
+  // llmlint: ignore[e2e_not_mocked] the browser is the environment here, not the layer under test: Chromium refuses a page its storage only under a profile content setting or an opaque origin this harness cannot give a page served by the real read API, so the access is made to throw the SecurityError such a browser throws; the bundle, the server and the engine journal stay real.
   await refusing.addInitScript(() => {
     Object.defineProperty(window, "localStorage", {
       get() {
@@ -3423,13 +3460,25 @@ test("a new write's toast starts afresh, with no editor open and nothing typed f
   await expect(outcome(page)).toHaveText(`Completed: ${plain}`);
   await expect(toast(page).getByRole("textbox")).toHaveCount(0);
   await toast(page).getByRole("button", { name: "Add comment" }).click();
-  await expect(
-    toast(page).getByRole("textbox", { name: "Comment" }),
-  ).toHaveValue("");
+  const comment = toast(page).getByRole("textbox", { name: "Comment" });
+  await expect(comment).toHaveValue("");
   // Nothing of the abandoned reason was sent.
   expect(stored(served, idOf(served, "certificate")).resolution?.reason).toBe(
     null,
   );
+  // A blank comment is no comment: nothing is sent, and the editor stays to
+  // write one.
+  const sent = writes(page);
+  await comment.fill("   ");
+  await comment.press("Enter");
+  await toast(page).getByRole("button", { name: "Send" }).click();
+  await page.waitForTimeout(500);
+  expect(sent).toHaveLength(0);
+  await expect(comment).toBeVisible();
+  await comment.fill("Filed as INFRA-212");
+  await comment.press("Enter");
+  await expect(outcome(page)).toHaveText(`Comment saved: ${plain}`);
+  expect(verbs(sent)).toEqual(["note"]);
 });
 
 test("a filter chosen while the page is ahead of the stream shows only what the filter selects", async ({
@@ -3460,4 +3509,28 @@ test("a filter chosen while the page is ahead of the stream shows only what the 
       .map(({ item }) => item.title)
       .sort(),
   );
+
+  // A reopen still on its way when the filter changes lands in a list it was
+  // not asked from, and stays out of it.
+  await page
+    .getByRole("combobox", { name: "Priority", exact: true })
+    .selectOption({ label: "Any priority" });
+  const certificate = "Rotate the staging certificate";
+  const certificateId = idOf(served, "certificate");
+  await page.getByRole("button", { name: `Complete: ${certificate}` }).click();
+  await expect(outcome(page)).toHaveText(`Completed: ${certificate}`);
+  const release = await holdRequests(
+    page,
+    `/api/human-items/${certificateId}/reopen`,
+  );
+  await toast(page).getByRole("button", { name: "Reopen" }).click();
+  await page
+    .getByRole("combobox", { name: "Priority", exact: true })
+    .selectOption({ label: "High" });
+  await expect(card(page, "Review the action-items design")).toBeVisible();
+  release();
+  await expect(outcome(page)).toHaveText(`Reopened: ${certificate}`);
+  expect(stored(served, certificateId).state).toBe("open");
+  await page.waitForTimeout(500);
+  await expect(card(page, certificate)).toHaveCount(0);
 });

@@ -57,6 +57,8 @@ export interface Toast {
 interface Settled {
   readonly view: HumanItemView;
   readonly at: number;
+  /** The filter the list showed when the write was sent. */
+  readonly filter: string;
 }
 
 /** A write out, and where its item stood in the list when it was sent. */
@@ -132,6 +134,9 @@ export function useHumanItems(
   const shownToast = useRef<Toast | undefined>(undefined);
   shownToast.current = toast;
   const pushed = live.items;
+  // The filter in effect now, which a receipt landing later is held against.
+  const currentFilter = useRef(filterKey);
+  currentFilter.current = filterKey;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `filterKey` is the trigger — a new filter is a new list, which nothing this page was ahead of belongs to.
   useEffect(() => {
     setSettled((all) => (Object.keys(all).length === 0 ? all : {}));
@@ -145,14 +150,19 @@ export function useHumanItems(
       return own.item.state === listedState ? [own] : [];
     });
     const has = (id: string) => shown.some(({ item }) => item.id === id);
-    // Taken back here before the stream says so: back where it was.
-    for (const { view, at } of Object.values(settled))
-      if (view.item.state === listedState && !has(view.item.id))
+    // Taken back here before the stream says so: back where it was — in the list
+    // it was taken back from, never one a later filter shows instead.
+    for (const { view, at, filter } of Object.values(settled))
+      if (
+        filter === filterKey &&
+        view.item.state === listedState &&
+        !has(view.item.id)
+      )
         shown.splice(Math.min(at, shown.length), 0, view);
     for (const { view, at } of sending)
       if (!has(view.item.id)) shown.splice(Math.min(at, shown.length), 0, view);
     return shown;
-  }, [pushed, sending, settled, hidden, listedState]);
+  }, [pushed, sending, settled, hidden, listedState, filterKey]);
   // A receipt is let go once what the page shows has caught up with it: the
   // item is served as new as the receipt, or is gone and was not to be shown.
   useEffect(() => {
@@ -198,6 +208,7 @@ export function useHumanItems(
       if (inFlight.current.has(id)) return;
       inFlight.current.add(id);
       const key = ++keys.current;
+      const filter = currentFilter.current;
       const at = Math.max(
         0,
         listed.current?.findIndex(({ item }) => item.id === id) ?? 0,
@@ -217,7 +228,10 @@ export function useHumanItems(
       sent
         .then(
           (receipt) => {
-            setSettled((all) => ({ ...all, [id]: { view: receipt.item, at } }));
+            setSettled((all) => ({
+              ...all,
+              [id]: { view: receipt.item, at, filter },
+            }));
             setWrites((all) => ({ ...all, [id]: { pending: false } }));
             setDrafts((all) =>
               Object.fromEntries(
@@ -267,6 +281,7 @@ export function useHumanItems(
       const resolving = resolutions.current.get(held.key);
       if (resolving === undefined || held.followUp?.phase === "sending") return;
       const { key, id } = held;
+      const filter = currentFilter.current;
       onToast(key, (current) => ({
         ...current,
         followUp: { kind, phase: "sending" },
@@ -282,7 +297,7 @@ export function useHumanItems(
             (after) => {
               setSettled((all) => ({
                 ...all,
-                [id]: { view: after.item, at: all[id]?.at ?? 0 },
+                [id]: { view: after.item, at: all[id]?.at ?? 0, filter },
               }));
               onToast(key, (current) => ({
                 ...current,
