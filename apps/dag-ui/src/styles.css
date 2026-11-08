@@ -3037,9 +3037,11 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   margin: 4px 0 2px;
 }
 
+/* Capped at 46ch, so a short title stays one line and one near the 80-character
+   limit wraps to two at every width rather than stretching across a wide card. */
 .mock-choice {
   box-sizing: border-box;
-  max-width: 100%;
+  max-width: min(100%, 46ch);
   padding: 5px 9px;
   border: 1px solid var(--border);
   border-radius: 7px;
