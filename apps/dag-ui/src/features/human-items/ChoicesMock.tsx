@@ -19,8 +19,9 @@ export type MockStage =
   | "refused"
   | "answered";
 
+// `before` is no longer drawn here: the before views are captured on the
+// starting head's own source (`just spike-action-items-before-screens`).
 const STAGES: readonly MockStage[] = [
-  "before",
   "card",
   "detail",
   "bar",
