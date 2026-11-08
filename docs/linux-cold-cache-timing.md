@@ -220,6 +220,29 @@ green. `dag-ui:build-api-server` ended 12.7 minutes into Nx, against 260 s on th
 last passing run (fda7038), which predates this branch's move of the linked
 `onepipeline` and replayed the browser tier. A pin move misses main's warm Rust
 cache for that crate in every target directory the job compiles, and a change to
-the app runs the browser tier. Reordering moves that work rather than removing it:
-the release tail already ended at the cap beside the browser tier. A pin move
-merged on its own lets the warm run compile it before the change that needs it.
+the app runs the browser tier.
+
+That was then profiled with `cargo build --timings` at four jobs, cold, on a loaded
+shared host, so the durations are a profile and not a comparison:
+
+| Build | `onepipeline` | this crate's library | binary | Serial total |
+| --- | --- | --- | --- | --- |
+| debug (`build-api-server`) | 81 s | 13 s | 4 s | about 100 s |
+| release (the wheel) | 473 s | 97 s | 240 s | about 810 s |
+
+The release rows are serial because `codegen-units = 1` and thin LTO keep each on
+one rustc. The debug figure is far under the 12.7 minutes `build-api-server` took
+to finish, so the build's own compile does not explain that time. A cancelled run
+records no task start times, so the time it waited for a slot is not measured.
+
+The release build is not compiled three times. `compile-release-server`,
+`wheel-smoke` and `rehearse` share `target/wheel-x86_64-unknown-linux-gnu` behind
+the lock in `scripts/build-linux-wheel.sh`, and in that run two of the three report
+cargo finishing in about a second. So two of the job's six Nx slots slept on the
+lock for the compile. `wheel-smoke` and `rehearse` now depend on
+`compile-release-server`, so they start once it is done and the slots go to tasks
+that can run; the same three commands run. A list-scheduling model of six slots,
+with durations from the fda7038 and 080242f runs and no account of CPU limits,
+moves the job's end from about 2425 s to 1900 s into Nx. CI has not measured it.
+Sharing `target`'s build directory with `build-api-server` was not done: it would
+save about 100 s of compile and queue that build behind the tiers' compiles there.
