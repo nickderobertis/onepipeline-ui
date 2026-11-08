@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.70.3](https://github.com/nickderobertis/onepipeline-ui/compare/v0.70.2...v0.70.3) - 2026-11-08
+
+### Added
+
+- *(dag-ui)* structured navigation, separate update settings per area, and one run-kind dropdown ([#686](https://github.com/nickderobertis/onepipeline-ui/pull/686))
+
 ## [0.70.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.70.1...v0.70.2) - 2026-11-07
 
 ### Added
