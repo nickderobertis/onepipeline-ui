@@ -575,8 +575,8 @@ function prototype(clone) {
       `{workspaceRoot}/target/coverage-tiers/${tier}.profdata`,
     ];
     t.inputs = [...t.inputs, '{workspaceRoot}/scripts/coverage-spike.mjs'];
-    // The prototype runs the tiers alone; the clone is provisioned by hand.
-    delete t.dependsOn;
+    // dependsOn stays (the repository's tests hold it); the sweep excludes task
+    // dependencies, because the clone is provisioned by hand.
     writeFileSync(path, JSON.stringify(json, null, 2) + '\n');
   }
   const covPath = join(clone, 'tests', 'tiers', 'coverage', 'project.json');
@@ -646,6 +646,7 @@ function nxSweep(clone, cacheDir, { label, skipCache = false }) {
     TIERS.map(([p]) => p).join(','),
     '--parallel=1',
     '--outputStyle=static',
+    '--excludeTaskDependencies',
   ];
   if (skipCache) args.push('--skip-nx-cache');
   let res = run('npx', args, { cwd: clone, env: nxEnv(cacheDir), capture: true, allowFail: true });
