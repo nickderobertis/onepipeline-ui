@@ -640,7 +640,7 @@ function price() {
   const unSet = new Set(unattributed.map((f) => f.path));
   const sharedSaved = shared.length ? without((p) => sharedSet.has(p)) : 0;
   const unSaved = unattributed.length ? without((p) => unSet.has(p)) : 0;
-  const cargoOnly = archiveBytes(allT, []);
+  const targetOnly = archiveBytes(allT, []);
   const groups = new Map();
   for (const f of shared) {
     const key = reachedBy.get(unitKey(f.path, profiles)).join(" + ");
@@ -657,16 +657,16 @@ function price() {
     unattributed_units_archive_bytes: unSaved,
     unattributed_raw_bytes: sum(unattributed),
     cargo_home_archive_bytes:
-      whole === null || cargoOnly === null ? null : whole - cargoOnly,
+      whole === null || targetOnly === null ? null : whole - targetOnly,
     // What no single removal accounts for: compression across parts.
     residual_archive_bytes:
-      whole === null || cargoOnly === null
+      whole === null || targetOnly === null
         ? null
         : whole -
           rows -
           (sharedSaved ?? 0) -
           (unSaved ?? 0) -
-          (whole - cargoOnly),
+          (whole - targetOnly),
   });
 
   // Prices, on the tree rust-cache would save: delete what its cleanup deletes,

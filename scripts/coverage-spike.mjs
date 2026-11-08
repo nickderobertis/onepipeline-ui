@@ -131,8 +131,6 @@ const profraws = (tier) =>
 
 // The flags `cargo llvm-cov report -v` passes to llvm-cov over this checkout's objects,
 // returned as one argument array.
-// report reads. Returns { objects: [...], flags: [...] } — everything after the
-// subcommand but the format, profile and output.
 function reportInvocation() {
   const res = run(
     "cargo",
