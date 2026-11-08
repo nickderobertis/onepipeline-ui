@@ -23,19 +23,33 @@ function formatted(source: string): string {
   return biome.stdout;
 }
 
+/**
+ * The render is checked through a Biome subprocess, and the first run of a newly
+ * installed native binary on a macOS host is held while the OS scans it: on a
+ * test-macos runner whose every Biome task replayed from cache, that scan landed
+ * on this test and outlasted Vitest's 5-second default. The allowance bounds a
+ * subprocess, not a speed claim — the equality below is the whole assertion.
+ */
+const SUBPROCESS_TIMEOUT = { timeout: 30_000 };
+
 describe("the generated human-item types", () => {
-  it("are what the checked-in engine schema renders", () => {
-    const schema: unknown = JSON.parse(
-      readFileSync(join(here, "human-items.schema.json"), "utf8"),
-    );
-    if (typeof schema !== "object" || schema === null)
-      throw new Error("the schema is not an object");
-    const rendered = formatted(
-      renderHumanItemTypes(schema as Record<string, unknown>),
-    );
-    if (process.env.UPDATE_HUMAN_ITEM_TYPES) writeFileSync(generated, rendered);
-    expect(readFileSync(generated, "utf8")).toBe(rendered);
-  });
+  it(
+    "are what the checked-in engine schema renders",
+    SUBPROCESS_TIMEOUT,
+    () => {
+      const schema: unknown = JSON.parse(
+        readFileSync(join(here, "human-items.schema.json"), "utf8"),
+      );
+      if (typeof schema !== "object" || schema === null)
+        throw new Error("the schema is not an object");
+      const rendered = formatted(
+        renderHumanItemTypes(schema as Record<string, unknown>),
+      );
+      if (process.env.UPDATE_HUMAN_ITEM_TYPES)
+        writeFileSync(generated, rendered);
+      expect(readFileSync(generated, "utf8")).toBe(rendered);
+    },
+  );
 
   it("refuses a construct it cannot render rather than saying less", () => {
     expect(() =>
