@@ -2845,6 +2845,8 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
    is a control of its own, whose hit area stays inside this box. */
 .human-items-unavailable {
   gap: 0;
+  min-width: 0;
+  margin: 0;
   padding: 0 2px 0 12px;
   opacity: 1;
   border-style: dashed;

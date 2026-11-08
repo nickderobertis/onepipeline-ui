@@ -177,12 +177,11 @@ function UndoAction({
       </button>
     );
   return (
-    <span
+    <fieldset
       aria-label={`${label} (unavailable)`}
       className="human-items-toast-action human-items-unavailable"
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
-      role="group"
     >
       <button aria-describedby={tip} disabled type="button">
         {label}
@@ -207,6 +206,6 @@ function UndoAction({
       >
         {reopen.reason}
       </span>
-    </span>
+    </fieldset>
   );
 }
