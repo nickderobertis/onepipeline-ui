@@ -2432,6 +2432,22 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   --otg-muted: var(--muted-foreground);
 }
 
+/* This app's Tailwind preflight strips list markers, which a task's lists need. */
+.otg-markdown ul {
+  list-style: disc;
+}
+
+.otg-markdown ol {
+  list-style: decimal;
+}
+
+/* An inline code span in the monospace stack sits lower than the text's baseline
+   allows for and grew its line past the others, so a four-line clamp cut a line in
+   half. A zero-height inline box cannot grow a line; its text still draws. */
+.otg-markdown code {
+  line-height: 0;
+}
+
 .node-tab-panel .otg-markdown {
   font-size: 13px;
   line-height: 20px;
@@ -2839,7 +2855,11 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   cursor: not-allowed;
 }
 
+/* Set on the Reopen text without preflight's lift for `sup`, which would carry the
+   mark above the control it belongs to. */
 .human-items-why-anchor {
+  position: static;
+  top: auto;
   align-self: stretch;
   display: flex;
   align-items: flex-start;
@@ -2927,13 +2947,13 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   /* A card's actions take their own row, each tall enough for a thumb. */
   .human-item-card .otg-card__actions {
     flex-basis: 100%;
-    gap: 8px;
+    gap: 6px;
   }
 
   .human-item-action,
   .human-item-tracker {
     min-height: 44px;
-    padding: 0 14px;
+    padding: 0 10px;
     font-size: 13px;
   }
 

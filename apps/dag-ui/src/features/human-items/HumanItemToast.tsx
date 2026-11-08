@@ -12,6 +12,12 @@ const PAST = {
   dismiss: "Dismissed",
 } as const;
 
+const DOING = {
+  answer: "Answering",
+  complete: "Completing",
+  dismiss: "Dismissing",
+} as const;
+
 const UNDONE = { complete: "Reopened", dismiss: "Restored" } as const;
 
 /** What the toast says, in one line, for where its write and follow-up stand. */
@@ -29,7 +35,9 @@ function sentence(toast: Toast): string {
     return followUp.kind === "undo"
       ? `${undone}: ${title}`
       : `${noted} saved: ${title}`;
-  return `${PAST[action]}: ${title}`;
+  return phase === "sending"
+    ? `${DOING[action]}: ${title}…`
+    : `${PAST[action]}: ${title}`;
 }
 
 /**
@@ -122,6 +130,7 @@ export function HumanItemToast({
     <section
       aria-label="Action result"
       className="human-items-toast"
+      data-phase={followUp?.phase ?? phase}
       data-tone={failed ? "failure" : "success"}
       onBlur={leaving}
       onFocus={() => setFocused(true)}

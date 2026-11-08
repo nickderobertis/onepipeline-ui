@@ -293,10 +293,29 @@ async function actAs(served: FixtureServer, session: string): Promise<void> {
   await served.serveRebuilt();
 }
 
-/** The page, opened at its own address on the server's origin. */
-async function open(page: Page, served: FixtureServer): Promise<Locator> {
+/** Where the page remembers, per browser, what its list is grouped by. */
+const GROUP_BY_KEY = "onepipeline-ui.human-items.group-by";
+
+/**
+ * The page, opened at its own address on the server's origin, and its list.
+ *
+ * Grouping is a reader's choice the browser remembers, so a journey about the
+ * engine's own order reads the list as one flat list — Group by None — chosen
+ * the way a reader's earlier visit would have left it. `groupBy: null` leaves the
+ * browser as it is, for the journeys about grouping itself.
+ */
+async function open(
+  page: Page,
+  served: FixtureServer,
+  { groupBy = "none" }: { readonly groupBy?: string | null } = {},
+): Promise<Locator> {
+  if (groupBy !== null)
+    await page.addInitScript(
+      ([key, value]) => window.localStorage.setItem(key, value),
+      [GROUP_BY_KEY, groupBy] as const,
+    );
   await page.goto(`${served.origin}/human-items`);
-  const list = page.getByRole("list", { name: "Action items" });
+  const list = listRegion(page);
   await expect(list.getByRole("listitem").first()).toBeVisible();
   return list;
 }
@@ -341,8 +360,14 @@ function answerBox(page: Page, title: string): Locator {
   return page.getByRole("textbox", { name: `Answer: ${title}`, exact: true });
 }
 
+/** The toast the last write leaves. */
+function toast(page: Page): Locator {
+  return page.getByRole("region", { name: "Action result" });
+}
+
+/** What the toast says, whether it went through or failed. */
 function outcome(page: Page): Locator {
-  return page.getByRole("status", { name: "Last outcome" });
+  return toast(page).locator('[role="status"], [role="alert"]');
 }
 
 function detailPane(page: Page): Locator {
@@ -476,7 +501,7 @@ test("opens Action items from its own navigation entry and leaves the Host page 
   await expect(
     page.getByRole("heading", { name: "Action items" }),
   ).toBeVisible();
-  const list = page.getByRole("list", { name: "Action items" });
+  const list = listRegion(page);
   await expect(list.getByRole("listitem")).toHaveCount(DECLARED.length);
 
   await nav.getByRole("button", { name: "Host" }).click();
@@ -487,7 +512,7 @@ test("opens Action items from its own navigation entry and leaves the Host page 
     host.getByRole("button", { name: "Refresh host" }),
   ).toBeVisible();
   // The Host page carries none of the action items: no list, no card, no title.
-  await expect(page.getByRole("list", { name: "Action items" })).toHaveCount(0);
+  await expect(listRegion(page)).toHaveCount(0);
   for (const { title } of DECLARED)
     await expect(page.getByText(title)).toHaveCount(0);
 
@@ -499,7 +524,7 @@ test("opens Action items from its own navigation entry and leaves the Host page 
   await page.goto(`${served.origin}/human-items/`);
   await expect(list.getByRole("listitem")).toHaveCount(DECLARED.length);
   await page.goto(`${served.origin}/not-human-items`);
-  await expect(page.getByRole("list", { name: "Action items" })).toHaveCount(0);
+  await expect(listRegion(page)).toHaveCount(0);
 });
 
 test("the sidebar's kinds stay on Action items and a run selected from it leaves for the run", async ({
@@ -631,8 +656,15 @@ test("lists every open item of the host in the engine's order, as compact full-w
     0,
   );
   const filters = page.getByRole("group", { name: "Filter action items" });
-  await expect(filters.getByRole("combobox")).toHaveCount(5);
-  for (const name of ["Kind", "Blocking", "Priority", "State", "Source"])
+  await expect(filters.getByRole("combobox")).toHaveCount(6);
+  for (const name of [
+    "Group by",
+    "Kind",
+    "Blocking",
+    "Priority",
+    "State",
+    "Source",
+  ])
     await expect(
       filters.getByRole("combobox", { name, exact: true }),
     ).toBeVisible();
@@ -653,6 +685,13 @@ test("lists every open item of the host in the engine's order, as compact full-w
     "Any",
     "Yes",
     "No",
+  ]);
+  await expect(filters.getByLabel("Group by").getByRole("option")).toHaveText([
+    "Priority",
+    "Kind",
+    "Source",
+    "Blocking",
+    "None",
   ]);
 });
 
@@ -675,7 +714,8 @@ test("at 1440×900 six complete cards and all their controls fit the list unscro
   page,
 }) => {
   const served = await serveWorld("queue");
-  const list = await open(page, served);
+  // Grouped as a reader first finds it — by Priority — with its headings showing.
+  const list = await open(page, served, { groupBy: null });
   // The original density target is six cards; select that same six-item corpus.
   await page
     .getByRole("combobox", { name: "Source", exact: true })
@@ -684,6 +724,13 @@ test("at 1440×900 six complete cards and all their controls fit the list unscro
     .getByRole("searchbox", { name: "Source identifier", exact: true })
     .fill(SUPERVISOR);
   await expect(list.getByRole("article")).toHaveCount(6);
+  await expect(list.getByRole("heading", { level: 2 })).toHaveText([
+    "Critical (2)",
+    "High (3)",
+    "Low (1)",
+  ]);
+  for (const heading of await list.getByRole("heading", { level: 2 }).all())
+    await expect(heading).toBeInViewport({ ratio: 1 });
   const region = listRegion(page);
   const box = await region.boundingBox();
   if (box === null) throw new Error("the list has no box");
@@ -949,7 +996,7 @@ test("Tab moves straight between answer boxes, Enter answers in place, Shift+Ent
   await answerBox(page, first).focus();
   await page.keyboard.type("eu-west, matching the incident report");
   await page.keyboard.press("Enter");
-  await expect(outcome(page)).toHaveText(`${first}: Answered`);
+  await expect(outcome(page)).toHaveText(`Answered: ${first}`);
   await expect(card(page, first)).toHaveCount(0);
   await expect(detailPane(page)).toHaveCount(0);
   expect(sent.map((request) => request.postData())).toEqual([
@@ -959,7 +1006,7 @@ test("Tab moves straight between answer boxes, Enter answers in place, Shift+Ent
   expect(stored(served, region)).toMatchObject({
     state: "answered",
     resolution: {
-      actor: `session:${SUPERVISOR}`,
+      actor: `browser:session:${SUPERVISOR}`,
       on_behalf_of: null,
       text: "eu-west, matching the incident report",
     },
@@ -988,7 +1035,7 @@ test("Tab moves straight between answer boxes, Enter answers in place, Shift+Ent
   expect(sent).toHaveLength(1);
   await ime.send("Input.insertText", { text: "にほん" });
   await page.keyboard.press("Enter");
-  await expect(outcome(page)).toHaveText(`${composing}: Answered`);
+  await expect(outcome(page)).toHaveText(`Answered: ${composing}`);
   expect(sent).toHaveLength(2);
   expect(stored(served, idOf(served, "export")).resolution?.text).toContain(
     "Keep it にほん",
@@ -1024,20 +1071,15 @@ test("card actions are a focus group of their own after the answer boxes, operab
   await expect(
     page.getByRole("button", { name: "Dismiss: Restore the build service" }),
   ).toBeFocused();
-  // Dismiss, with no reason, from the keyboard alone.
-  await page.keyboard.press("Enter");
-  const dialog = page.getByRole("dialog", {
-    name: "Dismiss Restore the build service",
-  });
-  await expect(dialog.getByLabel("Reason (optional)")).toBeFocused();
+  // Dismiss, from the keyboard alone, in one press.
   await page.keyboard.press("Enter");
   await expect(outcome(page)).toHaveText(
-    "Restore the build service: Dismissed",
+    "Dismissed: Restore the build service",
   );
   await expect(card(page, "Restore the build service")).toHaveCount(0);
   expect(stored(served, idOf(served, "build"))).toMatchObject({
     state: "dismissed",
-    resolution: { actor: `session:${SUPERVISOR}`, reason: null },
+    resolution: { actor: `browser:session:${SUPERVISOR}`, reason: null },
   });
 
   // Complete, from the keyboard. The group now opens on the first card left —
@@ -1103,7 +1145,7 @@ test("card actions are a focus group of their own after the answer boxes, operab
   ).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(outcome(page)).toHaveText(
-    "Review the action-items design: Completed",
+    "Completed: Review the action-items design",
   );
   expect(stored(served, idOf(served, "design")).state).toBe("completed");
 });
@@ -1120,7 +1162,7 @@ test("a design review completes with the ordinary Complete, and a changed docume
     .getByRole("button", { name: "Complete: Review the action-items design" })
     .click();
   await expect(outcome(page)).toHaveText(
-    "Review the action-items design: Completed",
+    "Completed: Review the action-items design",
   );
   await expect(card(page, "Review the action-items design")).toHaveCount(0);
   expect(sent.map((request) => request.postData())).toEqual(["{}"]);
@@ -1131,7 +1173,7 @@ test("a design review completes with the ordinary Complete, and a changed docume
     {
       board_copy: "docs/design/action-items.md",
       key: "sha256:5d1c0a",
-      actor: `session:${SUPERVISOR}`,
+      actor: `browser:session:${SUPERVISOR}`,
       on_behalf_of: null,
     },
   ]);
@@ -1143,8 +1185,9 @@ test("a design review completes with the ordinary Complete, and a changed docume
     .getByRole("button", { name: "Complete: Review the dashboard layout" })
     .click();
   await expect(outcome(page)).toHaveText(
-    "Review the dashboard layout: Re-read the current document",
+    /^Not completed: Review the dashboard layout\. .*Re-read the current document/u,
   );
+  await expect(toast(page)).toHaveAttribute("data-tone", "failure");
   // No stale approval; the obsolete task is dismissed and exactly one
   // replacement, for the new version, is open in its place.
   expect(approvals(served)).toHaveLength(1);
@@ -1162,19 +1205,19 @@ test("a design review completes with the ordinary Complete, and a changed docume
     .getByRole("button", { name: "Complete: Review the dashboard layout" })
     .click();
   await expect(outcome(page)).toHaveText(
-    "Review the dashboard layout: Completed",
+    "Completed: Review the dashboard layout",
   );
   expect(approvals(served)[1]).toEqual({
     board_copy: "docs/design/dashboard.md",
     key: "sha256:c4e2f9",
-    actor: `session:${SUPERVISOR}`,
+    actor: `browser:session:${SUPERVISOR}`,
     on_behalf_of: null,
   });
   const told = watch(served, SUPERVISOR).map(([kind]) => kind);
   expect(told).toContain("human-item-completed");
 });
 
-test("a dismissal sends a reason only when one is written", async ({
+test("a dismissal is one press, and a reason is sent only when one is written", async ({
   page,
 }) => {
   const served = await serveWorld("queue");
@@ -1186,13 +1229,17 @@ test("a dismissal sends a reason only when one is written", async ({
   await page
     .getByRole("button", { name: "Dismiss: Keep the legacy export format?" })
     .click();
-  const dialog = page.getByRole("dialog", {
-    name: "Dismiss Keep the legacy export format?",
-  });
-  await dialog.getByLabel("Reason (optional)").fill("the export stays");
-  await dialog.getByRole("button", { name: "Dismiss item" }).click();
   await expect(outcome(page)).toHaveText(
-    "Keep the legacy export format?: Dismissed",
+    "Dismissed: Keep the legacy export format?",
+  );
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await toast(page).getByRole("button", { name: "Add reason" }).click();
+  await toast(page)
+    .getByRole("textbox", { name: "Reason" })
+    .fill("the export stays");
+  await toast(page).getByRole("textbox", { name: "Reason" }).press("Enter");
+  await expect(outcome(page)).toHaveText(
+    "Reason saved: Keep the legacy export format?",
   );
   expect(stored(served, idOf(served, "export")).resolution?.reason).toBe(
     "the export stays",
@@ -1201,33 +1248,36 @@ test("a dismissal sends a reason only when one is written", async ({
   await page
     .getByRole("button", { name: "Dismiss: Review the dashboard layout" })
     .click();
-  await page
-    .getByRole("dialog", { name: "Dismiss Review the dashboard layout" })
-    .getByRole("button", { name: "Dismiss item" })
-    .click();
   await expect(outcome(page)).toHaveText(
-    "Review the dashboard layout: Dismissed",
+    "Dismissed: Review the dashboard layout",
   );
+  await expect
+    .poll(() => stored(served, idOf(served, "dashboard")).state)
+    .toBe("dismissed");
   expect(stored(served, idOf(served, "dashboard")).resolution?.reason).toBe(
     null,
   );
-  expect(sent.map((request) => request.postData())).toEqual([
-    JSON.stringify({ reason: "the export stays" }),
-    "{}",
+  expect(
+    sent.map((request) => [
+      new URL(request.url()).pathname.split("/").at(-1),
+      request.postData(),
+    ]),
+  ).toEqual([
+    ["dismiss", "{}"],
+    ["note", JSON.stringify({ text: "the export stays" })],
+    ["dismiss", "{}"],
   ]);
   expect(watch(served, SUPERVISOR)).toEqual([
     ["human-item-dismissed", idOf(served, "export")],
+    ["human-item-noted", idOf(served, "export")],
     ["human-item-dismissed", idOf(served, "dashboard")],
   ]);
   expect(watch(served, OTHER)).toEqual([]);
 
-  // Cancelling sends nothing.
-  await page
-    .getByRole("button", { name: "Dismiss: Restore the build service" })
-    .click();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  expect(sent).toHaveLength(2);
+  // Closing the toast sends nothing more.
+  await toast(page).getByRole("button", { name: "Close" }).click();
+  await expect(toast(page)).toHaveCount(0);
+  expect(sent).toHaveLength(3);
   await expect(card(page, "Restore the build service")).toBeVisible();
 });
 
@@ -1250,9 +1300,9 @@ test("the detail pane answers, completes, dismisses and follows the tracker as t
   await answer.fill("Reuse it, and check the artifact digest");
   await answer.press("Enter");
   await expect(outcome(page)).toHaveText(
-    "Should retries reuse the warm cache?: Answered",
+    "Answered: Should retries reuse the warm cache?",
   );
-  // The pane stays on the item, now answered.
+  // An answer leaves the pane on the item, now answered.
   await expect(pane.getByText("Question · Answered")).toBeVisible();
   expect(stored(served, idOf(served, "cache")).resolution?.text).toBe(
     "Reuse it, and check the artifact digest",
@@ -1269,22 +1319,25 @@ test("the detail pane answers, completes, dismisses and follows the tracker as t
   );
   await pane.getByRole("button", { name: "Complete" }).click();
   await expect(outcome(page)).toHaveText(
-    "Review the action-items design: Completed",
+    "Completed: Review the action-items design",
   );
-  await expect(pane.getByText("Task · Completed")).toBeVisible();
-  await expect(pane.getByRole("button", { name: "Complete" })).toHaveCount(0);
+  // Completing the item it shows closes the pane with its card.
+  await expect(pane).toHaveCount(0);
+  await expect(card(page, "Review the action-items design")).toHaveCount(0);
 
   await page
     .getByRole("button", { name: "Details: Review the dashboard layout" })
     .click();
   await pane.getByRole("button", { name: "Dismiss" }).click();
-  const dialog = page.getByRole("dialog", {
-    name: "Dismiss Review the dashboard layout",
-  });
-  await dialog.getByLabel("Reason (optional)").fill("superseded");
-  await dialog.getByRole("button", { name: "Dismiss item" }).click();
   await expect(outcome(page)).toHaveText(
-    "Review the dashboard layout: Dismissed",
+    "Dismissed: Review the dashboard layout",
+  );
+  await expect(pane).toHaveCount(0);
+  await toast(page).getByRole("button", { name: "Add reason" }).click();
+  await toast(page).getByRole("textbox", { name: "Reason" }).fill("superseded");
+  await toast(page).getByRole("button", { name: "Send" }).click();
+  await expect(outcome(page)).toHaveText(
+    "Reason saved: Review the dashboard layout",
   );
   expect(stored(served, idOf(served, "dashboard")).resolution?.reason).toBe(
     "superseded",
@@ -1319,7 +1372,7 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
   await expect(answerBox(page, title)).toHaveAttribute("readonly", "");
   expect(sent).toHaveLength(1);
   release();
-  await expect(outcome(page)).toHaveText(`${title}: Answered`);
+  await expect(outcome(page)).toHaveText(`Answered: ${title}`);
   await expect(card(page, title)).toHaveCount(0);
   expect(sent).toHaveLength(1);
   await page.unroute("**/api/human-items/*/answer");
@@ -1333,8 +1386,8 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
       ),
   ).toHaveLength(1);
 
-  // A task's Complete and Dismiss are held to one write the same way: while
-  // its receipt is out, further clicks send nothing.
+  // A task's Complete is one write too: the card leaves on the press, so there
+  // is nothing left to press again while its receipt is out.
   let releaseTask: () => void = () => {};
   const heldTask = new Promise<void>((resolve) => {
     releaseTask = resolve;
@@ -1346,16 +1399,11 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
   });
   const design = "Review the action-items design";
   await page.getByRole("button", { name: `Complete: ${design}` }).click();
-  await expect(card(page, design).getByRole("status")).toHaveText("Sending…");
-  await page.getByRole("button", { name: `Complete: ${design}` }).click();
-  await page.getByRole("button", { name: `Dismiss: ${design}` }).click();
-  await page
-    .getByRole("dialog", { name: `Dismiss ${design}` })
-    .getByRole("button", { name: "Dismiss item" })
-    .click();
+  await expect(card(page, design)).toHaveCount(0);
+  await expect(outcome(page)).toHaveText(`Completing: ${design}…`);
   expect(sent).toHaveLength(2);
   releaseTask();
-  await expect(outcome(page)).toHaveText(`${design}: Completed`);
+  await expect(outcome(page)).toHaveText(`Completed: ${design}`);
   expect(sent).toHaveLength(2);
   expect(stored(served, designId).state).toBe("completed");
   await page.unroute(`**/api/human-items/${designId}/complete`);
@@ -1377,14 +1425,14 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
   restore();
   expect(stored(served, idOf(served, "export")).state).toBe("open");
   await answerBox(page, question).press("Enter");
-  await expect(outcome(page)).toHaveText(`${question}: Answered`);
+  await expect(outcome(page)).toHaveText(`Answered: ${question}`);
   expect(stored(served, idOf(served, "export")).resolution?.text).toBe(
     "Keep it one more release",
   );
 
-  // The server stops answering at all: the write's connection fails, the item
-  // and its card stay, and once a server is back over the same journal the
-  // same action succeeds.
+  // The server stops answering at all: the write's connection fails, the card
+  // comes back where it was with the reason, and once a server is back over the
+  // same journal the same action succeeds.
   await served.stopServing();
   await page
     .getByRole("button", { name: "Complete: Restore the build service" })
@@ -1398,7 +1446,7 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
     .getByRole("button", { name: "Complete: Restore the build service" })
     .click();
   await expect(outcome(page)).toHaveText(
-    "Restore the build service: Completed",
+    "Completed: Restore the build service",
   );
   expect(stored(served, idOf(served, "build")).state).toBe("completed");
 });
@@ -1448,7 +1496,7 @@ for (const acting of ["browser-owns-nothing", SUPERVISOR, ""]) {
     expect(report).toContain("Restore the build service");
     expect(report).not.toContain("Should retries reuse the warm cache?");
     expect(report).not.toContain("Rotate the deploy credentials");
-    const actor = acting ? `session:${acting}` : "browser";
+    const actor = acting ? `browser:session:${acting}` : "browser";
     for (const [key, verb, event] of [
       ["cache", "answer", "human-item-answered"],
       ["other", "complete", "human-item-completed"],
@@ -1469,14 +1517,13 @@ for (const acting of ["browser-owns-nothing", SUPERVISOR, ""]) {
         await pane.getByRole("textbox", { name: /answer/i }).press("Enter");
       } else if (verb === "dismiss") {
         await pane.getByRole("button", { name: /^Dismiss/ }).click();
-        await page
-          .getByRole("dialog")
-          .getByRole("button", { name: "Dismiss item" })
-          .click();
       } else {
         await pane.getByRole("button", { name: /^Complete/ }).click();
       }
       await expect(card(page, before.title)).toHaveCount(0);
+      await expect(outcome(page)).toHaveText(
+        /^(Answered|Completed|Dismissed): /u,
+      );
       const after = stored(served, id);
       expect(after.owner).toEqual(before.owner);
       expect(after.resolution).toMatchObject({ actor, on_behalf_of: null });
@@ -1484,7 +1531,9 @@ for (const acting of ["browser-owns-nothing", SUPERVISOR, ""]) {
         expect(watch(served, owner)).toEqual(
           owner === before.owner.session ? [[event, id]] : [],
         );
-      await pane.getByRole("button", { name: "Close detail" }).click();
+      if (verb === "answer")
+        await pane.getByRole("button", { name: "Close detail" }).click();
+      await expect(pane).toHaveCount(0);
     }
     expect(approvals(served)).toContainEqual({
       board_copy: "docs/design/action-items.md",
@@ -1626,7 +1675,7 @@ test("ending its run retires the items holding that run's work, and leaves host 
   // that session's next watch.
   await answerBox(page, LAST_QUESTION).fill("Reuse it");
   await answerBox(page, LAST_QUESTION).press("Enter");
-  await expect(outcome(page)).toHaveText(`${LAST_QUESTION}: Answered`);
+  await expect(outcome(page)).toHaveText(`Answered: ${LAST_QUESTION}`);
   expect(watch(served, SUPERVISOR)).toEqual([
     ["human-item-answered", idOf(served, "cache")],
   ]);
@@ -1661,10 +1710,10 @@ test("ten sessions see the host queue, and each answer reaches only its owner's 
     const question = `Which day should ${session} ship?`;
     await answerBox(page, question).fill("Thursday");
     await answerBox(page, question).press("Enter");
-    await expect(outcome(page)).toHaveText(`${question}: Answered`);
+    await expect(outcome(page)).toHaveText(`Answered: ${question}`);
     const id = idOf(served, `${session}-question`);
     expect(stored(served, id).resolution).toEqual({
-      actor: `session:${session}`,
+      actor: `browser:session:${session}`,
       on_behalf_of: null,
       text: "Thursday",
       reason: null,
@@ -1684,8 +1733,11 @@ test("an item whose body is longer than four lines shows four on its card and al
   const longTitle = "Work through the release review follow-ups";
   const longText = stored(served, idOf(served, "long")).body;
   const long = card(page, longTitle);
+  // The body is the shared package's rendered markdown, clamped as a whole.
   const body = long.getByText(longText, { exact: true });
-  const clamp = await body.evaluate((element) => {
+  const clamp = await body.evaluate((text) => {
+    const element = text.closest(".otg-markdown");
+    if (!(element instanceof HTMLElement)) throw new Error("no rendered body");
     const style = getComputedStyle(element);
     return {
       line: Number.parseFloat(style.lineHeight),
@@ -1707,13 +1759,18 @@ test("an item whose body is longer than four lines shows four on its card and al
     const { title, body: text } = stored(served, idOf(served, key));
     const short = card(page, title).getByText(text, { exact: true });
     expect(
-      await short.evaluate((element) => ({
-        clipped: element.scrollHeight > element.clientHeight,
-        lines: Math.round(
-          element.clientHeight /
-            Number.parseFloat(getComputedStyle(element).lineHeight),
-        ),
-      })),
+      await short.evaluate((text) => {
+        const element = text.closest(".otg-markdown");
+        if (!(element instanceof HTMLElement))
+          throw new Error("no rendered body");
+        return {
+          clipped: element.scrollHeight > element.clientHeight,
+          lines: Math.round(
+            element.clientHeight /
+              Number.parseFloat(getComputedStyle(element).lineHeight),
+          ),
+        };
+      }),
     ).toEqual({ clipped: false, lines: 1 });
   }
   // The long card is held to four body lines, so the cards after it sit where
@@ -1730,7 +1787,7 @@ test("an item whose body is longer than four lines shows four on its card and al
   for (const [index, box] of boxes.entries())
     if (index > 0)
       expect(
-        Math.abs(box.top - (boxes[index - 1]?.bottom ?? 0) - 6),
+        Math.abs(box.top - (boxes[index - 1]?.bottom ?? 0) - 5),
       ).toBeLessThan(1);
 
   await long.getByRole("button", { name: `Details: ${longTitle}` }).click();
@@ -1767,7 +1824,7 @@ test("an item whose body is longer than four lines shows four on its card and al
     .toBe(true);
   // The final words are in view inside the pane, and nothing else moved.
   const shown = await full.evaluate((element) => {
-    const text = element.firstChild;
+    const text = element.querySelector(".otg-markdown p")?.firstChild ?? null;
     if (text === null) throw new Error("the body holds no text");
     const range = document.createRange();
     const words = "ship the reviewed release.";
@@ -2015,7 +2072,7 @@ test("an open page follows what the CLI writes, reads nothing to do it, and hold
   const beforeWrite = seen.requests.length;
   await answerBox(page, LAST_QUESTION).fill("Reuse it");
   await answerBox(page, LAST_QUESTION).press("Enter");
-  await expect(outcome(page)).toHaveText(`${LAST_QUESTION}: Answered`);
+  await expect(outcome(page)).toHaveText(`Answered: ${LAST_QUESTION}`);
   await expect(card(page, LAST_QUESTION)).toHaveCount(0);
   expect(seen.requests.slice(beforeWrite)).toEqual([
     {
@@ -2078,7 +2135,7 @@ test("an item whose patch beats its receipt stays where it was until the receipt
     order,
   );
   release();
-  await expect(outcome(page)).toHaveText(`${LAST_QUESTION}: Answered`);
+  await expect(outcome(page)).toHaveText(`Answered: ${LAST_QUESTION}`);
   await expect(card(page, LAST_QUESTION)).toHaveCount(0);
   await expect(card(page, later)).toBeVisible();
 });
@@ -2154,4 +2211,1037 @@ test("a world name the fixture does not define is refused before anything is bui
       rmSync(workspace, { recursive: true, force: true });
     }
   }
+});
+
+// ── One click, the toast, and taking a write back ──────────────────────────
+
+/** How long the page shows a toast nothing is holding: its configured duration. */
+const TOAST_SECONDS = 15;
+
+/**
+ * Hold every request to `path` on its way to the server until the answer is
+ * called: the browser has sent it, and no response comes until then.
+ */
+async function holdRequests(page: Page, path: string): Promise<() => void> {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`**${path}`, async (route) => {
+    await held;
+    await route.continue();
+  });
+  return release;
+}
+
+/** Every alert the page shows from here on, however briefly. */
+async function recordAlerts(page: Page): Promise<() => Promise<string[]>> {
+  await page.addInitScript(() => {
+    const seen: string[] = [];
+    Object.assign(window, { __alerts: seen });
+    new MutationObserver(() => {
+      for (const element of document.querySelectorAll('[role="alert"]')) {
+        const text = element.textContent ?? "";
+        if (!seen.includes(text)) seen.push(text);
+      }
+    }).observe(document, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
+  });
+  return () =>
+    page.evaluate(
+      () => (window as unknown as { __alerts: string[] }).__alerts ?? [],
+    );
+}
+
+/** The write routes the page sent to, by the verb each names, in order. */
+function verbs(sent: readonly Request[]): string[] {
+  return sent.map(
+    (request) => new URL(request.url()).pathname.split("/").at(-1) ?? "",
+  );
+}
+
+/** A CSS colour's channels, for "which hue dominates". */
+async function backgroundOf(locator: Locator) {
+  const colour = await locator.evaluate(
+    (element) => getComputedStyle(element).backgroundColor,
+  );
+  const [r = 0, g = 0, b = 0] = (colour.match(/\d+(\.\d+)?/gu) ?? []).map(
+    Number,
+  );
+  return { r, g, b };
+}
+
+async function box(locator: Locator) {
+  const found = await locator.boundingBox();
+  if (found === null) throw new Error("no box: the element is not rendered");
+  return found;
+}
+
+for (const { from, verb, key, title } of [
+  {
+    from: "card",
+    verb: "Complete",
+    key: "build",
+    title: "Restore the build service",
+  },
+  {
+    from: "card",
+    verb: "Dismiss",
+    key: "export",
+    title: "Keep the legacy export format?",
+  },
+  {
+    from: "detail",
+    verb: "Complete",
+    key: "design",
+    title: "Review the action-items design",
+  },
+  {
+    from: "detail",
+    verb: "Dismiss",
+    key: "other",
+    title: "Rotate the deploy credentials",
+  },
+] as const)
+  test(`${verb} from the ${from} is one press: the card leaves and the toast shows before the receipt, and it stays gone`, async ({
+    page,
+  }) => {
+    const served = await serveWorld("queue");
+    const alerts = await recordAlerts(page);
+    await open(page, served, { groupBy: null });
+    const id = idOf(served, key);
+    const sent = writes(page);
+    if (from === "detail") {
+      await card(page, title)
+        .getByRole("button", { name: `Details: ${title}` })
+        .click();
+      await expect(
+        detailPane(page).getByRole("heading", { name: title }),
+      ).toBeVisible();
+    }
+    const release = await holdRequests(
+      page,
+      `/api/human-items/${id}/${verb.toLowerCase()}`,
+    );
+    const button =
+      from === "card"
+        ? card(page, title).getByRole("button", { name: `${verb}: ${title}` })
+        : detailPane(page).getByRole("button", { name: verb, exact: true });
+    await button.click();
+    // With the receipt still held: the write is out, the card is gone, the
+    // detail showing it closed, and the toast already says what is happening —
+    // with no dialog, no confirmation and nothing else to press.
+    await expect.poll(() => verbs(sent)).toEqual([verb.toLowerCase()]);
+    await expect(card(page, title)).toHaveCount(0);
+    await expect(detailPane(page)).toHaveCount(0);
+    await expect(toast(page)).toBeVisible();
+    await expect(toast(page)).toHaveAttribute("data-phase", "sending");
+    await expect(outcome(page)).toHaveText(
+      `${verb === "Complete" ? "Completing" : "Dismissing"}: ${title}…`,
+    );
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(stored(served, id).state).toBe("open");
+    release();
+    await expect(outcome(page)).toHaveText(
+      `${verb === "Complete" ? "Completed" : "Dismissed"}: ${title}`,
+    );
+    const resolved = verb === "Complete" ? "completed" : "dismissed";
+    expect(stored(served, id).state).toBe(resolved);
+    expect(verbs(sent)).toEqual([verb.toLowerCase()]);
+    await page.unroute(`**/api/human-items/${id}/${verb.toLowerCase()}`);
+    // The stream catches up, the card stays gone, and a reload shows the same.
+    await page.waitForTimeout(1_000);
+    await expect(card(page, title)).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole("article").first()).toBeVisible();
+    await expect(card(page, title)).toHaveCount(0);
+    expect(stored(served, id).state).toBe(resolved);
+    // Nothing said, at any point, that the item could not be read.
+    expect(await alerts()).toEqual([]);
+  });
+
+test("the toast leaves after its duration, stays while hovered or focused, and leaves once that ends", async ({
+  page,
+}) => {
+  await page.clock.install();
+  const served = await serveWorld("queue");
+  await open(page, served);
+  const complete = async (title: string) => {
+    await page.getByRole("button", { name: `Complete: ${title}` }).click();
+    await expect(outcome(page)).toHaveText(`Completed: ${title}`);
+  };
+
+  // Left alone, it shows for its duration and then leaves.
+  await complete("Restore the build service");
+  await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
+  await expect(toast(page)).toBeVisible();
+  await page.clock.runFor(1_500);
+  await expect(toast(page)).toHaveCount(0);
+
+  // Hovered, it stays past its duration, and leaves when the pointer does.
+  await complete("Rotate the deploy credentials");
+  await toast(page).hover();
+  await page.clock.runFor((TOAST_SECONDS + 5) * 1_000);
+  await expect(toast(page)).toBeVisible();
+  await page.mouse.move(1, 1);
+  await expect(toast(page)).toHaveCount(0);
+
+  // Focused, the same, and it leaves when focus does.
+  await complete("Review the action-items design");
+  await toast(page).getByRole("button", { name: "Close" }).focus();
+  await page.clock.runFor((TOAST_SECONDS + 5) * 1_000);
+  await expect(toast(page)).toBeVisible();
+  await answerBox(page, LAST_QUESTION).focus();
+  await expect(toast(page)).toHaveCount(0);
+});
+
+for (const width of [1440, 390] as const)
+  test(`at ${width} wide the toast sits where it should, stands out in green or red, and leaves room to reach every card`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const served = await serveWorld("queue");
+    await open(page, served);
+    await page
+      .getByRole("button", { name: "Complete: Restore the build service" })
+      .click();
+    await expect(outcome(page)).toHaveText(
+      "Completed: Restore the build service",
+    );
+    const placed = await box(toast(page));
+    if (width === 1440) {
+      // Anchored bottom right, under half the width.
+      expect(Math.abs(placed.x + placed.width - width)).toBeLessThanOrEqual(24);
+      expect(placed.width).toBeLessThan(width / 2);
+    } else {
+      // Across the bottom.
+      expect(placed.x).toBeLessThanOrEqual(1);
+      expect(placed.width).toBeGreaterThanOrEqual(width - 1);
+    }
+    expect(placed.y + placed.height).toBeGreaterThanOrEqual(
+      (page.viewportSize()?.height ?? 0) - 24,
+    );
+    const success = await backgroundOf(toast(page));
+    expect(success.g).toBeGreaterThan(success.r);
+    expect(success.g).toBeGreaterThan(success.b);
+
+    // With the toast showing, the last card scrolls clear of it, actions and all.
+    const list = listRegion(page);
+    await list.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    const last = list.getByRole("article").last();
+    for (const action of await last.getByRole("button").all()) {
+      const at = await box(action);
+      expect(at.y + at.height).toBeLessThanOrEqual(placed.y);
+    }
+
+    // A failure turns it red.
+    await served.stopServing();
+    await page
+      .getByRole("button", { name: "Complete: Rotate the deploy credentials" })
+      .click();
+    await expect(toast(page)).toHaveAttribute("data-tone", "failure");
+    const failure = await backgroundOf(toast(page));
+    expect(failure.r).toBeGreaterThan(failure.g);
+    expect(failure.r).toBeGreaterThan(failure.b);
+    // The card it was about comes back, with its reason and its actions above
+    // the toast.
+    const returned = card(page, "Rotate the deploy credentials");
+    await expect(returned.getByRole("alert")).toHaveText(
+      "Telemetry request failed",
+    );
+    const top = (await box(toast(page))).y;
+    for (const part of [
+      returned.getByRole("alert"),
+      ...(await returned.getByRole("button").all()),
+    ]) {
+      const at = await box(part);
+      expect(at.y + at.height).toBeLessThanOrEqual(top);
+    }
+  });
+
+test("Restore and Reopen after the receipt bring the card back, and a reason or comment is saved", async ({
+  page,
+}) => {
+  const served = await serveWorld("undo");
+  await open(page, served);
+  watch(served, SUPERVISOR);
+  const sent = writes(page);
+  const restore = "Rotate the staging certificate";
+  const reopen = "File the flaky-runner report";
+
+  await page.getByRole("button", { name: `Dismiss: ${restore}` }).click();
+  await expect(outcome(page)).toHaveText(`Dismissed: ${restore}`);
+  await toast(page).getByRole("button", { name: "Restore" }).click();
+  await expect(outcome(page)).toHaveText(`Restored: ${restore}`);
+  await expect(card(page, restore)).toBeVisible();
+  expect(stored(served, idOf(served, "certificate"))).toMatchObject({
+    state: "open",
+    resolution: null,
+  });
+
+  await page.getByRole("button", { name: `Complete: ${reopen}` }).click();
+  await expect(outcome(page)).toHaveText(`Completed: ${reopen}`);
+  await toast(page).getByRole("button", { name: "Reopen" }).click();
+  await expect(outcome(page)).toHaveText(`Reopened: ${reopen}`);
+  await expect(card(page, reopen)).toBeVisible();
+  expect(stored(served, idOf(served, "plain")).state).toBe("open");
+
+  // A reason after Dismiss, a comment after Complete.
+  await page.getByRole("button", { name: `Dismiss: ${restore}` }).click();
+  await expect(outcome(page)).toHaveText(`Dismissed: ${restore}`);
+  await toast(page).getByRole("button", { name: "Add reason" }).click();
+  await toast(page)
+    .getByRole("textbox", { name: "Reason" })
+    .fill("Rotated with the production one");
+  await toast(page).getByRole("textbox", { name: "Reason" }).press("Enter");
+  await expect(outcome(page)).toHaveText(`Reason saved: ${restore}`);
+  await page.getByRole("button", { name: `Complete: ${reopen}` }).click();
+  await expect(outcome(page)).toHaveText(`Completed: ${reopen}`);
+  await toast(page).getByRole("button", { name: "Add comment" }).click();
+  await toast(page)
+    .getByRole("textbox", { name: "Comment" })
+    .fill("Filed as INFRA-212");
+  await toast(page).getByRole("button", { name: "Send" }).click();
+  await expect(outcome(page)).toHaveText(`Comment saved: ${reopen}`);
+
+  const certificate = idOf(served, "certificate");
+  const plain = idOf(served, "plain");
+  expect(stored(served, certificate)).toMatchObject({
+    state: "dismissed",
+    resolution: {
+      actor: `browser:session:${SUPERVISOR}`,
+      reason: "Rotated with the production one",
+    },
+  });
+  expect(stored(served, plain)).toMatchObject({
+    state: "completed",
+    resolution: {
+      actor: `browser:session:${SUPERVISOR}`,
+      text: "Filed as INFRA-212",
+    },
+  });
+  expect(watch(served, SUPERVISOR)).toEqual([
+    ["human-item-dismissed", certificate],
+    ["human-item-reopened", certificate],
+    ["human-item-completed", plain],
+    ["human-item-reopened", plain],
+    ["human-item-dismissed", certificate],
+    ["human-item-noted", certificate],
+    ["human-item-completed", plain],
+    ["human-item-noted", plain],
+  ]);
+  expect(verbs(sent)).toEqual([
+    "dismiss",
+    "reopen",
+    "complete",
+    "reopen",
+    "dismiss",
+    "note",
+    "complete",
+    "note",
+  ]);
+});
+
+for (const { verb, undo, key, title } of [
+  {
+    verb: "Dismiss",
+    undo: "Restore",
+    key: "certificate",
+    title: "Rotate the staging certificate",
+  },
+  {
+    verb: "Complete",
+    undo: "Reopen",
+    key: "plain",
+    title: "File the flaky-runner report",
+  },
+] as const)
+  test(`${undo} pressed before ${verb}'s receipt is sent after it, in order`, async ({
+    page,
+  }) => {
+    const served = await serveWorld("undo");
+    await open(page, served);
+    watch(served, SUPERVISOR);
+    const sent = writes(page);
+    const id = idOf(served, key);
+    const release = await holdRequests(
+      page,
+      `/api/human-items/${id}/${verb.toLowerCase()}`,
+    );
+    await page.getByRole("button", { name: `${verb}: ${title}` }).click();
+    await expect(toast(page)).toHaveAttribute("data-phase", "sending");
+    await toast(page).getByRole("button", { name: undo }).click();
+    // However long the receipt takes, the undo waits behind it.
+    await page.waitForTimeout(1_000);
+    expect(verbs(sent)).toEqual([verb.toLowerCase()]);
+    expect(stored(served, id).state).toBe("open");
+    release();
+    await expect(outcome(page)).toHaveText(
+      `${undo === "Restore" ? "Restored" : "Reopened"}: ${title}`,
+    );
+    expect(verbs(sent)).toEqual([verb.toLowerCase(), "reopen"]);
+    expect(watch(served, SUPERVISOR)).toEqual([
+      [`human-item-${verb === "Dismiss" ? "dismissed" : "completed"}`, id],
+      ["human-item-reopened", id],
+    ]);
+    expect(stored(served, id)).toMatchObject({
+      state: "open",
+      resolution: null,
+    });
+    await expect(card(page, title)).toBeVisible();
+  });
+
+for (const failure of ["the server stopped", "the engine refused"] as const)
+  test(`a write that fails because ${failure} leaves the item as it was and says why`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.clock.install();
+    const served = await serveWorld("undo");
+    await open(page, served);
+    const fail = async (): Promise<() => Promise<void>> => {
+      if (failure === "the server stopped") {
+        await served.stopServing();
+        return () => served.serveRebuilt();
+      }
+      const restore = breakJournal(served);
+      return async () => restore();
+    };
+
+    // A failed Complete and a failed Dismiss: the item stays open, its card is
+    // back in its place with the reason, clear of the toast.
+    for (const [verb, key, title] of [
+      ["Complete", "plain", "File the flaky-runner report"],
+      ["Dismiss", "certificate", "Rotate the staging certificate"],
+    ] as const) {
+      const order = await titles(listRegion(page));
+      const recover = await fail();
+      await card(page, title)
+        .getByRole("button", { name: `${verb}: ${title}` })
+        .click();
+      await expect(toast(page)).toHaveAttribute("data-tone", "failure");
+      const reason = card(page, title).getByRole("alert");
+      await expect(reason).toBeVisible();
+      await expect(outcome(page)).toContainText(
+        (await reason.textContent()) ?? "",
+      );
+      expect(await titles(listRegion(page))).toEqual(order);
+      const top = (await box(toast(page))).y;
+      for (const part of [
+        reason,
+        ...(await card(page, title).getByRole("button").all()),
+      ]) {
+        await expect(part).toBeInViewport();
+        const at = await box(part);
+        expect(at.y + at.height).toBeLessThanOrEqual(top);
+      }
+      await recover();
+      expect(stored(served, idOf(served, key)).state).toBe("open");
+      await toast(page).getByRole("button", { name: "Close" }).click();
+    }
+
+    // A failed Restore, Reopen and note: the item stays resolved as it was, no
+    // card returns, and the toast stays — past its duration — with the reason
+    // and the words typed, until it is sent again once the server is back.
+    for (const [verb, follow, key, title] of [
+      ["Dismiss", "Restore", "certificate", "Rotate the staging certificate"],
+      ["Complete", "Reopen", "plain", "File the flaky-runner report"],
+      ["Complete", "Add comment", "design", "Review the action-items design"],
+    ] as const) {
+      await card(page, title)
+        .getByRole("button", { name: `${verb}: ${title}` })
+        .click();
+      await expect(outcome(page)).toHaveText(
+        `${verb === "Dismiss" ? "Dismissed" : "Completed"}: ${title}`,
+      );
+      const before = stored(served, idOf(served, key));
+      const recover = await fail();
+      if (follow === "Add comment") {
+        await toast(page).getByRole("button", { name: follow }).click();
+        await toast(page)
+          .getByRole("textbox", { name: "Comment" })
+          .fill("Looks right on a phone too");
+        await toast(page).getByRole("button", { name: "Send" }).click();
+      } else await toast(page).getByRole("button", { name: follow }).click();
+      await expect(toast(page)).toHaveAttribute("data-tone", "failure");
+      await expect(toast(page)).toHaveAttribute("data-phase", "failed");
+      // Nothing holds it — no pointer, no focus — and still it stays.
+      await page.mouse.move(1, 1);
+      await page.evaluate(() =>
+        (document.activeElement as HTMLElement | null)?.blur(),
+      );
+      await page.clock.runFor((TOAST_SECONDS + 5) * 1_000);
+      await expect(toast(page)).toBeVisible();
+      await expect(outcome(page)).toContainText(/\S/u);
+      if (follow === "Add comment")
+        await expect(
+          toast(page).getByRole("textbox", { name: "Comment" }),
+        ).toHaveValue("Looks right on a phone too");
+      await expect(card(page, title)).toHaveCount(0);
+      await recover();
+      expect(stored(served, idOf(served, key))).toEqual(before);
+      // Sent again once the server is back, it goes through.
+      await toast(page)
+        .getByRole("button", {
+          name: follow === "Add comment" ? "Send again" : follow,
+        })
+        .click();
+      await expect(toast(page)).toHaveAttribute("data-tone", "success");
+      if (follow === "Add comment") {
+        await expect(outcome(page)).toHaveText(`Comment saved: ${title}`);
+        expect(stored(served, idOf(served, key)).resolution?.text).toBe(
+          "Looks right on a phone too",
+        );
+      } else {
+        await expect(card(page, title)).toBeVisible();
+        expect(stored(served, idOf(served, key)).state).toBe("open");
+      }
+    }
+  });
+
+test("Reopen says why it cannot be offered, by hover and by its question mark, and an undo runs through the approval authority", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const served = await serveWorld("undo");
+  await open(page, served);
+  const unavailable = toast(page).locator("[data-unavailable-action]");
+  const why = (label: string) =>
+    toast(page).getByRole("button", { name: `Why ${label} is unavailable` });
+  const tip = toast(page).getByRole("tooltip");
+
+  for (const [verb, label, key, title] of [
+    // A design review whose approval authority declares no undo.
+    ["Complete", "Reopen", "final", "Approve the final release notes"],
+    // A run's human step, completed and dismissed.
+    ["Complete", "Reopen", "step", "Sign off the release notes"],
+  ] as const) {
+    await page.getByRole("button", { name: `${verb}: ${title}` }).click();
+    await expect(outcome(page)).toHaveText(`Completed: ${title}`);
+    const { reopen } = z
+      .object({
+        reopen: z.object({ available: z.boolean(), reason: z.string() }),
+      })
+      .parse(
+        JSON.parse(
+          cli(served, ["human-items", "show", idOf(served, key), "--json"]),
+        ),
+      );
+    expect(reopen.available).toBe(false);
+    await expect(
+      toast(page).getByRole("button", { name: label, exact: true }),
+    ).toBeDisabled();
+    // On hover the engine's reason shows.
+    await expect(tip).toBeHidden();
+    await unavailable.hover();
+    await expect(tip).toHaveText(reopen.reason);
+    await page.mouse.move(1, 1);
+    await expect(tip).toBeHidden();
+    // And on a press of the question mark, which a phone has.
+    await why(label).click();
+    await expect(tip).toBeVisible();
+    await expect(tip).toHaveText(reopen.reason);
+    await expect(why(label)).toHaveAttribute("aria-expanded", "true");
+    // The mark sits within the greyed control, is at least 24 px square, and
+    // keeps clear of Add comment beside it.
+    const control = await box(unavailable);
+    const mark = await box(why(label));
+    expect(mark.x).toBeGreaterThanOrEqual(control.x);
+    expect(mark.y).toBeGreaterThanOrEqual(control.y);
+    expect(mark.x + mark.width).toBeLessThanOrEqual(control.x + control.width);
+    expect(mark.y + mark.height).toBeLessThanOrEqual(
+      control.y + control.height,
+    );
+    expect(mark.width).toBeGreaterThanOrEqual(24);
+    expect(mark.height).toBeGreaterThanOrEqual(24);
+    const comment = await box(
+      toast(page).getByRole("button", { name: "Add comment" }),
+    );
+    const overlaps =
+      mark.x < comment.x + comment.width &&
+      comment.x < mark.x + mark.width &&
+      mark.y < comment.y + comment.height &&
+      comment.y < mark.y + mark.height;
+    expect(overlaps).toBe(false);
+    await toast(page).getByRole("button", { name: "Close" }).click();
+  }
+
+  // A plain task's Reopen is offered.
+  await page
+    .getByRole("button", { name: "Complete: File the flaky-runner report" })
+    .click();
+  await expect(outcome(page)).toHaveText(
+    "Completed: File the flaky-runner report",
+  );
+  await expect(
+    toast(page).getByRole("button", { name: "Reopen", exact: true }),
+  ).toBeEnabled();
+  await expect(unavailable).toHaveCount(0);
+  await toast(page).getByRole("button", { name: "Close" }).click();
+
+  // A design review whose authority declares an undo: Reopen runs it, and the
+  // approval it recorded is gone; an undo with nothing to take back refuses,
+  // in the script's own words, and the task stays completed.
+  const design = "Review the action-items design";
+  const designId = idOf(served, "design");
+  // The authority's records of this review alone; the other review shares the log.
+  const recorded = () =>
+    approvals(served).filter(
+      ({ board_copy }) => board_copy === "docs/design/action-items.md",
+    );
+  await page.getByRole("button", { name: `Complete: ${design}` }).click();
+  await expect(outcome(page)).toHaveText(`Completed: ${design}`);
+  expect(recorded()).toHaveLength(1);
+  await toast(page)
+    .getByRole("button", { name: "Reopen", exact: true })
+    .click();
+  await expect(outcome(page)).toHaveText(`Reopened: ${design}`);
+  expect(recorded()).toEqual([]);
+  expect(stored(served, designId).state).toBe("open");
+  await card(page, design)
+    .getByRole("button", { name: `Complete: ${design}` })
+    .click();
+  await expect(outcome(page)).toHaveText(`Completed: ${design}`);
+  expect(recorded()).toHaveLength(1);
+  writeFileSync(factsOf(served).approvals, "");
+  await toast(page)
+    .getByRole("button", { name: "Reopen", exact: true })
+    .click();
+  await expect(toast(page)).toHaveAttribute("data-tone", "failure");
+  await expect(outcome(page)).toContainText("nothing to take back");
+  expect(stored(served, designId).state).toBe("completed");
+});
+
+test("Restore follows the same rule: a dismissed human step says why it cannot be restored", async ({
+  page,
+}) => {
+  const served = await serveWorld("undo");
+  await open(page, served);
+  await page
+    .getByRole("button", { name: "Dismiss: Sign off the release notes" })
+    .click();
+  await expect(outcome(page)).toHaveText(
+    "Dismissed: Sign off the release notes",
+  );
+  await expect(
+    toast(page).getByRole("button", { name: "Restore", exact: true }),
+  ).toBeDisabled();
+  await toast(page)
+    .getByRole("button", { name: "Why Restore is unavailable" })
+    .click();
+  await expect(toast(page).getByRole("tooltip")).toContainText("human step");
+  expect(stored(served, idOf(served, "step")).state).toBe("dismissed");
+});
+
+test("a press in the browser is recorded as the browser's, beside the same action through the CLI", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  await open(page, served);
+  await page
+    .getByRole("button", { name: "Complete: Restore the build service" })
+    .click();
+  await expect(outcome(page)).toHaveText(
+    "Completed: Restore the build service",
+  );
+  cli(served, ["human-items", "complete", idOf(served, "other")], SUPERVISOR);
+  const show = (key: string) =>
+    z
+      .object({
+        item: z.object({
+          resolution: z.object({
+            actor: z.string(),
+            on_behalf_of: z.string().nullable(),
+          }),
+        }),
+      })
+      .parse(
+        JSON.parse(
+          cli(served, ["human-items", "show", idOf(served, key), "--json"]),
+        ),
+      ).item.resolution;
+  expect(show("build")).toEqual({
+    actor: `browser:session:${SUPERVISOR}`,
+    on_behalf_of: null,
+  });
+  expect(show("other").actor).toBe(`session:${SUPERVISOR}`);
+
+  // A server that acts as no session records the press as the browser's alone.
+  await actAs(served, "");
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Dismiss: Keep the legacy export format?" })
+    .click();
+  await expect(outcome(page)).toHaveText(
+    "Dismissed: Keep the legacy export format?",
+  );
+  expect(show("export")).toEqual({ actor: "browser", on_behalf_of: null });
+});
+
+// ── Every task rendered by the shared package, safely ──────────────────────
+
+test("a task's markdown renders through the shared package on card, in detail and on the node timeline, and nothing in it runs or fetches", async ({
+  page,
+}) => {
+  const served = await serveWorld("markdown");
+  const images: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).hostname.endsWith("example.org"))
+      images.push(request.url());
+  });
+  const title = "Publish the release notes";
+  await open(page, served);
+  // The app's own font-synthesis is what bold has to show through.
+  expect(
+    await page.evaluate(
+      () => getComputedStyle(document.documentElement).fontSynthesis,
+    ),
+  ).toBe("none");
+
+  const shown = card(page, title);
+  await expect(shown).toHaveClass(/\botg-card\b/u);
+  await expect(shown).toHaveAttribute(
+    "aria-labelledby",
+    (await shown.getByRole("heading", { name: title }).getAttribute("id")) ??
+      "missing",
+  );
+  const surfaces: [string, Locator][] = [["card", shown]];
+  await shown.getByRole("button", { name: `Details: ${title}` }).click();
+  surfaces.push([
+    "detail",
+    detailPane(page).getByRole("region", { name: "Full body" }),
+  ]);
+  await expect(surfaces[1]?.[1] ?? shown).toBeVisible();
+  const check = async (where: string, root: Locator, visible: boolean) => {
+    const body = root.locator(".otg-markdown").first();
+    await expect(body, where).toBeAttached();
+    for (const [name, href] of [
+      ["release checklist", "https://example.org/checklist"],
+      ["https://example.org/runbook", "https://example.org/runbook"],
+      // An image is never fetched: it is a link to its source.
+      ["the rollout diagram", "https://images.example.org/diagram.png"],
+    ] as const) {
+      // A card's clamp hides what lies past its last lines; it is still there.
+      const links = body.getByRole("link", {
+        name,
+        exact: true,
+        includeHidden: !visible,
+      });
+      await expect(links.first(), `${where}: ${name}`).toBeAttached();
+      for (const link of await links.all()) {
+        await expect(link, `${where}: ${name}`).toHaveAttribute("href", href);
+        await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+        await expect(link).toHaveAttribute("target", "_blank");
+      }
+    }
+    await expect(body.locator("table").first(), where).toBeAttached();
+    await expect(body.locator("strong").first(), where).toHaveText(
+      "Ship the reviewed release",
+    );
+    // Raw HTML is text, never markup; a `javascript:` link is no link.
+    await expect(body.locator("script, img, [onerror]"), where).toHaveCount(0);
+    await expect(
+      body.getByRole("link", { name: "Run the cleanup" }),
+      where,
+    ).toHaveCount(0);
+    await expect(
+      body.getByText(/<script>window\.__otgScript/u).first(),
+    ).toBeAttached();
+    if (!visible) return;
+    // Bold is visibly bold: the same words in cells of one size differ.
+    const cells = body
+      .locator("table")
+      .first()
+      .getByRole("cell", { name: "Ship it", exact: true });
+    await expect(cells).toHaveCount(2);
+    const regular = await cells.nth(0).screenshot();
+    const bold = await cells.nth(1).screenshot();
+    expect(Buffer.compare(regular, bold), where).not.toBe(0);
+  };
+  await check("card", shown, false);
+  await check("detail", surfaces[1]?.[1] ?? shown, true);
+
+  // The tracker link on the card and in detail is the shared package's too.
+  const { name, url } = trackerOf(served, idOf(served, "notes"));
+  for (const [where, link] of [
+    ["card", shown.getByRole("link", { name, exact: true })],
+    ["detail", detailPane(page).getByRole("link", { name, exact: true })],
+  ] as const) {
+    await expect(link, where).toHaveClass(/\botg-source-link\b/u);
+    await expect(link).toHaveAttribute("href", url);
+    await expect(link).toHaveAttribute("target", "_blank");
+    await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  }
+  const cardLink = shown.getByRole("link", { name, exact: true });
+  await expect(cardLink).toHaveAttribute("tabindex", "-1");
+  await expect(cardLink).toHaveAttribute("data-card-action", "");
+
+  // The node timeline's task prose and acceptance criteria, the same way.
+  const run = factsOf(served).runs.a ?? "";
+  for (const [tab, panel] of [
+    ["task", "Task"],
+    ["criteria", "Acceptance criteria"],
+  ] as const) {
+    await page.goto(
+      `${served.origin}/?run=${encodeURIComponent(run)}&node=notes&tab=${tab}`,
+    );
+    const root = page.getByRole("tabpanel", { name: panel });
+    await expect(root.locator(".otg-markdown")).toBeVisible();
+    await expect(root.locator("pre")).toHaveCount(0);
+    await check(`timeline ${tab}`, root, true);
+  }
+  // The criteria tab shows the section, not the prose above its heading.
+  await expect(
+    page
+      .getByRole("tabpanel", { name: "Acceptance criteria" })
+      .getByText("Acceptance criteria", { exact: true }),
+  ).toHaveCount(0);
+
+  expect(
+    await page.evaluate(() => ({
+      script: Reflect.get(window, "__otgScript"),
+      onerror: Reflect.get(window, "__otgOnerror"),
+      link: Reflect.get(window, "__otgLink"),
+    })),
+  ).toEqual({ script: undefined, onerror: undefined, link: undefined });
+  expect(images).toEqual([]);
+});
+
+// ── Long realistic content, grouping, and a phone ──────────────────────────
+
+/** Whether `inner` lies wholly inside `outer`, to a pixel. */
+function inside(
+  inner: { x: number; y: number; width: number; height: number },
+  outer: { x: number; y: number; width: number; height: number },
+) {
+  return (
+    inner.x >= outer.x - 1 &&
+    inner.y >= outer.y - 1 &&
+    inner.x + inner.width <= outer.x + outer.width + 1 &&
+    inner.y + inner.height <= outer.y + outer.height + 1
+  );
+}
+
+function overlap(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+) {
+  return (
+    a.x < b.x + b.width - 0.5 &&
+    b.x < a.x + a.width - 0.5 &&
+    a.y < b.y + b.height - 0.5 &&
+    b.y < a.y + a.height - 0.5
+  );
+}
+
+for (const [width, height] of [
+  [1440, 900],
+  [390, 844],
+] as const)
+  test(`at ${width} wide long realistic items stay inside their cards, with badges and actions in their places`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    const served = await serveWorld("realistic");
+    const list = await open(page, served);
+    const cards = list.getByRole("article");
+    await expect(cards).toHaveCount(6);
+    const main = await box(listRegion(page));
+    const actionRows: { edge: number }[] = [];
+    for (const shown of await cards.all()) {
+      await shown.scrollIntoViewIfNeeded();
+      const outer = await box(shown);
+      if (width === 390)
+        // The card has the main area's width: no navigation column beside it.
+        expect(outer.width).toBeGreaterThan(main.width - 24);
+      // Nothing of the card — title, source, body, a long URL — leaves it: what
+      // shows of each part, after whatever clips it inside the card.
+      const parts = await shown.evaluate((card) =>
+        [...card.querySelectorAll("*")].flatMap((part) => {
+          if (part.getClientRects().length === 0) return [];
+          let { left, top, right, bottom } = part.getBoundingClientRect();
+          for (
+            let clip = part.parentElement;
+            clip !== null && clip !== card;
+            clip = clip.parentElement
+          ) {
+            const style = getComputedStyle(clip);
+            if (style.overflowX === "visible" && style.overflowY === "visible")
+              continue;
+            const edge = clip.getBoundingClientRect();
+            left = Math.max(left, edge.left);
+            top = Math.max(top, edge.top);
+            right = Math.min(right, edge.right);
+            bottom = Math.min(bottom, edge.bottom);
+          }
+          if (right <= left || bottom <= top) return [];
+          return [
+            {
+              what: `${part.tagName} ${(part.textContent ?? "").slice(0, 40)}`,
+              x: left,
+              y: top,
+              width: right - left,
+              height: bottom - top,
+            },
+          ];
+        }),
+      );
+      for (const part of parts)
+        expect(inside(part, outer), part.what).toBe(true);
+      // Badges share one row, and so do actions, each never over another.
+      const badges = await shown
+        .locator(".otg-card__badges > *")
+        .evaluateAll((all) =>
+          all.map((b) => b.getBoundingClientRect().toJSON()),
+        );
+      expect(new Set(badges.map(({ top }) => Math.round(top))).size).toBe(1);
+      const actions = await shown
+        .locator(".otg-card__actions")
+        .locator("button, a")
+        .evaluateAll((all) =>
+          all.map((a) => a.getBoundingClientRect().toJSON()),
+        );
+      expect(actions.length).toBeGreaterThan(0);
+      for (const [index, action] of actions.entries()) {
+        for (const other of actions.slice(index + 1))
+          expect(overlap(action, other)).toBe(false);
+        for (const badge of badges) expect(overlap(action, badge)).toBe(false);
+        if (width === 390) expect(action.height).toBeGreaterThanOrEqual(44);
+      }
+      const last = actions.at(-1);
+      if (last)
+        actionRows.push({
+          // Right-aligned beside the title on a wide screen; a row of their own,
+          // starting at the card's left, on a phone.
+          edge: width === 390 ? (actions[0]?.left ?? 0) : last.right,
+        });
+      if (width === 390) {
+        // On a phone the actions have a row of their own, below the title.
+        const title = await box(shown.getByRole("heading", { level: 3 }));
+        for (const action of actions)
+          expect(action.top).toBeGreaterThanOrEqual(title.y + title.height - 1);
+      }
+    }
+    // Every card's actions line up on one edge.
+    expect(
+      new Set(actionRows.map(({ edge }) => Math.round(edge / 2))).size,
+    ).toBe(1);
+
+    // The toast's actions on a phone are as tall, and overlap nothing.
+    await page
+      .getByRole("button", { name: /^Complete: Rotate PYPI_TOKEN/u })
+      .click();
+    await expect(toast(page)).toHaveAttribute("data-phase", "done");
+    const toastActions = await toast(page)
+      .getByRole("button")
+      .evaluateAll((all) => all.map((a) => a.getBoundingClientRect().toJSON()));
+    for (const [index, action] of toastActions.entries()) {
+      if (width === 390) expect(action.height).toBeGreaterThanOrEqual(44);
+      for (const other of toastActions.slice(index + 1))
+        expect(overlap(action, other)).toBe(false);
+    }
+  });
+
+test("the list groups by a remembered field, Priority first, with headings, counts and no repeated badge", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const list = await open(page, served, { groupBy: null });
+  const headings = list.getByRole("heading", { level: 2 });
+  const groupBy = page.getByRole("combobox", { name: "Group by" });
+  await expect(groupBy).toHaveValue("priority");
+  const expected = {
+    priority: ["Critical (3)", "High (3)", "Low (1)"],
+    kind: ["Task (4)", "Question (3)"],
+    blocking: ["Blocking (3)", "Not blocking (4)"],
+    source: [
+      "Source: host (1)",
+      "Source: plan board:plan-a / run plan-a (2)",
+      "Source: plan board:plan-b (2)",
+      `Source: session ${SUPERVISOR} (1)`,
+      `Source: session ${OTHER} (1)`,
+    ],
+  } as const;
+  const badge = {
+    priority: () => list.locator(".human-item-priority"),
+    kind: () => list.locator(".human-item-kind"),
+    blocking: () => list.locator(".human-item-blocking"),
+    source: () => list.getByText(/^Source: /u).and(list.locator("span")),
+  } as const;
+  for (const field of ["priority", "kind", "blocking", "source"] as const) {
+    await groupBy.selectOption(field);
+    await expect(headings).toHaveText([...expected[field]]);
+    // The field the list is grouped by is said once, by its heading.
+    await expect(badge[field]()).toHaveCount(0);
+    // Every card is still there, each under the heading it belongs to.
+    await expect(list.getByRole("article")).toHaveCount(DECLARED.length);
+  }
+  // Grouped by Priority, each card sits under its own priority's heading.
+  await groupBy.selectOption("priority");
+  for (const { title, priority } of DECLARED)
+    await expect(
+      list
+        .getByRole("region", { name: new RegExp(`^${priority} `, "u") })
+        .getByRole("article", { name: title }),
+    ).toHaveCount(1);
+  // None is one flat list in the engine's order, every badge back.
+  await groupBy.selectOption("none");
+  await expect(headings).toHaveCount(0);
+  expect(await titles(list)).toEqual(DECLARED.map(({ title }) => title));
+  await expect(list.locator(".human-item-priority")).toHaveCount(
+    DECLARED.length,
+  );
+  // The choice is this browser's, and survives a reload.
+  await groupBy.selectOption("kind");
+  await page.reload();
+  await expect(page.getByRole("combobox", { name: "Group by" })).toHaveValue(
+    "kind",
+  );
+  await expect(headings).toHaveText([...expected.kind]);
+});
+
+test("at phone width the filters and Group by fold behind Filters, which counts what changed and still narrows the list", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const served = await serveWorld("queue");
+  const list = await open(page, served, { groupBy: null });
+  const toggle = page.getByRole("button", { name: /^Filters/u });
+  const groupBy = page.getByRole("combobox", { name: "Group by" });
+  const kind = page.getByRole("combobox", { name: "Kind", exact: true });
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).toHaveAccessibleName("Filters");
+  await expect(groupBy).toBeHidden();
+  await expect(kind).toBeHidden();
+  // Folded, the list starts right under the button.
+  const below = await box(toggle);
+  const first = await box(list.getByRole("article").first());
+  expect(first.y - (below.y + below.height)).toBeLessThan(60);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(groupBy).toBeVisible();
+  await kind.selectOption("question");
+  await expect
+    .poll(() => titles(list))
+    .toEqual(
+      // Grouped by priority: Critical, High, Low.
+      [
+        LAST_QUESTION,
+        "Which region should the canary run in?",
+        "Keep the legacy export format?",
+      ],
+    );
+  await groupBy.selectOption("none");
+  await expect(toggle).toHaveAccessibleName("Filters, 2 changed");
+  await toggle.click();
+  await expect(kind).toBeHidden();
+  await expect(toggle).toHaveAccessibleName("Filters, 2 changed");
+  await expect(list.getByRole("article")).toHaveCount(QUESTIONS.length);
 });

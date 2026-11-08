@@ -5,6 +5,7 @@ import { TaskCard, TaskMarkdown, TaskSourceLink } from "@onetaskgraph/ui";
 import { SlidersHorizontal, X } from "lucide-react";
 import {
   type CSSProperties,
+  Fragment,
   type KeyboardEvent,
   type MouseEvent,
   useEffect,
@@ -301,6 +302,7 @@ function Filters({
       <button
         aria-controls={`${id}-filters`}
         aria-expanded={open}
+        aria-label={changed > 0 ? `Filters, ${changed} changed` : "Filters"}
         className="human-items-filters-toggle"
         onClick={() => setOpen((shown) => !shown)}
         type="button"
@@ -308,8 +310,7 @@ function Filters({
         <SlidersHorizontal aria-hidden="true" size={14} />
         Filters
         {changed > 0 && (
-          <span className="human-items-filters-count">
-            <span className="sr-only">, changed: </span>
+          <span aria-hidden="true" className="human-items-filters-count">
             {changed}
           </span>
         )}
@@ -490,7 +491,16 @@ function HumanItemCard({
       data-blocking={isBlocking(item)}
       data-item-id={item.id}
       data-selected={selected}
-      meta={meta.length === 0 ? undefined : meta.join(" · ")}
+      meta={
+        meta.length === 0
+          ? undefined
+          : meta.map((part, index) => (
+              <Fragment key={part}>
+                {index > 0 && " · "}
+                <span>{part}</span>
+              </Fragment>
+            ))
+      }
       onClick={(event) => {
         if (selectsCard(event)) onSelect();
       }}
@@ -695,7 +705,10 @@ function DetailPane({
     <aside aria-label="Action item detail" className="human-item-detail">
       <header className="human-item-detail-head">
         <p className="human-item-meta">
-          <Badges view={shown} /> {stateLabel(item)}
+          <span className="human-item-priority" data-priority={item.priority}>
+            {priorityLabel(item)}
+          </span>{" "}
+          {kindLabel(item)} · {stateLabel(item)}
         </p>
         <h2>{item.title}</h2>
         <Button
