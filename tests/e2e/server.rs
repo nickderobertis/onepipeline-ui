@@ -17178,7 +17178,10 @@ fn a_settlement_leaves_a_stored_term_and_is_read_through_the_status_and_node_rou
     engine(&["attest", &run, fixture_run::APPROVAL_NODE_ID]);
     started_and_let_go(&engine(&["adopt", &run, "--detach"]));
     let written = fs::read_to_string(&path).expect("the settlement write-back");
-    assert!(written.contains("Approve the velvetquasar change."), "{written}");
+    assert!(
+        written.contains("Approve the velvetquasar change."),
+        "{written}"
+    );
     assert!(!written.contains("Approve the sample change."), "{written}");
     assert!(stored_task(&dir, &approval)
         .metadata
