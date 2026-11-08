@@ -60,9 +60,20 @@ const NEVER = 120_000;
 
 const run = promisify(execFile);
 
+/**
+ * The server `compile-release-server` builds: the release's own Linux build, in
+ * the cargo target directory `scripts/build-linux-wheel.sh` gives that target.
+ */
 function releaseBinary(): string {
-  const target = process.env.CARGO_TARGET_DIR ?? join(REPO, "target");
-  const binary = join(resolve(REPO, target), "release", "onepipeline-api");
+  const triple = "x86_64-unknown-linux-gnu";
+  const binary = join(
+    REPO,
+    "target",
+    `wheel-${triple}`,
+    triple,
+    "release",
+    "onepipeline-api",
+  );
   if (!existsSync(binary))
     throw new Error(
       `no ${binary}: run 'npx nx run dag-ui-read-latency:test', which builds it after the bundle`,
