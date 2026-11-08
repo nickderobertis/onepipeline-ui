@@ -2369,6 +2369,9 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.install();
   const served = await serveWorld("queue");
   await open(page, served);
+  // From here the page's time moves only when this journey moves it, so no wait
+  // below can stand in for the toast's own duration.
+  await page.clock.pauseAt(Date.now() + 1_000);
   const complete = async (title: string) => {
     await page.getByRole("button", { name: `Complete: ${title}` }).click();
     await expect(outcome(page)).toHaveText(`Completed: ${title}`);
