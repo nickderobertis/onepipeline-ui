@@ -534,6 +534,33 @@ export class TelemetryClient {
       json("POST", reason?.trim() ? { reason } : {}),
     );
   }
+
+  /**
+   * Reopen a completed or dismissed item, taking its resolution back. A design
+   * review's approval is taken back by its adapter's undo first; whether a reopen
+   * would be accepted, and why not, is every view's `reopen`.
+   */
+  async reopenHumanItem(id: string): Promise<HumanItemReceipt> {
+    requireOpaqueId(id, "human-item ID");
+    return this.#request(
+      this.#url(HUMAN_ITEM_PATHS.reopen(id)),
+      humanItemReceiptSchema.parse,
+      json("POST", {}),
+    );
+  }
+
+  /**
+   * Say something after the fact on a resolved item: a completed item's comment,
+   * or a dismissed item's reason. Blank text is the engine's refusal.
+   */
+  async noteHumanItem(id: string, text: string): Promise<HumanItemReceipt> {
+    requireOpaqueId(id, "human-item ID");
+    return this.#request(
+      this.#url(HUMAN_ITEM_PATHS.note(id)),
+      humanItemReceiptSchema.parse,
+      json("POST", { text }),
+    );
+  }
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 
   /** Shut down the entire host and read its report, including incomplete teardown. */

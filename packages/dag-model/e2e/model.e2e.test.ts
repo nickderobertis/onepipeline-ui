@@ -1290,6 +1290,8 @@ test("the human-item goldens the server serves parse as the engine's records", a
     "human-item-answer.json",
     "human-item-complete.json",
     "human-item-dismiss.json",
+    "human-item-reopen.json",
+    "human-item-note.json",
   ])
     expect(humanItemReceiptSchema.parse(await served(name)).event_id).toMatch(
       /^human-items:\d+$/u,

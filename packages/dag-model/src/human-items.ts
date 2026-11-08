@@ -25,6 +25,8 @@ export const HUMAN_ITEM_PATHS = {
   complete: (id: string) =>
     `/api/human-items/${encodeURIComponent(id)}/complete`,
   dismiss: (id: string) => `/api/human-items/${encodeURIComponent(id)}/dismiss`,
+  reopen: (id: string) => `/api/human-items/${encodeURIComponent(id)}/reopen`,
+  note: (id: string) => `/api/human-items/${encodeURIComponent(id)}/note`,
 } as const;
 
 const nullableString = z.string().nullable();
