@@ -38,8 +38,12 @@ process.env.DAG_UI_FIXTURE_NOW = CAPTURE_INSTANT;
 
 export default defineConfig({
   ...e2eConfig,
+  // The journeys' two lanes select the journeys, and would override `testMatch` here.
+  projects: undefined,
   testMatch: "**/*.screens.spec.ts",
   testIgnore: [],
+  // Every shot reads one server's state, so the capture stays one worker's.
+  workers: 1,
   // Every viewport across every gallery surface, each waiting for real reads to
   // settle — a count here only drifts from the two lists that decide it.
   timeout: 120_000,

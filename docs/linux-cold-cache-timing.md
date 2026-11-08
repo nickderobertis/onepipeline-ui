@@ -201,3 +201,14 @@ moves from 1899 s to 1746–1714 s. The same model puts the passing run's end at
 for the same reason. A host `cargo build --release` beside `wheel-smoke` and
 the rehearsal compiled a second release dependency graph that no warm cache
 held: 1420–1450 s on every recent branch, test-linux's longest task.
+
+Run 42508499783 (a1d8ba2) was cancelled at the cap with the browser tier still
+running. Three tasks in a row have no slack around them: `dag-ui:build-api-server`
+(8.4 minutes into Nx there), `dag-ui-e2e:test` (24.3 minutes on one worker, run
+42458563223 attempt 3) and `dag-ui-read-latency:test` (255 s, alone). With the
+3.3 minutes before Nx that is about 40 minutes whatever else is reordered.
+`dag-ui-e2e:test` now runs two single-worker lanes: the journeys against the shared
+server in one, and `dag-ui-human-items` and `dag-ui-update-settings`, whose every
+journey starts its own server, in the other. Those two were 695 of the tier's
+1851 s of journey time, so the tier's wall time falls by up to that share, about
+9 minutes on the runner; the same 284 journeys run.
