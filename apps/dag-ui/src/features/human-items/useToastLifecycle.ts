@@ -8,10 +8,12 @@ export const TOAST_MS = 15_000;
  * When a toast leaves, and what it holds meanwhile: the note being written, and
  * the height it reports so the list can keep that much room below its last card.
  *
- * It leaves {@link TOAST_MS} after each new state of the toast — shown, its
- * receipt or refusal in, a follow-up settled — unless it is
- * hovered, focused or being written in — then once that ends — and never while a
- * follow-up is sending or after one failed, until it is sent again or closed.
+ * It leaves {@link TOAST_MS} after each settled state of the toast — its
+ * receipt or refusal in, a follow-up settled — unless it is hovered, focused or
+ * being written in — then once that ends. It never leaves while its write or a
+ * follow-up is still sending, so a late receipt finds its undo and a late
+ * refusal its reason, nor after a follow-up failed, until it is sent again or
+ * closed.
  */
 export function useToastLifecycle(
   toast: Toast,
@@ -26,7 +28,9 @@ export function useToastLifecycle(
   const ref = useRef<HTMLElement>(null);
   const { key, phase, followUp } = toast;
   const persistent =
-    followUp?.phase === "failed" || followUp?.phase === "sending";
+    phase === "sending" ||
+    followUp?.phase === "failed" ||
+    followUp?.phase === "sending";
   // Each new state — the receipt or refusal landing, a follow-up settling — is
   // shown for the whole duration, however long the receipt took.
   const signature = `${key}:${phase}:${followUp?.kind ?? ""}:${followUp?.phase ?? ""}`;

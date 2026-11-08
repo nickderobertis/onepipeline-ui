@@ -81,8 +81,9 @@ spike's six realistic items are taken, as the journeys' long-content fixture.
   Reopen are the engine's `reopen`, which also runs a completed design review's
   approval-adapter undo; Add reason and Add comment take text in the toast and send
   the engine's `note`. A Restore pressed before the receipt arrives is sent after it,
-  in order. The toast shows for **15 seconds**, and stays while it is hovered,
-  focused or being written in, leaving once that ends. It is a muted green when the
+  in order. The toast shows for **15 seconds** from the receipt or refusal, and
+  stays while the write is still on its way and while it is hovered, focused or
+  being written in, leaving once that ends. It is a muted green when the
   write went through and a muted red when something failed, each bordered in its own
   hue; on a wide screen it sits bottom right, and on a phone it runs across the
   bottom. While it shows, the list keeps room below its last card equal to the

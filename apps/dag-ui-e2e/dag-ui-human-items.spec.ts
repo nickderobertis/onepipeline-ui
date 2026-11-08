@@ -2691,6 +2691,128 @@ for (const { verb, undo, key, title } of [
     await expect(card(page, title)).toBeVisible();
   });
 
+test("a receipt or refusal that comes after the toast's duration finds its toast still there", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.clock.install();
+  const served = await serveWorld("undo");
+  await open(page, served);
+  watch(served, SUPERVISOR);
+  // From here the page's time moves only when this journey moves it.
+  await page.clock.pauseAt(Date.now() + 1_000);
+  const sent = writes(page);
+  const past = (TOAST_SECONDS + 5) * 1_000;
+  // Nothing pointing at the toast and nothing focused in it: only the write
+  // still on its way can be what keeps it.
+  const letGo = async () => {
+    await page.mouse.move(1, 1);
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement)
+        document.activeElement.blur();
+    });
+  };
+
+  // A Complete whose receipt is held past the duration: the toast stays,
+  // sending, and its Reopen still works — pressed then, it waits for the
+  // receipt, and once that lands it is sent and the card comes back.
+  const plain = "File the flaky-runner report";
+  const plainId = idOf(served, "plain");
+  const releaseComplete = await holdRequests(
+    page,
+    `/api/human-items/${plainId}/complete`,
+  );
+  await card(page, plain)
+    .getByRole("button", { name: `Complete: ${plain}` })
+    .click();
+  await letGo();
+  await page.clock.runFor(past);
+  await expect(toast(page)).toHaveAttribute("data-phase", "sending");
+  await expect(outcome(page)).toHaveText(`Completing: ${plain}…`);
+  await toast(page).getByRole("button", { name: "Reopen" }).click();
+  await letGo();
+  await page.clock.runFor(past);
+  await expect(toast(page)).toBeVisible();
+  expect(verbs(sent)).toEqual(["complete"]);
+  expect(stored(served, plainId).state).toBe("open");
+  await expect(card(page, plain)).toHaveCount(0);
+  releaseComplete();
+  await expect(outcome(page)).toHaveText(`Reopened: ${plain}`);
+  expect(verbs(sent)).toEqual(["complete", "reopen"]);
+  await expect(card(page, plain)).toBeVisible();
+  expect(stored(served, plainId)).toMatchObject({
+    state: "open",
+    resolution: null,
+  });
+  await page.unroute(`**/api/human-items/${plainId}/complete`);
+  await toast(page).getByRole("button", { name: "Close" }).click();
+
+  // A Dismiss whose receipt lands after the duration: the toast says so in
+  // green, and Restore — pressed only now, after the receipt — still brings
+  // the card back.
+  const certificate = "Rotate the staging certificate";
+  const certificateId = idOf(served, "certificate");
+  const releaseDismiss = await holdRequests(
+    page,
+    `/api/human-items/${certificateId}/dismiss`,
+  );
+  await card(page, certificate)
+    .getByRole("button", { name: `Dismiss: ${certificate}` })
+    .click();
+  await letGo();
+  await page.clock.runFor(past);
+  await expect(outcome(page)).toHaveText(`Dismissing: ${certificate}…`);
+  releaseDismiss();
+  await expect(outcome(page)).toHaveText(`Dismissed: ${certificate}`);
+  await expect(toast(page)).toHaveAttribute("data-tone", "success");
+  expect(stored(served, certificateId).state).toBe("dismissed");
+  await toast(page).getByRole("button", { name: "Restore" }).click();
+  await expect(outcome(page)).toHaveText(`Restored: ${certificate}`);
+  await expect(card(page, certificate)).toBeVisible();
+  expect(stored(served, certificateId).state).toBe("open");
+  expect(watch(served, SUPERVISOR)).toEqual([
+    ["human-item-completed", plainId],
+    ["human-item-reopened", plainId],
+    ["human-item-dismissed", certificateId],
+    ["human-item-reopened", certificateId],
+  ]);
+  await page.unroute(`**/api/human-items/${certificateId}/dismiss`);
+  await toast(page).getByRole("button", { name: "Close" }).click();
+
+  // A Complete the engine refuses after the duration: the card comes back where
+  // it was, with the engine's reason on it and in the toast, in view above it.
+  const order = await titles(listRegion(page));
+  const releaseRefused = await holdRequests(
+    page,
+    `/api/human-items/${plainId}/complete`,
+  );
+  await card(page, plain)
+    .getByRole("button", { name: `Complete: ${plain}` })
+    .click();
+  await letGo();
+  await page.clock.runFor(past);
+  await expect(toast(page)).toHaveAttribute("data-phase", "sending");
+  await expect(card(page, plain)).toHaveCount(0);
+  const restore = breakJournal(served);
+  releaseRefused();
+  await expect(toast(page)).toHaveAttribute("data-tone", "failure");
+  const reason = card(page, plain).getByRole("alert");
+  await expect(reason).toBeVisible();
+  await expect(outcome(page)).toContainText((await reason.textContent()) ?? "");
+  expect(await titles(listRegion(page))).toEqual(order);
+  const top = (await box(toast(page))).y;
+  for (const part of [
+    reason,
+    ...(await card(page, plain).getByRole("button").all()),
+  ]) {
+    await expect(part).toBeInViewport();
+    const at = await box(part);
+    expect(at.y + at.height).toBeLessThanOrEqual(top);
+  }
+  restore();
+  expect(stored(served, plainId).state).toBe("open");
+});
+
 for (const failure of ["the server stopped", "the engine refused"] as const)
   test(`a write that fails because ${failure} leaves the item as it was and says why`, async ({
     page,
