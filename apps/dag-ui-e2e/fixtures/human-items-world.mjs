@@ -73,10 +73,8 @@ const builtSchema = z.object({
  * Where built worlds are kept for the rest of a run, one directory per world, when
  * the caller names one: `DAG_UI_E2E_WORLD_TEMPLATES` in the environment, an absolute path.
  *
- * Building a world is the engine launching a run and raising, answering and
- * dismissing items one CLI process at a time — two to four seconds a journey,
- * and test-linux's browser tier ran past its cap with about fifty journeys each
- * building one. A copy is what that build wrote, so a journey over it starts from
+ * A template spares each journey rebuilding an identical world through the engine's
+ * CLI. A copy is what that build wrote, so a journey over it starts from
  * the same journal, board and configuration. It is the same bytes only at the same
  * path — a run's journal names its own directory — so a template is used only by
  * the workspace it was built in, and rebuilt once it is older than

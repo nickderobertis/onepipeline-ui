@@ -253,9 +253,7 @@ export default defineConfig({
   // live-update journeys change what it is serving, so every journey against that
   // server shares that state and must not run against another. The specs in
   // `OWN_SERVERS` start a server per journey over a directory of their own, so they
-  // share nothing with that lane and take their own: the tier was 24 minutes on one
-  // worker, which with the server build before it and read-latency after it did
-  // not fit test-linux's cap (docs/linux-cold-cache-timing.md).
+  // share nothing with that lane and take their own (docs/linux-cold-cache-timing.md).
   workers: 2,
   fullyParallel: false,
   projects: [
