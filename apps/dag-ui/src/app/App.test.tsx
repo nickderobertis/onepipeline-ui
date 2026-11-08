@@ -918,8 +918,13 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       "true",
     );
     const prose = await screen.findByText(/Sweep the recorded corpus/);
-    expect(prose).toHaveTextContent("sweep");
-    expect(prose).toHaveTextContent("Confirm the sweep");
+    // Rendered as the markdown it is: each step under a heading of its own id.
+    const panel = prose.closest(".otg-markdown");
+    expect(panel).not.toBeNull();
+    expect(
+      within(panel as HTMLElement).getByRole("heading", { name: "sweep" }),
+    ).toBeVisible();
+    expect(panel).toHaveTextContent("Confirm the sweep");
   });
 
   test("deep-links node tabs and moves across them with the keyboard", async () => {

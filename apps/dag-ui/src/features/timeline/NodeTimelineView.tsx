@@ -21,6 +21,7 @@ import {
 } from "@oneharness/ui";
 import type { RunTimeline } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
+import { TaskMarkdown } from "@onetaskgraph/ui";
 import {
   ArrowLeft,
   ExternalLink,
@@ -176,7 +177,9 @@ export function NodeTimelineView({
           ))}
         </TabsList>
         <TabsContent className="node-tab-panel" value="task">
-          <pre>{taskProse(node.task)}</pre>
+          {/* The task is untrusted markdown: the shared package renders it
+              safely, as every other place this app shows a task. */}
+          <TaskMarkdown source={taskProse(node.task)} />
           <dl className="facts">
             {/* The settlement's own word — `merged`, `published`, `shipped` —
                 which the status badge does not carry: `done` is the same for a
@@ -211,7 +214,7 @@ export function NodeTimelineView({
           </dl>
         </TabsContent>
         <TabsContent className="node-tab-panel" value="criteria">
-          <pre>{acceptanceCriteria(node.task)}</pre>
+          <TaskMarkdown source={acceptanceCriteria(node.task)} />
         </TabsContent>
         <TabsContent className="node-tab-panel" value="dependencies">
           <dl className="facts">

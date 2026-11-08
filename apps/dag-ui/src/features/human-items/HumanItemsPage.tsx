@@ -1,28 +1,31 @@
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogTitle,
-} from "@oneharness/ui";
+import { Button } from "@oneharness/ui";
 import type { HumanItemDetail, HumanItemView } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
-import { ExternalLink, X } from "lucide-react";
+import { TaskCard, TaskMarkdown, TaskSourceLink } from "@onetaskgraph/ui";
+import { SlidersHorizontal, X } from "lucide-react";
 import {
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
+  useEffect,
   useId,
   useRef,
   useState,
 } from "react";
 import type { LiveHumanItems } from "../../lib/live-human-items";
+import { HumanItemToast } from "./HumanItemToast";
 import {
   BLOCKING_CHOICES,
   blockedGroups,
   blockedPhrases,
   blockedSummary,
+  changedFilters,
+  DEFAULT_GROUP_BY,
   type FilterChoice,
+  GROUP_CHOICES,
+  GROUP_OPTIONS,
+  type GroupBy,
+  groupItems,
   isBlocking,
   KIND_CHOICES,
   kindLabel,
@@ -35,22 +38,27 @@ import {
   STATE_OPTIONS,
   sourceWords,
   stateLabel,
-  trackerProvider,
 } from "./human-items-model";
+import { useGroupBy } from "./useGroupBy";
 import {
   type HumanItemWrite,
   useHumanItems,
   type WriteState,
 } from "./useHumanItems";
 
-/** Marks every card control that belongs to the card-action focus group. */
+/** Marks every card control that belongs to the card-action group. */
 const CARD_ACTION = "data-card-action";
+
+/** The lines of a body a card shows; the detail pane shows the rest. */
+const CARD_BODY_LINES = 4;
 
 type Write = (view: HumanItemView, change: HumanItemWrite) => void;
 
 /**
  * The host-wide action items: tasks and questions the operator's attention is
- * asked for, most urgent first, with the open questions answerable in place.
+ * asked for, under a heading per value of the field they are grouped by, with
+ * the open questions answerable in place. Complete and Dismiss act at once and
+ * leave a toast that can take the write back or say why.
  *
  * Keyboard: Tab moves from one open question's answer box straight to the next,
  * and nothing else on a card is in that sequence. After the last answer box
@@ -74,9 +82,16 @@ export function HumanItemsPage({
   readonly selectedId: string | undefined;
   readonly setSelectedId: (id: string | undefined) => void;
 }) {
-  const [dismissing, setDismissing] = useState<HumanItemView>();
-  const items = useHumanItems(client, live, selectedId, choice.state);
-  const listRef = useRef<HTMLUListElement>(null);
+  const items = useHumanItems(
+    client,
+    live,
+    selectedId,
+    choice.state,
+    JSON.stringify(choice),
+  );
+  const { groupBy, setGroupBy } = useGroupBy();
+  const [room, setRoom] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
   const selected =
     items.items?.find(({ item }) => item.id === selectedId) ?? items.detail;
   // What the pane last showed of the open item, for when it no longer reads.
@@ -85,28 +100,37 @@ export function HumanItemsPage({
   else if (lastShown.current?.item.id !== selectedId)
     lastShown.current = undefined;
 
-  const ask = (view: HumanItemView, change: HumanItemWrite) => {
-    if (change.action === "dismiss") setDismissing(view);
-    else items.write(view, change);
+  const write: Write = (view, change) => {
+    // The item is resolved as far as this page is concerned: its detail closes
+    // with its card, rather than lingering on something no one is to act on.
+    if (change.action !== "answer" && view.item.id === selectedId)
+      setSelectedId(undefined);
+    items.write(view, change);
   };
 
+  // A write that failed put its card back: bring it into view above the toast.
+  const returned = items.returned;
+  useEffect(() => {
+    if (returned === undefined) return;
+    listRef.current
+      ?.querySelector(`[data-item-id="${CSS.escape(returned.id)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [returned]);
+
+  const groups = groupItems(items.items ?? [], groupBy);
   return (
     <section
       aria-label="Action items"
       className="human-items-page"
       data-detail-open={selectedId !== undefined}
+      style={{ "--toast-room": `${room}px` } as CSSProperties}
     >
-      <Filters choice={choice} onChange={setChoice} />
-      {items.outcome && (
-        <p
-          aria-label="Last outcome"
-          className="human-items-outcome"
-          data-failed={items.outcome.failed}
-          role="status"
-        >
-          {items.outcome.title}: {items.outcome.message}
-        </p>
-      )}
+      <Filters
+        choice={choice}
+        groupBy={groupBy}
+        onChange={setChoice}
+        onGroupBy={setGroupBy}
+      />
       <div className="human-items-body">
         <section aria-label="Action item list" className="human-items-list">
           {items.listError && <p role="alert">{items.listError}</p>}
@@ -116,25 +140,26 @@ export function HumanItemsPage({
           {items.items?.length === 0 && (
             <p role="status">No action items match these filters.</p>
           )}
-          <ul
-            aria-label="Action items"
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: the arrow keys move focus among the card actions inside; the container itself is never focused. */}
+          <div
+            className="human-items-groups"
             onKeyDown={(event) => roveCardActions(event, listRef.current)}
             ref={listRef}
           >
-            {items.items?.map((view) => (
-              <li key={view.item.id}>
-                <HumanItemCard
-                  draft={items.drafts[view.item.id] ?? ""}
-                  onDraft={(text) => items.setDraft(view.item.id, text)}
-                  onSelect={() => setSelectedId(view.item.id)}
-                  onWrite={ask}
-                  selected={view.item.id === selectedId}
-                  state={items.writes[view.item.id]}
-                  view={view}
-                />
-              </li>
+            {groups.map((group) => (
+              <ItemGroupList
+                draftOf={(id) => items.drafts[id] ?? ""}
+                group={group}
+                groupBy={groupBy}
+                key={group.key}
+                onDraft={items.setDraft}
+                onSelect={setSelectedId}
+                onWrite={write}
+                selectedId={selectedId}
+                writes={items.writes}
+              />
             ))}
-          </ul>
+          </div>
           {(items.items?.length ?? 0) > 0 && (
             <button
               className="card-actions-entry"
@@ -158,29 +183,77 @@ export function HumanItemsPage({
             lastShown={lastShown.current}
             onClose={() => setSelectedId(undefined)}
             onDraft={(text) => items.setDraft(selectedId, text)}
-            onWrite={ask}
+            onWrite={write}
             state={items.writes[selectedId]}
             view={selected}
           />
         )}
       </div>
-      <DismissDialog
-        onCancel={() => setDismissing(undefined)}
-        onConfirm={(reason) => {
-          if (dismissing)
-            items.write(dismissing, { action: "dismiss", reason });
-          setDismissing(undefined);
-        }}
-        view={dismissing}
+      {items.toast && (
+        <HumanItemToast
+          onClose={items.closeToast}
+          onNote={items.note}
+          onRoom={setRoom}
+          onUndo={items.undo}
+          toast={items.toast}
+        />
+      )}
+    </section>
+  );
+}
+
+/** One heading's cards, or the whole list when nothing groups it. */
+function ItemGroupList({
+  group,
+  groupBy,
+  selectedId,
+  writes,
+  draftOf,
+  onDraft,
+  onSelect,
+  onWrite,
+}: {
+  readonly group: ReturnType<typeof groupItems>[number];
+  readonly groupBy: GroupBy;
+  readonly selectedId: string | undefined;
+  readonly writes: Readonly<Record<string, WriteState>>;
+  readonly draftOf: (id: string) => string;
+  readonly onDraft: (id: string, text: string) => void;
+  readonly onSelect: (id: string) => void;
+  readonly onWrite: Write;
+}) {
+  const headingId = useId();
+  const cards = group.items.map((view) => (
+    <li key={view.item.id}>
+      <HumanItemCard
+        draft={draftOf(view.item.id)}
+        groupBy={groupBy}
+        onDraft={(text) => onDraft(view.item.id, text)}
+        onSelect={() => onSelect(view.item.id)}
+        onWrite={onWrite}
+        selected={view.item.id === selectedId}
+        state={writes[view.item.id]}
+        view={view}
       />
+    </li>
+  ));
+  if (group.label === undefined)
+    return <ul aria-label="Action items">{cards}</ul>;
+  return (
+    <section aria-labelledby={headingId} className="human-items-group">
+      <h2 className="human-items-group-heading" id={headingId}>
+        {group.label}{" "}
+        <span className="human-items-group-count">({group.items.length})</span>
+      </h2>
+      <ul aria-labelledby={headingId}>{cards}</ul>
     </section>
   );
 }
 
 /** Arrow keys, Home and End move focus through every card action in the list. */
 function roveCardActions(
-  event: KeyboardEvent<HTMLUListElement>,
-  list: HTMLUListElement | null,
+  event: KeyboardEvent<HTMLElement>,
+  list: HTMLElement | null,
 ) {
   const target = event.target;
   if (list === null || !(target instanceof HTMLElement)) return;
@@ -202,100 +275,142 @@ function roveCardActions(
   next.focus();
 }
 
+/**
+ * Group by and the filters. At phone width they fold behind one Filters button,
+ * closed until pressed, which counts the choices that differ from the defaults.
+ */
 function Filters({
   choice,
+  groupBy,
   onChange,
+  onGroupBy,
 }: {
   readonly choice: FilterChoice;
+  readonly groupBy: GroupBy;
   readonly onChange: (choice: FilterChoice) => void;
+  readonly onGroupBy: (groupBy: GroupBy) => void;
 }) {
   const id = useId();
+  const [open, setOpen] = useState(false);
   const set = <K extends keyof FilterChoice>(key: K, value: FilterChoice[K]) =>
     onChange({ ...choice, [key]: value });
   const named = choice.source !== "" && choice.source !== "host";
+  const changed = changedFilters(choice) + Number(groupBy !== DEFAULT_GROUP_BY);
   return (
-    <fieldset className="human-items-filters">
-      <legend className="sr-only">Filter action items</legend>
-      <label htmlFor={`${id}-kind`}>Kind</label>
-      <select
-        id={`${id}-kind`}
-        onChange={(event) =>
-          set("kind", oneOf(KIND_CHOICES, event.target.value) ?? "")
-        }
-        value={choice.kind}
+    <div className="human-items-controls" data-open={open}>
+      <button
+        aria-controls={`${id}-filters`}
+        aria-expanded={open}
+        className="human-items-filters-toggle"
+        onClick={() => setOpen((shown) => !shown)}
+        type="button"
       >
-        <option value="">Any kind</option>
-        <option value="task">Task</option>
-        <option value="question">Question</option>
-      </select>
-      <label htmlFor={`${id}-blocking`}>Blocking</label>
-      <select
-        id={`${id}-blocking`}
-        onChange={(event) =>
-          set("blocking", oneOf(BLOCKING_CHOICES, event.target.value) ?? "")
-        }
-        value={choice.blocking}
-      >
-        <option value="">Any</option>
-        <option value="yes">Yes</option>
-        <option value="no">No</option>
-      </select>
-      <label htmlFor={`${id}-priority`}>Priority</label>
-      <select
-        id={`${id}-priority`}
-        onChange={(event) =>
-          set("priority", oneOf(PRIORITY_CHOICES, event.target.value) ?? "")
-        }
-        value={choice.priority}
-      >
-        <option value="">Any priority</option>
-        {PRIORITY_OPTIONS.map(({ wire, label }) => (
-          <option key={wire} value={wire}>
-            {label}
-          </option>
-        ))}
-      </select>
-      <label htmlFor={`${id}-state`}>State</label>
-      <select
-        id={`${id}-state`}
-        onChange={(event) =>
-          set("state", oneOf(STATE_CHOICES, event.target.value) ?? "open")
-        }
-        value={choice.state}
-      >
-        {STATE_OPTIONS.map(({ state, label }) => (
-          <option key={state} value={state}>
-            {label}
-          </option>
-        ))}
-      </select>
-      <label htmlFor={`${id}-source`}>Source</label>
-      <select
-        id={`${id}-source`}
-        onChange={(event) =>
-          set("source", oneOf(SOURCE_CHOICES, event.target.value) ?? "")
-        }
-        value={choice.source}
-      >
-        <option value="">Any source</option>
-        <option value="session">Session</option>
-        <option value="run">Run</option>
-        <option value="plan">Plan</option>
-        <option value="host">Host</option>
-      </select>
-      {named && (
-        <>
-          <label htmlFor={`${id}-source-id`}>Source identifier</label>
-          <input
-            id={`${id}-source-id`}
-            onChange={(event) => set("sourceId", event.target.value)}
-            placeholder={`${choice.source} id`}
-            type="search"
-            value={choice.sourceId}
-          />
-        </>
-      )}
-    </fieldset>
+        <SlidersHorizontal aria-hidden="true" size={14} />
+        Filters
+        {changed > 0 && (
+          <span className="human-items-filters-count">
+            <span className="sr-only">, changed: </span>
+            {changed}
+          </span>
+        )}
+      </button>
+      <fieldset className="human-items-filters" id={`${id}-filters`}>
+        <legend className="sr-only">Filter action items</legend>
+        <label htmlFor={`${id}-group`}>Group by</label>
+        <select
+          id={`${id}-group`}
+          onChange={(event) =>
+            onGroupBy(oneOf(GROUP_CHOICES, event.target.value) ?? "priority")
+          }
+          value={groupBy}
+        >
+          {GROUP_OPTIONS.map(({ value, label }) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <label htmlFor={`${id}-kind`}>Kind</label>
+        <select
+          id={`${id}-kind`}
+          onChange={(event) =>
+            set("kind", oneOf(KIND_CHOICES, event.target.value) ?? "")
+          }
+          value={choice.kind}
+        >
+          <option value="">Any kind</option>
+          <option value="task">Task</option>
+          <option value="question">Question</option>
+        </select>
+        <label htmlFor={`${id}-blocking`}>Blocking</label>
+        <select
+          id={`${id}-blocking`}
+          onChange={(event) =>
+            set("blocking", oneOf(BLOCKING_CHOICES, event.target.value) ?? "")
+          }
+          value={choice.blocking}
+        >
+          <option value="">Any</option>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
+        <label htmlFor={`${id}-priority`}>Priority</label>
+        <select
+          id={`${id}-priority`}
+          onChange={(event) =>
+            set("priority", oneOf(PRIORITY_CHOICES, event.target.value) ?? "")
+          }
+          value={choice.priority}
+        >
+          <option value="">Any priority</option>
+          {PRIORITY_OPTIONS.map(({ wire, label }) => (
+            <option key={wire} value={wire}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <label htmlFor={`${id}-state`}>State</label>
+        <select
+          id={`${id}-state`}
+          onChange={(event) =>
+            set("state", oneOf(STATE_CHOICES, event.target.value) ?? "open")
+          }
+          value={choice.state}
+        >
+          {STATE_OPTIONS.map(({ state, label }) => (
+            <option key={state} value={state}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <label htmlFor={`${id}-source`}>Source</label>
+        <select
+          id={`${id}-source`}
+          onChange={(event) =>
+            set("source", oneOf(SOURCE_CHOICES, event.target.value) ?? "")
+          }
+          value={choice.source}
+        >
+          <option value="">Any source</option>
+          <option value="session">Session</option>
+          <option value="run">Run</option>
+          <option value="plan">Plan</option>
+          <option value="host">Host</option>
+        </select>
+        {named && (
+          <>
+            <label htmlFor={`${id}-source-id`}>Source identifier</label>
+            <input
+              id={`${id}-source-id`}
+              onChange={(event) => set("sourceId", event.target.value)}
+              placeholder={`${choice.source} id`}
+              type="search"
+              value={choice.sourceId}
+            />
+          </>
+        )}
+      </fieldset>
+    </div>
   );
 }
 
@@ -307,8 +422,38 @@ function selectsCard(event: MouseEvent<HTMLElement>): boolean {
   );
 }
 
+/**
+ * An item's badges: priority, kind, and whether it blocks — leaving out the one
+ * the list is grouped by, whose heading already says it.
+ */
+function Badges({
+  view,
+  groupBy,
+}: {
+  readonly view: HumanItemView;
+  readonly groupBy?: GroupBy;
+}) {
+  const { item } = view;
+  return (
+    <>
+      {groupBy !== "priority" && (
+        <span className="human-item-priority" data-priority={item.priority}>
+          {priorityLabel(item)}
+        </span>
+      )}
+      {groupBy !== "kind" && (
+        <span className="human-item-kind">{kindLabel(item)}</span>
+      )}
+      {groupBy !== "blocking" && isBlocking(item) && (
+        <span className="human-item-blocking">Blocking</span>
+      )}
+    </>
+  );
+}
+
 function HumanItemCard({
   view,
+  groupBy,
   selected,
   state,
   draft,
@@ -317,6 +462,7 @@ function HumanItemCard({
   onWrite,
 }: {
   readonly view: HumanItemView;
+  readonly groupBy: GroupBy;
   readonly selected: boolean;
   readonly state?: WriteState;
   readonly draft: string;
@@ -325,48 +471,31 @@ function HumanItemCard({
   readonly onWrite: Write;
 }) {
   const { item } = view;
-  const titleId = useId();
   const open = item.state === "open";
   const blocked = blockedSummary(view);
+  const meta = [
+    ...(open ? [] : [stateLabel(item)]),
+    ...(blocked ? [blocked] : []),
+    ...(groupBy === "source" ? [] : [`Source: ${sourceWords(item)}`]),
+  ];
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: the card's keyboard path is its Details action in the card-action group; this click is the pointer's shortcut to the same thing.
-    <article
-      aria-labelledby={titleId}
+    <TaskCard
+      actions={
+        <CardActions item={view} onSelect={onSelect} onWrite={onWrite} />
+      }
+      badges={<Badges groupBy={groupBy} view={view} />}
+      body={item.body}
       className="human-item-card"
+      clamp={CARD_BODY_LINES}
       data-blocking={isBlocking(item)}
+      data-item-id={item.id}
       data-selected={selected}
+      meta={meta.length === 0 ? undefined : meta.join(" · ")}
       onClick={(event) => {
         if (selectsCard(event)) onSelect();
       }}
+      title={item.title}
     >
-      <div className="human-item-head">
-        <span className="human-item-priority" data-priority={item.priority}>
-          {priorityLabel(item)}
-        </span>
-        <span className="human-item-kind">{kindLabel(item)}</span>
-        <h3 className="human-item-title" id={titleId}>
-          {item.title}
-        </h3>
-        <div className="human-item-actions">
-          <CardActions item={view} onSelect={onSelect} onWrite={onWrite} />
-        </div>
-      </div>
-      <p className="human-item-meta">
-        {!open && (
-          <>
-            <span>{stateLabel(item)}</span>
-            {" · "}
-          </>
-        )}
-        {blocked && (
-          <>
-            <span className="human-item-blocks">{blocked}</span>
-            {" · "}
-          </>
-        )}
-        <span>Source: {sourceWords(item)}</span>
-      </p>
-      <p className="human-item-body">{item.body}</p>
       {item.kind === "question" && open && (
         <AnswerBox
           draft={draft}
@@ -377,7 +506,7 @@ function HumanItemCard({
         />
       )}
       <WriteStatus state={state} />
-    </article>
+    </TaskCard>
   );
 }
 
@@ -398,7 +527,18 @@ function CardActions({
   const open = item.state === "open";
   return (
     <>
-      {item.tracker && <TrackerLink cardAction tracker={item.tracker} />}
+      {item.tracker && (
+        <TaskSourceLink
+          className="human-item-tracker"
+          data-card-action=""
+          label={item.tracker.task}
+          // On a card the link is one of the card-action group's, and following
+          // it never selects the card.
+          onClick={(event) => event.stopPropagation()}
+          tabIndex={-1}
+          url={item.tracker.url}
+        />
+      )}
       <button
         className="human-item-action"
         data-card-action=""
@@ -434,32 +574,6 @@ function CardActions({
         </button>
       )}
     </>
-  );
-}
-
-function TrackerLink({
-  tracker,
-  cardAction = false,
-}: {
-  readonly tracker: { readonly task: string; readonly url: string };
-  /** On a card, the link is one of the card-action group's, out of the Tab order. */
-  readonly cardAction?: boolean;
-}) {
-  const provider = trackerProvider(tracker.url);
-  return (
-    <a
-      data-card-action={cardAction ? "" : undefined}
-      tabIndex={cardAction ? -1 : undefined}
-      aria-label={`Open ${provider} issue ${tracker.task}`}
-      className="human-item-tracker"
-      href={tracker.url}
-      onClick={(event) => event.stopPropagation()}
-      rel="noreferrer"
-      target="_blank"
-    >
-      <ExternalLink aria-hidden="true" size={12} />
-      {tracker.task}
-    </a>
   );
 }
 
@@ -581,10 +695,7 @@ function DetailPane({
     <aside aria-label="Action item detail" className="human-item-detail">
       <header className="human-item-detail-head">
         <p className="human-item-meta">
-          <span className="human-item-priority" data-priority={item.priority}>
-            {priorityLabel(item)}
-          </span>{" "}
-          {kindLabel(item)} · {stateLabel(item)}
+          <Badges view={shown} /> {stateLabel(item)}
         </p>
         <h2>{item.title}</h2>
         <Button
@@ -626,7 +737,7 @@ function DetailPane({
         // biome-ignore lint/a11y/noNoninteractiveTabindex: the body scrolls within the pane, and a region that scrolls has to be reachable by keyboard to be scrolled by one.
         tabIndex={0}
       >
-        {item.body}
+        <TaskMarkdown source={item.body} />
       </section>
       <div className="human-item-detail-actions">
         {item.kind === "question" && open && (
@@ -638,7 +749,13 @@ function DetailPane({
             pending={state?.pending ?? false}
           />
         )}
-        {item.tracker && <TrackerLink tracker={item.tracker} />}
+        {item.tracker && (
+          <TaskSourceLink
+            className="human-item-tracker"
+            label={item.tracker.task}
+            url={item.tracker.url}
+          />
+        )}
         {open && item.kind === "task" && (
           <Button
             onClick={() => onWrite(shown, { action: "complete" })}
@@ -661,55 +778,5 @@ function DetailPane({
         <WriteStatus state={state} />
       </div>
     </aside>
-  );
-}
-
-/** Dismissal asks for an optional reason before anything is sent. */
-function DismissDialog({
-  view,
-  onConfirm,
-  onCancel,
-}: {
-  readonly view?: HumanItemView;
-  readonly onConfirm: (reason: string) => void;
-  readonly onCancel: () => void;
-}) {
-  const [reason, setReason] = useState("");
-  const id = useId();
-  return (
-    <Dialog
-      onOpenChange={(open) => {
-        if (!open) {
-          setReason("");
-          onCancel();
-        }
-      }}
-      open={view !== undefined}
-    >
-      <DialogContent>
-        <DialogTitle>Dismiss {view?.item.title}</DialogTitle>
-        <DialogDescription>
-          The item closes without being done. A reason is optional.
-        </DialogDescription>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            onConfirm(reason);
-            setReason("");
-          }}
-        >
-          <label htmlFor={`${id}-reason`}>Reason (optional)</label>
-          <input
-            className="human-item-reason"
-            id={`${id}-reason`}
-            onChange={(event) => setReason(event.target.value)}
-            value={reason}
-          />
-          <DialogFooter>
-            <Button type="submit">Dismiss item</Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   );
 }
