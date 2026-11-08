@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+// llmlint: ignore-file[boundary_inputs_validated] A never-landed measurement harness run by hand against CI output and GitHub responses the reader of its records checks; a bad value shows in a record, and nothing depends on it.
+// llmlint: ignore-file[changed_behavior_has_e2e] Throwaway spike harness, never landed: the hosted runs recorded in the spike report are what exercise it.
+// llmlint: ignore-file[cli_output_contract] Spike-only harness whose stdout records are read by the author of the report; a failed phase is reported as a record so the rest of a long measurement still lands.
+// llmlint: ignore-file[contracts_have_one_source_or_a_drift_gate] Deliberately restates repository recipes to compare against them once on one commit; the branch never lands, so nothing can drift from them.
+// llmlint: ignore-file[tool_output_is_signal] The records on stdout are the measurement this harness exists to print, not diagnostics.
 // SPIKE HARNESS — throwaway, never landed. Prices every compile line one OS leg
 // of `.github/workflows/ci-cache.yml` warms (`scripts/ci-warm.sh <os> --plan`):
 // the archive bytes it adds to that OS's Rust cache family, measured on a cold
@@ -362,8 +367,6 @@ function composition(label, kept, cargo, profiles, whole) {
   });
 }
 
-// ---- phases ------------------------------------------------------------------
-
 function listed() {
   const pkgs = packages();
   const { kept, profiles } = keptTarget(walk(join(root, "target"), root), pkgs);
@@ -539,7 +542,6 @@ function price() {
   const files = walk(join(root, "target"), root);
   const { kept, profiles } = keptTarget(files, pkgs);
   const cargo = keptCargo(cargoFiles(), pkgs, oldBins());
-  // Which units each line reaches.
   const reach = new Map();
   for (const line of plan) {
     let units;
@@ -723,8 +725,6 @@ function price() {
     status: [allWarm.status],
   });
 }
-
-// ---- driver ------------------------------------------------------------------
 
 function gh(args) {
   const res = spawnSync("gh", args, { encoding: "utf8", maxBuffer: 1 << 30 });

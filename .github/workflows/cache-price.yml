@@ -1,3 +1,5 @@
+# llmlint: ignore-file[boundary_inputs_validated] A never-landed spike workflow reading the MSRV from this repository's own Cargo.toml.
+# llmlint: ignore-file[no_second_broader_sweep_over_an_already_gated_commit] This spike's job is to run the instrumented sweep several times on one commit: comparing those runs is the measurement.
 name: Cache price
 
 # SPIKE (spike-onepipeline-ui-coverage-and-cache), never landed. Run by hand. It saves nothing to the Actions cache:
@@ -13,8 +15,7 @@ name: Cache price
 #    <measurement>)   runner: shapes, determinism, or cache-hit (real Nx over a
 #                     scratch clone; its cache is a local directory).
 
-# Its measurements are taken (runs 42502313959 and 42504632874), so the branch's
-# last push starts nothing: run it by hand from the workflow page.
+# Run by hand from the workflow page.
 on:
   workflow_dispatch:
 

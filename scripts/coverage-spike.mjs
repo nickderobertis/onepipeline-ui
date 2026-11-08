@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+// llmlint: ignore-file[boundary_inputs_validated] A never-landed measurement harness run by hand against CI output and GitHub responses the reader of its records checks; a bad value shows in a record, and nothing depends on it.
+// llmlint: ignore-file[changed_behavior_has_e2e] Throwaway spike harness, never landed: the hosted runs recorded in the spike report are what exercise it.
+// llmlint: ignore-file[cli_output_contract] Spike-only harness whose stdout records are read by the author of the report; a failed phase is reported as a record so the rest of a long measurement still lands.
+// llmlint: ignore-file[contracts_have_one_source_or_a_drift_gate] Deliberately restates repository recipes to compare against them once on one commit; the branch never lands, so nothing can drift from them.
+// llmlint: ignore-file[tool_output_is_signal] The records on stdout are the measurement this harness exists to print, not diagnostics.
 // SPIKE HARNESS — throwaway, never landed. Measures whether the crate's
 // instrumented test tiers can each leave a coverage output Nx can cache, and
 // whether a merge of those outputs holds the same 95% floor `_crate-coverage`
@@ -80,7 +85,6 @@ function fail(message, action) {
   process.exit(1);
 }
 
-// run COMMAND ARGS: inherit output, time it, fail on a non-zero status.
 function run(cmd, args, opts = {}) {
   const started = process.hrtime.bigint();
   const res = spawnSync(cmd, args, {
@@ -190,7 +194,6 @@ function splitCommand(line) {
   return out;
 }
 
-// Profiles -> one .profdata, as cargo-llvm-cov merges them.
 function mergeProfdata(inputs, out) {
   mkdirSync(join(out, ".."), { recursive: true });
   return run(llvmTool("llvm-profdata"), [
@@ -319,7 +322,6 @@ const relative = (file) =>
     ? file.slice(ROOT.length + 1)
     : file.replace(/^.*?\/(src|tests|build\.rs)/, "$1");
 
-// Every file whose line count or covered count differs between two totals.
 function differences(a, b) {
   const out = [];
   for (const file of new Set([
@@ -334,7 +336,6 @@ function differences(a, b) {
   return out.sort((p, q) => p.file.localeCompare(q.file));
 }
 
-// Every line whose covered status differs between two merged LCOV maps.
 function lineDifferences(a, b) {
   const out = [];
   for (const file of new Set([...a.keys(), ...b.keys()])) {
@@ -479,7 +480,6 @@ function sweep(out, { label, time = true }) {
     lcov_basis: summary(todayTotals),
   });
 
-  // Shape (a): merge the five LCOV files.
   let started = process.hrtime.bigint();
   const aFiles = mergeLcov(
     TIERS.map(([, t]) => readFileSync(join(out, "a", `${t}.lcov`), "utf8")),
@@ -487,7 +487,6 @@ function sweep(out, { label, time = true }) {
   const aTotals = totals(aFiles);
   const aSeconds = Number(process.hrtime.bigint() - started) / 1e9;
   writeLcov(aFiles, join(out, "a-merged.lcov"));
-  // Shape (b): merge the five .profdata files and export once over the objects.
   started = process.hrtime.bigint();
   const merged = join(out, "b-merged.profdata");
   mergeProfdata(
@@ -648,8 +647,6 @@ function measureDeterminism(out) {
     });
   }
 }
-
-// ---- the Nx prototype -------------------------------------------------------
 
 // `export <profile>`: the line the prototype appends to `_tier-test-covered`,
 // after the tier's tests: this tier's own profiles merged and exported, leaving
@@ -1280,8 +1277,6 @@ const summaryOf = (t) => ({
   percent: t.percent,
 });
 
-// ---- reuse over real pull requests -----------------------------------------
-
 // For each of the last 30 merged pull requests: which instrumented tiers the
 // proposed inputs (each tier's `test` inputs today, plus this harness) leave
 // unaffected, comparing the head its last test-linux run tested with the base
@@ -1352,7 +1347,6 @@ function measureReuse(out) {
   };
   const rows = [];
   for (const pr of prs) {
-    // The last CI run on the head that carries test-linux's executions.
     const runs = pr.commits.nodes
       .flatMap((c) => c.commit.checkSuites.nodes)
       .map((s) => s.workflowRun)
@@ -1484,8 +1478,6 @@ function measureReuse(out) {
   writeFileSync(join(out, "reuse.json"), JSON.stringify(rows, null, 1));
   rmSync(scratch, { recursive: true, force: true });
 }
-
-// ---- entry ------------------------------------------------------------------
 
 const [verb, ...rest] = process.argv.slice(2);
 let outArg = null;
