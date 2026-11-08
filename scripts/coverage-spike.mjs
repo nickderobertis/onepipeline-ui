@@ -617,6 +617,10 @@ function nxEnv(cacheDir) {
     NX_SELF_HOSTED_REMOTE_CACHE_SERVER: '',
     NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: '',
     GITHUB_ACTIONS: '',
+    // Scheduling only: on a shared host whose load passes its core count, the
+    // journeys' own timeouts fail at nextest's default of one test per core.
+    // Which tests run, and so which lines, is unchanged.
+    NEXTEST_TEST_THREADS: process.env.SPIKE_TEST_THREADS ?? '8',
   };
   return env;
 }
@@ -793,7 +797,12 @@ function measureCacheHit(out) {
   const commit = head();
   if (execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim())
     fail('the checkout has uncommitted changes', 'commit them: the scratch clone is cut from HEAD');
-  record('commit', { measurement: 'cache-hit', commit, platform: process.platform });
+  record('commit', {
+    measurement: 'cache-hit',
+    commit,
+    platform: process.platform,
+    nextest_test_threads: process.env.SPIKE_TEST_THREADS ?? '8',
+  });
   const clone = join(out, 'clone');
   const cacheDir = join(out, 'nx-cache');
   rmSync(out, { recursive: true, force: true });
