@@ -359,8 +359,7 @@ export function ChoiceButtons({
   if (choices === undefined) return null;
   const picked = pickedChoice(stage, id);
   return (
-    // biome-ignore lint/a11y/useSemanticElements: spike mock.
-    <div aria-label={`Choices: ${title}`} className="mock-choices" role="group">
+    <fieldset aria-label={`Choices: ${title}`} className="mock-choices">
       {choices.map((choice, index) => (
         <button
           aria-pressed={picked === index}
@@ -371,7 +370,7 @@ export function ChoiceButtons({
           {choice.title}
         </button>
       ))}
-    </div>
+    </fieldset>
   );
 }
 
@@ -444,8 +443,7 @@ export function SendBar({ stage }: { readonly stage: MockStage }) {
   if (count === 0 || stage === "answered") return null;
   const answers = count === 1 ? "1 answer" : `${count} answers`;
   return (
-    // biome-ignore lint/a11y/useSemanticElements: spike mock.
-    <div aria-label="Drafted answers" className="mock-send-bar" role="region">
+    <section aria-label="Drafted answers" className="mock-send-bar">
       <span className="mock-send-bar-count">
         {stage === "refused"
           ? "2 sent · 1 refused, draft kept"
@@ -457,6 +455,6 @@ export function SendBar({ stage }: { readonly stage: MockStage }) {
       <Button size="sm" type="button">
         Send {answers}
       </Button>
-    </div>
+    </section>
   );
 }

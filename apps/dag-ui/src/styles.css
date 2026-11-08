@@ -3025,6 +3025,9 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 /* SPIKE (question-items-2026-11-08 spike-visual): the choices / drafts / send-bar
    mock, drawn only under `/human-items?mock=<stage>`. Not meant to land. */
 .mock-choices {
+  min-width: 0;
+  padding: 0;
+  border: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
