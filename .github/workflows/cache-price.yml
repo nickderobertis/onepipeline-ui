@@ -1,7 +1,6 @@
 name: Cache price
 
-# SPIKE (spike-onepipeline-ui-coverage-and-cache), never landed. A draft pull
-# request's push is the only trigger. It saves nothing to the Actions cache:
+# SPIKE (spike-onepipeline-ui-coverage-and-cache), never landed. Run by hand. It saves nothing to the Actions cache:
 # rust-cache runs with `save-if: false`, actions/cache only restores, setup-bun
 # and setup-node cache nothing, and no Nx remote cache is configured. ci.yml's
 # pull-request trigger is off on this branch, so no test job runs.
@@ -14,9 +13,10 @@ name: Cache price
 #    <measurement>)   runner: shapes, determinism, or cache-hit (real Nx over a
 #                     scratch clone; its cache is a local directory).
 
+# Its measurements are taken (runs 42502313959 and 42504632874), so the branch's
+# last push starts nothing: run it by hand from the workflow page.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,7 +28,6 @@ env:
 
 jobs:
   price:
-    if: ${{ false }}
     name: price (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -105,7 +104,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        measurement: [cache-hit]
+        measurement: [shapes, determinism, cache-hit]
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
