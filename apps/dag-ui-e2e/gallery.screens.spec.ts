@@ -833,18 +833,23 @@ const SURFACES: readonly Surface[] = [
         if (stage === "before") {
           // The unchanged page: no `?mock=`, and the six fixture items laid into
           // the real server's subscription answer in place of its (empty) list.
+          // The gallery's server refuses the human-items view (503: no engine
+          // runtime here), so the subscription is made as the sidebar view —
+          // a real subscription id, cursor, sidebar and stream — and answered to
+          // the page as the human-items view it asked for, holding the fixture.
           await page.route("**/api/v2/subscriptions", async (route) => {
+            if (route.request().method() !== "POST") return route.continue();
             const body = route.request().postDataJSON() as {
-              view?: { type?: string; item?: string };
+              view: { type: string; item?: string };
             };
-            const response = await route.fetch();
-            if (body.view?.type !== "human-items")
-              return route.fulfill({ response });
+            if (body.view.type !== "human-items") return route.continue();
+            const response = await route.fetch({
+              postData: JSON.stringify({ ...body, view: { type: "sidebar" } }),
+            });
             const answer = await response.json();
             const details = actionItemsMock.details as Record<string, unknown>;
-            const at =
-              answer.initial.snapshot;
-            at.visible = {
+            answer.view = body.view;
+            answer.initial.snapshot.visible = {
               type: "human-items",
               items: actionItemsMock.items,
               detail:
