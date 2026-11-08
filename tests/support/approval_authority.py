@@ -42,6 +42,11 @@ def undo(request, log_path):
             records = [json.loads(line) for line in log if line.strip()]
     except OSError:
         records = []
+    except ValueError as error:
+        refuse(f"the approval log is not newline-delimited JSON: {error}")
+    if not all(isinstance(r, dict) and text(r.get("board_copy")) and text(r.get("key"))
+               for r in records):
+        refuse("every approval record must name its board_copy and key")
     wanted = (request["board_copy"], request["key"])
     kept = [r for r in records if (r["board_copy"], r["key"]) != wanted]
     if len(kept) == len(records):

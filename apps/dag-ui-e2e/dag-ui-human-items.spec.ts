@@ -293,30 +293,31 @@ async function actAs(served: FixtureServer, session: string): Promise<void> {
   await served.serveRebuilt();
 }
 
-/** Where the page remembers, per browser, what its list is grouped by. */
-const GROUP_BY_KEY = "onepipeline-ui.human-items.group-by";
-
 /**
  * The page, opened at its own address on the server's origin, and its list.
  *
- * Grouping is a reader's choice the browser remembers, so a journey about the
- * engine's own order reads the list as one flat list — Group by None — chosen
- * the way a reader's earlier visit would have left it. `groupBy: null` leaves the
- * browser as it is, for the journeys about grouping itself.
+ * A journey about the engine's own order reads the list as one flat list, so it
+ * chooses Group by None as a reader would — through the Filters button first
+ * where a phone folds the control behind it. `groupBy: null` leaves the page
+ * grouped as it opens, for the journeys about grouping itself.
  */
 async function open(
   page: Page,
   served: FixtureServer,
   { groupBy = "none" }: { readonly groupBy?: string | null } = {},
 ): Promise<Locator> {
-  if (groupBy !== null)
-    await page.addInitScript(
-      ([key, value]) => window.localStorage.setItem(key, value),
-      [GROUP_BY_KEY, groupBy] as const,
-    );
   await page.goto(`${served.origin}/human-items`);
   const list = listRegion(page);
   await expect(list.getByRole("listitem").first()).toBeVisible();
+  if (groupBy !== null) {
+    const toggle = page.getByRole("button", { name: /^Filters/u });
+    const folded = await toggle.isVisible();
+    if (folded) await toggle.click();
+    await page
+      .getByRole("combobox", { name: "Group by" })
+      .selectOption(groupBy);
+    if (folded) await toggle.click();
+  }
   return list;
 }
 
@@ -367,7 +368,7 @@ function toast(page: Page): Locator {
 
 /** What the toast says, whether it went through or failed. */
 function outcome(page: Page): Locator {
-  return toast(page).locator('[role="status"], [role="alert"]');
+  return toast(page).getByRole("status").or(toast(page).getByRole("alert"));
 }
 
 function detailPane(page: Page): Locator {
@@ -1735,9 +1736,12 @@ test("an item whose body is longer than four lines shows four on its card and al
   const long = card(page, longTitle);
   // The body is the shared package's rendered markdown, clamped as a whole.
   const body = long.getByText(longText, { exact: true });
+  // The clamp is the computed style of the box the package renders the body in
+  // — the text's own container — which no role or name exposes.
+  // llmlint: ignore[e2e_uses_accessible_selectors] a body's four-line clamp is the computed style and geometry of the box the shared package renders it in, which no accessible role or name exposes; it is reached as the located text's own container, never by a class.
   const clamp = await body.evaluate((text) => {
-    const element = text.closest(".otg-markdown");
-    if (!(element instanceof HTMLElement)) throw new Error("no rendered body");
+    const element = text.parentElement;
+    if (element === null) throw new Error("the body's text has no container");
     const style = getComputedStyle(element);
     return {
       line: Number.parseFloat(style.lineHeight),
@@ -1759,10 +1763,11 @@ test("an item whose body is longer than four lines shows four on its card and al
     const { title, body: text } = stored(served, idOf(served, key));
     const short = card(page, title).getByText(text, { exact: true });
     expect(
+      // llmlint: ignore[e2e_uses_accessible_selectors] as above: whether a body is clipped is the geometry of the box it is rendered in, reached as the located text's own container.
       await short.evaluate((text) => {
-        const element = text.closest(".otg-markdown");
-        if (!(element instanceof HTMLElement))
-          throw new Error("no rendered body");
+        const element = text.parentElement;
+        if (element === null)
+          throw new Error("the body's text has no container");
         return {
           clipped: element.scrollHeight > element.clientHeight,
           lines: Math.round(
@@ -1823,18 +1828,22 @@ test("an item whose body is longer than four lines shows four on its card and al
     )
     .toBe(true);
   // The final words are in view inside the pane, and nothing else moved.
-  const shown = await full.evaluate((element) => {
-    const text = element.querySelector(".otg-markdown p")?.firstChild ?? null;
-    if (text === null) throw new Error("the body holds no text");
-    const range = document.createRange();
-    const words = "ship the reviewed release.";
-    const at = (text.textContent ?? "").lastIndexOf(words);
-    range.setStart(text, at);
-    range.setEnd(text, at + words.length);
-    const word = range.getBoundingClientRect();
-    const box = element.getBoundingClientRect();
-    return word.top >= box.top && word.bottom <= box.bottom + 1;
-  });
+  const fullBox = await full.boundingBox();
+  if (fullBox === null) throw new Error("the full body has no box");
+  const shown = await full
+    .getByRole("paragraph")
+    .last()
+    .evaluate((paragraph, box) => {
+      const text = paragraph.firstChild;
+      if (text === null) throw new Error("the body holds no text");
+      const range = document.createRange();
+      const words = "ship the reviewed release.";
+      const at = (text.textContent ?? "").lastIndexOf(words);
+      range.setStart(text, at);
+      range.setEnd(text, at + words.length);
+      const word = range.getBoundingClientRect();
+      return word.top >= box.y && word.bottom <= box.y + box.height + 1;
+    }, fullBox);
   expect(shown).toBe(true);
   expect(await region.evaluate((element) => element.scrollTop)).toBe(
     before.list,
@@ -2213,8 +2222,6 @@ test("a world name the fixture does not define is refused before anything is bui
   }
 });
 
-// ── One click, the toast, and taking a write back ──────────────────────────
-
 /** How long the page shows a toast nothing is holding: its configured duration. */
 const TOAST_SECONDS = 15;
 
@@ -2234,8 +2241,13 @@ async function holdRequests(page: Page, path: string): Promise<() => void> {
   return release;
 }
 
-/** Every alert the page shows from here on, however briefly. */
+/**
+ * Every alert the page shows from here on, however briefly: a message that
+ * appears and is gone before any assertion could look is still a message a
+ * reader saw, so it is recorded in the page as it happens.
+ */
 async function recordAlerts(page: Page): Promise<() => Promise<string[]>> {
+  // llmlint: ignore[e2e_uses_accessible_selectors] a locator can only ask what is on the page now; a transient alert has to be noticed by an observer inside the page as it appears, and `[role="alert"]` is the accessible role itself, read where no locator reaches.
   await page.addInitScript(() => {
     const seen: string[] = [];
     Object.assign(window, { __alerts: seen });
@@ -2250,10 +2262,10 @@ async function recordAlerts(page: Page): Promise<() => Promise<string[]>> {
       characterData: true,
     });
   });
-  return () =>
-    page.evaluate(
-      () => (window as unknown as { __alerts: string[] }).__alerts ?? [],
-    );
+  return async () =>
+    z
+      .array(z.string())
+      .parse(await page.evaluate(() => Reflect.get(window, "__alerts") ?? []));
 }
 
 /** The write routes the page sent to, by the verb each names, in order. */
@@ -2675,9 +2687,10 @@ for (const failure of ["the server stopped", "the engine refused"] as const)
       await expect(toast(page)).toHaveAttribute("data-phase", "failed");
       // Nothing holds it — no pointer, no focus — and still it stays.
       await page.mouse.move(1, 1);
-      await page.evaluate(() =>
-        (document.activeElement as HTMLElement | null)?.blur(),
-      );
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement)
+          document.activeElement.blur();
+      });
       await page.clock.runFor((TOAST_SECONDS + 5) * 1_000);
       await expect(toast(page)).toBeVisible();
       await expect(outcome(page)).toContainText(/\S/u);
@@ -2713,7 +2726,9 @@ test("Reopen says why it cannot be offered, by hover and by its question mark, a
   await page.setViewportSize({ width: 390, height: 844 });
   const served = await serveWorld("undo");
   await open(page, served);
-  const unavailable = toast(page).locator("[data-unavailable-action]");
+  const unavailable = toast(page).getByRole("group", {
+    name: /\(unavailable\)$/u,
+  });
   const why = (label: string) =>
     toast(page).getByRole("button", { name: `Why ${label} is unavailable` });
   const tip = toast(page).getByRole("tooltip");
@@ -2886,8 +2901,6 @@ test("a press in the browser is recorded as the browser's, beside the same actio
   expect(show("export")).toEqual({ actor: "browser", on_behalf_of: null });
 });
 
-// ── Every task rendered by the shared package, safely ──────────────────────
-
 test("a task's markdown renders through the shared package on card, in detail and on the node timeline, and nothing in it runs or fetches", async ({
   page,
 }) => {
@@ -2921,6 +2934,7 @@ test("a task's markdown renders through the shared package on card, in detail an
   ]);
   await expect(surfaces[1]?.[1] ?? shown).toBeVisible();
   const check = async (where: string, root: Locator, visible: boolean) => {
+    // llmlint: ignore[e2e_uses_accessible_selectors] what is asserted is that the body is the shared package's rendering, which only the package's own `otg-` class names; no role or name tells one markdown renderer from another.
     const body = root.locator(".otg-markdown").first();
     await expect(body, where).toBeAttached();
     for (const [name, href] of [
@@ -2942,11 +2956,21 @@ test("a task's markdown renders through the shared package on card, in detail an
         await expect(link).toHaveAttribute("target", "_blank");
       }
     }
-    await expect(body.locator("table").first(), where).toBeAttached();
-    await expect(body.locator("strong").first(), where).toHaveText(
-      "Ship the reviewed release",
-    );
+    await expect(
+      body.getByRole("table", { includeHidden: !visible }).first(),
+      where,
+    ).toBeAttached();
+    const strong = body
+      .getByText("Ship the reviewed release", { exact: true })
+      .first();
+    expect(
+      await strong.evaluate((element) =>
+        Number(getComputedStyle(element).fontWeight),
+      ),
+      where,
+    ).toBeGreaterThanOrEqual(700);
     // Raw HTML is text, never markup; a `javascript:` link is no link.
+    // llmlint: ignore[e2e_uses_accessible_selectors] the property is that no script element, image or `onerror` attribute exists in the DOM at all; none of the three has a role a locator could ask for, so the elements and attribute are named as such.
     await expect(body.locator("script, img, [onerror]"), where).toHaveCount(0);
     await expect(
       body.getByRole("link", { name: "Run the cleanup" }),
@@ -2958,7 +2982,7 @@ test("a task's markdown renders through the shared package on card, in detail an
     if (!visible) return;
     // Bold is visibly bold: the same words in cells of one size differ.
     const cells = body
-      .locator("table")
+      .getByRole("table")
       .first()
       .getByRole("cell", { name: "Ship it", exact: true });
     await expect(cells).toHaveCount(2);
@@ -2994,8 +3018,7 @@ test("a task's markdown renders through the shared package on card, in detail an
       `${served.origin}/?run=${encodeURIComponent(run)}&node=notes&tab=${tab}`,
     );
     const root = page.getByRole("tabpanel", { name: panel });
-    await expect(root.locator(".otg-markdown")).toBeVisible();
-    await expect(root.locator("pre")).toHaveCount(0);
+    await expect(root.getByRole("paragraph").first()).toBeVisible();
     await check(`timeline ${tab}`, root, true);
   }
   // The criteria tab shows the section, not the prose above its heading.
@@ -3014,8 +3037,6 @@ test("a task's markdown renders through the shared package on card, in detail an
   ).toEqual({ script: undefined, onerror: undefined, link: undefined });
   expect(images).toEqual([]);
 });
-
-// ── Long realistic content, grouping, and a phone ──────────────────────────
 
 /** Whether `inner` lies wholly inside `outer`, to a pixel. */
 function inside(
@@ -3064,6 +3085,7 @@ for (const [width, height] of [
         expect(outer.width).toBeGreaterThan(main.width - 24);
       // Nothing of the card — title, source, body, a long URL — leaves it: what
       // shows of each part, after whatever clips it inside the card.
+      // llmlint: ignore[e2e_uses_accessible_selectors] "nothing leaves its card" is a property of every rendered box inside it, text runs and inline code included, most of which carry no role; the walk reads each one's geometry, never selects by a class.
       const parts = await shown.evaluate((card) =>
         [...card.querySelectorAll("*")].flatMap((part) => {
           if (part.getClientRects().length === 0) return [];
@@ -3098,14 +3120,14 @@ for (const [width, height] of [
         expect(inside(part, outer), part.what).toBe(true);
       // Badges share one row, and so do actions, each never over another.
       const badges = await shown
-        .locator(".otg-card__badges > *")
+        .getByText(/^(Critical|High|Medium|Low|Task|Question|Blocking)$/u)
         .evaluateAll((all) =>
           all.map((b) => b.getBoundingClientRect().toJSON()),
         );
+      expect(badges.length).toBeGreaterThan(0);
       expect(new Set(badges.map(({ top }) => Math.round(top))).size).toBe(1);
       const actions = await shown
-        .locator(".otg-card__actions")
-        .locator("button, a")
+        .getByRole("button")
         .evaluateAll((all) =>
           all.map((a) => a.getBoundingClientRect().toJSON()),
         );
@@ -3170,11 +3192,13 @@ test("the list groups by a remembered field, Priority first, with headings, coun
       `Source: session ${OTHER} (1)`,
     ],
   } as const;
+  // Each field as a card says it: inside the cards, never the headings.
+  const cards = list.getByRole("article");
   const badge = {
-    priority: () => list.locator(".human-item-priority"),
-    kind: () => list.locator(".human-item-kind"),
-    blocking: () => list.locator(".human-item-blocking"),
-    source: () => list.getByText(/^Source: /u).and(list.locator("span")),
+    priority: () => cards.getByText(/^(Critical|High|Medium|Low)$/u),
+    kind: () => cards.getByText(/^(Task|Question)$/u),
+    blocking: () => cards.getByText("Blocking", { exact: true }),
+    source: () => cards.getByText(/^Source: /u),
   } as const;
   for (const field of ["priority", "kind", "blocking", "source"] as const) {
     await groupBy.selectOption(field);
@@ -3196,9 +3220,7 @@ test("the list groups by a remembered field, Priority first, with headings, coun
   await groupBy.selectOption("none");
   await expect(headings).toHaveCount(0);
   expect(await titles(list)).toEqual(DECLARED.map(({ title }) => title));
-  await expect(list.locator(".human-item-priority")).toHaveCount(
-    DECLARED.length,
-  );
+  await expect(badge.priority()).toHaveCount(DECLARED.length);
   // The choice is this browser's, and survives a reload.
   await groupBy.selectOption("kind");
   await page.reload();
@@ -3247,4 +3269,136 @@ test("at phone width the filters and Group by fold behind Filters, which counts 
   await expect(kind).toBeHidden();
   await expect(toggle).toHaveAccessibleName("Filters, 2 changed");
   await expect(list.getByRole("article")).toHaveCount(QUESTIONS.length);
+});
+
+test("what is asked of a toast before its receipt waits for it, and is dropped when the receipt refuses it or never comes", async ({
+  page,
+}) => {
+  const served = await serveWorld("undo");
+  await open(page, served);
+  watch(served, SUPERVISOR);
+  const sent = writes(page);
+
+  // Reopen pressed before a receipt that says it cannot be: nothing is sent,
+  // and Reopen shows why.
+  const final = "Approve the final release notes";
+  const finalId = idOf(served, "final");
+  const releaseFinal = await holdRequests(
+    page,
+    `/api/human-items/${finalId}/complete`,
+  );
+  await page.getByRole("button", { name: `Complete: ${final}` }).click();
+  await toast(page).getByRole("button", { name: "Reopen" }).click();
+  releaseFinal();
+  await expect(outcome(page)).toHaveText(`Completed: ${final}`);
+  await expect(
+    toast(page).getByRole("button", { name: "Reopen", exact: true }),
+  ).toBeDisabled();
+  await toast(page)
+    .getByRole("button", { name: "Why Reopen is unavailable" })
+    .click();
+  await expect(toast(page).getByRole("tooltip")).toContainText(
+    "declares no undo",
+  );
+  expect(verbs(sent)).toEqual(["complete"]);
+  expect(stored(served, finalId).state).toBe("completed");
+
+  // Reopen pressed before a write that then fails: nothing is taken back, and
+  // the card returns with the reason.
+  const plain = "File the flaky-runner report";
+  const plainId = idOf(served, "plain");
+  let refuse: () => void = () => {};
+  const refused = new Promise<void>((resolve) => {
+    refuse = resolve;
+  });
+  await page.route(`**/api/human-items/${plainId}/complete`, async (route) => {
+    await refused;
+    await route.abort("connectionrefused");
+  });
+  await page.getByRole("button", { name: `Complete: ${plain}` }).click();
+  await toast(page).getByRole("button", { name: "Reopen" }).click();
+  refuse();
+  await expect(toast(page)).toHaveAttribute("data-tone", "failure");
+  await expect(card(page, plain).getByRole("alert")).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(verbs(sent)).toEqual(["complete", "complete"]);
+  expect(stored(served, plainId).state).toBe("open");
+  await page.unroute(`**/api/human-items/${plainId}/complete`);
+
+  // A reason written and sent before Dismiss's receipt goes after it.
+  const certificate = "Rotate the staging certificate";
+  const certificateId = idOf(served, "certificate");
+  const releaseDismiss = await holdRequests(
+    page,
+    `/api/human-items/${certificateId}/dismiss`,
+  );
+  await page.getByRole("button", { name: `Dismiss: ${certificate}` }).click();
+  await toast(page).getByRole("button", { name: "Add reason" }).click();
+  await toast(page)
+    .getByRole("textbox", { name: "Reason" })
+    .fill("Rotated with production");
+  await toast(page).getByRole("textbox", { name: "Reason" }).press("Enter");
+  await page.waitForTimeout(500);
+  expect(verbs(sent)).toEqual(["complete", "complete", "dismiss"]);
+  releaseDismiss();
+  await expect(outcome(page)).toHaveText(`Reason saved: ${certificate}`);
+  expect(verbs(sent)).toEqual(["complete", "complete", "dismiss", "note"]);
+  expect(stored(served, certificateId).resolution?.reason).toBe(
+    "Rotated with production",
+  );
+  expect(watch(served, SUPERVISOR)).toEqual([
+    ["human-item-completed", finalId],
+    ["human-item-dismissed", certificateId],
+    ["human-item-noted", certificateId],
+  ]);
+});
+
+test("a grouping this page does not know, or storage the browser refuses, groups by Priority and still groups as chosen", async ({
+  browser,
+}) => {
+  const served = await serveWorld("queue");
+  const headings = (page: Page) =>
+    listRegion(page).getByRole("heading", { level: 2 });
+
+  // A choice another release of the page remembered, which this one does not
+  // offer, is no choice: the list groups by Priority.
+  const remembered = await browser.newContext();
+  await remembered.addInitScript(() =>
+    window.localStorage.setItem(
+      "onepipeline-ui.human-items.group-by",
+      "assignee",
+    ),
+  );
+  const first = await remembered.newPage();
+  await open(first, served, { groupBy: null });
+  await expect(first.getByRole("combobox", { name: "Group by" })).toHaveValue(
+    "priority",
+  );
+  await expect(headings(first)).toHaveText([
+    "Critical (3)",
+    "High (3)",
+    "Low (1)",
+  ]);
+  await remembered.close();
+
+  // A browser that refuses this page its storage — as one blocking site data
+  // does, throwing on every access — still groups this visit as asked.
+  const refusing = await browser.newContext();
+  await refusing.addInitScript(() => {
+    Object.defineProperty(window, "localStorage", {
+      get() {
+        throw new DOMException("The operation is insecure.", "SecurityError");
+      },
+    });
+  });
+  const second = await refusing.newPage();
+  await open(second, served, { groupBy: null });
+  await expect(headings(second)).toHaveText([
+    "Critical (3)",
+    "High (3)",
+    "Low (1)",
+  ]);
+  await second.getByRole("combobox", { name: "Group by" }).selectOption("kind");
+  await expect(headings(second)).toHaveText(["Task (4)", "Question (3)"]);
+  await refusing.close();
 });

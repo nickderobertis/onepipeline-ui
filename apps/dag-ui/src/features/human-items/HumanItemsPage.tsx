@@ -124,7 +124,7 @@ export function HumanItemsPage({
       aria-label="Action items"
       className="human-items-page"
       data-detail-open={selectedId !== undefined}
-      style={{ "--toast-room": `${room}px` } as CSSProperties}
+      style={toastRoom(room)}
     >
       <Filters
         choice={choice}
@@ -201,6 +201,16 @@ export function HumanItemsPage({
       )}
     </section>
   );
+}
+
+/**
+ * The room the list keeps below its last card while a toast shows: a custom
+ * property, which `CSSProperties` does not name, so it is declared beside it.
+ */
+function toastRoom(
+  height: number,
+): CSSProperties & { readonly "--toast-room": string } {
+  return { "--toast-room": `${height}px` };
 }
 
 /** One heading's cards, or the whole list when nothing groups it. */

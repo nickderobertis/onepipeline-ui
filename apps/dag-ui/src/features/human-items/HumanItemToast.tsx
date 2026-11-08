@@ -1,10 +1,8 @@
 import type { HumanItemReopen } from "@onepipeline-ui/dag-model";
 import { X } from "lucide-react";
-import { type FocusEvent, useEffect, useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import type { Toast } from "./useHumanItems";
-
-/** How long a toast stays when nothing is holding it, in milliseconds. */
-export const TOAST_MS = 15_000;
+import { useToastLifecycle } from "./useToastLifecycle";
 
 const PAST = {
   answer: "Answered",
@@ -42,11 +40,8 @@ function sentence(toast: Toast): string {
 
 /**
  * The last write's toast: muted green once it went through, muted red when it or
- * what followed it failed. It leaves after {@link TOAST_MS} unless it is hovered,
- * focused or being written in — then it leaves once that ends — and a failed
- * follow-up keeps it, with the reason and whatever was typed, until it is sent
- * again or closed. Its height is reported, so the list can keep that much room
- * below its last card.
+ * what followed it failed. When it leaves, and what it holds meanwhile, is
+ * {@link useToastLifecycle}'s.
  */
 export function HumanItemToast({
   toast,
@@ -62,65 +57,14 @@ export function HumanItemToast({
   /** The toast's height in CSS pixels, or 0 once it is gone. */
   readonly onRoom: (height: number) => void;
 }) {
-  const [hovered, setHovered] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const [writing, setWriting] = useState(false);
-  const [text, setText] = useState("");
-  const [expired, setExpired] = useState(false);
-  const ref = useRef<HTMLElement>(null);
+  const { holds, writing, setWriting, text, setText } = useToastLifecycle(
+    toast,
+    onClose,
+    onRoom,
+  );
   const noteId = useId();
-  const { key, action, phase, followUp } = toast;
+  const { action, phase, followUp } = toast;
   const failed = phase === "failed" || followUp?.phase === "failed";
-  // A failed follow-up stays until it is sent again or closed.
-  const persistent =
-    followUp?.phase === "failed" || followUp?.phase === "sending";
-  const signature = `${key}:${followUp?.kind ?? ""}:${followUp?.phase ?? ""}`;
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the trigger — each new state of the toast is shown for the whole duration again.
-  useEffect(() => {
-    setExpired(false);
-    if (persistent) return;
-    const timer = setTimeout(() => setExpired(true), TOAST_MS);
-    return () => clearTimeout(timer);
-  }, [signature, persistent]);
-
-  // A new write's toast starts with nothing typed and no editor open.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `key` is the trigger.
-  useEffect(() => {
-    setWriting(false);
-    setText("");
-  }, [key]);
-
-  // A saved note is done with: its words are the item's now.
-  useEffect(() => {
-    if (followUp?.kind === "note" && followUp.phase === "done") {
-      setWriting(false);
-      setText("");
-    }
-  }, [followUp]);
-
-  const inUse = hovered || focused || writing;
-  useEffect(() => {
-    if (expired && !inUse) onClose();
-  }, [expired, inUse, onClose]);
-
-  useEffect(() => {
-    const element = ref.current;
-    if (element === null) return;
-    const report = () => onRoom(element.getBoundingClientRect().height);
-    report();
-    const observer = new ResizeObserver(report);
-    observer.observe(element);
-    return () => {
-      observer.disconnect();
-      onRoom(0);
-    };
-  }, [onRoom]);
-
-  const leaving = (event: FocusEvent<HTMLElement>) => {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null))
-      setFocused(false);
-  };
 
   const resolving = action !== "answer" && phase !== "failed";
   const undone = followUp?.kind === "undo" && followUp.phase === "done";
@@ -132,11 +76,7 @@ export function HumanItemToast({
       className="human-items-toast"
       data-phase={followUp?.phase ?? phase}
       data-tone={failed ? "failure" : "success"}
-      onBlur={leaving}
-      onFocus={() => setFocused(true)}
-      onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
-      ref={ref}
+      {...holds}
     >
       <p
         className="human-items-toast-message"
@@ -238,10 +178,11 @@ function UndoAction({
     );
   return (
     <span
+      aria-label={`${label} (unavailable)`}
       className="human-items-toast-action human-items-unavailable"
-      data-unavailable-action={label}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
+      role="group"
     >
       <button aria-describedby={tip} disabled type="button">
         {label}

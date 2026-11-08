@@ -919,11 +919,9 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     );
     const prose = await screen.findByText(/Sweep the recorded corpus/);
     // Rendered as the markdown it is: each step under a heading of its own id.
-    const panel = prose.closest(".otg-markdown");
-    expect(panel).not.toBeNull();
-    expect(
-      within(panel as HTMLElement).getByRole("heading", { name: "sweep" }),
-    ).toBeVisible();
+    const panel = screen.getByRole("tabpanel", { name: "Task" });
+    expect(panel).toContainElement(prose);
+    expect(within(panel).getByRole("heading", { name: "sweep" })).toBeVisible();
     expect(panel).toHaveTextContent("Confirm the sweep");
   });
 
