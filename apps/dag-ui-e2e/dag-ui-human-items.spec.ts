@@ -2315,31 +2315,44 @@ test("a board asked to resume refuses to start without state a board saved", () 
         timeout: 30_000,
       },
     );
-  for (const [saved, refusal] of [
+  const issue = (number: number, parent: string | null = null) => ({
+    title: `Issue ${number}`,
+    body: "",
+    number,
+    state: "OPEN",
+    reason: null,
+    status: "Todo",
+    parent,
+  });
+  const saved = (issues: Record<string, unknown>) => ({
+    repository: "generic/approval",
+    issues,
+    requests: [],
+  });
+  for (const [state, refusal] of [
     // Nothing saved at all.
     [undefined, "--resume found no readable state in"],
-    // Saved, but an issue no board keeps: it has no title.
+    // Saved, but not as a board keeps an issue: no title, or a state that is
+    // not one of GitHub's.
     [
-      {
-        repository: "generic/approval",
-        issues: {
-          I_1: {
-            body: "",
-            number: 1,
-            state: "OPEN",
-            reason: null,
-            parent: null,
-          },
-        },
-        requests: [],
-      },
-      "that no board over this seed saved",
+      saved({ I_1: { ...issue(1), title: undefined } }),
+      "issue 'I_1' is not one it keeps",
+    ],
+    [
+      saved({ I_1: { ...issue(1), state: 1 } }),
+      "issue 'I_1' is not one it keeps",
+    ],
+    // Two issues of one repository with one number, and a parent cycle.
+    [saved({ I_1: issue(1), I_2: issue(1) }), "two issues share a number"],
+    [
+      saved({ I_1: issue(1, "I_2"), I_2: issue(2, "I_1") }),
+      "is its own ancestor",
     ],
   ] as const) {
     const root = mkdtempSync(join(tmpdir(), "dag-ui-e2e-board-"));
     try {
-      if (saved !== undefined)
-        writeFileSync(join(root, "state.json"), JSON.stringify(saved));
+      if (state !== undefined)
+        writeFileSync(join(root, "state.json"), JSON.stringify(state));
       const refused = resume(root);
       expect(refused.status, refused.stderr).toBe(2);
       expect(refused.stderr).toContain(refusal);
