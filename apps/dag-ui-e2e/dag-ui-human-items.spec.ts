@@ -2412,6 +2412,50 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await answerBox(page, LAST_QUESTION).focus();
   await expect(toast(page)).toHaveCount(0);
 
+  // Nothing pointing at it and nothing focused in it, it still stays while what
+  // it was asked to do is on its way, and leaves its duration after that lands.
+  const letGo = async () => {
+    await page.mouse.move(1, 1);
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement)
+        document.activeElement.blur();
+    });
+  };
+  const cache = idOf(served, "cache");
+  await page.getByRole("button", { name: `Dismiss: ${LAST_QUESTION}` }).click();
+  await expect(outcome(page)).toHaveText(`Dismissed: ${LAST_QUESTION}`);
+  const releaseRestore = await holdRequests(
+    page,
+    `/api/human-items/${cache}/reopen`,
+  );
+  await toast(page).getByRole("button", { name: "Restore" }).click();
+  await letGo();
+  await page.clock.runFor((TOAST_SECONDS + 5) * 1_000);
+  await expect(toast(page)).toBeVisible();
+  releaseRestore();
+  await expect(outcome(page)).toHaveText(`Restored: ${LAST_QUESTION}`);
+  await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
+  await expect(toast(page)).toBeVisible();
+  await page.clock.runFor(1_500);
+  await expect(toast(page)).toHaveCount(0);
+  await page.unroute(`**/api/human-items/${cache}/reopen`);
+
+  // A reason being written holds it too, focus or no, until it is sent.
+  await page.getByRole("button", { name: `Dismiss: ${LAST_QUESTION}` }).click();
+  await expect(outcome(page)).toHaveText(`Dismissed: ${LAST_QUESTION}`);
+  await toast(page).getByRole("button", { name: "Add reason" }).click();
+  await toast(page)
+    .getByRole("textbox", { name: "Reason" })
+    .fill("Warm caches stay");
+  await letGo();
+  await page.clock.runFor((TOAST_SECONDS + 5) * 1_000);
+  await expect(toast(page)).toBeVisible();
+  await toast(page).getByRole("textbox", { name: "Reason" }).press("Enter");
+  await expect(outcome(page)).toHaveText(`Reason saved: ${LAST_QUESTION}`);
+  await letGo();
+  await page.clock.runFor((TOAST_SECONDS + 1) * 1_000);
+  await expect(toast(page)).toHaveCount(0);
+
   // A receipt slow to come: what it says is shown for the whole duration from
   // when it lands, however long the toast had already been up.
   const slow = "Review the dashboard layout";

@@ -54,10 +54,15 @@ export function useToastLifecycle(
     }
   }, [followUp]);
 
-  const inUse = hovered || focused || writing;
   useEffect(() => {
-    if (expired && !inUse) onClose();
-  }, [expired, inUse, onClose]);
+    if (!expired || hovered || writing) return;
+    // Focus is asked of the document as well as remembered: a control removed
+    // while focused — the note's field, once it is sent — fires no blur, and
+    // would otherwise hold the toast for good.
+    const holding = ref.current?.contains(document.activeElement) ?? false;
+    if (focused && holding) return;
+    onClose();
+  }, [expired, hovered, focused, writing, onClose]);
 
   useEffect(() => {
     const element = ref.current;
