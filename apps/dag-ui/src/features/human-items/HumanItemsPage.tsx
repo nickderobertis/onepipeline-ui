@@ -22,6 +22,7 @@ import { HumanItemToast } from "./HumanItemToast";
 import type { Draft } from "./human-item-drafts";
 import {
   BLOCKING_CHOICES,
+  blockedGroups,
   blockedSummary,
   changedFilters,
   DEFAULT_GROUP_BY,
@@ -850,12 +851,33 @@ function DetailPane({
         <WriteStatus state={state} />
       </div>
       <dl className="human-item-metadata">
-        {metadataFields(shown, detail).map(({ label, value }) => (
+        {metadataFields(shown).map(({ label, value }) => (
           <Fragment key={label}>
             <dt>{label}</dt>
             <dd>{value}</dd>
           </Fragment>
         ))}
+        {detail && detail.nodes.length > 0 && (
+          <>
+            <dt>Blocked steps</dt>
+            <dd>
+              <section aria-label="Blocked steps" className="human-item-steps">
+                {blockedGroups(detail).map(({ phrase, nodes }) => (
+                  <div key={phrase}>
+                    <h3>{phrase}</h3>
+                    <ul>
+                      {nodes.map((node) => (
+                        <li key={`${node.run}/${node.node}`}>
+                          {node.run} / {node.node}: {node.title}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </section>
+            </dd>
+          </>
+        )}
         {item.tracker && (
           <>
             <dt>Tracker</dt>

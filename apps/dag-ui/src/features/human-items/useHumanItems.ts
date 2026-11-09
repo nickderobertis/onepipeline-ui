@@ -118,6 +118,9 @@ export function useHumanItems(
   const [toast, setToast] = useState<Toast>();
   // Completed or dismissed here, receipt or not: gone from the list until a
   // failure brings it back.
+  // Questions a batch is out for: each holds its place until its receipt, even
+  // if the stream says it was answered first.
+  const [sending, setSending] = useState<readonly Hidden[]>([]);
   const [hidden, setHidden] = useState<Readonly<Record<string, Hidden>>>({});
   // What each accepted write's receipt says its item now is, until what the page
   // is shown of the server has caught up with it.
@@ -155,8 +158,10 @@ export function useHumanItems(
         !has(view.item.id)
       )
         shown.splice(Math.min(at, shown.length), 0, view);
+    for (const { view, at } of sending)
+      if (!has(view.item.id)) shown.splice(Math.min(at, shown.length), 0, view);
     return shown;
-  }, [pushed, settled, hidden, listedState, filterKey]);
+  }, [pushed, sending, settled, hidden, listedState, filterKey]);
   // A receipt is let go once what the page shows has caught up with it: the
   // item is served as new as the receipt, or is gone and was not to be shown.
   useEffect(() => {
@@ -205,6 +210,18 @@ export function useHumanItems(
       }
       return next;
     });
+    const answered = new Set(receipts.map(({ item }) => item.item.id));
+    setSending((all) => all.filter(({ view }) => !answered.has(view.item.id)));
+  }, []);
+  const onSending = useCallback((ids: readonly string[]) => {
+    const held = listed.current ?? [];
+    setSending(
+      ids.flatMap((id) => {
+        const at = held.findIndex(({ item }) => item.id === id);
+        const view = held[at];
+        return view === undefined ? [] : [{ view, at }];
+      }),
+    );
   }, []);
   const answers = useAnswerDrafts(
     client,
@@ -212,6 +229,7 @@ export function useHumanItems(
     filterKey,
     writing,
     onAnswered,
+    onSending,
   );
   const { retire } = answers;
 

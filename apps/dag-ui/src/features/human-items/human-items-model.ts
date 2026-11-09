@@ -133,18 +133,13 @@ export interface MetadataField {
 
 /**
  * Everything about an item rather than in it, as the detail's metadata block
- * labels it. The tracker is the block's own, since it is a link.
+ * labels it. The tracker and the blocked steps are the block's own, since
+ * those are a link and a list.
  */
-export function metadataFields(
-  view: HumanItemView,
-  detail: HumanItemDetail | undefined,
-): MetadataField[] {
+export function metadataFields(view: HumanItemView): MetadataField[] {
   const { item } = view;
   const { plan, run } = item.owner;
   const blocks = blockedPhrases(view).join("; ");
-  const steps = detail?.nodes.map(
-    ({ run: at, node, title }) => `${at} / ${node}: ${title}`,
-  );
   const resolvedLabel: Partial<Record<HumanItem["state"], string>> = {
     answered: "Answered",
     completed: "Completed",
@@ -159,9 +154,6 @@ export function metadataFields(
     ...(plan === null ? [] : [{ label: "Plan", value: plan }]),
     ...(run === null ? [] : [{ label: "Run", value: run }]),
     { label: "Blocks", value: blocks === "" ? "Nothing" : blocks },
-    ...(steps !== undefined && steps.length > 0
-      ? [{ label: "Blocked steps", value: steps.join("; ") }]
-      : []),
     { label: "Raised", value: formatAbsoluteTimestamp(item.created_at) },
     ...(resolved === undefined
       ? []

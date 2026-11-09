@@ -62,6 +62,8 @@ export function useAnswerDrafts(
   /** Whether a write the page itself made is out for this item. */
   writing: (id: string) => boolean,
   onAnswered: (receipts: readonly HumanItemReceipt[]) => void,
+  /** The ids a batch is about to carry, or `[]` once none is out. */
+  onSending: (ids: readonly string[]) => void,
 ) {
   const [drafts, setDrafts] = useState<Drafts>(() => storedDrafts() ?? {});
   const [refusals, setRefusals] = useState<Readonly<Record<string, string>>>(
@@ -157,6 +159,7 @@ export function useAnswerDrafts(
     sendingNow.current = true;
     setSending(true);
     setSendError(undefined);
+    onSending(answers.map(({ id }) => id));
     try {
       const receipt = await client.answerHumanItems(answers);
       for (const { item } of receipt.answered) {
@@ -175,8 +178,9 @@ export function useAnswerDrafts(
     } finally {
       sendingNow.current = false;
       setSending(false);
+      onSending([]);
     }
-  }, [batch, client, onAnswered, settleRefused]);
+  }, [batch, client, onAnswered, onSending, settleRefused]);
 
   const discard = useCallback(() => {
     for (const id of Object.keys(held.current)) storeDraft(id, undefined);

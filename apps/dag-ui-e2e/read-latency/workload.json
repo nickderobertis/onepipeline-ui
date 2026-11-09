@@ -10,5 +10,8 @@
   "human_item_bytes_at_start": 112010,
   "human_item_raises_at_start": 50,
   "writes": 40,
-  "write_spacing_s": 3
+  "write_spacing_s": 3,
+  "batch_questions": 50,
+  "batch_with_choices": 25,
+  "batch_choices_each": 3
 }

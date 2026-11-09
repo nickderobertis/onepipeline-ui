@@ -85,6 +85,51 @@ const pageSchema = z
       refuse("a page's request rate is its requests over its window");
   });
 
+/** A tab open on Action items while the page batch-answered: when its list emptied. */
+const batchTab = z.object({
+  /** Seconds from the send bar's press to the last of the batch leaving this list. */
+  lag_s: figure,
+  left_at_ms: figure,
+  /** Requests this tab sent during the phase. */
+  requests: count,
+  /** How many of the batch's titles this tab still lists when the phase ends. */
+  still_listed: count,
+});
+
+/**
+ * One batch of answers sent with one press of the send bar, watched from the tab
+ * that sent it (filtered) and one that only reads (unfiltered).
+ */
+const batchSchema = z
+  .object({
+    questions: z.literal(workload.batch_questions),
+    with_choices: z.literal(workload.batch_with_choices),
+    choices_each: z.literal(workload.batch_choices_each),
+    requests: z.literal(1),
+    answers_in_request: z.literal(workload.batch_questions),
+    answered: z.literal(workload.batch_questions),
+    pressed_at_ms: figure,
+    committed_at_ms: figure,
+    response_s: figure,
+    tabs: z.object({ unfiltered: batchTab, filtered: batchTab }),
+    host_load: z.object({ start: hostLoad, end: hostLoad }),
+  })
+  .superRefine((batch, context) => {
+    const refuse = (message: string) =>
+      context.addIssue({ code: "custom", message });
+    if (batch.committed_at_ms < batch.pressed_at_ms)
+      refuse("a batch commits after its press");
+    for (const name of PAGES) {
+      const tab = batch.tabs[name];
+      if (tab.still_listed !== 0)
+        refuse(`every question of the batch leaves the ${name} tab's list`);
+      if (Math.abs(tab.left_at_ms - batch.pressed_at_ms - tab.lag_s * 1000) > 5)
+        refuse(`the ${name} tab's lag is from the press to its list emptying`);
+    }
+    if (batch.tabs.unfiltered.requests !== 0)
+      refuse("the tab that sends nothing sends nothing");
+  });
+
 /** What each page's filter selects: the page's whole point. */
 const selecting = (selected: (filter: Record<string, unknown>) => boolean) =>
   pageSchema.refine(({ filter }) => selected(filter), {
@@ -92,7 +137,7 @@ const selecting = (selected: (filter: Record<string, unknown>) => boolean) =>
   });
 
 export const telemetrySchema = z.object({
-  schema_version: z.literal(1),
+  schema_version: z.literal(2),
   recorded_at: z.iso.datetime(),
   commit: z.string().regex(/^[0-9a-f]{40}$/u),
   dirty: z.boolean(),
@@ -104,5 +149,6 @@ export const telemetrySchema = z.object({
     unfiltered: selecting((filter) => Object.keys(filter).length === 0),
     filtered: selecting((filter) => Object.keys(filter).length > 0),
   }),
+  batch: batchSchema,
 });
 export type Telemetry = z.infer<typeof telemetrySchema>;

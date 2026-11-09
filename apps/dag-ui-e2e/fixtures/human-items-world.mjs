@@ -233,7 +233,7 @@ function startBoard(dir, seed, token, resume = false) {
   return { board, url: readFileSync(endpoint, "utf8") };
 }
 
-function writeConfiguration(workspace, endpoint) {
+function writeConfiguration(workspace, endpoint, repository) {
   const at = paths(workspace);
   mkdirSync(join(at.config, "onepipeline"), { recursive: true });
   writeFileSync(
@@ -282,7 +282,7 @@ function writeConfiguration(workspace, endpoint) {
       "    config:",
       "      owner: generic",
       "      project_number: 1",
-      "      repository: generic/approval",
+      `      repository: ${repository}`,
       "      token_env: CACHE_BOARD_TOKEN",
       `      endpoint: ${endpoint}/graphql`,
       "      status_mapping:",
@@ -317,7 +317,7 @@ const STATUS_OPTIONS = [
  * human` issue of the plan — and `human`, the project projected tasks of no plan
  * are filed under. Its issues are what the board serves when it starts.
  */
-function boardSeed(plans) {
+function boardSeed(plans, repository) {
   let number = 0;
   const issue = (title, content, metadata, parent, blockedBy) => ({
     number: ++number,
@@ -366,7 +366,7 @@ function boardSeed(plans) {
       );
     }
   }
-  return { repository: "generic/approval", options: STATUS_OPTIONS, issues };
+  return { repository, options: STATUS_OPTIONS, issues };
 }
 
 /** The run `start` launched, driven until it waits on a person. */
@@ -904,6 +904,25 @@ function buildSessions(workspace, token) {
   return { ids, runs: {}, plans: {}, sessions: SESSIONS };
 }
 
+/** One task whose tracker reference is too long for a card's chip. */
+function buildLongTracker(workspace, token) {
+  return {
+    ids: {
+      tracked: raise(workspace, token, SUPERVISOR_SESSION, {
+        dedup_key: "long-tracker",
+        kind: "task",
+        title: "Carry a very long tracker reference",
+        body: "Nothing else about this task is long.",
+        priority: "medium",
+        owner: owner(),
+        block: { scope: "nothing" },
+      }),
+    },
+    runs: {},
+    plans: {},
+  };
+}
+
 const WORLDS = {
   sessions: { plans: {}, build: buildSessions },
   queue: { plans: QUEUE_PLANS, build: buildQueue },
@@ -916,6 +935,11 @@ const WORLDS = {
   markdown: { plans: MARKDOWN_PLANS, build: buildMarkdown },
   realistic: { plans: {}, build: buildRealistic },
   "gallery-states": { plans: {}, build: buildGalleryStates },
+  "long-tracker": {
+    plans: {},
+    build: buildLongTracker,
+    repository: `generic/${"very-long-tracker-repository-name-".repeat(3)}x`,
+  },
 };
 
 /**
@@ -930,6 +954,7 @@ export function humanItemsWorld(workspace, name) {
       `'${name}' is not a human-items world; name one of ${Object.keys(WORLDS).join(", ")}`,
     );
   const at = paths(workspace);
+  const repository = kind.repository ?? "generic/approval";
   const built = join(workspace, BUILT);
   // A template is copied in before anything reads the workspace, so from here a
   // copied world is one served again, its board aside.
@@ -948,7 +973,7 @@ export function humanItemsWorld(workspace, name) {
     build: () => {
       for (const dir of [at.runs, at.intents, at.work, at.state])
         mkdirSync(dir, { recursive: true });
-      writeFileSync(at.seed, JSON.stringify(boardSeed(kind.plans)));
+      writeFileSync(at.seed, JSON.stringify(boardSeed(kind.plans, repository)));
       // A copied world's board resumes what the build left on it; a world served
       // again starts its board from the seed, as it always has.
       const started = startBoard(
@@ -958,7 +983,7 @@ export function humanItemsWorld(workspace, name) {
         template !== undefined,
       );
       board = started.board;
-      writeConfiguration(workspace, started.url);
+      writeConfiguration(workspace, started.url, repository);
       if (kept !== undefined) {
         world = kept.world;
         return;
