@@ -1100,7 +1100,7 @@ test("Tab moves straight between answer boxes, Enter only keeps a draft, Shift+E
     watch(served, SUPERVISOR)
       .map(([, id]) => id)
       .sort(),
-  ).toEqual([region, idOf(served, "export")].sort());
+  ).toEqual([region, idOf(served, "export"), idOf(served, "cache")].sort());
   expect(watch(served, OTHER)).toEqual([]);
 });
 
@@ -4744,15 +4744,19 @@ for (const [width, height] of [
     const region = await box(sendRegion(page));
     const toasted = await box(toast(page));
     expect(overlap(region, toasted)).toBe(false);
+    // The list ends where the bar starts, so what scrolls past is clipped by it.
+    const listed = await box(listRegion(page));
+    expect(listed.y + listed.height).toBeLessThanOrEqual(region.y + 1);
     for (const action of await page
       .getByRole("article")
       .getByRole("button")
       .all()) {
       if (!(await action.isVisible()) || !(await action.isEnabled())) continue;
       const button = await box(action);
-      if (button.y < 0 || button.y >= height) continue;
+      if (button.y + button.height <= listed.y) continue;
+      if (button.y >= listed.y + listed.height) continue;
       expect(overlap(button, region), "a card action under the bar").toBe(
-        false,
+        button.y + button.height > listed.y + listed.height,
       );
     }
     await context.close();
