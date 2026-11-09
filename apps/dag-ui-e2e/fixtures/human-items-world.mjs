@@ -58,6 +58,61 @@ const listedSchema = z.array(
     item: z.looseObject({ id: z.string().min(1), dedup_key: z.string() }),
   }),
 );
+/** A line of the journal, as far as restamping reads it. */
+const journalEventSchema = z.looseObject({
+  ts: z.string(),
+  payload: z.looseObject({
+    item: z.looseObject({
+      id: z.string().min(1),
+      created_at: z.string(),
+      updated_at: z.string(),
+    }),
+  }),
+});
+/**
+ * The instant a capture names (`capture-clock.ts`), if this start is one. The other
+ * half of `runs.mjs`'s corpus clock, which the engine's own stamps cannot read.
+ */
+const NAMED_NOW = z.iso
+  .datetime()
+  .transform((instant) => Date.parse(instant))
+  .optional()
+  .parse(process.env.DAG_UI_FIXTURE_NOW);
+/** How far apart a restamped journal's events are. */
+const RESTAMPED_EVENT_GAP_MS = 60_000;
+
+/**
+ * Put a world's journal on the clock a capture names.
+ *
+ * The engine stamps every event from the wall clock and has no way to be told
+ * otherwise, and an item's detail prints when it was raised, so a capture of a
+ * world as the engine wrote it differs from the next capture of the same build.
+ * Each event takes its place in the journal instead of the moment it was written,
+ * which keeps the order everything sorts by. Without a named instant the journal
+ * stays as the engine wrote it. The index is a fold of the old bytes, so it goes
+ * with them and the next read folds the restamped journal.
+ */
+function restampJournal(workspace) {
+  if (NAMED_NOW === undefined) return;
+  const journal = join(paths(workspace).runs, "human-items", "events.ndjson");
+  const lines = readFileSync(journal, "utf8").trimEnd().split("\n");
+  const raisedAt = new Map();
+  const restamped = lines.map((line, index) => {
+    const event = journalEventSchema.parse(JSON.parse(line));
+    const { item } = event.payload;
+    const stamp = new Date(
+      NAMED_NOW - (lines.length - index) * RESTAMPED_EVENT_GAP_MS,
+    ).toISOString();
+    if (!raisedAt.has(item.id)) raisedAt.set(item.id, stamp);
+    event.ts = stamp;
+    item.created_at = raisedAt.get(item.id);
+    item.updated_at = stamp;
+    return JSON.stringify(event);
+  });
+  writeFileSync(journal, `${restamped.join("\n")}\n`);
+  rmSync(join(dirname(journal), "index.json"), { force: true });
+}
+
 /** What a built world keeps beside itself to be served again. */
 const builtSchema = z.object({
   token: z.string().min(1),
@@ -1003,6 +1058,7 @@ export function humanItemsWorld(workspace, name) {
       writeFileSync(join(workspace, ACTING), SUPERVISOR_SESSION);
       const builtAt = Date.now();
       world = kind.build(workspace, token);
+      restampJournal(workspace);
       writeFileSync(built, JSON.stringify({ token, world }));
       keepTemplate(name, workspace, builtAt);
     },
