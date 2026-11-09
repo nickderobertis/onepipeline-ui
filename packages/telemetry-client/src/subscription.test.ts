@@ -7,7 +7,12 @@ import {
 } from "@onepipeline-ui/dag-model";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { type LiveCause, type LiveState, TelemetryClient } from "./index.js";
+import {
+  type LiveCause,
+  type LiveState,
+  READ_DEADLINE_MS,
+  TelemetryClient,
+} from "./index.js";
 
 const EPOCH = "0198a5b3-2c4d-4e60-8f01-0000000e9c00";
 const SUBSCRIPTION = "0198a5b3-2c4d-4e60-8f01-0000005ab001";
@@ -142,7 +147,7 @@ test("applies each frame onto the one before it, once, and resumes from what it 
   source.frame("run.changed", { id: id(3), base: id(1), row: row("settled") });
   // A replayed frame already applied is ignored.
   source.frame("run.changed", { id: id(3), base: id(1), row: row("bogus") });
-  expect(states.map(([state]) => state.sidebar[0]?.state)).toStrictEqual([
+  expect(states.map(([state]) => state.sidebar?.[0]?.state)).toStrictEqual([
     "running",
     "settled",
   ]);
@@ -714,4 +719,93 @@ test("a view started paused answers its state with no stream until resumed", asy
   live.resume();
   expect(h.sources).toHaveLength(1);
   live.close();
+});
+
+test("takes a run view's rows from its stream's first frame, and a first answer it is handed", async () => {
+  const h = harness();
+  const states: LiveState[] = [];
+  const answer = {
+    subscription: SUBSCRIPTION,
+    view: { type: "sidebar" },
+    initial: {
+      type: "snapshot",
+      snapshot: { ...snapshot(1), sidebar: null },
+    },
+  };
+  h.client.live({
+    view: { type: "sidebar" },
+    onState: (state) => states.push(state),
+    initial: answer,
+  });
+  // The handed answer is this subscription's: nothing is created.
+  expect(h.bodies).toHaveLength(0);
+  expect(states[0]?.sidebar).toBeUndefined();
+  await vi.waitFor(() => expect(h.sources).toHaveLength(1));
+  sourceAt(h, 0).frame("sidebar.snapshot", {
+    id: id(2),
+    base: id(1),
+    rows: [row("running")],
+  });
+  expect(states.at(-1)?.sidebar?.[0]?.state).toBe("running");
+});
+
+test("fails a stream that never opens at the one deadline, and not one that has", async () => {
+  const h = harness();
+  const errors: string[] = [];
+  h.client.live({
+    view: { type: "sidebar" },
+    onState: () => undefined,
+    onError: (error) => errors.push(error.message),
+  });
+  await vi.waitFor(() => expect(h.sources).toHaveLength(1));
+  const opened = harness();
+  const quiet: string[] = [];
+  opened.client.live({
+    view: { type: "sidebar" },
+    onState: () => undefined,
+    onError: (error) => quiet.push(error.message),
+  });
+  await vi.waitFor(() => expect(opened.sources).toHaveLength(1));
+  sourceAt(opened, 0).onopen?.(new Event("open"));
+  // Waiting for each source advanced the fake clock too, so the first stream's
+  // deadline is near this one's rather than exactly on it.
+  await vi.advanceTimersByTimeAsync(READ_DEADLINE_MS - 1_000);
+  expect(errors).toStrictEqual([]);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(errors).toStrictEqual([
+    "Opening the live stream got no answer within 30 seconds, so nothing here is up to date.",
+  ]);
+  expect(quiet).toStrictEqual([]);
+});
+
+test("gives a page of history the one deadline, and sends what it is asked", async () => {
+  const urls: string[] = [];
+  const held = new TelemetryClient("http://localhost", {
+    fetch: ((input: RequestInfo | URL, init?: RequestInit) => {
+      urls.push(String(input));
+      return new Promise((_, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("aborted", "AbortError")),
+        );
+      });
+    }) as typeof fetch,
+  });
+  const page = held.getTimelineEvents(SERVED_RUN, {
+    scope: "node",
+    node: "worker",
+    cursor: "c1",
+  });
+  const refusal = expect(page).rejects.toMatchObject({
+    code: "deadline",
+    message: expect.stringContaining("within 30 seconds"),
+  });
+  await vi.advanceTimersByTimeAsync(READ_DEADLINE_MS);
+  await refusal;
+  const url = new URL(urls[0] ?? "");
+  expect(url.pathname.endsWith("/timeline/events")).toBe(true);
+  expect(Object.fromEntries(url.searchParams)).toStrictEqual({
+    scope: "node",
+    node: "worker",
+    cursor: "c1",
+  });
 });

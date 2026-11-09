@@ -1,7 +1,7 @@
 import type {
   ChannelQueue,
   LiveActivity,
-  RunDetail,
+  LiveRunDetail,
   RunTimeline,
   SidebarRow,
   SubscriptionView,
@@ -14,6 +14,7 @@ import {
   TelemetryClientError,
 } from "@onepipeline-ui/telemetry-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { subscriptionView } from "../../first-screen/address";
 import type {
   HumanItemsView,
   LiveHumanItems,
@@ -21,6 +22,7 @@ import type {
 import { changedRowCount, newestRows } from "../../lib/sidebar-model";
 import type { UpdateSetting } from "../../lib/update-settings";
 import { useHeldArea } from "../../lib/useHeldArea";
+import type { FirstRead } from "../../main";
 
 // llmlint: ignore-file[changed_behavior_has_e2e] The browser journeys in
 // apps/dag-ui-e2e/dag-ui-live-updates.spec.ts drive every branch a conforming
@@ -58,6 +60,8 @@ export interface DagTelemetryOptions {
   readonly navigationUpdates: UpdateSetting;
   /** How the main area takes the view's changes the stream delivers. */
   readonly mainUpdates: UpdateSetting;
+  /** The first read the page's entry already made, taken over here. */
+  readonly first?: FirstRead;
 }
 
 /** What the main area shows of one state: the view it was served for. */
@@ -81,7 +85,7 @@ export interface DagTelemetryState {
   readonly mainWaiting: number;
   /** The run being shown: the requested one when it is served, else the newest. */
   readonly runId?: string;
-  readonly detail?: RunDetail;
+  readonly detail?: LiveRunDetail;
   readonly timeline?: RunTimeline;
   readonly channel?: ChannelQueue;
   readonly humanItems: LiveHumanItems;
@@ -163,6 +167,8 @@ export function useDagTelemetry(
   const live = useRef<LiveView | undefined>(undefined);
   const viewRef = useRef(view);
   viewRef.current = view;
+  // The entry's own read counts once, for the first subscription this page makes.
+  const firstRead = useRef(options.first);
   const navigation = useHeldArea(options.navigationUpdates, setNavigationRows);
   const main = useHeldArea<MainCopy>(
     options.mainUpdates,
@@ -193,15 +199,27 @@ export function useDagTelemetry(
   useEffect(() => {
     setError(undefined);
     let first = true;
+    const entry = firstRead.current;
+    firstRead.current = undefined;
+    if (entry?.error !== undefined) {
+      setError(entry.error);
+      return;
+    }
     const subscription = client.live({
       view: viewRef.current,
       paused: !wantsStream.current,
+      ...(entry?.answer !== undefined &&
+      JSON.stringify(entry.address.view) === JSON.stringify(viewRef.current)
+        ? { initial: entry.answer }
+        : {}),
       onState: (next, cause) => {
         // The rows as of the last frame applied, which is what says which runs
         // exist, whatever either area is showing.
         const before = latestRows.current;
-        latestRows.current = next.sidebar;
-        setRows(next.sidebar);
+        if (next.sidebar !== undefined) {
+          latestRows.current = next.sidebar;
+          setRows(next.sidebar);
+        }
         setError(undefined);
         setStreamError(undefined);
         const copy: MainCopy = {
@@ -214,7 +232,9 @@ export function useDagTelemetry(
           // everything: it shows. The rows are the navigation's only when this
           // subscription has shown it none yet.
           main.show(copy);
-          if (first) navigation.show(next.sidebar);
+          if (next.sidebar === undefined) {
+            // The rows are this stream's first frame.
+          } else if (first) navigation.show(next.sidebar);
           else if (before !== next.sidebar) {
             const moved = changedRowCount(before, next.sidebar);
             if (moved > 0) navigation.offer(next.sidebar, moved);
@@ -223,14 +243,20 @@ export function useDagTelemetry(
           return;
         }
         if (cause.kind === "reset") {
-          navigation.offer(next.sidebar);
+          if (next.sidebar !== undefined) navigation.offer(next.sidebar);
           main.offer(copy);
+          return;
+        }
+        if (cause.frame.type === "sidebar.snapshot") {
+          // The rows the snapshot did not hold, shown as a read's are.
+          navigation.show(cause.frame.rows);
           return;
         }
         const rowFrame =
           cause.frame.type === "run.changed" ||
           cause.frame.type === "run.removed";
-        if (rowFrame) navigation.offer(next.sidebar);
+        if (rowFrame && next.sidebar !== undefined)
+          navigation.offer(next.sidebar);
         if (!rowFrame || next.visible.type === "sidebar") main.offer(copy);
       },
       onError: (caught) => {
@@ -309,7 +335,7 @@ export function useDagTelemetry(
       ? visible
       : undefined;
   // The detail stays on screen across a change of view of the same run.
-  const heldDetail = useRef<RunDetail | undefined>(undefined);
+  const heldDetail = useRef<LiveRunDetail | undefined>(undefined);
   const detail =
     shown?.detail ??
     (heldDetail.current?.run.run_id === runId ? heldDetail.current : undefined);
@@ -338,35 +364,6 @@ export function useDagTelemetry(
   };
 }
 
-/** The subscription a page state shows. */
-function subscriptionView(
-  runId: string | undefined,
-  kind: RunViewKind,
-  nodeId: string | undefined,
-  filter: string | undefined,
-): SubscriptionView {
-  if (runId === undefined) return { type: "sidebar" };
-  const filtered = filter === undefined ? {} : { filter };
-  switch (kind) {
-    case "channel":
-      return { type: "channel", run_id: runId };
-    case "overall":
-      return { type: "timeline", run_id: runId, scope: "run", ...filtered };
-    case "node":
-      return nodeId === undefined
-        ? { type: "detail", run_id: runId, ...filtered }
-        : {
-            type: "timeline",
-            run_id: runId,
-            scope: "node",
-            node: nodeId,
-            ...filtered,
-          };
-    case "graph":
-      return { type: "detail", run_id: runId, ...filtered };
-  }
-}
-
 /** Whether the visible state the server sent is the view the page asks for. */
 function sameView(
   visible: Exclude<LiveState["visible"], { type: "sidebar" | "human-items" }>,
@@ -383,7 +380,9 @@ function sameView(
 }
 
 /** The header's live activity line, as the detail carries it. */
-function activityOf(detail: RunDetail | undefined): readonly LiveActivity[] {
+function activityOf(
+  detail: LiveRunDetail | undefined,
+): readonly LiveActivity[] {
   const candidate = detail?.run.live_activity;
   if (candidate === undefined) return [];
   // The live view validates each patched detail as a whole; the activity line

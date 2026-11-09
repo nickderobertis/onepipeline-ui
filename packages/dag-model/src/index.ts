@@ -38,6 +38,12 @@ export const API_V2_PATHS = {
     `/api/v2/runs/${encodeURIComponent(runId)}/conversations/${encodeURIComponent(conversationId)}`,
   artifact: (runId: string, artifactId: string) =>
     `/api/v2/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`,
+  /**
+   * A run's timeline rows on demand, one page at a time (schema 28): what the
+   * first answer and its later frames leave out of a span's `events`.
+   */
+  timelineEvents: (runId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/timeline/events`,
   events: "/api/v2/events",
   /**
    * The post-launch verbs, wrapped: every route below `events` is a thin call
@@ -110,6 +116,11 @@ export const API_V2_QUERY = {
   after: "after",
   cursor: "cursor",
   limit: "limit",
+  /** The span a timeline page reads (`timeline/events`). */
+  span: "span",
+  /** The earliest and latest stamps of a timeline page, inclusive. */
+  from: "from",
+  to: "to",
   /**
    * Which runs the run-list route answers about, by name: a comma-separated list
    * of run ids. It answers the same rows in the same order, names the ones it
@@ -276,7 +287,7 @@ export const API_V2_FILTER_PROFILES = {
  * served with the same meaning; the literal moves because a client written against
  * `26` switches on a vocabulary that holds neither word.
  */
-export const TELEMETRY_SCHEMA_VERSION = 27;
+export const TELEMETRY_SCHEMA_VERSION = 28;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -784,41 +795,40 @@ export const nodeSetsSchema = z.array(z.string());
  * shape to non-empty prose, so an agent or human node that lost its task is still a
  * contract violation rather than a silently blank node view.
  */
-export const planTaskSchema = planStepSchema
-  .extend({
-    task: z.string().min(1).optional(),
-    repo: z.string().min(1).optional(),
-    steps: z.array(planStepSchema).min(1).optional(),
-    session: z.string().min(1).optional(),
-    project_dir: z.string().min(1).optional(),
-    base_branch: z.string().min(1).optional(),
-    branch: z.string().min(1).optional(),
-    title: z.string().min(1).optional(),
-    verify_cmd: z.string().min(1).optional(),
-    skip_verify: z.boolean().optional(),
-    verify_via_ci: z.boolean().optional(),
-    merge_policy: z.enum(["auto", "direct", "none"]).optional(),
-    workflow: z.enum(["local", "remote"]).optional(),
-    repo_type: z.enum(["single-owner", "team"]).optional(),
-    execution_checkout: z.string().min(1).optional(),
-    stack_bases: z.array(stackBaseSchema).optional(),
-    resume: planTaskResumeSchema.optional(),
-    /**
-     * The node's ordered graph overrides; absent is `[]`. A node, never a step:
-     * the engine declares no `sets` on a step. An explicit `[]` is kept as
-     * written, which is how an `add` or a `retry` says the node carries none.
-     */
-    sets: nodeSetsSchema.optional(),
-  })
-  .superRefine((task, context) => {
-    if (task.steps === undefined && task.task === undefined) {
-      context.addIssue({
-        code: "custom",
-        path: ["task"],
-        message: "a plan task without `steps` must carry its own `task` prose",
-      });
-    }
-  });
+const planTaskFields = planStepSchema.extend({
+  task: z.string().min(1).optional(),
+  repo: z.string().min(1).optional(),
+  steps: z.array(planStepSchema).min(1).optional(),
+  session: z.string().min(1).optional(),
+  project_dir: z.string().min(1).optional(),
+  base_branch: z.string().min(1).optional(),
+  branch: z.string().min(1).optional(),
+  title: z.string().min(1).optional(),
+  verify_cmd: z.string().min(1).optional(),
+  skip_verify: z.boolean().optional(),
+  verify_via_ci: z.boolean().optional(),
+  merge_policy: z.enum(["auto", "direct", "none"]).optional(),
+  workflow: z.enum(["local", "remote"]).optional(),
+  repo_type: z.enum(["single-owner", "team"]).optional(),
+  execution_checkout: z.string().min(1).optional(),
+  stack_bases: z.array(stackBaseSchema).optional(),
+  resume: planTaskResumeSchema.optional(),
+  /**
+   * The node's ordered graph overrides; absent is `[]`. A node, never a step:
+   * the engine declares no `sets` on a step. An explicit `[]` is kept as
+   * written, which is how an `add` or a `retry` says the node carries none.
+   */
+  sets: nodeSetsSchema.optional(),
+});
+export const planTaskSchema = planTaskFields.superRefine((task, context) => {
+  if (task.steps === undefined && task.task === undefined) {
+    context.addIssue({
+      code: "custom",
+      path: ["task"],
+      message: "a plan task without `steps` must carry its own `task` prose",
+    });
+  }
+});
 const artifactPathsSchema = openObject({
   gate_log: z.string().optional(),
   worker_report: z.string().optional(),
@@ -1024,7 +1034,7 @@ export const decisionSchema = openObject({
  * continuous, so the graph a run is converging toward is one graph, with every
  * committed live edit applied to it.
  */
-export const graphStateSchema = openObject({
+const graphStateFields = openObject({
   run_id: z.string().min(1),
   plan: openObject({
     tasks: z.array(planTaskSchema),
@@ -1062,7 +1072,19 @@ export const graphStateSchema = openObject({
    * Absent is `[]` — a cleared list and one nobody set read the same.
    */
   run_node_sets: nodeSetsSchema.optional(),
-}).superRefine((graph, context) => {
+});
+export const graphStateSchema = graphStateFields.superRefine(checkGraph);
+
+/** Every plan task has one status, and every status one plan task. */
+function checkGraph(
+  graph: {
+    readonly plan: { readonly tasks: readonly { readonly id: string }[] };
+    readonly node_status: Readonly<Record<string, unknown>>;
+    readonly node_gated_by: Readonly<Record<string, readonly string[]>>;
+    readonly node_control: Readonly<Record<string, unknown>>;
+  },
+  context: z.RefinementCtx,
+): void {
   const taskIds = new Set(graph.plan.tasks.map((task) => task.id));
   const statusIds = new Set(Object.keys(graph.node_status));
   if (
@@ -1103,7 +1125,7 @@ export const graphStateSchema = openObject({
       message: "must name only nodes the run has in flight",
     });
   }
-});
+}
 
 export const conversationUsageSchema = openObject({
   cacheReadTokens: usageValue.optional(),
@@ -1283,9 +1305,18 @@ export const liveActivitySchema: z.ZodType<LiveActivity> = z.object({
 });
 export const liveActivityListSchema = z.array(liveActivitySchema);
 
+/**
+ * The SDK's telemetry document. `as_of` (schema 28) is when a live reading last
+ * folded it, RFC 3339, absent from a complete read's own document.
+ */
+export const telemetryDocumentSchema = openObject({
+  schema_version: counter,
+  as_of: timestamp.optional(),
+});
+
 export const runDetailSchema = openObject({
   /** The exact SDK telemetry document, including counters and millisecond buckets. */
-  telemetry: openObject({ schema_version: counter }).optional(),
+  telemetry: telemetryDocumentSchema.optional(),
   api_version: z.literal(2),
   telemetry_schema_version: z.literal(TELEMETRY_SCHEMA_VERSION),
   observed_at: timestamp,
@@ -1303,6 +1334,93 @@ export const runDetailSchema = openObject({
   launch: runLaunchSchema.optional(),
   provider_health: providerHealthSchema.optional(),
 });
+
+/**
+ * What a payload still holds back (schema 28). While `complete` is false, a member
+ * absent from the payload means not yet known: the page draws "Loading…" or withholds
+ * its control, never a zero, an empty or a default.
+ */
+export const progressSchema = z.strictObject({
+  complete: z.boolean(),
+  loading: z.array(z.string()),
+  failed: z.string().optional(),
+});
+export type Progress = z.infer<typeof progressSchema>;
+
+/** How a value no selective read holds is served in place of itself. */
+export const loadingMarkSchema = z.strictObject({ loading: z.literal(true) });
+export type LoadingMark = z.infer<typeof loadingMarkSchema>;
+
+export function isLoadingMark(value: unknown): value is LoadingMark {
+  return loadingMarkSchema.safeParse(value).success;
+}
+
+const liveNodeTelemetrySchema = nodeTelemetrySchema.partial({
+  sessions: true,
+  turns: true,
+  lint: true,
+  timing_quality: true,
+  linkage_quality: true,
+  timing_presence: true,
+});
+
+const liveTimingSchema = timingSchema.partial().extend({
+  wall_seconds: measured,
+});
+
+const liveRunTelemetrySchema = runTelemetrySchema
+  .partial({
+    usage: true,
+    timing_quality: true,
+    linkage_quality: true,
+    timing_presence: true,
+    sources: true,
+    node_work_ms: true,
+    lint: true,
+  })
+  .extend({
+    timing: liveTimingSchema,
+    nodes: z.array(liveNodeTelemetrySchema),
+    turns: z.union([counter, loadingMarkSchema]),
+    live_activity: liveActivityListSchema.optional(),
+  });
+
+const liveGraphStateSchema = graphStateFields
+  .partial({
+    node_states: true,
+    decisions: true,
+    attestations: true,
+  })
+  .extend({
+    plan: openObject({
+      // The prose joins with the rest of the run, so a first answer's task carries
+      // no `task` and is not held to the refinement a complete document is.
+      tasks: z.array(planTaskFields),
+      schema_version: counter.optional(),
+      concurrency: counter.positive().optional(),
+      name: z.string().min(1).optional(),
+      goal: openObject({
+        id: z.string().min(1),
+        text: z.string().min(1),
+      }).optional(),
+    }),
+  })
+  .superRefine(checkGraph);
+
+/**
+ * The detail a subscription serves: a {@link runDetailSchema} with `progress`, whose
+ * members a first answer leaves out are optional and whose `run.turns` may be marked
+ * loading. Only ever read off a subscription; the `GET` routes are complete documents.
+ */
+export const liveRunDetailSchema = runDetailSchema.extend({
+  run: liveRunTelemetrySchema,
+  graph: liveGraphStateSchema.nullable(),
+  conversations: runConversationsSchema.optional(),
+  progress: progressSchema.optional(),
+});
+export type LiveRunDetail = z.infer<typeof liveRunDetailSchema>;
+export type LiveGraphState = z.infer<typeof liveGraphStateSchema>;
+export type LiveNodeTelemetry = z.infer<typeof liveNodeTelemetrySchema>;
 
 export const timelineReferenceKindSchema = z.enum([
   "conversation",
@@ -1658,6 +1776,11 @@ export const timelineSpanSchema = openObject({
   started_at: timestamp,
   ended_at: timestamp.nullable(),
   events: z.array(timelineEventSchema),
+  /**
+   * How many events the span holds in all (schema 28), wherever `events` is not all
+   * of them: a node's first answer lists the latest 40, and Overall lists none.
+   */
+  events_total: counter.optional(),
   parent_id: z.string().min(1).optional(),
   node_id: z.string().min(1).optional(),
   step_id: z.string().min(1).optional(),
@@ -1734,7 +1857,28 @@ export const runTimelineSchema = openObject({
   observed_at: timestamp,
   run_id: z.string().min(1),
   spans: z.array(timelineSpanSchema),
+  /** What this payload still holds back; absent from a complete document. */
+  progress: progressSchema.optional(),
 });
+
+/** One row of a page: a span's event, and the span it belongs to. */
+export const timelineEventRowSchema = timelineEventSchema.extend({
+  span_id: z.string().min(1),
+});
+export type TimelineEventRow = z.infer<typeof timelineEventRowSchema>;
+
+/**
+ * `GET .../timeline/events`: rows in timeline order, newest page first. `span` is the
+ * whole of the span a request named, its `events` excepted.
+ */
+export const timelineEventsPageSchema = openObject({
+  rows: z.array(timelineEventRowSchema),
+  next_cursor: z.string().min(1).nullable(),
+  total: counter,
+  span: openObject({ id: z.string().min(1) }).optional(),
+  observed_at: timestamp,
+});
+export type TimelineEventsPage = z.infer<typeof timelineEventsPageSchema>;
 
 export const apiErrorSchema = openObject({
   error: openObject({ code: z.string(), message: z.string() }),
@@ -2591,13 +2735,13 @@ export const visibleStateSchema = z.union([
   z.strictObject({
     type: z.literal("detail"),
     run_id: z.string().min(1),
-    detail: runDetailSchema,
+    detail: liveRunDetailSchema,
   }),
   z.strictObject({
     type: z.literal("timeline"),
     run_id: z.string().min(1),
     scope: z.literal("run"),
-    detail: runDetailSchema,
+    detail: liveRunDetailSchema,
     timeline: runTimelineSchema,
   }),
   z.strictObject({
@@ -2605,13 +2749,13 @@ export const visibleStateSchema = z.union([
     run_id: z.string().min(1),
     scope: z.literal("node"),
     node: z.string().min(1),
-    detail: runDetailSchema,
+    detail: liveRunDetailSchema,
     timeline: runTimelineSchema,
   }),
   z.strictObject({
     type: z.literal("channel"),
     run_id: z.string().min(1),
-    detail: runDetailSchema,
+    detail: liveRunDetailSchema,
     channel: channelQueueSchema,
   }),
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
@@ -2620,7 +2764,11 @@ export const visibleStateSchema = z.union([
 
 export const subscriptionSnapshotSchema = z.strictObject({
   id: eventIdSchema,
-  sidebar: z.array(sidebarRowSchema),
+  /**
+   * The rows, or `null` for a `detail`, `timeline` or `channel` view (schema 28),
+   * whose rows are its stream's first frame, `sidebar.snapshot`.
+   */
+  sidebar: z.array(sidebarRowSchema).nullable(),
   visible: visibleStateSchema,
 });
 
@@ -2650,6 +2798,11 @@ export const resetFrameSchema = z.strictObject({
 });
 export const subscriptionFrameSchema = z.union([
   resetFrameSchema,
+  z.strictObject({
+    ...frameCommon,
+    type: z.literal("sidebar.snapshot"),
+    rows: z.array(sidebarRowSchema),
+  }),
   z.strictObject({
     ...frameCommon,
     type: z.literal("run.changed"),
@@ -2697,6 +2850,7 @@ export const subscriptionFrameSchema = z.union([
 /** Every frame type a subscription stream carries, as its SSE event name. */
 export const SUBSCRIPTION_FRAME_TYPES = [
   "reset",
+  "sidebar.snapshot",
   "run.changed",
   "run.removed",
   "detail.patch",
@@ -2718,6 +2872,210 @@ export const subscribedSchema = z.strictObject({
     resetFrameSchema,
   ]),
 });
+
+/** How many of a span's latest events a node's window holds. */
+export const TIMELINE_WINDOW_EVENTS = 40;
+
+/**
+ * Every member `detail` holds on a first answer, the only ones it may hold: `*` is
+ * each element or key. Stated in `docs/contract.md` and declared by the server.
+ */
+export const FIRST_ANSWER_DETAIL_PATHS: readonly string[] = [
+  "api_version",
+  "telemetry_schema_version",
+  "observed_at",
+  "progress",
+  "run.run_id",
+  "run.state",
+  "run.phase",
+  "run.last_event",
+  "run.timing.wall_seconds",
+  "run.nodes.*.node",
+  "run.nodes.*.status",
+  "run.nodes.*.outcome",
+  "run.nodes.*.failure",
+  "run.turns",
+  "graph.last_seq",
+  "graph.run_id",
+  "graph.plan.goal",
+  "graph.plan.tasks.*.id",
+  "graph.plan.tasks.*.kind",
+  "graph.plan.tasks.*.name",
+  "graph.plan.tasks.*.deps",
+  "graph.plan.tasks.*.repo",
+  "graph.plan.tasks.*.steps",
+  "graph.node_status",
+  "graph.node_gated_by",
+  "graph.node_control",
+  "graph.result",
+  "graph.node_results.*.blocked_by",
+  "graph.node_results.*.awaiting",
+  "graph.node_results.*.outcome",
+  "graph.node_results.*.error",
+  "graph.node_results.*.detail",
+  "node_details",
+];
+
+function allowedTree(paths: readonly string[]): Map<string, unknown> {
+  const root = new Map<string, unknown>();
+  for (const path of paths) {
+    let at = root;
+    for (const step of path.split(".")) {
+      let next = at.get(step) as Map<string, unknown> | undefined;
+      if (next === undefined) {
+        next = new Map();
+        at.set(step, next);
+      }
+      at = next;
+    }
+  }
+  return root;
+}
+
+const FIRST_ANSWER_TREE = allowedTree(FIRST_ANSWER_DETAIL_PATHS);
+
+function unnamedBelow(
+  value: unknown,
+  allowed: Map<string, unknown>,
+  path: string,
+  found: string[],
+): void {
+  if (allowed.size === 0) return;
+  if (Array.isArray(value)) {
+    const each = allowed.get("*") as Map<string, unknown> | undefined;
+    if (each === undefined) return;
+    value.forEach((item, index) => {
+      unnamedBelow(item, each, `${path}[${index}]`, found);
+    });
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  for (const [key, member] of Object.entries(value)) {
+    const below = (allowed.get(key) ?? allowed.get("*")) as
+      | Map<string, unknown>
+      | undefined;
+    if (below === undefined) {
+      found.push(`${path}.${key}`);
+      continue;
+    }
+    unnamedBelow(member, below, `${path}.${key}`, found);
+  }
+}
+
+function spanMemberViolations(
+  span: Record<string, unknown>,
+  path: string,
+  found: string[],
+): void {
+  for (const key of Object.keys(span))
+    if (!Object.hasOwn(timelineSpanSchema.shape, key))
+      found.push(`${path}.${key}`);
+  const events = Array.isArray(span.events) ? span.events : [];
+  events.forEach((event: unknown, index: number) => {
+    if (typeof event !== "object" || event === null) return;
+    for (const key of Object.keys(event))
+      if (!Object.hasOwn(timelineEventSchema.shape, key))
+        found.push(`${path}.events[${index}].${key}`);
+  });
+}
+
+/**
+ * What a timeline payload holds that the contract does not let it: a span's `detail`
+ * or whole `events`, a member no schema names, or on Overall before the rest a
+ * harness-scope span. Names one violation per offence, as a path.
+ */
+export function timelineViolations(
+  timeline: { readonly spans: readonly unknown[] },
+  scope: "run" | "node",
+  complete: boolean,
+): readonly string[] {
+  const found: string[] = [];
+  timeline.spans.forEach((raw, index) => {
+    const span = raw as Record<string, unknown>;
+    const at = `timeline.spans[${index}]`;
+    spanMemberViolations(span, at, found);
+    if (span.harness_scope !== undefined && scope === "run" && !complete)
+      found.push(`${at}.harness_scope`);
+    if (span.detail !== undefined && !complete) found.push(`${at}.detail`);
+    const events = Array.isArray(span.events) ? span.events : [];
+    if (scope === "run" && events.length > 0)
+      found.push(`${at}.events: ${events.length} listed`);
+    if (scope === "node" && events.length > TIMELINE_WINDOW_EVENTS)
+      found.push(`${at}.events: ${events.length} listed`);
+  });
+  return found;
+}
+
+/**
+ * What a subscription's visible payload holds that the contract does not let it, or
+ * nothing. Reads a first answer's detail by {@link FIRST_ANSWER_DETAIL_PATHS}, a
+ * finished one through {@link runDetailSchema} (paths still marked loading excepted),
+ * and every timeline by {@link timelineViolations}.
+ */
+export function visibleViolations(visible: VisibleState): readonly string[] {
+  if (visible.type === "sidebar" || visible.type === "human-items") return [];
+  const found: string[] = [];
+  const progress = visible.detail.progress;
+  const complete = progress?.complete === true;
+  if (progress === undefined) found.push("detail.progress: absent");
+  if (!complete)
+    unnamedBelow(visible.detail, FIRST_ANSWER_TREE, "detail", found);
+  else if ((progress?.loading.length ?? 0) === 0) {
+    const parsed = runDetailSchema.safeParse(visible.detail);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues)
+        found.push(`detail.${issue.path.join(".")}: ${issue.message}`);
+    }
+  }
+  if (visible.type === "timeline") {
+    if (visible.timeline.progress === undefined)
+      found.push("timeline.progress: absent");
+    found.push(
+      ...timelineViolations(
+        visible.timeline,
+        visible.scope,
+        visible.timeline.progress?.complete === true,
+      ),
+    );
+  }
+  return found;
+}
+
+/**
+ * Whether a patch frame's operations carry a span's whole `events`: every value is
+ * walked for an `events` list longer than a node's window, and on Overall (`run`) any
+ * that lists one at all.
+ */
+export function frameCarriesWholeEvents(
+  frame: { readonly ops: readonly unknown[] },
+  scope: "run" | "node",
+): boolean {
+  const limit = scope === "run" ? 0 : TIMELINE_WINDOW_EVENTS;
+  const walk = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(walk);
+    if (typeof value !== "object" || value === null) return false;
+    for (const [key, member] of Object.entries(value)) {
+      if (key === "events" && Array.isArray(member) && member.length > limit)
+        return true;
+      if (walk(member)) return true;
+    }
+    return false;
+  };
+  const overLimit = (op: unknown): boolean => {
+    if (typeof op !== "object" || op === null) return false;
+    const { p, v, a } = op as {
+      readonly p?: readonly unknown[];
+      readonly v?: unknown;
+      readonly a?: readonly unknown[];
+    };
+    if (p?.at(-1) !== "events") return false;
+    return (
+      (Array.isArray(v) && v.length > limit) ||
+      (Array.isArray(a) && a.length > limit)
+    );
+  };
+  return frame.ops.some((op) => overLimit(op) || walk(op));
+}
 
 /** `410` to a stream asked for a subscription this server cannot serve. */
 export const subscriptionUnavailableSchema = z.strictObject({

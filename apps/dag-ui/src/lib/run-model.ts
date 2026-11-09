@@ -3,13 +3,13 @@ import type {
   AwaitedRelease,
   Failure,
   GraphResultItem,
-  GraphState,
+  LiveGraphState,
+  LiveNodeTelemetry,
+  LiveRunDetail,
   NodeControl,
   NodeDetail,
   NodeStatus,
-  NodeTelemetry,
   PlanTask,
-  RunDetail,
   RunLaunch,
 } from "@onepipeline-ui/dag-model";
 
@@ -23,7 +23,7 @@ export interface NodeView {
   /** The authoritative `GraphState.node_status`, rendered without client-side defaults. */
   readonly status: NodeStatus;
   readonly task: PlanTask;
-  readonly telemetry?: NodeTelemetry;
+  readonly telemetry?: LiveNodeTelemetry;
   readonly result?: GraphResultItem;
   readonly detail?: NodeDetail;
   /**
@@ -56,7 +56,7 @@ export interface NodeView {
  * graph it is converging toward rather than a round per batch, and reading "the
  * latest" of anything is what this replaced.
  */
-export function graphOf(detail: RunDetail): GraphState | undefined {
+export function graphOf(detail: LiveRunDetail): LiveGraphState | undefined {
   return detail.graph ?? undefined;
 }
 
@@ -65,7 +65,7 @@ export function graphOf(detail: RunDetail): GraphState | undefined {
  * dispatch composes first, and each plan node's own. Absent on the wire is the
  * empty list, which is what the engine reads it as.
  */
-export function currentOverrides(graph: GraphState): {
+export function currentOverrides(graph: LiveGraphState): {
   readonly run: readonly string[];
   readonly nodes: ReadonlyMap<string, readonly string[]>;
 } {
@@ -75,7 +75,7 @@ export function currentOverrides(graph: GraphState): {
   };
 }
 
-export function nodeViews(detail: RunDetail): NodeView[] {
+export function nodeViews(detail: LiveRunDetail): NodeView[] {
   const graph = graphOf(detail);
   if (!graph) return [];
   const telemetry = new Map(detail.run.nodes.map((node) => [node.node, node]));

@@ -7,10 +7,13 @@ import {
   agentRoleSchema,
   agentSessionSchema,
   dagConversationSchema,
+  frameCarriesWholeEvents,
   graphPayloadSchema,
   graphResultItemSchema,
   graphStateSchema,
   hostShutdownScopeSchema,
+  isLoadingMark,
+  liveRunDetailSchema,
   nodeTelemetrySchema,
   parseRunList,
   parseRunTimeline,
@@ -30,11 +33,15 @@ import {
   shutdownReportSchema,
   TELEMETRY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
+  TIMELINE_WINDOW_EVENTS,
   timelineEventSchema,
   timelineReferenceSchema,
   timelineSpanSchema,
+  timelineViolations,
   timingSchema,
   unwatchedSchema,
+  type VisibleState,
+  visibleViolations,
 } from "./index.js";
 
 const timing = {
@@ -1608,3 +1615,83 @@ test.each(["review", "readjust"])(
     );
   },
 );
+
+describe("what the subscription contract names", () => {
+  const firstDetail = () =>
+    liveRunDetailSchema.parse({
+      api_version: 2,
+      telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
+      observed_at: "2026-01-01T00:00:00Z",
+      progress: { complete: false, loading: ["run.turns"] },
+      run: {
+        run_id: "r",
+        state: "active",
+        phase: "running",
+        last_event: null,
+        timing: { wall_seconds: 5 },
+        nodes: [{ node: "a", status: "running" }],
+        turns: { loading: true },
+      },
+      graph: null,
+      node_details: {},
+    });
+
+  test("reads a first answer and names a member it does not list", () => {
+    const detail = firstDetail();
+    const visible = {
+      type: "detail" as const,
+      run_id: "r",
+      detail,
+    } satisfies VisibleState;
+    expect(visibleViolations(visible)).toStrictEqual([]);
+    expect(
+      visibleViolations({
+        ...visible,
+        detail: { ...detail, run: { ...detail.run, usage: {} } },
+      } as VisibleState),
+    ).toStrictEqual(["detail.run.usage"]);
+    expect(isLoadingMark(detail.run.turns)).toBe(true);
+  });
+
+  test("refuses a span's whole events on either scope", () => {
+    const span = (events: number) => ({
+      id: "s",
+      kind: "node",
+      label: "n",
+      started_at: "2026-01-01T00:00:00Z",
+      ended_at: null,
+      events: Array.from({ length: events }, (_, index) => ({
+        id: `e${index}`,
+      })),
+    });
+    expect(timelineViolations({ spans: [span(1)] }, "run", false)).toHaveLength(
+      1,
+    );
+    expect(
+      timelineViolations(
+        { spans: [span(TIMELINE_WINDOW_EVENTS + 1)] },
+        "node",
+        false,
+      ),
+    ).toHaveLength(1);
+    expect(
+      timelineViolations(
+        { spans: [span(TIMELINE_WINDOW_EVENTS)] },
+        "node",
+        true,
+      ),
+    ).toHaveLength(0);
+    expect(
+      frameCarriesWholeEvents(
+        { ops: [{ p: ["spans", 0, "events"], a: [{ id: "x" }] }] },
+        "run",
+      ),
+    ).toBe(true);
+    expect(
+      frameCarriesWholeEvents(
+        { ops: [{ p: ["spans", 0, "status"], v: "done" }] },
+        "run",
+      ),
+    ).toBe(false);
+  });
+});

@@ -3028,3 +3028,112 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 .remote-checks .check-failing td:nth-child(3)::after {
   content: " — failing";
 }
+
+/* A run still arriving: the quiet line, a stretch not held, and what stands in for it. */
+.history-loading {
+  position: fixed;
+  right: 24px;
+  bottom: 16px;
+  z-index: 40;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.history-hatch {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 40;
+  display: grid;
+  place-content: center;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--background) 0 6px,
+    color-mix(in srgb, var(--muted-foreground) 35%, var(--background)) 6px 12px
+  );
+}
+
+.history-hatch-label {
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.first-plot {
+  position: relative;
+  height: 40px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--muted);
+}
+
+.first-plot-bar {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  background: color-mix(in srgb, var(--primary) 70%, transparent);
+}
+
+.load-earlier {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--secondary);
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.read-failed {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  max-width: 320px;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.read-failed strong {
+  color: var(--destructive);
+  font-size: 16px;
+}
+
+.read-failed p {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 14px;
+}
+
+.read-failed button {
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 6px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.page-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  color: var(--destructive);
+  font-size: 13px;
+}
+
+.loading-value {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}

@@ -15,10 +15,16 @@ import {
   ScrollArea,
   Timeline,
 } from "@oneharness/ui";
-import type { RunDetail, RunTimeline } from "@onepipeline-ui/dag-model";
+import type { LiveRunDetail, RunTimeline } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { Activity, Clock3, Cpu, Layers3, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import {
+  LOADING_TEXT,
+  loaded,
+  loadingPath,
+  staleFoldAsOf,
+} from "../../lib/loading";
 import { RecordDisclosure } from "../../lib/RecordDisclosure";
 import type { NodeView } from "../../lib/run-model";
 import { StructuredFields } from "../../lib/StructuredFields";
@@ -30,8 +36,10 @@ import {
   type GraphSegment,
   graphTimeline,
 } from "./graph-timeline";
+import { HistoryFailed } from "./history-controls";
 import { TimelineItemDetail } from "./TimelineItemDetail";
 import { eventAsRow, spanAsRow } from "./timeline-model";
+import { type TimelineHistory, useTimelineHistory } from "./useTimelineHistory";
 
 /**
  * The run as a whole, read as one clock rather than as a list of its parts.
@@ -50,15 +58,20 @@ export function OverallView({
   client,
   detail,
   nodes,
-  timeline,
+  timeline: served,
   timelineError,
+  filter,
+  onRetry,
   journalSeq,
   onSelectNode,
   selectedItemId,
   onSelectItem,
 }: {
   readonly client: TelemetryClient;
-  readonly detail: RunDetail;
+  readonly detail: LiveRunDetail;
+  readonly filter?: string;
+  /** Subscribe again, from a failed read. */
+  readonly onRetry?: () => void;
   readonly nodes: readonly NodeView[];
   readonly timeline?: RunTimeline;
   readonly timelineError?: Error;
@@ -69,6 +82,21 @@ export function OverallView({
   readonly onSelectItem: (itemId?: string) => void;
 }) {
   const runId = detail.run.run_id;
+  const history = useTimelineHistory({
+    client,
+    runId,
+    scope: "run",
+    ...(filter === undefined ? {} : { filter }),
+    ...(served === undefined ? {} : { timeline: served }),
+  });
+  const timeline = history.timeline;
+  const runLoaded = loaded(detail.progress);
+  const foldLoading =
+    !runLoaded ||
+    loadingPath(detail, "telemetry") ||
+    loadingPath(detail, "run.timing") ||
+    loadingPath(detail, "run.usage");
+  const foldAsOf = staleFoldAsOf(detail);
   const graph = useMemo(
     () => graphTimeline(timeline, nodes),
     [timeline, nodes],
@@ -99,6 +127,11 @@ export function OverallView({
         ? undefined
         : eventAsRow(openedEvent)
       : spanAsRow(openedSpan);
+  const { loadSpan } = history;
+  const openedSpanId = openedSpan?.id;
+  useEffect(() => {
+    if (openedSpanId !== undefined) loadSpan(openedSpanId);
+  }, [openedSpanId, loadSpan]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && selectedItemId !== undefined)
@@ -127,7 +160,18 @@ export function OverallView({
           </section>
           <section aria-label="Run records">
             <RecordDisclosure label="Timing and usage">
-              <StructuredFields value={detail.telemetry} />
+              {foldLoading ? (
+                <p className="loading-value">{LOADING_TEXT}</p>
+              ) : (
+                <>
+                  {foldAsOf !== undefined && (
+                    <p className="loading-value">
+                      as of <Timestamp at={foldAsOf} />, updating
+                    </p>
+                  )}
+                  <StructuredFields value={detail.telemetry} />
+                </>
+              )}
             </RecordDisclosure>
             <RecordDisclosure label="Goal and repository identities">
               <StructuredFields
@@ -147,7 +191,11 @@ export function OverallView({
               <StructuredFields value={detail.graph?.result} />
             </RecordDisclosure>
             <RecordDisclosure label="Provider health">
-              <StructuredFields value={detail.provider_health} />
+              {runLoaded ? (
+                <StructuredFields value={detail.provider_health} />
+              ) : (
+                <p className="loading-value">{LOADING_TEXT}</p>
+              )}
             </RecordDisclosure>
           </section>
           <section aria-label="Run metrics" className="metric-grid">
@@ -183,7 +231,11 @@ export function OverallView({
             <Metric
               icon={<Cpu />}
               label="Turns"
-              value={String(detail.run.turns)}
+              value={
+                typeof detail.run.turns === "number"
+                  ? String(detail.run.turns)
+                  : LOADING_TEXT
+              }
             />
           </section>
           <Card className="gap-0 py-[15px]">
@@ -202,7 +254,14 @@ export function OverallView({
                 <Alert variant="destructive">
                   <TriangleAlert />
                   <AlertTitle>Timeline unavailable</AlertTitle>
-                  <AlertDescription>{timelineError.message}</AlertDescription>
+                  <AlertDescription>
+                    {timelineError.message}{" "}
+                    {onRetry !== undefined && (
+                      <Button onClick={onRetry} size="sm" variant="outline">
+                        Try again
+                      </Button>
+                    )}
+                  </AlertDescription>
                 </Alert>
               ) : timeline === undefined ? (
                 <p
@@ -218,6 +277,7 @@ export function OverallView({
               ) : (
                 <GraphExecution
                   graph={graph}
+                  history={history}
                   onOpenNode={onSelectNode}
                   onOpenItem={onSelectItem}
                   selectedItemId={selectedItemId}
@@ -254,11 +314,13 @@ export function OverallView({
  */
 function GraphExecution({
   graph,
+  history,
   onOpenNode,
   onOpenItem,
   selectedItemId,
 }: {
   readonly graph: ReturnType<typeof graphTimeline>;
+  readonly history: TimelineHistory;
   readonly onOpenNode: (nodeId: string) => void;
   /**
    * Open one plotted item beside the plot, by the id it is selected under. Not a
@@ -280,6 +342,17 @@ function GraphExecution({
   const [rowsOpen, setRowsOpen] = useState(false);
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set());
   const range = zoom ?? graph.range;
+  // A zoom is a person asking about a stretch: the run-level records in it are read
+  // now; the rows of a node arrive when its row is opened.
+  const { loadRow, loadStretch } = history;
+  useEffect(() => {
+    if (zoom === undefined) return;
+    const asking = setTimeout(
+      () => loadStretch(zoom[0], zoom[1], undefined),
+      250,
+    );
+    return () => clearTimeout(asking);
+  }, [zoom, loadStretch]);
   const open = (segment: GraphSegment) => {
     // A record the run made at **no node** opens as itself, because there is
     // nowhere else to read it: `onevcs` observes a release, and a person
@@ -330,6 +403,9 @@ function GraphExecution({
             ))}
         </section>
       )}
+      {history.failure !== undefined && (
+        <HistoryFailed failure={history.failure} />
+      )}
       {rowsOpen && (
         <ol className="graph-rows">
           {graph.rows.map((row) => (
@@ -337,14 +413,15 @@ function GraphExecution({
               key={row.id}
               onOpen={open}
               onOpenNode={onOpenNode}
-              onExpandedChange={(next) =>
+              onExpandedChange={(next) => {
+                if (next) loadRow(row.nodeId);
                 setOpenRows((current) => {
                   const updated = new Set(current);
                   if (next) updated.add(row.id);
                   else updated.delete(row.id);
                   return updated;
-                })
-              }
+                });
+              }}
               expanded={openRows.has(row.id)}
               origin={graph.range[0]}
               range={range}

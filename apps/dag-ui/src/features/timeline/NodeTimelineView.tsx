@@ -29,7 +29,15 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { LOADING_TEXT } from "../../lib/loading";
 import {
   awaitedReleases,
   isUnhealthy,
@@ -48,6 +56,7 @@ import { boundedZoom, TIMELINE_TIME_MARKS } from "./axis";
 import { CheckRuntime } from "./CheckRuntime";
 import { ControlBadge } from "./ControlBadge";
 import { EventCategoryIcon } from "./event-category";
+import { LoadEarlier, PlotHatches } from "./history-controls";
 import { NodeRelease } from "./release";
 import { TimelineItemDetail } from "./TimelineItemDetail";
 import {
@@ -63,6 +72,7 @@ import {
   type TranscriptEntry,
   transcriptEntries,
 } from "./timeline-model";
+import { useTimelineHistory } from "./useTimelineHistory";
 
 /**
  * One node, read as what it did rather than as a column of stacked blocks.
@@ -81,6 +91,9 @@ export function NodeTimelineView({
   nodes,
   timeline,
   timelineError,
+  filter,
+  runLoaded = true,
+  onRetry,
   selectedItemId,
   onSelectItem,
   onBack,
@@ -94,6 +107,11 @@ export function NodeTimelineView({
   readonly nodes: readonly NodeView[];
   readonly timeline?: RunTimeline;
   readonly timelineError?: Error;
+  readonly filter?: string;
+  /** Whether the members a first answer leaves out have arrived. */
+  readonly runLoaded?: boolean;
+  /** Subscribe again, from a failed read. */
+  readonly onRetry?: () => void;
   readonly selectedItemId?: string;
   readonly onSelectItem: (id?: string) => void;
   readonly onBack: () => void;
@@ -143,8 +161,10 @@ export function NodeTimelineView({
           <StateBadge className="node-view-state" state={node.status} />
           <ControlBadge control={node.control} />
           <span className="node-view-meta">
-            {node.kind} node · {node.telemetry?.turns ?? 0} turns ·{" "}
-            {node.telemetry?.lint ?? 0} lint turns
+            {node.kind} node ·{" "}
+            {runLoaded
+              ? `${node.telemetry?.turns ?? 0} turns · ${node.telemetry?.lint ?? 0} lint turns`
+              : `turns ${LOADING_TEXT}`}
           </span>
           {prUrl !== undefined && (
             <a
@@ -179,7 +199,11 @@ export function NodeTimelineView({
         <TabsContent className="node-tab-panel" value="task">
           {/* The task is untrusted markdown: the shared package renders it
               safely, as every other place this app shows a task. */}
-          <TaskMarkdown source={taskProse(node.task)} />
+          {runLoaded ? (
+            <TaskMarkdown source={taskProse(node.task)} />
+          ) : (
+            <p className="loading-value">{LOADING_TEXT}</p>
+          )}
           <dl className="facts">
             {/* The settlement's own word — `merged`, `published`, `shipped` —
                 which the status badge does not carry: `done` is the same for a
@@ -197,7 +221,9 @@ export function NodeTimelineView({
             <div>
               <dt>Graph overrides</dt>
               <dd>
-                {(node.task.sets ?? []).length === 0 ? (
+                {!runLoaded ? (
+                  LOADING_TEXT
+                ) : (node.task.sets ?? []).length === 0 ? (
                   "None"
                 ) : (
                   <ol aria-label="Graph overrides" className="sets-served">
@@ -214,7 +240,11 @@ export function NodeTimelineView({
           </dl>
         </TabsContent>
         <TabsContent className="node-tab-panel" value="criteria">
-          <TaskMarkdown source={acceptanceCriteria(node.task)} />
+          {runLoaded ? (
+            <TaskMarkdown source={acceptanceCriteria(node.task)} />
+          ) : (
+            <p className="loading-value">{LOADING_TEXT}</p>
+          )}
         </TabsContent>
         <TabsContent className="node-tab-panel" value="dependencies">
           <dl className="facts">
@@ -238,7 +268,8 @@ export function NodeTimelineView({
           </dl>
         </TabsContent>
         <TabsContent className="node-tab-panel" value="remote">
-          <dl className="facts">
+          {!runLoaded && <p className="loading-value">{LOADING_TEXT}</p>}
+          <dl className="facts" hidden={!runLoaded}>
             <div>
               <dt>Publication</dt>
               <dd>
@@ -396,7 +427,14 @@ export function NodeTimelineView({
             <Alert className="m-5 w-auto" variant="destructive">
               <TriangleAlert />
               <AlertTitle>Timeline unavailable</AlertTitle>
-              <AlertDescription>{timelineError.message}</AlertDescription>
+              <AlertDescription>
+                {timelineError.message}{" "}
+                {onRetry !== undefined && (
+                  <Button onClick={onRetry} size="sm" variant="outline">
+                    Try again
+                  </Button>
+                )}
+              </AlertDescription>
             </Alert>
           ) : timeline === undefined ? (
             <div aria-live="polite" className="loading-state">
@@ -412,6 +450,7 @@ export function NodeTimelineView({
           ) : (
             <NodeExecution
               client={client}
+              {...(filter === undefined ? {} : { filter })}
               node={node}
               onSelectItem={onSelectItem}
               runId={runId}
@@ -427,19 +466,30 @@ export function NodeTimelineView({
 
 function NodeExecution({
   client,
+  filter,
   node,
   onSelectItem,
   runId,
   selectedItemId,
-  timeline,
+  timeline: served,
 }: {
   readonly client: TelemetryClient;
+  readonly filter?: string;
   readonly node: NodeView;
   readonly onSelectItem: (id?: string) => void;
   readonly runId: string;
   readonly selectedItemId?: string;
   readonly timeline: RunTimeline;
 }) {
+  const history = useTimelineHistory({
+    client,
+    runId,
+    scope: "node",
+    nodeId: node.id,
+    timeline: served,
+    ...(filter === undefined ? {} : { filter }),
+  });
+  const timeline = history.timeline ?? served;
   const projection = useMemo(
     () => nodeTimelineV2(timeline, node.id),
     [timeline, node.id],
@@ -529,16 +579,53 @@ function NodeExecution({
     selectedItemId === undefined
       ? undefined
       : findRow(projection.rows, selectedItemId);
+  // A scroll the page made itself, to a selected row, asks for no page.
+  const ownScrollUntil = useRef(0);
   const select = (id: string) => {
+    ownScrollUntil.current = Date.now() + 500;
     onSelectItem(id);
     sync.scrollTo(id);
   };
+  const transcript = useRef<HTMLElement | null>(null);
+  const plotArea = useRef<HTMLElement | null>(null);
+  // Rows added above the reader keep what they were reading where it was.
+  const heightBeforeLoad = useRef<number | undefined>(undefined);
+  const { loadEarlier, loadSpan, loadStretch } = history;
+  const askEarlier = () => {
+    heightBeforeLoad.current = transcript.current?.scrollHeight;
+    loadEarlier();
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the rows the merged timeline brought are what moved the height being restored.
+  useLayoutEffect(() => {
+    const element = transcript.current;
+    const before = heightBeforeLoad.current;
+    if (element === null || before === undefined || history.loadingEarlier)
+      return;
+    heightBeforeLoad.current = undefined;
+    element.scrollTop += element.scrollHeight - before;
+  }, [timeline, history.loadingEarlier]);
+  const openedSpan =
+    selected?.rowKind === "span" ? selected.span.id : undefined;
+  useEffect(() => {
+    if (openedSpan !== undefined) loadSpan(openedSpan);
+  }, [openedSpan, loadSpan]);
+  useEffect(() => {
+    if (zoom === undefined) return;
+    const asking = setTimeout(
+      () => loadStretch(zoom[0], zoom[1], node.id),
+      250,
+    );
+    return () => clearTimeout(asking);
+  }, [zoom, loadStretch, node.id]);
   // The hook returns a new object on each render, including a cursor update
   // from scrolling. Only a changed selection should scroll again; depending on
   // that object makes the selected stamp race the scroll-derived reading cursor.
   const { scrollTo } = sync;
   useEffect(() => {
-    if (selectedItemId !== undefined) scrollTo(selectedItemId);
+    if (selectedItemId !== undefined) {
+      ownScrollUntil.current = Date.now() + 500;
+      scrollTo(selectedItemId);
+    }
   }, [selectedItemId, scrollTo]);
   return (
     <div className="node-execution" data-expanded={expanded}>
@@ -546,7 +633,13 @@ function NodeExecution({
         aria-label="Node timeline"
         className="node-timeline-sticky"
         data-testid="node-timeline"
+        ref={plotArea}
       >
+        <PlotHatches
+          container={plotArea}
+          range={zoom ?? shown}
+          stretches={history.unheld}
+        />
         <Timeline
           {...TIMELINE_TIME_MARKS}
           axis={{ origin: plotted[0] }}
@@ -578,8 +671,30 @@ function NodeExecution({
       <section
         aria-label="Node transcript"
         className="node-transcript"
-        ref={sync.containerRef}
+        onScroll={(event) => {
+          if (
+            event.currentTarget.scrollTop < 120 &&
+            Date.now() > ownScrollUntil.current &&
+            history.canLoadEarlier &&
+            !history.loadingEarlier &&
+            history.failure === undefined
+          )
+            askEarlier();
+        }}
+        ref={(element) => {
+          transcript.current = element;
+          sync.containerRef(element);
+        }}
       >
+        {(history.canLoadEarlier || history.failure !== undefined) && (
+          <LoadEarlier
+            {...(history.failure === undefined
+              ? {}
+              : { failure: history.failure })}
+            loading={history.loadingEarlier}
+            onLoad={askEarlier}
+          />
+        )}
         {transcriptRuns(reading).map((run) => {
           const items = run.entries.map((entry) =>
             entry.entryKind === "row" ? (
