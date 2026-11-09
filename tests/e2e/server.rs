@@ -47,7 +47,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(27), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(28), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -286,7 +286,7 @@ fn every_route_over(run: &str, conversation: &str, artifact: &str) -> Vec<(&'sta
                 )
                 .replace("/artifacts/{id}", &format!("/artifacts/{artifact}"));
             let path = match template {
-                routes::RUN_TIMELINE => format!("{path}?scope=run"),
+                routes::RUN_TIMELINE | routes::RUN_TIMELINE_EVENTS => format!("{path}?scope=run"),
                 _ => path,
             };
             (template, path)
@@ -21365,7 +21365,9 @@ fn no_route_starts_adopts_or_drives_a_run() {
                 );
             }
             routes::Method::Get => {
-                let path = if route.path == routes::RUN_TIMELINE {
+                let path = if route.path == routes::RUN_TIMELINE
+                    || route.path == routes::RUN_TIMELINE_EVENTS
+                {
                     format!("{path}?scope=run")
                 } else {
                     path

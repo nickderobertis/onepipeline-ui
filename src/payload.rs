@@ -7196,25 +7196,35 @@ fn session_interval(
     session: &str,
     relayed: &[(usize, &Envelope)],
 ) -> (Moment, Option<Moment>) {
+    // Looked up rather than scanned: a node runs hundreds of sessions over
+    // thousands of records, and a scan per record per session is what a node's
+    // timeline used to spend seconds on.
+    let relayed_at: std::collections::HashSet<*const Envelope> = relayed
+        .iter()
+        .map(|(_, own)| std::ptr::from_ref::<Envelope>(*own))
+        .collect();
+    let relayed_streams: std::collections::HashSet<&str> =
+        relayed.iter().map(|(_, own)| own.stream.as_str()).collect();
     let own = ordered(events, &|event| {
-        belongs_to(event, session) || relayed.iter().any(|(_, own)| std::ptr::eq(*own, event))
+        belongs_to(event, session) || relayed_at.contains(&std::ptr::from_ref(event))
     });
     let started = own.first().cloned().unwrap_or_else(|| Moment {
         at: 0,
         ts: now_rfc3339(),
     });
     let last = own.last().cloned().unwrap_or_else(|| started.clone());
+    // The kind first and the stamp's parse last: most records close nothing.
     let closed = events.iter().any(|(_, event)| {
-        millis_of(&event.ts).is_some_and(|at| at >= last.at)
-            && (event.source == Source::Pipeline
-                && matches!(event.kind.0.as_str(), "node-settled" | "node-dispatched")
-                || event.source == Source::Vcs && event.kind.0 == vcs::SESSION_CLOSED
-                || event.source == Source::Agentgraph
-                    && belongs_to(event, session)
-                    && [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&event.kind.0.as_str())
-                || event.source == Source::Agentgraph
-                    && relayed.iter().any(|(_, own)| own.stream == event.stream)
-                    && event.kind.0 == "graph-settled")
+        (event.source == Source::Pipeline
+            && matches!(event.kind.0.as_str(), "node-settled" | "node-dispatched")
+            || event.source == Source::Vcs && event.kind.0 == vcs::SESSION_CLOSED
+            || event.source == Source::Agentgraph
+                && belongs_to(event, session)
+                && [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&event.kind.0.as_str())
+            || event.source == Source::Agentgraph
+                && event.kind.0 == "graph-settled"
+                && relayed_streams.contains(event.stream.as_str()))
+            && millis_of(&event.ts).is_some_and(|at| at >= last.at)
     });
     (started, closed.then_some(last))
 }
