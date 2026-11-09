@@ -30,8 +30,11 @@ export const MAX_BATCH_ANSWERS = 50;
 /** Why a draft is gone when the page learned it from the list, not a refusal. */
 export const ELSEWHERE = "answered or dismissed elsewhere";
 
-/** Every drafted item has its own key, so tabs never overwrite each other's. */
+/** Every drafted item has its own key, so writing one never touches another. */
 const KEY_PREFIX = "onepipeline-ui.human-items.draft.";
+
+/** A stored key's suffix names an item only if a route could interpolate it. */
+const ITEM_ID = /^[^\s/?#]+$/u;
 
 const storedDraft: z.ZodType<Draft> = z.strictObject({
   title: z.string(),
@@ -47,8 +50,9 @@ export function storedDrafts(): Drafts | undefined {
     for (let index = 0; index < window.localStorage.length; index += 1) {
       const key = window.localStorage.key(index);
       if (key === null || !key.startsWith(KEY_PREFIX)) continue;
+      const id = key.slice(KEY_PREFIX.length);
       const draft = readDraft(window.localStorage.getItem(key));
-      if (draft !== undefined) held[key.slice(KEY_PREFIX.length)] = draft;
+      if (draft !== undefined && ITEM_ID.test(id)) held[id] = draft;
     }
     return held;
   } catch {

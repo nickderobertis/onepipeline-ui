@@ -4405,13 +4405,15 @@ test("a refused draft follows the policy: gone with a notice once its item close
   page,
 }) => {
   const served = await serveWorld("queue");
-  const [one, two, three] = ["one", "two", "three"].map((key) =>
+  const policy = (key: string) =>
     raiseQuestion(served, {
       key: `policy-${key}`,
       title: `Policy ${key}?`,
       choices: REGIONS,
-    }),
-  ) as [string, string, string];
+    });
+  const one = policy("one");
+  const two = policy("two");
+  const three = policy("three");
   await open(page, served);
 
   // (a) The page hears of nothing: a dismissal only the send can find out about.
@@ -4531,6 +4533,68 @@ test("a filter hiding a drafted item does not retire its draft", async ({
   expect(await storedDraft(page, id)).toBeNull();
 });
 
+test("an item that no longer reads retires its draft, a read that fails keeps it, and blank words are no answer", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const kept = raiseQuestion(served, {
+    key: "read-fails",
+    title: "Read fails?",
+    choices: REGIONS,
+  });
+  const blank = raiseQuestion(served, {
+    key: "blank-words",
+    title: "Blank words?",
+    choices: REGIONS,
+  });
+  raiseQuestion(served, { key: "only-spaces", title: "Only spaces?" });
+  const vanishing = raiseQuestion(served, {
+    key: "vanishes",
+    title: "Vanishes?",
+  });
+  await open(page, served);
+
+  // Whitespace alone is nothing to send; beside a choice it is left out.
+  await answerBox(page, "Only spaces?").fill("   ");
+  await expect(sendButton(page)).toHaveCount(0);
+  const pane = await openDetail(page, "Blank words?");
+  await choiceButton(pane, "Europe").click();
+  await pane
+    .getByRole("textbox", { name: "Answer in detail: Blank words?" })
+    .fill("   ");
+  await pane.getByRole("button", { name: "Close detail" }).click();
+  const sent = writes(page);
+  await sendAnswers(page);
+  await expect(card(page, "Blank words?")).toHaveCount(0);
+  expect(batchesOf(sent)[0]?.answers).toEqual([{ id: blank, choice: "eu" }]);
+
+  // A hidden item whose read fails stays drafted: unknown is not gone.
+  await choiceButton(card(page, "Read fails?"), "Europe").click();
+  await answerBox(page, "Vanishes?").fill("Words for a vanished item");
+  await page.route(`**/api/human-items/${kept}`, (route) => route.abort());
+  await page
+    .getByRole("group", { name: "Filter action items" })
+    .getByLabel("Priority", { exact: true })
+    .selectOption("urgent");
+  await expect(card(page, "Read fails?")).toHaveCount(0);
+  await expect(sendButton(page)).toHaveText("Send 2 answers");
+  await expect(page.getByRole("list", { name: "Not sent" })).toHaveCount(0);
+  expect(await storedDraft(page, kept)).not.toBeNull();
+  await page.unroute(`**/api/human-items/${kept}`);
+
+  // Every item goes from under the server, which then answers 404 for it.
+  const dir = factsOf(served).journal;
+  renameSync(dir, `${dir}.gone`);
+  await page
+    .getByRole("group", { name: "Filter action items" })
+    .getByLabel("Priority", { exact: true })
+    .selectOption("low");
+  const notices = page.getByRole("list", { name: "Not sent" });
+  await expect(notices).toContainText("Words for a vanished item");
+  await expect(notices).toContainText("answered or dismissed elsewhere");
+  expect(await storedDraft(page, vanishing)).toBeNull();
+});
+
 test("Discard removes every draft for good and writes nothing", async ({
   page,
 }) => {
@@ -4582,27 +4646,29 @@ test("what storage holds is only used if valid, and a browser that keeps nothing
     choices: REGIONS,
   });
   await open(page, served);
-  await page.evaluate(
-    ([valid]) => {
-      localStorage.setItem(
-        valid ?? "",
-        JSON.stringify({ title: "Stored good?", text: "From storage" }),
-      );
-      localStorage.setItem(
-        "onepipeline-ui.human-items.draft.hi-notjson",
-        "{not json",
-      );
-      localStorage.setItem(
-        "onepipeline-ui.human-items.draft.hi-badshape",
-        JSON.stringify({ title: 7 }),
-      );
-    },
-    [DRAFT_KEY(good)],
-  );
+  await choiceButton(card(page, "Stored good?"), "Europe").click();
+  // Corrupt entries are what no press can make: another writer's bytes.
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "onepipeline-ui.human-items.draft.hi-notjson",
+      "{not json",
+    );
+    localStorage.setItem(
+      "onepipeline-ui.human-items.draft.hi-badshape",
+      JSON.stringify({ title: 7 }),
+    );
+    localStorage.setItem(
+      "onepipeline-ui.human-items.draft.bad id",
+      JSON.stringify({ title: "Bad key", text: "Never sent" }),
+    );
+  });
   await page.reload();
   await expect(sendButton(page)).toHaveText("Send 1 answer");
+  expect(await storedDraft(page, good)).not.toBeNull();
 
   const denied = await context.newPage();
+  // llmlint: ignore[e2e_not_mocked] a browser that refuses storage (a blocked-cookies profile, an opaque origin) throws exactly these SecurityErrors, and Playwright can neither launch nor toggle that setting per page; the server and every other layer here are real.
+  // llmlint: ignore[tests_mirror_real_usage] as above: the throw a denied browser produces, which no user action can induce from this page.
   await denied.addInitScript(() => {
     const refuse = () => {
       throw new DOMException("denied", "SecurityError");
@@ -4655,14 +4721,8 @@ test("more drafts than one batch takes go out fifty at a time, and the rest wait
     raiseQuestion(served, { key: `cap-${at}`, title: `Capped ${at}?` }),
   );
   await open(page, served);
-  await page.evaluate(
-    (entries) => {
-      for (const [key, title] of entries)
-        localStorage.setItem(key, JSON.stringify({ title, text: "Capped" }));
-    },
-    ids.map((id, at) => [DRAFT_KEY(id), `Capped ${at}?`] as const),
-  );
-  await page.reload();
+  for (let at = 0; at < 51; at += 1)
+    await answerBox(page, `Capped ${at}?`).fill("Capped");
   await expect(sendButton(page)).toHaveText("Send 50 answers");
   await expect(sendRegion(page)).toContainText("1 more after this");
   const sent = writes(page);
