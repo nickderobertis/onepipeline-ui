@@ -52,9 +52,7 @@ jobs:
   # report, which posts a status of its own and never fails this job.
   lint:
     if: github.event_name == 'pull_request'
-    # Pinned: ubuntu-latest moved to ubuntu-26.04, and this job's measured time cap
-    # was taken on 24.04.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     # What this job writes while VISUAL_DOCS_PUBLISH is off: the suppressions
     # comment and the PR-title read. Turning publishing on adds `contents: write`
@@ -752,9 +750,7 @@ jobs:
   budgets:
     needs: [lint, test-linux, test-windows, test-macos]
     if: always()
-    # Pinned: ubuntu-latest moved to ubuntu-26.04, and this job's measured time cap
-    # was taken on 24.04.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
