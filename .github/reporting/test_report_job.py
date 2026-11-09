@@ -209,6 +209,7 @@ class Journey:
         self.repository = self.harness.Repository()
         case.addCleanup(self.repository.close)
         self.case = case
+        self.tree = tree
         self.counts = Path(self.repository.path).parent / f'{Path(self.repository.path).name}.counts'
         case.addCleanup(self.counts.unlink, missing_ok=True)
         self.next_run = 1000
@@ -277,7 +278,13 @@ class Journey:
             self.test_linux(self.next_run + 1, head, targets_saved_from, release_tier)
         pull_request = {'head_repository': head_repository} if head_repository else {}
         event = self.harness.event_pull_request(1, head, self.base_sha, draft=draft, **pull_request)
-        return self.run('pull_request', head, event=event, base_ref='main', register=False)
+        job = self.run('pull_request', head, event=event, base_ref='main', register=False)
+        posted = [comment['body'] for comment in self.host.comments if f'head: {head} ·' in comment['body']]
+        delivered = head_repository is None and self.host.write_status is None
+        self.case.assertEqual(len(posted), int(delivered), job.stdout)
+        for body in posted:
+            assert_the_layout(self.case, job, body, omitted=self.tree)
+        return job
 
     def executed(self):
         return sorted(self.counts.read_text().split()) if self.counts.exists() else []
@@ -345,6 +352,104 @@ def catalog_files():
 
 def verdicts(job):
     return {result['id']: result for result in job.saved('budget-run.json')['results']['results']}
+
+
+# Where each part of the core's comment layout opens; each closes at its next `</details>`.
+SECTIONS = {'attention': '<details open><summary><b>Needs attention', 'within': '<details><summary><b>Within budget',
+            'details': '<details><summary>Details</summary>'}
+NOT_MEASURED = 'Not measured on this run'
+MARKS = ('✅', '❌', '⚠️')
+
+
+def section(body, name):
+    """One collapsible part of a posted comment, from its opening to its first `</details>`."""
+    start = body.index(SECTIONS[name])
+    return body[start:body.index('</details>', start)]
+
+
+def table_rows(text):
+    """A section's table rows, each the budget's name and then its cells, in order."""
+    return [[cell.strip() for cell in line.strip().strip('|').split('|')]
+            for line in text.splitlines() if line.startswith('| **')]
+
+
+def not_measured(details):
+    """The names the Details section lists under its not-measured heading."""
+    if f'**{NOT_MEASURED}' not in details:
+        return []
+    block = details.split(f'**{NOT_MEASURED}', 1)[1].split('\n\n', 2)[1]
+    return [line[2:].split(': ', 1)[0] for line in block.splitlines() if line.startswith('- ')]
+
+
+def signed(value):
+    """A change to one decimal with its sign and no negative zero, as the core writes it."""
+    rounded = f'{value:+.1f}'
+    return '+0.0' if rounded == '-0.0' else rounded
+
+
+def reason(row, report_only):
+    """The core contract's one phrase for why a row needs attention, from its saved verdict and flag."""
+    if row.get('verdict') == 'over':
+        phrase = 'Over limit · flagged' if row['flag'] else 'Over limit'
+    elif row.get('verdict') == 'error':
+        phrase = 'Error'
+    elif row.get('sd') == 0:
+        phrase = 'Flagged (was constant)'
+    else:
+        phrase = f'Flagged {signed(row.get("sigma_change") or 0)} SD'
+    return f'{phrase} (report-only)' if report_only else phrase
+
+
+def placed(row, report_only):
+    """The section the layout contract puts a saved row in."""
+    if row.get('verdict') == 'over' or (row.get('verdict') == 'error' and not report_only) or row['flag']:
+        return 'attention'
+    return 'within' if row.get('verdict') == 'within' else 'not-measured'
+
+
+def assert_the_layout(case, job, body, omitted):
+    """Every saved row in the one section its verdict and flag give, once, with the summary counting them."""
+    report = job.saved('comparison-report.json')
+    excluded = set(job_inputs()['enforcement-exclude-labels'].split(','))
+    labels = {(budget['file'], budget['id']): set(budget['labels']) for budget in job.saved('budget-run.json')['catalog']}
+    prefix = f"{report['current']['repository'].rsplit('/', 1)[-1]}-"
+    expected = {'attention': {}, 'within': {}, 'not-measured': {}}
+    for row in report['rows']:
+        report_only = bool(labels[(row['file'], row['id'])] & excluded)
+        name = row['id'].removeprefix(prefix) or row['id']
+        case.assertNotIn(name, {key for found in expected.values() for key in found}, 'one name per budget')
+        expected[placed(row, report_only)][name] = reason(row, report_only)
+    attention, within, details = (section(body, name) for name in ('attention', 'within', 'details'))
+    shown = {'attention': table_rows(attention), 'within': table_rows(within)}
+    case.assertEqual(sorted(cells[0].strip('*') for cells in shown['attention']), sorted(expected['attention']), body)
+    case.assertEqual(sorted(cells[0].strip('*') for cells in shown['within']), sorted(expected['within']), body)
+    case.assertEqual(sorted(not_measured(details)), sorted(expected['not-measured']), body)
+    for cells in shown['attention']:
+        case.assertEqual(len(cells), 3, cells)
+        case.assertEqual(cells[2], expected['attention'][cells[0].strip('*')], cells)
+    for cells in shown['within']:
+        case.assertEqual(len(cells), 2, cells)
+    if shown['attention']:
+        case.assertIn('| Budget | Now · vs base | Reason |\n', attention)
+    else:
+        case.assertIn('Nothing failed or was flagged.', attention)
+    if shown['within']:
+        case.assertIn('| Budget | Now · vs base |\n', within)
+    tables = [line for line in body.splitlines() if line.startswith('|')]
+    for mark in MARKS:
+        case.assertEqual([line for line in tables if mark in line], [], f'no table cell holds {mark}')
+    counts = {name: len(found) for name, found in expected.items()}
+    summary = (f"**⚠️ {counts['attention']} need attention**" if counts['attention'] else '**✅ Nothing needs attention**')
+    summary += f" · {counts['within']} within budget"
+    summary += f" · {counts['not-measured']} not measured" if counts['not-measured'] else ''
+    [line] = [line for line in body.splitlines() if line.startswith('**') and 'within budget ·' in line]
+    case.assertTrue(line.startswith(summary + ' · head '), (line, summary))
+    case.assertTrue(attention.startswith(f"{SECTIONS['attention']} ({counts['attention']})</b></summary>"), attention)
+    case.assertTrue(within.startswith(f"{SECTIONS['within']} ({counts['within']})</b></summary>"), within)
+    left_out = [line for line in body.splitlines() if 'left out' in line]
+    case.assertEqual(left_out, [line for line in details.splitlines() if 'left out' in line], 'inside Details')
+    if omitted:
+        case.assertEqual(left_out, [f'- {OMITTED_LINE}'], body)
 
 
 def unavailable(job):
@@ -689,7 +794,9 @@ class CatalogFixture(unittest.TestCase):
             self.assertEqual(journey.base_push().exit_code, 0)
         few = journey.pull_request()
         self.assertEqual(few.rows()['demo-bundle-bytes']['baseline_n'], 4)
-        self.assertIn('minimum 5', few.rows()['demo-bundle-bytes']['unavailable'])
+        # Below five samples nothing is compared: no mean, and the comment counts the samples instead.
+        self.assertNotIn('mean', few.rows()['demo-bundle-bytes'])
+        self.assertIn('| **demo-bundle-bytes** | 500 bytes<br>baseline 4/5 |', journey.host.comments[0]['body'])
         self.assertEqual(few.exit_code, 0, 'a missing baseline is a diagnostic')
 
         base = journey.base_push()
