@@ -4649,6 +4649,64 @@ test("choice buttons are reached by Tab and pressed from the keyboard, and resol
   }
 });
 
+test("editing a draft keeps its other half, clearing the last half drops it, and an edit clears a refusal and resends", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const title = "Edit a draft?";
+  const id = raiseQuestion(served, {
+    key: "edits",
+    title,
+    choices: REGIONS,
+  });
+  raiseQuestion(served, { key: "edits-text", title: "Text only?" });
+  await open(page, served);
+
+  // Clearing a text-only draft's words leaves nothing to send.
+  await answerBox(page, "Text only?").fill("Second thoughts");
+  await expect(sendButton(page)).toHaveText("Send 1 answer");
+  await answerBox(page, "Text only?").fill("");
+  await expect(sendButton(page)).toHaveCount(0);
+
+  // Words survive a choice's press, replacement and clearing; a choice survives
+  // the words being cleared.
+  const pane = await openDetail(page, title);
+  const words = pane.getByRole("textbox", {
+    name: `Answer in detail: ${title}`,
+  });
+  await words.fill("My own words");
+  await choiceButton(pane, "Europe").click();
+  await choiceButton(pane, "Asia Pacific").click();
+  await expect(words).toHaveValue("My own words");
+  await choiceButton(pane, "Asia Pacific").click();
+  await expect(words).toHaveValue("My own words");
+  await expect(sendButton(page)).toHaveText("Send 1 answer");
+  await choiceButton(pane, "Asia Pacific").click();
+  await words.fill("");
+  await expect(choiceButton(pane, "Asia Pacific")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(sendButton(page)).toHaveText("Send 1 answer");
+  await pane.getByRole("button", { name: "Close detail" }).click();
+
+  // Refused while open, then edited: the reason goes, and the resend lands.
+  await setUpdates(page, "Off");
+  raiseQuestion(served, {
+    key: "edits",
+    title,
+    choices: REGIONS.filter((choice) => choice.id !== "ap"),
+  });
+  await sendAnswers(page);
+  const reason = card(page, title).getByRole("alert");
+  await expect(reason).toContainText("offers no choice ap");
+  await choiceButton(card(page, title), "Europe").click();
+  await expect(reason).toHaveCount(0);
+  await sendAnswers(page);
+  await expect(card(page, title)).toHaveCount(0);
+  expect(stored(served, id).resolution?.choice).toBe("eu");
+});
+
 test("Discard removes every draft for good and writes nothing", async ({
   page,
 }) => {
