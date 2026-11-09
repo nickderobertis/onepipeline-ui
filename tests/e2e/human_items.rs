@@ -3198,19 +3198,28 @@ fn an_open_view_rides_out_a_journal_it_cannot_read_and_catches_up_on_the_same_st
     let mut tab = HumanItemsTab::open(&server, json!({ "type": "human-items" }));
     let shown = tab.state["visible"].clone();
 
-    // The directory moved aside and a plain file left where it was, so every
-    // read the engine makes of it is refused, for several polls.
-    let directory = world.root.join("human-items");
-    let away = world.root.join("human-items.away");
-    std::fs::rename(&directory, &away).expect("take the items away");
-    std::fs::write(&directory, "not a directory").expect("a file in their place");
+    // A directory where the engine opens its index lock refuses every read for
+    // several polls. The items stay where they are throughout, so a poll landing
+    // while the lock is swapped reads what the tab already shows.
+    let lock = world.root.join("human-items").join("index.lock");
+    let deadline = Instant::now() + PATIENCE;
+    while std::fs::remove_file(&lock)
+        .and_then(|()| std::fs::create_dir(&lock))
+        .is_err()
+    {
+        assert!(Instant::now() < deadline, "a poll kept the index lock");
+    }
+    error(
+        &http::get(server.address, "/api/human-items"),
+        409,
+        "human_item_conflict",
+    );
     assert!(tab.drain().is_empty(), "a refused read sends nothing");
     assert_eq!(tab.state["visible"], shown);
 
     // Put back, with a change it has not read: a read that was refused was not
     // forgotten, so the same stream carries it with nothing asked of the tab.
-    std::fs::remove_file(&directory).expect("remove the file");
-    std::fs::rename(&away, &directory).expect("put the items back");
+    std::fs::remove_dir(&lock).expect("give the lock back");
     raised(&world, "after", "task");
     tab.until_current(&server);
     assert_eq!(
