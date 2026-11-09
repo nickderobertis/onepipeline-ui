@@ -53,12 +53,21 @@ import {
 import { z } from "zod";
 import largeWorkload from "./large-run-workload.json" with { type: "json" };
 import {
+  checkAnswer,
+  checkScreen,
+  SCREEN_OBSERVER,
+  type ScreenState,
+  type Visible,
+} from "./mark";
+import {
   FIRST_VIEWS,
   type LargeRun,
   type Reading,
   telemetrySchema,
 } from "./telemetry";
 import workload from "./workload.json" with { type: "json" };
+
+const HISTORY_LOADING = "The rest of this run's history is still loading";
 
 const REPO = resolve(import.meta.dirname, "../../..");
 const TELEMETRY = join(import.meta.dirname, "telemetry/read-latency.json");
@@ -805,151 +814,16 @@ async function serveLarge(world: LargeWorld, port: number) {
   return { origin, server };
 }
 
-// llmlint: ignore-block[e2e_uses_accessible_selectors] a passive observer run inside the page at each mutation to time the moment a state is on screen: Playwright's role engine does not exist there, and a locator polled from outside would time the round trip. Every reading is against the accessible regions the page names (`Run header`, `Run metrics`, `Node transcript`, a card's aria-label).
-const SCREEN_OBSERVER = `
-(() => {
-  const states = [];
-  window.__firstScreen = states;
-  const text = (root, selector) => root?.querySelector(selector)?.textContent?.trim() ?? null;
-  const snapshot = () => {
-    const metrics = document.querySelector('[aria-label="Run metrics"]');
-    const metric = (name) => {
-      const tile = metrics && [...metrics.querySelectorAll('[role="group"]')].find((one) => one.getAttribute("aria-label")?.startsWith(name));
-      if (!tile) return null;
-      return { text: tile.textContent, loading: Boolean(tile.querySelector('[aria-busy="true"]')) };
-    };
-    const node = document.querySelector('[aria-label^="Timeline for "]');
-    const transcript = document.querySelector('[aria-label="Node transcript"]');
-    return {
-      at: performance.now(),
-      header: text(document, '[aria-label="Run header"] h2'),
-      hero: text(document, ".overall-hero h2"),
-      cards: [...document.querySelectorAll("article.dag-node")].map((card) => ({
-        name: card.getAttribute("aria-label"),
-        reason: text(card, ".node-reason"),
-        awaits: text(card, ".node-awaits"),
-      })),
-      status: metric("Status"),
-      nodes: metric("Nodes"),
-      wall: metric("Wall time"),
-      turns: metric("Turns"),
-      still_loading: document.body?.textContent?.includes("still loading") ?? false,
-      line: [...document.querySelectorAll('.graph-timeline [data-timeline-shape="span"]')].length,
-      node_heading: node?.getAttribute("aria-label") ?? null,
-      node_state: text(document, ".node-view-state"),
-      node_plot: Boolean(document.querySelector('[aria-label="Node timeline"] svg, [aria-label="Node timeline"] button')),
-      rows: transcript ? [...transcript.querySelectorAll(".transcript-item")].map((row) => row.getAttribute("aria-label")) : [],
-    };
-  };
-  const look = () => { states.push(snapshot()); };
-  new MutationObserver(look).observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
-})();
-`;
-// llmlint: ignore-end[e2e_uses_accessible_selectors]
-
-interface ScreenState {
-  at: number;
-  header: string | null;
-  hero: string | null;
-  cards: {
-    name: string | null;
-    reason: string | null;
-    awaits: string | null;
-  }[];
-  status: { text: string; loading: boolean } | null;
-  nodes: { text: string; loading: boolean } | null;
-  wall: { text: string; loading: boolean } | null;
-  turns: { text: string; loading: boolean } | null;
-  still_loading: boolean;
-  line: number;
-  node_heading: string | null;
-  node_state: string | null;
-  node_plot: boolean;
-  rows: (string | null)[];
-}
-
 /** The first answer, pared to what a mark and the complete comparison read. */
-const answerSchema = z.looseObject({
-  initial: z.looseObject({
-    snapshot: z.looseObject({
-      visible: z.looseObject({
-        detail: z.looseObject({
-          run: z.looseObject({ run_id: z.string(), state: z.string() }),
-          graph: z.looseObject({
-            plan: z.object({
-              tasks: z.array(
-                z.looseObject({ id: z.string(), name: z.string().optional() }),
-              ),
-            }),
-            node_status: z.record(z.string(), z.string()),
-          }),
-        }),
-        timeline: z
-          .looseObject({
-            spans: z.array(z.looseObject({ id: z.string() })),
-          })
-          .optional(),
-      }),
-    }),
-  }),
-});
-type Answer = z.infer<typeof answerSchema>;
-
-/** Whether a screen state draws the view's first useful screen as `answer` says it. */
-function screenHolds(
-  view: "graph" | "overall" | "node",
-  state: ScreenState,
-  answer: Answer,
-  world: LargeWorld,
-) {
-  const { detail, timeline } = answer.initial.snapshot.visible;
-  if (view === "graph") {
-    const tasks = detail.graph.plan.tasks;
-    if (
-      state.cards.length !== tasks.length ||
-      state.header !== detail.run.run_id
-    )
-      return false;
-    return tasks.every((task) => {
-      const status = detail.graph.node_status[task.id];
-      return state.cards.some(
-        (card) => card.name === `${task.name ?? task.id}: ${status}`,
-      );
-    });
-  }
-  if (view === "overall")
-    return (
-      state.hero === detail.run.run_id &&
-      state.status !== null &&
-      state.nodes !== null &&
-      state.wall !== null &&
-      state.turns?.loading &&
-      state.line > 0 &&
-      (timeline?.spans.length ?? 0) > 0
-    );
-  return (
-    state.node_heading === `Timeline for ${world.busiestNode}` &&
-    state.node_state !== null &&
-    state.node_plot &&
-    state.rows.length > 0
-  );
+interface Answer {
+  readonly initial: { readonly snapshot: { readonly visible: Visible } };
 }
 
-/** The first answer's held values against the complete document. */
-function answerHoldsToComplete(
-  answer: Answer,
-  complete: {
-    run: Record<string, unknown>;
-    graph: { node_status: Record<string, string> };
-  },
-) {
-  const held = answer.initial.snapshot.visible.detail;
-  return (
-    held.run.state === complete.run.state &&
-    Object.entries(held.graph.node_status).every(
-      ([node, status]) => complete.graph.node_status[node] === status,
-    )
-  );
+type Json = Record<string, unknown>;
+interface Complete {
+  readonly detail: Json;
+  readonly timeline: { readonly spans: readonly Json[] };
+  readonly nodeTimeline: { readonly spans: readonly Json[] };
 }
 
 const urlOf = (
@@ -966,7 +840,7 @@ async function firstViewReading(
   world: LargeWorld,
   port: number,
   view: (typeof FIRST_VIEWS)[number],
-  complete: Parameters<typeof answerHoldsToComplete>[1],
+  complete: Complete,
   cachedContext?: BrowserContext,
   run = world.run,
 ): Promise<{
@@ -996,11 +870,10 @@ async function firstViewReading(
       new URL(response.url()).pathname === "/api/v2/subscriptions" &&
       response.request().method() === "POST"
     ) {
-      const body = await response.text().catch(() => "");
       posted = {
         at: postStart.get(response.url()) ?? Date.now(),
         done: Date.now(),
-        body,
+        body: "",
       };
     }
   });
@@ -1011,14 +884,25 @@ async function firstViewReading(
   let mark: ScreenState | undefined;
   let answer: Answer | undefined;
   while (Date.now() < deadline) {
-    if (posted !== undefined && answer === undefined)
-      answer = answerSchema.parse(JSON.parse(posted.body));
+    if (posted !== undefined && answer === undefined) {
+      const text = await page.evaluate("window.__firstAnswer");
+      if (typeof text === "string") {
+        posted.body = text;
+        answer = JSON.parse(text) as Answer;
+      }
+    }
     if (answer !== undefined) {
       const states = z
         .array(z.custom<ScreenState>())
         .parse(await page.evaluate("window.__firstScreen ?? []"));
-      mark = states.find((state) =>
-        screenHolds(view, state, answer as Answer, world),
+      mark = states.find(
+        (state) =>
+          checkScreen(
+            view,
+            (answer as Answer).initial.snapshot.visible,
+            state,
+            world.busiestNode,
+          ).length === 0,
       );
       if (mark !== undefined) break;
     }
@@ -1042,7 +926,14 @@ async function firstViewReading(
     checked: {
       screen_against_answer: mark !== undefined && answer !== undefined,
       answer_against_complete:
-        answer !== undefined && answerHoldsToComplete(answer, complete),
+        answer !== undefined &&
+        checkAnswer(
+          answer.initial.snapshot.visible,
+          view === "node"
+            ? { detail: complete.detail, timeline: complete.nodeTimeline }
+            : { detail: complete.detail, timeline: complete.timeline },
+          view === "overall" ? "run" : view === "node" ? "node" : undefined,
+        ).length === 0,
     },
     host_load: load,
   };
@@ -1078,7 +969,17 @@ async function readComplete(world: LargeWorld, port: number) {
     const timeline = timelineSchema.parse(
       await (await fetch(`${root}/timeline?scope=run`)).json(),
     );
-    return { detail, spans: timeline.spans };
+    const nodeTimeline =
+      world.busiestNode === ""
+        ? { spans: [] }
+        : timelineSchema.parse(
+            await (
+              await fetch(
+                `${root}/timeline?scope=node&node=${encodeURIComponent(world.busiestNode)}`,
+              )
+            ).json(),
+          );
+    return { detail, timeline, nodeTimeline, spans: timeline.spans };
   } finally {
     await stopServing(server);
   }
@@ -1088,7 +989,7 @@ async function restArrived(
   world: LargeWorld,
   port: number,
   browser: Browser,
-  complete: Parameters<typeof answerHoldsToComplete>[1],
+  complete: Complete,
 ) {
   const measure = async (view: (typeof FIRST_VIEWS)[number]) => {
     const opened = await firstViewReading(browser, world, port, view, complete);
@@ -1108,7 +1009,7 @@ async function restArrived(
       return (
         last === undefined ||
         last.still_loading ||
-        (last.turns?.loading ?? false)
+        last.turns?.value === "Loading…"
       );
     };
     let states: ScreenState[] = [];
@@ -1150,7 +1051,7 @@ async function historyPage(
   world: LargeWorld,
   port: number,
   browser: Browser,
-  complete: Parameters<typeof answerHoldsToComplete>[1],
+  complete: Complete,
 ) {
   const opened = await firstViewReading(browser, world, port, "node", complete);
   const { page } = opened;
@@ -1168,12 +1069,12 @@ async function historyPage(
     return (Date.now() - asked) / 1000;
   };
   // The "before" reading is only that while the rest is still loading.
-  if ((await page.getByText("still loading").count()) === 0)
+  if ((await page.getByText(HISTORY_LOADING).count()) === 0)
     throw new Error(
       "the rest of the run arrived before the first page was asked for",
     );
   const before = await pageRead();
-  await expect(page.getByText("still loading")).toHaveCount(0, {
+  await expect(page.getByText(HISTORY_LOADING)).toHaveCount(0, {
     timeout: 600_000,
   });
   const after = await pageRead();
@@ -1250,7 +1151,7 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
         world,
         port,
         view,
-        complete.detail,
+        complete,
       );
       await primer.page.close();
       await stopServing(primer.server);
@@ -1261,7 +1162,7 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
           world,
           port,
           view,
-          complete.detail,
+          complete,
           primer.context,
         );
         readings.push(taken.reading);
@@ -1276,7 +1177,7 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
         world,
         port,
         view,
-        complete.detail,
+        complete,
         coldContext,
       );
       await coldContext.close();
@@ -1286,7 +1187,7 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
         world,
         port,
         view,
-        complete.detail,
+        complete,
         primer.context,
       );
       await fresh.page.close();
@@ -1298,7 +1199,7 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
           world,
           port,
           view,
-          complete.detail,
+          complete,
           primer.context,
           world.smallRun,
         );
@@ -1330,8 +1231,8 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
       slowest_view: FIRST_VIEWS[slowestIndex],
       slowest_s: medians[slowestIndex] ?? 0,
     };
-    const rest = await restArrived(world, port, browser, complete.detail);
-    const history = await historyPage(world, port, browser, complete.detail);
+    const rest = await restArrived(world, port, browser, complete);
+    const history = await historyPage(world, port, browser, complete);
     const status = await statusRead(world, port);
     const corpus =
       world.facts === undefined

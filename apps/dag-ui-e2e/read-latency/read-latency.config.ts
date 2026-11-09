@@ -12,7 +12,14 @@ import { defineConfig } from "@playwright/test";
  */
 export default defineConfig({
   testDir: import.meta.dirname,
-  testMatch: ["read-latency.spec.ts", "read-latency-budget.spec.ts"],
+  testMatch: [
+    "read-latency.spec.ts",
+    "read-latency-budget.spec.ts",
+    "first-screen-marks.spec.ts",
+    "wire-and-errors.spec.ts",
+    "live-run.spec.ts",
+    "reach-everything.spec.ts",
+  ],
   outputDir: join(import.meta.dirname, "../test-results/read-latency"),
   workers: 1,
   fullyParallel: false,
