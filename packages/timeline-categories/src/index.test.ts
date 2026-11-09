@@ -56,6 +56,10 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "edit-committed": "repository",
   "command-accepted": "planning",
   "planner-surface-queued": "planning",
+  // A surface a bus hook kept off the run's channel: the exchange with the
+  // planner, like the queueing it stands in for. `tests/contract.rs` named it
+  // when the engine pin moved to onepipeline 0.105.0, which declares it.
+  "planner-surface-dropped": "planning",
   "planner-surfaced": "planning",
   "planner-replied": "planning",
   "decision-pending": "planning",
