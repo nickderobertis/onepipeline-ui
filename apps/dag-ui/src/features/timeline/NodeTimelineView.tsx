@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import {
   Fragment,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -587,6 +588,16 @@ function NodeExecution({
     sync.scrollTo(id);
   };
   const transcript = useRef<HTMLElement | null>(null);
+  // One ref across renders, as the hook's own is: a new one would have the sync
+  // attach and detach its scroll listener on every render.
+  const { containerRef } = sync;
+  const transcriptRef = useCallback(
+    (element: HTMLElement | null) => {
+      transcript.current = element;
+      containerRef(element);
+    },
+    [containerRef],
+  );
   const plotArea = useRef<HTMLElement | null>(null);
   // Rows added above the reader keep what they were reading where it was.
   const heightBeforeLoad = useRef<number | undefined>(undefined);
@@ -604,6 +615,26 @@ function NodeExecution({
     heightBeforeLoad.current = undefined;
     element.scrollTop += element.scrollHeight - before;
   }, [timeline, history.loadingEarlier]);
+  // An address naming a row before the window is a person asking for it: read back
+  // until it is held or there is nothing earlier.
+  const { canLoadEarlier, loadingEarlier } = history;
+  useEffect(() => {
+    if (
+      selectedItemId !== undefined &&
+      selected === undefined &&
+      canLoadEarlier &&
+      !loadingEarlier &&
+      history.failure === undefined
+    )
+      loadEarlier();
+  }, [
+    selectedItemId,
+    selected,
+    canLoadEarlier,
+    loadingEarlier,
+    loadEarlier,
+    history.failure,
+  ]);
   const openedSpan =
     selected?.rowKind === "span" ? selected.span.id : undefined;
   useEffect(() => {
@@ -681,10 +712,7 @@ function NodeExecution({
           )
             askEarlier();
         }}
-        ref={(element) => {
-          transcript.current = element;
-          sync.containerRef(element);
-        }}
+        ref={transcriptRef}
       >
         {(history.canLoadEarlier || history.failure !== undefined) && (
           <LoadEarlier

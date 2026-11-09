@@ -127,6 +127,9 @@ export function useDagTelemetry(
   options: DagTelemetryOptions,
 ): DagTelemetryState {
   const [state, setState] = useState<LiveState>();
+  // Which view that state was served for, its filter included: a view's rows are
+  // never shown as another's.
+  const [stateView, setStateView] = useState<SubscriptionView>();
   const [humanItems, setHumanItems] = useState<LiveHumanItems>({});
   const latestRows = useRef<readonly SidebarRow[]>([]);
   const [rows, setRows] = useState<readonly SidebarRow[]>();
@@ -174,6 +177,7 @@ export function useDagTelemetry(
     options.mainUpdates,
     useCallback((copy) => {
       setState(copy.state);
+      setStateView(copy.view);
       const { visible } = copy.state;
       if (visible.type === "human-items") {
         const { items, detail } = visible;
@@ -331,7 +335,8 @@ export function useDagTelemetry(
     visible.type !== "sidebar" &&
     visible.type !== "human-items" &&
     visible.run_id === runId &&
-    sameView(visible, view)
+    sameView(visible, view) &&
+    JSON.stringify(stateView) === JSON.stringify(view)
       ? visible
       : undefined;
   // The detail stays on screen across a change of view of the same run.

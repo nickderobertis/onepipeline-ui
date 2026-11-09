@@ -47,6 +47,25 @@ export interface FirstAnswer {
   };
 }
 
+/**
+ * Carry a person's click over to the app arriving behind this screen: the address
+ * says what they asked for, and the app reads it when it mounts or on this event.
+ */
+function ask(change: (params: URLSearchParams) => void): void {
+  const params = new URLSearchParams(window.location.search);
+  change(params);
+  window.history.pushState(null, "", `${window.location.pathname}?${params}`);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+function openNode(id: string): void {
+  ask((params) => {
+    params.set("node", id);
+    params.set("view", "graph");
+    params.delete("event");
+  });
+}
+
 function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
   const reasons = new Map(
     nodes.map((node) => [
@@ -140,10 +159,13 @@ function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
           const reason = reasons.get(node.id);
           const awaited = awaits.get(node.id);
           return (
+            // biome-ignore lint/a11y/useKeyWithClickEvents: the card mirrors the canvas's, which takes the pointer alone; the list beside it is the keyboard path, as on the real one.
             <article
               aria-label={`${node.label}: ${node.state}`}
               className={`dag-node state-${node.state} token-${node.style}`}
               key={node.id}
+              // The list beside this canvas is the keyboard path, as on the real one.
+              onClick={() => openNode(node.id)}
               style={{
                 position: "absolute",
                 left: node.x,
@@ -171,6 +193,21 @@ function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
           );
         })}
       </div>
+      <ol aria-label="DAG nodes" className="accessible-node-list">
+        {nodes.map((node) => (
+          <li key={node.id}>
+            <button onClick={() => openNode(node.id)} type="button">
+              {node.label}: {node.status}
+              {reasons.get(node.id) === undefined
+                ? ""
+                : ` — ${reasons.get(node.id)}`}
+              {awaits.get(node.id) === undefined
+                ? ""
+                : ` — ${awaits.get(node.id)}`}
+            </button>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
@@ -385,8 +422,18 @@ function NodeTimeline({
             className="transcript-item"
             key={row.id}
           >
-            <span className="eyebrow">{row.displayKind}</span>
-            <strong>{row.displayLabel}</strong>
+            <button
+              aria-label={`Open ${row.displayLabel}`}
+              onClick={() =>
+                ask((params) => {
+                  params.set("event", row.id);
+                })
+              }
+              type="button"
+            >
+              <span className="eyebrow">{row.displayKind}</span>
+              <strong>{row.displayLabel}</strong>
+            </button>
           </article>
         ))}
       </section>

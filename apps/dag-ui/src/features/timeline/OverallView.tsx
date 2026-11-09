@@ -127,7 +127,16 @@ export function OverallView({
         ? undefined
         : eventAsRow(openedEvent)
       : spanAsRow(openedSpan);
-  const { loadSpan } = history;
+  const { loadSpan, loadRow: loadRunLevel } = history;
+  // An address naming a record this payload does not list is a person asking for it.
+  useEffect(() => {
+    if (
+      selectedItemId !== undefined &&
+      opened === undefined &&
+      timeline !== undefined
+    )
+      loadRunLevel(undefined);
+  }, [selectedItemId, opened, timeline, loadRunLevel]);
   const openedSpanId = openedSpan?.id;
   useEffect(() => {
     if (openedSpanId !== undefined) loadSpan(openedSpanId);
@@ -278,6 +287,11 @@ export function OverallView({
                 <GraphExecution
                   graph={graph}
                   history={history}
+                  runRecordsToLoad={runLevel.some(
+                    (span) =>
+                      span.events_total === undefined ||
+                      span.events_total > span.events.length,
+                  )}
                   onOpenNode={onSelectNode}
                   onOpenItem={onSelectItem}
                   selectedItemId={selectedItemId}
@@ -315,12 +329,15 @@ export function OverallView({
 function GraphExecution({
   graph,
   history,
+  runRecordsToLoad,
   onOpenNode,
   onOpenItem,
   selectedItemId,
 }: {
   readonly graph: ReturnType<typeof graphTimeline>;
   readonly history: TimelineHistory;
+  /** Whether the run's own records are not all held. */
+  readonly runRecordsToLoad: boolean;
   readonly onOpenNode: (nodeId: string) => void;
   /**
    * Open one plotted item beside the plot, by the id it is selected under. Not a
@@ -342,6 +359,7 @@ function GraphExecution({
   const [rowsOpen, setRowsOpen] = useState(false);
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set());
   const range = zoom ?? graph.range;
+  const [runRecordsAsked, setRunRecordsAsked] = useState(false);
   // A zoom is a person asking about a stretch: the run-level records in it are read
   // now; the rows of a node arrive when its row is opened.
   const { loadRow, loadStretch } = history;
@@ -405,6 +423,20 @@ function GraphExecution({
       )}
       {history.failure !== undefined && (
         <HistoryFailed failure={history.failure} />
+      )}
+      {/* Records the run made at no node, those after execution ended among them,
+          are read when asked for: a whole run's records are no part of opening it. */}
+      {runRecordsToLoad && !runRecordsAsked && (
+        <button
+          className="load-earlier"
+          onClick={() => {
+            setRunRecordsAsked(true);
+            loadRow(undefined);
+          }}
+          type="button"
+        >
+          Load the run's own records
+        </button>
       )}
       {rowsOpen && (
         <ol className="graph-rows">

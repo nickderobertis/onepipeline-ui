@@ -3093,6 +3093,15 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   font-weight: 500;
 }
 
+/* A finger needs the height above; a pointer does not, and a log wants its rows. */
+@media (min-width: 640px) {
+  .load-earlier {
+    min-height: 24px;
+    margin-bottom: 4px;
+    font-size: 12px;
+  }
+}
+
 .read-failed {
   display: grid;
   gap: 12px;

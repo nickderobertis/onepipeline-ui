@@ -588,6 +588,7 @@ export function App({
                       client={client}
                       detail={detail}
                       filter={filter}
+                      key={`${selectedRunId}:${filter ?? ""}`}
                       journalSeq={graph?.last_seq}
                       nodes={nodes}
                       onRetry={telemetry.refresh}
@@ -603,7 +604,7 @@ export function App({
                     <NodeTimelineView
                       client={client}
                       filter={filter}
-                      key={`${selectedNode.id}:${filter ?? ""}`}
+                      key={`${selectedRunId}:${selectedNode.id}:${filter ?? ""}`}
                       runLoaded={runLoaded}
                       onRetry={telemetry.refresh}
                       node={selectedNode}
