@@ -3146,3 +3146,10 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   color: var(--muted-foreground);
   font-weight: 400;
 }
+
+/* The main column runs wider than a phone; its recovery control stays on screen. */
+.live-issue {
+  position: sticky;
+  left: 0;
+  max-width: calc(100vw - 96px);
+}

@@ -817,6 +817,12 @@ impl Folded {
     }
 }
 
+/// A journal this small is read whole for its first answer. Selection drops
+/// heartbeats and activity except at a stream's ends, so on a run writing one
+/// stream a span resting on such a record would end early; reading it all costs
+/// less than a first screen can notice.
+const WHOLE_READ_BYTES: u64 = 1024 * 1024;
+
 fn agents_of(paths: &RunPaths) -> Option<Agents> {
     onepipeline::verbs::agents(paths, AgentScope::Run).ok()
 }
@@ -830,14 +836,23 @@ impl LiveRun {
         node: Option<&NodeId>,
     ) -> Result<Self, ApiError> {
         let paths = store.present(run)?;
-        let selection = onepipeline::journal::Selection::FirstScreen {
-            node: node.map(NodeId::as_str),
+        let (view, indexed) = if std::fs::metadata(paths.journal())
+            .is_ok_and(|about| about.len() <= WHOLE_READ_BYTES)
+        {
+            let view = store.view(run)?;
+            let indexed = Indexed::of(&view);
+            (view, indexed)
+        } else {
+            let selection = onepipeline::journal::Selection::FirstScreen {
+                node: node.map(NodeId::as_str),
+            };
+            let mut selected = onepipeline::journal::read_selected(&paths.journal(), &selection);
+            let events = std::mem::take(&mut selected.events);
+            let view = RunView::over_selected(&paths, events)
+                .map_err(|error| ApiError::Engine(error.to_string()))?;
+            let indexed = Indexed::selective(&view, selected);
+            (view, indexed)
         };
-        let mut selected = onepipeline::journal::read_selected(&paths.journal(), &selection);
-        let events = std::mem::take(&mut selected.events);
-        let view = RunView::over_selected(&paths, events)
-            .map_err(|error| ApiError::Engine(error.to_string()))?;
-        let indexed = Indexed::selective(&view, selected);
         let declared = store.declared(&view);
         // A node's session rows come off the pointer file, and its agent count
         // and rows are the only thing a first answer reads it for.
@@ -1748,10 +1763,13 @@ impl Hub {
                 !matches!(visible, Visible::Sidebar) && visible.detail_filter() == *key
             })
         });
+        // A complete reading keeps Overall, so a tab opening it is answered at once.
+        let complete = run.complete();
         run.timelines.retain(|(scope, key, _)| {
-            wanted.iter().any(|visible| {
-                matches!(visible, Visible::Timeline { scope: shown, filter, .. } if shown == scope && filter == key)
-            })
+            (complete && *scope == TimelineScope::Run && key.names_none())
+                || wanted.iter().any(|visible| {
+                    matches!(visible, Visible::Timeline { scope: shown, filter, .. } if shown == scope && filter == key)
+                })
         });
         if !wanted
             .iter()

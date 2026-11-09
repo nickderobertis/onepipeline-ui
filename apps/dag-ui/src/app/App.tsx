@@ -422,7 +422,7 @@ export function App({
             // `Alert` carries `role="alert"` itself, so the banner keeps announcing
             // itself the moment a read fails.
             <Alert
-              className="rounded-none border-x-0 border-t-0"
+              className="live-issue rounded-none border-x-0 border-t-0"
               variant="destructive"
             >
               <TriangleAlert />

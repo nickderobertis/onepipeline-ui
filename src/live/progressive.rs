@@ -318,7 +318,14 @@ impl CompleteRead {
                 self.details.insert(key.clone(), (filter.clone(), built));
             }
         }
-        for (scope, key, filter) in &shown.1 {
+        // Overall is built whoever shows it now: a tab opening it once this read is
+        // published must not wait on a build of the whole run under the run's lock.
+        let overall = (
+            TimelineScope::Run,
+            FilterKey::default(),
+            EventFilter::default(),
+        );
+        for (scope, key, filter) in shown.1.iter().chain(std::iter::once(&overall)) {
             if !self
                 .timelines
                 .iter()
@@ -630,6 +637,31 @@ impl Hub {
                         run: run.run.clone(),
                         scope: scope.clone(),
                         ops,
+                    },
+                ));
+            }
+        }
+        if let Some(at) = timelines.iter().position(|(scope, key, ..)| {
+            *scope == TimelineScope::Run && key.names_none()
+        }) {
+            let (scope, key, filter, built) = timelines.swap_remove(at);
+            if !run
+                .timelines
+                .iter()
+                .any(|(held_scope, held_key, _)| *held_scope == scope && *held_key == key)
+            {
+                let window = wire_window(&scope);
+                let mut wire = wire_timeline(built.payload(), window, true);
+                wire["progress"] = run.timeline_progress(&scope);
+                run.timelines.push((
+                    scope,
+                    key,
+                    super::HeldTimeline {
+                        live: built,
+                        wire,
+                        window,
+                        filter,
+                        observed_at: now.clone(),
                     },
                 ));
             }

@@ -25,11 +25,7 @@ export function loadingPath(detail: LiveRunDetail, path: string): boolean {
  */
 export function staleFoldAsOf(detail: LiveRunDetail): string | undefined {
   const asOf = detail.telemetry?.as_of;
-  const last = detail.run.last_event;
-  if (asOf === undefined || last === undefined || last === null)
-    return undefined;
-  const lastAt = Date.parse(last);
-  return Number.isFinite(lastAt) && lastAt > Date.parse(asOf)
-    ? asOf
-    : undefined;
+  if (asOf === undefined) return undefined;
+  // `observed_at` moves with every record a frame carried; the fold does not.
+  return Date.parse(detail.observed_at) > Date.parse(asOf) ? asOf : undefined;
 }
