@@ -161,11 +161,14 @@ test("the busiest node's whole transcript is reached back to its first row, in o
     timeout: NEVER,
   });
   const load = page.getByRole("button", { name: "Load earlier rows" });
-  const paging = page.getByRole("button", { name: "Loading earlier rows…" });
-  while ((await load.count()) > 0) {
-    await load.first().click();
-    // A page in flight renames the control, so it is gone only once the last is read.
-    await expect(paging).toHaveCount(0, { timeout: NEVER });
+  // Paged until the server says there is no earlier row; a scroll may take a page of
+  // its own, so each round waits for an answer rather than for the control.
+  while (answers.at(-1)?.includes("next=null") !== true) {
+    const asked = answers.length;
+    await load.first().click({ timeout: NEVER });
+    await expect
+      .poll(() => answers.length, { timeout: NEVER })
+      .toBeGreaterThan(asked);
     if ((await page.getByRole("alert").count()) > 0)
       throw new Error("a page failed on the way back");
   }
