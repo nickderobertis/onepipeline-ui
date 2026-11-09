@@ -159,9 +159,12 @@ impl HumanItems {
         let actor = actor(session);
         let id = id.as_str().to_owned();
         let action = match act {
+            // The browser answers in its own words; picking a choice by id is
+            // the engine's surface alone, and this route offers none.
             Act::Answer(text) => HumanItemAction::Answer {
                 id,
-                text,
+                choice: None,
+                text: Some(text),
                 actor,
                 on_behalf_of: None,
             },
