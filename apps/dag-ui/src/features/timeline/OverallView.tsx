@@ -260,7 +260,7 @@ export function OverallView({
                   header banner. App.test.tsx proves this surface through the real
                   client. */}
               {timelineError !== undefined ? (
-                <Alert variant="destructive">
+                <Alert className="live-issue" variant="destructive">
                   <TriangleAlert />
                   <AlertTitle>Timeline unavailable</AlertTitle>
                   <AlertDescription>

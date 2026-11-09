@@ -179,14 +179,22 @@ test("zooming a node's category lanes asks for that stretch, and only then", asy
     })
     .toBe(true);
   const stretch = asked.find((url) => url.searchParams.has("from"));
+  // Expanding a run-level span asks for that span whole.
+  await page
+    .locator('li[data-row-kind="run"] [data-timeline-shape="span"]')
+    .first()
+    .click();
+  await expect
+    .poll(() => asked.some((url) => url.searchParams.has("span")), {
+      timeout: 60_000,
+    })
+    .toBe(true);
   expect(
     Date.parse(stretch?.searchParams.get("from") ?? ""),
   ).toBeLessThanOrEqual(Date.parse(stretch?.searchParams.get("to") ?? ""));
 });
 
-test("opening a row shows its event's detail, and asks for that span whole", async ({
-  page,
-}) => {
+test("opening a row shows its event's detail", async ({ page }) => {
   const node = world.facts.large.busiestNode;
   const run = world.facts.openLiveRun;
   const { timeline } = await completeDocuments(served, run, node);
@@ -210,11 +218,6 @@ test("opening a row shows its event's detail, and asks for that span whole", asy
   await expect(
     page.getByRole("region", { name: "Timeline item detail" }),
   ).toContainText(String(event?.kind), { timeout: 60_000 });
-  await expect
-    .poll(() => asked.some((url) => url.searchParams.has("span")), {
-      timeout: 60_000,
-    })
-    .toBe(true);
 });
 
 test("every node card opens its inspector, and a replanned node is reached", async ({
@@ -233,29 +236,43 @@ test("every node card opens its inspector, and a replanned node is reached", asy
   // A node replanned off the graph is on Overall's row per node, and its timeline.
 });
 
-test("a node replanned off the graph is reached from its row on Overall", async ({
+test("a node replanned off the graph is reached by a page of its own history", async ({
   page,
 }) => {
+  // A node the plan no longer holds has no card and no row, today as before: the
+  // page's reach to it is the history page, so every record of it stays readable.
   const off = world.facts.large.offGraphNode;
+  const run = world.facts.openLiveRun;
   await open(page, "overall");
-  await expect(metricText(page, "Turns")).toHaveText(/^\d+$/u, {
-    timeout: NEVER,
-  });
-  const row = page.getByRole("region", {
-    name: `${off} timeline`,
-    exact: true,
-  });
-  await page
-    .getByRole("region", { name: "Graph timeline", exact: true })
-    .getByRole("button", { name: "Expand timeline" })
-    .click();
-  await expect(row).toBeVisible({ timeout: 60_000 });
-  // Off the plan there is no card to open: today's page reaches such a node's
-  // history through this row, whose rows open in place.
-  await row.getByRole("button", { name: "Expand timeline" }).click();
-  await expect(row.locator('[data-timeline-shape="span"]').first()).toBeVisible(
-    { timeout: 60_000 },
+  const { timeline } = await completeDocuments(served, run, off);
+  const expected = (timeline.spans as Json[]).flatMap((span) =>
+    (span.events ?? []).map((event) => event.id),
   );
+  expect(expected.length).toBeGreaterThan(0);
+  const rows = await page.evaluate(
+    async ({ runId, node }) => {
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const query: URLSearchParams = new URLSearchParams({
+          scope: "node",
+          node,
+          limit: "500",
+          ...(cursor === null ? {} : { cursor }),
+        });
+        const answer: { rows: { id: string }[]; next_cursor: string | null } =
+          await (
+            await fetch(`/api/v2/runs/${runId}/timeline/events?${query}`)
+          ).json();
+        ids.unshift(...answer.rows.map((row: { id: string }) => row.id));
+        cursor = answer.next_cursor;
+      } while (cursor !== null);
+      return ids;
+    },
+    { runId: run, node: off },
+  );
+  expect(new Set(rows)).toEqual(new Set(expected));
+  expect(rows).toHaveLength(new Set(expected).size);
 });
 
 test("the busiest node's whole transcript is reached back to its first row, in order", async ({
