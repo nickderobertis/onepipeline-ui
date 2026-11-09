@@ -417,11 +417,13 @@ function outcome(page: Page): Locator {
 
 /** The value of one labelled field in a detail's metadata block. */
 function metadataOf(pane: Locator, label: string): Locator {
-  // llmlint: ignore[e2e_uses_accessible_selectors] a `dd` belongs to its `dt` only by position in the list: the accessibility tree offers no name or relation from a term to its definition, so the label is found by role and its value by that adjacency.
-  return pane
-    .getByRole("term")
-    .filter({ hasText: new RegExp(`^${label}$`, "u") })
-    .locator("+ dd");
+  return (
+    pane
+      .getByRole("term")
+      .filter({ hasText: new RegExp(`^${label}$`, "u") })
+      // llmlint: ignore[e2e_uses_accessible_selectors] a `dd` belongs to its `dt` only by position in the list: the accessibility tree offers no name or relation from a term to its definition, so the label is found by role and its value by that adjacency.
+      .locator("+ dd")
+  );
 }
 
 function detailPane(page: Page): Locator {
@@ -4571,6 +4573,7 @@ test("an item that no longer reads retires its draft, a read that fails keeps it
   // A hidden item whose read fails stays drafted: unknown is not gone.
   await choiceButton(card(page, "Read fails?"), "Europe").click();
   await answerBox(page, "Vanishes?").fill("Words for a vanished item");
+  // llmlint: ignore[e2e_not_mocked] the transport failing for this one read while the page and every other request stay up is the state under test, and no real server can fail a single GET; the bundle, the engine and all other routes are real.
   await page.route(`**/api/human-items/${kept}`, (route) => route.abort());
   await page
     .getByRole("group", { name: "Filter action items" })
@@ -4593,6 +4596,57 @@ test("an item that no longer reads retires its draft, a read that fails keeps it
   await expect(notices).toContainText("Words for a vanished item");
   await expect(notices).toContainText("answered or dismissed elsewhere");
   expect(await storedDraft(page, vanishing)).toBeNull();
+});
+
+test("choice buttons are reached by Tab and pressed from the keyboard, and resolved items state when", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const title = "Pick by keyboard?";
+  const id = raiseQuestion(served, {
+    key: "keyboard",
+    title,
+    choices: REGIONS,
+  });
+  await open(page, served);
+  const shown = card(page, title);
+  const first = choiceButton(shown, "Europe");
+  await first.focus();
+  await page.keyboard.press("Tab");
+  await expect(choiceButton(shown, "United States")).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(first).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(first).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Space");
+  await expect(first).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Space");
+  await expect(sendButton(page)).toHaveText("Send 1 answer");
+  const pane = await openDetail(page, title);
+  await expect(metadataOf(pane, "Raised")).toHaveText(/\d{4}/u);
+  await expect(pane.getByRole("term")).not.toContainText(["Answered"]);
+  await sendAnswers(page);
+  await expect(metadataOf(pane, "State")).toHaveText("Answered");
+  await expect(metadataOf(pane, "Answered")).toHaveText(/\d{4}/u);
+  expect(stored(served, id).resolution?.choice).toBe("eu");
+  await pane.getByRole("button", { name: "Close detail" }).click();
+
+  // A completed task and a dismissed one say when, under their own labels.
+  for (const [state, verb, label] of [
+    ["completed", "complete", "Completed"],
+    ["dismissed", "dismiss", "Dismissed"],
+  ] as const) {
+    const taskTitle = `Done by ${verb}`;
+    const taskId = raise(served, taskTitle, "task");
+    cli(served, ["human-items", verb, taskId], SUPERVISOR);
+    await page
+      .getByRole("group", { name: "Filter action items" })
+      .getByLabel("State", { exact: true })
+      .selectOption(state);
+    const resolved = await openDetail(page, taskTitle);
+    await expect(metadataOf(resolved, label)).toHaveText(/\d{4}/u);
+    await resolved.getByRole("button", { name: "Close detail" }).click();
+  }
 });
 
 test("Discard removes every draft for good and writes nothing", async ({
@@ -4667,8 +4721,8 @@ test("what storage holds is only used if valid, and a browser that keeps nothing
   expect(await storedDraft(page, good)).not.toBeNull();
 
   const denied = await context.newPage();
-  // llmlint: ignore[e2e_not_mocked] a browser that refuses storage (a blocked-cookies profile, an opaque origin) throws exactly these SecurityErrors, and Playwright can neither launch nor toggle that setting per page; the server and every other layer here are real.
-  // llmlint: ignore[tests_mirror_real_usage] as above: the throw a denied browser produces, which no user action can induce from this page.
+  // llmlint: ignore-block[e2e_not_mocked] a browser that refuses storage (a blocked-cookies profile, an opaque origin) throws exactly these SecurityErrors, and Playwright can neither launch nor toggle that setting per page; the server and every other layer here are real.
+  // llmlint: ignore-block[tests_mirror_real_usage] as above: the throw a denied browser produces, which no user action can induce from this page.
   await denied.addInitScript(() => {
     const refuse = () => {
       throw new DOMException("denied", "SecurityError");
@@ -4678,6 +4732,8 @@ test("what storage holds is only used if valid, and a browser that keeps nothing
     Storage.prototype.removeItem = refuse;
     Storage.prototype.key = refuse;
   });
+  // llmlint: ignore-end[tests_mirror_real_usage]
+  // llmlint: ignore-end[e2e_not_mocked]
   const typed = raiseQuestion(served, {
     key: "stored-denied",
     title: "Storage denied?",
