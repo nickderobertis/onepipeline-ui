@@ -406,6 +406,12 @@ impl LiveTimeline {
         self.window == ItemsWindow::All
     }
 
+    /// Under [`ItemsWindow::Page`], how many rows its bounds admit across every
+    /// span, rendered or not.
+    pub(crate) fn counted(&self) -> usize {
+        self.rendered.borrow().counted.len()
+    }
+
     pub(crate) fn rendered(&self) -> usize {
         self.rendered.borrow().fresh
     }

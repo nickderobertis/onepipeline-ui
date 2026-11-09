@@ -107,6 +107,17 @@ fn from_selected(
     };
     let scope = scope_of(&query.owner);
     let indexed: Indexed = run.indexed.reading_share(&run.view, selected, held);
+    // Only this page's rows are rendered and the rest of the share counted,
+    // except for one span asked for whole, whose own list is the answer.
+    let window = match query.span {
+        Some(_) => ItemsWindow::All,
+        None => ItemsWindow::Page {
+            before: query.cursor.map(|cursor| (cursor.at, cursor.order)),
+            from: query.from,
+            to: query.to,
+            limit: query.limit,
+        },
+    };
     let built = LiveTimeline::build(
         &run.view,
         &indexed,
@@ -114,9 +125,13 @@ fn from_selected(
         scope,
         filter,
         run.agents.as_ref(),
-        ItemsWindow::All,
+        window,
     );
-    page_of(&built.payload()["spans"], query)
+    let mut page = page_of(&built.payload()["spans"], query)?;
+    if query.span.is_none() {
+        page["total"] = json!(built.counted());
+    }
+    Ok(page)
 }
 
 /// A page once the complete read was published, from a share's kept timeline,

@@ -131,7 +131,10 @@ pub(super) fn wire_span(
                 })
                 .unwrap_or_default(),
         ),
-        ItemsWindow::All => fields.get("events").cloned().unwrap_or(json!([])),
+        // A page's rendering is the page route's own, never a subscriber's.
+        ItemsWindow::All | ItemsWindow::Page { .. } => {
+            fields.get("events").cloned().unwrap_or(json!([]))
+        }
     };
     wire.insert("events".to_owned(), listed);
     if complete && !wire.contains_key("events_total") {

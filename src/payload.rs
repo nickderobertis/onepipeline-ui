@@ -5428,6 +5428,20 @@ pub(crate) enum ItemsWindow {
     /// None at all: a span's bounds and status are read off the records, not
     /// its list.
     Nothing,
+    /// One history page's rows and those just older, across every span: rows
+    /// strictly older than `before`, within `from` and `to`, the latest `limit`
+    /// and one more of them. Every row the bounds admit is counted, rendered or
+    /// not, into the reading's [`Rendered::counted`].
+    Page {
+        /// Older than this row's `(at, journal order)`.
+        before: Option<(i128, u64)>,
+        /// At or after this instant.
+        from: Option<i128>,
+        /// At or before this instant.
+        to: Option<i128>,
+        /// How many rows the page holds.
+        limit: usize,
+    },
 }
 
 /// Timeline entries a live reading has rendered, by merged-store position,
@@ -5435,11 +5449,36 @@ pub(crate) enum ItemsWindow {
 #[derive(Debug, Default)]
 pub(crate) struct Rendered {
     pub(crate) entries: std::collections::HashMap<usize, (Option<String>, Value)>,
+    /// Under [`ItemsWindow::Page`], the id of every row its bounds admit.
+    pub(crate) counted: HashSet<String>,
     /// How many entries were rendered rather than reused, since this was made.
     pub(crate) fresh: usize,
 }
 
 impl Lens<'_> {
+    /// Where a record stands among history rows: its stamp, and its place in the
+    /// journal, as a cursor names it.
+    fn page_key(&self, index: usize, event: &Envelope) -> Option<(i128, u64)> {
+        let position = self
+            .positions
+            .and_then(|positions| positions.get(index).copied())
+            .unwrap_or(index);
+        Some((millis_of(&event.ts)?, u64::try_from(position).ok()?))
+    }
+
+    /// The id a record's row is served under, without rendering it.
+    fn row_id(&self, index: usize) -> String {
+        let position = self
+            .positions
+            .and_then(|positions| positions.get(index).copied())
+            .unwrap_or(index);
+        self.turns
+            .get(index)
+            .and_then(Option::as_ref)
+            .filter(|turn| turn.held == Held::Describes)
+            .map_or_else(|| format!("e{position}"), |turn| turn.id.clone())
+    }
+
     /// The events of one span, as the reader asked for them, into `span`:
     /// its `events`, and `events_total` where the list is a window of them.
     fn fill(&self, span: &mut Map<String, Value>, events: &[(usize, &Envelope)]) {
@@ -5459,6 +5498,30 @@ impl Lens<'_> {
         let mut ordered = events.to_vec();
         ordered.sort_by_key(|(index, event)| (millis_of(&event.ts), *index));
         let mut total = None;
+        if let ItemsWindow::Page {
+            before, from, to, ..
+        } = self.window
+        {
+            ordered.retain(|(index, event)| {
+                let key = self.page_key(*index, event);
+                self.filter.allows(event)
+                    && key.is_some_and(|(at, order)| {
+                        before.is_none_or(|before| (at, order) < before)
+                            && from.is_none_or(|from| at >= from)
+                            && to.is_none_or(|to| at <= to)
+                    })
+            });
+            if let Some(rendered) = self.rendered {
+                let mut rendered = rendered.borrow_mut();
+                for (index, _) in &ordered {
+                    let id = self.row_id(*index);
+                    rendered.counted.insert(id);
+                }
+            }
+            if let Some(since) = self.since {
+                ordered.retain(|(index, event)| (millis_of(&event.ts), *index) >= since);
+            }
+        }
         if let ItemsWindow::Latest(latest) = self.window {
             ordered.retain(|(_, event)| self.filter.allows(event));
             total = Some(ordered.len());
@@ -5611,6 +5674,36 @@ pub(crate) fn share_spans(
         turn_ids(view, &transcripts)
     };
     let since = match window {
+        ItemsWindow::Page {
+            before,
+            from,
+            to,
+            limit,
+        } => {
+            let mut keys: Vec<(Option<i128>, usize)> = view
+                .events
+                .iter()
+                .enumerate()
+                .filter(|(index, event)| {
+                    let position = view
+                        .positions
+                        .and_then(|positions| positions.get(*index).copied())
+                        .unwrap_or(*index);
+                    filter.allows(event)
+                        && millis_of(&event.ts).is_some_and(|at| {
+                            before.is_none_or(|before| {
+                                (at, u64::try_from(position).unwrap_or(u64::MAX)) < before
+                            }) && from.is_none_or(|from| at >= from)
+                                && to.is_none_or(|to| at <= to)
+                        })
+                })
+                .map(|(index, event)| (millis_of(&event.ts), index))
+                .collect();
+            keys.sort_unstable();
+            keys.len()
+                .checked_sub(limit + 1)
+                .and_then(|from| keys.get(from).copied())
+        }
         ItemsWindow::Latest(latest) => {
             let mut keys: Vec<(Option<i128>, usize)> = view
                 .events
