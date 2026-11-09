@@ -6,18 +6,23 @@
  * the check to refusing one wrong value at a time.
  */
 import type { LiveRunDetail, RunTimeline } from "@onepipeline-ui/dag-model";
+// eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
 import { graphTimeline } from "../../dag-ui/src/features/timeline/graph-timeline";
+// eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
 import {
   nodeTimelineV2,
   transcriptEntries,
 } from "../../dag-ui/src/features/timeline/timeline-model";
+// eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
 import { LOADING_TEXT } from "../../dag-ui/src/lib/loading";
+// eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
 import {
   awaitedLine,
   isUnhealthy,
   nodeReason,
   nodeViews,
 } from "../../dag-ui/src/lib/run-model";
+// eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
 import { formatDurationSeconds } from "../../dag-ui/src/lib/time";
 
 export type FirstView = "graph" | "overall" | "node";

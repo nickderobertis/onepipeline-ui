@@ -78,6 +78,7 @@
       "version": "0.0.0-workspace",
       "dependencies": {
         "@onepipeline-ui/dag-model": "workspace:*",
+        "@onepipeline-ui/telemetry-client": "workspace:*",
         "@onepipeline-ui/timeline-categories": "workspace:*",
         "zod": "4.1.12",
       },

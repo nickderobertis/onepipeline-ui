@@ -9,8 +9,8 @@ import {
   timelineEventsPageSchema,
   visibleViolations,
 } from "@onepipeline-ui/dag-model";
+import { READ_DEADLINE_MS } from "@onepipeline-ui/telemetry-client";
 import { expect, type Page, test } from "@playwright/test";
-import { READ_DEADLINE_MS } from "../../../packages/telemetry-client/src/deadline";
 import {
   addressOf,
   appendTo,

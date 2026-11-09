@@ -255,7 +255,7 @@ const WRONG_ANSWERS: {
     view: "overall",
     feed: (v) => {
       const span = (
-        v.timeline?.spans as unknown as {
+        (v.timeline as unknown as { spans: never[] }).spans as unknown as {
           kind: string;
           ended_at: string;
           started_at: string;
@@ -272,7 +272,7 @@ const WRONG_ANSWERS: {
     name: "a missing span",
     view: "overall",
     feed: (v) => {
-      (v.timeline?.spans as unknown as unknown[]).pop();
+      (v.timeline as unknown as { spans: unknown[] }).spans.pop();
     },
     refusedAs: /spans: the answer holds/u,
   },
@@ -281,8 +281,8 @@ const WRONG_ANSWERS: {
     view: "node",
     feed: (v) => {
       const span = (
-        v.timeline?.spans as unknown as { events: unknown[] }[]
-      ).find((held) => held.events.length > 1);
+        v.timeline as unknown as { spans: { events: unknown[] }[] }
+      ).spans.find((held) => held.events.length > 1);
       span?.events.pop();
     },
     refusedAs: /events/u,
