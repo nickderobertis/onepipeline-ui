@@ -27,8 +27,8 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# The one variable rust-cache hashes into its key that these jobs set, and
-# `ci-cache.yml` sets it alike, so the key it saves is the key these restore.
+# rust-cache hashes these variables into its key, and `ci-cache.yml` sets them
+# alike, so the key it saves is the key these restore.
 env:
   CARGO_TERM_COLOR: always
 
