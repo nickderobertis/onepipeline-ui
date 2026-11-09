@@ -73,7 +73,7 @@ export function probeHashes(cwd, before) {
   const hashes = join(workspaceData, "before.json");
   writeFileSync(hashes, JSON.stringify(before));
   try {
-    return JSON.parse(
+    const read = JSON.parse(
       execFileSync(
         process.execPath,
         [resolve(".github/tests/nx-cache/nx-probe-hashes.mjs"), cwd, hashes],
@@ -89,6 +89,17 @@ export function probeHashes(cwd, before) {
         },
       ),
     );
+    const hashesOnly = (value) =>
+      value &&
+      typeof value === "object" &&
+      Object.values(value).every((hash) => typeof hash === "string");
+    if (
+      !hashesOnly(read?.restored) ||
+      !read.moved ||
+      !Object.values(read.moved).every(hashesOnly)
+    )
+      throw new Error("nx-probe-hashes printed no moved and restored hashes");
+    return read;
   } finally {
     rmSync(workspaceData, { recursive: true, force: true });
   }

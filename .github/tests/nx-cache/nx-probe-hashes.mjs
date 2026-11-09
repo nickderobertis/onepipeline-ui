@@ -3,7 +3,7 @@
 // cost, and a CI job ran past its cap on it (docs/linux-cold-cache-timing.md).
 import { readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { probeEdit } from "./nx-fixture.mjs";
 
@@ -23,6 +23,22 @@ async function main() {
     before = JSON.parse(readFileSync(beforePath, "utf8"));
   } catch (error) {
     usage(`cannot read hashes ${beforePath}: ${error.message}`);
+  }
+  if (!before || typeof before !== "object" || Array.isArray(before))
+    usage("the hashes must be an object of tasks");
+  for (const [id, task] of Object.entries(before)) {
+    if (
+      !/^[A-Za-z0-9@._/-]+:[A-Za-z0-9._-]+$/.test(id) ||
+      !Array.isArray(task?.probes)
+    )
+      usage(`${id} is not a task carrying its probes`);
+    for (const probe of task.probes)
+      if (
+        typeof probe?.file !== "string" ||
+        isAbsolute(probe.file) ||
+        probe.file.split("/").includes("..")
+      )
+        usage(`${id} names a probe outside the workspace`);
   }
   try {
     process.chdir(resolve(workspace));
