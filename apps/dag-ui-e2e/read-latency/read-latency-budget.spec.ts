@@ -198,7 +198,9 @@ test("a batch tab slower than the spaced writes becomes the figure, with each pa
 });
 
 test("telemetry with no batch phase is refused rather than reported", () => {
-  const { batch: _dropped, ...none } = telemetry();
+  const none = Object.fromEntries(
+    Object.entries(telemetry()).filter(([key]) => key !== "batch"),
+  );
   const run = measure("human-items-lag", recorded(none));
   expect(run.status).toBe(1);
   expect(run.stderr).toContain("dag-ui-read-latency:test");
