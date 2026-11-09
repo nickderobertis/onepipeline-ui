@@ -92,6 +92,7 @@ const RESTAMPED_EVENT_GAP_MS = 60_000;
  * stays as the engine wrote it. The index is a fold of the old bytes, so it goes
  * with them and the next read folds the restamped journal.
  */
+// llmlint: ignore-block[tests_mirror_real_usage] every event here was written by the real CLI and is still read by the real server; only the moment on it changes, because the engine stamps its own wall clock and has no input for another, and an image gate cannot compare a capture carrying the time it was built. The capture's run corpus is written on disk against the same named instant for the same reason (`runs.mjs`), and this runs only when the screenshot tier names one.
 function restampJournal(workspace) {
   if (NAMED_NOW === undefined) return;
   const journal = join(paths(workspace).runs, "human-items", "events.ndjson");
@@ -112,6 +113,7 @@ function restampJournal(workspace) {
   writeFileSync(journal, `${restamped.join("\n")}\n`);
   rmSync(join(dirname(journal), "index.json"), { force: true });
 }
+// llmlint: ignore-end[tests_mirror_real_usage]
 
 /** What a built world keeps beside itself to be served again. */
 const builtSchema = z.object({
