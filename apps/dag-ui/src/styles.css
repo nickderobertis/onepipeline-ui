@@ -2610,9 +2610,10 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 .human-item-tracker {
   display: inline-flex;
   align-items: center;
+  box-sizing: border-box;
   gap: 4px;
-  height: 22px;
-  padding: 0 8px;
+  height: 30px;
+  padding: 0 9px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--background);
@@ -2620,12 +2621,85 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   white-space: nowrap;
 }
 
-/* A tracker id is short, but never allowed to push the card's actions out. */
+/* A long tracker reference is cut in its chip, whole in its `title` and in the
+   detail's metadata. An ellipsis needs a block container: a flex one has none. */
 .human-item-tracker {
+  display: inline-block;
   max-width: 24ch;
   overflow: hidden;
   color: var(--primary);
+  line-height: 28px;
   text-overflow: ellipsis;
+}
+
+.human-item-tracker-full {
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+
+.human-item-card .otg-card__actions {
+  gap: 8px;
+}
+
+/* A title is read in full, and a card's meta line keeps every name it carries. */
+.human-item-card .otg-card__title,
+.human-item-card .otg-card__meta {
+  overflow-wrap: anywhere;
+}
+.human-item-card .otg-card__title {
+  overflow: visible;
+  min-width: 0;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+/* Choice buttons: one 30px line at every width, 8px apart, wrapping inside the
+   button only when a title needs it. The 46ch cap makes a title near the 80
+   character limit two lines on a wide card as well as a phone. */
+.human-item-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  margin: 4px 0 2px;
+  padding: 0;
+  border: 0;
+}
+
+.human-item-choice {
+  box-sizing: border-box;
+  max-width: min(100%, 46ch);
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--background);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.human-item-choice[aria-pressed="true"] {
+  border-color: var(--primary);
+  background: color-mix(in oklab, var(--primary) 22%, var(--background));
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.human-item-choice:disabled {
+  opacity: 0.7;
+}
+
+.human-item-answered {
+  margin-top: 2px;
+  font-size: 12.5px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.human-item-answered-choice {
+  margin: 0;
+  font-weight: 600;
 }
 
 .human-item-card .otg-card__meta,
@@ -2694,8 +2768,13 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   gap: 8px;
   min-height: 0;
   padding: 12px 20px calc(12px + var(--toast-room));
-  overflow: hidden;
+  overflow: auto;
   border-left: 1px solid var(--border);
+}
+
+/* The detail reads top to bottom as one scroll, each part at its natural height. */
+.human-item-detail > * {
+  flex: none;
 }
 
 .human-item-detail-head {
@@ -2729,30 +2808,71 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   overflow-wrap: anywhere;
 }
 
-.human-item-steps {
-  flex: none;
-  max-height: 30%;
-  overflow: auto;
-  font-size: 12px;
-}
-
-.human-item-steps h3 {
-  margin: 4px 0 2px;
-  font-size: 12px;
-}
-
-.human-item-steps ul {
-  margin: 0;
-  padding-left: 16px;
-}
-
-/* The whole body, scrolling within the pane when it is taller than the room left. */
 .human-item-detail-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
   font-size: 13px;
   line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.human-item-choice-list {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.human-item-choice-list legend {
+  margin-bottom: 4px;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.human-item-choice-entry {
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  min-width: 0;
+}
+
+.human-item-choice-description,
+.human-item-choice-description .otg-markdown {
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
+.human-item-detail .human-item-answer {
+  min-height: 64px;
+}
+
+/* What is about the item, set apart from what is in it. */
+.human-item-metadata {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 12px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 16px;
+}
+
+.human-item-metadata dt {
+  font-weight: 600;
+}
+
+.human-item-metadata dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
 }
 
 .human-item-detail-actions {
@@ -2761,6 +2881,63 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+/* A region of the layout under the list and the detail, not a sticky child of
+   either, so it shows with a detail open and is never scrolled away. Long
+   notices scroll here rather than taking the list's room. */
+.human-items-send {
+  display: grid;
+  flex: none;
+  gap: 6px;
+  max-height: 40vh;
+  padding: 8px 20px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+}
+
+.human-items-send-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.human-items-send-action {
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  font-size: 12px;
+}
+
+.human-items-send-action[data-primary="true"] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.human-items-send-more {
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+}
+
+.human-items-not-sent {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 17px;
+  overflow-wrap: anywhere;
+}
+
+.human-items-not-sent p {
+  margin: 0;
 }
 
 /*
@@ -2773,7 +2950,7 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   position: fixed;
   z-index: 40;
   right: 16px;
-  bottom: 16px;
+  bottom: calc(16px + var(--send-room));
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
@@ -2953,17 +3130,10 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     height: 36px;
   }
 
-  /* A card's actions take their own row, each tall enough for a thumb. */
+  /* A card's actions take their own row, wrapping before they overlap. */
   .human-item-card .otg-card__actions {
     flex-basis: 100%;
-    gap: 6px;
-  }
-
-  .human-item-action,
-  .human-item-tracker {
-    min-height: 44px;
-    padding: 0 10px;
-    font-size: 13px;
+    gap: 8px;
   }
 
   .human-items-page[data-detail-open="true"] .human-items-body {
@@ -2984,9 +3154,18 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     min-height: 44px;
   }
 
+  .human-items-send {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .human-items-send-action {
+    min-height: 44px;
+  }
+
   .human-items-toast {
     right: 0;
-    bottom: 0;
+    bottom: var(--send-room);
     left: 0;
     width: auto;
     border-width: 1px 0 0;

@@ -107,7 +107,9 @@ function lifecycleProblem(item: {
   if (settled === null) return "a resolved item carries its resolution";
   if (state === "answered")
     return kind === "question" &&
-      (settled.text === null ? picked !== undefined : /\S/u.test(settled.text)) &&
+      (settled.text === null
+        ? picked !== undefined
+        : /\S/u.test(settled.text)) &&
       settled.reason === null
       ? undefined
       : "an answer is a question's, with a choice or text and no reason";
