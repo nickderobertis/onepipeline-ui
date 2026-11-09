@@ -119,6 +119,68 @@
       "!{workspaceRoot}/**/pyproject.toml",
       "cargoVersionFree",
       "sharedInputs"
+    ],
+    "coverageTier": [
+      "coverageTierKey",
+      {
+        "runtime": "node scripts/coverage-tier-key.mjs base"
+      }
+    ],
+    "coverageTierNoMachinery": [
+      "coverageTierKey",
+      {
+        "runtime": "node scripts/coverage-tier-key.mjs no-machinery"
+      }
+    ],
+    "coverageTierNoCiScripts": [
+      "coverageTierKey",
+      {
+        "runtime": "node scripts/coverage-tier-key.mjs no-ci-scripts"
+      }
+    ],
+    "coverageTierKey": [
+      "{workspaceRoot}/scripts/coverage-unit.sh",
+      "{workspaceRoot}/scripts/coverage-merge.mjs",
+      "{workspaceRoot}/scripts/coverage-tier-key.mjs",
+      "testTiers",
+      "cargoVersionFree",
+      "npmVersionFree",
+      "pythonVersionFree",
+      "{workspaceRoot}/rust-toolchain.toml",
+      {
+        "runtime": "bash scripts/coverage-unit.sh --tool-version rustc"
+      },
+      {
+        "runtime": "bash scripts/coverage-unit.sh --tool-version cargo-llvm-cov"
+      },
+      {
+        "runtime": "bash scripts/coverage-unit.sh --tool-version cargo-nextest"
+      },
+      {
+        "runtime": "bash scripts/coverage-unit.sh --tool-version llvm-profdata"
+      },
+      {
+        "runtime": "bash scripts/coverage-unit.sh --tool-version llvm-cov"
+      },
+      {
+        "runtime": "bash scripts/coverage-unit.sh --tool-version llvm-readobj"
+      },
+      {
+        "env": "COVERAGE_UNIT_IGNORE_REGEX"
+      },
+      {
+        "env": "LLVM_PROFDATA"
+      },
+      {
+        "env": "LLVM_COV"
+      },
+      {
+        "env": "RUSTFLAGS"
+      },
+      {
+        "env": "UPDATE_CONTRACT_FIXTURES"
+      },
+      "platform"
     ]
   },
   "targetDefaults": {

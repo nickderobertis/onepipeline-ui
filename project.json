@@ -29,7 +29,7 @@
       "cache": false
     },
     "ensure-baseline": {
-      "//": "After the browser tiers\u2019 server: both build in target\u2019s build directory, which cargo locks per build, and the browser tiers wait on the server (docs/linux-cold-cache-timing.md).",
+      "//": "After the browser tiers’ server: both build in target’s build directory, which cargo locks per build, and the browser tiers wait on the server (docs/linux-cold-cache-timing.md).",
       "command": "just _ensure-baseline",
       "dependsOn": [
         {
@@ -57,7 +57,6 @@
       ]
     },
     "test": {
-      "cache": false,
       "command": "just _tier-test-covered unit",
       "dependsOn": [
         {
@@ -66,15 +65,19 @@
         }
       ],
       "inputs": [
-        "crateInputs",
+        "apiServerSurface",
+        "{workspaceRoot}/tests/contract.rs",
+        "{workspaceRoot}/tests/support/**/*",
+        "{workspaceRoot}/.config/**/*",
         "servedGoldens",
         "{workspaceRoot}/docs/contract.md",
         "{workspaceRoot}/apps/dag-ui/src/**/*",
         "{workspaceRoot}/apps/dag-ui-e2e/fixtures/**/*",
         "{workspaceRoot}/packages/*/src/**/*",
-        "platform"
+        "coverageTierNoCiScripts"
       ],
-      "outputs": ["{workspaceRoot}/target/llvm-cov-target/unit-*.profraw"]
+      "outputs": ["{workspaceRoot}/target/coverage-units/unit.lcov"],
+      "cache": true
     },
     "test-quick": {
       "command": "just _tier-test unit",
