@@ -340,7 +340,7 @@ fn every_linux_target_the_release_builds_is_handed_to_its_own_manylinux_image() 
     assert_eq!(
         release_linux_legs(),
         [
-            ("x86_64-unknown-linux-gnu", "ubuntu-latest"),
+            ("x86_64-unknown-linux-gnu", "ubuntu-24.04"),
             ("aarch64-unknown-linux-gnu", "ubuntu-24.04-arm"),
         ]
         .map(|(target, runner)| (target.to_string(), runner.to_string())),
@@ -523,15 +523,15 @@ fn the_pull_request_check_builds_the_release_x86_64_linux_leg_through_the_recipe
         x86_64,
         vec![(
             "x86_64-unknown-linux-gnu".to_owned(),
-            "ubuntu-latest".to_owned()
+            "ubuntu-24.04".to_owned()
         )],
-        "release.yml builds one x86_64 Linux wheel leg, on ubuntu-latest"
+        "release.yml builds one x86_64 Linux wheel leg, on ubuntu-24.04"
     );
     // `test-linux` runs on the release's runner and reaches the wheel through
     // its recipe's `wheel-smoke` target (scripts/ci-job.sh).
     let block = job_block("ci.yml", "test-linux");
     assert!(
-        block.contains("runs-on: ubuntu-latest"),
+        block.contains("runs-on: ubuntu-24.04"),
         "ci.yml's test-linux runs on the release's x86_64 runner:\n{block}"
     );
     assert!(

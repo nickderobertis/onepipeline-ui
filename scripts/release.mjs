@@ -157,7 +157,9 @@ export const TARGETS = {
 // Each platform job and the runner it builds on, natively: a Linux target is
 // compiled in the manylinux image of its own architecture, never emulated.
 export const PLATFORMS = {
-  linux: "ubuntu-latest",
+  // Pinned: ubuntu-latest moved to ubuntu-26.04, and this leg holds to the runner
+  // of ci.yml's test-linux, whose measured time cap was taken on 24.04.
+  linux: "ubuntu-24.04",
   "linux-arm64": "ubuntu-24.04-arm",
   macos: "macos-latest",
   windows: "windows-latest",
