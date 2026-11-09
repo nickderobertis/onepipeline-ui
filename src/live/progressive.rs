@@ -86,10 +86,15 @@ pub(super) fn trimmed_detail(detail: &Value) -> Value {
         at[*last] = json!({ "loading": true });
     }
     trimmed["node_details"] = json!({});
-    for member in ["node_results", "node_control", "node_gated_by"] {
-        if trimmed["graph"][member].is_null() {
-            trimmed["graph"][member] = json!({});
+    // A run with no graph yet is `graph: null`, as the complete document serves it.
+    if trimmed["graph"].is_object() {
+        for member in ["node_results", "node_control", "node_gated_by"] {
+            if trimmed["graph"][member].is_null() {
+                trimmed["graph"][member] = json!({});
+            }
         }
+    } else {
+        trimmed["graph"] = Value::Null;
     }
     trimmed
 }
