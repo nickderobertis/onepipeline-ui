@@ -17148,8 +17148,9 @@ fn a_sanitized_settlement_is_read_through_the_status_and_node_routes() {
         ),
         "--detach",
     ]));
-    // A person edits the board while approval waits. The settlement must screen
-    // the existing body as well as the metadata it is about to add.
+    // A person edits the board while approval waits. The settlement screens what
+    // it adds and leaves a term already stored for `sources sanitize`, so it still
+    // settles and the routes still read the run through the public boundary.
     let approval = approval.to_string();
     let native = approval.split_once(':').expect("a source-qualified task").1;
     let path = store.join("tasks").join(format!("{native}.md"));
@@ -17176,8 +17177,10 @@ fn a_sanitized_settlement_is_read_through_the_status_and_node_routes() {
     engine(&["attest", &run, fixture_run::APPROVAL_NODE_ID]);
     started_and_let_go(&engine(&["adopt", &run, "--detach"]));
     let written = fs::read_to_string(&path).expect("the settlement write-back");
-    assert!(written.contains("Approve the sample change."), "{written}");
-    assert!(!written.contains("velvetquasar"), "{written}");
+    assert!(
+        written.contains("Approve the velvetquasar change."),
+        "{written}"
+    );
     assert!(stored_task(&dir, &approval)
         .metadata
         .contains_key("onepipeline.settlement"));
