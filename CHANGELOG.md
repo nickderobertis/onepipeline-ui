@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.74.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.73.0...v0.74.0) - 2026-11-09
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine that shows a failed worktree provisioning ([#717](https://github.com/nickderobertis/onepipeline-ui/pull/717))
+
 ## [0.73.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.72.0...v0.73.0) - 2026-11-09
 
 ### Fixed
