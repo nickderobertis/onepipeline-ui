@@ -393,6 +393,11 @@ impl LiveTimeline {
 
     /// How many entries this timeline has rendered from records, rather than
     /// reused, since it was built.
+    /// Whether every row of every span was rendered, rather than a window of them.
+    pub(crate) fn renders_whole(&self) -> bool {
+        self.window == ItemsWindow::All
+    }
+
     pub(crate) fn rendered(&self) -> usize {
         self.rendered.borrow().fresh
     }

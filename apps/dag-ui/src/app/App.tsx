@@ -442,7 +442,7 @@ export function App({
           )}
           {historyFailed !== undefined && (
             <Alert
-              className="rounded-none border-x-0 border-t-0"
+              className="live-issue rounded-none border-x-0 border-t-0"
               variant="destructive"
             >
               <TriangleAlert />

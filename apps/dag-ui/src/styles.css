@@ -3153,3 +3153,14 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   left: 0;
   max-width: calc(100vw - 96px);
 }
+
+@media (max-width: 640px) {
+  .live-issue {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    max-width: none;
+  }
+}

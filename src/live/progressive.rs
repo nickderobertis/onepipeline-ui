@@ -641,9 +641,10 @@ impl Hub {
                 ));
             }
         }
-        if let Some(at) = timelines.iter().position(|(scope, key, ..)| {
-            *scope == TimelineScope::Run && key.names_none()
-        }) {
+        if let Some(at) = timelines
+            .iter()
+            .position(|(scope, key, ..)| *scope == TimelineScope::Run && key.names_none())
+        {
             let (scope, key, filter, built) = timelines.swap_remove(at);
             if !run
                 .timelines

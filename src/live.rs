@@ -934,7 +934,10 @@ impl LiveRun {
 
     /// The window a held timeline renders, which while selective is the wire's.
     fn render_window(&self, scope: &TimelineScope) -> ItemsWindow {
-        if self.complete() {
+        // A node opened after the rest renders its window too: rendering all its
+        // rows here is seconds under this run's lock, and its first page keeps a
+        // whole view of the node of its own.
+        if self.complete() && matches!(scope, TimelineScope::Run) {
             ItemsWindow::All
         } else {
             wire_window(scope)
@@ -1758,13 +1761,15 @@ impl Hub {
             .map(|held| Visible::of(&held.view))
             .filter(|visible| visible.run() == Some(run.run.as_str()))
             .collect();
-        run.details.retain(|key, _| {
-            wanted.iter().any(|visible| {
-                !matches!(visible, Visible::Sidebar) && visible.detail_filter() == *key
-            })
-        });
-        // A complete reading keeps Overall, so a tab opening it is answered at once.
+        // A complete reading keeps its unfiltered detail and Overall: a whole build of
+        // either is a long hold of this run's lock, and a tab opening it then waits.
         let complete = run.complete();
+        run.details.retain(|key, _| {
+            (complete && key.names_none())
+                || wanted.iter().any(|visible| {
+                    !matches!(visible, Visible::Sidebar) && visible.detail_filter() == *key
+                })
+        });
         run.timelines.retain(|(scope, key, _)| {
             (complete && *scope == TimelineScope::Run && key.names_none())
                 || wanted.iter().any(|visible| {

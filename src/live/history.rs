@@ -31,9 +31,16 @@ impl Hub {
         let live = lock(&shared.runs).get(run).cloned();
         let page = match live {
             Some(live) => {
-                let complete = lock(&live).complete();
+                let (complete, kept) = {
+                    let guard = lock(&live);
+                    (guard.complete(), guard.holds_whole(query))
+                };
                 if complete {
-                    from_kept(&mut lock(&live), query)?
+                    // Read before the lock, so a view not yet kept costs the run's
+                    // other readers only its share's build.
+                    let selected = (!kept).then(|| read_share(&paths, &query.owner));
+                    let mut guard = lock(&live);
+                    from_kept(&mut guard, query, selected.as_ref())?
                 } else {
                     let selected = read_share(&paths, &query.owner);
                     let mut guard = lock(&live);
@@ -112,44 +119,81 @@ fn from_selected(
     page_of(&built.payload()["spans"], query)
 }
 
-/// A page once the complete read was published, from a share's kept timeline.
-fn from_kept(run: &mut LiveRun, query: &TimelineEventsQuery) -> Result<Value, ApiError> {
+/// A page once the complete read was published, from a share's kept timeline,
+/// which is built from `selected` the first time it is asked for and then kept.
+fn from_kept(
+    run: &mut LiveRun,
+    query: &TimelineEventsQuery,
+    selected: Option<&journal::SelectedRecords>,
+) -> Result<Value, ApiError> {
     check_node(run, &query.owner)?;
     let filter = RunStore::resolve(&run.view, query.filter.as_ref())?;
     let scope = scope_of(&query.owner);
     let key = super::FilterKey::of(query.filter.as_ref());
-    if let Some((_, _, held)) = run
-        .timelines
-        .iter()
-        .find(|(held_scope, held_key, _)| *held_scope == scope && *held_key == key)
-    {
+    if let Some((_, _, held)) = run.timelines.iter().find(|(held_scope, held_key, held)| {
+        *held_scope == scope && *held_key == key && held.live.renders_whole()
+    }) {
         return page_of(&held.live.payload()["spans"], query);
     }
     let at = run
         .history
         .iter()
         .position(|(held_scope, held_key, _)| *held_scope == scope && *held_key == key);
-    let at = at.unwrap_or_else(|| {
-        let built = LiveTimeline::build(
-            &run.view,
-            &run.indexed,
-            &run.declared,
-            scope.clone(),
-            filter,
-            run.agents.as_ref(),
-            ItemsWindow::All,
-        );
-        run.history.push((
-            scope,
-            key,
-            Held {
-                payload: built,
-                observed_at: String::new(),
-            },
-        ));
-        run.history.len() - 1
-    });
+    let at = match at {
+        Some(at) => at,
+        None => {
+            if matches!(query.owner, PageOwner::Node(_)) && run.agents.is_none() {
+                run.agents = agents_of(&run.view.paths);
+            }
+            let held = match &query.owner {
+                PageOwner::Run => None,
+                PageOwner::Node(node) | PageOwner::RunNode(node) => Some(node.as_str()),
+            };
+            // A whole store's build is seconds under this run's lock; the share's is
+            // what the page needs.
+            let indexed: Indexed = match selected {
+                Some(selected) => run.indexed.reading_share(&run.view, selected, held),
+                None => run.indexed.reading_share(
+                    &run.view,
+                    &read_share(&run.view.paths, &query.owner),
+                    held,
+                ),
+            };
+            let built = LiveTimeline::build(
+                &run.view,
+                &indexed,
+                &run.declared,
+                scope.clone(),
+                filter,
+                run.agents.as_ref(),
+                ItemsWindow::All,
+            );
+            run.history.push((
+                scope,
+                key,
+                Held {
+                    payload: built,
+                    observed_at: String::new(),
+                },
+            ));
+            run.history.len() - 1
+        }
+    };
     page_of(&run.history[at].2.payload.payload()["spans"], query)
+}
+
+impl LiveRun {
+    /// Whether a page of `query` is answered from a timeline already kept whole.
+    fn holds_whole(&self, query: &TimelineEventsQuery) -> bool {
+        let scope = scope_of(&query.owner);
+        let key = super::FilterKey::of(query.filter.as_ref());
+        self.timelines.iter().any(|(held_scope, held_key, held)| {
+            *held_scope == scope && *held_key == key && held.live.renders_whole()
+        }) || self
+            .history
+            .iter()
+            .any(|(held_scope, held_key, _)| *held_scope == scope && *held_key == key)
+    }
 }
 
 /// The asked-for page of `spans`' rows, and the span when one was named.

@@ -90,6 +90,131 @@ test("Overall reaches its line, tiles, run records and disclosures", async ({
     await disclosure.getByText(label).click();
     await expect(disclosure, label).not.toHaveText(/Loading…/u);
   }
+  const goal = (detail.graph as { plan: { goal: { text: string } } }).plan.goal
+    .text;
+  await expect(
+    page.getByRole("group", { name: "Goal and repository identities" }),
+  ).toContainText(goal);
+});
+
+const pageAsks = (page: Page) => {
+  const asked: URL[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/timeline/events")) asked.push(url);
+  });
+  return asked;
+};
+
+test("every session link is served as the complete document names it, once the rest arrives", async ({
+  page,
+}) => {
+  const run = world.facts.openLiveRun;
+  const { timeline } = await completeDocuments(served, run);
+  const links = (timeline.spans as Json[]).filter(
+    (span) => span.harness_scope !== undefined,
+  );
+  expect(links.length).toBeGreaterThan(0);
+  await open(page, "overall");
+  await expect(metricText(page, "Turns")).toHaveText(/^\d+$/u, {
+    timeout: NEVER,
+  });
+  const answered = await page.evaluate(async (runId) => {
+    const response = await fetch("/api/v2/subscriptions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        view: { type: "timeline", run_id: runId, scope: "run" },
+      }),
+    });
+    return response.json();
+  }, run);
+  const visible = answered.initial.snapshot.visible;
+  expect(visible.timeline.progress.complete).toBe(true);
+  const held = new Map<string, Json>(
+    (visible.timeline.spans as Json[]).map((span) => [String(span.id), span]),
+  );
+  for (const link of links) {
+    const served_span = held.get(String(link.id));
+    expect(served_span, `${link.id}`).toBeDefined();
+    expect(served_span?.reference).toEqual(link.reference);
+    expect(served_span?.started_at).toEqual(link.started_at);
+    expect(served_span?.ended_at).toEqual(link.ended_at);
+  }
+});
+
+test("zooming a node's category lanes asks for that stretch, and only then", async ({
+  page,
+}) => {
+  const node = world.facts.large.busiestNode;
+  const asked = pageAsks(page);
+  await open(page, "overall");
+  await expect(metricText(page, "Turns")).toHaveText(/^\d+$/u, {
+    timeout: NEVER,
+  });
+  await page
+    .getByRole("region", { name: "Graph timeline", exact: true })
+    .getByRole("button", { name: "Expand timeline" })
+    .click();
+  const row = page.getByRole("region", {
+    name: `${node} timeline`,
+    exact: true,
+  });
+  await row.getByRole("button", { name: "Expand timeline" }).click();
+  expect(asked.filter((url) => url.searchParams.has("from"))).toHaveLength(0);
+  const plot = row.locator('[data-timeline-shape="span"]').first();
+  await plot.scrollIntoViewIfNeeded({ timeout: 60_000 });
+  const bounds = await plot.boundingBox();
+  if (bounds === null) throw new Error("the lanes' plot has no box");
+  await page.mouse.move(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2,
+  );
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, -240);
+  await page.keyboard.up("Control");
+  await expect
+    .poll(() => asked.some((url) => url.searchParams.has("from")), {
+      timeout: 60_000,
+    })
+    .toBe(true);
+  const stretch = asked.find((url) => url.searchParams.has("from"));
+  expect(
+    Date.parse(stretch?.searchParams.get("from") ?? ""),
+  ).toBeLessThanOrEqual(Date.parse(stretch?.searchParams.get("to") ?? ""));
+});
+
+test("opening a row shows its event's detail, and asks for that span whole", async ({
+  page,
+}) => {
+  const node = world.facts.large.busiestNode;
+  const run = world.facts.openLiveRun;
+  const { timeline } = await completeDocuments(served, run, node);
+  const events = new Map<string, Json>();
+  for (const span of timeline.spans as Json[])
+    for (const event of span.events ?? []) {
+      events.set(String(event.id), event);
+      events.set(String(event.record_id), event);
+    }
+  const asked = pageAsks(page);
+  await open(page, "node", node);
+  const transcript = page.getByRole("region", { name: "Node transcript" });
+  const row = transcript.getByRole("button", { name: /^Open / }).last();
+  await expect(row).toBeVisible({ timeout: NEVER });
+  expect(asked).toHaveLength(0);
+  await row.click();
+  await expect(page).toHaveURL(/[?&]event=/u, { timeout: 60_000 });
+  const id = new URL(page.url()).searchParams.get("event") ?? "";
+  const event = events.get(id);
+  expect(event, `event ${id} is in the complete document`).toBeDefined();
+  await expect(
+    page.getByRole("region", { name: "Timeline item detail" }),
+  ).toContainText(String(event?.kind), { timeout: 60_000 });
+  await expect
+    .poll(() => asked.some((url) => url.searchParams.has("span")), {
+      timeout: 60_000,
+    })
+    .toBe(true);
 });
 
 test("every node card opens its inspector, and a replanned node is reached", async ({
@@ -116,15 +241,21 @@ test("a node replanned off the graph is reached from its row on Overall", async 
   await expect(metricText(page, "Turns")).toHaveText(/^\d+$/u, {
     timeout: NEVER,
   });
+  const row = page.getByRole("region", {
+    name: `${off} timeline`,
+    exact: true,
+  });
   await page
-    .getByRole("button", { name: new RegExp(off, "u") })
-    .first()
+    .getByRole("region", { name: "Graph timeline", exact: true })
+    .getByRole("button", { name: "Expand timeline" })
     .click();
-  await expect(
-    page.getByRole("region", {
-      name: `Timeline for ${world.facts.large.offGraphNode}`,
-    }),
-  ).toBeVisible({ timeout: 60_000 });
+  await expect(row).toBeVisible({ timeout: 60_000 });
+  // Off the plan there is no card to open: today's page reaches such a node's
+  // history through this row, whose rows open in place.
+  await row.getByRole("button", { name: "Expand timeline" }).click();
+  await expect(row.locator('[data-timeline-shape="span"]').first()).toBeVisible(
+    { timeout: 60_000 },
+  );
 });
 
 test("the busiest node's whole transcript is reached back to its first row, in order", async ({
