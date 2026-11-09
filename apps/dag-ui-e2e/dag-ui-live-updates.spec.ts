@@ -434,6 +434,9 @@ test("a record appended to the open live run reaches every view as a patch, with
   for (const view of ["graph", "overall", "node"]) {
     await page.goto(`${server.origin}${address(run, view, node)}`);
     await shown(page, view, node);
+    // The app takes over from the first screen and reads the run's status once, for
+    // its control panel, after the view has opened; only what follows is under test.
+    await expect(page.locator("[data-first-screen]")).toHaveCount(0);
     const since = Date.now();
     const marker = `live ${view} ${since}`;
     const seq = recordActivity(server, run, node, marker);

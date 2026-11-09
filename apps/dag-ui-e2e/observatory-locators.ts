@@ -86,3 +86,34 @@ export async function navigationTakesRowsLive(page: Page): Promise<void> {
     .getByRole("combobox", { name: "Navigation updates" })
     .selectOption({ label: "Live" });
 }
+
+/**
+ * Read a node's whole transcript back through the page's own control. Its first
+ * answer holds each span's latest rows, so what comes before them is asked for.
+ */
+export async function loadAllEarlierRows(page: Page): Promise<void> {
+  const more = page.getByRole("button", { name: /^Load(ing)? earlier rows/ });
+  // A short window: a transcript short enough to hold whole offers no control.
+  await more
+    .first()
+    .waitFor({ state: "attached", timeout: 3_000 })
+    .catch(() => undefined);
+  while ((await more.count()) > 0) {
+    await more
+      .first()
+      .click({ timeout: 15_000 })
+      .catch(() => undefined);
+    await page.waitForTimeout(50);
+  }
+}
+
+/**
+ * Open Overall's run-level records through the page's own control. Overall's spans
+ * list no rows of their own (schema 28), so the records after execution, and the
+ * run's other records, arrive when a person asks for them.
+ */
+export async function loadRunRecords(page: Page): Promise<void> {
+  await page
+    .getByRole("button", { name: "Load the run's own records" })
+    .click();
+}

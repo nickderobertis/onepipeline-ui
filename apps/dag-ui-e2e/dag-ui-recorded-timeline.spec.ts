@@ -5,6 +5,7 @@ import {
 } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import corpus from "./fixtures/timeline-recorded.json" with { type: "json" };
+import { loadAllEarlierRows, loadRunRecords } from "./observatory-locators";
 import { SERVED_UI_URL } from "./playwright.config";
 
 const nodeUrl = `/?run=${corpus.run_id}&node=${corpus.node}`;
@@ -237,6 +238,7 @@ test("Overall ends at settlement and keeps the late completion as a marker", asy
       `End: ${expectedIdle[index]?.[1]}`,
     );
   }
+  await loadRunRecords(page);
   const late = page.getByRole("region", { name: "Records after execution" });
   await expect(late).toBeVisible();
   await late.getByRole("button", { name: /completion-requested/ }).click();
@@ -266,6 +268,7 @@ for (const terminal of corpus.terminations) {
     );
     expect(served.spans.every((span) => span.ended_at !== null)).toBe(true);
     await page.goto(`/?run=${run}&view=overall`);
+    await loadRunRecords(page);
     const late = page.getByRole("region", { name: "Records after execution" });
     for (const kind of [
       "completion-requested",
@@ -366,6 +369,9 @@ test("retries, equal timestamps and repeated relays keep every record under its 
   await expect(
     page.getByRole("region", { name: "Dispatch 3", exact: true }),
   ).toHaveCount(0);
+  // A node's first answer holds each span's latest rows, so the ones before them
+  // are read through the page's own control before every record is counted.
+  await loadAllEarlierRows(page);
   for (const button of await page
     .getByRole("button", { name: /more .* events/ })
     .all())
@@ -586,6 +592,7 @@ test("late edit panels show populated edit facts without adding work", async ({
     "Operation kinds": ["task-amended"],
   });
   await page.goto(`/?run=${run}&view=overall`);
+  await loadRunRecords(page);
   await page
     .getByRole("region", { name: "Records after execution" })
     .getByRole("button", { name: /edit-committed/ })
@@ -754,6 +761,8 @@ test("filtering every dispatch boundary and graph record preserves served groups
     .getByRole("group", { name: "Level of detail" })
     .getByRole("button", { name: "Detailed activity" })
     .click();
+  // Back on the detailed reading, the records before its window are asked for again.
+  await loadAllEarlierRows(page);
   await expect(
     page.getByRole("button", { name: "Open node-dispatched", exact: true }),
   ).toHaveCount(2);
@@ -812,6 +821,9 @@ test("keeps the reading cursor when an open event's timeline is expanded", async
   });
   const cursor = timeline.getByLabel("Timeline cursor", { exact: true });
   await expect(cursor).toBeVisible();
+  // Scrolling to the top reads earlier rows, which move the reading: this journey is
+  // about the cursor over a transcript already held, so it holds it first.
+  await loadAllEarlierRows(page);
   const initialReading = await cursor.getAttribute("style");
   await worker
     .getByRole("button", { name: "Open gate-run", exact: true })

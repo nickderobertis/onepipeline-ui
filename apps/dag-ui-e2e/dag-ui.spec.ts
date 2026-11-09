@@ -2565,8 +2565,11 @@ test("recovers a node transcript with Refresh after a connection reset", async (
   await openObservatory(page, `/?run=${runId}&node=${narrow_node}`);
   expect((await reset).failure()?.errorText).toContain("ERR_CONNECTION_RESET");
   // The node's detail and timeline arrive together, so nothing of the node is
-  // held when its one read fails: the page says the live read failed.
-  await expect(page.getByRole("alert")).toContainText("Live telemetry issue");
+  // held when its one read fails: the page shows the design's Read failed view,
+  // which took the place of the "Live telemetry issue" banner for a first answer.
+  await expect(page.getByRole("alert")).toContainText(
+    "This run's history did not load",
+  );
   await expect(readingRows(page)).toHaveCount(0);
 
   await readNodeTranscript(page, runId, narrow_node, () =>
