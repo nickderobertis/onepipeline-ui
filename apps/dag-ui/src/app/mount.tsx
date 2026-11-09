@@ -27,15 +27,13 @@ export function mountApp(
   }
   const reveal = () => {
     if (app === firstRoot) return;
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        drawn?.unmount();
-        firstRoot.replaceWith(app);
-        app.id = "root";
-        app.removeAttribute("data-app-behind-first-screen");
-        app.style.cssText = "";
-      }),
-    );
+    // Called from a layout effect, so this lands before the app's commit paints:
+    // the two trade places in one frame, with no scheduled callback to wait on.
+    drawn?.unmount();
+    firstRoot.replaceWith(app);
+    app.id = "root";
+    app.removeAttribute("data-app-behind-first-screen");
+    app.style.cssText = "";
   };
   createRoot(app).render(
     <StrictMode>

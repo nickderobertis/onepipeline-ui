@@ -27,7 +27,7 @@ import {
   TriangleAlert,
   Workflow,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChannelView } from "../features/control/ChannelView";
 import { RunActions } from "../features/control/RunActions";
 import { useRunControl } from "../features/control/useRunControl";
@@ -178,7 +178,7 @@ export function App({
   const readFailed =
     !runless && detail === undefined && telemetry.error !== undefined;
   const drawnOnce = useRef(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (drawnOnce.current) return;
     if (detail !== undefined || telemetry.error !== undefined) {
       drawnOnce.current = true;
