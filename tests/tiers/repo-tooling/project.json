@@ -16,7 +16,6 @@
       "outputs": []
     },
     "test": {
-      "cache": false,
       "command": "just _tier-test-covered repo-tooling",
       "dependsOn": [
         {
@@ -24,10 +23,9 @@
           "target": "build"
         }
       ],
-      "inputs": ["repoMachinery", "platform"],
-      "outputs": [
-        "{workspaceRoot}/target/llvm-cov-target/repo-tooling-*.profraw"
-      ]
+      "inputs": ["repoMachinery", "coverageTier"],
+      "outputs": ["{workspaceRoot}/target/coverage-units/repo-tooling.lcov"],
+      "cache": true
     },
     "test-quick": {
       "command": "just _tier-test repo-tooling",
