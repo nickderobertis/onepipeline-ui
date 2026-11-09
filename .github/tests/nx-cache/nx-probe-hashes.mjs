@@ -1,9 +1,15 @@
 // Read how each declared file input rule's probe moves the tasks that read it, in one
 // process: starting Node and Nx for each of the 150-odd probes was most of this reader's
 // cost, and a CI job ran past its cap on it (docs/linux-cold-cache-timing.md).
-import { readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  readFileSync,
+  realpathSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { probeEdit } from "./nx-fixture.mjs";
 
@@ -33,17 +39,25 @@ async function main() {
     )
       usage(`${id} is not a task carrying its probes`);
     for (const probe of task.probes)
-      if (
-        typeof probe?.file !== "string" ||
-        isAbsolute(probe.file) ||
-        probe.file.split("/").includes("..")
-      )
-        usage(`${id} names a probe outside the workspace`);
+      if (typeof probe?.file !== "string")
+        usage(`${id} names a probe that is not a path`);
   }
   try {
     process.chdir(resolve(workspace));
   } catch (error) {
     usage(`cannot enter workspace ${workspace}: ${error.message}`);
+  }
+  // A probe is rewritten in place, so it must really be a file of this workspace.
+  const root = realpathSync(process.cwd());
+  for (const probe of Object.values(before).flatMap((task) => task.probes)) {
+    let inside;
+    try {
+      inside = relative(root, realpathSync(probe.file));
+    } catch (error) {
+      usage(`cannot read probe ${probe.file}: ${error.message}`);
+    }
+    if (!inside || inside.startsWith("..") || isAbsolute(inside))
+      usage(`${probe.file} is outside the workspace`);
   }
   process.env.NX_DAEMON = "false";
   process.env.NX_WORKSPACE_ROOT_PATH = process.cwd();
