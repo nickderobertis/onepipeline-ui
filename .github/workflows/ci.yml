@@ -139,6 +139,8 @@ jobs:
         shell: bash
         run: |
           node scripts/nx-remote-cache.mjs trust
+          # DO NOT MERGE: the demonstration saves no Actions cache entry.
+          [ "${GITHUB_HEAD_REF:-}" != demo-705-cold-rust-cache ] || printf 'read_only=true\npromotable=false\n' >> "$GITHUB_OUTPUT"
           token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
@@ -403,6 +405,8 @@ jobs:
         shell: bash
         run: |
           node scripts/nx-remote-cache.mjs trust
+          # DO NOT MERGE: the demonstration saves no Actions cache entry.
+          [ "${GITHUB_HEAD_REF:-}" != demo-705-cold-rust-cache ] || printf 'read_only=true\npromotable=false\n' >> "$GITHUB_OUTPUT"
           token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
@@ -567,6 +571,8 @@ jobs:
         shell: bash
         run: |
           node scripts/nx-remote-cache.mjs trust
+          # DO NOT MERGE: the demonstration saves no Actions cache entry.
+          [ "${GITHUB_HEAD_REF:-}" != demo-705-cold-rust-cache ] || printf 'read_only=true\npromotable=false\n' >> "$GITHUB_OUTPUT"
           token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
@@ -674,6 +680,8 @@ jobs:
         shell: bash
         run: |
           node scripts/nx-remote-cache.mjs trust
+          # DO NOT MERGE: the demonstration saves no Actions cache entry.
+          [ "${GITHUB_HEAD_REF:-}" != demo-705-cold-rust-cache ] || printf 'read_only=true\npromotable=false\n' >> "$GITHUB_OUTPUT"
           token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
