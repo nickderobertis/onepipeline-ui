@@ -16,7 +16,6 @@
       "outputs": []
     },
     "test": {
-      "cache": false,
       "command": "just _tier-test-covered versions",
       "dependsOn": [
         {
@@ -28,8 +27,18 @@
           "target": "build"
         }
       ],
-      "inputs": ["versionJourneys", "platform"],
-      "outputs": ["{workspaceRoot}/target/llvm-cov-target/versions-*.profraw"]
+      "inputs": [
+        "versionJourneys",
+        "coverageTierNoMachinery",
+        {
+          "runtime": "node scripts/nx-version-free-inputs.mjs --ecosystem cargo --keep-version"
+        },
+        {
+          "runtime": "git hash-object CHANGELOG.md"
+        }
+      ],
+      "outputs": ["{workspaceRoot}/target/coverage-units/versions.lcov"],
+      "cache": true
     },
     "test-quick": {
       "command": "just _tier-test versions",
@@ -94,5 +103,5 @@
       }
     ]
   },
-  "//": "The UI refusal journey builds Cargo\u2019s packaged tree, so the package\u2019s source inputs join the four selected tests and their helpers. Workflow and provisioning-test edits do not select these version-reading journeys."
+  "//": "The UI refusal journey builds Cargo’s packaged tree, so the package’s source inputs join the four selected tests and their helpers. Workflow and provisioning-test edits do not select these version-reading journeys."
 }

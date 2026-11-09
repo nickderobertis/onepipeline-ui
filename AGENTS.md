@@ -178,8 +178,12 @@ consumers use version-free manifest digests. Runtime manifest consumers carry an
 selection without changing the cached targets’ semantic hashes. CI never runs it. Version/changelog edits retain source
 and dependency hashes; the `versions`,
 npm-launcher and release tiers keep the version where their tests read it.
-Rust coverage producers and the aggregate stay uncached: LLVM profiles cannot
-cross a package-version rebuild. The 95% floor still applies. Cached outputs
+Each Rust coverage tier caches one LCOV report (`target/coverage-units/<tier>.lcov`,
+`scripts/coverage-unit.sh`), which a package-version change leaves valid, and the aggregate
+stays uncached: it re-merges every tier's report (`scripts/coverage-merge.mjs`) on every run.
+Each tier's key is the version-free workspace less the paths it cannot read, so a read is
+covered unless a path is deliberately left out; `.github/tests/nx-cache/coverage-units.test.mjs`
+holds that, and a file read by a new journey belongs in the key, not in an exclusion. Cached outputs
 name reports, never build directories; release rehearsal and frontend/package
 builds also stay uncached. Reports and promotion receipts feed the
 release-tail cache-use figure; missing evidence never counts as replay. Nested Nx
@@ -453,7 +457,7 @@ fans one uniformly-named target across all of them.
   Every tool is told so in the way it needs telling: clippy takes `-D warnings`,
   rustdoc `RUSTDOCFLAGS`, and ESLint `--max-warnings 0`, which is the one of the
   three that otherwise exits `0` with its findings printed.
-- **Coverage is enforced at 95% line coverage**; the gate fails below it. That
+- **Coverage is enforced at 95.29% LCOV line coverage**; the gate fails below it. That
   is the Rust crate's floor, measured by `cargo llvm-cov`. The frontend is held
   to its journeys rather than to a number.
 - **Tests are realistic, not mocked, and complete, not minimal.** Nothing under

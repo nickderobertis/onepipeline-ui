@@ -41,6 +41,8 @@ files:
     - "scripts/nx-remote-cache.mjs"
     - "scripts/actions-cache-prune.mjs"
     - "scripts/nx-version-free-inputs.mjs"
+    - "scripts/coverage-unit.sh"
+    - "scripts/coverage-merge.mjs"
 rationales: true
 # No `agents` block: the harness/model are NOT pinned here. `oneharness.toml`
 # (composed alongside this file) selects them in fallback mode — codex + gpt-6.1-sol
