@@ -179,15 +179,24 @@ test("zooming a node's category lanes asks for that stretch, and only then", asy
     })
     .toBe(true);
   const stretch = asked.find((url) => url.searchParams.has("from"));
-  // Expanding a run-level span asks for that span whole.
-  await page
-    .locator('li[data-row-kind="run"] [data-timeline-shape="span"]')
-    .first()
-    .click();
+  // Opening a run-level span, which is what clicking one selects, asks for it whole.
+  const { timeline } = await completeDocuments(served, world.facts.openLiveRun);
+  const runSpan = (timeline.spans as Json[]).find(
+    (span) => span.node_id === undefined && span.harness_scope === undefined,
+  );
+  if (runSpan === undefined) throw new Error("no run-level span");
+  const before = asked.length;
+  await page.goto(
+    `${page.url()}&event=${encodeURIComponent(String(runSpan.id))}`,
+  );
   await expect
-    .poll(() => asked.some((url) => url.searchParams.has("span")), {
-      timeout: 60_000,
-    })
+    .poll(
+      () =>
+        asked
+          .slice(before)
+          .some((url) => url.searchParams.get("span") === runSpan.id),
+      { timeout: 60_000 },
+    )
     .toBe(true);
   expect(
     Date.parse(stretch?.searchParams.get("from") ?? ""),
