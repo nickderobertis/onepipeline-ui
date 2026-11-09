@@ -19,9 +19,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, normalize, resolve } from "node:path";
 import { test } from "node:test";
 import { taskHashes, workspaceFixture } from "./nx-fixture.mjs";
+import { compiledFromRoots, compiledReads } from "./rust-compile-reads.mjs";
 
 const TIERS = {
   unit: ["onepipeline-ui", "project.json"],
@@ -548,14 +549,25 @@ const namedDirectory = (text, candidate) => {
 // release's changelog through the `git hash-object` input of the tier that packs it.
 const DIGESTED =
   /(^|\/)(Cargo\.toml|Cargo\.lock|package\.json|bun\.lock|pyproject\.toml|uv\.lock|CHANGELOG\.md)$/;
-// Every tracked file a tier's journeys can reach that its task hash does not cover: what
-// its test modules name, conditional paths included, and what a script they name names.
+// Every tracked file a tier's build or journeys can reach that its task hash does not
+// cover: what compiling the crate reads, whichever tests its profile then selects; what
+// its test modules name, conditional paths included; and what a script they name names.
 function uncoveredReads(cwd, tier, keyed) {
   const tracked = execFileSync("git", ["ls-files"], { cwd, encoding: "utf8" })
     .split("\n")
     .filter(Boolean);
   const modules = tierModules(cwd, tier);
   const missing = new Set();
+  const compiled = compiledReads(cwd);
+  assert.deepEqual(
+    compiled.unresolved,
+    [],
+    "an include naming no fixed path hides what the build reads from every key",
+  );
+  const trackedSet = new Set(tracked);
+  for (const file of [...compiled.files, ...COMPILE_CONFIGURATION])
+    if (trackedSet.has(file) && !DIGESTED.test(file) && !keyed.has(file))
+      missing.add(`${file} (compiled by the tier's build)`);
   const scan = (file) => {
     const text = stripComments(readFileSync(join(cwd, file), "utf8"));
     const scripts = [];
@@ -573,6 +585,9 @@ function uncoveredReads(cwd, tier, keyed) {
     if (!modules.includes(script)) scan(script);
   return [...missing].sort();
 }
+
+// What cargo and rustc read beside the sources, whichever target they build.
+const COMPILE_CONFIGURATION = [".cargo/config.toml", "rust-toolchain.toml"];
 
 // Every tracked file a tier's key hashes: Nx's file inputs and the coverage digest's list.
 function keyedFiles(cwd) {
@@ -699,6 +714,165 @@ test("every workspace file a tier can read is covered by its task hash", () => {
     probeFile(fixture, fixturePath, appendLine, ["repo-tooling"]);
   } finally {
     fixture.remove();
+  }
+});
+
+test("dropping a file only the compiler reads from a tier's inputs is refused, and restoring it moves that tier's key", () => {
+  const cwd = workspaceFixture();
+  const file = "src/encoding.rs";
+  const id = `${TIERS.unit[0]}:test`;
+  const hashOfUnit = () => taskHashes(cwd, [id])[id].hash;
+  const editSource = () => {
+    const path = join(cwd, file);
+    const original = readFileSync(path);
+    writeFileSync(path, `${original}\n// probe\n`);
+    stamp(path);
+    return () => {
+      writeFileSync(path, original);
+      stamp(path);
+    };
+  };
+  const nxPath = join(cwd, "nx.json");
+  const keyPath = join(cwd, "scripts/coverage-tier-key.mjs");
+  const projectPath = join(cwd, "project.json");
+  const originals = [nxPath, keyPath, projectPath].map((path) => [
+    path,
+    readFileSync(path, "utf8"),
+  ]);
+  try {
+    assert.ok(
+      compiledReads(cwd).files.includes(file),
+      `${file} is compiled into the crate, so the walk must find it`,
+    );
+    // Out of the digest every tier shares, and out of the unit tier's Nx file inputs.
+    writeFileSync(
+      keyPath,
+      originals[1][1].replace(
+        "const NEVER_READ = [",
+        "const NEVER_READ = [\n  /^src\\/encoding\\.rs$/,",
+      ),
+    );
+    const project = JSON.parse(originals[2][1]);
+    project.targets.test.inputs.push(`!{workspaceRoot}/${file}`);
+    writeFileSync(projectPath, JSON.stringify(project, null, 2));
+    const narrowed = keyedFiles(cwd);
+    assert.equal(narrowed.unit.has(file), false, "the probe narrowed nothing");
+    assert.ok(
+      uncoveredReads(cwd, "unit", narrowed.unit).includes(
+        `${file} (compiled by the tier's build)`,
+      ),
+      `dropping ${file} from unit's inputs is not refused`,
+    );
+    // The finding is the real hole: the narrowed key does not see the edit.
+    const narrowedHash = hashOfUnit();
+    let restoreSource = editSource();
+    assert.equal(hashOfUnit(), narrowedHash);
+    restoreSource();
+    // Back in its inputs, the same edit moves the key and nothing is refused.
+    for (const [path, text] of originals) writeFileSync(path, text);
+    const restored = keyedFiles(cwd);
+    assert.ok(restored.unit.has(file));
+    assert.deepEqual(uncoveredReads(cwd, "unit", restored.unit), []);
+    const hash = hashOfUnit();
+    restoreSource = editSource();
+    assert.notEqual(hashOfUnit(), hash, `editing ${file} left unit's key`);
+    restoreSource();
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("the compile walk reads exactly what rustc reads", () => {
+  const root = mkdtempSync(
+    join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR || tmpdir(), "compile-walk-"),
+  );
+  const write = (file, text) => {
+    mkdirSync(dirname(join(root, file)), { recursive: true });
+    writeFileSync(join(root, file), text);
+  };
+  // Every way a crate reaches a file; each of the decoys names one nothing compiles.
+  write(
+    "src/lib.rs",
+    `#![doc = include_str!("../README.md")]
+// mod commented;
+/* mod block_commented; include_str!("../decoy.txt"); */
+pub const WRITTEN: &str = r#"mod in_a_raw_string; include_str!("../decoy.txt")"#;
+pub const QUOTED: &str = "include_bytes!(\\"../decoy.txt\\")";
+pub const LIFETIME: &'static str = include_str!(
+    "data/multi-line.txt"
+);
+pub const FROM_ROOT: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/rooted.txt"));
+pub const BYTES: &[u8] = core::include_bytes!("data/bytes.bin");
+pub mod plain;
+pub(crate) mod directory;
+#[path = "elsewhere/renamed.rs"]
+#[allow(dead_code)]
+mod attributed;
+pub mod inline {
+    pub mod inner_file;
+    #[path = "by_path.rs"]
+    pub mod inner_path;
+}
+include!("included.rs");
+`,
+  );
+  write("README.md", "read\n");
+  write("rooted.txt", "");
+  write("src/data/multi-line.txt", "");
+  write("src/data/bytes.bin", "");
+  write("src/plain.rs", "pub mod child;\n");
+  write(
+    "src/plain/child.rs",
+    'pub const C: &str = include_str!("sibling.txt");\n',
+  );
+  write("src/plain/sibling.txt", "");
+  write("src/directory/mod.rs", "pub mod beside;\n");
+  write("src/directory/beside.rs", "");
+  write("src/elsewhere/renamed.rs", "pub mod next_to_it;\n");
+  write("src/elsewhere/next_to_it.rs", "");
+  write("src/inline/inner_file.rs", "");
+  write("src/inline/by_path.rs", "");
+  write("src/included.rs", "pub mod from_included;\n");
+  write("src/from_included.rs", "");
+  write("decoy.txt", "");
+  const roots = [join(root, "src/lib.rs")];
+  try {
+    const depInfo = join(root, "out.d");
+    execFileSync(
+      "rustc",
+      [
+        "--edition=2021",
+        "--crate-type=lib",
+        "--crate-name=walked",
+        "--emit=dep-info",
+        "-o",
+        depInfo,
+        roots[0],
+      ],
+      { env: { ...process.env, CARGO_MANIFEST_DIR: root }, stdio: "pipe" },
+    );
+    const byRustc = [
+      ...new Set(
+        readFileSync(depInfo, "utf8")
+          .split("\n")
+          .filter((line) => line.startsWith(root) && line.endsWith(":"))
+          .map((line) => normalize(line.slice(root.length + 1, -1))),
+      ),
+    ].sort();
+    assert.ok(byRustc.length >= 10, `rustc listed too little: ${byRustc}`);
+    assert.deepEqual(compiledFromRoots(root, roots).files, byRustc);
+    // A module another configuration turns on is a read of that tier's build too, and a
+    // path no reading can resolve is reported rather than dropped.
+    write(
+      "src/cfgd.rs",
+      `#[cfg(any())] mod off;\nconst X: &str = include_str!(env!("WHERE"));\n`,
+    );
+    write("src/off.rs", "");
+    const walked = compiledFromRoots(root, [join(root, "src/cfgd.rs")]);
+    assert.ok(walked.files.includes("src/off.rs"));
+    assert.deepEqual(walked.unresolved, ["include_str! in src/cfgd.rs"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
