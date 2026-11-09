@@ -296,4 +296,16 @@ test("the budgets file states the workload workload.json records", () => {
     `spaced ${workload.write_spacing_s} s apart`,
   ])
     expect(text.split(stated)).toHaveLength(3);
+  const questions = workload.batch_questions;
+  const chosen = workload.batch_with_choices;
+  const typed = questions - chosen;
+  // Only the page-update budget times the batch, so each figure is stated once.
+  for (const stated of [
+    `for one ${questions}-answer batch sent at once from the page`,
+    `${questions} open high-priority questions raised through the real CLI`,
+    `(${chosen} offering ${workload.batch_choices_each} choices, ${typed} offering none)`,
+    `drafts all ${questions} (${chosen} by a choice press, ${typed} by typed text)`,
+    `carrying ${questions} answers`,
+  ])
+    expect(text.split(stated)).toHaveLength(2);
 });
