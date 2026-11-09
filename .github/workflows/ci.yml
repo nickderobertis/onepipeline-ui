@@ -351,7 +351,9 @@ jobs:
     permissions:
       contents: read
       checks: write
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to ubuntu-26.04, and this job's measured time cap
+    # was taken on 24.04.
+    runs-on: ubuntu-24.04
     # 29.8 min upper estimate / 0.85, rounded up: docs/release-sweep-timing.md.
     timeout-minutes: 36
     env:
