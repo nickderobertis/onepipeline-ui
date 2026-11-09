@@ -5,6 +5,9 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,8 +35,8 @@ import { FIXTURE_WORKSPACE } from "./playwright.config";
  * the page writes is checked against what the engine's journal holds, read back
  * through that same CLI — `human-items show` and `list` — and what the owning
  * session's watch was told, through `human-items watch`. A connection failure
- * is the server really stopping; a journal the server cannot read is that
- * journal really moved; a request held on its way is a delayed receipt,
+ * is the server really stopping; a journal the server cannot read is the
+ * engine really refused its lock; a request held on its way is a delayed receipt,
  * released untouched.
  */
 
@@ -285,16 +288,30 @@ function journal(served: FixtureServer): string {
 }
 
 /**
- * Make the journal unreadable to the server — its directory moved away and a
- * plain file left where it was — and answer how to put it back.
+ * Make the journal unreadable to the server, and answer how to put it back.
+ *
+ * Every read and write the engine makes takes `index.lock` beside the journal,
+ * and first creates the journal's directory if it has gone, so a server that
+ * notices that directory moved away recreates it before anything can stand in
+ * its place. Here the break is a single `rename` over the lock: a symlink to
+ * itself, which the engine's open refuses (`ELOOP`) for as long as it stands,
+ * leaving nothing to recreate. Only then does the journal's modified time move,
+ * which is what tells the server to read again rather than answer with the
+ * views it holds; putting it back returns the journal to the time it had, and
+ * the engine's next read makes a new lock of its own.
  */
 function breakJournal(served: FixtureServer): () => void {
   const dir = factsOf(served).journal;
-  renameSync(dir, `${dir}.away`);
-  writeFileSync(dir, "not a directory");
+  const lock = join(dir, "index.lock");
+  const events = join(dir, "events.ndjson");
+  const refusing = `${lock}.refusing`;
+  const { atime, mtime } = statSync(events);
+  symlinkSync("index.lock", refusing);
+  renameSync(refusing, lock);
+  utimesSync(events, atime, new Date(mtime.getTime() + 1_000));
   return () => {
-    rmSync(dir);
-    renameSync(`${dir}.away`, dir);
+    rmSync(lock);
+    utimesSync(events, atime, mtime);
   };
 }
 
