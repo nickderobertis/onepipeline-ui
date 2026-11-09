@@ -161,7 +161,8 @@ impl HumanItems {
         let action = match act {
             Act::Answer(text) => HumanItemAction::Answer {
                 id,
-                text,
+                choice: None,
+                text: Some(text),
                 actor,
                 on_behalf_of: None,
             },

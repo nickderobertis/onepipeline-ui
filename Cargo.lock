@@ -1778,8 +1778,9 @@ dependencies = [
 
 [[package]]
 name = "onepipeline"
-version = "0.103.0"
-source = "git+https://github.com/nickderobertis/onepipeline?rev=886124121e083dcdbe8c359a8375113551e4aa61#886124121e083dcdbe8c359a8375113551e4aa61"
+version = "0.104.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da379cb2dad79b8475b9b0a287e515c29f9d3ea69571fcdbc54759096b133d4e"
 dependencies = [
  "async-trait",
  "clap",
@@ -1807,7 +1808,7 @@ dependencies = [
 
 [[package]]
 name = "onepipeline-ui"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "assert_cmd",
  "auditable-info",
@@ -1960,9 +1961,9 @@ dependencies = [
 
 [[package]]
 name = "onevcs"
-version = "0.62.0"
+version = "0.62.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad2b4341c071818f05beb33c61e1ef181d1928a22fa6c3707977cb4f4cd68058"
+checksum = "775325e2ea50353f114fc5f4e53558c5b6849fefb16e196d1c067a15fe5a8f3d"
 dependencies = [
  "clap",
  "dunce",
