@@ -521,6 +521,42 @@ fn the_broader_tier_sweeps_every_project_with_the_budgets() {
     );
 }
 
+/// One compile serves every task that reads the release's Linux wheel. Those tasks
+/// share a target directory behind a lock, so without this edge the ones that lose
+/// the race sleep on it for the whole compile, each holding one of the job's Nx
+/// slots away from the tiers waiting to start.
+#[test]
+fn the_tasks_sharing_the_release_wheel_start_after_its_one_compile() {
+    let workspace = workspace(None);
+    for task in [
+        "onepipeline-ui:wheel-smoke",
+        "onepipeline-ui-release:rehearse",
+    ] {
+        let graph = Command::new("bash")
+            .args(["scripts/nx.sh", "run", task, "--graph=stdout"])
+            .current_dir(workspace.root())
+            .env("NX_DAEMON", "false")
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("bash runs Nx");
+        assert!(
+            graph.status.success(),
+            "Nx could not plan {task}:\n{}",
+            plain(&graph.stderr)
+        );
+        let graph: serde_json::Value =
+            serde_json::from_slice(&graph.stdout).expect("Nx prints its task graph as JSON");
+        let compile = serde_json::json!("dag-ui-read-latency:compile-release-server");
+        let edges = graph["tasks"]["dependencies"][task]
+            .as_array()
+            .unwrap_or_else(|| panic!("no dependency list for {task}: {graph}"));
+        assert!(
+            edges.contains(&compile),
+            "{task} would sleep on the wheel's lock instead of following its compile: {edges:?}"
+        );
+    }
+}
+
 /// A lockfile the checkout no longer matches fails `test-linux` and names what
 /// to do, even when the diff selected nothing to run; the other jobs leave that
 /// question to it.

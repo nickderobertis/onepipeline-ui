@@ -2422,17 +2422,60 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 }
 
 /*
+ * Every task this app shows — an action item's body on a card and in detail, a
+ * node's task prose and acceptance criteria — is `@onetaskgraph/ui`'s, themed here
+ * from this app's palette rather than the package's defaults.
+ */
+:root {
+  --otg-accent: var(--primary);
+  --otg-border: var(--border);
+  --otg-muted: var(--muted-foreground);
+}
+
+/* This app's Tailwind preflight strips list markers, which a task's lists need. */
+.otg-markdown ul {
+  list-style: disc;
+}
+
+.otg-markdown ol {
+  list-style: decimal;
+}
+
+/* An inline code span in the monospace stack sits lower than the text's baseline
+   allows for and grew its line past the others, so a four-line clamp cut a line in
+   half. A zero-height inline box cannot grow a line; its text still draws. */
+.otg-markdown code {
+  line-height: 0;
+}
+
+.node-tab-panel .otg-markdown {
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/*
  * The action-items page. Dense rows occupy the full width until a selection opens
  * the detail pane beside them; the list and the pane each scroll on their own, so
  * reading a long body never moves the list. At 1440×900 the unselected list shows
  * six complete cards — three tasks and three open questions with 80–160 character
- * bodies — with every control in view (docs/human-items.md states the target).
+ * bodies — under their group headings, with every control in view
+ * (docs/human-items.md states the target).
  */
 .human-items-page {
+  --toast-room: 0px;
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+.human-items-controls {
+  border-bottom: 1px solid var(--border);
+}
+
+/* The Filters button is the phone's; wider screens show what it folds. */
+.human-items-filters-toggle {
+  display: none;
 }
 
 .human-items-filters {
@@ -2443,7 +2486,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   margin: 0;
   padding: 8px 20px;
   border: 0;
-  border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
 
@@ -2460,14 +2502,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   font-size: 12px;
 }
 
-.human-items-outcome {
-  margin: 0;
-  padding: 4px 20px;
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
-}
-
-.human-items-outcome[data-failed="true"],
 .human-item-status[data-failed="true"] {
   color: var(--destructive);
 }
@@ -2483,65 +2517,82 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   grid-template-columns: minmax(0, 1fr) minmax(320px, 42%);
 }
 
+/* While a toast shows, the list keeps that much room below its last card, so any
+   card can be scrolled clear of it — and a card brought into view stops above it. */
 .human-items-list {
   min-height: 0;
   overflow: auto;
-  padding: 8px 20px 12px;
+  padding: 6px 20px calc(12px + var(--toast-room));
+  scroll-padding-bottom: calc(8px + var(--toast-room));
 }
 
-.human-items-list > ul {
+.human-items-group + .human-items-group {
+  margin-top: 6px;
+}
+
+.human-items-group-heading {
+  margin: 0 0 3px;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 16px;
+}
+
+.human-items-group-count {
+  font-weight: 400;
+}
+
+/* The page's own lists only: a task body rendered inside a card has lists of its own. */
+.human-items-groups > ul,
+.human-items-group > ul {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .human-item-card {
-  display: grid;
-  gap: 2px;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
   cursor: pointer;
 }
 
-.human-item-card[data-selected="true"] {
+.human-item-card > .otg-card__surface {
+  gap: 1px;
+  padding: 5px 10px 6px;
+  border-color: var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.human-item-card[data-selected="true"] > .otg-card__surface {
   border-color: var(--primary);
   box-shadow: inset 2px 0 var(--primary);
 }
 
-.human-item-head {
-  display: flex;
-  flex-wrap: wrap;
+.human-item-card .otg-card__header {
   align-items: center;
-  gap: 2px 8px;
-  min-width: 0;
 }
 
-/* A title takes the row's room and wraps rather than clipping when the detail
-   pane narrows the list; the actions then wrap below it. */
-.human-item-title {
-  flex: 1 1 16ch;
-  min-width: 0;
-  margin: 0;
+.human-item-card .otg-card__title {
   font-size: 13.5px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
+  line-height: 20px;
 }
 
 .human-item-priority,
-.human-item-kind {
+.human-item-kind,
+.human-item-blocking {
   flex: none;
   padding: 0 6px;
   border: 1px solid var(--border);
   border-radius: 999px;
   font-size: 11px;
   line-height: 18px;
+  white-space: nowrap;
 }
 
-.human-item-priority[data-priority="urgent"] {
+.human-item-priority[data-priority="urgent"],
+.human-item-blocking {
   border-color: var(--destructive);
   color: var(--destructive);
 }
@@ -2553,14 +2604,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 
 .human-item-kind {
   color: var(--muted-foreground);
-}
-
-.human-item-actions {
-  margin-left: auto;
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
 }
 
 .human-item-action,
@@ -2577,33 +2620,28 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   white-space: nowrap;
 }
 
+/* A tracker id is short, but never allowed to push the card's actions out. */
 .human-item-tracker {
+  max-width: 24ch;
+  overflow: hidden;
   color: var(--primary);
+  text-overflow: ellipsis;
 }
 
+.human-item-card .otg-card__meta,
 .human-item-meta {
   margin: 0;
-  overflow: hidden;
   color: var(--muted-foreground);
   font-size: 11.5px;
   line-height: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* At most four lines of a body on a card, ending in an ellipsis when there is more;
    the detail pane carries the whole of it. */
-.human-item-body {
-  display: -webkit-box;
-  margin: 0;
-  overflow: hidden;
+.human-item-card .otg-markdown {
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 17px;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
-  overflow-wrap: anywhere;
 }
 
 /* An answer box rests one line tall and grows with what is written. */
@@ -2655,7 +2693,7 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   flex-direction: column;
   gap: 8px;
   min-height: 0;
-  padding: 12px 20px;
+  padding: 12px 20px calc(12px + var(--toast-room));
   overflow: hidden;
   border-left: 1px solid var(--border);
 }
@@ -2671,9 +2709,14 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   grid-column: 1;
   margin: 0;
   font-size: 16px;
+  overflow-wrap: anywhere;
 }
 
 .human-item-detail-head .human-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
   grid-column: 1;
 }
 
@@ -2683,7 +2726,7 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 }
 
 .human-item-detail .human-item-meta {
-  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .human-item-steps {
@@ -2710,8 +2753,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   overflow: auto;
   font-size: 13px;
   line-height: 19px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 .human-item-detail-actions {
@@ -2720,6 +2761,247 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+/*
+ * The last write's toast. It has to stand out from a dark page at a glance, so it
+ * is a muted green once the write went through and a muted red when something
+ * failed, each bordered in its own hue. Bottom right on a wide screen, under half
+ * of it; across the bottom on a phone.
+ */
+.human-items-toast {
+  position: fixed;
+  z-index: 40;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px 10px;
+  width: min(440px, 40vw);
+  padding: 10px 12px;
+  border: 1px solid #3f8a5c;
+  border-radius: 10px;
+  background: #183a27;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  color: #e6f4ea;
+  font-size: 13px;
+}
+
+.human-items-toast[data-tone="failure"] {
+  border-color: #b04a4f;
+  background: #4a1d21;
+  color: #fbe9ea;
+}
+
+.human-items-toast-message {
+  grid-column: 1;
+  margin: 0;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.human-items-toast-close {
+  display: grid;
+  grid-column: 2;
+  grid-row: 1;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.human-items-toast-actions,
+.human-items-toast-note {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 8px;
+}
+
+.human-items-toast-note input {
+  flex: 1 1 12ch;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 25%);
+  color: inherit;
+}
+
+.human-items-toast-action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 8%);
+  white-space: nowrap;
+}
+
+/* Greyed where the engine says it cannot be done; the question mark on its text
+   is a control of its own, whose hit area stays inside this box. */
+.human-items-unavailable {
+  gap: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0 2px 0 12px;
+  opacity: 1;
+  border-style: dashed;
+  color: color-mix(in srgb, currentColor 55%, transparent);
+}
+
+.human-items-unavailable > button:disabled {
+  cursor: not-allowed;
+}
+
+/* Set on the Reopen text without preflight's lift for `sup`, which would carry the
+   mark above the control it belongs to. */
+.human-items-why-anchor {
+  position: static;
+  top: auto;
+  align-self: stretch;
+  display: flex;
+  align-items: flex-start;
+  font-size: inherit;
+  line-height: 1;
+  vertical-align: baseline;
+}
+
+.human-items-why {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding-top: 4px;
+  color: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.human-items-why-tip {
+  position: absolute;
+  z-index: 1;
+  bottom: calc(100% + 6px);
+  left: 0;
+  width: max-content;
+  max-width: min(320px, 80vw);
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  font-size: 12px;
+  line-height: 17px;
+  white-space: normal;
+}
+
+.human-items-why-tip[hidden] {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  /* The navigation is a drawer by now, so a card has the whole width. */
+  .human-items-list {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  /* Group by and the filters fold behind one Filters button, so the list keeps
+     the screen. */
+  .human-items-filters-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    margin: 0 10px;
+    font-size: 13px;
+  }
+
+  .human-items-filters-count {
+    display: inline-grid;
+    place-items: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--primary);
+    color: var(--primary-foreground);
+    font-size: 11px;
+  }
+
+  .human-items-controls[data-open="false"] .human-items-filters {
+    display: none;
+  }
+
+  /* Two label-and-control pairs a row, so no label is left at a row's end without
+     its control. */
+  .human-items-filters {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
+    padding: 0 10px 8px;
+  }
+
+  .human-items-filters :where(select, input) {
+    width: 100%;
+    height: 36px;
+  }
+
+  /* A card's actions take their own row, each tall enough for a thumb. */
+  .human-item-card .otg-card__actions {
+    flex-basis: 100%;
+    gap: 6px;
+  }
+
+  .human-item-action,
+  .human-item-tracker {
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 13px;
+  }
+
+  .human-items-page[data-detail-open="true"] .human-items-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The detail takes the main area over its list rather than squeezing beside it. */
+  .human-items-page[data-detail-open="true"] .human-items-list {
+    display: none;
+  }
+
+  .human-item-detail {
+    border-left: 0;
+    overflow: auto;
+  }
+
+  .human-item-detail-actions :where(button, a) {
+    min-height: 44px;
+  }
+
+  .human-items-toast {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    border-width: 1px 0 0;
+    border-radius: 0;
+  }
+
+  .human-items-toast-action,
+  .human-items-toast-note input {
+    min-height: 44px;
+  }
+
+  .human-items-toast-close {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 .remote-checks .check-required {

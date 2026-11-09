@@ -169,3 +169,107 @@ The estimate is the median's 28.7 minutes for the job this change was made for,
 at least 15% under the 36-minute cap; the worst measured case, 35.2 minutes,
 stays under it. The cap is unchanged. A hosted cold job over 30.5 minutes is
 outside every median figure above.
+
+## Later: the tail behind the timed journey (2026-11-08)
+
+On the action-items branch, test-linux was cancelled at its cap four times on
+fab12a3d (run 42458563223) and again on c5797b8c (run 42473859179, job
+128710690806) with every finished task green. Nx's own record of the last
+passing run (42451639631, `nx-cache-entries-test-linux`'s `executions.json`)
+gives each task's start and end. The job ends on `dag-ui-read-latency:test`,
+which has `parallelism: false` and so starts only once every other task is done.
+The last of those was `github-workflows-nx-cache:test`. It reads the whole
+workspace, so it runs on every pull request, for about 950 s. Having no dependent,
+it started 635 s into that run and about 800 s into the cancelled one. Two
+changes, held to Nx 23.1.3's own `TasksSchedule` driven over the branch's task
+graph with that run's task durations:
+
+- `.github/tests/nx-cache/project.json`: a no-op `prioritize` follows `test`,
+  test-linux's affected targets (`scripts/ci-job.sh`) and the project's `check`
+  name it, so the suite has a dependent and a slot with the tiers
+  (it starts at 302 s rather than 692 s). On its own that moves the end only
+  41 s: with `dag-ui-e2e:test` uncached, the browser tier then ends last.
+- `apps/dag-ui-e2e`: each action-items world is built once per run and copied
+  for later journeys (`fixtures/human-items-world.mjs`). That spec's 54 world
+  starts took 177 s and now take 60 s on this host.
+
+With the edge in place and the browser tier 112–212 s shorter, the modelled end
+moves from 1899 s to 1746–1714 s. The same model puts the passing run's end at
+1820 s; it actually ended at 1843 s.
+
+`dag-ui-read-latency:compile-release-server` builds through `just wheel-linux`
+for the same reason. A host `cargo build --release` beside `wheel-smoke` and
+the rehearsal compiled a second release dependency graph that no warm cache
+held: 1420–1450 s on every recent branch, test-linux's longest task.
+
+Run 42508499783 (a1d8ba2) was cancelled at the cap with the browser tier still
+running. Three tasks in a row have no slack around them: `dag-ui:build-api-server`
+(8.4 minutes into Nx there), `dag-ui-e2e:test` (24.3 minutes on one worker, run
+42458563223 attempt 3) and `dag-ui-read-latency:test` (255 s, alone). With the
+3.3 minutes before Nx that is about 40 minutes whatever else is reordered.
+`dag-ui-e2e:test` now runs two single-worker lanes: the journeys against the shared
+server in one, and `dag-ui-human-items` and `dag-ui-update-settings`, whose every
+journey starts its own server, in the other. Those two were 695 of the tier's
+1851 s of journey time, so the tier's wall time falls by up to that share, about
+9 minutes on the runner; the same 284 journeys run.
+
+Run 42515808360 (080242f, job 128838449483) had both lanes and was still cancelled
+at the cap, with `dag-ui-e2e:test`, `:test-isolation`, `dag-ui-read-latency:test`
+and `:budgets` and `onepipeline-ui-release:test` unfinished and every finished task
+green. `dag-ui:build-api-server` ended 12.7 minutes into Nx, against 260 s on the
+last passing run (fda7038), which predates this branch's move of the linked
+`onepipeline` and replayed the browser tier. A pin move misses main's warm Rust
+cache for that crate in every target directory the job compiles, and a change to
+the app runs the browser tier.
+
+That was then profiled with `cargo build --timings` at four jobs, cold, on a loaded
+shared host, so the durations are a profile and not a comparison:
+
+| Build | `onepipeline` | this crate's library | binary | Serial total |
+| --- | --- | --- | --- | --- |
+| debug (`build-api-server`) | 81 s | 13 s | 4 s | about 100 s |
+| release (the wheel) | 473 s | 97 s | 240 s | about 810 s |
+
+The release rows are serial because `codegen-units = 1` and thin LTO keep each on
+one rustc. The debug figure is far under the 12.7 minutes `build-api-server` took
+to finish, so the build's own compile does not explain that time. A cancelled run
+records no task start times, so the time it waited for a slot is not measured.
+
+The release build is not compiled three times. `compile-release-server`,
+`wheel-smoke` and `rehearse` share `target/wheel-x86_64-unknown-linux-gnu` behind
+the lock in `scripts/build-linux-wheel.sh`, and in that run two of the three report
+cargo finishing in about a second. So two of the job's six Nx slots slept on the
+lock for the compile. `wheel-smoke` and `rehearse` now depend on
+`compile-release-server`, so they start once it is done and the slots go to tasks
+that can run; the same three commands run. A list-scheduling model of six slots,
+with durations from the fda7038 and 080242f runs and no account of CPU limits,
+moves the job's end from about 2425 s to 1900 s into Nx. CI has not measured it.
+Sharing `target`'s build directory with `build-api-server` was not done: it would
+save about 100 s of compile and queue that build behind the tiers' compiles there.
+
+Run 42534302010 (5c036bb, job 128895188222) was cancelled at the cap with only
+`dag-ui-read-latency:test` and `:budgets` left, 92 s after `github-workflows-nx-cache:test`
+ended. That suite took 1862 s of Nx there, run one test at a time. Two of its tests held
+776 s of it:
+
+| Test | Where the time went | CI | This host, before | This host, after |
+| --- | --- | ---: | ---: | ---: |
+| `cache-use under onebudgetspec…` | The pinned sidecar's and promotion CLI's backoff on the double's HTTP 500: 94 s and 61 s, sleeping | 412 s | 240–255 s | 90 s |
+| `each declared file input rule…` | Starting Node and Nx afresh for each of 146 probes | 364 s | 278 s | 82–104 s |
+
+The double now answers a store fault with 501, which the pinned client does not retry and
+which ends in the same failed store call. The probes share one process, whose hashes are
+held to an isolated read of `nx.json` and `README.md` and to the restored tree. Run alone
+on this host the whole suite went from 767 s to 482 s, the later run at the higher load
+(21 against about 10); the host is shared, so these durations are a profile and not a
+comparison.
+
+That removes the suite from the end of the job. CI has not measured it. The browser chain
+ended 31 s before the suite did, and `dag-ui-read-latency:test` then runs alone for about
+255 s, so the chain headed by `dag-ui:build-api-server` may still run past the cap. That
+task finished 12.9 minutes into Nx there, against about 100 s of compile alone. A cancelled
+run records no task start times, so when it started and what it waited on are not known.
+CPU contention is an unverified hypothesis: Nx's ordering should start it soon after
+`dag-ui:build`, and no shared build lock was found, but neither was observed in that run.
+`NODE_COMPILE_CACHE` was tried on the suite's slowest
+nested-Nx test, and it did not move (64–66 s against 62–65 s).

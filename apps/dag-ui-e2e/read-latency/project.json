@@ -10,8 +10,8 @@
   "//compile": "llmlint: ignore-block[new_projects_keep_the_graph_uniform] this target stays apart from `build`: a `build` target would put a release compile no other task reads in every `build` sweep, and folding it into `test` holds every other task off for the compile under parallelism:false, which ran test-linux into its 36-minute cap.",
   "targets": {
     "compile-release-server": {
-      "//": "A target of its own so the compile overlaps the job's other tasks: only the timed journey in `test` holds them off. Named apart from `build` so no build sweep compiles a server nothing else reads.",
-      "command": "cargo build --release --locked --features bundled-ui --bin onepipeline-api",
+      "//": "Named apart from `build` so no build sweep compiles a server nothing else reads. It is the release's own Linux build, in the target directory `wheel-smoke` and the release rehearsal share, so it times the binary that ships (docs/linux-cold-cache-timing.md).",
+      "command": "just wheel-linux x86_64-unknown-linux-gnu target/read-latency-wheel",
       "cache": false,
       "dependsOn": [
         {

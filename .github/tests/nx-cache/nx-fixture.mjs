@@ -57,6 +57,54 @@ export function workspaceFixture(ref) {
   symlinkSync(join(root, "node_modules"), join(cwd, "node_modules"), "dir");
   return cwd;
 }
+// The smallest edit that changes a file's bytes and leaves it readable as what it is.
+export function probeEdit(file, original) {
+  return file === "tsconfig.base.json"
+    ? Buffer.from(
+        original.toString().replace('"target": "ES2024"', '"target": "ES2023"'),
+      )
+    : Buffer.concat([original, Buffer.from("\n")]);
+}
+
+// What each file-rule probe's edit does to the tasks reading it, read in one process.
+export function probeHashes(cwd, before) {
+  mkdirSync(join(cwd, ".nx"), { recursive: true });
+  const workspaceData = mkdtempSync(join(cwd, ".nx/hash-read-"));
+  const hashes = join(workspaceData, "before.json");
+  writeFileSync(hashes, JSON.stringify(before));
+  try {
+    const read = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [resolve(".github/tests/nx-cache/nx-probe-hashes.mjs"), cwd, hashes],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            NX_DAEMON: "false",
+            NX_ISOLATE_PLUGINS: "false",
+            NX_WORKSPACE_DATA_DIRECTORY: workspaceData,
+          },
+          maxBuffer: 32 * 1024 * 1024,
+        },
+      ),
+    );
+    const hashesOnly = (value) =>
+      value &&
+      typeof value === "object" &&
+      Object.values(value).every((hash) => typeof hash === "string");
+    if (
+      !hashesOnly(read?.restored) ||
+      !read.moved ||
+      !Object.values(read.moved).every(hashesOnly)
+    )
+      throw new Error("nx-probe-hashes printed no moved and restored hashes");
+    return read;
+  } finally {
+    rmSync(workspaceData, { recursive: true, force: true });
+  }
+}
+
 export function taskHashes(cwd, ids = ["--ci"]) {
   // Nx's native file-hash archive keys reuse on mtime alone (seconds on Unix).
   // Each inspection must read current bytes, even for edits in the same second.

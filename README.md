@@ -141,6 +141,8 @@ GET /api/human-items/{id}             # one item and every step it blocks
 POST /api/human-items/{id}/answer     # answer an open question
 POST /api/human-items/{id}/complete   # complete an open task, design reviews included
 POST /api/human-items/{id}/dismiss    # dismiss an open item, with an optional reason
+POST /api/human-items/{id}/reopen     # take a completed or dismissed item's resolution back, undoing its approval
+POST /api/human-items/{id}/note       # a resolved item's comment or reason, after the fact
 ```
 
 The first seven are the read surface the browser view was written against;

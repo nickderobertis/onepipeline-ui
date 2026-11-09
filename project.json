@@ -133,6 +133,10 @@
         {
           "projects": ["dag-ui"],
           "target": "build"
+        },
+        {
+          "projects": ["dag-ui-read-latency"],
+          "target": "compile-release-server"
         }
       ],
       "cache": false,

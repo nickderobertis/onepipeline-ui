@@ -12,6 +12,12 @@ answers that version; asked about another, it records nothing and answers the
 current one, which the engine compares with the stored key. A document it does
 not hold exits 3; input that is not the shape above exits 2, before anything is
 recorded.
+
+Run as `python3 approval_authority.py --undo VERSIONS LOG` it is the same
+authority's configured `undo`: it reads the same request, removes the approval
+record of exactly that document and version from `LOG` and answers
+`{board_copy, key}` naming it. With no such record to remove it exits 1 and says
+why on standard error, which the engine shows as the reopen's refusal.
 """
 
 import json
@@ -29,9 +35,36 @@ def text(value):
     return isinstance(value, str) and value.strip() != ""
 
 
+def undo(request, log_path):
+    """Remove the approval `request` names from the log, or refuse saying why."""
+    try:
+        with open(log_path) as log:
+            records = [json.loads(line) for line in log if line.strip()]
+    except OSError:
+        records = []
+    except ValueError as error:
+        refuse(f"the approval log is not newline-delimited JSON: {error}")
+    if not all(isinstance(r, dict) and text(r.get("board_copy")) and text(r.get("key"))
+               for r in records):
+        refuse("every approval record must name its board_copy and key")
+    wanted = (request["board_copy"], request["key"])
+    kept = [r for r in records if (r["board_copy"], r["key"]) != wanted]
+    if len(kept) == len(records):
+        sys.stderr.write(
+            f"no approval of {request['board_copy']} at {request['key']} is recorded, "
+            "so there is nothing to take back\n")
+        sys.exit(1)
+    with open(log_path, "w") as log:
+        log.writelines(json.dumps(r) + "\n" for r in kept)
+    print(json.dumps({"board_copy": request["board_copy"], "key": request["key"]}))
+
+
 def main():
+    undoing = sys.argv[1:2] == ["--undo"]
+    if undoing:
+        del sys.argv[1]
     if len(sys.argv) != 3:
-        refuse("usage: approval_authority.py VERSIONS LOG")
+        refuse("usage: approval_authority.py [--undo] VERSIONS LOG")
     try:
         request = json.load(sys.stdin)
         with open(sys.argv[1]) as held:
@@ -47,6 +80,9 @@ def main():
     if not isinstance(versions, dict) or not all(
             text(name) and text(version) for name, version in versions.items()):
         refuse("the versions file must map each document to a non-empty version")
+    if undoing:
+        undo(request, sys.argv[2])
+        return
     current = versions.get(request["board_copy"])
     if current is None:
         sys.exit(3)

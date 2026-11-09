@@ -117,8 +117,13 @@ export class GithubCache {
         if (!Object.hasOwn(CACHE_RPC_FIELDS, method))
           return reply({ message: "Unknown cache RPC" }, 404);
         const key = JSON.stringify([body.key, body.version]);
+        // A store fault the client gives up on at once. The pinned client sleeps through
+        // about 150 s of backoff on a 500 and reaches the same outcome, a failed store call.
         if (this.mode === "fault")
-          return reply({ code: "internal", msg: "store unavailable" }, 500);
+          return reply(
+            { code: "unimplemented", msg: "store unavailable" },
+            501,
+          );
         if (method === "GetCacheEntryDownloadURL") {
           const found =
             this.entries.get(`${scope}:${key}`) ??

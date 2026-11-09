@@ -3,7 +3,12 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { taskHashes, workspaceFixture } from "./nx-fixture.mjs";
+import {
+  probeEdit,
+  probeHashes,
+  taskHashes,
+  workspaceFixture,
+} from "./nx-fixture.mjs";
 
 const versionReaders = (id) =>
   /^(onepipeline-ui-release:test$|onepipeline-ui-npm-launcher:|onepipeline-ui-versions:)/.test(
@@ -241,47 +246,35 @@ test("every cached task separates platforms and test outputs name only profile/r
   }
 });
 
-test("each declared file input rule moves every task that reads its probe", (context) => {
+test("each declared file input rule moves every task that reads its probe", () => {
   const cwd = workspaceFixture();
   try {
     const before = taskHashes(cwd);
-    const probes = [
-      ...new Set(
-        Object.values(before).flatMap((task) =>
-          task.probes.map((probe) => probe.file),
-        ),
-      ),
-    ];
-    for (const file of probes) {
+    const { moved, restored } = probeHashes(cwd, before);
+    const probes = Object.keys(moved);
+    assert.ok(probes.length >= 100, `only ${probes.length} probes were read`);
+    for (const file of probes)
+      for (const id of Object.keys(moved[file]))
+        assert.notEqual(
+          moved[file][id],
+          before[id].hash,
+          `${id}: declared input ${file} did not move its hash`,
+        );
+    // The one reader sees what the reader each edit once started its own process for sees,
+    // so its hashes are Nx's: a graph file and a plain source, and the tree as restored.
+    for (const file of ["nx.json", "README.md"]) {
       const original = readFileSync(join(cwd, file));
-      writeFileSync(
-        join(cwd, file),
-        file === "tsconfig.base.json"
-          ? Buffer.from(
-              original
-                .toString()
-                .replace('"target": "ES2024"', '"target": "ES2023"'),
-            )
-          : Buffer.concat([original, Buffer.from("\n")]),
-      );
+      writeFileSync(join(cwd, file), probeEdit(file, original));
       try {
-        const readers = Object.entries(before)
-          .filter(([, task]) =>
-            task.probes.some((probe) => probe.file === file),
-          )
-          .map(([id]) => id);
-        const after = taskHashes(cwd, readers);
-        for (const id of readers)
-          assert.notEqual(
-            after[id].hash,
-            before[id].hash,
-            `${id}: declared input ${file} did not move its hash`,
-          );
+        const isolated = taskHashes(cwd, Object.keys(moved[file]));
+        for (const id of Object.keys(moved[file]))
+          assert.equal(moved[file][id], isolated[id].hash, `${file}: ${id}`);
       } finally {
         writeFileSync(join(cwd, file), original);
       }
-      context.diagnostic(`hashed file-rule probe ${file}`);
     }
+    for (const [id, task] of Object.entries(before))
+      assert.equal(restored[id], task.hash, `${id}: not restored`);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

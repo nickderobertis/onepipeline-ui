@@ -124,16 +124,6 @@ export function blockedGroups(detail: HumanItemDetail): {
   });
 }
 
-export type TrackerProvider = "GitHub" | "Linear" | "tracker";
-
-/** Which tracker an issue is on, by its address; any other host is a tracker. */
-export function trackerProvider(url: string): TrackerProvider {
-  const host = URL.canParse(url) ? new URL(url).hostname : "";
-  if (host === "github.com") return "GitHub";
-  if (host === "linear.app") return "Linear";
-  return "tracker";
-}
-
 /**
  * `value` if it is one of `allowed`, else `undefined`: how a `<select>`'s string
  * becomes one of the choices it was rendered from without asserting its type.
@@ -183,4 +173,105 @@ export function toFilter(choice: FilterChoice): HumanItemFilter {
       ? { [choice.source]: id }
       : {}),
   };
+}
+
+/** Whether `choice` names any selector beyond the page's defaults, one per field. */
+export function changedFilters(choice: FilterChoice): number {
+  return (
+    Number(choice.kind !== NO_FILTER.kind) +
+    Number(choice.blocking !== NO_FILTER.blocking) +
+    Number(choice.priority !== NO_FILTER.priority) +
+    Number(choice.state !== NO_FILTER.state) +
+    Number(choice.source !== NO_FILTER.source)
+  );
+}
+
+/** The fields the list can be grouped by; `none` is one flat list. */
+export const GROUP_CHOICES = [
+  "priority",
+  "kind",
+  "source",
+  "blocking",
+  "none",
+] as const;
+export type GroupBy = (typeof GROUP_CHOICES)[number];
+/** What the list is grouped by until a reader chooses otherwise. */
+export const DEFAULT_GROUP_BY: GroupBy = "priority";
+
+export const GROUP_OPTIONS: readonly {
+  readonly value: GroupBy;
+  readonly label: string;
+}[] = [
+  { value: "priority", label: "Priority" },
+  { value: "kind", label: "Kind" },
+  { value: "source", label: "Source" },
+  { value: "blocking", label: "Blocking" },
+  { value: "none", label: "None" },
+];
+
+/** One heading's items, in the engine's order. */
+export interface ItemGroup {
+  readonly key: string;
+  /** The heading, or `undefined` for the one flat list of `none`. */
+  readonly label?: string;
+  readonly items: readonly HumanItemView[];
+}
+
+/** Where a group sorts among the others: a fixed rank, or first appearance. */
+function groupOf(
+  view: HumanItemView,
+  by: Exclude<GroupBy, "none">,
+): { readonly key: string; readonly label: string; readonly rank: number } {
+  const { item } = view;
+  switch (by) {
+    case "priority":
+      return {
+        key: item.priority,
+        label: priorityLabel(item),
+        rank: HUMAN_ITEM_PRIORITIES.indexOf(item.priority),
+      };
+    case "kind":
+      return {
+        key: item.kind,
+        label: kindLabel(item),
+        rank: item.kind === "task" ? 0 : 1,
+      };
+    case "blocking":
+      return isBlocking(item)
+        ? { key: "blocking", label: "Blocking", rank: 0 }
+        : { key: "not-blocking", label: "Not blocking", rank: 1 };
+    case "source": {
+      const words = sourceWords(item);
+      return { key: words, label: `Source: ${words}`, rank: 0 };
+    }
+  }
+}
+
+/**
+ * `items` under one heading per value of `by`: priority Critical to Low, tasks
+ * before questions, blocking before not, and sources in the order the engine
+ * first lists them. Within a heading the engine's own order stands.
+ */
+export function groupItems(
+  items: readonly HumanItemView[],
+  by: GroupBy,
+): ItemGroup[] {
+  if (by === "none") return [{ key: "all", items }];
+  const groups = new Map<
+    string,
+    { label: string; rank: number; first: number; items: HumanItemView[] }
+  >();
+  items.forEach((view, index) => {
+    const { key, label, rank } = groupOf(view, by);
+    const held = groups.get(key);
+    if (held) held.items.push(view);
+    else groups.set(key, { label, rank, first: index, items: [view] });
+  });
+  return [...groups.entries()]
+    .sort(([, a], [, b]) => a.rank - b.rank || a.first - b.first)
+    .map(([key, { label, items: grouped }]) => ({
+      key,
+      label,
+      items: grouped,
+    }));
 }

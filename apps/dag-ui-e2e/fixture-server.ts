@@ -1,8 +1,8 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { connect, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { FIXTURE_FACTS_NAME } from "./fixtures/facts-file";
 import { FIXTURE_WORKSPACE } from "./playwright.config";
 
@@ -80,6 +80,19 @@ export const exited = (child: ChildProcess): Promise<void> =>
     : new Promise((resolve) => child.once("exit", () => resolve()));
 
 /**
+ * `dag-ui-e2e-NAME-RUN` under the temp root, empty: one path per corpus name and
+ * run, named after this run's fixture workspace so two runs on one host never
+ * share it.
+ */
+function sameWorkspace(name: string): string {
+  const run = basename(FIXTURE_WORKSPACE).replace(/^dag-ui-e2e-fixture-/, "");
+  const workspace = join(tmpdir(), `dag-ui-e2e-${name}-${run}`);
+  rmSync(workspace, { recursive: true, force: true });
+  mkdirSync(workspace);
+  return workspace;
+}
+
+/**
  * Start a read API over the corpus `corpusArgs` selects, the view beside it, and
  * wait until it answers. `name` says which corpus in the workspace's name and in
  * every failure.
@@ -89,10 +102,18 @@ export async function startFixtureServer(
   corpusArgs: readonly string[],
   /** Beside the fixture server's own environment: what this journey's server is told. */
   env: Readonly<Record<string, string>> = {},
+  /**
+   * The same workspace path every time this name is started in a run, emptied
+   * first, rather than a fresh one: for a corpus that keeps what it built for the
+   * next journey to copy, which is the same bytes only at the same path.
+   */
+  { samePath = false }: { readonly samePath?: boolean } = {},
 ): Promise<FixtureServer> {
   // `dag-ui-e2e-…` directly under the temp root: the one shape
   // `serve-fixture.mjs` agrees to remove and rebuild.
-  const workspace = mkdtempSync(join(tmpdir(), `dag-ui-e2e-${name}-`));
+  const workspace = samePath
+    ? sameWorkspace(name)
+    : mkdtempSync(join(tmpdir(), `dag-ui-e2e-${name}-`));
   // The journey's origin is a listener this process takes before anything is
   // served and holds until `stop`, relaying each connection to the read API
   // serving at the time. A restart is then a new child behind the same held

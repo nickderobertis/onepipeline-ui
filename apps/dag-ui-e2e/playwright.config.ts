@@ -211,22 +211,30 @@ export const OUTPUT_DIR = join(
   basename(session.workspace),
 );
 
+/**
+ * What other configs select. The gallery lives beside the journeys because it drives
+ * the same surfaces against the same stack, but it asserts nothing and writes images;
+ * `screenshots.config.ts` selects it, and `just dag-ui-screens` is when it runs.
+ * `isolation/` runs *this* config rather than being run by it. Both would otherwise
+ * be selected, since the journeys and they share a directory. The load telemetry is
+ * `dag-ui-e2e:test-load`'s, in a config of its own, and the read-latency telemetry
+ * is its own project's.
+ */
+const NOT_THIS_TIER = [
+  "**/*.screens.spec.ts",
+  "isolation/**",
+  "load/**",
+  "read-latency/**",
+];
+
+/** Specs whose every journey starts its own server (see `workers` below). */
+const OWN_SERVERS = [
+  "**/dag-ui-human-items.spec.ts",
+  "**/dag-ui-update-settings.spec.ts",
+];
+
 export default defineConfig({
   testDir: ".",
-  // The gallery lives beside the journeys because it drives the same surfaces against
-  // the same stack, but it asserts nothing and writes images; `screenshots.config.ts`
-  // selects it, and `just dag-ui-screens` is when it runs.
-  // The gallery asserts nothing and `isolation/` runs *this* config rather than
-  // being run by it; both would otherwise be selected, since the journeys and
-  // they now share a directory.
-  // The load telemetry is `dag-ui-e2e:test-load`'s, in a config of its own, and
-  // the read-latency telemetry is its own project's.
-  testIgnore: [
-    "**/*.screens.spec.ts",
-    "isolation/**",
-    "load/**",
-    "read-latency/**",
-  ],
   globalTeardown: "./global-teardown.ts",
   outputDir: OUTPUT_DIR,
   /**
@@ -241,10 +249,21 @@ export default defineConfig({
    */
   expect: { timeout: 15_000 },
   timeout: 120_000,
-  // One server serves one run directory, and the live-update journeys change what it
-  // is serving, so the journeys share that state and must not run against each other.
-  workers: 1,
+  // Two lanes, each one worker. One server serves one run directory, and the
+  // live-update journeys change what it is serving, so every journey against that
+  // server shares that state and must not run against another. The specs in
+  // `OWN_SERVERS` start a server per journey over a directory of their own, so they
+  // share nothing with that lane and take their own (docs/linux-cold-cache-timing.md).
+  workers: 2,
   fullyParallel: false,
+  projects: [
+    {
+      name: "shared-server",
+      testIgnore: [...NOT_THIS_TIER, ...OWN_SERVERS],
+      workers: 1,
+    },
+    { name: "own-servers", testMatch: OWN_SERVERS, workers: 1 },
+  ],
   use: { baseURL: `http://${LOOPBACK}:${session.ui}` },
   /**
    * Every timeout below is a *readiness* budget: how long a process may take to bind

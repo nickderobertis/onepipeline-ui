@@ -88,8 +88,9 @@ case "$job" in
       # crate a second time to lint it. Listed rather than reached through
       # `check`, which would pull them back in; `tests/e2e/ci_jobs.rs` holds the
       # list to `check`'s selection. Browser-bundle tests run here too, so their
-      # result is proven before the broader release tier needs it.
-      targets="build,test,test-baseline,test-cost,test-isolation,doc,coverage,budgets,test-ci-jobs,install-smoke,wheel-smoke"
+      # result is proven before the broader release tier needs it. `prioritize`
+      # runs nothing: it is the edge that has Nx start a long suite with the tiers.
+      targets="build,test,test-baseline,test-cost,test-isolation,doc,coverage,budgets,test-ci-jobs,install-smoke,wheel-smoke,prioritize"
     fi
     ;;
   test-windows) targets="format-check,lint,test-quick,build,install-smoke" ;;

@@ -81,6 +81,8 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::HUMAN_ITEM_ANSWER, "human-item-answer.json"),
     (routes::HUMAN_ITEM_COMPLETE, "human-item-complete.json"),
     (routes::HUMAN_ITEM_DISMISS, "human-item-dismiss.json"),
+    (routes::HUMAN_ITEM_REOPEN, "human-item-reopen.json"),
+    (routes::HUMAN_ITEM_NOTE, "human-item-note.json"),
 ];
 
 /// The store the served process would build over a workspace's runs root: the
@@ -4207,6 +4209,8 @@ fn every_human_item_fixture_is_the_engines_record() {
         "human-item-answer.json",
         "human-item-complete.json",
         "human-item-dismiss.json",
+        "human-item-reopen.json",
+        "human-item-note.json",
     ] {
         serde_json::from_str::<HumanItemReceipt>(&read(receipt))
             .unwrap_or_else(|err| panic!("{receipt} is not the engine's receipt: {err}"));

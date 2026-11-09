@@ -9,6 +9,8 @@ An optional second argument names a JSON seed replacing the default plan and its
 one approval: `{"repository": "owner/name", "options": [...], "issues": {NAME:
 {"number": N, "title": T, "content": C, "metadata": {...}, "status": OPTION,
 "state": "OPEN" | "CLOSED", "reason": null | REASON, "parent": NAME | null}}}`.
+With `--resume`, the board starts from the `state.json` an earlier board over the
+same root saved instead.
 """
 import faulthandler
 
@@ -35,6 +37,8 @@ def directory(value):
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("root", type=directory)
 parser.add_argument("seed", nargs="?", type=pathlib.Path)
+parser.add_argument("--resume", action="store_true",
+                    help="hold the state the last board over ROOT saved, rather than the seed's")
 arguments = parser.parse_args()
 root = arguments.root
 token = os.environ.get("CACHE_BOARD_TOKEN", "")
@@ -466,6 +470,54 @@ class LoopbackServer(HTTPServer):
         TCPServer.server_bind(self)
         self.server_name, self.server_port = self.server_address[:2]
 
+
+# A board resumed holds what the last one over this root saved — its issues and
+# the requests it answered — as a board that had stayed up would.
+if arguments.resume:
+    try:
+        resumed = json.loads((root / "state.json").read_text())
+    except (OSError, ValueError) as error:
+        parser.error(f"--resume found no readable state in {root}: {error}")
+    refusal = f"--resume found state in {root} that no board over this seed saved"
+    if (not isinstance(resumed, dict) or set(resumed) != {"repository", "issues", "requests"}
+            or resumed["repository"] != seed["repository"]
+            or not isinstance(resumed["issues"], dict)
+            or not isinstance(resumed["requests"], list)
+            or not all(isinstance(request, dict) for request in resumed["requests"])):
+        parser.error(refusal)
+    # Every field a handler reads, of the type this board writes it as: what a seed
+    # is held to, in the shape the board keeps issues in once it has read one.
+    KEPT = {"title", "body", "number", "state", "reason", "status", "parent"}
+    WRITTEN = {"blocked_by", "member", "url", "origin", "priority"}
+    text_or_none = (lambda value: value is None or isinstance(value, str))
+    for name, held in resumed["issues"].items():
+        if (not isinstance(held, dict) or not KEPT <= set(held) <= KEPT | WRITTEN
+                or not all(isinstance(held[key], str) for key in ["title", "body", "state"])
+                or not isinstance(held["number"], int) or isinstance(held["number"], bool)
+                or held["number"] < 1
+                or held["state"] not in STATES or held["reason"] not in STATES[held["state"]]
+                or not (held["status"] is None
+                        or (isinstance(held["status"], str) and held["status"] in options))
+                or not (held["parent"] is None
+                        or (isinstance(held["parent"], str) and held["parent"] in resumed["issues"]))
+                or not isinstance(held.get("blocked_by", []), list)
+                or not all(isinstance(blocker, str) and blocker in resumed["issues"]
+                           and blocker != name for blocker in held.get("blocked_by", []))
+                or not isinstance(held.get("member", False), bool)
+                or not all(text_or_none(held.get(key)) for key in ["url", "origin", "priority"])):
+            parser.error(f"{refusal}: issue {name!r} is not one it keeps")
+    numbers = [held["number"] for held in resumed["issues"].values()]
+    if len(set(numbers)) != len(numbers):
+        parser.error(f"{refusal}: two issues share a number")
+    for name in resumed["issues"]:
+        seen = {name}
+        parent = resumed["issues"][name]["parent"]
+        while parent is not None:
+            if parent in seen:
+                parser.error(f"{refusal}: issue {name!r} is its own ancestor")
+            seen.add(parent)
+            parent = resumed["issues"][parent]["parent"]
+    state = resumed
 
 server = LoopbackServer(("127.0.0.1", 0), Handler)
 save()

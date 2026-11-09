@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync, rmSync, utimesSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { taskHashes, workspaceFixture } from "./nx-fixture.mjs";
@@ -148,5 +155,30 @@ test("both test tiers hash the real judge fingerprint and ignore recording-only 
     if (history === undefined) delete process.env.LLMLINT_NO_HISTORY;
     else process.env.LLMLINT_NO_HISTORY = history;
     rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("the probe reader rejects hashes that are not tasks naming workspace files, as usage", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "nx-probe-usage-"));
+  try {
+    for (const [name, document] of [
+      ["array", []],
+      ["no-probes", { "a:b": {} }],
+      ["bad-id", { nope: { probes: [] } }],
+      ["escapes", { "a:b": { probes: [{ file: "../secret" }] } }],
+      ["absolute", { "a:b": { probes: [{ file: "/etc/passwd" }] } }],
+    ]) {
+      const path = join(scratch, `${name}.json`);
+      writeFileSync(path, JSON.stringify(document));
+      const result = spawnSync(
+        process.execPath,
+        [".github/tests/nx-cache/nx-probe-hashes.mjs", ".", path],
+        { encoding: "utf8" },
+      );
+      assert.equal(result.status, 2, `${name}: ${result.stderr}`);
+      assert.match(result.stderr, /ACTION:/, name);
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 });

@@ -17,17 +17,22 @@
  * The world outlives the server: `serveRebuilt` starts a new server over the same
  * journal (and a fresh board, whose address the configuration is rewritten to), so
  * a journey can stop the server, change what it acts as, and start it again.
+ *
+ * A world is built once per run and copied for every later journey that asks for
+ * it (see {@link DAG_UI_E2E_WORLD_TEMPLATES}): the copy is the built workspace byte for byte,
+ * at the same path, with the board resumed from the state it had then.
  */
 
 import { execFileSync, spawn } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { graphRecordsFor, SUPERVISOR_SESSION } from "./runs.mjs";
@@ -63,6 +68,59 @@ const builtSchema = z.object({
     sessions: z.array(z.string()).optional(),
   }),
 });
+
+/**
+ * Where built worlds are kept for the rest of a run, one directory per world, when
+ * the caller names one: `DAG_UI_E2E_WORLD_TEMPLATES` in the environment, an absolute path.
+ *
+ * A template spares each journey rebuilding an identical world through the engine's
+ * CLI. A copy is what that build wrote, so a journey over it starts from
+ * the same journal, board and configuration. It is the same bytes only at the same
+ * path — a run's journal names its own directory — so a template is used only by
+ * the workspace it was built in, and rebuilt once it is older than
+ * {@link TEMPLATE_MS}, so no journey reads a world much older than a fresh one.
+ */
+const DAG_UI_E2E_WORLD_TEMPLATES = z
+  .string()
+  .refine(isAbsolute, "DAG_UI_E2E_WORLD_TEMPLATES is an absolute path")
+  .optional()
+  .parse(process.env.DAG_UI_E2E_WORLD_TEMPLATES);
+/** How long a built world is copied rather than built again. */
+const TEMPLATE_MS = 10 * 60_000;
+/** What a template records about the build it holds. */
+const templateSchema = z.object({
+  workspace: z.string().min(1),
+  builtAt: z.number(),
+});
+
+/** The template `name` built in `workspace` and still young enough, if any. */
+function usableTemplate(name, workspace) {
+  if (DAG_UI_E2E_WORLD_TEMPLATES === undefined) return undefined;
+  const dir = join(DAG_UI_E2E_WORLD_TEMPLATES, name);
+  const about = join(dir, "template.json");
+  if (!existsSync(about)) return undefined;
+  const held = templateSchema.parse(JSON.parse(readFileSync(about, "utf8")));
+  if (held.workspace !== workspace || Date.now() - held.builtAt > TEMPLATE_MS)
+    return undefined;
+  return join(dir, "files");
+}
+
+/** Keep what was just built in `workspace` as the template for `name`. */
+function keepTemplate(name, workspace, builtAt) {
+  if (DAG_UI_E2E_WORLD_TEMPLATES === undefined) return;
+  const dir = join(DAG_UI_E2E_WORLD_TEMPLATES, name);
+  rmSync(dir, { recursive: true, force: true });
+  // The board's address is its own process's; every start publishes a new one.
+  const endpoint = join(paths(workspace).board, "endpoint");
+  cpSync(workspace, join(dir, "files"), {
+    recursive: true,
+    filter: (source) => source !== endpoint,
+  });
+  writeFileSync(
+    join(dir, "template.json"),
+    JSON.stringify({ workspace, builtAt }),
+  );
+}
 
 /** The login a manager session acts on behalf of. */
 export const USER = "operator";
@@ -144,18 +202,25 @@ export function engine(workspace, token, args, session) {
   });
 }
 
-/** Start the loopback board over `dir`; answers its process and address. */
-function startBoard(dir, seed, token) {
+/**
+ * Start the loopback board over `dir`; answers its process and address. With
+ * `resume`, it holds the state the board last saved in `dir` rather than the seed's.
+ */
+function startBoard(dir, seed, token, resume = false) {
   mkdirSync(dir, { recursive: true });
   const endpoint = join(dir, "endpoint");
   // A world served again still holds the endpoint its last board published,
   // which names a port nothing listens on any more: wait for this board's own.
   rmSync(endpoint, { force: true });
   // llmlint: ignore[e2e_not_mocked] GitHub is the external tracker these journeys may double; the loopback answers only the requests the github-projects source sends, and everything of onepipeline under test is real.
-  const board = spawn("python3", [BOARD, dir, seed], {
-    env: { ...process.env, CACHE_BOARD_TOKEN: token },
-    stdio: ["ignore", "ignore", "inherit"],
-  });
+  const board = spawn(
+    "python3",
+    [BOARD, dir, seed, ...(resume ? ["--resume"] : [])],
+    {
+      env: { ...process.env, CACHE_BOARD_TOKEN: token },
+      stdio: ["ignore", "ignore", "inherit"],
+    },
+  );
   // However this process ends, the board it started ends with it.
   process.on("exit", () => board.kill("SIGKILL"));
   const deadline = Date.now() + 10_000;
@@ -180,6 +245,10 @@ function writeConfiguration(workspace, endpoint) {
       "  approval_adapters:",
       "    approve-design:",
       `      command: ["python3", ${JSON.stringify(APPROVAL_AUTHORITY)}, ${JSON.stringify(at.keys)}, ${JSON.stringify(at.approvals)}]`,
+      `      undo: ["python3", ${JSON.stringify(APPROVAL_AUTHORITY)}, "--undo", ${JSON.stringify(at.keys)}, ${JSON.stringify(at.approvals)}]`,
+      // The same authority with no undo declared: what it approves stays approved.
+      "    approve-final:",
+      `      command: ["python3", ${JSON.stringify(APPROVAL_AUTHORITY)}, ${JSON.stringify(at.keys)}, ${JSON.stringify(at.approvals)}]`,
       "  hooks:",
       "    - phase: design-review",
       "      kind: task",
@@ -188,6 +257,13 @@ function writeConfiguration(workspace, endpoint) {
       "      priority: high",
       "      block: {scope: nothing}",
       "      approval: {adapter: approve-design}",
+      "    - phase: final-review",
+      "      kind: task",
+      '      title: "{{ title }}"',
+      '      body: "{{ body }}"',
+      "      priority: high",
+      "      block: {scope: nothing}",
+      "      approval: {adapter: approve-final}",
       "",
     ].join("\n"),
   );
@@ -328,11 +404,11 @@ function raise(workspace, token, session, input) {
   return receipt.item.item.id;
 }
 
-/** Raise a design review through the configured phase; answers its id. */
+/** Raise a design review through a configured phase; answers its id. */
 function raiseDesign(
   workspace,
   token,
-  { dedup, title, body, owner, copy, key },
+  { dedup, title, body, owner, copy, key, phase = "design-review" },
 ) {
   const path = join(workspace, `design-${dedup}.json`);
   writeFileSync(
@@ -349,7 +425,7 @@ function raiseDesign(
       engine(
         workspace,
         token,
-        ["human-items", "raise", "--phase", "design-review", "--context", path],
+        ["human-items", "raise", "--phase", phase, "--context", path],
         owner.session,
       ),
     ),
@@ -586,6 +662,218 @@ function buildLong(workspace, token) {
   return { ids, runs: { a: runA }, plans: { a: planA } };
 }
 
+const UNDO_PLANS = {
+  "plan-u": [
+    {
+      id: "signoff",
+      title: "Sign off the release notes",
+      priority: "high",
+      body: "Read the drafted release notes and complete this step once they say what shipped.",
+    },
+  ],
+};
+
+/**
+ * What can and cannot be taken back: a plain task, a design review whose
+ * authority declares an undo, one whose authority declares none, and the item
+ * standing for a run's human step.
+ */
+function buildUndo(workspace, token) {
+  const plan = "board:plan-u";
+  const run = start(workspace, token, plan);
+  const ids = {};
+  ids.step = stepItem(workspace, token, run, "signoff");
+  ids.plain = raise(workspace, token, SUPERVISOR_SESSION, {
+    dedup_key: "flaky-runner",
+    kind: "task",
+    title: "File the flaky-runner report",
+    body: "Collect the three runner timeouts from this week and file them with the infrastructure tracker.",
+    priority: "medium",
+    owner: owner(),
+    block: { scope: "nothing" },
+  });
+  ids.certificate = raise(workspace, token, SUPERVISOR_SESSION, {
+    dedup_key: "staging-certificate",
+    kind: "task",
+    title: "Rotate the staging certificate",
+    body: "The staging certificate expires on Friday. Rotate it and record the new expiry on the checklist.",
+    priority: "low",
+    owner: owner(),
+    block: { scope: "nothing" },
+  });
+  ids.design = raiseDesign(workspace, token, {
+    dedup: "action-items-design",
+    title: "Review the action-items design",
+    body: "Read the action-items design document and complete this task once its layout and keyboard flow look right to you.",
+    owner: owner(),
+    copy: "docs/design/action-items.md",
+    key: "sha256:5d1c0a",
+  });
+  ids.final = raiseDesign(workspace, token, {
+    dedup: "final-release-notes",
+    title: "Approve the final release notes",
+    body: "Approve the release notes as published; the publisher keeps every approval it records.",
+    owner: owner(),
+    copy: "docs/release/notes.md",
+    key: "sha256:aa11b2",
+    phase: "final-review",
+  });
+  writeFileSync(
+    paths(workspace).keys,
+    JSON.stringify({
+      "docs/design/action-items.md": "sha256:5d1c0a",
+      "docs/release/notes.md": "sha256:aa11b2",
+    }),
+  );
+  return { ids, runs: { a: run }, plans: { a: plan } };
+}
+
+/**
+ * Everything a task's markdown may carry, harmless and hostile alike: formatted
+ * and bare links, a table — one column, so a regular and a bold cell of the same
+ * words lie in boxes of one size — bold text, raw HTML that would run script,
+ * a `javascript:` link and a remote image.
+ */
+const MARKDOWN_HAZARDS = [
+  "**Ship the reviewed release** once the [release checklist](https://example.org/checklist) is green; the runbook is at https://example.org/runbook.",
+  "",
+  "| Words |",
+  "| --- |",
+  "| Ship it |",
+  "| **Ship it** |",
+  "",
+  '<script>window.__otgScript = "ran"</script>',
+  '<img src="https://images.example.org/broken.png" onerror="window.__otgOnerror = \'ran\'">',
+  "",
+  "[Run the cleanup](javascript:window.__otgLink='ran') and look at ![the rollout diagram](https://images.example.org/diagram.png).",
+].join("\n");
+
+/** A task whose prose and acceptance criteria both carry every hazard. */
+export const MARKDOWN_BODY = `${MARKDOWN_HAZARDS}\n\n## Acceptance criteria\n\n${MARKDOWN_HAZARDS}`;
+
+const MARKDOWN_PLANS = {
+  "plan-md": [
+    {
+      id: "notes",
+      title: "Publish the release notes",
+      priority: "high",
+      body: MARKDOWN_BODY,
+    },
+  ],
+};
+
+/** A run whose human step's task is markdown, and its item beside it. */
+function buildMarkdown(workspace, token) {
+  const plan = "board:plan-md";
+  const run = start(workspace, token, plan);
+  const ids = { notes: stepItem(workspace, token, run, "notes") };
+  return { ids, runs: { a: run }, plans: { a: plan } };
+}
+
+/** Where every realistic item says it came from: a long run and plan of its own. */
+const REALISTIC_RUN = "brief-action-items-ui-2026-11-06-spikes";
+const REALISTIC_PLAN = "local-md:action-items-ui-2026-11-06";
+
+/**
+ * Six action items as a host really carries them — four tasks and two
+ * questions, Critical to Low, with long titles, long sources, bulleted bodies
+ * and long unbroken URLs — the visual spike's workload, raised through the
+ * engine.
+ */
+const REALISTIC = [
+  {
+    dedup_key: "approve-design",
+    kind: "task",
+    priority: "urgent",
+    title:
+      "Approve the design document for action-items-ui-2026-11-06: cards, one-click resolve and the navigation rework",
+    body: "Read [the design document](https://github.com/nickderobertis/ai-orchestrator/blob/main/.plans/documents/action-items-ui-2026-11-06-design.md) and approve it. **Five nodes wait on this.** The one high-cost decision is the journal rollout:\n\n- one engine release, not two\n- `just runs` must show no driver from before the pin\n- a server not restarted answers every human-items route unavailable",
+  },
+  {
+    dedup_key: "navigation-default",
+    kind: "question",
+    priority: "urgent",
+    title: "Should the navigation default to every 30 seconds or to live?",
+    body: "Live keeps the list current but **rows jump while you read**; 30 seconds holds them still and shows a waiting count. See the [ruling](https://github.com/nickderobertis/onepipeline-ui/pull/649).",
+  },
+  {
+    dedup_key: "restart-dag-ui",
+    kind: "task",
+    priority: "high",
+    title:
+      "Restart dag-ui so it links the engine that keeps copied design-document references working",
+    body: "After `onepipeline-api` 0.69.0 is on the host, restart the service and confirm `/healthz` reports the pinned release. Until then: https://github.com/nickderobertis/onepipeline-ui/blob/main/docs/contract.md#a-very-long-anchor-that-has-no-break-opportunity-anywhere-along-its-length",
+  },
+  {
+    dedup_key: "rotate-pypi-token",
+    kind: "task",
+    priority: "high",
+    title: "Rotate PYPI_TOKEN to an account-scoped token",
+    body: "A token scoped to the old project **cannot create** `onepipeline-api-cli`. Replace it in the [repository secrets](https://github.com/nickderobertis/onepipeline-ui/settings/secrets/actions), then re-run the failed release job.",
+  },
+  {
+    dedup_key: "follow-ups-board",
+    kind: "task",
+    priority: "medium",
+    title:
+      "Review the follow-ups board for run brief-dag-run-load-speed-2026-11-06 before the sibling plan lands",
+    body: "Four drafts are unverified. The [board](https://github.com/users/nickderobertis/projects/7) lists them with the run that drafted each.",
+  },
+  {
+    dedup_key: "retired-cli",
+    kind: "question",
+    priority: "low",
+    title: "Keep the retired onepipeline-ui-cli package listed on PyPI?",
+    body: "npm and PyPI still serve it at 0.1.0. Nothing publishes it again.",
+  },
+];
+
+function buildRealistic(workspace, token) {
+  const ids = {};
+  for (const input of REALISTIC)
+    ids[input.dedup_key] = raise(workspace, token, SUPERVISOR_SESSION, {
+      ...input,
+      owner: owner(REALISTIC_RUN, REALISTIC_PLAN),
+      block: { scope: "nothing" },
+    });
+  return { ids, runs: {}, plans: {} };
+}
+
+/**
+ * The toasts the gallery photographs beyond a plain resolve: a design review whose
+ * document moved on, which the engine refuses and replaces, and one whose authority
+ * declares no undo. Owned by the acting session, so every word on the page is the
+ * same in every build of this world.
+ */
+function buildGalleryStates(workspace, token) {
+  const ids = {};
+  ids.dashboard = raiseDesign(workspace, token, {
+    dedup: "dashboard-layout",
+    title: "Review the dashboard layout",
+    body: "Read the dashboard design document and complete this task when the column widths and empty states read clearly.",
+    owner: owner(),
+    copy: "docs/design/dashboard.md",
+    key: "sha256:91aa07",
+  });
+  ids.final = raiseDesign(workspace, token, {
+    dedup: "final-release-notes",
+    title: "Approve the final release notes",
+    body: "Approve the release notes as published; the publisher keeps every approval it records.",
+    owner: owner(),
+    copy: "docs/release/notes.md",
+    key: "sha256:aa11b2",
+    phase: "final-review",
+  });
+  writeFileSync(
+    paths(workspace).keys,
+    JSON.stringify({
+      "docs/design/dashboard.md": "sha256:c4e2f9",
+      "docs/release/notes.md": "sha256:aa11b2",
+    }),
+  );
+  return { ids, runs: {}, plans: {} };
+}
+
 /** The manager sessions the sessions world is raised across. */
 export const SESSIONS = Array.from({ length: 10 }, (_, n) => `manager-${n}`);
 
@@ -624,6 +912,10 @@ const WORLDS = {
     build: (workspace, token) => buildQueue(workspace, token, "third-owner"),
   },
   long: { plans: LONG_PLANS, build: buildLong },
+  undo: { plans: UNDO_PLANS, build: buildUndo },
+  markdown: { plans: MARKDOWN_PLANS, build: buildMarkdown },
+  realistic: { plans: {}, build: buildRealistic },
+  "gallery-states": { plans: {}, build: buildGalleryStates },
 };
 
 /**
@@ -639,6 +931,12 @@ export function humanItemsWorld(workspace, name) {
     );
   const at = paths(workspace);
   const built = join(workspace, BUILT);
+  // A template is copied in before anything reads the workspace, so from here a
+  // copied world is one served again, its board aside.
+  const template = existsSync(built)
+    ? undefined
+    : usableTemplate(name, workspace);
+  if (template !== undefined) cpSync(template, workspace, { recursive: true });
   const kept = existsSync(built)
     ? builtSchema.parse(JSON.parse(readFileSync(built, "utf8")))
     : undefined;
@@ -651,7 +949,14 @@ export function humanItemsWorld(workspace, name) {
       for (const dir of [at.runs, at.intents, at.work, at.state])
         mkdirSync(dir, { recursive: true });
       writeFileSync(at.seed, JSON.stringify(boardSeed(kind.plans)));
-      const started = startBoard(at.board, at.seed, token);
+      // A copied world's board resumes what the build left on it; a world served
+      // again starts its board from the seed, as it always has.
+      const started = startBoard(
+        at.board,
+        at.seed,
+        token,
+        template !== undefined,
+      );
       board = started.board;
       writeConfiguration(workspace, started.url);
       if (kept !== undefined) {
@@ -664,8 +969,10 @@ export function humanItemsWorld(workspace, name) {
         "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: oneharness\n    oneharness_config: ./child.toml\n",
       );
       writeFileSync(join(workspace, ACTING), SUPERVISOR_SESSION);
+      const builtAt = Date.now();
       world = kind.build(workspace, token);
       writeFileSync(built, JSON.stringify({ token, world }));
+      keepTemplate(name, workspace, builtAt);
     },
     facts: () => ({
       ...world,

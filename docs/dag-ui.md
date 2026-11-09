@@ -607,7 +607,8 @@ just dag-ui-screens --grep "at 390x844"   # one width; extra arguments reach Pla
 
 `scripts/visual-capture.sh` is that path's one source and there is deliberately no
 second. It builds what is photographed on this machine — the workspace install, the
-Vite bundle, and the `onepipeline-api` binary that serves it — and then renders inside
+Vite bundle, the `onepipeline-api` binary that serves it, and the pinned `onepipeline`
+CLI that builds the Action items worlds — and then renders inside
 a browser container pinned to this repository's own `@playwright/test`, because glyph
 rasterisation and the browser build decide bytes and the capture is gated on the
 content hash of every image. `screenshots.config.ts` reuses `playwright.config.ts`
@@ -690,6 +691,13 @@ being photographed.
 | `23-overall-timeline-crosshair` | the overall timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
 | `24-held-graph` | a run holding finished work for releases: a held-unlanded and a draft node, each card naming what it awaits |
 | `25-held-node` | the draft node's view, naming every release it awaits in full above the settlement's detail |
+| `26-action-items` | Action items: six long realistic cards under their priority headings, the filters folded at phone width |
+| `27-action-items-filters` | the same cards grouped by kind with the filters showing, unfolded at phone width |
+| `28-action-items-detail` | an item's detail with its whole body, beside the list or over it at phone width |
+| `29-action-items-dismissed` | the green toast after Dismiss, offering Restore and Add reason, the card already gone |
+| `30-action-items-comment` | the green toast after Complete, offering Reopen and taking a comment |
+| `31-action-items-refused` | the red toast with the engine's refusal of a review whose document changed, and the replacement card |
+| `32-action-items-reopen-unavailable` | Reopen greyed for a review with no undo, its question mark pressed and the reason showing |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the

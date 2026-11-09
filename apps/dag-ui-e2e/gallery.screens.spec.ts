@@ -10,8 +10,10 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 import { CAPTURE_INSTANT_MS } from "./capture-clock";
 import { delayGraphMeasurements } from "./delayed-graph-measurements";
 import { fixture, runs } from "./fixture-facts";
+import { type FixtureServer, startFixtureServer } from "./fixture-server";
 import recorded from "./fixtures/timeline-recorded.json" with { type: "json" };
 import { graphNodes, metrics, timelineLane } from "./observatory-locators";
+import { FIXTURE_WORKSPACE } from "./playwright.config";
 import { VIEWPORTS, type Viewport } from "./viewports";
 
 /**
@@ -323,6 +325,42 @@ async function pointAtPlot(page: Page, timeline: Locator): Promise<void> {
   );
   await expect(timeline.getByLabel("Timeline crosshair")).toBeVisible();
 }
+
+/** The server of the Action items surface being photographed, stopped after it. */
+let actionItems: FixtureServer | undefined;
+
+/**
+ * Open the Action items page over a real engine world of its own.
+ *
+ * A surface here resolves items, so each shot starts from a copy of the world as
+ * built: what one viewport dismissed is still open at the next.
+ */
+async function openActionItems(page: Page, world: string): Promise<Locator> {
+  actionItems = await startFixtureServer(
+    `gallery-${world}`,
+    ["--human-items-world", world],
+    {
+      DAG_UI_E2E_WORLD_TEMPLATES: join(FIXTURE_WORKSPACE, "human-items-worlds"),
+    },
+    { samePath: true },
+  );
+  await page.goto(`${actionItems.origin}/human-items`);
+  const list = page.getByRole("region", { name: "Action item list" });
+  await expect(list.getByRole("article").first()).toBeVisible();
+  await settleReads(page);
+  return list;
+}
+
+const resultToast = (page: Page): Locator =>
+  page.getByRole("region", { name: "Action result" });
+
+/**
+ * Keep a toast up for the shot by resting the pointer on its corner, clear of its
+ * controls: a toast nothing holds leaves after 15 seconds of real time, and the waits
+ * before a shot have no ceiling on a loaded host.
+ */
+const holdToast = (page: Page): Promise<void> =>
+  resultToast(page).hover({ position: { x: 2, y: 2 } });
 
 const SURFACES: readonly Surface[] = [
   {
@@ -808,6 +846,117 @@ const SURFACES: readonly Surface[] = [
       ).toBeVisible();
     },
   },
+  {
+    name: "26-action-items",
+    title: "Action items: long realistic cards grouped by priority",
+    open: async (page) => {
+      const list = await openActionItems(page, "realistic");
+      await expect(list.getByRole("article")).toHaveCount(6);
+    },
+  },
+  {
+    name: "27-action-items-filters",
+    title: "Action items: grouped by kind with the filters showing",
+    open: async (page) => {
+      const list = await openActionItems(page, "realistic");
+      // A phone folds these behind one button; shown open here.
+      const folded = page.getByRole("button", { name: /^Filters/u });
+      if (await folded.isVisible()) await folded.click();
+      await page
+        .getByRole("combobox", { name: "Group by" })
+        .selectOption("kind");
+      await expect(
+        list.getByRole("heading", { name: /^Question/u }),
+      ).toBeVisible();
+    },
+  },
+  {
+    name: "28-action-items-detail",
+    title: "Action items: an item's detail with its whole body",
+    open: async (page) => {
+      await openActionItems(page, "realistic");
+      await page
+        .getByRole("button", { name: /^Details: / })
+        .first()
+        .click();
+      await expect(
+        page.getByRole("complementary", { name: "Action item detail" }),
+      ).toBeVisible();
+    },
+  },
+  {
+    name: "29-action-items-dismissed",
+    title: "Action items: the toast after Dismiss",
+    open: async (page) => {
+      const list = await openActionItems(page, "realistic");
+      await page
+        .getByRole("button", { name: /^Dismiss: / })
+        .first()
+        .click();
+      await expect(list.getByRole("article")).toHaveCount(5);
+      await expect(
+        resultToast(page).getByRole("button", { name: "Restore", exact: true }),
+      ).toBeEnabled();
+      await expect(resultToast(page)).toHaveAttribute("data-tone", "success");
+    },
+    point: holdToast,
+  },
+  {
+    name: "30-action-items-comment",
+    title: "Action items: the toast after Complete, taking a comment",
+    open: async (page) => {
+      await openActionItems(page, "realistic");
+      await page
+        .getByRole("button", { name: /^Complete: / })
+        .first()
+        .click();
+      const toast = resultToast(page);
+      await expect(
+        toast.getByRole("button", { name: "Reopen", exact: true }),
+      ).toBeEnabled();
+      await toast.getByRole("button", { name: "Add comment" }).click();
+      await toast.getByRole("textbox").fill("Reviewed with the release owner.");
+    },
+    point: holdToast,
+  },
+  {
+    name: "31-action-items-refused",
+    title: "Action items: a refused review, its reason and its replacement",
+    open: async (page) => {
+      const list = await openActionItems(page, "gallery-states");
+      await page
+        .getByRole("button", { name: "Complete: Review the dashboard layout" })
+        .click();
+      await expect(resultToast(page)).toHaveAttribute("data-tone", "failure");
+      await expect(resultToast(page)).toContainText(
+        "Re-read the current document",
+      );
+      // The refused card comes back before the read that replaces it lands, so two
+      // share this title for a moment: one is the page having settled.
+      await expect(
+        list.getByRole("article", { name: "Review the dashboard layout" }),
+      ).toHaveCount(1);
+    },
+    point: holdToast,
+  },
+  {
+    name: "32-action-items-reopen-unavailable",
+    title: "Action items: Reopen unavailable, with the reason open",
+    open: async (page) => {
+      await openActionItems(page, "gallery-states");
+      await page
+        .getByRole("button", {
+          name: "Complete: Approve the final release notes",
+        })
+        .click();
+      const toast = resultToast(page);
+      await toast
+        .getByRole("button", { name: "Why Reopen is unavailable" })
+        .click();
+      await expect(toast.getByRole("tooltip")).toBeVisible();
+    },
+    point: holdToast,
+  },
 ];
 
 /**
@@ -835,6 +984,11 @@ for (const size of VIEWPORTS) {
 
     test.beforeEach(async ({ page }) => {
       await freezeClock(page);
+    });
+
+    test.afterEach(async () => {
+      await actionItems?.stop();
+      actionItems = undefined;
     });
 
     for (const surface of SURFACES) {

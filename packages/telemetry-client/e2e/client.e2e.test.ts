@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import {
   TELEMETRY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
@@ -525,6 +526,76 @@ test("a package consumer sends an envelope as the bytes it typed and reads the e
     expect(received[4]?.body).toBe('{"kind":"finding","message":"red"}');
     expect(received[5]?.body).toBe('{"reference":"signoff"}');
     expect(received[7]?.body).toBe('{"force":true}');
+  } finally {
+    await server.stop();
+  }
+});
+
+test("a package consumer reopens and notes a human item and reads the engine's receipt or refusal", async () => {
+  // The receipts are the goldens `tests/e2e/human_items.rs` wrote from the real
+  // server, served back over a real socket.
+  const golden = async (name: string): Promise<unknown> =>
+    JSON.parse(
+      await readFile(
+        new URL(`../../../tests/fixtures/${name}`, import.meta.url),
+        "utf8",
+      ),
+    );
+  const reopened = await golden("human-item-reopen.json");
+  const noted = await golden("human-item-note.json");
+  const received: { method: string; path: string; body: string }[] = [];
+  // llmlint: ignore-block[e2e_not_mocked] the layer under test is this package, a client of the read API, driven as a consumer drives it over a real socket, as every journey in this file is; the receipts it reads are the goldens `tests/e2e/human_items.rs` wrote from the real server, and the refusal is the error envelope `tests/contract.rs` holds every route to. The real reopen and note routes are driven over the real engine journal by `tests/e2e/human_items.rs` and by the browser journeys in `apps/dag-ui-e2e/dag-ui-human-items.spec.ts`.
+  const server = await serveLoopback(async (request) => {
+    const url = new URL(request.url);
+    const body = await request.text();
+    received.push({ method: request.method, path: url.pathname, body });
+    if (url.pathname === "/api/human-items/hi-1/reopen")
+      return Response.json(reopened);
+    if (url.pathname === "/api/human-items/hi-1/note")
+      return body === '{"text":" "}'
+        ? Response.json(
+            {
+              error: {
+                code: "human_item_conflict",
+                message: "a note's text must not be blank",
+              },
+            },
+            { status: 409 },
+          )
+        : Response.json(noted);
+    return Response.json(
+      { error: { code: "not_found", message: "Not found" } },
+      { status: 404 },
+    );
+  });
+  // llmlint: ignore-end[e2e_not_mocked]
+  try {
+    const client = new TelemetryClient(`http://127.0.0.1:${server.port}`);
+    expect((await client.reopenHumanItem("hi-1")).item.item.state).toBe("open");
+    const receipt = await client.noteHumanItem("hi-1", "Ended on its own.");
+    expect(receipt.item.item.resolution?.reason).toBe(
+      "The outage ended on its own.",
+    );
+    await expect(client.noteHumanItem("hi-1", " ")).rejects.toMatchObject({
+      status: 409,
+      code: "human_item_conflict",
+      message: "a note's text must not be blank",
+    });
+    // An id that is not a bare name never reaches the wire.
+    await expect(client.reopenHumanItem("../hi-1")).rejects.toThrow();
+    expect(received).toEqual([
+      { method: "POST", path: "/api/human-items/hi-1/reopen", body: "{}" },
+      {
+        method: "POST",
+        path: "/api/human-items/hi-1/note",
+        body: '{"text":"Ended on its own."}',
+      },
+      {
+        method: "POST",
+        path: "/api/human-items/hi-1/note",
+        body: '{"text":" "}',
+      },
+    ]);
   } finally {
     await server.stop();
   }

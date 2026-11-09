@@ -69,8 +69,15 @@
       "cache": true,
       "outputs": []
     },
+    "prioritize": {
+      "//": "A no-op that gives `test` a dependent: Nx starts the ready task with the most dependents first, and this whole-workspace suite otherwise started only after the crate tiers, holding up the timed journey that runs alone at the end (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` reaches it for the broader tier.",
+      "executor": "nx:noop",
+      "dependsOn": ["test"]
+    },
     "check": {
-      "executor": "nx:noop"
+      "//": "The default check's targets this project has, plus `prioritize`, so test-linux's affected targets stay `check`'s selection (tests/e2e/ci_jobs.rs).",
+      "executor": "nx:noop",
+      "dependsOn": ["lint", "test", "prioritize"]
     }
   }
 }
