@@ -66,6 +66,14 @@ pub(crate) struct Touched {
 }
 
 impl Touched {
+    /// Take in what a later refresh touched, as one refresh covering both would.
+    pub(crate) fn absorb(&mut self, later: &Self) {
+        self.run |= later.run;
+        self.nodes.extend(later.nodes.iter().cloned());
+        self.records += later.records;
+        self.every_node |= later.every_node;
+    }
+
     /// Whether the refresh appended anything.
     pub(crate) fn any(&self) -> bool {
         self.records > 0

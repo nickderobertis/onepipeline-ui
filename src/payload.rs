@@ -5411,6 +5411,9 @@ struct Lens<'a> {
     /// How much of each span's list is rendered; the rest is left out here so
     /// a window's cost follows the window, not the span.
     window: ItemsWindow,
+    /// Under [`ItemsWindow::Latest`], the earliest row the share's window holds,
+    /// as rows are ordered: every span lists its own rows from here on.
+    since: Option<(Option<i128>, usize)>,
 }
 
 /// How much of a span's event list a reading renders.
@@ -5418,7 +5421,9 @@ struct Lens<'a> {
 pub(crate) enum ItemsWindow {
     /// Every event, as the complete documents hold them.
     All,
-    /// The latest `n` events the filter admits, in order, and how many it admits.
+    /// The latest `n` events the filter admits across every span of the share,
+    /// each span listing those of them that are its own, in order, and how many
+    /// it admits in all.
     Latest(usize),
     /// None at all: a span's bounds and status are read off the records, not
     /// its list.
@@ -5457,7 +5462,14 @@ impl Lens<'_> {
         if let ItemsWindow::Latest(latest) = self.window {
             ordered.retain(|(_, event)| self.filter.allows(event));
             total = Some(ordered.len());
-            ordered.drain(..ordered.len().saturating_sub(latest));
+            match self.since {
+                Some(since) => {
+                    ordered.retain(|(index, event)| (millis_of(&event.ts), *index) >= since);
+                }
+                None => {
+                    ordered.drain(..ordered.len().saturating_sub(latest));
+                }
+            }
         }
         let items = ordered
             .iter()
@@ -5552,6 +5564,7 @@ fn timeline_spans(
         positions: view.positions,
         rendered: None,
         window: ItemsWindow::All,
+        since: None,
     };
     match scope {
         Scope::Run => run_spans(view, &lens, ends),
@@ -5597,6 +5610,22 @@ pub(crate) fn share_spans(
     } else {
         turn_ids(view, &transcripts)
     };
+    let since = match window {
+        ItemsWindow::Latest(latest) => {
+            let mut keys: Vec<(Option<i128>, usize)> = view
+                .events
+                .iter()
+                .enumerate()
+                .filter(|(_, event)| filter.allows(event))
+                .map(|(index, event)| (millis_of(&event.ts), index))
+                .collect();
+            keys.sort_unstable();
+            keys.len()
+                .checked_sub(latest)
+                .and_then(|from| keys.get(from).copied())
+        }
+        _ => None,
+    };
     let lens = Lens {
         turns: &turns,
         filter,
@@ -5604,6 +5633,7 @@ pub(crate) fn share_spans(
         positions: view.positions,
         rendered: Some(rendered),
         window,
+        since,
     };
     match share {
         Share::RunLevel { first } => run_level_spans(view, &lens, first, ends),

@@ -746,7 +746,20 @@ impl HeldDetail {
     }
 }
 
+/// What a kept timeline nobody shows has not been brought up to date with.
+#[derive(Default)]
+struct Behind {
+    /// Whether anything moved since it was last refreshed.
+    pending: bool,
+    /// What the refreshes it missed touched; `None` once one reread the store.
+    touched: Option<Touched>,
+    agents_moved: bool,
+}
+
 struct HeldTimeline {
+    /// While nobody shows it, what it has not caught up with: caught up when a tab
+    /// next opens it, so a view nobody shows is never rebuilt on a tick.
+    behind: Behind,
     live: LiveTimeline,
     /// What its subscribers hold: no whole list of events.
     wire: Value,
@@ -879,6 +892,32 @@ impl LiveRun {
             },
             overdue: false,
         })
+    }
+
+    /// Bring a kept timeline nobody showed up to date before a tab is shown it.
+    fn catch_up_timeline(&mut self, at: usize) {
+        let complete = self.complete();
+        let progress = self.timeline_progress(&self.timelines[at].0);
+        let (scope, _, held) = &mut self.timelines[at];
+        if !held.behind.pending {
+            return;
+        }
+        let behind = std::mem::take(&mut held.behind);
+        let agents = match scope {
+            TimelineScope::Run if !complete => None,
+            _ => self.agents.as_ref(),
+        };
+        held.live.refreshed(
+            &self.view,
+            &self.indexed,
+            &self.declared,
+            behind.touched.as_ref(),
+            agents,
+            behind.agents_moved,
+        );
+        held.wire = progressive::wire_timeline(held.live.payload(), held.window, complete);
+        held.wire["progress"] = progress;
+        held.observed_at = payload::now_rfc3339();
     }
 
     fn agent_count(&self) -> Option<usize> {
@@ -1040,7 +1079,10 @@ impl LiveRun {
                     .iter()
                     .position(|(held_scope, held_key, _)| held_scope == scope && held_key == key)
                 {
-                    Some(at) => at,
+                    Some(at) => {
+                        self.catch_up_timeline(at);
+                        at
+                    }
                     None => {
                         let agents = match scope {
                             TimelineScope::Run if !self.complete() => None,
@@ -1063,6 +1105,7 @@ impl LiveRun {
                             scope.clone(),
                             key.clone(),
                             HeldTimeline {
+                                behind: Behind::default(),
                                 live: built,
                                 wire,
                                 window,
@@ -1950,6 +1993,25 @@ impl Hub {
                 }
             }
             for ((scope, key, timeline), progress) in timelines.iter_mut().zip(progresses) {
+                let shown = wanted.iter().any(|visible| {
+                    matches!(visible, Visible::Timeline { scope: held, filter, .. } if held == scope && filter == key)
+                });
+                if !shown {
+                    // Kept for the next tab to open it, and caught up then.
+                    let behind = &mut timeline.behind;
+                    behind.touched = match (behind.pending, &behind.touched, &touched) {
+                        (false, _, Some(now)) => Some(now.clone()),
+                        (true, Some(was), Some(now)) => {
+                            let mut both = was.clone();
+                            both.absorb(now);
+                            Some(both)
+                        }
+                        _ => None,
+                    };
+                    behind.pending = true;
+                    behind.agents_moved |= agents_moved || liveness_moved;
+                    continue;
+                }
                 let before = timeline.live.rendered();
                 let agents_for = match scope {
                     TimelineScope::Run if !complete => None,
@@ -2054,11 +2116,18 @@ impl Hub {
             .details
             .keys()
             .map(|key| format!("detail:{key}"))
-            .chain(run.timelines.iter().map(|(scope, key, _)| match scope {
-                TimelineScope::Run => format!("timeline:run:{key}"),
-                TimelineScope::Node(node) => format!("timeline:node {node}:{key}"),
-                TimelineScope::RunShare | TimelineScope::NodeShare(_) => format!("history:{key}"),
-            }))
+            .chain(
+                run.timelines
+                    .iter()
+                    .filter(|(_, _, held)| !held.behind.pending)
+                    .map(|(scope, key, _)| match scope {
+                        TimelineScope::Run => format!("timeline:run:{key}"),
+                        TimelineScope::Node(node) => format!("timeline:node {node}:{key}"),
+                        TimelineScope::RunShare | TimelineScope::NodeShare(_) => {
+                            format!("history:{key}")
+                        }
+                    }),
+            )
             .chain(run.channel.as_ref().map(|_| "channel".to_owned()))
             .collect();
         self.trace(&json!({

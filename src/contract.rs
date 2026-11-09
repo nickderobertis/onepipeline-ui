@@ -389,7 +389,8 @@ pub const DETAIL_FIRST_LOADING: &[&str] = &["run.turns"];
 /// What `timeline.progress.loading` names on Overall until the rest arrives.
 pub const SPANS_HARNESS_LOADING: &str = "spans[harness_scope]";
 
-/// The latest events per span a node's timeline view holds.
+/// How many of a node's latest rows its timeline view holds, across all its
+/// spans: each span lists only those of them that are its own.
 pub const NODE_WINDOW_EVENTS: usize = 40;
 
 /// The rows a page of `GET .../timeline/events` holds by default.

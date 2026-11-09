@@ -1778,7 +1778,8 @@ export const timelineSpanSchema = openObject({
   events: z.array(timelineEventSchema),
   /**
    * How many events the span holds in all (schema 28), wherever `events` is not all
-   * of them: a node's first answer lists the latest 40, and Overall lists none.
+   * of them: a node's first answer lists the node's latest 40 rows across all its
+   * spans, each span only its own of them, and Overall lists none.
    */
   events_total: counter.optional(),
   parent_id: z.string().min(1).optional(),

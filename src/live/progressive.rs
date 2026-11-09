@@ -100,7 +100,12 @@ pub(super) fn trimmed_detail(detail: &Value) -> Value {
 }
 
 /// A span, as a subscriber is shown it: no whole list of events.
-pub(super) fn wire_span(span: &Value, window: ItemsWindow, complete: bool) -> Value {
+pub(super) fn wire_span(
+    span: &Value,
+    window: ItemsWindow,
+    complete: bool,
+    since: Option<(String, u64)>,
+) -> Value {
     let Some(fields) = span.as_object() else {
         return span.clone();
     };
@@ -115,9 +120,15 @@ pub(super) fn wire_span(span: &Value, window: ItemsWindow, complete: bool) -> Va
     let held = events.map_or(0, Vec::len);
     let listed = match window {
         ItemsWindow::Nothing => json!([]),
-        ItemsWindow::Latest(latest) => Value::Array(
+        ItemsWindow::Latest(_) => Value::Array(
             events
-                .map(|events| events[events.len().saturating_sub(latest)..].to_vec())
+                .map(|events| {
+                    events
+                        .iter()
+                        .filter(|event| since.as_ref().is_none_or(|since| row_key(event) >= *since))
+                        .cloned()
+                        .collect()
+                })
                 .unwrap_or_default(),
         ),
         ItemsWindow::All => fields.get("events").cloned().unwrap_or(json!([])),
@@ -179,11 +190,19 @@ pub(super) fn sync_timeline(
     let before = wire["spans"].as_array().map_or(0, Vec::len);
     let mut ops = Vec::new();
     let mut path = vec![Step::Key("spans".to_owned())];
-    match touched_spans(full_ops, before, new_spans.len()) {
+    // A node's window is its latest rows across every span, so a row arriving in
+    // one span can move which rows another lists: each is projected again.
+    let since = window_start(payload, window);
+    let touched = if matches!(window, ItemsWindow::Latest(_)) {
+        Spans::All
+    } else {
+        touched_spans(full_ops, before, new_spans.len())
+    };
+    match touched {
         Spans::All => {
             let whole: Vec<Value> = new_spans
                 .iter()
-                .map(|span| wire_span(span, window, complete))
+                .map(|span| wire_span(span, window, complete, since.clone()))
                 .collect();
             let new = Value::Array(whole);
             patch::diff_at(&mut path, &wire["spans"], &new, &mut ops);
@@ -195,7 +214,7 @@ pub(super) fn sync_timeline(
                 let Some(span) = new_spans.get(index) else {
                     continue;
                 };
-                let projected = wire_span(span, window, complete);
+                let projected = wire_span(span, window, complete, since.clone());
                 match wire["spans"]
                     .as_array_mut()
                     .and_then(|spans| spans.get_mut(index))
@@ -223,6 +242,35 @@ pub(super) fn sync_timeline(
     ops
 }
 
+/// Where a row stands in a timeline's order: its stamp, then its place in the store.
+fn row_key(event: &Value) -> (String, u64) {
+    (
+        event["at"].as_str().unwrap_or_default().to_owned(),
+        event["journal_order"].as_u64().unwrap_or_default(),
+    )
+}
+
+/// Under [`ItemsWindow::Latest`], the earliest row of the latest `n` across every
+/// span: each span lists only its own rows from there on. `None` where every row
+/// is within the window.
+fn window_start(payload: &Value, window: ItemsWindow) -> Option<(String, u64)> {
+    let ItemsWindow::Latest(latest) = window else {
+        return None;
+    };
+    let mut keys: Vec<(String, u64)> = payload["spans"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|span| span["events"].as_array().into_iter().flatten())
+        .map(row_key)
+        .collect();
+    keys.sort_unstable();
+    keys.dedup();
+    keys.len()
+        .checked_sub(latest)
+        .map(|from| keys[from].clone())
+}
+
 /// A timeline payload as a subscriber is shown it.
 pub(super) fn wire_timeline(payload: &Value, window: ItemsWindow, complete: bool) -> Value {
     let mut wire = Map::new();
@@ -233,12 +281,13 @@ pub(super) fn wire_timeline(payload: &Value, window: ItemsWindow, complete: bool
             }
         }
     }
+    let since = window_start(payload, window);
     let spans: Vec<Value> = payload["spans"]
         .as_array()
         .map(|spans| {
             spans
                 .iter()
-                .map(|span| wire_span(span, window, complete))
+                .map(|span| wire_span(span, window, complete, since.clone()))
                 .collect()
         })
         .unwrap_or_default();
@@ -658,6 +707,7 @@ impl Hub {
                     scope,
                     key,
                     super::HeldTimeline {
+                        behind: super::Behind::default(),
                         live: built,
                         wire,
                         window,
