@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.71.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.70.3...v0.71.0) - 2026-11-09
+
+### Fixed
+
+- *(deps)* link the engine that copies reference-style links to Linear inline ([#689](https://github.com/nickderobertis/onepipeline-ui/pull/689))
+- *(deps)* [**breaking**] link the engine whose plan store screens narrow writes without extra reads ([#703](https://github.com/nickderobertis/onepipeline-ui/pull/703))
+
 ## [0.70.3](https://github.com/nickderobertis/onepipeline-ui/compare/v0.70.2...v0.70.3) - 2026-11-08
 
 ### Added
