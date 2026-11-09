@@ -8,7 +8,7 @@
  *
  *   node apps/dag-ui-e2e/read-latency/read-latency-budget.mjs \
  *     --telemetry apps/dag-ui-e2e/read-latency/telemetry/read-latency.json \
- *     --metric human-items-requests|human-items-lag
+ *     --metric human-items-requests|human-items-lag|first-view|rest-arrived|history-page|status
  *
  * Exits 0 having reported the figure, 1 when the telemetry is absent or does not
  * state the workload, and 2 on a usage error.
@@ -19,7 +19,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { report } from "@onebudgetspec/sdk";
-import { PAGES, telemetrySchema } from "./telemetry.ts";
+import { FIRST_VIEWS, PAGES, telemetrySchema } from "./telemetry.ts";
 
 class UsageError extends Error {}
 
@@ -61,7 +61,45 @@ const pages = (telemetry, read) =>
     PAGES.map((page) => [page, read(telemetry.human_items[page])]),
   );
 
+const large = (telemetry) => telemetry.large_run;
+const provenance = (telemetry) => ({
+  corpus: large(telemetry).corpus,
+  host_load: large(telemetry).host_load,
+});
+
 const MEASURES = {
+  "first-view"(telemetry) {
+    const { first_view: view } = large(telemetry);
+    return {
+      value: view.slowest_s,
+      detail: {
+        slowest_view: view.slowest_view,
+        ...Object.fromEntries(FIRST_VIEWS.map((name) => [name, view[name]])),
+        ...provenance(telemetry),
+      },
+    };
+  },
+  "rest-arrived"(telemetry) {
+    const rest = large(telemetry).rest_arrived;
+    return {
+      value: rest.overall_s,
+      detail: { ...rest, ...provenance(telemetry) },
+    };
+  },
+  "history-page"(telemetry) {
+    const page = large(telemetry).history_page;
+    return {
+      value: page.slowest_s,
+      detail: { ...page, ...provenance(telemetry) },
+    };
+  },
+  status(telemetry) {
+    const status = large(telemetry).status;
+    return {
+      value: status.slowest_s,
+      detail: { ...status, ...provenance(telemetry) },
+    };
+  },
   "human-items-requests"(telemetry) {
     const { value } = slowest(telemetry, (page) => page.requests_per_min);
     return {

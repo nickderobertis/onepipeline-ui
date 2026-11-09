@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod";
+import large from "./large-run-workload.json" with { type: "json" };
 import workload from "./workload.json" with { type: "json" };
 
 /** Each page the human-item budgets are the slowest of, as the page sets it. */
@@ -91,8 +92,134 @@ const selecting = (selected: (filter: Record<string, unknown>) => boolean) =>
     message: "a page measures the filter it is named for",
   });
 
+/** The three first-useful-screen views, the slowest of which is the budget. */
+export const FIRST_VIEWS = ["graph", "overall", "node"] as const;
+
+/** A wall-clock reading with the bytes and host load beside it. */
+const readingSchema = z.object({
+  /** Navigation start to the view's mark, or `null` where no mark was reached. */
+  seconds: seconds,
+  navigation_to_post_s: seconds,
+  post_s: seconds,
+  answer_to_mark_s: seconds,
+  first_answer_bytes: count,
+  first_answer_gzipped: count,
+  checked: z.object({
+    screen_against_answer: z.boolean(),
+    answer_against_complete: z.boolean(),
+  }),
+  host_load: hostLoad,
+});
+export type Reading = z.infer<typeof readingSchema>;
+
+/**
+ * Every driver the budgets name, measured off the corpus that was read. A missing
+ * or undersized driver is a workload the budgets were not stated over, and is
+ * refused naming it rather than read as a pass.
+ */
+export const DRIVERS = {
+  records: large.large.records,
+  journal_bytes: large.large.journal_bytes,
+  streams: large.large.streams,
+  checkpoint_bytes: large.large.checkpoint_bytes,
+  ordinary_spans: large.large.ordinary_spans,
+  harness_spans: large.large.harness_spans,
+  busiest_node_records: large.large.busiest_node_records,
+  off_graph_node_records: large.large.off_graph_node_records,
+  run_directories: large.runs,
+  other_live_runs: large.other_live_runs,
+  overall_first_answer_bytes: 1_000_000,
+  session_references: 1,
+  spans_resting_on_dropped_records: 1,
+  reasons: 1,
+  awaits: 1,
+  cross_run_settled_consumers: 1,
+  stand_in_provider: 1,
+} as const;
+export type Driver = keyof typeof DRIVERS;
+/** The largest a driver may read under the figure the budgets state. */
+const DRIVER_TOLERANCE = 0.95;
+
+const corpusSchema = z
+  .record(z.string(), figure)
+  .superRefine((corpus, context) => {
+    for (const [name, floor] of Object.entries(DRIVERS)) {
+      const held = corpus[name];
+      if (held === undefined || held < floor * DRIVER_TOLERANCE)
+        context.addIssue({
+          code: "custom",
+          path: [name],
+          message: `the corpus's ${name} driver is ${held ?? "missing"}, and the budgets state ${floor}`,
+        });
+    }
+  });
+
+const viewSchema = z
+  .object({
+    readings: z.array(readingSchema).length(3),
+    median_s: seconds,
+    cold_cache: readingSchema,
+    fresh_server: readingSchema,
+    small_run_s: seconds,
+  })
+  .superRefine((view, context) => {
+    for (const reading of view.readings) {
+      if (reading.seconds === null)
+        context.addIssue({
+          code: "custom",
+          path: ["readings"],
+          message: "a reading reached no first-useful-screen mark",
+        });
+      if (
+        !reading.checked.screen_against_answer ||
+        !reading.checked.answer_against_complete
+      )
+        context.addIssue({
+          code: "custom",
+          path: ["readings"],
+          message:
+            "a reading's screen did not hold the answer it received, or that answer the complete document",
+        });
+    }
+  });
+
+const largeRunSchema = z.object({
+  corpus: corpusSchema,
+  first_view: z.object({
+    graph: viewSchema,
+    overall: viewSchema,
+    node: viewSchema,
+    slowest_view: z.enum(FIRST_VIEWS),
+    slowest_s: figure,
+  }),
+  rest_arrived: z.object({
+    overall_s: figure,
+    graph_s: seconds,
+    node_s: seconds,
+    patch_frame_bytes: count,
+    server_peak_rss_mb: figure,
+    complete: z.literal(true),
+  }),
+  history_page: z.object({
+    node_before_rest_s: figure,
+    node_after_rest_s: figure,
+    overall_span_page_s: seconds,
+    slowest_s: figure,
+    rows_shown_after: count,
+  }),
+  status: z.object({
+    small_s: figure,
+    large_s: figure,
+    slowest_s: figure,
+    checkpoint_bytes: count,
+    stand_in_starts: count,
+  }),
+  host_load: z.object({ start: hostLoad, end: hostLoad }),
+});
+export type LargeRun = z.infer<typeof largeRunSchema>;
+
 export const telemetrySchema = z.object({
-  schema_version: z.literal(1),
+  schema_version: z.literal(2),
   recorded_at: z.iso.datetime(),
   commit: z.string().regex(/^[0-9a-f]{40}$/u),
   dirty: z.boolean(),
@@ -104,5 +231,6 @@ export const telemetrySchema = z.object({
     unfiltered: selecting((filter) => Object.keys(filter).length === 0),
     filtered: selecting((filter) => Object.keys(filter).length > 0),
   }),
+  large_run: largeRunSchema,
 });
 export type Telemetry = z.infer<typeof telemetrySchema>;

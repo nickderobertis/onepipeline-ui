@@ -38,3 +38,70 @@ budgets:
     unit: seconds
     direction: max
     threshold: 3
+  - id: dag-ui-run-first-view-seconds
+    description: >-
+      First useful screen of a large run, on any view. Seconds from navigation
+      start to the first useful screen, a rendered DOM state, in a real browser
+      with the bundle in the HTTP cache, on a fresh release server that has
+      answered one sidebar read; the median of 3 readings per view, then the
+      slowest of Graph, Overall and the busiest node's timeline. Detail per view:
+      navigation to POST, the POST, answer to mark, first-answer bytes raw and
+      gzipped, cold-cache and fresh-server readings, a small settled run, and the
+      corpus's drivers. Phone network time is excluded. 850 warmed run
+      directories, one tab on loopback, the opened run live at 116,000 records,
+      100 MB, 2,000 streams, 9,900 spans, a 7 MB checkpoint and a 10,000-record
+      node, and 11 other live runs at 50 records per minute. Basis design;
+      telemetry analysis only, approximately 2 seconds.
+    measure: reported
+    command: [node, read-latency-budget.mjs, --metric, first-view]
+    unit: seconds
+    direction: max
+    threshold: 1
+  - id: dag-ui-run-rest-arrived-seconds
+    description: >-
+      Time until a large run's loading values have all arrived. Seconds from the
+      first useful screen until the rendered page holds every value it marked
+      loading, progress.complete true, on Overall on the large run; detail
+      reports Graph and a node, the patch frames' bytes and the server's peak
+      memory. 850 warmed run directories, one tab on loopback, the opened run
+      live at 116,000 records, 100 MB, 2,000 streams, 9,900 spans, a 7 MB
+      checkpoint and a 10,000-record node, and 11 other live runs at 50 records
+      per minute. Basis estimate; telemetry analysis only, approximately 2
+      seconds.
+    measure: reported
+    command: [node, read-latency-budget.mjs, --metric, rest-arrived]
+    unit: seconds
+    direction: max
+    threshold: 60
+  - id: dag-ui-run-history-page-seconds
+    description: >-
+      Time to show the next page of a run's history. Seconds from asking for
+      earlier rows on the busiest node's timeline, by the page's own control, to
+      those rows rendered, the slowest of a page before the complete read ends
+      and one after; detail reports each and Overall's span page. 850 warmed run
+      directories, one tab on loopback, the opened run live at 116,000 records,
+      100 MB, 2,000 streams, 9,900 spans, a 7 MB checkpoint and a 10,000-record
+      node, and 11 other live runs at 50 records per minute. Basis estimate;
+      telemetry analysis only, approximately 2 seconds.
+    measure: reported
+    command: [node, read-latency-budget.mjs, --metric, history-page]
+    unit: seconds
+    direction: max
+    threshold: 1
+  - id: dag-ui-run-status-read-seconds
+    description: >-
+      Status read of one run through the API. Wall-clock seconds of GET
+      /api/v2/runs/<run>/status as the browser's client takes it, on a release
+      server, the slowest of the small and the large run; detail reports each
+      run's figure, the checkpoint's bytes and the stand-in provider's starts.
+      Inner measure: the control panel makes this request after the view has
+      opened, so nothing on screen waits on it alone. One read of a settled
+      1-node run and one of the live run at 116,000 records, 100 MB and a 7 MB
+      checkpoint, over 850 run directories, with a claude stand-in on PATH that
+      takes 20 s and records each start. Basis design; telemetry analysis only,
+      approximately 2 seconds.
+    measure: reported
+    command: [node, read-latency-budget.mjs, --metric, status]
+    unit: seconds
+    direction: max
+    threshold: 1
