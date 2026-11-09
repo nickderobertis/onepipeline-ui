@@ -39,9 +39,10 @@ use crate::api::RunApi;
 use crate::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId, EventsQuery,
     HumanItemAnswerRequest, HumanItemCompleteRequest, HumanItemDismissRequest, HumanItemId,
-    HumanItemNoteRequest, HumanItemReopenRequest, NextQuery, NodeId, PageLimit, ProjectId, RunId,
-    RunQuery, RunSelection, RunsPage, RunsQuery, ShutdownRequest, StopRequest, SubscribeRequest,
-    SubscriptionId, SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery,
+    HumanItemNoteRequest, HumanItemReopenRequest, NextQuery, NodeId, PageCursor, PageLimit,
+    PageOwner, ProjectId, RunId, RunQuery, RunSelection, RunsPage, RunsQuery, ShutdownRequest,
+    SpanId, StopRequest, SubscribeRequest, SubscriptionId, SurfaceRequest, TimelineEventsQuery,
+    TimelineQuery, TimelineScope, TranscriptQuery, TIMELINE_EVENTS_PAGE, TIMELINE_EVENTS_PAGE_MAX,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
@@ -93,6 +94,7 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::RUNS, get(runs))
         .route(routes::RUN, get(run))
         .route(routes::RUN_TIMELINE, get(timeline))
+        .route(routes::RUN_TIMELINE_EVENTS, get(timeline_events))
         .route(routes::RUN_CONVERSATION, get(conversation))
         .route(routes::RUN_ARTIFACT, get(artifact))
         .route(routes::EVENTS, get(events))
@@ -589,6 +591,83 @@ fn runs_query(raw: &HashMap<String, String>) -> Result<RunsQuery, ApiError> {
         )));
     }
     Ok(RunsQuery::Selected(RunSelection::parse(select)?))
+}
+
+async fn timeline_events(
+    State(serving): Store,
+    Path(run): Path<String>,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Response {
+    let run = match RunId::try_from(run.as_str()) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    let query = match timeline_events_query(&raw) {
+        Ok(query) => query,
+        Err(error) => return error.into_response(),
+    };
+    answer(move || serving.hub.timeline_events(&run, &query)).await
+}
+
+/// The query of a page of timeline rows, refused before any run is opened.
+fn timeline_events_query(raw: &HashMap<String, String>) -> Result<TimelineEventsQuery, ApiError> {
+    let node = raw
+        .get("node")
+        .map(|node| NodeId::try_from(node.as_str()))
+        .transpose()?;
+    let owner = match (raw.get("scope").map(String::as_str), node) {
+        (Some("run"), None) => PageOwner::Run,
+        (Some("run"), Some(node)) => PageOwner::RunNode(node),
+        (Some("node"), Some(node)) => PageOwner::Node(node),
+        (Some("node"), None) => {
+            return Err(ApiError::InvalidNodeId(
+                "scope=node needs the node it scopes to".to_owned(),
+            ))
+        }
+        (scope, _) => {
+            return Err(ApiError::InvalidRequest(format!(
+                "scope must be run or node, got {:?}",
+                scope.unwrap_or_default()
+            )))
+        }
+    };
+    let moment = |name: &str| -> Result<Option<i128>, ApiError> {
+        raw.get(name)
+            .map(|stamp| {
+                crate::payload::millis_of(stamp)
+                    .ok_or_else(|| ApiError::InvalidRequest(format!("{name} must be RFC 3339")))
+            })
+            .transpose()
+    };
+    let limit = match raw.get("limit") {
+        None => TIMELINE_EVENTS_PAGE,
+        Some(limit) => {
+            let limit: usize = limit.parse().map_err(|_| {
+                ApiError::InvalidRequest(format!("limit must be a number, got {limit:?}"))
+            })?;
+            if limit == 0 || limit > TIMELINE_EVENTS_PAGE_MAX {
+                return Err(ApiError::InvalidRequest(format!(
+                    "limit must be between 1 and {TIMELINE_EVENTS_PAGE_MAX}"
+                )));
+            }
+            limit
+        }
+    };
+    Ok(TimelineEventsQuery {
+        owner,
+        span: raw
+            .get("span")
+            .map(|span| SpanId::try_from(span.as_str()))
+            .transpose()?,
+        cursor: raw
+            .get("cursor")
+            .map(|cursor| PageCursor::try_from(cursor.as_str()))
+            .transpose()?,
+        from: moment("from")?,
+        to: moment("to")?,
+        filter: filter_spec(raw)?,
+        limit,
+    })
 }
 
 /// `?scope=run`, or `?scope=node&node=ID`. The pair is parsed into the variant

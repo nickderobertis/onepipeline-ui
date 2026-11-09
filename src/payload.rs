@@ -13,7 +13,7 @@
 //! Everything here is a pure function of a [`RunView`], the run directory, and
 //! that document, so a payload can be built and asserted without a server.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -2718,13 +2718,17 @@ pub(crate) fn run_detail_over(
     agents: Option<usize>,
     filter: &EventFilter,
 ) -> Value {
+    let sdk_telemetry = json!(onepipeline::telemetry::of_run(view.paths, view.events));
     detail_document(
         view,
         declared,
         include_conversations,
-        telemetry,
-        json!(onepipeline::telemetry::of_run(view.paths, view.events)),
-        agents,
+        &live::DetailInputs {
+            telemetry,
+            sdk_telemetry: &sdk_telemetry,
+            agents,
+            activity: None,
+        },
         filter,
     )
 }
@@ -2736,11 +2740,16 @@ fn detail_document(
     view: &Run<'_>,
     declared: &DeclaredMembers,
     include_conversations: bool,
-    telemetry: Option<&RunTelemetry>,
-    sdk_telemetry: Value,
-    agents: Option<usize>,
+    inputs: &live::DetailInputs<'_>,
     filter: &EventFilter,
 ) -> Value {
+    let live::DetailInputs {
+        telemetry,
+        sdk_telemetry,
+        agents,
+        activity,
+    } = *inputs;
+    let sdk_telemetry = sdk_telemetry.clone();
     let mut payload = Map::new();
     // One fold of the run's transcripts, read before anything that counts,
     // numbers or lists a turn: the count beside a node and the transcript a
@@ -2763,7 +2772,10 @@ fn detail_document(
     }
     // What each node was last seen doing, over the whole journal whatever the
     // filter said: it is a fact about the run, which a filter never shapes.
-    run["live_activity"] = json!(live_activity_over(view, &EventFilter::default()));
+    run["live_activity"] = activity.map_or_else(
+        || json!(live_activity_over(view, &EventFilter::default())),
+        |fold| json!(fold.entries()),
+    );
     payload.insert("run".into(), run);
     payload.insert("telemetry".into(), sdk_telemetry);
     payload.insert("graph".into(), graph_state(view).unwrap_or(Value::Null));
@@ -2778,6 +2790,63 @@ fn detail_document(
     payload.insert("node_details".into(), node_details(view));
     payload.insert("launch".into(), launch(view));
     Value::Object(payload)
+}
+
+/// What a first screen draws of a detail, from the run's state alone: no fold of
+/// its transcripts or its telemetry. The caller keeps what the contract names
+/// of it; the wall clock is the one the telemetry fold would make it, a run's
+/// first record's stamp to its last's, so a selective read serves the same
+/// figure a complete one does.
+pub(crate) fn first_detail(view: &RunView) -> Value {
+    let run = Run::of(view);
+    let nodes: Vec<Value> = node_statuses(&run)
+        .iter()
+        .map(|(node, recorded)| {
+            let mut row = Map::new();
+            row.insert("node".into(), json!(node));
+            row.insert("status".into(), json!(status_word(&recorded.status)));
+            if let Some(outcome) = &recorded.outcome {
+                row.insert("outcome".into(), json!(outcome));
+            }
+            if let Some(class) = failure_class(&run, node, recorded) {
+                row.insert("failure".into(), json!({ "class": class }));
+            }
+            Value::Object(row)
+        })
+        .collect();
+    let mut detail = Map::new();
+    detail.insert(
+        "run".into(),
+        json!({
+            "run_id": view.paths.run,
+            "state": state_word(&run),
+            "phase": phase_word(&run),
+            "last_event": last_event(&run),
+            "timing": { "wall_seconds": wall_seconds(view) },
+            "nodes": nodes,
+        }),
+    );
+    detail.insert("graph".into(), graph_state(&run).unwrap_or(Value::Null));
+    Value::Object(detail)
+}
+
+/// A run's wall clock from its records, first stamp to last, in the whole
+/// seconds the fold reports; `None` where neither can be read.
+pub(crate) fn wall_seconds(view: &RunView) -> Option<u64> {
+    let first = view.events.first().and_then(|event| millis_of(&event.ts))?;
+    let last = view.events.last().and_then(|event| millis_of(&event.ts))?;
+    u64::try_from(last.saturating_sub(first))
+        .ok()
+        .map(|ms| ms / 1_000)
+}
+
+/// The rows a span lists, and where each ordered record is, `(stamp, place)`
+/// — the order every list of one is in.
+pub(crate) fn row_order(row: &Value) -> Option<(i128, u64)> {
+    Some((
+        millis_of(row["at"].as_str()?)?,
+        row["journal_order"].as_u64()?,
+    ))
 }
 
 /// `run_detail`, over everything `view` read: the whole merged store.
@@ -5339,6 +5408,21 @@ struct Lens<'a> {
     /// position: a record is rendered into an entry once, when it arrives, and
     /// again only when the turn it belongs to is renumbered.
     rendered: Option<&'a std::cell::RefCell<Rendered>>,
+    /// How much of each span's list is rendered; the rest is left out here so
+    /// a window's cost follows the window, not the span.
+    window: ItemsWindow,
+}
+
+/// How much of a span's event list a reading renders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ItemsWindow {
+    /// Every event, as the complete documents hold them.
+    All,
+    /// The latest `n` events the filter admits, in order, and how many it admits.
+    Latest(usize),
+    /// None at all: a span's bounds and status are read off the records, not
+    /// its list.
+    Nothing,
 }
 
 /// Timeline entries a live reading has rendered, by merged-store position,
@@ -5351,11 +5435,31 @@ pub(crate) struct Rendered {
 }
 
 impl Lens<'_> {
-    /// The events of one span, as the reader asked for them.
-    fn items(&self, events: &[(usize, &Envelope)]) -> Vec<Value> {
+    /// The events of one span, as the reader asked for them, into `span`:
+    /// its `events`, and `events_total` where the list is a window of them.
+    fn fill(&self, span: &mut Map<String, Value>, events: &[(usize, &Envelope)]) {
+        let (items, total) = self.listing(events);
+        span.insert("events".into(), Value::Array(items));
+        if let Some(total) = total {
+            span.insert("events_total".into(), json!(total));
+        }
+    }
+
+    /// The window's rows of one span, and how many it holds when that is not
+    /// all of them.
+    fn listing(&self, events: &[(usize, &Envelope)]) -> (Vec<Value>, Option<usize>) {
+        if self.window == ItemsWindow::Nothing {
+            return (Vec::new(), None);
+        }
         let mut ordered = events.to_vec();
         ordered.sort_by_key(|(index, event)| (millis_of(&event.ts), *index));
-        ordered
+        let mut total = None;
+        if let ItemsWindow::Latest(latest) = self.window {
+            ordered.retain(|(_, event)| self.filter.allows(event));
+            total = Some(ordered.len());
+            ordered.drain(..ordered.len().saturating_sub(latest));
+        }
+        let items = ordered
             .iter()
             .filter(|(_, event)| self.filter.allows(event))
             .map(|(index, event)| {
@@ -5382,7 +5486,8 @@ impl Lens<'_> {
                 rendered.entries.insert(position, (turn, entry.clone()));
                 entry
             })
-            .collect()
+            .collect();
+        (items, total)
     }
 }
 
@@ -5446,6 +5551,7 @@ fn timeline_spans(
         transcripts: &transcripts,
         positions: view.positions,
         rendered: None,
+        window: ItemsWindow::All,
     };
     match scope {
         Scope::Run => run_spans(view, &lens, ends),
@@ -5476,15 +5582,28 @@ pub(crate) fn share_spans(
     filter: &EventFilter,
     ends: &Ends,
     rendered: &std::cell::RefCell<Rendered>,
+    window: ItemsWindow,
 ) -> Vec<Value> {
-    let transcripts = Transcripts::of(view, declared);
-    let turns = turn_ids(view, &transcripts);
+    // A span's own fields read no transcript, so a reading that renders no list
+    // does not fold one.
+    let no_records = window == ItemsWindow::Nothing;
+    let transcripts = if no_records {
+        Transcripts::of(&(*view).over(&[]), declared)
+    } else {
+        Transcripts::of(view, declared)
+    };
+    let turns = if no_records {
+        Vec::new()
+    } else {
+        turn_ids(view, &transcripts)
+    };
     let lens = Lens {
         turns: &turns,
         filter,
         transcripts: &transcripts,
         positions: view.positions,
         rendered: Some(rendered),
+        window,
     };
     match share {
         Share::RunLevel { first } => run_level_spans(view, &lens, first, ends),
@@ -6809,16 +6928,16 @@ fn run_level_spans(view: &Run<'_>, lens: &Lens<'_>, first: &Envelope, ends: &End
         // What the run itself recorded: the relayed turns belong to the
         // sessions below, and carrying them here too would draw every one
         // of them on the run's row twice.
-        "events": lens.items(
-            &events
-                .iter()
-                .filter(|(_, event)| {
-                    event.labels.node.is_none() && event.source != Source::Agentgraph
-                })
-                .copied()
-                .collect::<Vec<_>>(),
-        ),
+        "events": [],
     }));
+    let own: Vec<(usize, &Envelope)> = events
+        .iter()
+        .filter(|(_, event)| event.labels.node.is_none() && event.source != Source::Agentgraph)
+        .copied()
+        .collect();
+    if let Some(Value::Object(run_span)) = spans.first_mut() {
+        lens.fill(run_span, &own);
+    }
     // The sessions relayed at no node: the run's own driving conversations,
     // which belong to the run rather than to any of its work. Left open until
     // the run closes, because a session that has stopped talking has not
@@ -6872,7 +6991,7 @@ fn run_level_spans(view: &Run<'_>, lens: &Lens<'_>, first: &Envelope, ends: &End
             "reference".into(),
             json!({ "kind": "conversation", "value": session }),
         );
-        span.insert("events".into(), json!(lens.items(&relayed)));
+        lens.fill(&mut span, &relayed);
         spans.push(Value::Object(span));
     }
     spans
@@ -6897,7 +7016,7 @@ fn node_level_spans(view: &Run<'_>, node: &str, run_id: &str, lens: &Lens<'_>) -
             && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
     });
     spans.extend(waiting_span(view, settled, &node_id, node));
-    spans.extend(queued_spans(&mine, &node_id, node));
+    spans.extend(queued_spans(&mine, &node_id, node, lens.positions));
     spans.extend(role_rollups(
         &mine,
         &node_id,
@@ -6945,7 +7064,7 @@ fn node_span(view: &Run<'_>, node: &str, parent: Option<&str>, lens: &Lens<'_>) 
     {
         span.insert("status".into(), json!(status_word(status)));
     }
-    span.insert("events".into(), json!(lens.items(&events)));
+    lens.fill(&mut span, &events);
     Value::Object(span)
 }
 
@@ -7267,7 +7386,12 @@ enum HoldMark {
 /// this serves no queued span at all**: the gap it shows today is the gap it goes
 /// on showing, because a span inferred from a dispatch that came late would be
 /// indistinguishable from one the run actually recorded.
-fn queued_spans(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<Value> {
+fn queued_spans(
+    events: &[(usize, &Envelope)],
+    parent: &str,
+    node: &str,
+    positions: Option<&[usize]>,
+) -> Vec<Value> {
     let marks: Vec<(usize, &Envelope, HoldMark)> = events
         .iter()
         .filter_map(|(index, event)| {
@@ -7296,7 +7420,15 @@ fn queued_spans(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<
         let mut span = Map::new();
         // Keyed by the record that opened it, because a node is held several
         // times over and the *hold* is what each span identifies.
-        span.insert("id".into(), json!(format!("queued.{node}.{index}")));
+        span.insert(
+            "id".into(),
+            json!(format!(
+                "queued.{node}.{}",
+                positions
+                    .and_then(|positions| positions.get(*index).copied())
+                    .unwrap_or(*index)
+            )),
+        );
         span.insert("kind".into(), json!("queued"));
         span.insert("label".into(), json!(node));
         span.insert("started_at".into(), json!(event.ts));
@@ -7589,7 +7721,7 @@ fn node_spans(view: &Run<'_>, node: &str, lens: &Lens<'_>) -> Vec<Value> {
     });
 
     spans.extend(waiting_span(view, settled, &node_id, node));
-    spans.extend(queued_spans(&events, &node_id, node));
+    spans.extend(queued_spans(&events, &node_id, node, lens.positions));
 
     // The evidence the node kept and the branch it published: both sit inside
     // the dispatch they were recorded during, so both are appended after it.
@@ -7717,7 +7849,7 @@ fn node_spans(view: &Run<'_>, node: &str, lens: &Lens<'_>) -> Vec<Value> {
                 json!({ "kind": "conversation", "value": session }),
             );
         }
-        span.insert("events".into(), json!(lens.items(&relayed)));
+        lens.fill(&mut span, &relayed);
         let sibling = judge_span(lens.transcripts, session, &span);
         spans.push(Value::Object(span));
         // Pushed straight after the dispatch it supervised, and as its sibling
@@ -7789,6 +7921,7 @@ pub(crate) fn live_activity_over(view: &Run<'_>, filter: &EventFilter) -> Vec<Va
     for event in view.events {
         fold.absorb(event, filter);
     }
+    fold.settle();
     fold.entries()
 }
 
@@ -7799,6 +7932,10 @@ pub(crate) struct ActivityFold {
     order: Vec<String>,
     latest: BTreeMap<String, (i128, Value)>,
     identities: HashSet<(String, u64)>,
+    /// Each node's latest record, its description read only when the entries
+    /// are: a fold over a run's whole journal resolves one transcript per node
+    /// rather than one per record.
+    unresolved: HashMap<String, Envelope>,
 }
 
 impl ActivityFold {
@@ -7851,13 +7988,9 @@ impl ActivityFold {
             entry.insert("step".into(), json!(step));
         }
         entry.insert("at".into(), json!(stamp));
-        // The call in one line, as the engine's resolver describes it.
-        entry.insert(
-            "description".into(),
-            json!(transcript::read(event, None)
-                .map(|read| read.description())
-                .unwrap_or_default()),
-        );
+        // The call in one line, as the engine's resolver describes it; read
+        // for the record that stays latest, in `settle`.
+        entry.insert("description".into(), json!(""));
         for field in ["kind", "name", "detail"] {
             entry.insert(
                 field.into(),
@@ -7869,12 +8002,25 @@ impl ActivityFold {
             );
         }
         entry.insert("events".into(), json!(counted + 1));
+        self.unresolved.insert(node.clone(), event.clone());
         if self
             .latest
             .insert(node.clone(), (at, Value::Object(entry)))
             .is_none()
         {
             self.order.push(node);
+        }
+    }
+
+    /// Read the description of each node's latest record, once, however many
+    /// records came before it.
+    pub(crate) fn settle(&mut self) {
+        for (node, event) in std::mem::take(&mut self.unresolved) {
+            if let Some((_, entry)) = self.latest.get_mut(&node) {
+                entry["description"] = json!(transcript::read(&event, None)
+                    .map(|read| read.description())
+                    .unwrap_or_default());
+            }
         }
     }
 

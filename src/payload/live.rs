@@ -32,8 +32,8 @@ use serde_json::{json, Map, Value};
 
 use super::{
     detail_document, is_end_boundary, is_settlement, measured, moment_of, share_spans,
-    timeline_harnesses_over, turns_of, ActivityFold, DeclaredMembers, Ends, Rendered, Run, Scope,
-    Share, Transcripts,
+    timeline_harnesses_over, turns_of, ActivityFold, DeclaredMembers, Ends, ItemsWindow, Rendered,
+    Run, Scope, Share, Transcripts,
 };
 use crate::contract::NodeId;
 use crate::filter::EventFilter;
@@ -94,6 +94,11 @@ pub(crate) struct Indexed {
     latest_settlement: Option<(i128, usize)>,
     /// The last record that decides whether a historical exit still holds.
     last_boundary: Option<usize>,
+    /// A node's records, whole, read apart from a selective view that holds
+    /// only some of them; that node's rows are read from here.
+    held_shares: HashMap<String, (Vec<Envelope>, Vec<usize>)>,
+    /// The run's own records, whole, for a page read apart from a selective view.
+    held_run: Option<(Vec<Envelope>, Vec<usize>)>,
 }
 // llmlint: ignore-end[invalid_states_unrepresentable]
 
@@ -103,6 +108,60 @@ impl Indexed {
         let mut indexed = Self::default();
         indexed.extend(view, 0);
         indexed
+    }
+
+    /// Index a view over a selective read's records, each at the place the
+    /// whole store gives it.
+    pub(crate) fn selective(
+        view: &RunView,
+        selected: onepipeline::journal::SelectedRecords,
+    ) -> Self {
+        let mut indexed = Self::of(view);
+        indexed.canonical = selected.places;
+        indexed.canonical_len = selected.store_len;
+        indexed.last_seq = selected.last_seq;
+        indexed
+    }
+
+    /// Hold `node`'s whole share, read apart from a selective view that holds
+    /// only some of it, kept current from the records a refresh appends.
+    pub(crate) fn hold_share(
+        &mut self,
+        node: &str,
+        selected: &onepipeline::journal::SelectedRecords,
+    ) {
+        let (events, positions) = canonical_of(selected, Some(node));
+        self.held_shares
+            .insert(node.to_owned(), (events, positions));
+    }
+
+    /// A reading of this view with one owner's records read whole, for one
+    /// page's build: `selected` is that owner's selective read.
+    pub(crate) fn reading_share(
+        &self,
+        view: &RunView,
+        selected: &onepipeline::journal::SelectedRecords,
+        node: Option<&str>,
+    ) -> Self {
+        let mut indexed = Self::of(view);
+        indexed.canonical.clone_from(&self.canonical);
+        indexed.canonical_len = self.canonical_len;
+        indexed.last_seq = self.last_seq;
+        let (events, positions) = canonical_of(selected, node);
+        match node {
+            Some(node) => {
+                indexed
+                    .held_shares
+                    .insert(node.to_owned(), (events, positions));
+            }
+            None => indexed.held_run = Some((events, positions)),
+        }
+        indexed
+    }
+
+    /// Whether every record of `node` is read: the view's, or a held share.
+    pub(crate) fn holds_share(&self, node: &str) -> bool {
+        self.held_shares.contains_key(node)
     }
 
     /// Index the records from `first` on, which a refresh appended, and say
@@ -117,6 +176,13 @@ impl Indexed {
                 self.canonical_len += 1;
             } else {
                 self.canonical.push(None);
+            }
+            let place = self.canonical[self.canonical.len() - 1];
+            if let (Some(node), Some(place)) = (event.labels.node.as_deref(), place) {
+                if let Some((events, positions)) = self.held_shares.get_mut(node) {
+                    events.push(event.clone());
+                    positions.push(place);
+                }
             }
             self.last_seq = self.last_seq.max(event.seq);
             self.lint += measured(std::iter::once(event)).lint_records;
@@ -170,6 +236,16 @@ impl Indexed {
     /// One owner's records as a store of their own, and where each sits in the
     /// canonical store — repetitions left out, as the timeline leaves them.
     fn canonical_share(&self, view: &RunView, owner: &Owner) -> (Vec<Envelope>, Vec<usize>) {
+        if let Owner::Node(node) = owner {
+            if let Some((events, positions)) = self.held_shares.get(node) {
+                return (events.clone(), positions.clone());
+            }
+        }
+        if matches!(owner, Owner::Run) {
+            if let Some((events, positions)) = &self.held_run {
+                return (events.clone(), positions.clone());
+            }
+        }
         let mut events = Vec::new();
         let mut positions = Vec::new();
         for &index in self.indices(owner) {
@@ -207,6 +283,25 @@ impl Indexed {
     }
 }
 
+/// The canonical records of one owner's selective read: the owner's alone,
+/// its repetitions left out, each at the place the whole store gives it.
+pub(crate) fn canonical_of(
+    selected: &onepipeline::journal::SelectedRecords,
+    node: Option<&str>,
+) -> (Vec<Envelope>, Vec<usize>) {
+    let mut events = Vec::new();
+    let mut positions = Vec::new();
+    for (event, place) in selected.events.iter().zip(&selected.places) {
+        if event.labels.node.as_deref() == node {
+            if let Some(place) = place {
+                events.push(event.clone());
+                positions.push(*place);
+            }
+        }
+    }
+    (events, positions)
+}
+
 /// What a timeline draws: the run, or one node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TimelineScope {
@@ -214,6 +309,10 @@ pub(crate) enum TimelineScope {
     Run,
     /// One node.
     Node(NodeId),
+    /// The run's own spans, as `scope=run` pages read them.
+    RunShare,
+    /// One node's span on the run timeline, as `scope=run&node=` pages read it.
+    NodeShare(NodeId),
 }
 
 /// One owner's run of spans in a run-scope timeline: where it starts, and for
@@ -256,6 +355,8 @@ pub(crate) struct LiveTimeline {
     /// The owners whose entries the cache holds, taken from the payload the
     /// subscriber already has the first time each is rebuilt.
     seeded: BTreeSet<Owner>,
+    /// How much of each span's list this timeline renders.
+    window: ItemsWindow,
 }
 
 impl LiveTimeline {
@@ -268,6 +369,7 @@ impl LiveTimeline {
         scope: TimelineScope,
         filter: EventFilter,
         agents: Option<&onepipeline::agents::Agents>,
+        window: ItemsWindow,
     ) -> Self {
         let mut timeline = Self {
             scope,
@@ -278,6 +380,7 @@ impl LiveTimeline {
             ends: indexed.ends(view),
             rendered: RefCell::new(Rendered::default()),
             seeded: BTreeSet::new(),
+            window,
         };
         timeline.payload = timeline.whole(view, indexed, declared, agents);
         timeline
@@ -307,7 +410,11 @@ impl LiveTimeline {
         self.slots.clear();
         let mut spans: Vec<Value> = Vec::new();
         let owners: Vec<Owner> = match &self.scope {
-            TimelineScope::Node(node) => vec![Owner::Node(node.as_str().to_owned())],
+            TimelineScope::Node(node) | TimelineScope::NodeShare(node) => {
+                vec![Owner::Node(node.as_str().to_owned())]
+            }
+            TimelineScope::RunShare if view.events.is_empty() => Vec::new(),
+            TimelineScope::RunShare => vec![Owner::Run],
             TimelineScope::Run if view.events.is_empty() => Vec::new(),
             TimelineScope::Run => std::iter::once(Owner::Run)
                 .chain(
@@ -351,7 +458,9 @@ impl LiveTimeline {
             return;
         };
         let range = match &self.scope {
-            TimelineScope::Node(_) => 0..spans.len(),
+            TimelineScope::Node(_) | TimelineScope::RunShare | TimelineScope::NodeShare(_) => {
+                0..spans.len()
+            }
             TimelineScope::Run => match self.slots.iter().find(|slot| slot.owner == *owner) {
                 Some(slot) => slot.start..slot.start + slot.openings.len(),
                 None => return,
@@ -390,14 +499,20 @@ impl LiveTimeline {
         let node;
         let share = match (&self.scope, owner) {
             (TimelineScope::Node(scope), _) => Share::NodeScope(scope),
-            (TimelineScope::Run, Owner::Run) => match view.events.first() {
-                Some(first) => Share::RunLevel { first },
-                None => return Vec::new(),
-            },
-            (TimelineScope::Run, Owner::Node(name)) => {
+            (TimelineScope::Run | TimelineScope::RunShare, Owner::Run) => {
+                match view.events.first() {
+                    Some(first) => Share::RunLevel { first },
+                    None => return Vec::new(),
+                }
+            }
+            (
+                TimelineScope::Run | TimelineScope::RunShare | TimelineScope::NodeShare(_),
+                Owner::Node(name),
+            ) => {
                 node = name.clone();
                 Share::NodeLevel(&node)
             }
+            (TimelineScope::NodeShare(_), Owner::Run) => return Vec::new(),
         };
         share_spans(
             &run,
@@ -406,6 +521,7 @@ impl LiveTimeline {
             &self.filter,
             &self.ends,
             &self.rendered,
+            self.window,
         )
     }
 
@@ -426,6 +542,7 @@ impl LiveTimeline {
             TimelineScope::Run => {
                 timeline_harnesses_over(payload, &Run::of(view), &Scope::Run, agents)
             }
+            TimelineScope::RunShare | TimelineScope::NodeShare(_) => payload,
             TimelineScope::Node(node) => {
                 let (events, positions) =
                     indexed.canonical_share(view, &Owner::Node(node.as_str().to_owned()));
@@ -466,7 +583,18 @@ impl LiveTimeline {
         let ends_moved = ends != self.ends;
         self.ends = ends;
         match &self.scope {
-            TimelineScope::Node(node) => {
+            TimelineScope::RunShare => {
+                if !(ends_moved || touched.run) {
+                    return Vec::new();
+                }
+                self.seed(&Owner::Run);
+                let old = std::mem::take(&mut self.payload);
+                let new = self.whole(view, indexed, declared, agents);
+                let ops = diffed(&old, &new);
+                self.payload = new;
+                ops
+            }
+            TimelineScope::Node(node) | TimelineScope::NodeShare(node) => {
                 if !(ends_moved || agents_moved || touched.nodes.contains(node.as_str())) {
                     return Vec::new();
                 }
@@ -715,8 +843,6 @@ enum Source {
 pub(crate) struct LiveDetail {
     filter: EventFilter,
     payload: Value,
-    /// What each node was last seen doing, folded one appended record at a time.
-    activity: ActivityFold,
     /// Each owner's transcript turns, which the run's own count sums.
     turns: BTreeMap<Owner, usize>,
 }
@@ -730,6 +856,8 @@ pub(crate) struct DetailInputs<'a> {
     pub(crate) sdk_telemetry: &'a Value,
     /// How many agent sessions the run's pointer file names.
     pub(crate) agents: Option<usize>,
+    /// What each node was last seen doing, the run's one fold of it.
+    pub(crate) activity: Option<&'a ActivityFold>,
 }
 
 impl LiveDetail {
@@ -744,7 +872,6 @@ impl LiveDetail {
         let mut detail = Self {
             filter,
             payload: Value::Null,
-            activity: ActivityFold::default(),
             turns: BTreeMap::new(),
         };
         detail.payload = detail.whole(view, indexed, declared, inputs);
@@ -764,10 +891,6 @@ impl LiveDetail {
         inputs: &DetailInputs<'_>,
     ) -> Value {
         self.turns.clear();
-        self.activity = ActivityFold::default();
-        for event in &view.events {
-            self.activity.absorb(event, &EventFilter::default());
-        }
         for owner in std::iter::once(Owner::Run).chain(
             indexed
                 .node_order()
@@ -777,15 +900,9 @@ impl LiveDetail {
             self.turns
                 .insert(owner, owner_turns(&Run::of(view).over(&events), declared));
         }
-        detail_document(
-            &Run::of(view),
-            declared,
-            false,
-            inputs.telemetry,
-            inputs.sdk_telemetry.clone(),
-            inputs.agents,
-            &self.filter,
-        )
+        let mut document = detail_document(&Run::of(view), declared, false, inputs, &self.filter);
+        stamp_wall_clock(&mut document, view);
+        document
     }
 
     /// The operations that bring the subscriber's detail up to date with the
@@ -838,15 +955,7 @@ impl LiveDetail {
             .collect();
         let events = indexed.merged_share(view, &owners);
         let share = whole.over(&events);
-        let partial = detail_document(
-            &share,
-            declared,
-            false,
-            inputs.telemetry,
-            inputs.sdk_telemetry.clone(),
-            inputs.agents,
-            &self.filter,
-        );
+        let partial = detail_document(&share, declared, false, inputs, &self.filter);
         if touched.run {
             let events = indexed.merged_share(view, &[Owner::Run]);
             self.turns
@@ -859,10 +968,6 @@ impl LiveDetail {
                 .insert(owner, owner_turns(&whole.over(&events), declared));
         }
         let mut detail = partial;
-        // Only the appended records reach the activity fold.
-        for event in &view.events[view.events.len().saturating_sub(touched.records)..] {
-            self.activity.absorb(event, &EventFilter::default());
-        }
         let held = &self.payload;
         let keep = |node: &str| !dirty.contains(node);
         // The run: its own fields read over the whole store, its nodes merged.
@@ -872,7 +977,13 @@ impl LiveDetail {
             run.insert("timing_quality".into(), quality.clone());
             run.insert("turns".into(), json!(self.turns.values().sum::<usize>()));
             run.insert("lint".into(), json!(indexed.lint));
-            run.insert("live_activity".into(), json!(self.activity.entries()));
+            run.insert(
+                "live_activity".into(),
+                json!(inputs
+                    .activity
+                    .map(ActivityFold::entries)
+                    .unwrap_or_default()),
+            );
             if let Some(Value::Array(nodes)) = run.get_mut("nodes") {
                 for entry in nodes.iter_mut() {
                     let node = entry["node"].as_str().unwrap_or_default().to_owned();
@@ -899,7 +1010,24 @@ impl LiveDetail {
         if let Some(object) = detail.as_object_mut() {
             merge_held(object, held.get("node_details"), "node_details", &keep);
         }
+        stamp_wall_clock(&mut detail, view);
         detail
+    }
+}
+
+/// The run's wall clock from its records, on the tick they arrive, rather than
+/// from the telemetry fold's clock, so publishing moves it no way but forward.
+fn stamp_wall_clock(detail: &mut Value, view: &RunView) {
+    if let (Some(timing), Some(seconds)) = (
+        detail["run"]["timing"].as_object_mut(),
+        super::wall_seconds(view),
+    ) {
+        if timing
+            .get("wall_seconds")
+            .is_some_and(|held| !held.is_null())
+        {
+            timing.insert("wall_seconds".into(), json!(seconds));
+        }
     }
 }
 

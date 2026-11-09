@@ -23,10 +23,11 @@ use onepipeline_ui::api::RunApi;
 use onepipeline_ui::cli::{Cli, Command, ServeArgs, SessionId, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, DispatchId, Envelope, ErrorEnvelope,
-    EventFrame, EventsQuery, Health, HealthStatus, NextQuery, NodeId, PageLimit, ProjectId,
-    ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery, ShutdownRequest, ShutdownScope,
-    SseEvent, StopRequest, SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery,
-    API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
+    EventFrame, EventsQuery, Health, HealthStatus, NextQuery, NodeId, PageLimit, PageOwner,
+    ProjectId, ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery, ShutdownRequest,
+    ShutdownScope, SseEvent, StopRequest, SurfaceRequest, TimelineEventsQuery, TimelineQuery,
+    TimelineScope, TranscriptQuery, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION,
+    TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -43,6 +44,7 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUNS, "runs.json"),
     (routes::RUN, "run.json"),
     (routes::RUN_TIMELINE, "run-timeline.json"),
+    (routes::RUN_TIMELINE_EVENTS, "run-timeline-events.json"),
     (routes::RUN_CONVERSATION, "run-conversation.json"),
     (routes::RUN_ARTIFACT, "run-artifact.json"),
     (routes::EVENTS, "events.json"),
@@ -521,7 +523,7 @@ fn every_route_serves_the_payload_its_golden_pins() {
          would be pinned absent — read the server's own account of why on stderr"
     );
 
-    let served: [(&str, Value); 6] = [
+    let served: [(&str, Value); 7] = [
         (
             "runs.json",
             enveloped(store.runs(&RunsQuery::Page(RunsPage {
@@ -551,6 +553,24 @@ fn every_route_serves_the_payload_its_golden_pins() {
                 },
             )),
         ),
+        ("run-timeline-events.json", {
+            let hub = onepipeline_ui::live::Hub::new(
+                store_over(&root),
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            );
+            enveloped(hub.timeline_events(
+                &run,
+                &TimelineEventsQuery {
+                    owner: PageOwner::Node(NodeId::try_from(fixture_run::NODE_ID).expect("valid")),
+                    span: None,
+                    cursor: None,
+                    from: None,
+                    to: None,
+                    filter: None,
+                    limit: 2,
+                },
+            ))
+        }),
         (
             "run-conversation.json",
             enveloped(store.conversation(
@@ -1204,7 +1224,7 @@ fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent()
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 27);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 28);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
