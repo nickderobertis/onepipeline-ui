@@ -17112,13 +17112,13 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 // llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this read journey uses the tier's already provisioned engine and local files, with no additional prerequisite.
-/// A settlement written back to a public plan store changes only status and
-/// metadata: since onepipeline 0.102.3 it does not read the item to screen what
-/// is already stored, which is left for `sources sanitize`. This reader serves
-/// that settled run all the same. No agent or forge is needed for a human approval.
+/// A settlement's write-back to a public plan store does not re-read the item to
+/// screen what it already holds, so a stored term stays for `sources sanitize`,
+/// and this reader still serves the settled run. No agent or forge is needed for
+/// a human approval.
 #[cfg(unix)]
 #[test]
-fn a_settlement_on_a_public_store_is_read_through_the_status_and_node_routes() {
+fn a_settlement_leaves_a_stored_term_and_is_read_through_the_status_and_node_routes() {
     let (workspace, root) = fixture_run::workspace();
     let dir = workspace.path().to_path_buf();
     let graph = write_node_scope_graph(&dir);
@@ -17150,8 +17150,8 @@ fn a_settlement_on_a_public_store_is_read_through_the_status_and_node_routes() {
         ),
         "--detach",
     ]));
-    // A person edits the board while approval waits. The settlement must neither
-    // refuse over that edit nor write over it.
+    // A person edits the board while approval waits. The settlement's narrow
+    // write adds its metadata without re-reading the body to screen it.
     let approval = approval.to_string();
     let native = approval.split_once(':').expect("a source-qualified task").1;
     let path = store.join("tasks").join(format!("{native}.md"));
@@ -17182,6 +17182,7 @@ fn a_settlement_on_a_public_store_is_read_through_the_status_and_node_routes() {
         written.contains("Approve the velvetquasar change."),
         "{written}"
     );
+    assert!(!written.contains("Approve the sample change."), "{written}");
     assert!(stored_task(&dir, &approval)
         .metadata
         .contains_key("onepipeline.settlement"));
