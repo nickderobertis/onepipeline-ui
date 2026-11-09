@@ -71,6 +71,10 @@
         {
           "projects": ["dag-ui"],
           "target": "build"
+        },
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
         }
       ]
     },

@@ -28,7 +28,12 @@
  * Knobs: LOAD_WINDOW_S, LOAD_ONLY (comma-separated variant names).
  */
 
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import {
+  type ChildProcess,
+  execFile,
+  execFileSync,
+  spawn,
+} from "node:child_process";
 import {
   constants,
   copyFileSync,
@@ -43,6 +48,7 @@ import {
 import { createServer } from "node:net";
 import { availableParallelism, loadavg, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { gzipSync } from "node:zlib";
 import {
   type Browser,
@@ -59,6 +65,7 @@ import harnessBinaries from "../fixtures/harness-binaries.json" with {
 import { treeCpuSeconds } from "./cpu";
 import { frameArrivals, lagStats, percentile, renderedAt } from "./lag";
 import {
+  ACTION_ITEM_CHANGES,
   type Measured,
   telemetrySchema,
   VARIANTS,
@@ -69,6 +76,8 @@ import declared from "./workload.json" with { type: "json" };
 
 const REPO = resolve(import.meta.dirname, "../../..");
 const WRITER = join(import.meta.dirname, "writer.mjs");
+const ENGINE = join(REPO, ".tools/bin/onepipeline");
+const run = promisify(execFile);
 const TELEMETRY = join(import.meta.dirname, "../telemetry/request-load.json");
 const CORPUS = join(import.meta.dirname, "corpus.mjs");
 /** How long each variant is watched once loaded: whole seconds, 120 by default. */
@@ -138,6 +147,7 @@ interface Served {
   readonly workspace: string;
   readonly server: ChildProcess;
   readonly facts: z.infer<typeof corpusSchema>;
+  readonly env: NodeJS.ProcessEnv;
 }
 
 /** A fresh corpus and a fresh server over it, isolated as the fixtures are. */
@@ -164,6 +174,9 @@ async function serveFresh(name: string): Promise<Served> {
   symlinkSync(process.execPath, join(utilityBin, "node"));
   const providerConfig = join(workspace, "provider-config.toml");
   writeFileSync(providerConfig, "");
+  const config = join(workspace, "config/onepipeline");
+  mkdirSync(config, { recursive: true });
+  writeFileSync(join(config, "config.yaml"), "human_items:\n  enabled: true\n");
   mkdirSync(join(workspace, "onevcs-home"));
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -179,8 +192,10 @@ async function serveFresh(name: string): Promise<Served> {
     ONEAGENTGRAPH_STATE_DIR: join(workspace, "oneagentgraph"),
     ONEVCS_HOME: join(workspace, "onevcs-home"),
     ONEPIPELINE_PROJECT_DIR: join(workspace, "overrides"),
+    XDG_CONFIG_HOME: join(workspace, "config"),
     XDG_STATE_HOME: join(workspace, "state"),
     XDG_CACHE_HOME: join(workspace, "cache"),
+    ONEPIPELINE_RUNS_DIR: runsRoot,
   };
   for (const variable of [
     "COPILOT_GITHUB_TOKEN",
@@ -224,7 +239,7 @@ async function serveFresh(name: string): Promise<Served> {
       throw new Error(`the ${name} server never answered`);
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
-  return { origin, runsRoot, workspace, server, facts };
+  return { origin, runsRoot, workspace, server, facts, env };
 }
 
 async function stopServing(served: Served): Promise<void> {
@@ -403,19 +418,83 @@ async function keepRunsOpen(page: Page, until: () => boolean): Promise<void> {
   }
 }
 
+const ACTION_ITEM_OWNER = "load-action-items-session";
+
+/**
+ * The window's external Action items changes, spaced over it, through the real
+ * CLI: raises answered and completed in turn, so a tab is told of each by its
+ * one stream, and none is this tab's own write.
+ */
+async function externalActionItemChanges(served: Served): Promise<void> {
+  const raised: string[] = [];
+  const work = join(served.workspace, "action-work");
+  mkdirSync(work, { recursive: true });
+  const env = {
+    ...served.env,
+    ONEPIPELINE_LAUNCHER_SESSION: ACTION_ITEM_OWNER,
+  };
+  const started = Date.now();
+  const spacing = WINDOW_MS / ACTION_ITEM_CHANGES;
+  for (let index = 0; index < ACTION_ITEM_CHANGES; index += 1) {
+    await new Promise((wake) =>
+      setTimeout(wake, Math.max(0, started + index * spacing - Date.now())),
+    );
+    const last = raised.at(-1);
+    if (index % 4 === 3 && last !== undefined) {
+      await run(ENGINE, ["human-items", "complete", last], { cwd: work, env });
+      continue;
+    }
+    const input = join(work, `raise-${index}.json`);
+    writeFileSync(
+      input,
+      JSON.stringify({
+        schema_version: 1,
+        approval: null,
+        dedup_key: `load-${index}`,
+        kind: "task",
+        title: `Load action item ${index}`,
+        body: "An external change for the Action items page.",
+        priority: "high",
+        owner: { session: ACTION_ITEM_OWNER, run: null, plan: null },
+        block: { scope: "nothing" },
+      }),
+    );
+    const { stdout } = await run(
+      ENGINE,
+      ["human-items", "raise", "--input", input],
+      { cwd: work, env, maxBuffer: 1 << 24 },
+    );
+    raised.push(
+      z
+        .object({ item: z.object({ item: z.object({ id: z.string() }) }) })
+        .parse(JSON.parse(stdout)).item.item.id,
+    );
+  }
+}
+
+/** Narrow a tab's Action items to high priority, the second tab's different filter. */
+async function narrowActionItems(page: Page): Promise<void> {
+  await page
+    .getByRole("group", { name: "Filter action items" })
+    .getByLabel("Priority", { exact: true })
+    .selectOption("high");
+}
+
 /** The page has finished loading: its view drawn, and two quiet seconds after. */
 async function loaded(page: Page, variant: Variant): Promise<number> {
   const started = Date.now();
   const view =
-    variant.kind === "nothing-open" || variant.kind === "host"
-      ? page.getByRole("region", { name: "Host", exact: true })
-      : variant.view === "graph"
-        ? page.getByRole("application", { name: "DAG execution graph" })
-        : variant.view === "overall"
-          ? page.getByRole("region", { name: "Graph timeline" })
-          : variant.view === "channel"
-            ? page.getByRole("heading", { name: "Channel queue" })
-            : page.getByRole("region", { name: /^Timeline for / });
+    variant.kind === "action-items"
+      ? page.getByRole("region", { name: "Action item list" })
+      : variant.kind === "nothing-open" || variant.kind === "host"
+        ? page.getByRole("region", { name: "Host", exact: true })
+        : variant.view === "graph"
+          ? page.getByRole("application", { name: "DAG execution graph" })
+          : variant.view === "overall"
+            ? page.getByRole("region", { name: "Graph timeline" })
+            : variant.view === "channel"
+              ? page.getByRole("heading", { name: "Channel queue" })
+              : page.getByRole("region", { name: /^Timeline for / });
   await view.waitFor({ timeout: 300_000 });
   // The Host page has finished loading once its own listing has been read.
   if (variant.kind === "nothing-open" || variant.kind === "host")
@@ -434,6 +513,7 @@ const round = (value: number, places = 3) =>
 
 function address(served: Served, variant: Variant): string {
   const { settledRun, stoppedRun, openLiveRun, liveNode } = served.facts;
+  if (variant.kind === "action-items") return "/human-items";
   if (variant.kind === "nothing-open" || variant.kind === "host")
     return "/?page=host";
   const run =
@@ -513,6 +593,8 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
       );
       await page.goto(`${served.origin}${address(served, variant)}`);
       loads.push(await loaded(page, variant));
+      if (variant.kind === "action-items" && tab === 1)
+        await narrowActionItems(page);
       pages.push(page);
       // The byte accounting held to a response of known size: what the
       // recorder counted for the page's subscription is that answer's body as
@@ -569,6 +651,10 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
       ],
       { stdio: ["ignore", "inherit", "inherit"] },
     );
+    const external =
+      variant.kind === "action-items"
+        ? externalActionItemChanges(served)
+        : Promise.resolve();
     // The Host page's own refresh control, pressed once in its window: the
     // reads it takes are the Host page's, which no other state sends.
     if (variant.kind === "host") {
@@ -589,6 +675,7 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
       throw new Error(
         `the workload writer for ${variant.name} ended ${signal ?? `with ${code}`}`,
       );
+    await external;
     const end = Math.max(Date.now(), start + WINDOW_MS);
     const cpu = treeCpuSeconds(pid) - cpuStart;
     const loadEnd = hostLoad();
@@ -775,6 +862,11 @@ test("request load, frames, lag and server CPU in every page state", async ({
     // nothing whole, and every record appended to the open live run reaches the
     // view showing it. The figures themselves are the budgets' to judge.
     expect(measured.repeated_snapshot.in_window.frames, variant.name).toBe(0);
+    if (variant.kind === "action-items")
+      expect(
+        measured.frames_by_type["human-items.patch"]?.frames_per_min ?? 0,
+        `${variant.name} received no human-items.patch frames`,
+      ).toBeGreaterThan(0);
     if (measured.lag !== undefined)
       expect(measured.lag.never_shown, `${variant.name} never showed`).toBe(0);
   }

@@ -139,7 +139,7 @@ const MEASURES = {
     };
   },
   cpu(telemetry) {
-    const found = variants(telemetry, ["live"], [1, 2]);
+    const found = variants(telemetry, ["live", "action-items"], [1, 2]);
     const { value } = worst(
       found,
       (variant) => variant.server_cpu.cores_per_tab,
@@ -150,7 +150,7 @@ const MEASURES = {
         found.map(([name, variant]) => [
           name,
           {
-            page_state: variant.view,
+            page_state: variant.view ?? variant.kind,
             tabs: variant.tabs,
             total_cpu_seconds: variant.server_cpu.seconds,
             window_s: variant.server_cpu.window_s,
