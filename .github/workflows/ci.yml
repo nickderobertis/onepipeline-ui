@@ -7,11 +7,8 @@ name: CI
 # jobs, which fail when `main` does not build (AGENTS.md, "Commits, releases, and
 # merging").
 on:
-  pull_request:
-    # GitHub's default three, without `ready_for_review`: a draft's runs already
-    # report on its head commit, and lifting it changes no commit, so a run on
-    # the lift would only repeat them.
-    types: [opened, synchronize, reopened]
+  # DO NOT MERGE: off so this push runs only cache-price.yml.
+  workflow_dispatch:
   push:
     branches: [main]
 
