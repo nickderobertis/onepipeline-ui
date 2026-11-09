@@ -37,6 +37,7 @@ export function rustTokens(text) {
         const start = at + raw[0].length;
         const close = `"${raw[1]}`;
         const end = text.indexOf(close, start);
+        if (end < 0) throw new Error("unterminated Rust raw string");
         tokens.push({ string: text.slice(start, end) });
         at = end + close.length;
         continue;
@@ -44,7 +45,9 @@ export function rustTokens(text) {
       if (text[at] === '"' || text.startsWith('b"', at)) {
         let end = at + (text[at] === '"' ? 1 : 2);
         const start = end;
-        while (text[end] !== '"') end += text[end] === "\\" ? 2 : 1;
+        while (end < text.length && text[end] !== '"')
+          end += text[end] === "\\" ? 2 : 1;
+        if (end >= text.length) throw new Error("unterminated Rust string");
         tokens.push({ string: text.slice(start, end) });
         at = end + 1;
         continue;

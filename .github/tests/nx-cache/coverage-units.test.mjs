@@ -22,7 +22,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, normalize, resolve } from "node:path";
 import { test } from "node:test";
 import { taskHashes, workspaceFixture } from "./nx-fixture.mjs";
-import { compiledFromRoots, compiledReads } from "./rust-compile-reads.mjs";
+import {
+  compiledFromRoots,
+  compiledReads,
+  rustTokens,
+} from "./rust-compile-reads.mjs";
 
 const TIERS = {
   unit: ["onepipeline-ui", "project.json"],
@@ -806,7 +810,7 @@ pub const BYTES: &[u8] = core::include_bytes!("data/bytes.bin");
 pub mod plain;
 pub(crate) mod directory;
 #[path = "elsewhere/renamed.rs"]
-#[allow(dead_code)]
+#[doc(hidden)]
 mod attributed;
 pub mod inline {
     pub mod inner_file;
@@ -871,6 +875,9 @@ include!("included.rs");
     const walked = compiledFromRoots(root, [join(root, "src/cfgd.rs")]);
     assert.ok(walked.files.includes("src/off.rs"));
     assert.deepEqual(walked.unresolved, ["include_str! in src/cfgd.rs"]);
+    // Source a compiler would reject is an error, never a walk that stops early.
+    assert.throws(() => rustTokens('const A: &str = "open'), /unterminated/);
+    assert.throws(() => rustTokens('const A: &str = r#"open"'), /unterminated/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
