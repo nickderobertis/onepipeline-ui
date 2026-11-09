@@ -78,8 +78,8 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::HUMAN_ITEMS, "human-items.json"),
     (routes::HUMAN_ITEMS, "human-items-raise.json"),
     (routes::HUMAN_ITEM, "human-item.json"),
-    (routes::HUMAN_ITEM_ANSWER, "human-item-answer.json"),
     (routes::HUMAN_ITEM_ANSWERS, "human-item-answers.json"),
+    (routes::HUMAN_ITEM_ANSWER, "human-item-answer.json"),
     (routes::HUMAN_ITEM_COMPLETE, "human-item-complete.json"),
     (routes::HUMAN_ITEM_DISMISS, "human-item-dismiss.json"),
     (routes::HUMAN_ITEM_REOPEN, "human-item-reopen.json"),
@@ -4187,6 +4187,25 @@ fn the_checked_in_human_item_schema_is_the_linked_engines() {
         "{} is not what the linked engine's human_items::schemas() exports; rerun with \
          {UPDATE}=1, then `just format` and regenerate the browser's types",
         path.display()
+    );
+}
+
+/// **The page's batch limit is the linked engine's.** The send bar splits drafts at
+/// this number, and a constant the schema does not carry can only be held here.
+#[test]
+fn the_pages_batch_limit_is_the_linked_engines() {
+    let page = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("apps/dag-ui/src/features/human-items/human-item-drafts.ts"),
+    )
+    .expect("the page's draft module reads");
+    let declared = format!(
+        "export const MAX_BATCH_ANSWERS = {};",
+        onepipeline::human_items::MAX_BATCH_ANSWERS
+    );
+    assert!(
+        page.contains(&declared),
+        "the page does not declare {declared}"
     );
 }
 

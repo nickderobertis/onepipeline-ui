@@ -150,10 +150,13 @@ export function useAnswerDrafts(
   const send = useCallback(async () => {
     if (sendingNow.current) return;
     const stored = storedDrafts();
+    const elsewhere = batch.filter(
+      ([id]) => stored !== undefined && stored[id] === undefined,
+    );
+    // Sent or discarded from another tab: this tab stops offering it too.
+    for (const [id] of elsewhere) setDrafts((all) => without(all, id));
     const answers = batch.flatMap(([id, draft]) =>
-      stored === undefined || stored[id] !== undefined
-        ? [batchEntry(id, draft)]
-        : [],
+      elsewhere.some(([gone]) => gone === id) ? [] : [batchEntry(id, draft)],
     );
     if (answers.length === 0) return;
     sendingNow.current = true;

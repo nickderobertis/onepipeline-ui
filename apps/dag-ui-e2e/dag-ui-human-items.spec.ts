@@ -417,6 +417,7 @@ function outcome(page: Page): Locator {
 
 /** The value of one labelled field in a detail's metadata block. */
 function metadataOf(pane: Locator, label: string): Locator {
+  // llmlint: ignore[e2e_uses_accessible_selectors] a `dd` belongs to its `dt` only by position in the list: the accessibility tree offers no name or relation from a term to its definition, so the label is found by role and its value by that adjacency.
   return pane
     .getByRole("term")
     .filter({ hasText: new RegExp(`^${label}$`, "u") })
@@ -884,12 +885,9 @@ test("the detail enumerates every blocked step the engine derived, and an open h
     .click();
   // The detail says it twice by design: once in the item's meta line, and once
   // as the heading over the steps that hold enumerates.
-  await expect(
-    detailPane(page)
-      .getByRole("term")
-      .filter({ hasText: /^Blocks$/u })
-      .locator("+ dd"),
-  ).toHaveText("blocks all work on this host");
+  await expect(metadataOf(detailPane(page), "Blocks")).toHaveText(
+    "blocks all work on this host",
+  );
   await expect(
     steps.getByRole("heading", {
       name: "blocks all work on this host",
@@ -4090,8 +4088,6 @@ test("a filter chosen while the page is ahead of the stream shows only what the 
   await expect(card(page, certificate)).toHaveCount(0);
 });
 
-// ---- Choices, drafts and the send bar -------------------------------------
-
 interface Offered {
   readonly id: string;
   readonly title: string;
@@ -4521,6 +4517,162 @@ test("a filter hiding a drafted item does not retire its draft", async ({
   await expect(sendButton(page)).toHaveText("Send 1 answer");
   await expect(page.getByRole("list", { name: "Not sent" })).toHaveCount(0);
   expect(await storedDraft(page, id)).not.toBeNull();
+
+  // A later filter asks again: answered meanwhile, the draft is retired.
+  cli(served, ["human-items", "answer", id, "--text", "Elsewhere"], SUPERVISOR);
+  await page
+    .getByRole("group", { name: "Filter action items" })
+    .getByLabel("Priority", { exact: true })
+    .selectOption("high");
+  await expect(page.getByRole("list", { name: "Not sent" })).toContainText(
+    "answered or dismissed elsewhere",
+  );
+  await expect(sendButton(page)).toHaveCount(0);
+  expect(await storedDraft(page, id)).toBeNull();
+});
+
+test("Discard removes every draft for good and writes nothing", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const id = raiseQuestion(served, {
+    key: "discarded",
+    title: "Discarded?",
+    choices: REGIONS,
+  });
+  await open(page, served);
+  const sent = writes(page);
+  await choiceButton(card(page, "Discarded?"), "Europe").click();
+  await sendRegion(page).getByRole("button", { name: "Discard" }).click();
+  await expect(sendRegion(page)).toHaveCount(0);
+  await expect(
+    choiceButton(card(page, "Discarded?"), "Europe"),
+  ).toHaveAttribute("aria-pressed", "false");
+  expect(await storedDraft(page, id)).toBeNull();
+  await page.reload();
+  await expect(card(page, "Discarded?")).toBeVisible();
+  await expect(sendButton(page)).toHaveCount(0);
+  expect(sent).toHaveLength(0);
+  expect(stored(served, id).state).toBe("open");
+});
+
+test("dismissing a drafted question here keeps its words as a notice", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const id = raiseQuestion(served, { key: "dismissed", title: "Dismissed?" });
+  await open(page, served);
+  await answerBox(page, "Dismissed?").fill("Words kept after dismissing");
+  await page.getByRole("button", { name: "Dismiss: Dismissed?" }).click();
+  const notices = page.getByRole("list", { name: "Not sent" });
+  await expect(notices).toContainText("dismissed here");
+  await expect(notices).toContainText("Words kept after dismissing");
+  expect(await storedDraft(page, id)).toBeNull();
+  await expect(sendButton(page)).toHaveCount(0);
+});
+
+test("what storage holds is only used if valid, and a browser that keeps nothing can still draft and send", async ({
+  page,
+  context,
+}) => {
+  const served = await serveWorld("queue");
+  const good = raiseQuestion(served, {
+    key: "stored-good",
+    title: "Stored good?",
+    choices: REGIONS,
+  });
+  await open(page, served);
+  await page.evaluate(
+    ([valid]) => {
+      localStorage.setItem(
+        valid ?? "",
+        JSON.stringify({ title: "Stored good?", text: "From storage" }),
+      );
+      localStorage.setItem(
+        "onepipeline-ui.human-items.draft.hi-notjson",
+        "{not json",
+      );
+      localStorage.setItem(
+        "onepipeline-ui.human-items.draft.hi-badshape",
+        JSON.stringify({ title: 7 }),
+      );
+    },
+    [DRAFT_KEY(good)],
+  );
+  await page.reload();
+  await expect(sendButton(page)).toHaveText("Send 1 answer");
+
+  const denied = await context.newPage();
+  await denied.addInitScript(() => {
+    const refuse = () => {
+      throw new DOMException("denied", "SecurityError");
+    };
+    Storage.prototype.getItem = refuse;
+    Storage.prototype.setItem = refuse;
+    Storage.prototype.removeItem = refuse;
+    Storage.prototype.key = refuse;
+  });
+  const typed = raiseQuestion(served, {
+    key: "stored-denied",
+    title: "Storage denied?",
+  });
+  await denied.goto(page.url());
+  await expect(answerBox(denied, "Storage denied?")).toBeVisible();
+  await answerBox(denied, "Storage denied?").fill("Kept for this visit");
+  await sendAnswers(denied);
+  await expect(card(denied, "Storage denied?")).toHaveCount(0);
+  expect(stored(served, typed).resolution?.text).toBe("Kept for this visit");
+});
+
+test("a draft another tab discarded is not sent from a tab still showing it", async ({
+  page,
+  context,
+}) => {
+  const served = await serveWorld("queue");
+  const id = raiseQuestion(served, {
+    key: "two-tabs",
+    title: "Two tabs?",
+    choices: REGIONS,
+  });
+  await open(page, served);
+  await choiceButton(card(page, "Two tabs?"), "Europe").click();
+  const other = await context.newPage();
+  await other.goto(page.url());
+  await expect(sendButton(other)).toHaveText("Send 1 answer");
+  const sent = writes(other);
+  await sendRegion(page).getByRole("button", { name: "Discard" }).click();
+  await sendAnswers(other);
+  await expect(sendRegion(other)).toHaveCount(0);
+  expect(sent).toHaveLength(0);
+  expect(stored(served, id).state).toBe("open");
+});
+
+test("more drafts than one batch takes go out fifty at a time, and the rest wait", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const ids = Array.from({ length: 51 }, (_, at) =>
+    raiseQuestion(served, { key: `cap-${at}`, title: `Capped ${at}?` }),
+  );
+  await open(page, served);
+  await page.evaluate(
+    (entries) => {
+      for (const [key, title] of entries)
+        localStorage.setItem(key, JSON.stringify({ title, text: "Capped" }));
+    },
+    ids.map((id, at) => [DRAFT_KEY(id), `Capped ${at}?`] as const),
+  );
+  await page.reload();
+  await expect(sendButton(page)).toHaveText("Send 50 answers");
+  await expect(sendRegion(page)).toContainText("1 more after this");
+  const sent = writes(page);
+  await sendAnswers(page);
+  await expect(sendButton(page)).toHaveText("Send 1 answer");
+  expect(batchesOf(sent)[0]?.answers).toHaveLength(50);
+  await sendAnswers(page);
+  await expect(sendRegion(page)).toHaveCount(0);
+  expect(batchesOf(sent)).toHaveLength(2);
+  for (const id of ids) expect(stored(served, id).state).toBe("answered");
 });
 
 const HOSTILE = [
@@ -4570,7 +4722,9 @@ test("choices and answers carrying hostile markup are shown as readable text and
       await page.evaluate(() => Reflect.get(window, "__pwn")),
     ).toBeUndefined();
     expect(images).toEqual([]);
+    // llmlint: ignore[e2e_uses_accessible_selectors] what is asserted is that no such attribute reached the DOM, which no role or name can express.
     expect(await page.locator("[onerror]").count()).toBe(0);
+    // llmlint: ignore[e2e_uses_accessible_selectors] as above: the assertion is about an href value no link's accessible name carries.
     expect(await page.locator('a[href^="javascript:"]').count()).toBe(0);
   };
 
@@ -4792,6 +4946,7 @@ for (const [width, height] of [
         expect(answer.y).toBeGreaterThanOrEqual(list.y);
         last = answer.y + answer.height;
       }
+      // llmlint: ignore[e2e_uses_accessible_selectors] the criterion is that the block is a `<dl>`, an element ARIA has no role for as a whole; its fields are read by role just below.
       const block = pane.locator("dl");
       await expect(block).toHaveCount(1);
       const blockBox = await box(block);

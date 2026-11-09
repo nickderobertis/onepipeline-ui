@@ -60,6 +60,7 @@ pub(crate) struct HumanItems {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Act {
     /// Answer a question with a choice's id, the person's words, or both.
+    // llmlint: ignore[invalid_states_unrepresentable] this carries the route's body straight to the engine's flat `HumanItemAction::Answer`, whose `apply` is the one place that refuses an answer naming neither, in its own words and as the 409 the contract states; an enum here would refuse first and restate that rule in this crate.
     Answer {
         /// The picked choice's id.
         choice: Option<String>,
