@@ -56,36 +56,55 @@ const resolution = z.strictObject({
   actor: z.string(),
   on_behalf_of: nullableString,
   text: nullableString,
+  choice: nullableString.optional(),
   reason: nullableString,
+});
+
+const choice = z.strictObject({
+  id: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9-]*$/u)
+    .max(64),
+  title: z.string().regex(/^(?=.*\S)[^\n\r]{1,80}$/u),
+  description: prose,
 });
 
 /**
  * Whether `item`'s kind, state, resolution and approval agree, as the engine's
  * own decoder rules: an open item has no resolution and a resolved one has one;
  * a task is completed and a question answered, never the reverse; an answer
- * carries text and no reason, a completion no reason and any comment not blank,
- * a dismissal no text; and
+ * carries text, a choice or both and no reason, a completion no reason and any
+ * comment not blank, a dismissal no text; only a question offers choices, each
+ * id once, and only an answer names one, among those its question offers; and
  * only a task carries an approval reference.
  */
 function lifecycleProblem(item: {
   kind: string;
   state: string;
   approval: unknown;
+  choices?: readonly { readonly id: string }[] | undefined;
   resolution: z.infer<typeof resolution> | null;
 }): string | undefined {
   const { kind, state, resolution: settled } = item;
+  const offered = (item.choices ?? []).map(({ id }) => id);
+  if (kind === "task" && offered.length > 0)
+    return "choices are only valid on questions";
+  if (new Set(offered).size !== offered.length)
+    return "a choice id is repeated";
   if (kind === "question" && item.approval !== null)
     return "approval is only valid on tasks";
   if (state === "open")
     return settled === null ? undefined : "an open item has no resolution";
   if (settled === null) return "a resolved item carries its resolution";
+  const picked = settled.choice ?? null;
+  if (picked !== null && (state !== "answered" || !offered.includes(picked)))
+    return "a resolution's choice is one its answered question offers";
   if (state === "answered")
     return kind === "question" &&
-      settled.text !== null &&
-      /\S/u.test(settled.text) &&
+      (settled.text === null ? picked !== null : /\S/u.test(settled.text)) &&
       settled.reason === null
       ? undefined
-      : "an answer is a question's, with text and no reason";
+      : "an answer is a question's, with text or a choice and no reason";
   if (state === "completed")
     return kind === "task" &&
       (settled.text === null || /\S/u.test(settled.text)) &&
@@ -103,6 +122,7 @@ export const humanItemSchema: z.ZodType<HumanItem> = z
     kind: z.enum(["task", "question"]),
     title: prose,
     body: prose,
+    choices: z.array(choice).max(6).optional(),
     priority: z.enum(HUMAN_ITEM_PRIORITIES),
     owner,
     block,
