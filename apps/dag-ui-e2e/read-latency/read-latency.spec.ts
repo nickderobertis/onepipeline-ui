@@ -585,7 +585,9 @@ async function measureBatch(browser: Browser, world: World, grown: string) {
       const tab = await context.newPage();
       await tab.goto(`${origin}/human-items`);
       const list = actionItemList(tab);
-      await expect(list.getByRole("article", { name: last })).toBeVisible({
+      await expect(
+        list.getByRole("article", { name: last, exact: true }),
+      ).toBeVisible({
         timeout: NEVER,
       });
       if (filtered) {
@@ -621,7 +623,7 @@ async function measureBatch(browser: Browser, world: World, grown: string) {
 
     const list = actionItemList(filtered);
     for (const [index, title] of titles.entries()) {
-      const shown = list.getByRole("article", { name: title });
+      const shown = list.getByRole("article", { name: title, exact: true });
       if (index < workload.batch_with_choices)
         await shown
           .getByRole("button", {
