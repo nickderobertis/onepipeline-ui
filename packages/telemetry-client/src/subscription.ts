@@ -132,8 +132,17 @@ export class LiveView {
     globalThis.addEventListener?.("offline", this.#offline);
     globalThis.addEventListener?.("online", this.#online);
     globalThis.addEventListener?.("pagehide", this.#pagehide);
-    if (options.initial !== undefined) this.#adopt(options.initial);
-    else void this.#create({});
+    const initial = options.initial;
+    if (initial === undefined) void this.#create({});
+    else {
+      // Never before this constructor returns: `onState` is the caller's, and it
+      // may read the subscription it is being assigned, as `#create`'s answer can.
+      const generation = ++this.#generation;
+      queueMicrotask(() => {
+        if (generation === this.#generation && !this.#closed)
+          this.#adopt(initial);
+      });
+    }
   }
 
   /** The view this subscription shows. */
