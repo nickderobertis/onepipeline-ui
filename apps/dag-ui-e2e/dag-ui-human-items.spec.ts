@@ -1868,6 +1868,12 @@ test("an item whose body is longer than four lines shows four on its card and al
       (element) => element.scrollHeight > element.clientHeight,
     ),
   ).toBe(true);
+  // The pane first paints from the list's summary, and the blocked steps only
+  // the served detail carries then land at its foot: End waits for them, or it
+  // stops at a bottom that has since moved.
+  await expect(
+    pane.getByRole("region", { name: "Blocked steps" }),
+  ).toBeVisible();
   // A reader scrolls the detail from the keyboard: focus it, press End.
   await pane.focus();
   await page.keyboard.press("End");
