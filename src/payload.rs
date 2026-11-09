@@ -7170,63 +7170,107 @@ fn moment_at(ts: &str) -> Option<Moment> {
     })
 }
 
-/// Whether one record is a session's own.
-///
-/// A session id is `{stream}.{member}`, so the records that spell it are its own
-/// — which is the one join this contract allows, because `oneagentgraph` stamps
-/// no `session` label on the records that open and close a member.
-fn belongs_to(event: &Envelope, session: &str) -> bool {
-    member_label(event).is_some_and(|member| format!("{}.{member}", event.stream) == session)
-}
-
-fn ordered(events: &[(usize, &Envelope)], matching: &dyn Fn(&Envelope) -> bool) -> Vec<Moment> {
-    let mut found: Vec<Moment> = events
-        .iter()
-        .filter(|(_, event)| matching(event))
-        .filter_map(|(_, event)| Moment::of(event))
-        .collect();
-    found.sort_by_key(|moment| moment.at);
-    found
-}
-
 /// A session's own first and last records bound its lane. External closure
 /// proves it ended, but does not add the time another session spent to its work.
 fn session_interval(
-    events: &[(usize, &Envelope)],
+    index: &SessionIndex<'_>,
     session: &str,
     relayed: &[(usize, &Envelope)],
 ) -> (Moment, Option<Moment>) {
-    // Looked up rather than scanned: a node runs hundreds of sessions over
-    // thousands of records, and a scan per record per session is what a node's
-    // timeline used to spend seconds on.
-    let relayed_at: std::collections::HashSet<*const Envelope> = relayed
-        .iter()
-        .map(|(_, own)| std::ptr::from_ref::<Envelope>(*own))
+    let mut seen: HashSet<*const Envelope> = HashSet::new();
+    let mut held: Vec<(usize, &Envelope)> = index
+        .members
+        .get(session)
+        .into_iter()
+        .flatten()
+        .copied()
+        .chain(relayed.iter().copied())
+        .filter(|(_, event)| seen.insert(std::ptr::from_ref::<Envelope>(*event)))
         .collect();
-    let relayed_streams: std::collections::HashSet<&str> =
-        relayed.iter().map(|(_, own)| own.stream.as_str()).collect();
-    let own = ordered(events, &|event| {
-        belongs_to(event, session) || relayed_at.contains(&std::ptr::from_ref(event))
-    });
+    // In the node's own order first, so records stamped alike keep it.
+    held.sort_by_key(|(position, _)| *position);
+    let mut own: Vec<Moment> = held
+        .into_iter()
+        .filter_map(|(_, event)| Moment::of(event))
+        .collect();
+    own.sort_by_key(|moment| moment.at);
     let started = own.first().cloned().unwrap_or_else(|| Moment {
         at: 0,
         ts: now_rfc3339(),
     });
     let last = own.last().cloned().unwrap_or_else(|| started.clone());
-    // The kind first and the stamp's parse last: most records close nothing.
-    let closed = events.iter().any(|(_, event)| {
-        (event.source == Source::Pipeline
-            && matches!(event.kind.0.as_str(), "node-settled" | "node-dispatched")
-            || event.source == Source::Vcs && event.kind.0 == vcs::SESSION_CLOSED
-            || event.source == Source::Agentgraph
-                && belongs_to(event, session)
-                && [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&event.kind.0.as_str())
-            || event.source == Source::Agentgraph
-                && event.kind.0 == "graph-settled"
-                && relayed_streams.contains(event.stream.as_str()))
-            && millis_of(&event.ts).is_some_and(|at| at >= last.at)
-    });
+    let reaches = |at: Option<i128>| at.is_some_and(|at| at >= last.at);
+    let closed = reaches(index.closers)
+        || reaches(index.member_closers.get(session).copied())
+        || relayed
+            .iter()
+            .any(|(_, own)| reaches(index.graph_settled.get(own.stream.as_str()).copied()));
     (started, closed.then_some(last))
+}
+
+/// One pass over a node's records for what [`session_interval`] asks of each of
+/// its sessions: a node runs hundreds of sessions over thousands of records, and
+/// asking every record about every session was seconds of a node's timeline.
+struct SessionIndex<'a> {
+    /// Each session's own records, by `{stream}.{member}`.
+    members: HashMap<String, Vec<(usize, &'a Envelope)>>,
+    /// The latest record that closes every session: a settlement, a dispatch, or
+    /// a session the forge closed.
+    closers: Option<i128>,
+    /// The latest record that closes one session: its member settling or dying.
+    member_closers: HashMap<String, i128>,
+    /// The latest graph settlement on each stream.
+    graph_settled: HashMap<&'a str, i128>,
+}
+
+impl<'a> SessionIndex<'a> {
+    fn of(events: &[(usize, &'a Envelope)]) -> Self {
+        let mut index = Self {
+            members: HashMap::new(),
+            closers: None,
+            member_closers: HashMap::new(),
+            graph_settled: HashMap::new(),
+        };
+        let later = |held: Option<i128>, at: Option<i128>| match (held, at) {
+            (Some(held), Some(at)) => Some(held.max(at)),
+            (held, at) => held.or(at),
+        };
+        for &(position, event) in events {
+            let key = member_label(event).map(|member| format!("{}.{member}", event.stream));
+            let kind = event.kind.0.as_str();
+            if event.source == Source::Pipeline
+                && matches!(kind, "node-settled" | "node-dispatched")
+                || event.source == Source::Vcs && kind == vcs::SESSION_CLOSED
+            {
+                index.closers = later(index.closers, millis_of(&event.ts));
+            }
+            if event.source == Source::Agentgraph {
+                if kind == "graph-settled" {
+                    if let Some(at) = millis_of(&event.ts) {
+                        let held = index
+                            .graph_settled
+                            .entry(event.stream.as_str())
+                            .or_insert(at);
+                        *held = (*held).max(at);
+                    }
+                }
+                if [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&kind) {
+                    if let (Some(key), Some(at)) = (&key, millis_of(&event.ts)) {
+                        let held = index.member_closers.entry(key.clone()).or_insert(at);
+                        *held = (*held).max(at);
+                    }
+                }
+            }
+            if let Some(key) = key {
+                index
+                    .members
+                    .entry(key)
+                    .or_default()
+                    .push((position, event));
+            }
+        }
+        index
+    }
 }
 
 /// The branch a node opened and what became of it, from the records `onevcs`
@@ -7613,6 +7657,7 @@ fn role_rollups(
             && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
     });
     let mut counted: Vec<Category> = Vec::new();
+    let index = SessionIndex::of(events);
     for (session, relayed) in relayed_sessions(events) {
         let Some(role) = declared.role_of_dispatched(
             relayed
@@ -7632,7 +7677,7 @@ fn role_rollups(
         // long as the node that ran them: a drafting turn inside a node that
         // worked for four hours took a minute, and a lane drawn over the node's
         // window says the drafting was what the node was doing all along.
-        let (began, over) = session_interval(events, session, &relayed);
+        let (began, over) = session_interval(&index, session, &relayed);
         match counted.iter_mut().find(|category| category.pair == pair) {
             Some(category) => category.fold(began, over),
             None => counted.push(Category::of(pair, began, over)),
@@ -7807,6 +7852,7 @@ fn node_spans(view: &Run<'_>, node: &str, lens: &Lens<'_>) -> Vec<Value> {
     // is three transcripts an operator has to be able to tell apart. A
     // dispatch that relayed no session at all is still one span, because the
     // node was dispatched and that is a fact of its own.
+    let index = SessionIndex::of(&events);
     let mut sessions = relayed_sessions(&events);
     if sessions.is_empty() {
         sessions.push((node, Vec::new()));
@@ -7835,7 +7881,7 @@ fn node_spans(view: &Run<'_>, node: &str, lens: &Lens<'_>) -> Vec<Value> {
                     .flatten(),
             )
         } else {
-            let (began, over) = session_interval(&events, session, &relayed);
+            let (began, over) = session_interval(&index, session, &relayed);
             (Some(began), over)
         };
         span.insert(
