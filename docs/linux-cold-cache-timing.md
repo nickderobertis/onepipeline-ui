@@ -246,3 +246,27 @@ with durations from the fda7038 and 080242f runs and no account of CPU limits,
 moves the job's end from about 2425 s to 1900 s into Nx. CI has not measured it.
 Sharing `target`'s build directory with `build-api-server` was not done: it would
 save about 100 s of compile and queue that build behind the tiers' compiles there.
+
+Run 42534302010 (5c036bb, job 128895188222) was cancelled at the cap with only
+`dag-ui-read-latency:test` and `:budgets` left, 92 s after `github-workflows-nx-cache:test`
+ended. That suite took 1862 s of Nx there, run one test at a time. Two of its tests held
+776 s of it:
+
+| Test | Where the time went | CI | This host, before | This host, after |
+| --- | --- | ---: | ---: | ---: |
+| `cache-use under onebudgetspec…` | The pinned sidecar's and promotion CLI's backoff on the double's HTTP 500: 94 s and 61 s, sleeping | 412 s | 240–255 s | 90 s |
+| `each declared file input rule…` | Starting Node and Nx afresh for each of 146 probes | 364 s | 278 s | 82–104 s |
+
+The double now answers a store fault with 501, which the pinned client does not retry and
+which ends in the same failed store call. The probes share one process, whose hashes are
+held to an isolated read of `nx.json` and `README.md` and to the restored tree. Run alone
+on this host the whole suite went from 767 s to 482 s, the later run at the higher load
+(21 against about 10); the host is shared, so these durations are a profile and not a
+comparison.
+
+That removes the suite from the end of the job. CI has not measured it. The browser chain
+ended 31 s before the suite did, and `dag-ui-read-latency:test` then runs alone for about
+255 s, so what is left past the cap is `dag-ui:build-api-server` (776 s here), which is
+CPU contention rather than a slot or a lock: it starts as soon as `dag-ui:build` ends, and
+its compile is about 100 s alone. `NODE_COMPILE_CACHE` was tried on the suite's slowest
+nested-Nx test, and it did not move (64–66 s against 62–65 s).
