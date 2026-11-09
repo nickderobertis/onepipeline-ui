@@ -31,6 +31,12 @@ concurrency:
 # alike, so the key it saves is the key these restore.
 env:
   CARGO_TERM_COLOR: always
+  # Hashed into every rust-cache key here, in `ci-cache.yml` and in no other way, so
+  # moving it moves the keys of every family at once while leaving their name prefixes
+  # for `ci-cache.yml`'s cleanup: a restore that cannot match the old entries builds
+  # cold, which drops the stale units carried across lock keys. The two files carry
+  # one value; `.github/tests/rust-cache-generation.test.mjs` reconciles them.
+  RUST_CACHE_GENERATION: "1"
 
 jobs:
   # One lint job and one test job per platform. Each of the four runs its checks through one recipe of its own — `just
