@@ -103,5 +103,5 @@
       }
     ]
   },
-  "//": "The UI refusal journey builds Cargo’s packaged tree, so the package’s source inputs join the four selected tests and their helpers. Workflow and provisioning-test edits do not select these version-reading journeys."
+  "//": "The UI refusal journey builds Cargo\u2019s packaged tree, so the package\u2019s source inputs join the four selected tests and their helpers. Workflow and provisioning-test edits do not select these version-reading journeys."
 }

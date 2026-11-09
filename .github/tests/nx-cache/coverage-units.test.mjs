@@ -599,6 +599,44 @@ function keyedFiles(cwd) {
   );
 }
 
+test("the coverage digest tells a missing file from an empty one", () => {
+  const cwd = workspaceFixture();
+  const digest = () =>
+    execFileSync("node", ["scripts/coverage-tier-key.mjs", "base"], {
+      cwd,
+      encoding: "utf8",
+    }).trim();
+  try {
+    const before = digest();
+    const file = join(cwd, "docs/contract.md");
+    const original = readFileSync(file);
+    writeFileSync(file, "");
+    const empty = digest();
+    assert.notEqual(empty, before, "an emptied file must move the digest");
+    rmSync(file);
+    assert.notEqual(
+      digest(),
+      empty,
+      "a vanished file must not read like an empty one",
+    );
+    writeFileSync(file, original);
+    assert.equal(digest(), before, "restoring the file restores the digest");
+    // A tiers file with a malformed target definition is refused with its next step.
+    const project = join(cwd, "tests/tiers/e2e/project.json");
+    const text = readFileSync(project, "utf8");
+    writeFileSync(project, JSON.stringify({ name: "x", targets: [] }));
+    const refused = spawnSync("node", ["scripts/coverage-tiers.mjs"], {
+      cwd,
+      encoding: "utf8",
+    });
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /ACTION: run from the repository root/);
+    writeFileSync(project, text);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("every workspace file a tier can read is covered by its task hash", () => {
   const fixture = coverageFixture();
   const { cwd } = fixture;

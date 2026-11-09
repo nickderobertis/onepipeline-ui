@@ -88,9 +88,11 @@ if (list) {
     try {
       digest.update(readFileSync(path));
     } catch (error) {
-      // A staged-away or symlink-to-directory entry has no bytes to hash.
+      // A staged-away entry or a symlink to a directory has no bytes, but its state
+      // is still part of the key: a file that vanished must not read like an empty one.
       if (error.code !== "ENOENT" && error.code !== "EISDIR")
         fail(`cannot read ${path}`, error);
+      digest.update(`\0unreadable:${error.code}`);
     }
     digest.update("\0");
   }

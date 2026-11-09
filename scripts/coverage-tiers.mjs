@@ -28,10 +28,33 @@ try {
     const project = JSON.parse(readFileSync(path, "utf8"));
     if (
       typeof project?.name !== "string" ||
-      typeof project?.targets !== "object" ||
-      project.targets === null
+      project.targets === null ||
+      typeof project.targets !== "object" ||
+      Array.isArray(project.targets) ||
+      !Object.values(project.targets).every(
+        (target) =>
+          target !== null &&
+          typeof target === "object" &&
+          (target.outputs === undefined ||
+            (Array.isArray(target.outputs) &&
+              target.outputs.every((output) => typeof output === "string"))) &&
+          (target.dependsOn === undefined ||
+            (Array.isArray(target.dependsOn) &&
+              target.dependsOn.every(
+                (dependency) =>
+                  typeof dependency === "string" ||
+                  (dependency !== null &&
+                    typeof dependency === "object" &&
+                    (dependency.projects === undefined ||
+                      (Array.isArray(dependency.projects) &&
+                        dependency.projects.every(
+                          (name) => typeof name === "string",
+                        ))) &&
+                    typeof dependency.target === "string"),
+              ))),
+      )
     )
-      throw new Error(`${path} names no project with targets`);
+      throw new Error(`${path} is not a project of target definitions`);
     return project;
   });
 } catch (error) {
@@ -59,7 +82,7 @@ const coverage = projects.find((p) => p.name === "onepipeline-ui-coverage")
   ?.targets?.coverage;
 const depended = new Set(
   (coverage?.dependsOn ?? []).flatMap((dependency) =>
-    (dependency.projects ?? []).map(
+    (typeof dependency === "string" ? [] : (dependency.projects ?? [])).map(
       (project) => `${project}:${dependency.target}`,
     ),
   ),
