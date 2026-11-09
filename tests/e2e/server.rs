@@ -17776,10 +17776,7 @@ fn a_node_whose_worktree_provisioning_failed_is_served_as_the_engine_recorded_it
         &format!("#!/bin/sh\necho '{HOOK_SAID}' >&2\nexit 3\n"),
     );
     let log = dir.join("harness.log");
-    // llmlint: ignore[e2e_not_mocked] the harness program is the one process this
-    // journey stands in for, on the terms `write_harness_standin` states: a real one
-    // bills a model call. The hook, `onevcs` cutting the session over real git, and
-    // the pinned engine raising and recording the surface are all real.
+    // llmlint: ignore[e2e_not_mocked] the stand-in replaces only the harness program, which bills a model call (`write_harness_standin`); every layer this journey asserts on — the hook under real git, onevcs cutting the session and the pinned engine raising the surface — runs for real.
     let standin = write_committing_harness_standin(&dir, &log);
     write_extending_config(&dir, &standin);
     let graph = write_node_scope_graph(&dir);
@@ -17844,7 +17841,6 @@ fn a_node_whose_worktree_provisioning_failed_is_served_as_the_engine_recorded_it
     );
     assert_eq!(queued[0]["payload"]["blocking"], json!(false));
 
-    // The run detail answers that run, with the node as every run journey reads it.
     let served = detail();
     assert_eq!(served.status, 200, "{}", served.body);
     let served = served.json();
@@ -17873,8 +17869,6 @@ fn a_node_whose_worktree_provisioning_failed_is_served_as_the_engine_recorded_it
         served["node_details"]
     );
 
-    // The timeline lists the session's failed provisioning and the surface it
-    // raised on that node's run, each as recorded.
     let timeline = http::get(
         serving.address,
         &format!("/api/v2/runs/{run}/timeline?scope=run"),
@@ -17904,7 +17898,6 @@ fn a_node_whose_worktree_provisioning_failed_is_served_as_the_engine_recorded_it
         "{events:?}"
     );
 
-    // And the channel serves it waiting, in the engine's words.
     let channel = http::get(serving.address, &format!("/api/v2/runs/{run}/channel"));
     assert_eq!(channel.status, 200, "{}", channel.body);
     let channel = channel.json();
