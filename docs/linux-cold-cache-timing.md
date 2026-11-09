@@ -266,7 +266,10 @@ comparison.
 
 That removes the suite from the end of the job. CI has not measured it. The browser chain
 ended 31 s before the suite did, and `dag-ui-read-latency:test` then runs alone for about
-255 s, so what is left past the cap is `dag-ui:build-api-server` (776 s here), which is
-CPU contention rather than a slot or a lock: it starts as soon as `dag-ui:build` ends, and
-its compile is about 100 s alone. `NODE_COMPILE_CACHE` was tried on the suite's slowest
+255 s, so the chain headed by `dag-ui:build-api-server` may still run past the cap. That
+task finished 12.9 minutes into Nx there, against about 100 s of compile alone. A cancelled
+run records no task start times, so when it started and what it waited on are not known.
+CPU contention is an unverified hypothesis: Nx's ordering should start it soon after
+`dag-ui:build`, and no shared build lock was found, but neither was observed in that run.
+`NODE_COMPILE_CACHE` was tried on the suite's slowest
 nested-Nx test, and it did not move (64–66 s against 62–65 s).
