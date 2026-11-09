@@ -561,7 +561,7 @@ fn every_sibling_is_the_release_the_pinned_engine_resolves() {
 /// comparison of the two above passes for any release both moved to together —
 /// including one whose adopted runs write their plan's home nothing. It moves
 /// with the `onepipeline` pin and [`STORE_RELEASE`], as one change.
-const ENGINE_RELEASE: &str = "0.103.0";
+const ENGINE_RELEASE: &str = "0.104.0";
 
 /// Where the lock must resolve [`ENGINE_RELEASE`] from: crates.io, which serves
 /// the release a crates.io consumer and the sibling CLI `just bootstrap`

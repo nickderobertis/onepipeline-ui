@@ -17755,6 +17755,166 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+/// A node whose session opened on a worktree the repository's `post-checkout`
+/// failed to provision is served as before: onepipeline 0.104 raises a
+/// non-blocking `provisioning-failed` surface for that session and the session
+/// opens regardless, so the run detail answers with the node, its status, its
+/// branch and its publication exactly as for any other dispatched node, and the
+/// surface reaches a reader as the engine queued it. Every record here is the
+/// linked engine's and `onevcs`'s own: the hook fails under real git, `onevcs`
+/// records it on the session's stream, and the engine raises the surface.
+#[cfg(unix)]
+#[test]
+fn a_node_whose_worktree_provisioning_failed_is_served_as_the_engine_recorded_it() {
+    const HOOK_SAID: &str = "the toolchain did not install";
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let repo = scratch_repo::seed(&dir);
+    scratch_repo::commit_post_checkout(
+        &repo,
+        &format!("#!/bin/sh\necho '{HOOK_SAID}' >&2\nexit 3\n"),
+    );
+    let log = dir.join("harness.log");
+    // llmlint: ignore[e2e_not_mocked] the stand-in replaces only the harness program, which bills a model call (`write_harness_standin`); every layer this journey asserts on — the hook under real git, onevcs cutting the session and the pinned engine raising the surface — runs for real.
+    let standin = write_committing_harness_standin(&dir, &log);
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::DISPATCH_NODE_ID;
+    fixture_run::write_awaiting_session(
+        &root,
+        run,
+        &dir,
+        &graph,
+        &repo.alias,
+        scratch_repo::BASE_BRANCH,
+    );
+
+    let state = dir.join("state");
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+            (
+                scratch_repo::GIT_CONFIG_ENV,
+                &repo.gitconfig.display().to_string(),
+            ),
+            (onevcs::branches::PREFIX_ENV, ""),
+        ],
+    );
+    let pid = serving.drive_fixture(run);
+    let driver = RetainedDriver(pid);
+
+    let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}"));
+    eventually("the adopted run's node settled", || {
+        matches!(
+            detail().json()["graph"]["node_status"][node].as_str(),
+            Some("done" | "failed")
+        )
+    });
+
+    // The engine's own record: the surface it queued for the failed session,
+    // read off the journal it wrote rather than off anything served.
+    let journal = fs::read_to_string(serving.run_dir(run).join("events.jsonl"))
+        .expect("the engine's journal");
+    let queued: Vec<Value> = journal
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| {
+            record["kind"] == json!("planner-surface-queued")
+                && record["payload"]["kind"] == json!("provisioning-failed")
+        })
+        .collect();
+    assert_eq!(queued.len(), 1, "{journal}");
+    let message = queued[0]["payload"]["message"]
+        .as_str()
+        .expect("the surface's message");
+    assert!(
+        message.contains(&format!("node: {node}"))
+            && message.contains("hook: post-checkout")
+            && message.contains("ended: exited with status 3")
+            && message.contains(HOOK_SAID),
+        "{message}"
+    );
+    assert_eq!(queued[0]["payload"]["blocking"], json!(false));
+
+    let served = detail();
+    assert_eq!(served.status, 200, "{}", served.body);
+    let served = served.json();
+    assert_enveloped(&served);
+    assert_eq!(served["run"]["run_id"], json!(run), "{}", served["run"]);
+    assert_eq!(served["graph"]["run_id"], json!(run));
+    assert_eq!(
+        served["graph"]["node_status"][node],
+        json!("done"),
+        "{}",
+        served["graph"]
+    );
+    assert!(
+        fs::read_to_string(&log).is_ok_and(|ran| ran.contains("committing-harness")),
+        "the node settled without the harness running"
+    );
+    let branch = served["graph"]["node_results"][node]["branch"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the node's branch: {}", served["graph"]))
+        .to_owned();
+    assert!(branch.contains(node), "{branch}");
+    assert_eq!(
+        served["node_details"][node]["publication"]["branch"],
+        json!(branch),
+        "{}",
+        served["node_details"]
+    );
+
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    );
+    assert_eq!(timeline.status, 200, "{}", timeline.body);
+    let events = events_on(&timeline.json());
+    assert!(
+        events
+            .iter()
+            .any(|event| event["kind"] == json!("worktree-provision-failed")
+                && event["node_id"] == json!(node)),
+        "the timeline lists no worktree-provision-failed for the node: {events:?}"
+    );
+    let surfaced: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["surface"]["kind"] == json!("provisioning-failed"))
+        .map(|event| &event["surface"])
+        .collect();
+    assert_eq!(
+        surfaced,
+        [&json!({
+            "kind": "provisioning-failed",
+            "message": message,
+            "source": queued[0]["payload"]["source"],
+            "blocking": false,
+        })],
+        "{events:?}"
+    );
+
+    let channel = http::get(serving.address, &format!("/api/v2/runs/{run}/channel"));
+    assert_eq!(channel.status, 200, "{}", channel.body);
+    let channel = channel.json();
+    let waiting: Vec<&Value> = channel["waiting"]
+        .as_array()
+        .expect("the waiting surfaces")
+        .iter()
+        .filter(|surface| surface["kind"] == json!("provisioning-failed"))
+        .collect();
+    assert_eq!(waiting.len(), 1, "{channel}");
+    assert_eq!(waiting[0]["message"], json!(message));
+    assert_eq!(waiting[0]["blocking"], json!(false));
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 /// A harness stand-in for a dispatch on either side of the publication boundary:
 /// it records the argv it was given in `argv-<pid>.txt` under `records`, and the
 /// first line of its stdin — the stream-json prompt frame, where the turn was
