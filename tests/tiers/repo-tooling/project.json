@@ -2,7 +2,7 @@
   "name": "onepipeline-ui-repo-tooling",
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
-  "tags": ["scope:api", "type:test", "lang:rust", "demo:coverage-after-retry"],
+  "tags": ["scope:api", "type:test", "lang:rust", "demo:coverage-after-3"],
   "targets": {
     "manifest-inputs-for-affected": {
       "//": "Carries only file-based affected edges for semantic manifest inputs; CI never runs this uncached no-op.",
