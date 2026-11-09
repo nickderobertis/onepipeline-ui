@@ -26,8 +26,8 @@ function load() {
 
 // Linux gets 36 minutes from docs/release-sweep-timing.md; the other caps stay 30.
 const FOUR = {
-  lint: "ubuntu-latest",
-  "test-linux": "ubuntu-latest",
+  lint: "ubuntu-24.04",
+  "test-linux": "ubuntu-24.04",
   "test-windows": "windows-latest",
   "test-macos": "macos-latest",
 };
