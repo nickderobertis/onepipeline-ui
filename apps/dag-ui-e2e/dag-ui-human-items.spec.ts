@@ -4508,6 +4508,46 @@ test("a refused draft follows the policy: gone with a notice once its item close
   expect(await storedDraft(page, last)).not.toBeNull();
 });
 
+test("a refused draft whose item cannot then be read stays stored and sendable beside its reason", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const id = raiseQuestion(served, {
+    key: "refused-unread",
+    title: "Refused then unread?",
+    choices: REGIONS,
+  });
+  await open(page, served);
+  await setUpdates(page, "Off");
+  await choiceButton(
+    card(page, "Refused then unread?"),
+    "Asia Pacific",
+  ).click();
+  raiseQuestion(served, {
+    key: "refused-unread",
+    title: "Refused then unread?",
+    choices: REGIONS.filter(({ id: offered }) => offered !== "ap"),
+  });
+  const looked: string[] = [];
+  // llmlint: ignore[e2e_not_mocked] the transport failing for the one read that follows a refusal, while the send and every other request stay up, is the state under test, and no real server can fail a single GET; the bundle, the engine's refusal and all other routes are real.
+  await page.route(`**/api/human-items/${id}`, (route) => {
+    looked.push(route.request().url());
+    return route.abort();
+  });
+  const sent = writes(page);
+  await sendAnswers(page);
+
+  const refused = card(page, "Refused then unread?").getByRole("alert");
+  await expect(refused).toContainText("offers no choice ap");
+  expect(looked.length).toBeGreaterThan(0);
+  expect(batchesOf(sent)).toHaveLength(1);
+  expect(stored(served, id).state).toBe("open");
+  expect(await storedDraft(page, id)).not.toBeNull();
+  await expect(sendButton(page)).toHaveText("Send 1 answer");
+  await expect(page.getByRole("list", { name: "Not sent" })).toHaveCount(0);
+  await page.unroute(`**/api/human-items/${id}`);
+});
+
 test("a filter hiding a drafted item does not retire its draft", async ({
   page,
 }) => {
@@ -4765,7 +4805,7 @@ test("what storage holds is only used if valid, and a browser that keeps nothing
   });
   await open(page, served);
   await choiceButton(card(page, "Stored good?"), "Europe").click();
-  // Corrupt entries are what no press can make: another writer's bytes.
+  // llmlint: ignore-block[tests_mirror_real_usage] the state under test is storage holding bytes no press on this page can write (an older build's or another writer's draft, a key that is no item id), so they can only be put there directly; the page reads them back through the real reload, server and engine.
   await page.evaluate(() => {
     localStorage.setItem(
       "onepipeline-ui.human-items.draft.hi-notjson",
@@ -4780,6 +4820,7 @@ test("what storage holds is only used if valid, and a browser that keeps nothing
       JSON.stringify({ title: "Bad key", text: "Never sent" }),
     );
   });
+  // llmlint: ignore-end[tests_mirror_real_usage]
   await page.reload();
   await expect(sendButton(page)).toHaveText("Send 1 answer");
   expect(await storedDraft(page, good)).not.toBeNull();
