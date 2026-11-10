@@ -20,8 +20,7 @@ if [ "${1:-}" = --default ]; then
   exit 0
 fi
 engine=.tools/onepipeline-spike
-if ! git -C "$engine" diff --quiet c58295e HEAD -- src 2>/dev/null \
-  || ! diff -q <(git -C "$engine" diff c58295e HEAD -- src) spikes/first-view-time/engine.patch >/dev/null; then
+if ! diff -q <(git -C "$engine" diff c58295e HEAD -- src) spikes/first-view-time/engine.patch >/dev/null; then
   echo "$engine does not hold exactly engine.patch over onepipeline v0.105.0 (c58295e)" >&2
   exit 1
 fi
