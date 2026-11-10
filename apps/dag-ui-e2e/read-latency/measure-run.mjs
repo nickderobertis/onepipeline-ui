@@ -39,6 +39,8 @@ const run = spawnSync(
     "test",
     "--config",
     join(HERE, "read-latency.config.ts"),
+    // One argument: `--project` alone takes every name after it as a project.
+    "--project=budgets",
     // The host measurement alone: other journeys' titles name first screens too.
     "read-latency.spec.ts",
     "-g",
