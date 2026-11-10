@@ -844,7 +844,9 @@ async function serveLarge(world: LargeWorld, port: number) {
       env: {
         ...world.env,
         ONEPIPELINE_UI_SPIKE: SPIKE,
-        ONEPIPELINE_UI_SPIKE_TRACE: trace,
+        ...(process.env.READ_LATENCY_NO_TRACE === "1"
+          ? {}
+          : { ONEPIPELINE_UI_SPIKE_TRACE: trace }),
       },
       cwd: world.workspace,
     },
@@ -1328,6 +1330,8 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
       return {
         first_view: firstView,
         spike: SPIKE,
+        stub_kinds: process.env.ONEPIPELINE_UI_SPIKE_STUB_KINDS ?? null,
+        traced: process.env.READ_LATENCY_NO_TRACE !== "1",
         server: releaseBinary(),
         host_load: { start: hostStart, end: hostLoad() },
       } as unknown as LargeRun;
@@ -1349,6 +1353,8 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
       history_page: history,
       status,
       spike: SPIKE,
+      stub_kinds: process.env.ONEPIPELINE_UI_SPIKE_STUB_KINDS ?? null,
+      traced: process.env.READ_LATENCY_NO_TRACE !== "1",
       server: releaseBinary(),
       host_load: { start: hostStart, end: hostLoad() },
     } as LargeRun;

@@ -16,7 +16,8 @@
  *
  * `--server` names the binary measured (the release build by default), `--spike`
  * the prototype switches it runs with (`ONEPIPELINE_UI_SPIKE`; none by default), and
- * `--first-view-only` takes each view's primer and three readings and nothing else.
+ * `--first-view-only` takes each view's primer and three readings and nothing else;
+ * `--no-trace` starts each server without its trace, so its traced answer path is not taken.
  * Every reading carries its server's trace (`server_split`) where the binary writes one.
  *
  * Exits 2 on a usage error, otherwise as the measurement does.
@@ -41,6 +42,7 @@ try {
       spike: { type: "string" },
       views: { type: "string" },
       "first-view-only": { type: "boolean" },
+      "no-trace": { type: "boolean" },
     },
   }));
   if (
@@ -89,6 +91,7 @@ const run = spawnSync(
       ...optional("READ_LATENCY_SPIKE", values.spike),
       ...optional("READ_LATENCY_VIEWS", values.views),
       ...(values["first-view-only"] ? { READ_LATENCY_FIRST_VIEW_ONLY: "1" } : {}),
+      ...(values["no-trace"] ? { READ_LATENCY_NO_TRACE: "1" } : {}),
     },
   },
 );
