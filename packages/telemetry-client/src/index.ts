@@ -401,7 +401,10 @@ export class TelemetryClient {
       this.#url(API_V2_PATHS.subscriptions),
       subscribedSchema.parse,
       json("POST", body),
-      "The read of this run's history",
+      // What a person is waiting on: a run's history, or the page's own listing.
+      body.view.type === "sidebar" || body.view.type === "human-items"
+        ? "The read of this page"
+        : "The read of this run's history",
     );
   }
 

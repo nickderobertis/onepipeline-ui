@@ -1273,6 +1273,19 @@ test("Action items follows the CLI's writes on the stream it already holds, filt
   const world = buildWorld();
   try {
     const grown = await growJournal(world);
+    // The workload's runs are warmed: one sidebar read writes each run's summary
+    // cache, which a server over a fresh copy of them otherwise spends its first
+    // answer on, past the client's deadline on a loaded host.
+    {
+      const warm = await serveFresh(world, grown, "warm");
+      const read = await fetch(`${warm.origin}/api/v2/subscriptions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ view: { type: "sidebar" } }),
+      });
+      if (!read.ok) throw new Error(`the warming read answered ${read.status}`);
+      await stopServing(warm.server);
+    }
     const measureOn = async (name: "unfiltered" | "filtered") => {
       const context = await browser.newContext();
       const page = await context.newPage();
