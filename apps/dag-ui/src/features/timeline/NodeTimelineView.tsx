@@ -599,21 +599,31 @@ function NodeExecution({
     [containerRef],
   );
   const plotArea = useRef<HTMLElement | null>(null);
-  // Rows added above the reader keep what they were reading where it was.
-  const heightBeforeLoad = useRef<number | undefined>(undefined);
+  // Rows added above the reader keep what they were reading where it was. A page
+  // can add rows at more than one place, so this anchors on the first row already
+  // shown that new rows arrived directly above, not on the total growth.
+  const placesBeforeLoad = useRef<Map<string, number> | undefined>(undefined);
   const { loadEarlier, loadSpan, loadStretch } = history;
   const askEarlier = () => {
-    heightBeforeLoad.current = transcript.current?.scrollHeight;
+    placesBeforeLoad.current = transcriptPlaces(transcript.current);
     loadEarlier();
   };
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the rows the merged timeline brought are what moved the height being restored.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the rows the merged timeline brought are what moved the row being kept in place.
   useLayoutEffect(() => {
     const element = transcript.current;
-    const before = heightBeforeLoad.current;
+    const before = placesBeforeLoad.current;
     if (element === null || before === undefined || history.loadingEarlier)
       return;
-    heightBeforeLoad.current = undefined;
-    element.scrollTop += element.scrollHeight - before;
+    placesBeforeLoad.current = undefined;
+    let arrived = false;
+    for (const [id, top] of transcriptPlaces(element)) {
+      const was = before.get(id);
+      if (was === undefined) arrived = true;
+      else if (arrived) {
+        element.scrollTop += top - was;
+        return;
+      }
+    }
   }, [timeline, history.loadingEarlier]);
   // An address naming a row before the window is a person asking for it: read back
   // until it is held or there is nothing earlier.
@@ -846,6 +856,16 @@ function transcriptRuns(reading: readonly TranscriptEntry[]): readonly {
  * much of it there is. `aria-expanded` is what says which way the control goes, and
  * it is the same button both ways: one thing to find, one thing to press.
  */
+/** Where each transcript row stands on screen, by row id, in the order shown. */
+function transcriptPlaces(transcript: HTMLElement | null): Map<string, number> {
+  const places = new Map<string, number>();
+  for (const row of transcript?.querySelectorAll<HTMLElement>(
+    "article.transcript-item[data-row-id]",
+  ) ?? [])
+    places.set(row.dataset.rowId ?? "", row.getBoundingClientRect().top);
+  return places;
+}
+
 function CollapsedRun({
   entry,
   onToggle,
@@ -881,6 +901,7 @@ function TranscriptItem({
       className="transcript-item"
       data-dispatch-group={row.dispatch?.label}
       data-journal-seq={row.rowKind === "event" ? row.event.seq : undefined}
+      data-row-id={row.id}
       data-selected={selected}
       ref={(element) => register(row.id, element)}
     >

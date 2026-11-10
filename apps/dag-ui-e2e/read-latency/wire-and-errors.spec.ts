@@ -125,10 +125,33 @@ test("a page request goes out only when the reader scrolls back", async ({
     const answered = page.waitForResponse((response) =>
       new URL(response.url()).pathname.endsWith("/timeline/events"),
     );
+    // Earlier rows arrive above the rows already shown, and the row they arrive above
+    // keeps its place on screen rather than being pushed down by them.
+    await load.scrollIntoViewIfNeeded();
+    const rows = page
+      .getByRole("region", { name: "Node transcript" })
+      .getByRole("button", { name: /^Open / });
+    const shownBefore = await rows.allInnerTexts();
+    const handles = await rows.elementHandles();
+    const places = await Promise.all(
+      handles.map(async (row) => (await row.boundingBox())?.y),
+    );
     await load.click();
     const body = timelineEventsPageSchema.parse(await (await answered).json());
     expect(body.rows.length).toBeGreaterThan(0);
     expect(wire.pages).toHaveLength(1);
+    await expect.poll(() => rows.count()).toBeGreaterThan(shownBefore.length);
+    const shownAfter = await rows.allInnerTexts();
+    const above = shownBefore.findIndex((text, at) => shownAfter[at] !== text);
+    expect(
+      above,
+      "the earlier rows arrive among those shown",
+    ).toBeGreaterThanOrEqual(0);
+    const now = (await handles[above]?.boundingBox())?.y;
+    expect(
+      Math.abs((now ?? Number.NaN) - (places[above] ?? Number.NaN)),
+      `"${shownBefore[above]}" moved from ${places[above]} to ${now}`,
+    ).toBeLessThan(2);
   } finally {
     await stop(served);
   }
