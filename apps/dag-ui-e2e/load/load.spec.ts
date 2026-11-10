@@ -496,6 +496,17 @@ async function loaded(page: Page, variant: Variant): Promise<number> {
               ? page.getByRole("heading", { name: "Channel queue" })
               : page.getByRole("region", { name: /^Timeline for / });
   await view.waitFor({ timeout: 300_000 });
+  // A run view has loaded once it holds the whole run, as it did when its first
+  // answer was the whole run: the window then reads the view kept live, not the
+  // one-off read of the rest, which each opening does once.
+  if (
+    variant.kind !== "action-items" &&
+    variant.kind !== "nothing-open" &&
+    variant.kind !== "host"
+  )
+    await expect(
+      page.getByText("The rest of this run's history is still loading"),
+    ).toHaveCount(0, { timeout: 600_000 });
   // The Host page has finished loading once its own listing has been read.
   if (variant.kind === "nothing-open" || variant.kind === "host")
     await page
