@@ -1,9 +1,10 @@
 /**
  * The load journey's lag arithmetic, held to records of known timing: what it
  * reports for each record is the time from that record's append to the page
- * rendering it — on a node timeline that record's own row, elsewhere the first
- * time a view root reached its number — and a record the page never rendered
- * is counted as never shown, not as no lag. No browser is opened.
+ * rendering it — on a node timeline that record's own row or the first later row
+ * a burst carried it past, elsewhere the first time a view root reached its
+ * number — and a record the page never rendered is counted as never shown, not
+ * as no lag. No browser is opened.
  */
 
 import { expect, test } from "@playwright/test";
@@ -36,16 +37,19 @@ test("a view root's rise renders every record at or below it", () => {
   });
 });
 
-test("a node timeline renders a record only when its own row appears", () => {
+test("a node timeline renders a record by its own row, or by the first later row a burst carried it past", () => {
   const rendered = { rows: { "10": 1_100, "12": 3_200 }, roots: [] };
-  // 11 and 13 never had a row: never shown, and never read as quick.
+  // 11 had no row of its own: the window of latest rows had moved past it when
+  // 12's appeared, which is when it was rendered. 13 never had a row nor one
+  // after it: never shown, and never read as quick.
+  expect(renderedAt(rendered, true, 11)).toBe(3_200);
   expect(lagStats(appended, rendered, true)).toStrictEqual({
     records: 4,
-    shown: 2,
-    never_shown: 2,
-    p50_s: 0.1,
-    p95_s: 0.2,
-    max_s: 0.2,
+    shown: 3,
+    never_shown: 1,
+    p50_s: 0.2,
+    p95_s: 1.2,
+    max_s: 1.2,
   });
   expect(lagStats([], rendered, true).p95_s).toBeNull();
 });

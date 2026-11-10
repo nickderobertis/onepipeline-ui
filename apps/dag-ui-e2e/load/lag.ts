@@ -39,15 +39,23 @@ const seconds = (ms: number) => Math.round(ms) / 1000;
 /**
  * When the page rendered the record numbered `seq`: its row's appearance on a
  * node timeline, or else the first rise of a view root to it or past it.
+ *
+ * A node timeline holds the node's latest rows, so a record a burst carried past
+ * that window before the page drew it has no row of its own: it is rendered when
+ * the first row at or after it appears, as a root's rise past it renders it.
  */
 export function renderedAt(
   rendered: Rendered,
   rowsShown: boolean,
   seq: number,
 ): number | undefined {
-  return rowsShown
-    ? rendered.rows[String(seq)]
-    : rendered.roots.find(([shown]) => shown >= seq)?.[1];
+  if (!rowsShown) return rendered.roots.find(([shown]) => shown >= seq)?.[1];
+  const own = rendered.rows[String(seq)];
+  if (own !== undefined) return own;
+  const later = Object.entries(rendered.rows)
+    .filter(([shown]) => Number(shown) > seq)
+    .map(([, at]) => at);
+  return later.length === 0 ? undefined : Math.min(...later);
 }
 
 /** Each shown record's lag in seconds, and the summary of them. */
