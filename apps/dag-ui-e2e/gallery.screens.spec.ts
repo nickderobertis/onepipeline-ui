@@ -771,6 +771,10 @@ const SURFACES: readonly Surface[] = [
     title: "Recorded settled execution and the late completion marker",
     open: async (page) => {
       await page.goto(`/?run=${recorded.run_id}&view=overall`);
+      // The run's own records are read when asked for, by the page's own control.
+      await page
+        .getByRole("button", { name: "Load the run's own records" })
+        .click();
       await page
         .getByRole("region", { name: "Records after execution" })
         .waitFor();
