@@ -5885,6 +5885,25 @@ pub(crate) fn timeline_harnesses_over(
     let Some(spans) = payload["spans"].as_array_mut() else {
         return payload;
     };
+    // Each node's dispatches, read once: a run's thousands of sessions each find
+    // their parent among them, and a scan of every span per session was most of
+    // what a large run's Overall cost.
+    let mut dispatches: HashMap<String, Vec<(String, Value, String)>> = HashMap::new();
+    for span in spans.iter() {
+        if span["kind"] == "dispatch" && span.get("harness_scope").is_none() {
+            if let (Some(node), Some(started), Some(id)) = (
+                span["node_id"].as_str(),
+                span["started_at"].as_str(),
+                span["id"].as_str(),
+            ) {
+                dispatches.entry(node.to_owned()).or_default().push((
+                    started.to_owned(),
+                    span["agent_role"].clone(),
+                    id.to_owned(),
+                ));
+            }
+        }
+    }
     for session in &agents.sessions {
         let labels = session.labels.as_map();
         let node = labels.get(NODE_LABEL);
@@ -5926,26 +5945,19 @@ pub(crate) fn timeline_harnesses_over(
             let parent = node.map_or_else(
                 || format!("run.{}", view.paths.run),
                 |node| {
-                    spans
-                        .iter()
-                        .filter(|span| {
-                            span["node_id"] == *node
-                                && span["kind"] == "dispatch"
-                                && span.get("harness_scope").is_none()
-                                && span["started_at"].as_str() <= started.as_str()
+                    dispatches
+                        .get(node.as_str())
+                        .into_iter()
+                        .flatten()
+                        .filter(|(began, role, _)| {
+                            Some(began.as_str()) <= started.as_str()
                                 && match launch_scope {
-                                    "pr-author" | "review-reply" => {
-                                        span["agent_role"] == launch_scope
-                                    }
-                                    _ => {
-                                        span["agent_role"] != "pr-author"
-                                            && span["agent_role"] != "review-reply"
-                                    }
+                                    "pr-author" | "review-reply" => *role == launch_scope,
+                                    _ => *role != "pr-author" && *role != "review-reply",
                                 }
                         })
-                        .max_by_key(|span| span["started_at"].as_str())
-                        .and_then(|span| span["id"].as_str())
-                        .map_or_else(|| format!("node.{node}"), str::to_owned)
+                        .max_by_key(|(began, ..)| began.as_str())
+                        .map_or_else(|| format!("node.{node}"), |(.., id)| id.clone())
                 },
             );
             let mut span = json!({
