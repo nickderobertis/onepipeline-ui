@@ -415,8 +415,6 @@ impl LiveTimeline {
         &self.payload
     }
 
-    /// How many entries this timeline has rendered from records, rather than
-    /// reused, since it was built.
     /// Render every row from the next rebuild on: a node's first answer renders
     /// its window, and a view kept live holds every row from that window's start.
     pub(crate) fn widen(&mut self) {
@@ -440,6 +438,8 @@ impl LiveTimeline {
         self.rendered.borrow().older.len()
     }
 
+    /// How many entries this timeline has rendered from records, rather than
+    /// reused, since it was built.
     pub(crate) fn rendered(&self) -> usize {
         self.rendered.borrow().fresh
     }

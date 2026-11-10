@@ -545,8 +545,8 @@ impl Hub {
         let shared = &self.0;
         let mut guard = lock(live);
         let run = &mut *guard;
-        if let Reading::Selective { failed, .. } = &mut run.reading {
-            *failed = Some(why.to_owned());
+        if !matches!(run.reading, Reading::Complete) {
+            run.reading = Reading::Failed(why.to_owned());
         }
         let now = crate::payload::now_rfc3339();
         let mut changes: Vec<(Visible, Change)> = Vec::new();

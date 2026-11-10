@@ -709,11 +709,13 @@ struct LiveRun {
 
 /// How far a held run's reading has come.
 enum Reading {
-    /// A selective read, with its complete read not started, running or failed.
-    Selective {
-        started: bool,
-        failed: Option<String>,
-    },
+    /// A selective read, whose complete read has not been started.
+    Selective,
+    /// A selective read, with its complete read running.
+    Running,
+    /// A selective read, whose complete read failed for this reason; a later
+    /// subscription starts it again.
+    Failed(String),
     /// The complete read was published.
     Complete,
 }
@@ -899,10 +901,7 @@ impl LiveRun {
             agents_stamp: file_stamp(&paths.oneharness_sessions()),
             agents,
             view,
-            reading: Reading::Selective {
-                started: false,
-                failed: None,
-            },
+            reading: Reading::Selective,
             overdue: false,
         })
     }
@@ -950,20 +949,19 @@ impl LiveRun {
     /// Claim the starting of the complete read, if none is held, running or
     /// failed: a later subscription retries one that failed.
     fn claim_complete(&mut self) -> bool {
-        match &mut self.reading {
-            Reading::Selective { started, failed } if !*started || failed.is_some() => {
-                *started = true;
-                *failed = None;
+        match self.reading {
+            Reading::Selective | Reading::Failed(_) => {
+                self.reading = Reading::Running;
                 true
             }
-            _ => false,
+            Reading::Running | Reading::Complete => false,
         }
     }
 
     fn failed(&self) -> Option<&str> {
         match &self.reading {
-            Reading::Selective { failed, .. } => failed.as_deref(),
-            Reading::Complete => None,
+            Reading::Failed(why) => Some(why),
+            Reading::Selective | Reading::Running | Reading::Complete => None,
         }
     }
 
