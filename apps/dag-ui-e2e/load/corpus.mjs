@@ -598,8 +598,14 @@ function writeLargeRun(root, runId, project, scale, startMs, stepMs) {
   mkdirSync(dir, { recursive: true });
   const settled = large.state === "settled";
   const store = join(dirname(root), "history");
-  // Node names: the graph's steps, its busiest node, and the off-graph one.
-  const steps = Array.from({ length: 14 }, (_, n) => `step-${n}`);
+  // Node names: the graph's steps, its busiest node, and the off-graph one. A
+  // step is named at a real node id's length, which every span repeats: the
+  // budgets state Overall's first answer over 1 MB, and a short name would
+  // understate it.
+  const steps = Array.from(
+    { length: 14 },
+    (_, n) => `implement-first-screen-${n}`,
+  );
   const busiest = LIVE_NODE;
   const offGraph = "retired-off-graph";
   const planned = [
