@@ -697,8 +697,27 @@ function readCorpusDrivers(
           z.looseObject({ awaiting: z.array(z.unknown()).optional() }),
         )
         .default({}),
+      plan: z
+        .looseObject({
+          tasks: z.array(
+            z.looseObject({
+              id: z.string(),
+              deps: z.array(z.string()).default([]),
+            }),
+          ),
+        })
+        .optional(),
     })
     .parse(complete.graph);
+  // A consumer whose dependency names a run that is in this root, as `run:<id>#<node>`.
+  const crossRunConsumers = (graph.plan?.tasks ?? []).filter((task) =>
+    task.deps.some((dep) => {
+      const named = /^run:([^#]+)#/u.exec(dep)?.[1];
+      return named !== undefined && existsSync(join(world.runsRoot, named));
+    }),
+  );
+  // The stand-in counts only where an executable `claude` is on the path it records.
+  const standIn = join(dirname(world.standInLog), "claude");
   return {
     records: records.length,
     journal_bytes: Buffer.byteLength(journal.join("\n")) + journal.length,
@@ -732,9 +751,9 @@ function readCorpusDrivers(
     awaits: Object.values(graph.node_results).filter(
       (result) => (result.awaiting ?? []).length > 0,
     ).length,
-    cross_run_settled_consumers:
-      facts?.large.crossRunConsumer === undefined ? 0 : 1,
-    stand_in_provider: existsSync(dirname(world.standInLog)) ? 1 : 0,
+    cross_run_settled_consumers: crossRunConsumers.length,
+    stand_in_provider:
+      existsSync(standIn) && (statSync(standIn).mode & 0o111) !== 0 ? 1 : 0,
   };
 }
 

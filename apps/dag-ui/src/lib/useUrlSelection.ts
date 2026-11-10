@@ -1,5 +1,6 @@
 import { API_V2_FILTER_PROFILES, isProjectId } from "@onepipeline-ui/dag-model";
 import { useCallback, useSyncExternalStore } from "react";
+import { isOpaqueId } from "../first-screen/address";
 import { appRootPath } from "./humanItemsRoute";
 
 /**
@@ -150,25 +151,6 @@ export type NodeTab = keyof typeof NODE_TAB_LABELS;
 
 export function isNodeTab(value: string | null): value is NodeTab {
   return value !== null && Object.hasOwn(NODE_TAB_LABELS, value);
-}
-
-/**
- * Whether an address value can be the opaque identifier the read API takes: a
- * run, a node or a timeline item is a non-empty token with no control character
- * and none of `/?#`, which is exactly what the telemetry client refuses to put
- * in a path. Checked here so a shared address that could never be served lands
- * where an unnamed one does rather than raising the client's refusal.
- */
-function isOpaqueId(value: string): boolean {
-  const hasControlCharacter = [...value].some(
-    (character) => character.charCodeAt(0) < 32,
-  );
-  return (
-    value.length > 0 &&
-    value.length <= 512 &&
-    !hasControlCharacter &&
-    !/[/?#]/u.test(value)
-  );
 }
 
 /** The value of one address parameter, where it is an identifier at all. */

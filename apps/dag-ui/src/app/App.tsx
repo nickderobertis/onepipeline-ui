@@ -47,6 +47,7 @@ import { ShutdownStatus } from "../features/shutdown/ShutdownStatus";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
 import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
+import { runPageKind } from "../first-screen/address";
 import { useHumanItemsRoute } from "../lib/humanItemsRoute";
 import { HISTORY_LOADING_TEXT, LOADING_TEXT, loaded } from "../lib/loading";
 import { RecordDisclosure } from "../lib/RecordDisclosure";
@@ -125,14 +126,7 @@ export function App({
   const drawer = useNavigationDrawer();
   const telemetry = useDagTelemetry(client, {
     runId: selection.runId,
-    view:
-      selection.view === "overall"
-        ? "overall"
-        : selection.view === "channel"
-          ? "channel"
-          : selection.nodeId === undefined
-            ? "graph"
-            : "node",
+    view: runPageKind(selection.view, selection.nodeId),
     nodeId: selection.nodeId,
     filter,
     // An address naming no run opens the newest one served, except on the Host

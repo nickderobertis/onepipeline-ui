@@ -3,8 +3,8 @@
  *
  * This is the first-screen chunk's reading of the address: it imports nothing that
  * parses a payload, because everything on this path counts against a run's first
- * second. `src/test/first-screen-address.test.ts` holds its two copied profiles to
- * `useUrlSelection`'s, which is the reading the rest of the app takes.
+ * second. `src/test/first-screen-address.test.ts` holds what it reads to `useUrlSelection`'s
+ * reading, which is the one the rest of the app takes, over a table of addresses.
  */
 import type { SubscriptionView } from "@onepipeline-ui/dag-model";
 
@@ -17,12 +17,41 @@ export interface FirstAddress {
   readonly view: SubscriptionView;
 }
 
+/**
+ * Whether an address value can be the opaque identifier the read API takes: a
+ * run, a node or a timeline item is a non-empty token with no control character
+ * and none of `/?#`, which is exactly what the telemetry client refuses to put
+ * in a path. The one reading of it: `useUrlSelection` takes it from here, so a
+ * shared address that could never be served lands where an unnamed one does on
+ * the first screen and in the app alike.
+ */
+export function isOpaqueId(value: string): boolean {
+  const hasControlCharacter = [...value].some(
+    (character) => character.charCodeAt(0) < 32,
+  );
+  return (
+    value.length > 0 &&
+    value.length <= 512 &&
+    !hasControlCharacter &&
+    !/[/?#]/u.test(value)
+  );
+}
+
 function usable(value: string | null): string | undefined {
-  if (value === null || value.length === 0 || value.length > 512)
-    return undefined;
-  for (const character of value)
-    if (character.charCodeAt(0) < 32) return undefined;
-  return /[/?#]/u.test(value) ? undefined : value;
+  return value !== null && isOpaqueId(value) ? value : undefined;
+}
+
+/**
+ * Which page a run's view shows: its graph, Overall, its channel, or a node's
+ * timeline where the graph names a node. The app and the first screen both read
+ * the address through this.
+ */
+export function runPageKind(
+  view: "graph" | "overall" | "channel",
+  nodeId: string | undefined,
+): "graph" | "overall" | "node" | "channel" {
+  if (view === "overall" || view === "channel") return view;
+  return nodeId === undefined ? "graph" : "node";
 }
 
 /** The server's two profile names for the two levels of detail. */
@@ -76,16 +105,20 @@ export function firstAddress(
   const nodeId = usable(params.get("node"));
   const named = params.get("view");
   const tab = params.get("tab");
-  if (named === "channel" || (tab !== null && tab !== "timeline"))
-    return undefined;
+  if (tab !== null && tab !== "timeline") return undefined;
   const filter =
     params.get("detail") === "decisions" ? FILTERS.decisions : FILTERS.activity;
-  const kind: FirstScreenKind =
-    named === "overall" || (named !== "graph" && nodeId === undefined)
-      ? "overall"
+  // An address naming no view, or one this app has no page for, opens the graph
+  // where it names a node and Overall where it names none, as `useUrlSelection` does.
+  const kind = runPageKind(
+    named === "overall" || named === "graph" || named === "channel"
+      ? named
       : nodeId === undefined
-        ? "graph"
-        : "node";
+        ? "overall"
+        : "graph",
+    nodeId,
+  );
+  if (kind === "channel") return undefined;
   return {
     runId,
     ...(kind === "node" && nodeId !== undefined ? { nodeId } : {}),

@@ -285,6 +285,7 @@ export function OverallView({
                 </p>
               ) : (
                 <GraphExecution
+                  failureShown={opened === undefined}
                   graph={graph}
                   history={history}
                   runRecordsToLoad={runLevel.some(
@@ -313,6 +314,11 @@ export function OverallView({
             <X />
           </Button>
           <TimelineItemDetail client={client} row={opened} runId={runId} />
+          {/* The panel covers the plot beside it, so a read that failed is said here,
+              where the person who opened the item is looking. */}
+          {history.failure !== undefined && (
+            <HistoryFailed failure={history.failure} />
+          )}
         </aside>
       )}
     </div>
@@ -327,6 +333,7 @@ export function OverallView({
  * given, so a wheel or a brush anywhere reframes the lot together.
  */
 function GraphExecution({
+  failureShown,
   graph,
   history,
   runRecordsToLoad,
@@ -334,6 +341,8 @@ function GraphExecution({
   onOpenItem,
   selectedItemId,
 }: {
+  /** Whether a failed read is said here, rather than in an open item's panel. */
+  readonly failureShown: boolean;
   readonly graph: ReturnType<typeof graphTimeline>;
   readonly history: TimelineHistory;
   /** Whether the run's own records are not all held. */
@@ -421,7 +430,7 @@ function GraphExecution({
             ))}
         </section>
       )}
-      {history.failure !== undefined && (
+      {failureShown && history.failure !== undefined && (
         <HistoryFailed failure={history.failure} />
       )}
       {/* Records the run made at no node, those after execution ended among them,

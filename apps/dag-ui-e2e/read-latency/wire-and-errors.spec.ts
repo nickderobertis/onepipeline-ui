@@ -10,7 +10,7 @@ import {
   visibleViolations,
 } from "@onepipeline-ui/dag-model";
 import { READ_DEADLINE_MS } from "@onepipeline-ui/telemetry-client";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import {
   addressOf,
   appendTo,
@@ -331,6 +331,136 @@ test("a failed page says so at its control, and Try again takes the page", async
     await failed.getByRole("button", { name: "Try again" }).click();
     await expect(failed).toHaveCount(0);
     await expect(load).toBeEnabled();
+  } finally {
+    await stop(served);
+  }
+});
+
+test("a span, a row, the run's records and a stretch each fail at their control and recover by Try again", async ({
+  page,
+}) => {
+  const served = await serve(world);
+  try {
+    const run = world.facts.openLiveRun;
+    const node = world.facts.large.busiestNode;
+    let refusing = false;
+    // llmlint: ignore[e2e_not_mocked] the acceptance criteria require a failed page to recover at its control: the proxy's 524 is doubled at the network boundary, the journey's only doubled party, and Try again then takes the real server's page.
+    await page.route("**/timeline/events**", (route) =>
+      refusing ? route.fulfill({ status: 524, body: "" }) : route.continue(),
+    );
+    /**
+     * Ask by `act` while pages are refused, then take the page by Try again: the
+     * failure is said `where` the person is looking, once.
+     */
+    const recovers = async (
+      what: string,
+      act: () => Promise<void>,
+      asks: (url: URL) => boolean,
+      where: Page | Locator = page,
+    ) =>
+      test.step(what, async () => {
+        const failed = where
+          .getByRole("alert")
+          .filter({ hasText: "Earlier rows did not load" });
+        refusing = true;
+        await act();
+        await expect(failed, `${what} says it failed`).toBeVisible({
+          timeout: 60_000,
+        });
+        await expect(
+          page
+            .getByRole("alert")
+            .filter({ hasText: "Earlier rows did not load" }),
+          `${what} is said once`,
+        ).toHaveCount(1);
+        refusing = false;
+        const taken = page.waitForResponse(
+          (response) => {
+            const url = new URL(response.url());
+            return (
+              url.pathname.endsWith("/timeline/events") &&
+              asks(url) &&
+              response.status() === 200
+            );
+          },
+          { timeout: 60_000 },
+        );
+        await failed.getByRole("button", { name: "Try again" }).click();
+        await taken;
+        await expect(failed, `${what} recovered`).toHaveCount(0);
+      });
+    const { timeline } = await completeDocuments(served, run);
+    const runSpan = (
+      timeline.spans as {
+        id: string;
+        node_id?: string;
+        harness_scope?: unknown;
+      }[]
+    ).find(
+      (span) => span.node_id === undefined && span.harness_scope === undefined,
+    );
+    if (runSpan === undefined) throw new Error("no run-level span");
+    await page.goto(`${served.origin}${addressOf(run, "overall")}`);
+    await expect(metricText(page, "Turns")).toHaveText(/^\d+$/u, {
+      timeout: 60_000,
+    });
+    await recovers(
+      "the run's own records",
+      () =>
+        page
+          .getByRole("button", { name: "Load the run's own records" })
+          .click(),
+      (url) =>
+        !url.searchParams.has("node") &&
+        !url.searchParams.has("span") &&
+        !url.searchParams.has("from"),
+    );
+    const line = page.getByRole("region", {
+      name: "Graph timeline",
+      exact: true,
+    });
+    await line.getByRole("button", { name: "Expand timeline" }).click();
+    await recovers(
+      "a node's row",
+      () =>
+        page
+          .getByRole("region", { name: `${node} timeline`, exact: true })
+          .getByRole("button", { name: "Expand timeline" })
+          .click(),
+      (url) =>
+        url.searchParams.get("node") === node &&
+        !url.searchParams.has("span") &&
+        !url.searchParams.has("from"),
+    );
+    await recovers(
+      "a zoomed stretch",
+      async () => {
+        // llmlint: ignore[e2e_uses_accessible_selectors] the line's spans are positioned SVG geometry that no role or name carries; the journey only finds where one is drawn and then zooms there with the pointer, as a person does.
+        const shape = line.locator('[data-timeline-shape="span"]').first();
+        const bounds = await shape.boundingBox();
+        if (bounds === null) throw new Error("the line's plot has no box");
+        await page.mouse.move(
+          bounds.x + bounds.width / 2,
+          bounds.y + bounds.height / 2,
+        );
+        await page.keyboard.down("Control");
+        await page.mouse.wheel(0, -240);
+        await page.keyboard.up("Control");
+      },
+      (url) => url.searchParams.has("from"),
+    );
+    await recovers(
+      "an opened span",
+      () =>
+        page
+          .goto(
+            `${served.origin}${addressOf(run, "overall")}&event=${encodeURIComponent(runSpan.id)}`,
+          )
+          .then(() => undefined),
+      (url) => url.searchParams.get("span") === runSpan.id,
+      // The opened item's panel covers the plot, so its failure is said there.
+      page.getByRole("complementary", { name: "Item detail panel" }),
+    );
   } finally {
     await stop(served);
   }

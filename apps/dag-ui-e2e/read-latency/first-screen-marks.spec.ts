@@ -323,6 +323,16 @@ for (const wrong of WRONG_ANSWERS)
   });
 
 /** One value wrong on the page rather than in the answer. */
+/** The state a view's mark was reached at; a view that reached none fails here. */
+function marked(
+  reached: { readonly state: ScreenState | undefined },
+  view: string,
+): ScreenState {
+  if (reached.state === undefined)
+    throw new Error(`the ${view} view reached no first useful screen`);
+  return reached.state;
+}
+
 test("a screen drawing a value unlike its answer is refused by name", async ({
   page,
 }) => {
@@ -330,7 +340,7 @@ test("a screen drawing a value unlike its answer is refused by name", async ({
   try {
     const run = world.facts.openLiveRun;
     const graph = await reachMark(page, served, "graph", run, undefined);
-    const graphState = graph.state as ScreenState;
+    const graphState = marked(graph, "graph");
     const held = (changed: (state: ScreenState) => void) => {
       const copy = structuredClone(graphState);
       changed(copy);
@@ -358,7 +368,7 @@ test("a screen drawing a value unlike its answer is refused by name", async ({
     ).toMatch(/card .* awaits/u);
     await page.goto("about:blank");
     const overall = await reachMark(page, served, "overall", run, undefined);
-    const base = overall.state as ScreenState;
+    const base = marked(overall, "overall");
     const of = (changed: (state: ScreenState) => void) => {
       const copy = structuredClone(base);
       changed(copy);
@@ -385,7 +395,7 @@ test("a screen drawing a value unlike its answer is refused by name", async ({
       run,
       world.facts.large.busiestNode,
     );
-    const nodeBase = node.state as ScreenState;
+    const nodeBase = marked(node, "node");
     const row = structuredClone(nodeBase);
     row.rows = row.rows.slice(1);
     expect(
