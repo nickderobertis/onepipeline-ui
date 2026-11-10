@@ -2590,6 +2590,38 @@ for (const { from, verb, key, title } of [
     expect(await alerts()).toEqual([]);
   });
 
+/**
+ * The toast has left, or the failure says what was still in front of it.
+ *
+ * Nothing records a failed journey's page on CI, and a toast that stays has
+ * one of a few holds on it — pointed at, focus inside, a reason open, a write
+ * still out — or a duration that started late. The page as it stood when the
+ * wait gave up is the only evidence of which, so it goes into the message.
+ */
+async function expectToastGone(page: Page): Promise<void> {
+  try {
+    await expect(toast(page)).toHaveCount(0);
+  } catch (error) {
+    const state = await toast(page)
+      .evaluate((shown) => ({
+        phase: shown.getAttribute("data-phase"),
+        text: shown.textContent,
+        pointedAt: shown.matches(":hover"),
+        focusInside: shown.contains(document.activeElement),
+        focused: document.activeElement?.tagName,
+      }))
+      .then(async (shown) => ({
+        ...shown,
+        writing: await toast(page).getByRole("textbox").count(),
+      }))
+      .catch((unread: unknown) => `unreadable: ${String(unread)}`);
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\nThe toast as it stood: ${JSON.stringify(state)}`,
+      { cause: error },
+    );
+  }
+}
+
 test("the toast leaves after its duration, stays while hovered or focused, and leaves once that ends", async ({
   page,
 }) => {
@@ -2609,7 +2641,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
   await expect(toast(page)).toBeVisible();
   await page.clock.runFor(1_500);
-  await expect(toast(page)).toHaveCount(0);
+  await expectToastGone(page);
 
   // Hovered, it stays past its duration, and leaves when the pointer does.
   await complete("Rotate the deploy credentials");
@@ -2617,7 +2649,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.runFor((TOAST_SECONDS + 5) * 1_000);
   await expect(toast(page)).toBeVisible();
   await page.mouse.move(1, 1);
-  await expect(toast(page)).toHaveCount(0);
+  await expectToastGone(page);
 
   // Focused, the same, and it leaves when focus does.
   await complete("Review the action-items design");
@@ -2625,7 +2657,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.runFor((TOAST_SECONDS + 5) * 1_000);
   await expect(toast(page)).toBeVisible();
   await answerBox(page, LAST_QUESTION).focus();
-  await expect(toast(page)).toHaveCount(0);
+  await expectToastGone(page);
 
   // Nothing pointing at it and nothing focused in it, it still stays while what
   // it was asked to do is on its way, and leaves its duration after that lands.
@@ -2652,7 +2684,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
   await expect(toast(page)).toBeVisible();
   await page.clock.runFor(1_500);
-  await expect(toast(page)).toHaveCount(0);
+  await expectToastGone(page);
   await page.unroute(`**/api/human-items/${cache}/reopen`);
 
   // A reason being written holds it too, focus or no, until it is sent.
@@ -2669,7 +2701,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await expect(outcome(page)).toHaveText(`Reason saved: ${LAST_QUESTION}`);
   await letGo();
   await page.clock.runFor((TOAST_SECONDS + 1) * 1_000);
-  await expect(toast(page)).toHaveCount(0);
+  await expectToastGone(page);
 
   // A receipt slow to come: what it says is shown for the whole duration from
   // when it lands, however long the toast had already been up.
@@ -2687,7 +2719,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
   await expect(toast(page)).toBeVisible();
   await page.clock.runFor(1_500);
-  await expect(toast(page)).toHaveCount(0);
+  await expectToastGone(page);
   await page.unroute(`**/api/human-items/${dashboard}/dismiss`);
 
   // A refusal slow to come, the same: red for the whole duration once it lands.
@@ -2705,7 +2737,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
   await expect(toast(page)).toBeVisible();
   await page.clock.runFor(1_500);
-  await expect(toast(page)).toHaveCount(0);
+  await expectToastGone(page);
 });
 
 for (const width of [1440, 390] as const)
