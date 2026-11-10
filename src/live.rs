@@ -1178,6 +1178,27 @@ impl LiveRun {
                 let (_, _, timeline) = &self.timelines[at];
                 let timeline = enveloped(&timeline.wire, &timeline.observed_at);
                 drop(envelope_span);
+                if crate::spike::on("snapshot-move") {
+                    let _span = crate::spike::span("timeline_answer_s");
+                    return Ok(match scope {
+                        TimelineScope::Node(node) => moved(vec![
+                            ("type", json!("timeline")),
+                            ("run_id", json!(run)),
+                            ("scope", json!("node")),
+                            ("node", json!(node)),
+                            ("detail", detail),
+                            ("timeline", timeline),
+                        ]),
+                        _ => moved(vec![
+                            ("type", json!("timeline")),
+                            ("run_id", json!(run)),
+                            ("scope", json!("run")),
+                            ("detail", detail),
+                            ("timeline", timeline),
+                        ]),
+                    });
+                }
+                let _span = crate::spike::span("timeline_answer_s");
                 Ok(match scope {
                     TimelineScope::Node(node) => json!({
                         "type": "timeline", "run_id": run, "scope": "node", "node": node,
@@ -1223,8 +1244,36 @@ fn held<T>(payload: T) -> Held<T> {
     }
 }
 
+/// An object of `fields`, each moved in: what `json!` builds, without the copy it
+/// serializes of each value it is given.
+fn moved(fields: Vec<(&str, Value)>) -> Value {
+    Value::Object(
+        fields
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
+    )
+}
+
 /// A payload in the schema-version envelope every route serves it in.
 fn enveloped(payload: &Value, observed_at: &str) -> Value {
+    if crate::spike::on("snapshot-move") {
+        // The spike's `snapshot-move`: one clone of the held payload's fields, after
+        // the envelope's own (it is flattened in), rather than its serialization.
+        if let Value::Object(fields) = payload {
+            let mut object = serde_json::Map::with_capacity(fields.len() + 3);
+            object.insert("api_version".to_owned(), json!(API_VERSION));
+            object.insert(
+                "telemetry_schema_version".to_owned(),
+                json!(TELEMETRY_SCHEMA_VERSION),
+            );
+            object.insert("observed_at".to_owned(), json!(observed_at));
+            for (key, value) in fields {
+                object.insert(key.clone(), value.clone());
+            }
+            return Value::Object(object);
+        }
+    }
     serde_json::to_value(Envelope {
         api_version: API_VERSION,
         telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
@@ -1481,6 +1530,26 @@ impl Hub {
         }
         let _snapshot = crate::spike::span("snapshot_json_s");
         let id = self.id(seq);
+        if crate::spike::on("snapshot-move")
+            && matches!(
+                request.origin,
+                SubscribeOrigin::Fresh | SubscribeOrigin::Replaces(_)
+            )
+        {
+            // The spike's `snapshot-move`: the same answer, its values moved in
+            // rather than serialized into copies, as `json!` does for each one.
+            let snapshot = moved(vec![
+                ("id", json!(id)),
+                ("sidebar", rows),
+                ("visible", visible_state),
+            ]);
+            let initial = moved(vec![("type", json!("snapshot")), ("snapshot", snapshot)]);
+            return Ok(moved(vec![
+                ("subscription", json!(subscription)),
+                ("view", request.view.to_json()),
+                ("initial", initial),
+            ]));
+        }
         let snapshot = json!({ "id": id, "sidebar": rows, "visible": visible_state });
         let initial = match request.origin {
             SubscribeOrigin::Fresh | SubscribeOrigin::Replaces(_) => {

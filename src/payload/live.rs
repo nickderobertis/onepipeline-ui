@@ -453,7 +453,10 @@ impl LiveTimeline {
         declared: &DeclaredMembers,
         agents: Option<&onepipeline::agents::Agents>,
     ) -> Value {
+        let ends_span = crate::spike::span("timeline.ends_s");
         self.ends = indexed.ends(view);
+        drop(ends_span);
+        let shares_span = crate::spike::span("timeline.shares_s");
         self.slots.clear();
         let mut spans: Vec<Value> = Vec::new();
         let owners: Vec<Owner> = match &self.scope {
@@ -484,13 +487,30 @@ impl LiveTimeline {
                 span
             }));
         }
-        let mut payload = json!({
-            "timeline_schema_version": crate::contract::TIMELINE_SCHEMA_VERSION,
-            "run_id": view.paths.run,
-            "spans": spans,
-        });
+        drop(shares_span);
+        let payload_span = crate::spike::span("timeline.payload_s");
+        let mut payload = if crate::spike::on("snapshot-move") {
+            // The spike's `snapshot-move`: the spans moved in rather than copied.
+            let mut object = serde_json::Map::new();
+            object.insert(
+                "timeline_schema_version".to_owned(),
+                json!(crate::contract::TIMELINE_SCHEMA_VERSION),
+            );
+            object.insert("run_id".to_owned(), json!(view.paths.run));
+            object.insert("spans".to_owned(), Value::Array(spans));
+            Value::Object(object)
+        } else {
+            json!({
+                "timeline_schema_version": crate::contract::TIMELINE_SCHEMA_VERSION,
+                "run_id": view.paths.run,
+                "spans": spans,
+            })
+        };
+        drop(payload_span);
         let owned = payload["spans"].as_array().map_or(0, Vec::len);
+        let harnessed_span = crate::spike::span("timeline.harnessed_s");
         payload = self.harnessed(view, indexed, payload, agents);
+        drop(harnessed_span);
         self.harness = payload["spans"].as_array().map_or(0, Vec::len) - owned;
         payload
     }

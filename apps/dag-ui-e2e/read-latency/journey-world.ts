@@ -31,6 +31,10 @@ export const OWNER = "read-latency-session";
 export const NEVER = 300_000;
 
 export function releaseBinary(): string {
+  // The first-view-time spike's prototype server, when it names one; its switches
+  // reach every server through `ONEPIPELINE_UI_SPIKE`, which `world.env` carries.
+  const spike = process.env.READ_LATENCY_SERVER;
+  if (spike !== undefined) return spike;
   const triple = "x86_64-unknown-linux-gnu";
   const binary = join(
     REPO,
