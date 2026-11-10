@@ -1,0 +1,2226 @@
+{
+  "first_view": {
+    "graph": {
+      "readings": [
+        {
+          "seconds": 0.5388999999985099,
+          "navigation_to_post_s": 0.058199951171875,
+          "post_s": 0.427,
+          "answer_to_mark_s": 0.05370004882663493,
+          "first_answer_bytes": 4291,
+          "first_answer_gzipped": 1093,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 3.88,
+            "load_5m": 4.86,
+            "load_15m": 6.17,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Detail { run_id: RunId(\"load-live-open\"), filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.422396547,
+              "serialize_s": 0.0000262,
+              "answer_bytes": 4291,
+              "spans": {
+                "read_selected_s": 0.276986215,
+                "read_selected.read_file_s": 0.022309984,
+                "read_selected.lines_s": 0.017200605,
+                "read_selected.skim_s": 0.049355001,
+                "read_selected.merge_s": 0.031379027,
+                "read_selected.index_s": 0.026008015,
+                "read_selected.choose_s": 0.013095957,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 13998,
+                "read_selected.parse_s": 0.084465198,
+                "read_selected.assemble_s": 0.010756053,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.066209892,
+                "over_selected.stamp_launch_s": 0.000064522,
+                "over_selected.fold_s": 0.05401607,
+                "over_selected.landings_s": 0.000050696,
+                "over_selected.heartbeat_s": 0.000006292,
+                "over_selected.crossdag_s": 0.000029095,
+                "over_selected.coverage_s": 0.011891439,
+                "over_selected.covered_bytes_s": 0.000088037,
+                "over_selected.result_upstreams_s": 0.000039484,
+                "indexed_s": 0.01885866,
+                "declared_s": 0.026685174,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.390556234,
+                "detail_build_s": 0.030788903,
+                "detail_wire_s": 0.000067027,
+                "ensure_first_s": 0.030914982,
+                "sidebar_lock_s": 0.000001212,
+                "run_lock_s": 4e-8,
+                "detail_wire_s#2": 0.000067438,
+                "ensure_boundary_s": 0.000113585,
+                "state_lock_s": 6e-8,
+                "release_s": 7e-8,
+                "start_polling_s": 0.000189969,
+                "send_sidebar_s": 0.000121409,
+                "spawn_complete_s": 0.000086704,
+                "snapshot_json_s": 0.00013226,
+                "subscribe_s": 0.422154277
+              }
+            }
+          ],
+          "screen": {
+            "at": 538.8999999985099,
+            "first": true,
+            "header": "load-live-open",
+            "hero": null,
+            "hero_lines": "",
+            "cards": [
+              {
+                "name": "blocked-by-failure: skipped",
+                "reason": "blocked by failed-with-reason",
+                "awaits": null
+              },
+              {
+                "name": "cross-run-consumer: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "dashboard: running",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "failed-with-reason: failed",
+                "reason": "the check it depends on failed with a real reason",
+                "awaits": null
+              },
+              {
+                "name": "gated-on-dashboard: pending",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "held-for-release: complete-but-held",
+                "reason": null,
+                "awaits": "awaits crate of awaited-crate"
+              },
+              {
+                "name": "step-0: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-1: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-10: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-11: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-12: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-13: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-2: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-3: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-4: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-5: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-6: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-7: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-8: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-9: done",
+                "reason": null,
+                "awaits": null
+              }
+            ],
+            "status": null,
+            "nodes": null,
+            "wall": null,
+            "turns": null,
+            "still_loading": true,
+            "range": null,
+            "bars": [],
+            "line": 0,
+            "node_heading": null,
+            "node_state": null,
+            "rows": []
+          }
+        },
+        {
+          "seconds": 0.539800000000745,
+          "navigation_to_post_s": 0.061199951171875,
+          "post_s": 0.425,
+          "answer_to_mark_s": 0.05360004882887004,
+          "first_answer_bytes": 4292,
+          "first_answer_gzipped": 1093,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 3.88,
+            "load_5m": 4.86,
+            "load_15m": 6.17,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Detail { run_id: RunId(\"load-live-open\"), filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.420302852,
+              "serialize_s": 0.000033413,
+              "answer_bytes": 4292,
+              "spans": {
+                "read_selected_s": 0.28380719,
+                "read_selected.read_file_s": 0.021160256,
+                "read_selected.lines_s": 0.017630037,
+                "read_selected.skim_s": 0.05961253,
+                "read_selected.merge_s": 0.031470421,
+                "read_selected.index_s": 0.026316789,
+                "read_selected.choose_s": 0.012981178,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 13998,
+                "read_selected.parse_s": 0.084795515,
+                "read_selected.assemble_s": 0.010939009,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.0657179,
+                "over_selected.stamp_launch_s": 0.000062698,
+                "over_selected.fold_s": 0.053776878,
+                "over_selected.landings_s": 0.000038873,
+                "over_selected.heartbeat_s": 0.000006382,
+                "over_selected.crossdag_s": 0.000028574,
+                "over_selected.coverage_s": 0.011669851,
+                "over_selected.covered_bytes_s": 0.000071726,
+                "over_selected.result_upstreams_s": 0.000041919,
+                "indexed_s": 0.01840929,
+                "declared_s": 0.022988717,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.392608754,
+                "detail_build_s": 0.026620012,
+                "detail_wire_s": 0.000093066,
+                "ensure_first_s": 0.026774213,
+                "sidebar_lock_s": 0.000001323,
+                "run_lock_s": 4e-8,
+                "detail_wire_s#2": 0.000069251,
+                "ensure_boundary_s": 0.000116571,
+                "state_lock_s": 1.8e-7,
+                "release_s": 1.8e-7,
+                "start_polling_s": 0.000159912,
+                "send_sidebar_s": 0.000093467,
+                "spawn_complete_s": 0.000099508,
+                "snapshot_json_s": 0.000124776,
+                "subscribe_s": 0.420012887
+              }
+            }
+          ],
+          "screen": {
+            "at": 539.8000000007451,
+            "first": true,
+            "header": "load-live-open",
+            "hero": null,
+            "hero_lines": "",
+            "cards": [
+              {
+                "name": "blocked-by-failure: skipped",
+                "reason": "blocked by failed-with-reason",
+                "awaits": null
+              },
+              {
+                "name": "cross-run-consumer: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "dashboard: running",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "failed-with-reason: failed",
+                "reason": "the check it depends on failed with a real reason",
+                "awaits": null
+              },
+              {
+                "name": "gated-on-dashboard: pending",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "held-for-release: complete-but-held",
+                "reason": null,
+                "awaits": "awaits crate of awaited-crate"
+              },
+              {
+                "name": "step-0: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-1: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-10: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-11: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-12: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-13: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-2: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-3: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-4: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-5: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-6: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-7: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-8: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-9: done",
+                "reason": null,
+                "awaits": null
+              }
+            ],
+            "status": null,
+            "nodes": null,
+            "wall": null,
+            "turns": null,
+            "still_loading": true,
+            "range": null,
+            "bars": [],
+            "line": 0,
+            "node_heading": null,
+            "node_state": null,
+            "rows": []
+          }
+        },
+        {
+          "seconds": 0.530800000000745,
+          "navigation_to_post_s": 0.06210009765625,
+          "post_s": 0.417,
+          "answer_to_mark_s": 0.05169990234449501,
+          "first_answer_bytes": 4292,
+          "first_answer_gzipped": 1092,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 3.88,
+            "load_5m": 4.86,
+            "load_15m": 6.17,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Detail { run_id: RunId(\"load-live-open\"), filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.414297544,
+              "serialize_s": 0.000025558,
+              "answer_bytes": 4292,
+              "spans": {
+                "read_selected_s": 0.271365802,
+                "read_selected.read_file_s": 0.021381449,
+                "read_selected.lines_s": 0.015838451,
+                "read_selected.skim_s": 0.048254308,
+                "read_selected.merge_s": 0.030562044,
+                "read_selected.index_s": 0.024514411,
+                "read_selected.choose_s": 0.012101907,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 13998,
+                "read_selected.parse_s": 0.086277316,
+                "read_selected.assemble_s": 0.010343152,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.070638092,
+                "over_selected.stamp_launch_s": 0.000075152,
+                "over_selected.fold_s": 0.058670038,
+                "over_selected.landings_s": 0.000031519,
+                "over_selected.heartbeat_s": 0.000005821,
+                "over_selected.crossdag_s": 0.000034385,
+                "over_selected.coverage_s": 0.011650414,
+                "over_selected.covered_bytes_s": 0.000095821,
+                "over_selected.result_upstreams_s": 0.000040737,
+                "indexed_s": 0.018730407,
+                "declared_s": 0.024478984,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.386908218,
+                "detail_build_s": 0.026422589,
+                "detail_wire_s": 0.000066365,
+                "ensure_first_s": 0.026547926,
+                "sidebar_lock_s": 0.000001624,
+                "run_lock_s": 3e-8,
+                "detail_wire_s#2": 0.000066686,
+                "ensure_boundary_s": 0.000113024,
+                "state_lock_s": 4.31e-7,
+                "release_s": 6e-8,
+                "start_polling_s": 0.000178327,
+                "send_sidebar_s": 0.000102354,
+                "spawn_complete_s": 0.000089389,
+                "snapshot_json_s": 0.000130647,
+                "subscribe_s": 0.414100171
+              }
+            }
+          ],
+          "screen": {
+            "at": 530.8000000007451,
+            "first": true,
+            "header": "load-live-open",
+            "hero": null,
+            "hero_lines": "",
+            "cards": [
+              {
+                "name": "blocked-by-failure: skipped",
+                "reason": "blocked by failed-with-reason",
+                "awaits": null
+              },
+              {
+                "name": "cross-run-consumer: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "dashboard: running",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "failed-with-reason: failed",
+                "reason": "the check it depends on failed with a real reason",
+                "awaits": null
+              },
+              {
+                "name": "gated-on-dashboard: pending",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "held-for-release: complete-but-held",
+                "reason": null,
+                "awaits": "awaits crate of awaited-crate"
+              },
+              {
+                "name": "step-0: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-1: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-10: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-11: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-12: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-13: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-2: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-3: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-4: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-5: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-6: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-7: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-8: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-9: done",
+                "reason": null,
+                "awaits": null
+              }
+            ],
+            "status": null,
+            "nodes": null,
+            "wall": null,
+            "turns": null,
+            "still_loading": true,
+            "range": null,
+            "bars": [],
+            "line": 0,
+            "node_heading": null,
+            "node_state": null,
+            "rows": []
+          }
+        }
+      ],
+      "median_s": 0.5388999999985099
+    },
+    "overall": {
+      "readings": [
+        {
+          "seconds": 0.9521000000014901,
+          "navigation_to_post_s": 0.05910009765625,
+          "post_s": 0.822,
+          "answer_to_mark_s": 0.07099990234524012,
+          "first_answer_bytes": 958480,
+          "first_answer_gzipped": 76086,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 4.05,
+            "load_5m": 4.88,
+            "load_15m": 6.17,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Run, filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.810142742,
+              "serialize_s": 0.003555621,
+              "answer_bytes": 958480,
+              "spans": {
+                "read_selected_s": 0.268845243,
+                "read_selected.read_file_s": 0.020465636,
+                "read_selected.lines_s": 0.016249438,
+                "read_selected.skim_s": 0.047670567,
+                "read_selected.merge_s": 0.031758043,
+                "read_selected.index_s": 0.025435753,
+                "read_selected.choose_s": 0.012421,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 13998,
+                "read_selected.parse_s": 0.084981684,
+                "read_selected.assemble_s": 0.011256298,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.066208518,
+                "over_selected.stamp_launch_s": 0.000119847,
+                "over_selected.fold_s": 0.054323741,
+                "over_selected.landings_s": 0.000025819,
+                "over_selected.heartbeat_s": 0.00000572,
+                "over_selected.crossdag_s": 0.000029526,
+                "over_selected.coverage_s": 0.011545305,
+                "over_selected.covered_bytes_s": 0.000085441,
+                "over_selected.result_upstreams_s": 0.000041789,
+                "indexed_s": 0.018818153,
+                "declared_s": 0.024218271,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.379734081,
+                "detail_build_s": 0.026843975,
+                "detail_wire_s": 0.000064141,
+                "timeline.ends_s": 0.001682631,
+                "timeline.shares_s": 0.105803777,
+                "timeline.payload_s": 0.012529425,
+                "timeline.harnessed_s": 2.1e-7,
+                "timeline_build_s": 0.129253054,
+                "timeline_wire_s": 0.006261817,
+                "timeline_envelope_s": 0.00801405,
+                "timeline_answer_s": 0.011142592,
+                "ensure_first_s": 0.188591895,
+                "sidebar_lock_s": 0.000001412,
+                "run_lock_s": 9.1e-8,
+                "detail_wire_s#2": 0.000148691,
+                "timeline_envelope_s#2": 0.005424464,
+                "timeline_answer_s#2": 0.005490238,
+                "ensure_boundary_s": 0.014342513,
+                "state_lock_s": 0.000001072,
+                "release_s": 3.41e-7,
+                "start_polling_s": 0.000177646,
+                "send_sidebar_s": 0.000104217,
+                "spawn_complete_s": 0.000145305,
+                "snapshot_json_s": 0.223116971,
+                "subscribe_s": 0.806265017
+              }
+            }
+          ],
+          "screen": {
+            "at": 952.1000000014901,
+            "first": true,
+            "header": "load-live-open",
+            "hero": "load-live-open",
+            "hero_lines": "Whole DAG\nCarry the load\ndispatching · last event node-settled",
+            "cards": [],
+            "status": {
+              "value": "parked"
+            },
+            "nodes": {
+              "value": "20"
+            },
+            "wall": {
+              "value": "23h 58m 6s"
+            },
+            "turns": {
+              "value": "Loading…"
+            },
+            "still_loading": true,
+            "range": [
+              1794218163592,
+              1794318032966
+            ],
+            "bars": [
+              {
+                "id": "idle-graph-0",
+                "left": 0,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "publication.step-0",
+                "left": 0.011446886446886446,
+                "width": 99.98712225274726
+              },
+              {
+                "id": "verification.step-0.verify-1",
+                "left": 0.02003205128205128,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-0.verify-94",
+                "left": 2.0289606227106227,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-0.verify-187",
+                "left": 4.037889194139194,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-247",
+                "left": 5.334249084249084,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-340",
+                "left": 7.343177655677656,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-433",
+                "left": 9.352106227106226,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-493",
+                "left": 10.648466117216117,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-586",
+                "left": 12.657394688644688,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-679",
+                "left": 14.66775412087912,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-739",
+                "left": 15.96268315018315,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-832",
+                "left": 17.973042582417584,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-925",
+                "left": 19.981971153846153,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-985",
+                "left": 21.278331043956044,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-1078",
+                "left": 23.287259615384613,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-1171",
+                "left": 25.296188186813183,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1231",
+                "left": 26.592548076923077,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1324",
+                "left": 28.60147664835165,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1417",
+                "left": 30.61040521978022,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1477",
+                "left": 31.906765109890113,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1570",
+                "left": 33.91712454212454,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1663",
+                "left": 35.92605311355312,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1723",
+                "left": 37.222413003663,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1816",
+                "left": 39.23134157509158,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1909",
+                "left": 41.240270146520146,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-1969",
+                "left": 42.53663003663004,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-2062",
+                "left": 44.54555860805861,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-2155",
+                "left": 46.55448717948718,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2215",
+                "left": 47.850847069597066,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2308",
+                "left": 49.859775641025635,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2401",
+                "left": 51.87013507326007,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2461",
+                "left": 53.166494963369956,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2554",
+                "left": 55.17542353479854,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2647",
+                "left": 57.18435210622711,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2707",
+                "left": 58.480711996337,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2800",
+                "left": 60.48964056776557,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2893",
+                "left": 62.49856913919414,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-2953",
+                "left": 63.79492902930403,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-3046",
+                "left": 65.8038576007326,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-3139",
+                "left": 67.81278617216118,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3199",
+                "left": 69.10914606227107,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3292",
+                "left": 71.1195054945055,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3385",
+                "left": 73.12843406593407,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3445",
+                "left": 74.42479395604396,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3538",
+                "left": 76.43372252747253,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3631",
+                "left": 78.4426510989011,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3724",
+                "left": 80.45157967032966,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.held-for-release.verify-3790",
+                "left": 81.87385531135531,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.failed-with-reason.verify-3792",
+                "left": 81.89817994505495,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.cross-run-consumer.verify-3794",
+                "left": 81.92393543956044,
+                "width": 0.0486492673992674
+              }
+            ],
+            "line": 51,
+            "node_heading": null,
+            "node_state": null,
+            "rows": []
+          }
+        },
+        {
+          "seconds": 0.8858999999985099,
+          "navigation_to_post_s": 0.06,
+          "post_s": 0.755,
+          "answer_to_mark_s": 0.07089999999850993,
+          "first_answer_bytes": 958480,
+          "first_answer_gzipped": 76085,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 4.05,
+            "load_5m": 4.88,
+            "load_15m": 6.17,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Run, filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.744415559,
+              "serialize_s": 0.003092244,
+              "answer_bytes": 958480,
+              "spans": {
+                "read_selected_s": 0.272603532,
+                "read_selected.read_file_s": 0.019421058,
+                "read_selected.lines_s": 0.018676816,
+                "read_selected.skim_s": 0.049664503,
+                "read_selected.merge_s": 0.031305959,
+                "read_selected.index_s": 0.025628737,
+                "read_selected.choose_s": 0.013107281,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 13998,
+                "read_selected.parse_s": 0.083919293,
+                "read_selected.assemble_s": 0.012079665,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.069059937,
+                "over_selected.stamp_launch_s": 0.000063791,
+                "over_selected.fold_s": 0.057086243,
+                "over_selected.landings_s": 0.00002117,
+                "over_selected.heartbeat_s": 0.000006221,
+                "over_selected.crossdag_s": 0.000024717,
+                "over_selected.coverage_s": 0.011707701,
+                "over_selected.covered_bytes_s": 0.000088588,
+                "over_selected.result_upstreams_s": 0.00003703,
+                "indexed_s": 0.018293672,
+                "declared_s": 0.025904575,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.387508939,
+                "detail_build_s": 0.025417348,
+                "detail_wire_s": 0.000064171,
+                "timeline.ends_s": 0.001750639,
+                "timeline.shares_s": 0.099552265,
+                "timeline.payload_s": 0.012123455,
+                "timeline.harnessed_s": 1.4e-7,
+                "timeline_build_s": 0.122659289,
+                "timeline_wire_s": 0.006163229,
+                "timeline_envelope_s": 0.008305709,
+                "timeline_answer_s": 0.011463025,
+                "ensure_first_s": 0.180466708,
+                "sidebar_lock_s": 0.000001052,
+                "run_lock_s": 1.6e-7,
+                "detail_wire_s#2": 0.000130627,
+                "timeline_envelope_s#2": 0.005217461,
+                "timeline_answer_s#2": 0.00488891,
+                "ensure_boundary_s": 0.012985063,
+                "state_lock_s": 7.92e-7,
+                "release_s": 3.2e-7,
+                "start_polling_s": 0.000173859,
+                "send_sidebar_s": 0.000096903,
+                "spawn_complete_s": 0.000099398,
+                "snapshot_json_s": 0.159713936,
+                "subscribe_s": 0.741090131
+              }
+            }
+          ],
+          "screen": {
+            "at": 885.8999999985099,
+            "first": true,
+            "header": "load-live-open",
+            "hero": "load-live-open",
+            "hero_lines": "Whole DAG\nCarry the load\ndispatching · last event node-settled",
+            "cards": [],
+            "status": {
+              "value": "parked"
+            },
+            "nodes": {
+              "value": "20"
+            },
+            "wall": {
+              "value": "23h 58m 6s"
+            },
+            "turns": {
+              "value": "Loading…"
+            },
+            "still_loading": true,
+            "range": [
+              1794218163592,
+              1794318034610
+            ],
+            "bars": [
+              {
+                "id": "idle-graph-0",
+                "left": 0,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "publication.step-0",
+                "left": 0.011446886446886446,
+                "width": 99.98712225274726
+              },
+              {
+                "id": "verification.step-0.verify-1",
+                "left": 0.02003205128205128,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-0.verify-94",
+                "left": 2.0289606227106227,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-0.verify-187",
+                "left": 4.037889194139194,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-247",
+                "left": 5.334249084249084,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-340",
+                "left": 7.343177655677656,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-433",
+                "left": 9.352106227106226,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-493",
+                "left": 10.648466117216117,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-586",
+                "left": 12.657394688644688,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-679",
+                "left": 14.666323260073261,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-739",
+                "left": 15.96268315018315,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-832",
+                "left": 17.971611721611723,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-925",
+                "left": 19.981971153846153,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-985",
+                "left": 21.276900183150182,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-1078",
+                "left": 23.287259615384613,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-1171",
+                "left": 25.296188186813183,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1231",
+                "left": 26.592548076923077,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1324",
+                "left": 28.60147664835165,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1417",
+                "left": 30.61040521978022,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1477",
+                "left": 31.906765109890113,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1570",
+                "left": 33.91569368131868,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1663",
+                "left": 35.92462225274725,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1723",
+                "left": 37.220982142857146,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1816",
+                "left": 39.229910714285715,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1909",
+                "left": 41.240270146520146,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-1969",
+                "left": 42.535199175824175,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-2062",
+                "left": 44.54555860805861,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-2155",
+                "left": 46.55448717948718,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2215",
+                "left": 47.850847069597066,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2308",
+                "left": 49.859775641025635,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2401",
+                "left": 51.86870421245421,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2461",
+                "left": 53.16506410256411,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2554",
+                "left": 55.17399267399268,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2647",
+                "left": 57.18292124542125,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2707",
+                "left": 58.47928113553114,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2800",
+                "left": 60.48820970695971,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2893",
+                "left": 62.49713827838828,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-2953",
+                "left": 63.79349816849816,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-3046",
+                "left": 65.8038576007326,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-3139",
+                "left": 67.81278617216118,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3199",
+                "left": 69.10914606227107,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3292",
+                "left": 71.11807463369964,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3385",
+                "left": 73.1270032051282,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3445",
+                "left": 74.42336309523809,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3538",
+                "left": 76.43229166666666,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3631",
+                "left": 78.44122023809523,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3724",
+                "left": 80.45014880952381,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.held-for-release.verify-3790",
+                "left": 81.87242445054946,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.failed-with-reason.verify-3792",
+                "left": 81.89674908424908,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.cross-run-consumer.verify-3794",
+                "left": 81.92250457875457,
+                "width": 0.0486492673992674
+              }
+            ],
+            "line": 51,
+            "node_heading": null,
+            "node_state": null,
+            "rows": []
+          }
+        },
+        {
+          "seconds": 0.882699999999255,
+          "navigation_to_post_s": 0.059800048828125,
+          "post_s": 0.75,
+          "answer_to_mark_s": 0.07289995117113002,
+          "first_answer_bytes": 958479,
+          "first_answer_gzipped": 76087,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 4.13,
+            "load_5m": 4.88,
+            "load_15m": 6.16,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Run, filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.735225178,
+              "serialize_s": 0.003984882,
+              "answer_bytes": 958479,
+              "spans": {
+                "read_selected_s": 0.261690227,
+                "read_selected.read_file_s": 0.022932203,
+                "read_selected.lines_s": 0.018434183,
+                "read_selected.skim_s": 0.045931783,
+                "read_selected.merge_s": 0.032372106,
+                "read_selected.index_s": 0.025499547,
+                "read_selected.choose_s": 0.012593062,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 13998,
+                "read_selected.parse_s": 0.073003244,
+                "read_selected.assemble_s": 0.009686728,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.065620319,
+                "over_selected.stamp_launch_s": 0.000063611,
+                "over_selected.fold_s": 0.053581243,
+                "over_selected.landings_s": 0.000027061,
+                "over_selected.heartbeat_s": 0.000006382,
+                "over_selected.crossdag_s": 0.00003159,
+                "over_selected.coverage_s": 0.011759317,
+                "over_selected.covered_bytes_s": 0.000086573,
+                "over_selected.result_upstreams_s": 0.000037551,
+                "indexed_s": 0.018215649,
+                "declared_s": 0.025253251,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.372466135,
+                "detail_build_s": 0.025609944,
+                "detail_wire_s": 0.000065453,
+                "timeline.ends_s": 0.001580708,
+                "timeline.shares_s": 0.099720742,
+                "timeline.payload_s": 0.012346687,
+                "timeline.harnessed_s": 2.3e-7,
+                "timeline_build_s": 0.123144064,
+                "timeline_wire_s": 0.006276674,
+                "timeline_envelope_s": 0.00799447,
+                "timeline_answer_s": 0.011076336,
+                "ensure_first_s": 0.180048449,
+                "sidebar_lock_s": 0.000001663,
+                "run_lock_s": 1.01e-7,
+                "detail_wire_s#2": 0.000101692,
+                "timeline_envelope_s#2": 0.005150695,
+                "timeline_answer_s#2": 0.004986456,
+                "ensure_boundary_s": 0.013468045,
+                "state_lock_s": 8.12e-7,
+                "release_s": 5.21e-7,
+                "start_polling_s": 0.000215558,
+                "send_sidebar_s": 0.000086964,
+                "spawn_complete_s": 0.000095069,
+                "snapshot_json_s": 0.164501804,
+                "subscribe_s": 0.730944322
+              }
+            }
+          ],
+          "screen": {
+            "at": 882.6999999992549,
+            "first": true,
+            "header": "load-live-open",
+            "hero": "load-live-open",
+            "hero_lines": "Whole DAG\nCarry the load\ndispatching · last event node-settled",
+            "cards": [],
+            "status": {
+              "value": "parked"
+            },
+            "nodes": {
+              "value": "20"
+            },
+            "wall": {
+              "value": "23h 58m 6s"
+            },
+            "turns": {
+              "value": "Loading…"
+            },
+            "still_loading": true,
+            "range": [
+              1794218163592,
+              1794318036334
+            ],
+            "bars": [
+              {
+                "id": "idle-graph-0",
+                "left": 0,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "publication.step-0",
+                "left": 0.011446886446886446,
+                "width": 99.98712225274726
+              },
+              {
+                "id": "verification.step-0.verify-1",
+                "left": 0.02003205128205128,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-0.verify-94",
+                "left": 2.0289606227106227,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-0.verify-187",
+                "left": 4.037889194139194,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-247",
+                "left": 5.334249084249084,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-340",
+                "left": 7.343177655677656,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-433",
+                "left": 9.352106227106226,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-493",
+                "left": 10.648466117216117,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-586",
+                "left": 12.657394688644688,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-679",
+                "left": 14.666323260073261,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-739",
+                "left": 15.96268315018315,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-832",
+                "left": 17.971611721611723,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-925",
+                "left": 19.980540293040296,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-985",
+                "left": 21.276900183150182,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-1078",
+                "left": 23.285828754578755,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-1171",
+                "left": 25.296188186813183,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1231",
+                "left": 26.591117216117215,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1324",
+                "left": 28.60147664835165,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1417",
+                "left": 30.61040521978022,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1477",
+                "left": 31.906765109890113,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1570",
+                "left": 33.91569368131868,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1663",
+                "left": 35.92462225274725,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1723",
+                "left": 37.220982142857146,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1816",
+                "left": 39.229910714285715,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1909",
+                "left": 41.238839285714285,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-1969",
+                "left": 42.535199175824175,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-2062",
+                "left": 44.54412774725275,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-2155",
+                "left": 46.55305631868132,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2215",
+                "left": 47.849416208791204,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2308",
+                "left": 49.85834478021978,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2401",
+                "left": 51.86727335164834,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2461",
+                "left": 53.16363324175825,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2554",
+                "left": 55.17256181318682,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2647",
+                "left": 57.18292124542125,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2707",
+                "left": 58.47785027472527,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2800",
+                "left": 60.48820970695971,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2893",
+                "left": 62.49713827838828,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-2953",
+                "left": 63.79349816849816,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-3046",
+                "left": 65.80242673992674,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-3139",
+                "left": 67.81135531135531,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3199",
+                "left": 69.1077152014652,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3292",
+                "left": 71.11664377289377,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3385",
+                "left": 73.12557234432234,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3445",
+                "left": 74.42193223443223,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3538",
+                "left": 76.4308608058608,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3631",
+                "left": 78.43978937728939,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3724",
+                "left": 80.44871794871796,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.held-for-release.verify-3790",
+                "left": 81.87099358974359,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.failed-with-reason.verify-3792",
+                "left": 81.89531822344323,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.cross-run-consumer.verify-3794",
+                "left": 81.92107371794873,
+                "width": 0.0486492673992674
+              }
+            ],
+            "line": 51,
+            "node_heading": null,
+            "node_state": null,
+            "rows": []
+          }
+        }
+      ],
+      "median_s": 0.8858999999985099
+    },
+    "node": {
+      "readings": [
+        {
+          "seconds": 0.8283999999985099,
+          "navigation_to_post_s": 0.057199951171875,
+          "post_s": 0.72,
+          "answer_to_mark_s": 0.05120004882663487,
+          "first_answer_bytes": 450545,
+          "first_answer_gzipped": 29609,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 4.13,
+            "load_5m": 4.88,
+            "load_15m": 6.16,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Node(NodeId(\"dashboard\")), filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.714139054,
+              "serialize_s": 0.001516807,
+              "answer_bytes": 450545,
+              "spans": {
+                "read_selected_s": 0.314080548,
+                "read_selected.read_file_s": 0.04441614,
+                "read_selected.lines_s": 0.016913688,
+                "read_selected.skim_s": 0.052890558,
+                "read_selected.merge_s": 0.032581732,
+                "read_selected.index_s": 0.025309517,
+                "read_selected.choose_s": 0.01397859,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 37432,
+                "read_selected.kept_bytes": 31801330,
+                "read_selected.stubs": 12791,
+                "read_selected.parse_s": 0.09657815,
+                "read_selected.assemble_s": 0.013883382,
+                "kept_records": 37432,
+                "store_len": 115996,
+                "over_selected_s": 0.087831659,
+                "over_selected.stamp_launch_s": 0.000069922,
+                "over_selected.fold_s": 0.072575835,
+                "over_selected.landings_s": 0.000027312,
+                "over_selected.heartbeat_s": 0.000005961,
+                "over_selected.crossdag_s": 0.000027281,
+                "over_selected.coverage_s": 0.014992758,
+                "over_selected.covered_bytes_s": 0.00006881,
+                "over_selected.result_upstreams_s": 0.000039043,
+                "indexed_s": 0.022563778,
+                "declared_s": 0.028483095,
+                "pointer_read_s": 0.094666394,
+                "pointer_wait_s": 0.000002856,
+                "live_run_s": 0.454757468,
+                "detail_build_s": 0.030001975,
+                "detail_wire_s": 0.000112172,
+                "hold_node_share_s": 0.000001222,
+                "timeline.ends_s": 0.001636063,
+                "timeline.shares_s": 0.106902414,
+                "timeline.payload_s": 0.001774744,
+                "timeline.harnessed_s": 0.092327787,
+                "timeline_build_s": 0.20510214,
+                "timeline_wire_s": 0.002465299,
+                "timeline_envelope_s": 0.001655899,
+                "timeline_answer_s": 0.001623449,
+                "ensure_first_s": 0.241938424,
+                "sidebar_lock_s": 0.000001042,
+                "run_lock_s": 4e-8,
+                "detail_wire_s#2": 0.000695334,
+                "hold_node_share_s#2": 0.000001983,
+                "timeline_envelope_s#2": 0.001814228,
+                "timeline_answer_s#2": 0.00174568,
+                "ensure_boundary_s": 0.00510588,
+                "state_lock_s": 0.000001002,
+                "release_s": 2.4e-7,
+                "start_polling_s": 0.000217431,
+                "send_sidebar_s": 0.000107413,
+                "spawn_complete_s": 0.000091653,
+                "snapshot_json_s": 0.010092696,
+                "subscribe_s": 0.712365408
+              }
+            }
+          ],
+          "screen": {
+            "at": 828.3999999985099,
+            "first": true,
+            "header": "load-live-open",
+            "hero": null,
+            "hero_lines": "",
+            "cards": [],
+            "status": null,
+            "nodes": null,
+            "wall": null,
+            "turns": null,
+            "still_loading": true,
+            "range": [
+              1794292472080,
+              1794299911337
+            ],
+            "bars": [
+              {
+                "id": "group-dispatch.a-recording-host-load-live-open-dashboard.worker-3444",
+                "left": 0,
+                "width": 99.99860987544484
+              },
+              {
+                "id": "publication.dashboard",
+                "left": 0.15986432384341637,
+                "width": 99.83874555160142
+              },
+              {
+                "id": "group-verification.dashboard.verify-3445",
+                "left": 0.2599532918149466,
+                "width": 99.19928825622776
+              },
+              {
+                "id": "verification.dashboard.verify-3788",
+                "left": 99.73865658362989,
+                "width": 0.04865435943060498
+              }
+            ],
+            "line": 4,
+            "node_heading": "Timeline for dashboard",
+            "node_state": "running",
+            "rows": [
+              "Agent (a-recording-host-load-live-open-dashboard.worker-3444)",
+              "Agent (a-recording-host-load-live-open-dashboard.worker-3788)",
+              "Publication: dashboard",
+              "Verification: verify-3445",
+              "Verification: verify-3787",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9962 of dashboard",
+              "change-check",
+              "step 9964 of dashboard",
+              "turn-message",
+              "turn-completed",
+              "turn-started",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9970 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9973 of dashboard",
+              "Verification: verify-3788",
+              "change-check",
+              "step 9975 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9979 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9982 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9985 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9988 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9991 of dashboard",
+              "change-check",
+              "step 9993 of dashboard",
+              "turn-message",
+              "turn-completed",
+              "turn-started",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9999 of dashboard"
+            ]
+          }
+        },
+        {
+          "seconds": 0.799,
+          "navigation_to_post_s": 0.062800048828125,
+          "post_s": 0.688,
+          "answer_to_mark_s": 0.04819995117187503,
+          "first_answer_bytes": 450545,
+          "first_answer_gzipped": 29606,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 4.6,
+            "load_5m": 4.96,
+            "load_15m": 6.19,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Node(NodeId(\"dashboard\")), filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.681758559,
+              "serialize_s": 0.001179821,
+              "answer_bytes": 450545,
+              "spans": {
+                "read_selected_s": 0.292945509,
+                "read_selected.read_file_s": 0.037121803,
+                "read_selected.lines_s": 0.018680598,
+                "read_selected.skim_s": 0.051813292,
+                "read_selected.merge_s": 0.031303487,
+                "read_selected.index_s": 0.025012224,
+                "read_selected.choose_s": 0.014131199,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 37432,
+                "read_selected.kept_bytes": 31801330,
+                "read_selected.stubs": 12791,
+                "read_selected.parse_s": 0.083099022,
+                "read_selected.assemble_s": 0.012371121,
+                "kept_records": 37432,
+                "store_len": 115996,
+                "over_selected_s": 0.081431641,
+                "over_selected.stamp_launch_s": 0.000072166,
+                "over_selected.fold_s": 0.066795048,
+                "over_selected.landings_s": 0.000086493,
+                "over_selected.heartbeat_s": 0.000008236,
+                "over_selected.crossdag_s": 0.000025368,
+                "over_selected.coverage_s": 0.014282003,
+                "over_selected.covered_bytes_s": 0.000094629,
+                "over_selected.result_upstreams_s": 0.000038152,
+                "indexed_s": 0.022748085,
+                "declared_s": 0.02968593,
+                "pointer_read_s": 0.086628036,
+                "pointer_wait_s": 0.000003005,
+                "live_run_s": 0.428600908,
+                "detail_build_s": 0.031145076,
+                "detail_wire_s": 0.00006353,
+                "hold_node_share_s": 0.000001152,
+                "timeline.ends_s": 0.001384958,
+                "timeline.shares_s": 0.10537708,
+                "timeline.payload_s": 0.001609472,
+                "timeline.harnessed_s": 0.091380857,
+                "timeline_build_s": 0.202174955,
+                "timeline_wire_s": 0.002407671,
+                "timeline_envelope_s": 0.0016772,
+                "timeline_answer_s": 0.001649809,
+                "ensure_first_s": 0.239930265,
+                "sidebar_lock_s": 0.000001213,
+                "run_lock_s": 4e-8,
+                "detail_wire_s#2": 0.0006193,
+                "hold_node_share_s#2": 0.000001693,
+                "timeline_envelope_s#2": 0.00174596,
+                "timeline_answer_s#2": 0.001579816,
+                "ensure_boundary_s": 0.004580337,
+                "state_lock_s": 7.51e-7,
+                "release_s": 2.1e-7,
+                "start_polling_s": 0.000186242,
+                "send_sidebar_s": 0.000086143,
+                "spawn_complete_s": 0.000097044,
+                "snapshot_json_s": 0.006840659,
+                "subscribe_s": 0.680356023
+              }
+            }
+          ],
+          "screen": {
+            "at": 799,
+            "first": true,
+            "header": "load-live-open",
+            "hero": null,
+            "hero_lines": "",
+            "cards": [],
+            "status": null,
+            "nodes": null,
+            "wall": null,
+            "turns": null,
+            "still_loading": true,
+            "range": [
+              1794292472080,
+              1794299911337
+            ],
+            "bars": [
+              {
+                "id": "group-dispatch.a-recording-host-load-live-open-dashboard.worker-3444",
+                "left": 0,
+                "width": 99.99860987544484
+              },
+              {
+                "id": "publication.dashboard",
+                "left": 0.15986432384341637,
+                "width": 99.83874555160142
+              },
+              {
+                "id": "group-verification.dashboard.verify-3445",
+                "left": 0.2599532918149466,
+                "width": 99.19928825622776
+              },
+              {
+                "id": "verification.dashboard.verify-3788",
+                "left": 99.73865658362989,
+                "width": 0.04865435943060498
+              }
+            ],
+            "line": 4,
+            "node_heading": "Timeline for dashboard",
+            "node_state": "running",
+            "rows": [
+              "Agent (a-recording-host-load-live-open-dashboard.worker-3444)",
+              "Agent (a-recording-host-load-live-open-dashboard.worker-3788)",
+              "Publication: dashboard",
+              "Verification: verify-3445",
+              "Verification: verify-3787",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9962 of dashboard",
+              "change-check",
+              "step 9964 of dashboard",
+              "turn-message",
+              "turn-completed",
+              "turn-started",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9970 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9973 of dashboard",
+              "Verification: verify-3788",
+              "change-check",
+              "step 9975 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9979 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9982 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9985 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9988 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9991 of dashboard",
+              "change-check",
+              "step 9993 of dashboard",
+              "turn-message",
+              "turn-completed",
+              "turn-started",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9999 of dashboard"
+            ]
+          }
+        },
+        {
+          "seconds": 0.8243999999985099,
+          "navigation_to_post_s": 0.05639990234375,
+          "post_s": 0.709,
+          "answer_to_mark_s": 0.05900009765475989,
+          "first_answer_bytes": 450545,
+          "first_answer_gzipped": 29607,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 4.6,
+            "load_5m": 4.96,
+            "load_15m": 6.19,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Node(NodeId(\"dashboard\")), filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.703010145,
+              "serialize_s": 0.00122978,
+              "answer_bytes": 450545,
+              "spans": {
+                "read_selected_s": 0.305207343,
+                "read_selected.read_file_s": 0.045355625,
+                "read_selected.lines_s": 0.017411289,
+                "read_selected.skim_s": 0.050141762,
+                "read_selected.merge_s": 0.031426578,
+                "read_selected.index_s": 0.024857893,
+                "read_selected.choose_s": 0.013798009,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 37432,
+                "read_selected.kept_bytes": 31801330,
+                "read_selected.stubs": 12791,
+                "read_selected.parse_s": 0.08921383,
+                "read_selected.assemble_s": 0.01418974,
+                "kept_records": 37432,
+                "store_len": 115996,
+                "over_selected_s": 0.080557677,
+                "over_selected.stamp_launch_s": 0.00006374,
+                "over_selected.fold_s": 0.066107104,
+                "over_selected.landings_s": 0.000038112,
+                "over_selected.heartbeat_s": 0.000005851,
+                "over_selected.crossdag_s": 0.000032411,
+                "over_selected.coverage_s": 0.014126931,
+                "over_selected.covered_bytes_s": 0.000090883,
+                "over_selected.result_upstreams_s": 0.000064953,
+                "indexed_s": 0.022115424,
+                "declared_s": 0.028986647,
+                "pointer_read_s": 0.094252204,
+                "pointer_wait_s": 0.000003297,
+                "live_run_s": 0.438757932,
+                "detail_build_s": 0.034333394,
+                "detail_wire_s": 0.000064582,
+                "hold_node_share_s": 0.000001313,
+                "timeline.ends_s": 0.001735948,
+                "timeline.shares_s": 0.111366148,
+                "timeline.payload_s": 0.001786073,
+                "timeline.harnessed_s": 0.092032326,
+                "timeline_build_s": 0.209516082,
+                "timeline_wire_s": 0.002522548,
+                "timeline_envelope_s": 0.001762749,
+                "timeline_answer_s": 0.001633314,
+                "ensure_first_s": 0.25068351,
+                "sidebar_lock_s": 0.000001012,
+                "run_lock_s": 1.61e-7,
+                "detail_wire_s#2": 0.00067089,
+                "hold_node_share_s#2": 0.000001934,
+                "timeline_envelope_s#2": 0.001755114,
+                "timeline_answer_s#2": 0.001548784,
+                "ensure_boundary_s": 0.004574334,
+                "state_lock_s": 0.000001012,
+                "release_s": 2.1e-7,
+                "start_polling_s": 0.000175132,
+                "send_sidebar_s": 0.000130618,
+                "spawn_complete_s": 0.000100991,
+                "snapshot_json_s": 0.006838824,
+                "subscribe_s": 0.701310954
+              }
+            }
+          ],
+          "screen": {
+            "at": 824.3999999985099,
+            "first": true,
+            "header": "load-live-open",
+            "hero": null,
+            "hero_lines": "",
+            "cards": [],
+            "status": null,
+            "nodes": null,
+            "wall": null,
+            "turns": null,
+            "still_loading": true,
+            "range": [
+              1794292472080,
+              1794299911337
+            ],
+            "bars": [
+              {
+                "id": "group-dispatch.a-recording-host-load-live-open-dashboard.worker-3444",
+                "left": 0,
+                "width": 99.99860987544484
+              },
+              {
+                "id": "publication.dashboard",
+                "left": 0.15986432384341637,
+                "width": 99.83874555160142
+              },
+              {
+                "id": "group-verification.dashboard.verify-3445",
+                "left": 0.2599532918149466,
+                "width": 99.19928825622776
+              },
+              {
+                "id": "verification.dashboard.verify-3788",
+                "left": 99.73865658362989,
+                "width": 0.04865435943060498
+              }
+            ],
+            "line": 4,
+            "node_heading": "Timeline for dashboard",
+            "node_state": "running",
+            "rows": [
+              "Agent (a-recording-host-load-live-open-dashboard.worker-3444)",
+              "Agent (a-recording-host-load-live-open-dashboard.worker-3788)",
+              "Publication: dashboard",
+              "Verification: verify-3445",
+              "Verification: verify-3787",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9962 of dashboard",
+              "change-check",
+              "step 9964 of dashboard",
+              "turn-message",
+              "turn-completed",
+              "turn-started",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9970 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9973 of dashboard",
+              "Verification: verify-3788",
+              "change-check",
+              "step 9975 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9979 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9982 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9985 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9988 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9991 of dashboard",
+              "change-check",
+              "step 9993 of dashboard",
+              "turn-message",
+              "turn-completed",
+              "turn-started",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9999 of dashboard"
+            ]
+          }
+        }
+      ],
+      "median_s": 0.8243999999985099
+    },
+    "slowest_view": "overall",
+    "slowest_s": 0.8858999999985099
+  },
+  "spike": "overall-stubs",
+  "stub_kinds": null,
+  "traced": true,
+  "server": "/home/whoop/ai-orchestrator/runs/brief-dag-first-view-under-1s-2026-11-10-spikes/scratch/296031-0/bin/onepipeline-api-release-proto-6a93b09",
+  "host_load": {
+    "start": {
+      "load_1m": 4.11,
+      "load_5m": 5.1,
+      "load_15m": 6.35,
+      "cores": 20
+    },
+    "end": {
+      "load_1m": 4.6,
+      "load_5m": 4.96,
+      "load_15m": 6.19,
+      "cores": 20
+    }
+  }
+}
