@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.77.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.76.0...v0.77.0) - 2026-11-10
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine whose observer graph follows the run journal ([#723](https://github.com/nickderobertis/onepipeline-ui/pull/723))
+
 ## [0.76.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.75.0...v0.76.0) - 2026-11-10
 
 ### Added
