@@ -1,0 +1,628 @@
+{
+  "first_view": {
+    "graph": {
+      "readings": [
+        {
+          "seconds": 0.7034000000003725,
+          "navigation_to_post_s": 0.073800048828125,
+          "post_s": 0.571,
+          "answer_to_mark_s": 0.05859995117224748,
+          "first_answer_bytes": 4292,
+          "first_answer_gzipped": 1092,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 6.09,
+            "load_5m": 11.42,
+            "load_15m": 16.38,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Detail { run_id: RunId(\"load-live-open\"), filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.568541258,
+              "serialize_s": 0.000046498,
+              "answer_bytes": 4292,
+              "spans": {
+                "read_selected_s": 0.358004203,
+                "read_selected.read_file_s": 0.068398146,
+                "read_selected.lines_s": 0.017668302,
+                "read_selected.skim_s": 0.051001495,
+                "read_selected.merge_s": 0.034466698,
+                "read_selected.index_s": 0.026122044,
+                "read_selected.choose_s": 0.0114557,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 0,
+                "read_selected.parse_s": 0.113981871,
+                "read_selected.assemble_s": 0.012995192,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.090640639,
+                "over_selected.stamp_launch_s": 0.000078559,
+                "over_selected.fold_s": 0.07415846,
+                "over_selected.landings_s": 0.000032682,
+                "over_selected.heartbeat_s": 0.000006422,
+                "over_selected.crossdag_s": 0.000032682,
+                "over_selected.coverage_s": 0.015951855,
+                "over_selected.covered_bytes_s": 0.000065534,
+                "over_selected.result_upstreams_s": 0.000041158,
+                "indexed_s": 0.032735814,
+                "declared_s": 0.036813628,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.519743024,
+                "detail_build_s": 0.047643052,
+                "detail_wire_s": 0.000068881,
+                "ensure_first_s": 0.047772927,
+                "detail_wire_s#2": 0.000071115,
+                "ensure_boundary_s": 0.000173538,
+                "subscribe_s": 0.568203451
+              }
+            }
+          ]
+        },
+        {
+          "seconds": 0.7755,
+          "navigation_to_post_s": 0.092300048828125,
+          "post_s": 0.604,
+          "answer_to_mark_s": 0.07919995117187495,
+          "first_answer_bytes": 4292,
+          "first_answer_gzipped": 1093,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 6.16,
+            "load_5m": 11.35,
+            "load_15m": 16.33,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Detail { run_id: RunId(\"load-live-open\"), filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.600421511,
+              "serialize_s": 0.000038563,
+              "answer_bytes": 4292,
+              "spans": {
+                "read_selected_s": 0.445108959,
+                "read_selected.read_file_s": 0.024352598,
+                "read_selected.lines_s": 0.018605705,
+                "read_selected.skim_s": 0.054679994,
+                "read_selected.merge_s": 0.034847748,
+                "read_selected.index_s": 0.026676923,
+                "read_selected.choose_s": 0.012197683,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 0,
+                "read_selected.parse_s": 0.239208982,
+                "read_selected.assemble_s": 0.011875314,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.068918076,
+                "over_selected.stamp_launch_s": 0.000066837,
+                "over_selected.fold_s": 0.056250083,
+                "over_selected.landings_s": 0.000043853,
+                "over_selected.heartbeat_s": 0.000005901,
+                "over_selected.crossdag_s": 0.000030127,
+                "over_selected.coverage_s": 0.012371642,
+                "over_selected.covered_bytes_s": 0.000088979,
+                "over_selected.result_upstreams_s": 0.000037741,
+                "indexed_s": 0.02321846,
+                "declared_s": 0.02749544,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.566138109,
+                "detail_build_s": 0.033107828,
+                "detail_wire_s": 0.000111812,
+                "ensure_first_s": 0.033282418,
+                "detail_wire_s#2": 0.000070684,
+                "ensure_boundary_s": 0.000118674,
+                "subscribe_s": 0.600101655
+              }
+            }
+          ]
+        },
+        {
+          "seconds": 0.6061999999992549,
+          "navigation_to_post_s": 0.07489990234375,
+          "post_s": 0.474,
+          "answer_to_mark_s": 0.05730009765550492,
+          "first_answer_bytes": 4292,
+          "first_answer_gzipped": 1094,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 6.16,
+            "load_5m": 11.35,
+            "load_15m": 16.33,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Detail { run_id: RunId(\"load-live-open\"), filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.470499279,
+              "serialize_s": 0.000033794,
+              "answer_bytes": 4292,
+              "spans": {
+                "read_selected_s": 0.312091335,
+                "read_selected.read_file_s": 0.02785809,
+                "read_selected.lines_s": 0.020474069,
+                "read_selected.skim_s": 0.056404745,
+                "read_selected.merge_s": 0.034480855,
+                "read_selected.index_s": 0.026559261,
+                "read_selected.choose_s": 0.012006199,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 0,
+                "read_selected.parse_s": 0.100163256,
+                "read_selected.assemble_s": 0.011945918,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.069687843,
+                "over_selected.stamp_launch_s": 0.000077987,
+                "over_selected.fold_s": 0.056720434,
+                "over_selected.landings_s": 0.000029706,
+                "over_selected.heartbeat_s": 0.000006111,
+                "over_selected.crossdag_s": 0.000034526,
+                "over_selected.coverage_s": 0.012677611,
+                "over_selected.covered_bytes_s": 0.000073118,
+                "over_selected.result_upstreams_s": 0.000040577,
+                "indexed_s": 0.0224195,
+                "declared_s": 0.028132697,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.434004539,
+                "detail_build_s": 0.035378233,
+                "detail_wire_s": 0.000064171,
+                "ensure_first_s": 0.035526834,
+                "detail_wire_s#2": 0.000069121,
+                "ensure_boundary_s": 0.000117212,
+                "subscribe_s": 0.470157507
+              }
+            }
+          ]
+        }
+      ],
+      "median_s": 0.7034000000003725
+    },
+    "overall": {
+      "readings": [
+        {
+          "seconds": 1.0410999999996275,
+          "navigation_to_post_s": 0.066800048828125,
+          "post_s": 0.892,
+          "answer_to_mark_s": 0.08229995117150257,
+          "first_answer_bytes": 958480,
+          "first_answer_gzipped": 76087,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 6.15,
+            "load_5m": 11.26,
+            "load_15m": 16.28,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Run, filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.87488517,
+              "serialize_s": 0.004044769,
+              "answer_bytes": 958480,
+              "spans": {
+                "read_selected_s": 0.321465061,
+                "read_selected.read_file_s": 0.024843668,
+                "read_selected.lines_s": 0.018141554,
+                "read_selected.skim_s": 0.055848393,
+                "read_selected.merge_s": 0.035457911,
+                "read_selected.index_s": 0.026753198,
+                "read_selected.choose_s": 0.011140506,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 0,
+                "read_selected.parse_s": 0.110733041,
+                "read_selected.assemble_s": 0.011527568,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.072588289,
+                "over_selected.stamp_launch_s": 0.000093527,
+                "over_selected.fold_s": 0.059442441,
+                "over_selected.landings_s": 0.000029265,
+                "over_selected.heartbeat_s": 0.000005711,
+                "over_selected.crossdag_s": 0.000030889,
+                "over_selected.coverage_s": 0.012825051,
+                "over_selected.covered_bytes_s": 0.000085211,
+                "over_selected.result_upstreams_s": 0.000042901,
+                "indexed_s": 0.024431398,
+                "declared_s": 0.029568903,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.449684225,
+                "detail_build_s": 0.031829081,
+                "detail_wire_s": 0.000064091,
+                "timeline_build_s": 0.207137971,
+                "timeline_wire_s": 0.006395122,
+                "timeline_envelope_s": 0.008252034,
+                "ensure_first_s": 0.272174555,
+                "detail_wire_s#2": 0.000115308,
+                "timeline_envelope_s#2": 0.005486835,
+                "ensure_boundary_s": 0.014658449,
+                "subscribe_s": 0.870508607
+              }
+            }
+          ]
+        },
+        {
+          "seconds": 1.26260000000149,
+          "navigation_to_post_s": 0.06889990234375,
+          "post_s": 1.109,
+          "answer_to_mark_s": 0.08470009765774011,
+          "first_answer_bytes": 958480,
+          "first_answer_gzipped": 76082,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 6.15,
+            "load_5m": 11.26,
+            "load_15m": 16.28,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Run, filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 1.092601851,
+              "serialize_s": 0.003622189,
+              "answer_bytes": 958480,
+              "spans": {
+                "read_selected_s": 0.312900418,
+                "read_selected.read_file_s": 0.02674297,
+                "read_selected.lines_s": 0.019232126,
+                "read_selected.skim_s": 0.054765718,
+                "read_selected.merge_s": 0.033556193,
+                "read_selected.index_s": 0.027319571,
+                "read_selected.choose_s": 0.012760099,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 0,
+                "read_selected.parse_s": 0.093626071,
+                "read_selected.assemble_s": 0.015001327,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.073531626,
+                "over_selected.stamp_launch_s": 0.000078379,
+                "over_selected.fold_s": 0.05983197,
+                "over_selected.landings_s": 0.000035357,
+                "over_selected.heartbeat_s": 0.000006392,
+                "over_selected.crossdag_s": 0.00004214,
+                "over_selected.coverage_s": 0.013371525,
+                "over_selected.covered_bytes_s": 0.000088898,
+                "over_selected.result_upstreams_s": 0.000048381,
+                "indexed_s": 0.031809802,
+                "declared_s": 0.027070569,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.447493368,
+                "detail_build_s": 0.070091671,
+                "detail_wire_s": 0.000092685,
+                "timeline_build_s": 0.223660765,
+                "timeline_wire_s": 0.007673511,
+                "timeline_envelope_s": 0.009863731,
+                "ensure_first_s": 0.332766129,
+                "detail_wire_s#2": 0.000111661,
+                "timeline_envelope_s#2": 0.006770292,
+                "ensure_boundary_s": 0.016603657,
+                "subscribe_s": 1.088727832
+              }
+            }
+          ]
+        },
+        {
+          "seconds": 1.254699999999255,
+          "navigation_to_post_s": 0.073300048828125,
+          "post_s": 1.094,
+          "answer_to_mark_s": 0.08739995117112986,
+          "first_answer_bytes": 958479,
+          "first_answer_gzipped": 76087,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 6.46,
+            "load_5m": 11.24,
+            "load_15m": 16.24,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Run, filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 1.078762577,
+              "serialize_s": 0.004027566,
+              "answer_bytes": 958479,
+              "spans": {
+                "read_selected_s": 0.342995001,
+                "read_selected.read_file_s": 0.02733135,
+                "read_selected.lines_s": 0.018015617,
+                "read_selected.skim_s": 0.066431402,
+                "read_selected.merge_s": 0.043352219,
+                "read_selected.index_s": 0.031915646,
+                "read_selected.choose_s": 0.011995473,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 0,
+                "read_selected.parse_s": 0.106158766,
+                "read_selected.assemble_s": 0.01204516,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.072037363,
+                "over_selected.stamp_launch_s": 0.000067758,
+                "over_selected.fold_s": 0.05821787,
+                "over_selected.landings_s": 0.000037782,
+                "over_selected.heartbeat_s": 0.000005971,
+                "over_selected.crossdag_s": 0.000035567,
+                "over_selected.coverage_s": 0.013520317,
+                "over_selected.covered_bytes_s": 0.00008461,
+                "over_selected.result_upstreams_s": 0.000042561,
+                "indexed_s": 0.024717591,
+                "declared_s": 0.028893146,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.47041491,
+                "detail_build_s": 0.035704708,
+                "detail_wire_s": 0.000065113,
+                "timeline_build_s": 0.236830734,
+                "timeline_wire_s": 0.006677888,
+                "timeline_envelope_s": 0.008623457,
+                "ensure_first_s": 0.308246041,
+                "detail_wire_s#2": 0.000119286,
+                "timeline_envelope_s#2": 0.005377229,
+                "ensure_boundary_s": 0.015025493,
+                "subscribe_s": 1.07443544
+              }
+            }
+          ]
+        }
+      ],
+      "median_s": 1.254699999999255
+    },
+    "node": {
+      "readings": [
+        {
+          "seconds": 1.0848999999985098,
+          "navigation_to_post_s": 0.074300048828125,
+          "post_s": 0.936,
+          "answer_to_mark_s": 0.07459995117038476,
+          "first_answer_bytes": 450544,
+          "first_answer_gzipped": 29609,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 7.06,
+            "load_5m": 11.28,
+            "load_15m": 16.23,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Node(NodeId(\"dashboard\")), filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.926462518,
+              "serialize_s": 0.001918116,
+              "answer_bytes": 450544,
+              "spans": {
+                "read_selected_s": 0.467933162,
+                "read_selected.read_file_s": 0.057402888,
+                "read_selected.lines_s": 0.020489801,
+                "read_selected.skim_s": 0.060101799,
+                "read_selected.merge_s": 0.03517709,
+                "read_selected.index_s": 0.027449942,
+                "read_selected.choose_s": 0.013852922,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 37432,
+                "read_selected.kept_bytes": 31801330,
+                "read_selected.stubs": 0,
+                "read_selected.parse_s": 0.21347536,
+                "read_selected.assemble_s": 0.015340786,
+                "kept_records": 37432,
+                "store_len": 115996,
+                "over_selected_s": 0.097321558,
+                "over_selected.stamp_launch_s": 0.000088938,
+                "over_selected.fold_s": 0.080070039,
+                "over_selected.landings_s": 0.000035537,
+                "over_selected.heartbeat_s": 0.000019166,
+                "over_selected.crossdag_s": 0.000037892,
+                "over_selected.coverage_s": 0.016914442,
+                "over_selected.covered_bytes_s": 0.000076515,
+                "over_selected.result_upstreams_s": 0.000044995,
+                "indexed_s": 0.029928808,
+                "declared_s": 0.034040042,
+                "pointer_read_s": 0.144691647,
+                "pointer_wait_s": 0.000004389,
+                "live_run_s": 0.631097103,
+                "detail_build_s": 0.04031658,
+                "detail_wire_s": 0.000066846,
+                "hold_node_share_s": 0.000001974,
+                "timeline_build_s": 0.230806342,
+                "timeline_wire_s": 0.00283488,
+                "timeline_envelope_s": 0.001892949,
+                "ensure_first_s": 0.278788827,
+                "detail_wire_s#2": 0.000824108,
+                "hold_node_share_s#2": 0.000001503,
+                "timeline_envelope_s#2": 0.002149274,
+                "ensure_boundary_s": 0.005608254,
+                "subscribe_s": 0.92416646
+              }
+            }
+          ]
+        },
+        {
+          "seconds": 1.215699999999255,
+          "navigation_to_post_s": 0.08810009765625,
+          "post_s": 1.068,
+          "answer_to_mark_s": 0.05959990234300494,
+          "first_answer_bytes": 450545,
+          "first_answer_gzipped": 29610,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 7.06,
+            "load_5m": 11.28,
+            "load_15m": 16.23,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Node(NodeId(\"dashboard\")), filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 1.058693836,
+              "serialize_s": 0.001570209,
+              "answer_bytes": 450545,
+              "spans": {
+                "read_selected_s": 0.42647013,
+                "read_selected.read_file_s": 0.048039002,
+                "read_selected.lines_s": 0.02066892,
+                "read_selected.skim_s": 0.085490696,
+                "read_selected.merge_s": 0.040987842,
+                "read_selected.index_s": 0.032638012,
+                "read_selected.choose_s": 0.017323396,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 37432,
+                "read_selected.kept_bytes": 31801330,
+                "read_selected.stubs": 0,
+                "read_selected.parse_s": 0.1326877,
+                "read_selected.assemble_s": 0.019840949,
+                "kept_records": 37432,
+                "store_len": 115996,
+                "over_selected_s": 0.114038625,
+                "over_selected.stamp_launch_s": 0.000088337,
+                "over_selected.fold_s": 0.096885331,
+                "over_selected.landings_s": 0.000028293,
+                "over_selected.heartbeat_s": 0.000007494,
+                "over_selected.crossdag_s": 0.000038313,
+                "over_selected.coverage_s": 0.016831916,
+                "over_selected.covered_bytes_s": 0.00007951,
+                "over_selected.result_upstreams_s": 0.000045817,
+                "indexed_s": 0.031449405,
+                "declared_s": 0.035883058,
+                "pointer_read_s": 0.099315866,
+                "pointer_wait_s": 0.000005391,
+                "live_run_s": 0.610119565,
+                "detail_build_s": 0.071274821,
+                "detail_wire_s": 0.000074171,
+                "hold_node_share_s": 0.000002275,
+                "timeline_build_s": 0.342738789,
+                "timeline_wire_s": 0.004027515,
+                "timeline_envelope_s": 0.002933827,
+                "ensure_first_s": 0.42566452,
+                "detail_wire_s#2": 0.001873302,
+                "hold_node_share_s#2": 0.000002835,
+                "timeline_envelope_s#2": 0.002995214,
+                "ensure_boundary_s": 0.009627083,
+                "subscribe_s": 1.056751952
+              }
+            }
+          ]
+        },
+        {
+          "seconds": 1.1257000000011177,
+          "navigation_to_post_s": 0.07889990234375,
+          "post_s": 0.972,
+          "answer_to_mark_s": 0.07480009765736773,
+          "first_answer_bytes": 450545,
+          "first_answer_gzipped": 29606,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 7.06,
+            "load_5m": 11.28,
+            "load_15m": 16.23,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Node(NodeId(\"dashboard\")), filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.963802719,
+              "serialize_s": 0.002165915,
+              "answer_bytes": 450545,
+              "spans": {
+                "read_selected_s": 0.413115888,
+                "read_selected.read_file_s": 0.049544379,
+                "read_selected.lines_s": 0.01965857,
+                "read_selected.skim_s": 0.067440986,
+                "read_selected.merge_s": 0.03616364,
+                "read_selected.index_s": 0.031493078,
+                "read_selected.choose_s": 0.015674548,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 37432,
+                "read_selected.kept_bytes": 31801330,
+                "read_selected.stubs": 0,
+                "read_selected.parse_s": 0.148685514,
+                "read_selected.assemble_s": 0.016448942,
+                "kept_records": 37432,
+                "store_len": 115996,
+                "over_selected_s": 0.099389936,
+                "over_selected.stamp_launch_s": 0.00008995,
+                "over_selected.fold_s": 0.081111634,
+                "over_selected.landings_s": 0.000029416,
+                "over_selected.heartbeat_s": 0.000006011,
+                "over_selected.crossdag_s": 0.000032061,
+                "over_selected.coverage_s": 0.01796567,
+                "over_selected.covered_bytes_s": 0.000074351,
+                "over_selected.result_upstreams_s": 0.00004244,
+                "indexed_s": 0.038152138,
+                "declared_s": 0.040600759,
+                "pointer_read_s": 0.122347785,
+                "pointer_wait_s": 0.000003988,
+                "live_run_s": 0.593356207,
+                "detail_build_s": 0.046309343,
+                "detail_wire_s": 0.000111671,
+                "hold_node_share_s": 0.000002234,
+                "timeline_build_s": 0.291785477,
+                "timeline_wire_s": 0.003741404,
+                "timeline_envelope_s": 0.002435565,
+                "ensure_first_s": 0.349166455,
+                "detail_wire_s#2": 0.001896085,
+                "hold_node_share_s#2": 0.000002515,
+                "timeline_envelope_s#2": 0.003004952,
+                "ensure_boundary_s": 0.008323277,
+                "subscribe_s": 0.961244592
+              }
+            }
+          ]
+        }
+      ],
+      "median_s": 1.1257000000011177
+    },
+    "slowest_view": "overall",
+    "slowest_s": 1.254699999999255
+  },
+  "spike": "",
+  "server": "/home/whoop/.onevcs/workspaces/github.com-nickderobertis-onepipeline-ui-95f7516c419c/pool/2/worktree/target/spike-first-view/release/onepipeline-api-spike",
+  "host_load": {
+    "start": {
+      "load_1m": 7.37,
+      "load_5m": 12.96,
+      "load_15m": 17.23,
+      "cores": 20
+    },
+    "end": {
+      "load_1m": 6.89,
+      "load_5m": 11.18,
+      "load_15m": 16.17,
+      "cores": 20
+    }
+  }
+}

@@ -1,0 +1,249 @@
+{
+  "first_view": {
+    "overall": {
+      "readings": [
+        {
+          "seconds": 1.2309000000003725,
+          "navigation_to_post_s": 0.064699951171875,
+          "post_s": 1.08,
+          "answer_to_mark_s": 0.08620004882849752,
+          "first_answer_bytes": 958479,
+          "first_answer_gzipped": 76077,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 12.05,
+            "load_5m": 17.34,
+            "load_15m": 18.36,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Run, filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 1.067341104,
+              "serialize_s": 0.003571581,
+              "answer_bytes": 958479,
+              "spans": {
+                "read_selected_s": 0.304550403,
+                "read_selected.read_file_s": 0.020992478,
+                "read_selected.lines_s": 0.016294338,
+                "read_selected.skim_s": 0.049991159,
+                "read_selected.merge_s": 0.033747176,
+                "read_selected.index_s": 0.026271066,
+                "read_selected.choose_s": 0.011310197,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 0,
+                "read_selected.parse_s": 0.113568625,
+                "read_selected.assemble_s": 0.011383436,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.068116447,
+                "over_selected.stamp_launch_s": 0.000078859,
+                "over_selected.fold_s": 0.055089205,
+                "over_selected.landings_s": 0.000044574,
+                "over_selected.heartbeat_s": 0.000005791,
+                "over_selected.crossdag_s": 0.000043171,
+                "over_selected.coverage_s": 0.012672603,
+                "over_selected.covered_bytes_s": 0.000103205,
+                "over_selected.result_upstreams_s": 0.000041388,
+                "indexed_s": 0.023126772,
+                "declared_s": 0.027841724,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.425122237,
+                "detail_build_s": 0.034791971,
+                "detail_wire_s": 0.000065384,
+                "timeline_build_s": 0.23675397,
+                "timeline_wire_s": 0.00971367,
+                "timeline_envelope_s": 0.011675598,
+                "ensure_first_s": 0.316931554,
+                "sidebar_lock_s": 0.000001232,
+                "run_lock_s": 4e-8,
+                "detail_wire_s#2": 0.000129885,
+                "timeline_envelope_s#2": 0.006033745,
+                "ensure_boundary_s": 0.015975947,
+                "state_lock_s": 8.82e-7,
+                "release_s": 3.51e-7,
+                "start_polling_s": 0.000147839,
+                "send_sidebar_s": 0.000104447,
+                "spawn_complete_s": 0.000124325,
+                "snapshot_json_s": 0.301726948,
+                "subscribe_s": 1.063513988
+              }
+            }
+          ]
+        },
+        {
+          "seconds": 1.049699999999255,
+          "navigation_to_post_s": 0.06360009765625,
+          "post_s": 0.914,
+          "answer_to_mark_s": 0.0720999023430049,
+          "first_answer_bytes": 958480,
+          "first_answer_gzipped": 76081,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 12.05,
+            "load_5m": 17.34,
+            "load_15m": 18.36,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Run, filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.902378116,
+              "serialize_s": 0.00384073,
+              "answer_bytes": 958480,
+              "spans": {
+                "read_selected_s": 0.289855665,
+                "read_selected.read_file_s": 0.022104371,
+                "read_selected.lines_s": 0.018207935,
+                "read_selected.skim_s": 0.051784229,
+                "read_selected.merge_s": 0.031403777,
+                "read_selected.index_s": 0.025318545,
+                "read_selected.choose_s": 0.011423031,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 0,
+                "read_selected.parse_s": 0.093830473,
+                "read_selected.assemble_s": 0.010884624,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.070820509,
+                "over_selected.stamp_launch_s": 0.000074251,
+                "over_selected.fold_s": 0.057813153,
+                "over_selected.landings_s": 0.000038744,
+                "over_selected.heartbeat_s": 0.000005771,
+                "over_selected.crossdag_s": 0.000033283,
+                "over_selected.coverage_s": 0.01269799,
+                "over_selected.covered_bytes_s": 0.000081935,
+                "over_selected.result_upstreams_s": 0.00004224,
+                "indexed_s": 0.023775249,
+                "declared_s": 0.029174293,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.415170585,
+                "detail_build_s": 0.03617721,
+                "detail_wire_s": 0.000068189,
+                "timeline_build_s": 0.162987205,
+                "timeline_wire_s": 0.00634875,
+                "timeline_envelope_s": 0.008656432,
+                "ensure_first_s": 0.233516253,
+                "sidebar_lock_s": 0.000001483,
+                "run_lock_s": 4e-8,
+                "detail_wire_s#2": 0.000114015,
+                "timeline_envelope_s#2": 0.005365441,
+                "ensure_boundary_s": 0.014447247,
+                "state_lock_s": 7.32e-7,
+                "release_s": 1.4e-7,
+                "start_polling_s": 0.000174029,
+                "send_sidebar_s": 0.000087516,
+                "spawn_complete_s": 0.000125337,
+                "snapshot_json_s": 0.230834936,
+                "subscribe_s": 0.898226929
+              }
+            }
+          ]
+        },
+        {
+          "seconds": 1.120199999999255,
+          "navigation_to_post_s": 0.08260009765625,
+          "post_s": 0.95,
+          "answer_to_mark_s": 0.08759990234300497,
+          "first_answer_bytes": 958480,
+          "first_answer_gzipped": 76086,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 12.05,
+            "load_5m": 17.25,
+            "load_15m": 18.32,
+            "cores": 20
+          },
+          "server_split": [
+            {
+              "view": "Timeline { run_id: RunId(\"load-live-open\"), scope: Run, filter: Some(FilterSpec(Named(\"detailed\"))) }",
+              "handler_s": 0.928576108,
+              "serialize_s": 0.004654414,
+              "answer_bytes": 958480,
+              "spans": {
+                "read_selected_s": 0.326807991,
+                "read_selected.read_file_s": 0.030283199,
+                "read_selected.lines_s": 0.019460574,
+                "read_selected.skim_s": 0.067347915,
+                "read_selected.merge_s": 0.034045861,
+                "read_selected.index_s": 0.028282819,
+                "read_selected.choose_s": 0.012488485,
+                "read_selected.lines": 115996,
+                "read_selected.kept": 30017,
+                "read_selected.kept_bytes": 25335358,
+                "read_selected.stubs": 0,
+                "read_selected.parse_s": 0.101978222,
+                "read_selected.assemble_s": 0.011374279,
+                "kept_records": 30017,
+                "store_len": 115996,
+                "over_selected_s": 0.069803114,
+                "over_selected.stamp_launch_s": 0.000070384,
+                "over_selected.fold_s": 0.056344728,
+                "over_selected.landings_s": 0.000046268,
+                "over_selected.heartbeat_s": 0.000006031,
+                "over_selected.crossdag_s": 0.000032942,
+                "over_selected.coverage_s": 0.01306415,
+                "over_selected.covered_bytes_s": 0.000167216,
+                "over_selected.result_upstreams_s": 0.000043743,
+                "indexed_s": 0.023735083,
+                "declared_s": 0.028696821,
+                "pointer_wait_s": 4e-8,
+                "live_run_s": 0.451079927,
+                "detail_build_s": 0.034993452,
+                "detail_wire_s": 0.000064422,
+                "timeline_build_s": 0.184507263,
+                "timeline_wire_s": 0.006787089,
+                "timeline_envelope_s": 0.00910468,
+                "ensure_first_s": 0.2600241,
+                "sidebar_lock_s": 0.000001303,
+                "run_lock_s": 3.1e-7,
+                "detail_wire_s#2": 0.000173928,
+                "timeline_envelope_s#2": 0.006485239,
+                "ensure_boundary_s": 0.019517169,
+                "state_lock_s": 0.000001112,
+                "release_s": 2.41e-7,
+                "start_polling_s": 0.000224314,
+                "send_sidebar_s": 0.000107333,
+                "spawn_complete_s": 0.000164972,
+                "snapshot_json_s": 0.187898817,
+                "subscribe_s": 0.923561469
+              }
+            }
+          ]
+        }
+      ],
+      "median_s": 1.120199999999255
+    },
+    "slowest_view": "overall",
+    "slowest_s": 1.120199999999255
+  },
+  "spike": "",
+  "server": "/home/whoop/.onevcs/workspaces/github.com-nickderobertis-onepipeline-ui-95f7516c419c/pool/2/worktree/target/spike-first-view/release/onepipeline-api-spike",
+  "host_load": {
+    "start": {
+      "load_1m": 13.77,
+      "load_5m": 19.32,
+      "load_15m": 19.03,
+      "cores": 20
+    },
+    "end": {
+      "load_1m": 12.05,
+      "load_5m": 17.25,
+      "load_15m": 18.32,
+      "cores": 20
+    }
+  }
+}

@@ -1,0 +1,2846 @@
+{
+  "corpus": {
+    "records": 115996,
+    "journal_bytes": 100055334,
+    "streams": 2002,
+    "checkpoint_bytes": 7332522,
+    "ordinary_spans": 4036,
+    "harness_spans": 5900,
+    "busiest_node_records": 10001,
+    "off_graph_node_records": 6002,
+    "run_directories": 850,
+    "other_live_runs": 11,
+    "overall_first_answer_bytes": 958479,
+    "session_references": 33976,
+    "spans_resting_on_dropped_records": 3998,
+    "reasons": 1,
+    "awaits": 1,
+    "cross_run_settled_consumers": 1,
+    "stand_in_provider": 1
+  },
+  "first_view": {
+    "graph": {
+      "readings": [
+        {
+          "seconds": 0.582800000000745,
+          "navigation_to_post_s": 0.06739990234375,
+          "post_s": 0.465,
+          "answer_to_mark_s": 0.050400097656995047,
+          "first_answer_bytes": 4291,
+          "first_answer_gzipped": 1092,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 9.2,
+            "load_5m": 7.36,
+            "load_15m": 10.79,
+            "cores": 20
+          },
+          "server_split": [],
+          "screen": {
+            "at": 582.8000000007451,
+            "first": true,
+            "header": "load-live-open",
+            "hero": null,
+            "hero_lines": "",
+            "cards": [
+              {
+                "name": "blocked-by-failure: skipped",
+                "reason": "blocked by failed-with-reason",
+                "awaits": null
+              },
+              {
+                "name": "cross-run-consumer: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "dashboard: running",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "failed-with-reason: failed",
+                "reason": "the check it depends on failed with a real reason",
+                "awaits": null
+              },
+              {
+                "name": "gated-on-dashboard: pending",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "held-for-release: complete-but-held",
+                "reason": null,
+                "awaits": "awaits crate of awaited-crate"
+              },
+              {
+                "name": "step-0: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-1: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-10: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-11: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-12: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-13: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-2: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-3: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-4: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-5: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-6: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-7: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-8: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-9: done",
+                "reason": null,
+                "awaits": null
+              }
+            ],
+            "status": null,
+            "nodes": null,
+            "wall": null,
+            "turns": null,
+            "still_loading": true,
+            "range": null,
+            "bars": [],
+            "line": 0,
+            "node_heading": null,
+            "node_state": null,
+            "rows": []
+          }
+        },
+        {
+          "seconds": 0.630300000000745,
+          "navigation_to_post_s": 0.06689990234375,
+          "post_s": 0.48,
+          "answer_to_mark_s": 0.08340009765699508,
+          "first_answer_bytes": 4292,
+          "first_answer_gzipped": 1094,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 9.2,
+            "load_5m": 7.36,
+            "load_15m": 10.79,
+            "cores": 20
+          },
+          "server_split": [],
+          "screen": {
+            "at": 630.3000000007451,
+            "first": true,
+            "header": "load-live-open",
+            "hero": null,
+            "hero_lines": "",
+            "cards": [
+              {
+                "name": "blocked-by-failure: skipped",
+                "reason": "blocked by failed-with-reason",
+                "awaits": null
+              },
+              {
+                "name": "cross-run-consumer: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "dashboard: running",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "failed-with-reason: failed",
+                "reason": "the check it depends on failed with a real reason",
+                "awaits": null
+              },
+              {
+                "name": "gated-on-dashboard: pending",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "held-for-release: complete-but-held",
+                "reason": null,
+                "awaits": "awaits crate of awaited-crate"
+              },
+              {
+                "name": "step-0: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-1: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-10: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-11: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-12: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-13: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-2: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-3: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-4: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-5: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-6: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-7: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-8: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-9: done",
+                "reason": null,
+                "awaits": null
+              }
+            ],
+            "status": null,
+            "nodes": null,
+            "wall": null,
+            "turns": null,
+            "still_loading": true,
+            "range": null,
+            "bars": [],
+            "line": 0,
+            "node_heading": null,
+            "node_state": null,
+            "rows": []
+          }
+        },
+        {
+          "seconds": 0.6202000000029803,
+          "navigation_to_post_s": 0.06360009765625,
+          "post_s": 0.498,
+          "answer_to_mark_s": 0.05859990234673029,
+          "first_answer_bytes": 4292,
+          "first_answer_gzipped": 1092,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 9.2,
+            "load_5m": 7.36,
+            "load_15m": 10.79,
+            "cores": 20
+          },
+          "server_split": [],
+          "screen": {
+            "at": 620.2000000029802,
+            "first": true,
+            "header": "load-live-open",
+            "hero": null,
+            "hero_lines": "",
+            "cards": [
+              {
+                "name": "blocked-by-failure: skipped",
+                "reason": "blocked by failed-with-reason",
+                "awaits": null
+              },
+              {
+                "name": "cross-run-consumer: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "dashboard: running",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "failed-with-reason: failed",
+                "reason": "the check it depends on failed with a real reason",
+                "awaits": null
+              },
+              {
+                "name": "gated-on-dashboard: pending",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "held-for-release: complete-but-held",
+                "reason": null,
+                "awaits": "awaits crate of awaited-crate"
+              },
+              {
+                "name": "step-0: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-1: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-10: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-11: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-12: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-13: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-2: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-3: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-4: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-5: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-6: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-7: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-8: done",
+                "reason": null,
+                "awaits": null
+              },
+              {
+                "name": "step-9: done",
+                "reason": null,
+                "awaits": null
+              }
+            ],
+            "status": null,
+            "nodes": null,
+            "wall": null,
+            "turns": null,
+            "still_loading": true,
+            "range": null,
+            "bars": [],
+            "line": 0,
+            "node_heading": null,
+            "node_state": null,
+            "rows": []
+          }
+        }
+      ],
+      "median_s": 0.6202000000029803,
+      "cold_cache": {
+        "seconds": 0.588199999999255,
+        "navigation_to_post_s": 0.072699951171875,
+        "post_s": 0.458,
+        "answer_to_mark_s": 0.057500048827380024,
+        "first_answer_bytes": 4291,
+        "first_answer_gzipped": 1092,
+        "checked": {
+          "screen_against_answer": true,
+          "answer_against_complete": true
+        },
+        "host_load": {
+          "load_1m": 9.02,
+          "load_5m": 7.35,
+          "load_15m": 10.77,
+          "cores": 20
+        },
+        "server_split": [],
+        "screen": {
+          "at": 588.1999999992549,
+          "first": true,
+          "header": "load-live-open",
+          "hero": null,
+          "hero_lines": "",
+          "cards": [
+            {
+              "name": "blocked-by-failure: skipped",
+              "reason": "blocked by failed-with-reason",
+              "awaits": null
+            },
+            {
+              "name": "cross-run-consumer: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "dashboard: running",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "failed-with-reason: failed",
+              "reason": "the check it depends on failed with a real reason",
+              "awaits": null
+            },
+            {
+              "name": "gated-on-dashboard: pending",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "held-for-release: complete-but-held",
+              "reason": null,
+              "awaits": "awaits crate of awaited-crate"
+            },
+            {
+              "name": "step-0: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-1: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-10: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-11: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-12: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-13: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-2: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-3: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-4: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-5: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-6: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-7: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-8: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-9: done",
+              "reason": null,
+              "awaits": null
+            }
+          ],
+          "status": null,
+          "nodes": null,
+          "wall": null,
+          "turns": null,
+          "still_loading": true,
+          "range": null,
+          "bars": [],
+          "line": 0,
+          "node_heading": null,
+          "node_state": null,
+          "rows": []
+        }
+      },
+      "fresh_server": {
+        "seconds": 0.58,
+        "navigation_to_post_s": 0.06989990234375,
+        "post_s": 0.455,
+        "answer_to_mark_s": 0.05510009765625001,
+        "first_answer_bytes": 4292,
+        "first_answer_gzipped": 1093,
+        "checked": {
+          "screen_against_answer": true,
+          "answer_against_complete": true
+        },
+        "host_load": {
+          "load_1m": 9.02,
+          "load_5m": 7.35,
+          "load_15m": 10.77,
+          "cores": 20
+        },
+        "server_split": [],
+        "screen": {
+          "at": 580,
+          "first": true,
+          "header": "load-live-open",
+          "hero": null,
+          "hero_lines": "",
+          "cards": [
+            {
+              "name": "blocked-by-failure: skipped",
+              "reason": "blocked by failed-with-reason",
+              "awaits": null
+            },
+            {
+              "name": "cross-run-consumer: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "dashboard: running",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "failed-with-reason: failed",
+              "reason": "the check it depends on failed with a real reason",
+              "awaits": null
+            },
+            {
+              "name": "gated-on-dashboard: pending",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "held-for-release: complete-but-held",
+              "reason": null,
+              "awaits": "awaits crate of awaited-crate"
+            },
+            {
+              "name": "step-0: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-1: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-10: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-11: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-12: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-13: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-2: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-3: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-4: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-5: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-6: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-7: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-8: done",
+              "reason": null,
+              "awaits": null
+            },
+            {
+              "name": "step-9: done",
+              "reason": null,
+              "awaits": null
+            }
+          ],
+          "status": null,
+          "nodes": null,
+          "wall": null,
+          "turns": null,
+          "still_loading": true,
+          "range": null,
+          "bars": [],
+          "line": 0,
+          "node_heading": null,
+          "node_state": null,
+          "rows": []
+        }
+      },
+      "small_run_s": 0.111
+    },
+    "overall": {
+      "readings": [
+        {
+          "seconds": 1.4118000000007451,
+          "navigation_to_post_s": 0.109300048828125,
+          "post_s": 1.189,
+          "answer_to_mark_s": 0.11349995117262002,
+          "first_answer_bytes": 958479,
+          "first_answer_gzipped": 76083,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 10.3,
+            "load_5m": 7.65,
+            "load_15m": 10.84,
+            "cores": 20
+          },
+          "server_split": [],
+          "screen": {
+            "at": 1411.800000000745,
+            "first": true,
+            "header": "load-live-open",
+            "hero": "load-live-open",
+            "hero_lines": "Whole DAG\nCarry the load\ndispatching · last event node-settled",
+            "cards": [],
+            "status": {
+              "value": "parked"
+            },
+            "nodes": {
+              "value": "20"
+            },
+            "wall": {
+              "value": "23h 58m 6s"
+            },
+            "turns": {
+              "value": "Loading…"
+            },
+            "still_loading": true,
+            "range": [
+              1794218163592,
+              1794315134751
+            ],
+            "bars": [
+              {
+                "id": "idle-graph-0",
+                "left": 0,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "publication.step-0",
+                "left": 0.012877747252747254,
+                "width": 99.98569139194139
+              },
+              {
+                "id": "verification.step-0.verify-1",
+                "left": 0.02003205128205128,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-0.verify-91",
+                "left": 2.021806318681319,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-0.verify-181",
+                "left": 4.025011446886447,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-247",
+                "left": 5.493074633699633,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-337",
+                "left": 7.496279761904762,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-427",
+                "left": 9.49805402930403,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-493",
+                "left": 10.967548076923077,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-583",
+                "left": 12.969322344322345,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-673",
+                "left": 14.972527472527473,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-739",
+                "left": 16.44059065934066,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-829",
+                "left": 18.442364926739927,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-919",
+                "left": 20.445570054945055,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-985",
+                "left": 21.913633241758244,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-1075",
+                "left": 23.91683836996337,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-1165",
+                "left": 25.918612637362635,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1231",
+                "left": 27.388106684981683,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1321",
+                "left": 29.389880952380953,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1411",
+                "left": 31.39308608058608,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1477",
+                "left": 32.86114926739927,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1567",
+                "left": 34.86292353479853,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1657",
+                "left": 36.866128663003664,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1723",
+                "left": 38.334191849816854,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1813",
+                "left": 40.33739697802198,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1903",
+                "left": 42.33917124542125,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-1969",
+                "left": 43.80723443223443,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-2059",
+                "left": 45.81043956043956,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-2149",
+                "left": 47.81221382783883,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2215",
+                "left": 49.281707875457876,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2305",
+                "left": 51.28348214285714,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2395",
+                "left": 53.28668727106227,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2461",
+                "left": 54.75475045787546,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2551",
+                "left": 56.75795558608059,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2641",
+                "left": 58.75972985347986,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2707",
+                "left": 60.227793040293044,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2797",
+                "left": 62.23099816849816,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2887",
+                "left": 64.23277243589743,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-2953",
+                "left": 65.70226648351648,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-3043",
+                "left": 67.70404075091575,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-3133",
+                "left": 69.70724587912088,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3199",
+                "left": 71.17530906593407,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3289",
+                "left": 73.17708333333334,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3379",
+                "left": 75.18028846153845,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3445",
+                "left": 76.64835164835165,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3535",
+                "left": 78.65155677655677,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3625",
+                "left": 80.65333104395604,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3715",
+                "left": 82.65653617216118,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.held-for-release.verify-3790",
+                "left": 84.3206272893773,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.failed-with-reason.verify-3792",
+                "left": 84.34638278388277,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.cross-run-consumer.verify-3794",
+                "left": 84.37213827838828,
+                "width": 0.0486492673992674
+              }
+            ],
+            "line": 51,
+            "node_heading": null,
+            "node_state": null,
+            "rows": []
+          }
+        },
+        {
+          "seconds": 1.387199999999255,
+          "navigation_to_post_s": 0.0945,
+          "post_s": 1.207,
+          "answer_to_mark_s": 0.08569999999925493,
+          "first_answer_bytes": 958480,
+          "first_answer_gzipped": 76083,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 10.3,
+            "load_5m": 7.65,
+            "load_15m": 10.84,
+            "cores": 20
+          },
+          "server_split": [],
+          "screen": {
+            "at": 1387.199999999255,
+            "first": true,
+            "header": "load-live-open",
+            "hero": "load-live-open",
+            "hero_lines": "Whole DAG\nCarry the load\ndispatching · last event node-settled",
+            "cards": [],
+            "status": {
+              "value": "parked"
+            },
+            "nodes": {
+              "value": "20"
+            },
+            "wall": {
+              "value": "23h 58m 6s"
+            },
+            "turns": {
+              "value": "Loading…"
+            },
+            "still_loading": true,
+            "range": [
+              1794218163592,
+              1794315137417
+            ],
+            "bars": [
+              {
+                "id": "idle-graph-0",
+                "left": 0,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "publication.step-0",
+                "left": 0.012877747252747254,
+                "width": 99.98569139194139
+              },
+              {
+                "id": "verification.step-0.verify-1",
+                "left": 0.02003205128205128,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-0.verify-91",
+                "left": 2.021806318681319,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-0.verify-181",
+                "left": 4.025011446886447,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-247",
+                "left": 5.493074633699633,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-337",
+                "left": 7.496279761904762,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-427",
+                "left": 9.49805402930403,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-493",
+                "left": 10.966117216117215,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-583",
+                "left": 12.969322344322345,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-673",
+                "left": 14.971096611721613,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-739",
+                "left": 16.44059065934066,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-829",
+                "left": 18.442364926739927,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-919",
+                "left": 20.445570054945055,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-985",
+                "left": 21.913633241758244,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-1075",
+                "left": 23.91540750915751,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-1165",
+                "left": 25.918612637362635,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1231",
+                "left": 27.38667582417583,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1321",
+                "left": 29.38845009157509,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1411",
+                "left": 31.39165521978022,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1477",
+                "left": 32.85971840659341,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1567",
+                "left": 34.86292353479853,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1657",
+                "left": 36.8646978021978,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1723",
+                "left": 38.332760989010985,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1813",
+                "left": 40.33596611721612,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1903",
+                "left": 42.33774038461539,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-1969",
+                "left": 43.80723443223443,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-2059",
+                "left": 45.8090086996337,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-2149",
+                "left": 47.81221382783883,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2215",
+                "left": 49.280277014652015,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2305",
+                "left": 51.28205128205128,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2395",
+                "left": 53.28525641025641,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2461",
+                "left": 54.75331959706959,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2551",
+                "left": 56.75509386446886,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2641",
+                "left": 58.758298992674,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2707",
+                "left": 60.22636217948718,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2797",
+                "left": 62.229567307692314,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2887",
+                "left": 64.23134157509158,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-2953",
+                "left": 65.69940476190477,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-3043",
+                "left": 67.70260989010988,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-3133",
+                "left": 69.70438415750915,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3199",
+                "left": 71.1738782051282,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3289",
+                "left": 73.17565247252747,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3379",
+                "left": 75.1788576007326,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3445",
+                "left": 76.6469207875458,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3535",
+                "left": 78.64869505494505,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3625",
+                "left": 80.65190018315019,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3715",
+                "left": 82.65367445054946,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.held-for-release.verify-3790",
+                "left": 84.31919642857143,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.failed-with-reason.verify-3792",
+                "left": 84.34352106227107,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.cross-run-consumer.verify-3794",
+                "left": 84.36927655677655,
+                "width": 0.0486492673992674
+              }
+            ],
+            "line": 51,
+            "node_heading": null,
+            "node_state": null,
+            "rows": []
+          }
+        },
+        {
+          "seconds": 1.3650999999977649,
+          "navigation_to_post_s": 0.084699951171875,
+          "post_s": 1.14,
+          "answer_to_mark_s": 0.14040004882588986,
+          "first_answer_bytes": 958480,
+          "first_answer_gzipped": 76085,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 11.08,
+            "load_5m": 7.85,
+            "load_15m": 10.89,
+            "cores": 20
+          },
+          "server_split": [],
+          "screen": {
+            "at": 1365.0999999977648,
+            "first": true,
+            "header": "load-live-open",
+            "hero": "load-live-open",
+            "hero_lines": "Whole DAG\nCarry the load\ndispatching · last event node-settled",
+            "cards": [],
+            "status": {
+              "value": "parked"
+            },
+            "nodes": {
+              "value": "20"
+            },
+            "wall": {
+              "value": "23h 58m 6s"
+            },
+            "turns": {
+              "value": "Loading…"
+            },
+            "still_loading": true,
+            "range": [
+              1794218163592,
+              1794315139794
+            ],
+            "bars": [
+              {
+                "id": "idle-graph-0",
+                "left": 0,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "publication.step-0",
+                "left": 0.012877747252747254,
+                "width": 99.98569139194139
+              },
+              {
+                "id": "verification.step-0.verify-1",
+                "left": 0.02003205128205128,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-0.verify-91",
+                "left": 2.021806318681319,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-0.verify-181",
+                "left": 4.025011446886447,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-247",
+                "left": 5.493074633699633,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-337",
+                "left": 7.496279761904762,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-1.verify-427",
+                "left": 9.49805402930403,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-493",
+                "left": 10.966117216117215,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-583",
+                "left": 12.969322344322345,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-2.verify-673",
+                "left": 14.971096611721613,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-739",
+                "left": 16.4391597985348,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-829",
+                "left": 18.442364926739927,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-3.verify-919",
+                "left": 20.444139194139193,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-985",
+                "left": 21.91220238095238,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-1075",
+                "left": 23.91540750915751,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-4.verify-1165",
+                "left": 25.917181776556774,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1231",
+                "left": 27.38667582417583,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1321",
+                "left": 29.38845009157509,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-5.verify-1411",
+                "left": 31.39022435897436,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1477",
+                "left": 32.85971840659341,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1567",
+                "left": 34.86149267399267,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-6.verify-1657",
+                "left": 36.86326694139194,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1723",
+                "left": 38.332760989010985,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1813",
+                "left": 40.334535256410255,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-7.verify-1903",
+                "left": 42.33774038461539,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-1969",
+                "left": 43.80580357142857,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-2059",
+                "left": 45.80757783882784,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-8.verify-2149",
+                "left": 47.810782967032964,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2215",
+                "left": 49.27884615384615,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2305",
+                "left": 51.28062042124542,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-9.verify-2395",
+                "left": 53.28382554945055,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2461",
+                "left": 54.75188873626373,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2551",
+                "left": 56.753663003663,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-10.verify-2641",
+                "left": 58.75686813186813,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2707",
+                "left": 60.22493131868132,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2797",
+                "left": 62.22813644688645,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-11.verify-2887",
+                "left": 64.22991071428571,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-2953",
+                "left": 65.6979739010989,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-3043",
+                "left": 67.70117902930403,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-12.verify-3133",
+                "left": 69.7029532967033,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3199",
+                "left": 71.17101648351648,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3289",
+                "left": 73.1742216117216,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.step-13.verify-3379",
+                "left": 75.17599587912088,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3445",
+                "left": 76.64405906593407,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3535",
+                "left": 78.6472641941392,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3625",
+                "left": 80.64903846153845,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.dashboard.verify-3715",
+                "left": 82.65224358974359,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.held-for-release.verify-3790",
+                "left": 84.31633470695971,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.failed-with-reason.verify-3792",
+                "left": 84.3420902014652,
+                "width": 0.0486492673992674
+              },
+              {
+                "id": "verification.cross-run-consumer.verify-3794",
+                "left": 84.3678456959707,
+                "width": 0.0486492673992674
+              }
+            ],
+            "line": 51,
+            "node_heading": null,
+            "node_state": null,
+            "rows": []
+          }
+        }
+      ],
+      "median_s": 1.387199999999255,
+      "cold_cache": {
+        "seconds": 1.432,
+        "navigation_to_post_s": 0.099,
+        "post_s": 1.183,
+        "answer_to_mark_s": 0.1499999999999999,
+        "first_answer_bytes": 958480,
+        "first_answer_gzipped": 76084,
+        "checked": {
+          "screen_against_answer": true,
+          "answer_against_complete": true
+        },
+        "host_load": {
+          "load_1m": 11.08,
+          "load_5m": 7.85,
+          "load_15m": 10.89,
+          "cores": 20
+        },
+        "server_split": [],
+        "screen": {
+          "at": 1432,
+          "first": true,
+          "header": "load-live-open",
+          "hero": "load-live-open",
+          "hero_lines": "Whole DAG\nCarry the load\ndispatching · last event node-settled",
+          "cards": [],
+          "status": {
+            "value": "parked"
+          },
+          "nodes": {
+            "value": "20"
+          },
+          "wall": {
+            "value": "23h 58m 6s"
+          },
+          "turns": {
+            "value": "Loading…"
+          },
+          "still_loading": true,
+          "range": [
+            1794218163592,
+            1794315142329
+          ],
+          "bars": [
+            {
+              "id": "idle-graph-0",
+              "left": 0,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "publication.step-0",
+              "left": 0.012877747252747254,
+              "width": 99.98569139194139
+            },
+            {
+              "id": "verification.step-0.verify-1",
+              "left": 0.02003205128205128,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-0.verify-91",
+              "left": 2.021806318681319,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-0.verify-181",
+              "left": 4.025011446886447,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-1.verify-247",
+              "left": 5.493074633699633,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-1.verify-337",
+              "left": 7.494848901098901,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-1.verify-427",
+              "left": 9.49805402930403,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-2.verify-493",
+              "left": 10.966117216117215,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-2.verify-583",
+              "left": 12.967891483516484,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-2.verify-673",
+              "left": 14.971096611721613,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-3.verify-739",
+              "left": 16.4391597985348,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-3.verify-829",
+              "left": 18.440934065934066,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-3.verify-919",
+              "left": 20.444139194139193,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-4.verify-985",
+              "left": 21.91220238095238,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-4.verify-1075",
+              "left": 23.91397664835165,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-4.verify-1165",
+              "left": 25.917181776556774,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-5.verify-1231",
+              "left": 27.385244963369964,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-5.verify-1321",
+              "left": 29.38701923076923,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-5.verify-1411",
+              "left": 31.39022435897436,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-6.verify-1477",
+              "left": 32.85828754578755,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-6.verify-1567",
+              "left": 34.86006181318682,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-6.verify-1657",
+              "left": 36.86326694139194,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-7.verify-1723",
+              "left": 38.331330128205124,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-7.verify-1813",
+              "left": 40.333104395604394,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-7.verify-1903",
+              "left": 42.336309523809526,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-8.verify-1969",
+              "left": 43.804372710622715,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-8.verify-2059",
+              "left": 45.80614697802198,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-8.verify-2149",
+              "left": 47.8093521062271,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-9.verify-2215",
+              "left": 49.27741529304029,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-9.verify-2305",
+              "left": 51.27918956043956,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-9.verify-2395",
+              "left": 53.282394688644686,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-10.verify-2461",
+              "left": 54.75045787545788,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-10.verify-2551",
+              "left": 56.75223214285714,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-10.verify-2641",
+              "left": 58.75543727106227,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-11.verify-2707",
+              "left": 60.22350045787546,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-11.verify-2797",
+              "left": 62.22527472527473,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-11.verify-2887",
+              "left": 64.22847985347985,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-12.verify-2953",
+              "left": 65.69654304029304,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-12.verify-3043",
+              "left": 67.6983173076923,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-12.verify-3133",
+              "left": 69.70152243589743,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-13.verify-3199",
+              "left": 71.16958562271061,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-13.verify-3289",
+              "left": 73.17135989010988,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-13.verify-3379",
+              "left": 75.17456501831502,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.dashboard.verify-3445",
+              "left": 76.6426282051282,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.dashboard.verify-3535",
+              "left": 78.64440247252747,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.dashboard.verify-3625",
+              "left": 80.6476076007326,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.dashboard.verify-3715",
+              "left": 82.64938186813187,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.held-for-release.verify-3790",
+              "left": 84.31490384615384,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.failed-with-reason.verify-3792",
+              "left": 84.33922847985347,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.cross-run-consumer.verify-3794",
+              "left": 84.36498397435898,
+              "width": 0.0486492673992674
+            }
+          ],
+          "line": 51,
+          "node_heading": null,
+          "node_state": null,
+          "rows": []
+        }
+      },
+      "fresh_server": {
+        "seconds": 1.4318000000007451,
+        "navigation_to_post_s": 0.082800048828125,
+        "post_s": 1.253,
+        "answer_to_mark_s": 0.09599995117262017,
+        "first_answer_bytes": 958479,
+        "first_answer_gzipped": 76082,
+        "checked": {
+          "screen_against_answer": true,
+          "answer_against_complete": true
+        },
+        "host_load": {
+          "load_1m": 11.55,
+          "load_5m": 8,
+          "load_15m": 10.93,
+          "cores": 20
+        },
+        "server_split": [],
+        "screen": {
+          "at": 1431.800000000745,
+          "first": true,
+          "header": "load-live-open",
+          "hero": "load-live-open",
+          "hero_lines": "Whole DAG\nCarry the load\ndispatching · last event node-settled",
+          "cards": [],
+          "status": {
+            "value": "parked"
+          },
+          "nodes": {
+            "value": "20"
+          },
+          "wall": {
+            "value": "23h 58m 6s"
+          },
+          "turns": {
+            "value": "Loading…"
+          },
+          "still_loading": true,
+          "range": [
+            1794218163592,
+            1794315144652
+          ],
+          "bars": [
+            {
+              "id": "idle-graph-0",
+              "left": 0,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "publication.step-0",
+              "left": 0.012877747252747254,
+              "width": 99.98569139194139
+            },
+            {
+              "id": "verification.step-0.verify-1",
+              "left": 0.02003205128205128,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-0.verify-91",
+              "left": 2.021806318681319,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-0.verify-181",
+              "left": 4.025011446886447,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-1.verify-247",
+              "left": 5.493074633699633,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-1.verify-337",
+              "left": 7.494848901098901,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-1.verify-427",
+              "left": 9.49805402930403,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-2.verify-493",
+              "left": 10.966117216117215,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-2.verify-583",
+              "left": 12.967891483516484,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-2.verify-673",
+              "left": 14.971096611721613,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-3.verify-739",
+              "left": 16.4391597985348,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-3.verify-829",
+              "left": 18.440934065934066,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-3.verify-919",
+              "left": 20.442708333333336,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-4.verify-985",
+              "left": 21.91220238095238,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-4.verify-1075",
+              "left": 23.91397664835165,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-4.verify-1165",
+              "left": 25.91575091575092,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-5.verify-1231",
+              "left": 27.385244963369964,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-5.verify-1321",
+              "left": 29.38701923076923,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-5.verify-1411",
+              "left": 31.3887934981685,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-6.verify-1477",
+              "left": 32.856856684981686,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-6.verify-1567",
+              "left": 34.86006181318682,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-6.verify-1657",
+              "left": 36.86183608058608,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-7.verify-1723",
+              "left": 38.32989926739927,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-7.verify-1813",
+              "left": 40.333104395604394,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-7.verify-1903",
+              "left": 42.334878663003664,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-8.verify-1969",
+              "left": 43.802941849816854,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-8.verify-2059",
+              "left": 45.80614697802198,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-8.verify-2149",
+              "left": 47.80792124542125,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-9.verify-2215",
+              "left": 49.27598443223443,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-9.verify-2305",
+              "left": 51.27918956043956,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-9.verify-2395",
+              "left": 53.280963827838825,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-10.verify-2461",
+              "left": 54.74902701465202,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-10.verify-2551",
+              "left": 56.75080128205128,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-10.verify-2641",
+              "left": 58.75400641025641,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-11.verify-2707",
+              "left": 60.22206959706959,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-11.verify-2797",
+              "left": 62.22384386446886,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-11.verify-2887",
+              "left": 64.227048992674,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-12.verify-2953",
+              "left": 65.69511217948718,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-12.verify-3043",
+              "left": 67.69688644688645,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-12.verify-3133",
+              "left": 69.70009157509158,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-13.verify-3199",
+              "left": 71.16815476190477,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-13.verify-3289",
+              "left": 73.16992902930403,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.step-13.verify-3379",
+              "left": 75.17313415750915,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.dashboard.verify-3445",
+              "left": 76.64119734432234,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.dashboard.verify-3535",
+              "left": 78.6429716117216,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.dashboard.verify-3625",
+              "left": 80.64474587912088,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.dashboard.verify-3715",
+              "left": 82.647951007326,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.held-for-release.verify-3790",
+              "left": 84.31204212454212,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.failed-with-reason.verify-3792",
+              "left": 84.33779761904762,
+              "width": 0.0486492673992674
+            },
+            {
+              "id": "verification.cross-run-consumer.verify-3794",
+              "left": 84.36355311355311,
+              "width": 0.0486492673992674
+            }
+          ],
+          "line": 51,
+          "node_heading": null,
+          "node_state": null,
+          "rows": []
+        }
+      },
+      "small_run_s": 0.12489999999850988
+    },
+    "node": {
+      "readings": [
+        {
+          "seconds": 1.048300000000745,
+          "navigation_to_post_s": 0.08239990234375,
+          "post_s": 0.908,
+          "answer_to_mark_s": 0.057900097656995,
+          "first_answer_bytes": 450545,
+          "first_answer_gzipped": 29607,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 11.91,
+            "load_5m": 8.14,
+            "load_15m": 10.95,
+            "cores": 20
+          },
+          "server_split": [],
+          "screen": {
+            "at": 1048.300000000745,
+            "first": true,
+            "header": "load-live-open",
+            "hero": null,
+            "hero_lines": "",
+            "cards": [],
+            "status": null,
+            "nodes": null,
+            "wall": null,
+            "turns": null,
+            "still_loading": true,
+            "range": [
+              1794292472080,
+              1794299911337
+            ],
+            "bars": [
+              {
+                "id": "group-dispatch.a-recording-host-load-live-open-dashboard.worker-3444",
+                "left": 0,
+                "width": 99.99860987544484
+              },
+              {
+                "id": "publication.dashboard",
+                "left": 0.15986432384341637,
+                "width": 99.83874555160142
+              },
+              {
+                "id": "group-verification.dashboard.verify-3445",
+                "left": 0.2599532918149466,
+                "width": 99.19928825622776
+              },
+              {
+                "id": "verification.dashboard.verify-3788",
+                "left": 99.73865658362989,
+                "width": 0.04865435943060498
+              }
+            ],
+            "line": 4,
+            "node_heading": "Timeline for dashboard",
+            "node_state": "running",
+            "rows": [
+              "Agent (a-recording-host-load-live-open-dashboard.worker-3444)",
+              "Agent (a-recording-host-load-live-open-dashboard.worker-3788)",
+              "Publication: dashboard",
+              "Verification: verify-3445",
+              "Verification: verify-3787",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9962 of dashboard",
+              "change-check",
+              "step 9964 of dashboard",
+              "turn-message",
+              "turn-completed",
+              "turn-started",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9970 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9973 of dashboard",
+              "Verification: verify-3788",
+              "change-check",
+              "step 9975 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9979 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9982 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9985 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9988 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9991 of dashboard",
+              "change-check",
+              "step 9993 of dashboard",
+              "turn-message",
+              "turn-completed",
+              "turn-started",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9999 of dashboard"
+            ]
+          }
+        },
+        {
+          "seconds": 1.02989999999851,
+          "navigation_to_post_s": 0.085,
+          "post_s": 0.886,
+          "answer_to_mark_s": 0.05889999999850992,
+          "first_answer_bytes": 450545,
+          "first_answer_gzipped": 29611,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 11.91,
+            "load_5m": 8.14,
+            "load_15m": 10.95,
+            "cores": 20
+          },
+          "server_split": [],
+          "screen": {
+            "at": 1029.8999999985099,
+            "first": true,
+            "header": "load-live-open",
+            "hero": null,
+            "hero_lines": "",
+            "cards": [],
+            "status": null,
+            "nodes": null,
+            "wall": null,
+            "turns": null,
+            "still_loading": true,
+            "range": [
+              1794292472080,
+              1794299911337
+            ],
+            "bars": [
+              {
+                "id": "group-dispatch.a-recording-host-load-live-open-dashboard.worker-3444",
+                "left": 0,
+                "width": 99.99860987544484
+              },
+              {
+                "id": "publication.dashboard",
+                "left": 0.15986432384341637,
+                "width": 99.83874555160142
+              },
+              {
+                "id": "group-verification.dashboard.verify-3445",
+                "left": 0.2599532918149466,
+                "width": 99.19928825622776
+              },
+              {
+                "id": "verification.dashboard.verify-3788",
+                "left": 99.73865658362989,
+                "width": 0.04865435943060498
+              }
+            ],
+            "line": 4,
+            "node_heading": "Timeline for dashboard",
+            "node_state": "running",
+            "rows": [
+              "Agent (a-recording-host-load-live-open-dashboard.worker-3444)",
+              "Agent (a-recording-host-load-live-open-dashboard.worker-3788)",
+              "Publication: dashboard",
+              "Verification: verify-3445",
+              "Verification: verify-3787",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9962 of dashboard",
+              "change-check",
+              "step 9964 of dashboard",
+              "turn-message",
+              "turn-completed",
+              "turn-started",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9970 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9973 of dashboard",
+              "Verification: verify-3788",
+              "change-check",
+              "step 9975 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9979 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9982 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9985 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9988 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9991 of dashboard",
+              "change-check",
+              "step 9993 of dashboard",
+              "turn-message",
+              "turn-completed",
+              "turn-started",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9999 of dashboard"
+            ]
+          }
+        },
+        {
+          "seconds": 1.0965,
+          "navigation_to_post_s": 0.08339990234375,
+          "post_s": 0.959,
+          "answer_to_mark_s": 0.05410009765625001,
+          "first_answer_bytes": 450545,
+          "first_answer_gzipped": 29608,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 13.36,
+            "load_5m": 8.5,
+            "load_15m": 11.06,
+            "cores": 20
+          },
+          "server_split": [],
+          "screen": {
+            "at": 1096.5,
+            "first": true,
+            "header": "load-live-open",
+            "hero": null,
+            "hero_lines": "",
+            "cards": [],
+            "status": null,
+            "nodes": null,
+            "wall": null,
+            "turns": null,
+            "still_loading": true,
+            "range": [
+              1794292472080,
+              1794299911337
+            ],
+            "bars": [
+              {
+                "id": "group-dispatch.a-recording-host-load-live-open-dashboard.worker-3444",
+                "left": 0,
+                "width": 99.99860987544484
+              },
+              {
+                "id": "publication.dashboard",
+                "left": 0.15986432384341637,
+                "width": 99.83874555160142
+              },
+              {
+                "id": "group-verification.dashboard.verify-3445",
+                "left": 0.2599532918149466,
+                "width": 99.19928825622776
+              },
+              {
+                "id": "verification.dashboard.verify-3788",
+                "left": 99.73865658362989,
+                "width": 0.04865435943060498
+              }
+            ],
+            "line": 4,
+            "node_heading": "Timeline for dashboard",
+            "node_state": "running",
+            "rows": [
+              "Agent (a-recording-host-load-live-open-dashboard.worker-3444)",
+              "Agent (a-recording-host-load-live-open-dashboard.worker-3788)",
+              "Publication: dashboard",
+              "Verification: verify-3445",
+              "Verification: verify-3787",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9962 of dashboard",
+              "change-check",
+              "step 9964 of dashboard",
+              "turn-message",
+              "turn-completed",
+              "turn-started",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9970 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9973 of dashboard",
+              "Verification: verify-3788",
+              "change-check",
+              "step 9975 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9979 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9982 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9985 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9988 of dashboard",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9991 of dashboard",
+              "change-check",
+              "step 9993 of dashboard",
+              "turn-message",
+              "turn-completed",
+              "turn-started",
+              "member-heartbeat",
+              "member-heartbeat",
+              "step 9999 of dashboard"
+            ]
+          }
+        }
+      ],
+      "median_s": 1.048300000000745,
+      "cold_cache": {
+        "seconds": 1.06389999999851,
+        "navigation_to_post_s": 0.08789990234375,
+        "post_s": 0.869,
+        "answer_to_mark_s": 0.10700009765475993,
+        "first_answer_bytes": 450545,
+        "first_answer_gzipped": 29609,
+        "checked": {
+          "screen_against_answer": true,
+          "answer_against_complete": true
+        },
+        "host_load": {
+          "load_1m": 13.36,
+          "load_5m": 8.5,
+          "load_15m": 11.06,
+          "cores": 20
+        },
+        "server_split": [],
+        "screen": {
+          "at": 1063.8999999985099,
+          "first": true,
+          "header": "load-live-open",
+          "hero": null,
+          "hero_lines": "",
+          "cards": [],
+          "status": null,
+          "nodes": null,
+          "wall": null,
+          "turns": null,
+          "still_loading": true,
+          "range": [
+            1794292472080,
+            1794299911337
+          ],
+          "bars": [
+            {
+              "id": "group-dispatch.a-recording-host-load-live-open-dashboard.worker-3444",
+              "left": 0,
+              "width": 99.99860987544484
+            },
+            {
+              "id": "publication.dashboard",
+              "left": 0.15986432384341637,
+              "width": 99.83874555160142
+            },
+            {
+              "id": "group-verification.dashboard.verify-3445",
+              "left": 0.2599532918149466,
+              "width": 99.19928825622776
+            },
+            {
+              "id": "verification.dashboard.verify-3788",
+              "left": 99.73865658362989,
+              "width": 0.04865435943060498
+            }
+          ],
+          "line": 4,
+          "node_heading": "Timeline for dashboard",
+          "node_state": "running",
+          "rows": [
+            "Agent (a-recording-host-load-live-open-dashboard.worker-3444)",
+            "Agent (a-recording-host-load-live-open-dashboard.worker-3788)",
+            "Publication: dashboard",
+            "Verification: verify-3445",
+            "Verification: verify-3787",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9962 of dashboard",
+            "change-check",
+            "step 9964 of dashboard",
+            "turn-message",
+            "turn-completed",
+            "turn-started",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9970 of dashboard",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9973 of dashboard",
+            "Verification: verify-3788",
+            "change-check",
+            "step 9975 of dashboard",
+            "member-heartbeat",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9979 of dashboard",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9982 of dashboard",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9985 of dashboard",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9988 of dashboard",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9991 of dashboard",
+            "change-check",
+            "step 9993 of dashboard",
+            "turn-message",
+            "turn-completed",
+            "turn-started",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9999 of dashboard"
+          ]
+        }
+      },
+      "fresh_server": {
+        "seconds": 1.069199999999255,
+        "navigation_to_post_s": 0.088,
+        "post_s": 0.924,
+        "answer_to_mark_s": 0.05719999999925496,
+        "first_answer_bytes": 450545,
+        "first_answer_gzipped": 29608,
+        "checked": {
+          "screen_against_answer": true,
+          "answer_against_complete": true
+        },
+        "host_load": {
+          "load_1m": 13.36,
+          "load_5m": 8.5,
+          "load_15m": 11.06,
+          "cores": 20
+        },
+        "server_split": [],
+        "screen": {
+          "at": 1069.199999999255,
+          "first": true,
+          "header": "load-live-open",
+          "hero": null,
+          "hero_lines": "",
+          "cards": [],
+          "status": null,
+          "nodes": null,
+          "wall": null,
+          "turns": null,
+          "still_loading": true,
+          "range": [
+            1794292472080,
+            1794299911337
+          ],
+          "bars": [
+            {
+              "id": "group-dispatch.a-recording-host-load-live-open-dashboard.worker-3444",
+              "left": 0,
+              "width": 99.99860987544484
+            },
+            {
+              "id": "publication.dashboard",
+              "left": 0.15986432384341637,
+              "width": 99.83874555160142
+            },
+            {
+              "id": "group-verification.dashboard.verify-3445",
+              "left": 0.2599532918149466,
+              "width": 99.19928825622776
+            },
+            {
+              "id": "verification.dashboard.verify-3788",
+              "left": 99.73865658362989,
+              "width": 0.04865435943060498
+            }
+          ],
+          "line": 4,
+          "node_heading": "Timeline for dashboard",
+          "node_state": "running",
+          "rows": [
+            "Agent (a-recording-host-load-live-open-dashboard.worker-3444)",
+            "Agent (a-recording-host-load-live-open-dashboard.worker-3788)",
+            "Publication: dashboard",
+            "Verification: verify-3445",
+            "Verification: verify-3787",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9962 of dashboard",
+            "change-check",
+            "step 9964 of dashboard",
+            "turn-message",
+            "turn-completed",
+            "turn-started",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9970 of dashboard",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9973 of dashboard",
+            "Verification: verify-3788",
+            "change-check",
+            "step 9975 of dashboard",
+            "member-heartbeat",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9979 of dashboard",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9982 of dashboard",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9985 of dashboard",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9988 of dashboard",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9991 of dashboard",
+            "change-check",
+            "step 9993 of dashboard",
+            "turn-message",
+            "turn-completed",
+            "turn-started",
+            "member-heartbeat",
+            "member-heartbeat",
+            "step 9999 of dashboard"
+          ]
+        }
+      },
+      "small_run_s": null
+    },
+    "slowest_view": "overall",
+    "slowest_s": 1.387199999999255
+  },
+  "rest_arrived": {
+    "overall_s": 25.317199999999254,
+    "graph_s": 19.3135,
+    "node_s": 21.44879999999702,
+    "patch_frame_bytes": 7761314,
+    "server_peak_rss_mb": 789.0625,
+    "complete": true
+  },
+  "history_page": {
+    "node_before_rest_s": 0.975,
+    "node_after_rest_s": 0.481,
+    "overall_span_page_s": 1.126,
+    "slowest_s": 0.975,
+    "rows_shown_after": 211
+  },
+  "status": {
+    "small_s": 0.015,
+    "large_s": 0.126,
+    "slowest_s": 0.126,
+    "checkpoint_bytes": 7332522,
+    "stand_in_starts": 0
+  },
+  "spike": "",
+  "server": "/home/whoop/ai-orchestrator/runs/brief-dag-first-view-under-1s-2026-11-10-spikes/scratch/296031-0/bin/onepipeline-api-landed-59eaa15",
+  "host_load": {
+    "start": {
+      "load_1m": 4.75,
+      "load_5m": 6.69,
+      "load_15m": 10.9,
+      "cores": 20
+    },
+    "end": {
+      "load_1m": 10.56,
+      "load_5m": 9.34,
+      "load_15m": 11.06,
+      "cores": 20
+    }
+  }
+}

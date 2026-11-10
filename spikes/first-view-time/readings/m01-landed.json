@@ -1,0 +1,208 @@
+{
+  "first_view": {
+    "graph": {
+      "readings": [
+        {
+          "seconds": 0.618699999999255,
+          "navigation_to_post_s": 0.068300048828125,
+          "post_s": 0.491,
+          "answer_to_mark_s": 0.05939995117112995,
+          "first_answer_bytes": 4292,
+          "first_answer_gzipped": 1093,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 8.06,
+            "load_5m": 13.63,
+            "load_15m": 17.58,
+            "cores": 20
+          },
+          "server_split": []
+        },
+        {
+          "seconds": 0.6594000000003726,
+          "navigation_to_post_s": 0.07660009765625,
+          "post_s": 0.527,
+          "answer_to_mark_s": 0.055799902344122576,
+          "first_answer_bytes": 4292,
+          "first_answer_gzipped": 1095,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 8.06,
+            "load_5m": 13.63,
+            "load_15m": 17.58,
+            "cores": 20
+          },
+          "server_split": []
+        },
+        {
+          "seconds": 0.5829000000003726,
+          "navigation_to_post_s": 0.064800048828125,
+          "post_s": 0.46,
+          "answer_to_mark_s": 0.05809995117224753,
+          "first_answer_bytes": 4292,
+          "first_answer_gzipped": 1093,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 8.06,
+            "load_5m": 13.63,
+            "load_15m": 17.58,
+            "cores": 20
+          },
+          "server_split": []
+        }
+      ],
+      "median_s": 0.618699999999255
+    },
+    "overall": {
+      "readings": [
+        {
+          "seconds": 1.066699999999255,
+          "navigation_to_post_s": 0.068199951171875,
+          "post_s": 0.901,
+          "answer_to_mark_s": 0.09750004882738006,
+          "first_answer_bytes": 958480,
+          "first_answer_gzipped": 76087,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 8.21,
+            "load_5m": 13.57,
+            "load_15m": 17.54,
+            "cores": 20
+          },
+          "server_split": []
+        },
+        {
+          "seconds": 1.2808000000007451,
+          "navigation_to_post_s": 0.07439990234375,
+          "post_s": 1.079,
+          "answer_to_mark_s": 0.12740009765699511,
+          "first_answer_bytes": 958480,
+          "first_answer_gzipped": 76089,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 8.21,
+            "load_5m": 13.57,
+            "load_15m": 17.54,
+            "cores": 20
+          },
+          "server_split": []
+        },
+        {
+          "seconds": 1.1286999999992549,
+          "navigation_to_post_s": 0.069199951171875,
+          "post_s": 0.968,
+          "answer_to_mark_s": 0.09150004882737983,
+          "first_answer_bytes": 958480,
+          "first_answer_gzipped": 76083,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 8.12,
+            "load_5m": 13.46,
+            "load_15m": 17.48,
+            "cores": 20
+          },
+          "server_split": []
+        }
+      ],
+      "median_s": 1.1286999999992549
+    },
+    "node": {
+      "readings": [
+        {
+          "seconds": 0.9094000000003726,
+          "navigation_to_post_s": 0.068300048828125,
+          "post_s": 0.788,
+          "answer_to_mark_s": 0.05309995117224753,
+          "first_answer_bytes": 450545,
+          "first_answer_gzipped": 29611,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 8.12,
+            "load_5m": 13.46,
+            "load_15m": 17.48,
+            "cores": 20
+          },
+          "server_split": []
+        },
+        {
+          "seconds": 0.9547000000011175,
+          "navigation_to_post_s": 0.06389990234375,
+          "post_s": 0.843,
+          "answer_to_mark_s": 0.04780009765736759,
+          "first_answer_bytes": 450545,
+          "first_answer_gzipped": 29610,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 8.51,
+            "load_5m": 13.45,
+            "load_15m": 17.45,
+            "cores": 20
+          },
+          "server_split": []
+        },
+        {
+          "seconds": 0.8798000000007451,
+          "navigation_to_post_s": 0.07339990234375,
+          "post_s": 0.754,
+          "answer_to_mark_s": 0.05240009765699505,
+          "first_answer_bytes": 450545,
+          "first_answer_gzipped": 29609,
+          "checked": {
+            "screen_against_answer": true,
+            "answer_against_complete": true
+          },
+          "host_load": {
+            "load_1m": 8.51,
+            "load_5m": 13.45,
+            "load_15m": 17.45,
+            "cores": 20
+          },
+          "server_split": []
+        }
+      ],
+      "median_s": 0.9094000000003726
+    },
+    "slowest_view": "overall",
+    "slowest_s": 1.1286999999992549
+  },
+  "spike": "",
+  "server": "/home/whoop/ai-orchestrator/runs/brief-dag-first-view-under-1s-2026-11-10-spikes/scratch/296031-0/bin/onepipeline-api-landed-59eaa15",
+  "host_load": {
+    "start": {
+      "load_1m": 13.23,
+      "load_5m": 16.35,
+      "load_15m": 18.81,
+      "cores": 20
+    },
+    "end": {
+      "load_1m": 8.51,
+      "load_5m": 13.45,
+      "load_15m": 17.45,
+      "cores": 20
+    }
+  }
+}
