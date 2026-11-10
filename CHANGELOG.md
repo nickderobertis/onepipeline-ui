@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.76.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.75.0...v0.76.0) - 2026-11-10
+
+### Added
+
+- *(dag-ui)* [**breaking**] answer questions by choice or in your own words, and send several answers at once ([#714](https://github.com/nickderobertis/onepipeline-ui/pull/714))
+
 ## [0.75.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.74.0...v0.75.0) - 2026-11-09
 
 ### Fixed
