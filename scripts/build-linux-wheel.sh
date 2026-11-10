@@ -199,12 +199,28 @@ at "installing maturin $MATURIN_VERSION" "check that PyPI serves maturin $MATURI
 python3.12 -m pip install -q "maturin==$MATURIN_VERSION"
 at "compiling the wheel" \
   "fix the compile error above; 'just wheel-linux $TARGET' reproduces it in this image"
-python3.12 -m maturin build --release --locked --features bundled-ui \
+python3.12 -m maturin build --release --locked --features "bundled-ui${EXTRA_FEATURES:+,$EXTRA_FEATURES}" \
   --target "$TARGET" --compatibility manylinux2014 --out "$OUT"
 SCRIPT
 
+# The first-view-time spike's opt-in, unset by default so the release's build is
+# unchanged: WHEEL_MANIFEST_OVERLAY names a directory under the checkout holding a
+# Cargo.toml and Cargo.lock mounted over the root's (the root manifest with a
+# `[patch.crates-io]` onepipeline, and its lock, which spikes/first-view-time/
+# release-overlay.sh writes), and WHEEL_FEATURES adds features to `bundled-ui`.
+overlay=()
+if [ -n "${WHEEL_MANIFEST_OVERLAY:-}" ]; then
+  for file in Cargo.toml Cargo.lock; do
+    [ -f "$root/$WHEEL_MANIFEST_OVERLAY/$file" ] \
+      || fail_usage "WHEEL_MANIFEST_OVERLAY=$WHEEL_MANIFEST_OVERLAY holds no $file"
+    overlay+=(-v "$root/$WHEEL_MANIFEST_OVERLAY/$file:/io/$file:ro")
+  done
+  echo "building over the manifest overlay $WHEEL_MANIFEST_OVERLAY with features bundled-ui${WHEEL_FEATURES:+,$WHEEL_FEATURES}" >&2
+fi
+
 docker run --rm --platform "$platform" \
-  -v "$root":/io:ro -v "$root/$cargo_target":"/io/$cargo_target" -v "$out_abs":"/io/$out_rel" -w /io \
+  -v "$root":/io:ro -v "$root/$cargo_target":"/io/$cargo_target" -v "$out_abs":"/io/$out_rel" "${overlay[@]}" -w /io \
+  -e EXTRA_FEATURES="${WHEEL_FEATURES:-}" \
   -e TARGET="$target" -e OUT="$out_rel" -e CHANNEL="$channel" -e MATURIN_VERSION="$maturin_version" \
   -e RUSTUP_VERSION="$rustup_version" -e RUSTUP_SHA256="$rustup_sha256" \
   -e HOST_OWNER="$(id -u):$(id -g)" \
