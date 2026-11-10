@@ -43,7 +43,7 @@ TARGETS = {('Linux', 'x86_64'): 'x86_64-unknown-linux-gnu', ('Linux', 'aarch64')
 
 # The workload of the job's own budget: this repository's catalog, one rolling file, and one
 # results artifact of a size real runs produced.
-ROWS = 21
+ROWS = 25
 COMMITS = 20
 SAVED_ARTIFACT_BYTES = (2619, 11350)
 PROVISIONAL_REQUESTS = 20
@@ -61,7 +61,9 @@ RECORDED_JOBS = json.loads((HERE / 'fixtures/own-run/jobs.json').read_text())
 SAVED = ('onepipeline-ui-macos-jobs-per-run', 'onepipeline-ui-macos-runs-per-change')
 POOL = 'onepipeline-ui-pool-maintenance-seconds'
 # Saved only when the affected tier selects their project, so here, as nothing selects it, none is.
-READ_LATENCY = ('dag-ui-human-items-requests-per-minute', 'dag-ui-human-items-update-lag-seconds')
+READ_LATENCY = ('dag-ui-human-items-requests-per-minute', 'dag-ui-human-items-update-lag-seconds',
+                'dag-ui-run-first-view-seconds', 'dag-ui-run-rest-arrived-seconds',
+                'dag-ui-run-history-page-seconds', 'dag-ui-run-status-read-seconds')
 # Its command runs in this job: nothing saves it, and a pull request's job measures the live listing.
 HEADROOM = 'onepipeline-ui-cache-headroom'
 # A push reads no saved results, so a row its merged run holds no figure for keeps its catalog reason.

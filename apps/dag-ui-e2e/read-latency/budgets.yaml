@@ -68,7 +68,7 @@ budgets:
       1 s is the engine's selective read (read_selected and
       RunView::over_selected), which a later change brings down.
     measure: reported
-    command: [node, read-latency-budget.mjs, --metric, first-view]
+    command: [node, read-latency-budget.mjs, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, --metric, first-view]
     unit: seconds
     direction: max
     threshold: 1.5
@@ -84,7 +84,7 @@ budgets:
       per minute. Basis estimate; telemetry analysis only, approximately 2
       seconds.
     measure: reported
-    command: [node, read-latency-budget.mjs, --metric, rest-arrived]
+    command: [node, read-latency-budget.mjs, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, --metric, rest-arrived]
     unit: seconds
     direction: max
     threshold: 60
@@ -99,7 +99,7 @@ budgets:
       node, and 11 other live runs at 50 records per minute. Basis estimate;
       telemetry analysis only, approximately 2 seconds.
     measure: reported
-    command: [node, read-latency-budget.mjs, --metric, history-page]
+    command: [node, read-latency-budget.mjs, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, --metric, history-page]
     unit: seconds
     direction: max
     threshold: 1
@@ -116,7 +116,7 @@ budgets:
       takes 20 s and records each start. Basis design; telemetry analysis only,
       approximately 2 seconds.
     measure: reported
-    command: [node, read-latency-budget.mjs, --metric, status]
+    command: [node, read-latency-budget.mjs, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, --metric, status]
     unit: seconds
     direction: max
     threshold: 1

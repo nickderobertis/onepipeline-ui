@@ -436,13 +436,19 @@ test("refuses a metric it does not measure, as a usage error", () => {
 
 test("the budgets file names this runner's metrics, with no host label", () => {
   const text = readFileSync(join(import.meta.dirname, "budgets.yaml"), "utf8");
-  for (const metric of ["human-items-requests", "human-items-lag"])
+  // Each names the telemetry it reads, so a job without that file, such as
+  // ci.yml's budgets job, reports the file missing rather than running the
+  // runner where its imports do not resolve.
+  for (const metric of [
+    "human-items-requests",
+    "human-items-lag",
+    "first-view",
+    "rest-arrived",
+    "history-page",
+    "status",
+  ])
     expect(text).toContain(
       `command: [node, read-latency-budget.mjs, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, --metric, ${metric}]`,
-    );
-  for (const metric of ["first-view", "rest-arrived", "history-page", "status"])
-    expect(text).toContain(
-      `command: [node, read-latency-budget.mjs, --metric, ${metric}]`,
     );
   expect(text).not.toMatch(/labels:/u);
 });
