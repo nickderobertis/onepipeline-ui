@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   HUMAN_ITEM_PRIORITIES,
   type HumanItem,
+  type HumanItemBatchReceipt,
+  type HumanItemChoice,
   type HumanItemDetail,
   type HumanItemFilter,
   type HumanItemReceipt,
@@ -21,6 +23,7 @@ export * from "./human-items.generated.js";
 export const HUMAN_ITEM_PATHS = {
   list: "/api/human-items",
   item: (id: string) => `/api/human-items/${encodeURIComponent(id)}`,
+  answers: "/api/human-items/answers",
   answer: (id: string) => `/api/human-items/${encodeURIComponent(id)}/answer`,
   complete: (id: string) =>
     `/api/human-items/${encodeURIComponent(id)}/complete`,
@@ -60,12 +63,13 @@ const resolution = z.strictObject({
   reason: nullableString,
 });
 
-const choice = z.strictObject({
-  id: z
+/** One answer a question offers, as the engine bounds it. */
+const choice: z.ZodType<HumanItemChoice> = z.strictObject({
+  id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/u),
+  title: z
     .string()
-    .regex(/^[a-z0-9][a-z0-9-]*$/u)
-    .max(64),
-  title: z.string().regex(/^(?=.*\S)[^\n\r]{1,80}$/u),
+    .regex(/^[^\r\n]*\S[^\r\n]*$/u)
+    .refine((title) => [...title].length <= 80),
   description: prose,
 });
 
@@ -73,38 +77,42 @@ const choice = z.strictObject({
  * Whether `item`'s kind, state, resolution and approval agree, as the engine's
  * own decoder rules: an open item has no resolution and a resolved one has one;
  * a task is completed and a question answered, never the reverse; an answer
- * carries text, a choice or both and no reason, a completion no reason and any
- * comment not blank, a dismissal no text; only a question offers choices, each
- * id once, and only an answer names one, among those its question offers; and
+ * carries a choice the question offers, text, or both, and no reason, a completion no reason and any comment not blank,
+ * a dismissal no text; and
  * only a task carries an approval reference.
  */
 function lifecycleProblem(item: {
   kind: string;
   state: string;
   approval: unknown;
-  choices?: readonly { readonly id: string }[] | undefined;
   resolution: z.infer<typeof resolution> | null;
+  choices?: readonly HumanItemChoice[] | undefined;
 }): string | undefined {
   const { kind, state, resolution: settled } = item;
-  const offered = (item.choices ?? []).map(({ id }) => id);
+  const offered = item.choices ?? [];
   if (kind === "task" && offered.length > 0)
     return "choices are only valid on questions";
-  if (new Set(offered).size !== offered.length)
+  if (new Set(offered.map(({ id }) => id)).size !== offered.length)
     return "a choice id is repeated";
+  const picked = settled?.choice ?? undefined;
+  if (
+    picked !== undefined &&
+    (state !== "answered" || !offered.some(({ id }) => id === picked))
+  )
+    return "a resolution's choice is one this answered question offers";
   if (kind === "question" && item.approval !== null)
     return "approval is only valid on tasks";
   if (state === "open")
     return settled === null ? undefined : "an open item has no resolution";
   if (settled === null) return "a resolved item carries its resolution";
-  const picked = settled.choice ?? null;
-  if (picked !== null && (state !== "answered" || !offered.includes(picked)))
-    return "a resolution's choice is one its answered question offers";
   if (state === "answered")
     return kind === "question" &&
-      (settled.text === null ? picked !== null : /\S/u.test(settled.text)) &&
+      (settled.text === null
+        ? picked !== undefined
+        : /\S/u.test(settled.text)) &&
       settled.reason === null
       ? undefined
-      : "an answer is a question's, with text or a choice and no reason";
+      : "an answer is a question's, with a choice or text and no reason";
   if (state === "completed")
     return kind === "task" &&
       (settled.text === null || /\S/u.test(settled.text)) &&
@@ -283,6 +291,18 @@ export const humanItemReceiptSchema: z.ZodType<HumanItemReceipt> =
   z.strictObject({
     item: humanItemViewSchema,
     event_id: z.string(),
+  });
+
+const refusal = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("unavailable") }),
+  z.strictObject({ kind: z.literal("conflict"), reason: z.string() }),
+]);
+
+export const humanItemBatchReceiptSchema: z.ZodType<HumanItemBatchReceipt> =
+  z.strictObject({
+    batch: nullableString.optional(),
+    answered: z.array(humanItemReceiptSchema),
+    refused: z.array(z.strictObject({ id: z.string(), refusal })),
   });
 
 export const humanItemListSchema = z.strictObject({

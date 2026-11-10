@@ -117,7 +117,8 @@ def checked(seed):
     """A journey's seed, refused unless every part is one this board can answer as GitHub
     would: open issues carry no reason, closed ones one GitHub closes with, every card sits at
     one of the board's options, and every parent is an issue of the seed."""
-    if (not isinstance(seed, dict) or set(seed) != {"repository", "options", "issues"}
+    if (not isinstance(seed, dict) or set(seed) - {"created_prefix"} != {"repository", "options", "issues"}
+            or not isinstance(seed.get("created_prefix", ""), str)
             or not isinstance(seed["repository"], str) or not REPOSITORY.match(seed["repository"])
             or not isinstance(seed["options"], list) or not seed["options"]
             or not all(isinstance(option, str) and option for option in seed["options"])
@@ -312,7 +313,7 @@ def create_issue(supplied):
             or supplied.get("parentIssueId") not in [None, *state["issues"]]):
         raise ValueError("invalid createIssue input")
     number = max([held["number"] for held in state["issues"].values()], default=0) + 1
-    name = "I_%d" % number
+    name = "%sI_%d" % (seed.get("created_prefix", ""), number)
     state["issues"][name] = {"body": supplied.get("body", ""), "status": None, "state": "OPEN",
                              "reason": None, "title": supplied["title"], "number": number,
                              "parent": supplied.get("parentIssueId"), "member": False,

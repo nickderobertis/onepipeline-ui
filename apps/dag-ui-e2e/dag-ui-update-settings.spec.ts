@@ -704,9 +704,12 @@ test("a person's write shows at once while changes nobody made here stay held un
   });
   await answer.fill("eu-west");
   await answer.press("Enter");
+  await page.getByRole("button", { name: "Send 1 answer" }).click();
   const wrote = Date.now();
   await expect(answer).toHaveCount(0);
-  await expect(pane.getByText(/· Answered$/)).toBeVisible();
+  await expect(pane.getByRole("region", { name: "Answer" })).toContainText(
+    "eu-west",
+  );
   await expect(itemCard(page, question)).toHaveCount(0);
   await page.getByRole("button", { name: "Close detail" }).click();
 

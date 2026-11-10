@@ -38,10 +38,11 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::api::RunApi;
 use crate::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId, EventsQuery,
-    HumanItemAnswerRequest, HumanItemCompleteRequest, HumanItemDismissRequest, HumanItemId,
-    HumanItemNoteRequest, HumanItemReopenRequest, NextQuery, NodeId, PageLimit, ProjectId, RunId,
-    RunQuery, RunSelection, RunsPage, RunsQuery, ShutdownRequest, StopRequest, SubscribeRequest,
-    SubscriptionId, SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery,
+    HumanItemAnswerRequest, HumanItemAnswersRequest, HumanItemCompleteRequest,
+    HumanItemDismissRequest, HumanItemId, HumanItemNoteRequest, HumanItemReopenRequest, NextQuery,
+    NodeId, PageLimit, ProjectId, RunId, RunQuery, RunSelection, RunsPage, RunsQuery,
+    ShutdownRequest, StopRequest, SubscribeRequest, SubscriptionId, SurfaceRequest, TimelineQuery,
+    TimelineScope, TranscriptQuery,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
@@ -120,6 +121,7 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::SUBSCRIPTION, delete(unsubscribe))
         .route(routes::HUMAN_ITEMS, get(human_items).post(raise_human_item))
         .route(routes::HUMAN_ITEM, get(human_item))
+        .route(routes::HUMAN_ITEM_ANSWERS, post(answer_human_items))
         .route(routes::HUMAN_ITEM_ANSWER, post(answer_human_item))
         .route(routes::HUMAN_ITEM_COMPLETE, post(complete_human_item))
         .route(routes::HUMAN_ITEM_DISMISS, post(dismiss_human_item))
@@ -963,9 +965,24 @@ async fn act_on_human_item(serving: Serving, id: &str, act: Result<Act, ApiError
 
 // llmlint: ignore[authorization_enforced_server_side] `docs/contract.md` deliberately permits host-wide resolutions, including approvals, without authentication or an acting session. `HumanItems::act` applies the engine’s validation and approval authority and supplies session:<id> or browser attribution; the body cannot supply actor or on_behalf_of.
 async fn answer_human_item(State(serving): Store, Path(id): Path<String>, raw: String) -> Response {
-    let act =
-        body::<HumanItemAnswerRequest>("{text}", &raw).map(|request| Act::Answer(request.text));
+    let act = body::<HumanItemAnswerRequest>("{choice?, text?}", &raw).map(|request| Act::Answer {
+        choice: request.choice,
+        text: request.text,
+    });
     act_on_human_item(serving, &id, act).await
+}
+
+// llmlint: ignore[authorization_enforced_server_side] `docs/contract.md` deliberately permits host-wide resolutions without authentication or an acting session. `HumanItems::answer_batch` validates the batch at this boundary, applies the engine's own rules per entry and supplies browser:session:<id> or browser attribution; the body cannot supply actor or on_behalf_of.
+async fn answer_human_items(State(serving): Store, raw: String) -> Response {
+    let request = match body::<HumanItemAnswersRequest>("{answers: [{id, choice?, text?}]}", &raw) {
+        Ok(request) => request,
+        Err(error) => return error.into_response(),
+    };
+    answer_record(move || {
+        let (items, session) = serving.store.human_items();
+        items.answer_batch(session, request.answers)
+    })
+    .await
 }
 
 // llmlint: ignore[authorization_enforced_server_side] `docs/contract.md` deliberately permits host-wide resolutions, including approvals, without authentication or an acting session. `HumanItems::act` applies the engine’s validation and approval authority and supplies session:<id> or browser attribution; the body cannot supply actor or on_behalf_of.

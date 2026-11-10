@@ -13,10 +13,13 @@ import {
   dagConversationSchema,
   type HostShutdownScope,
   HUMAN_ITEM_PATHS,
+  type HumanItemBatchAnswer,
+  type HumanItemBatchReceipt,
   type HumanItemDetail,
   type HumanItemFilter,
   type HumanItemList,
   type HumanItemReceipt,
+  humanItemBatchReceiptSchema,
   humanItemDetailSchema,
   humanItemListSchema,
   humanItemReceiptSchema,
@@ -499,13 +502,34 @@ export class TelemetryClient {
     );
   }
 
-  /** Answer an open question; the engine's receipt, or its refusal. */
-  async answerHumanItem(id: string, text: string): Promise<HumanItemReceipt> {
+  /**
+   * Answer an open question with a choice's id, the person's words, or both
+   * (a string is words alone); the engine's receipt, or its refusal.
+   */
+  async answerHumanItem(
+    id: string,
+    answer: string | Omit<HumanItemBatchAnswer, "id">,
+  ): Promise<HumanItemReceipt> {
     requireOpaqueId(id, "human-item ID");
     return this.#request(
       this.#url(HUMAN_ITEM_PATHS.answer(id)),
       humanItemReceiptSchema.parse,
-      json("POST", { text }),
+      json("POST", typeof answer === "string" ? { text: answer } : answer),
+    );
+  }
+
+  /**
+   * Answer several open questions as one batch. A well-formed batch is the
+   * engine's receipt even when it refused every entry; only a malformed batch
+   * or the server's own failure rejects.
+   */
+  async answerHumanItems(
+    answers: readonly HumanItemBatchAnswer[],
+  ): Promise<HumanItemBatchReceipt> {
+    return this.#request(
+      this.#url(HUMAN_ITEM_PATHS.answers),
+      humanItemBatchReceiptSchema.parse,
+      json("POST", { answers }),
     );
   }
 
