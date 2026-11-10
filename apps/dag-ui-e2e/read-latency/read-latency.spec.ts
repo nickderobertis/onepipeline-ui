@@ -905,7 +905,7 @@ async function firstViewReading(
   cachedContext?: BrowserContext,
   run = world.run,
 ): Promise<{
-  reading: Reading & { server_split?: unknown[] };
+  reading: Reading & { server_split?: unknown[]; screen?: ScreenState };
   state: ScreenState | undefined;
   context: BrowserContext;
   page: Page;
@@ -973,7 +973,10 @@ async function firstViewReading(
   const posted2 = posted;
   const body = posted2?.body ?? "";
   const load = hostLoad();
-  const reading: Reading & { server_split?: unknown[] } = {
+  const reading: Reading & {
+    server_split?: unknown[];
+    screen?: ScreenState;
+  } = {
     seconds: mark === undefined ? null : mark.at / 1000,
     navigation_to_post_s:
       posted2 === undefined ? null : (posted2.at - Number(navStart)) / 1000,
@@ -998,6 +1001,8 @@ async function firstViewReading(
     },
     host_load: load,
     server_split: serverSplit(trace),
+    // What the mark saw, so two measurements' screens can be compared.
+    ...(KEPT_CORPUS === undefined ? {} : { screen: mark }),
   };
   return { reading, state: mark, context, page, server };
 }

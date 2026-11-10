@@ -178,3 +178,36 @@ pub fn engine_split(stage: &str) {
 /// The released engine times nothing inside itself.
 #[cfg(not(feature = "spike-engine"))]
 pub fn engine_split(_stage: &str) {}
+
+/// The spike's `trim-spans`: from a run-scoped first answer's spans other than a
+/// rollup, remove the fields `ONEPIPELINE_UI_SPIKE_TRIM` names (by default `label` and
+/// `parent_id`, which nothing Overall's first screen draws reads). The answer alone is
+/// trimmed: what the server holds, and patches against, is not.
+pub fn trim_spans(visible: &mut Value) {
+    if visible["type"] != "timeline" || visible["scope"] != "run" {
+        return;
+    }
+    let names: Vec<String> = std::env::var("ONEPIPELINE_UI_SPIKE_TRIM")
+        .unwrap_or_else(|_| "label,parent_id".to_owned())
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let Some(Value::Array(spans)) = visible
+        .get_mut("timeline")
+        .and_then(|timeline| timeline.get_mut("spans"))
+    else {
+        return;
+    };
+    for span in spans {
+        if span["kind"] == "rollup" {
+            continue;
+        }
+        if let Value::Object(fields) = span {
+            for name in &names {
+                fields.shift_remove(name);
+            }
+        }
+    }
+}

@@ -1530,6 +1530,10 @@ impl Hub {
         }
         let _snapshot = crate::spike::span("snapshot_json_s");
         let id = self.id(seq);
+        let mut visible_state = visible_state;
+        if crate::spike::on("trim-spans") {
+            crate::spike::trim_spans(&mut visible_state);
+        }
         if crate::spike::on("snapshot-move")
             && matches!(
                 request.origin,

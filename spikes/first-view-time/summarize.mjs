@@ -5,7 +5,9 @@
  * the median of each server-side span its readings' traces carry, for the view's
  * run-scoped subscription (the POST that opened the run's reading).
  *
- *   node spikes/first-view-time/summarize.mjs <measure-run output.json>...
+ *   node spikes/first-view-time/summarize.mjs [--brief] <measure-run output.json>...
+ *
+ * `--brief` prints one line per view and the split's main fields beside it.
  */
 import { readFileSync } from "node:fs";
 
@@ -16,11 +18,30 @@ const median = (values) => {
 const round = (value) =>
   value === null ? null : Math.round(value * 1000) / 1000;
 
-for (const file of process.argv.slice(2)) {
+const BRIEF = [
+  "handler_s",
+  "live_run_s",
+  "read_selected_s",
+  "read_selected.parse_s",
+  "read_selected.stubs",
+  "over_selected_s",
+  "indexed_s",
+  "declared_s",
+  "ensure_first_s",
+  "detail_build_s",
+  "timeline_build_s",
+  "timeline.shares_s",
+  "timeline.harnessed_s",
+  "ensure_boundary_s",
+  "snapshot_json_s",
+  "pointer_read_s",
+];
+const brief = process.argv.includes("--brief");
+for (const file of process.argv.slice(2).filter((arg) => arg !== "--brief")) {
   const measured = JSON.parse(readFileSync(file, "utf8"));
   const load = measured.host_load;
   console.log(
-    `# ${file}\nspike=${JSON.stringify(measured.spike ?? "")} server=${measured.server}\n` +
+    `# ${file.split("/").at(-1)}\nspike=${JSON.stringify(measured.spike ?? "")} server=${measured.server.split("/").at(-1)}\n` +
       `load start ${load.start.load_1m.toFixed(1)}/${load.start.load_5m.toFixed(1)} end ${load.end.load_1m.toFixed(1)}/${load.end.load_5m.toFixed(1)} (1m/5m, ${load.start.cores} cores)`,
   );
   for (const [view, taken] of Object.entries(measured.first_view)) {
@@ -74,6 +95,15 @@ for (const file of process.argv.slice(2)) {
         .filter((line) => line.spans?.live_run_s === undefined)
         .map((line) => round(line.handler_s)),
     );
+    if (brief) {
+      console.log(
+        `  ${view.padEnd(8)} first_view=${row.first_view_s} ${JSON.stringify(row.readings_s)} nav=${row.nav_s} post=${row.post_s} a2m=${row.answer_to_mark_s} bytes=${row.bytes} checked=${row.checked.join(",")}\n` +
+          `           ${BRIEF.filter((key) => key in split)
+            .map((key) => `${key}=${split[key]}`)
+            .join(" ")}`,
+      );
+      continue;
+    }
     console.log(`\n## ${view}`);
     console.log(JSON.stringify(row));
     console.log(`server split (median of ${opened.filter(Boolean).length}):`);
