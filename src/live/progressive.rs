@@ -186,6 +186,7 @@ pub(super) fn sync_timeline(
     full_ops: &[Op],
     window: ItemsWindow,
     complete: bool,
+    since: Option<&(String, u64)>,
 ) -> Vec<Op> {
     let Some(new_spans) = payload["spans"].as_array() else {
         return Vec::new();
@@ -193,14 +194,11 @@ pub(super) fn sync_timeline(
     let before = wire["spans"].as_array().map_or(0, Vec::len);
     let mut ops = Vec::new();
     let mut path = vec![Step::Key("spans".to_owned())];
-    // A node's window is its latest rows across every span, so a row arriving in
-    // one span can move which rows another lists: each is projected again.
-    let since = window_start(payload, window);
-    let touched = if matches!(window, ItemsWindow::Latest(_)) {
-        Spans::All
-    } else {
-        touched_spans(full_ops, before, new_spans.len())
-    };
+    // A node's window is held from where it started, so a row arriving joins its
+    // own span's list and moves no other; the spans the operations touched are
+    // the ones projected again, as for Overall.
+    let since = since.cloned();
+    let touched = touched_spans(full_ops, before, new_spans.len());
     match touched {
         Spans::All => {
             let whole: Vec<Value> = new_spans
@@ -256,7 +254,7 @@ fn row_key(event: &Value) -> (String, u64) {
 /// Under [`ItemsWindow::Latest`], the earliest row of the latest `n` across every
 /// span: each span lists only its own rows from there on. `None` where every row
 /// is within the window.
-fn window_start(payload: &Value, window: ItemsWindow) -> Option<(String, u64)> {
+pub(super) fn window_start(payload: &Value, window: ItemsWindow) -> Option<(String, u64)> {
     let ItemsWindow::Latest(latest) = window else {
         return None;
     };
@@ -274,8 +272,15 @@ fn window_start(payload: &Value, window: ItemsWindow) -> Option<(String, u64)> {
         .map(|from| keys[from].clone())
 }
 
-/// A timeline payload as a subscriber is shown it.
-pub(super) fn wire_timeline(payload: &Value, window: ItemsWindow, complete: bool) -> Value {
+/// A timeline payload as a subscriber is shown it, its window held from `since`:
+/// a node's window starts where it started when the view was first projected, so
+/// a row arriving is appended to it rather than moving every span's list.
+pub(super) fn wire_timeline_from(
+    payload: &Value,
+    window: ItemsWindow,
+    complete: bool,
+    since: Option<(String, u64)>,
+) -> Value {
     let mut wire = Map::new();
     if let Some(fields) = payload.as_object() {
         for (key, value) in fields {
@@ -284,7 +289,6 @@ pub(super) fn wire_timeline(payload: &Value, window: ItemsWindow, complete: bool
             }
         }
     }
-    let since = window_start(payload, window);
     let spans: Vec<Value> = payload["spans"]
         .as_array()
         .map(|spans| {
@@ -676,7 +680,8 @@ impl Hub {
             };
             let (.., built) = timelines.swap_remove(at);
             let window = wire_window(scope);
-            let mut wire = wire_timeline(built.payload(), window, true);
+            let since = window_start(built.payload(), window);
+            let mut wire = wire_timeline_from(built.payload(), window, true, since.clone());
             wire["progress"] = progress;
             let mut ops = Vec::new();
             if let Err(refused) = crate::patch::diff(&held.wire, &wire, &mut ops) {
@@ -685,6 +690,7 @@ impl Hub {
             held.live = built;
             held.wire = wire;
             held.window = window;
+            held.since = since;
             if let Some(ops) = super::patch_ops(&mut held.observed_at, &now, ops) {
                 changes.push((
                     Visible::Timeline {
@@ -711,13 +717,15 @@ impl Hub {
                 .any(|(held_scope, held_key, _)| *held_scope == scope && *held_key == key)
             {
                 let window = wire_window(&scope);
-                let mut wire = wire_timeline(built.payload(), window, true);
+                let since = window_start(built.payload(), window);
+                let mut wire = wire_timeline_from(built.payload(), window, true, since.clone());
                 wire["progress"] = run.timeline_progress(&scope);
                 run.timelines.push((
                     scope,
                     key,
                     super::HeldTimeline {
                         behind: super::Behind::default(),
+                        since,
                         live: built,
                         wire,
                         window,

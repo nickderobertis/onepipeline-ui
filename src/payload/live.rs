@@ -417,6 +417,12 @@ impl LiveTimeline {
 
     /// How many entries this timeline has rendered from records, rather than
     /// reused, since it was built.
+    /// Render every row from the next rebuild on: a node's first answer renders
+    /// its window, and a view kept live holds every row from that window's start.
+    pub(crate) fn widen(&mut self) {
+        self.window = ItemsWindow::All;
+    }
+
     /// Whether every row of every span was rendered, rather than a window of them.
     pub(crate) fn renders_whole(&self) -> bool {
         self.window == ItemsWindow::All

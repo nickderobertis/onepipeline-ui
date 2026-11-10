@@ -760,6 +760,9 @@ struct HeldTimeline {
     /// While nobody shows it, what it has not caught up with: caught up when a tab
     /// next opens it, so a view nobody shows is never rebuilt on a tick.
     behind: Behind,
+    /// Where its wire window starts: a node's latest rows when first projected,
+    /// after which rows arriving are appended to it.
+    since: Option<(String, u64)>,
     live: LiveTimeline,
     /// What its subscribers hold: no whole list of events.
     wire: Value,
@@ -925,7 +928,13 @@ impl LiveRun {
             agents,
             behind.agents_moved,
         );
-        held.wire = progressive::wire_timeline(held.live.payload(), held.window, complete);
+        held.since = progressive::window_start(held.live.payload(), held.window);
+        held.wire = progressive::wire_timeline_from(
+            held.live.payload(),
+            held.window,
+            complete,
+            held.since.clone(),
+        );
         held.wire["progress"] = progress;
         held.observed_at = payload::now_rfc3339();
     }
@@ -1084,48 +1093,53 @@ impl LiveRun {
                         self.agents = agents_of(&self.view.paths);
                     }
                 }
-                let at = match self
-                    .timelines
-                    .iter()
-                    .position(|(held_scope, held_key, _)| held_scope == scope && held_key == key)
-                {
-                    Some(at) => {
-                        self.catch_up_timeline(at);
-                        at
-                    }
-                    None => {
-                        let agents = match scope {
-                            TimelineScope::Run if !self.complete() => None,
-                            _ => self.agents.as_ref(),
-                        };
-                        let built = LiveTimeline::build(
-                            &self.view,
-                            &self.indexed,
-                            &self.declared,
-                            scope.clone(),
-                            filter.clone(),
-                            agents,
-                            self.render_window(scope),
-                        );
-                        let window = wire_window(scope);
-                        let mut wire =
-                            progressive::wire_timeline(built.payload(), window, self.complete());
-                        wire["progress"] = self.timeline_progress(scope);
-                        self.timelines.push((
-                            scope.clone(),
-                            key.clone(),
-                            HeldTimeline {
-                                behind: Behind::default(),
-                                live: built,
-                                wire,
+                let at =
+                    match self.timelines.iter().position(|(held_scope, held_key, _)| {
+                        held_scope == scope && held_key == key
+                    }) {
+                        Some(at) => {
+                            self.catch_up_timeline(at);
+                            at
+                        }
+                        None => {
+                            let agents = match scope {
+                                TimelineScope::Run if !self.complete() => None,
+                                _ => self.agents.as_ref(),
+                            };
+                            let built = LiveTimeline::build(
+                                &self.view,
+                                &self.indexed,
+                                &self.declared,
+                                scope.clone(),
+                                filter.clone(),
+                                agents,
+                                self.render_window(scope),
+                            );
+                            let window = wire_window(scope);
+                            let since = progressive::window_start(built.payload(), window);
+                            let mut wire = progressive::wire_timeline_from(
+                                built.payload(),
                                 window,
-                                filter: filter.clone(),
-                                observed_at: payload::now_rfc3339(),
-                            },
-                        ));
-                        self.timelines.len() - 1
-                    }
-                };
+                                self.complete(),
+                                since.clone(),
+                            );
+                            wire["progress"] = self.timeline_progress(scope);
+                            self.timelines.push((
+                                scope.clone(),
+                                key.clone(),
+                                HeldTimeline {
+                                    behind: Behind::default(),
+                                    since,
+                                    live: built,
+                                    wire,
+                                    window,
+                                    filter: filter.clone(),
+                                    observed_at: payload::now_rfc3339(),
+                                },
+                            ));
+                            self.timelines.len() - 1
+                        }
+                    };
                 let (_, _, timeline) = &self.timelines[at];
                 let timeline = enveloped(&timeline.wire, &timeline.observed_at);
                 Ok(match scope {
@@ -2024,6 +2038,11 @@ impl Hub {
                     behind.agents_moved |= agents_moved || liveness_moved;
                     continue;
                 }
+                // Past its first answer a node view holds every row from its
+                // window's start, so its rows are all rendered from here on.
+                if matches!(scope, TimelineScope::Node(_)) {
+                    timeline.live.widen();
+                }
                 let before = timeline.live.rendered();
                 let agents_for = match scope {
                     TimelineScope::Run if !complete => None,
@@ -2044,6 +2063,7 @@ impl Hub {
                     &full,
                     timeline.window,
                     complete,
+                    timeline.since.as_ref(),
                 );
                 if timeline.wire["progress"] != progress {
                     timeline.wire["progress"] = progress.clone();
