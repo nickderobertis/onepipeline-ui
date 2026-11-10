@@ -9,7 +9,7 @@
 # the environment reach every server the journeys start.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-server="$PWD/target/spike-first-view/release/onepipeline-api-spike"
+server="${READ_LATENCY_SERVER:-$PWD/target/spike-release/onepipeline-api}"
 [ -x "$server" ] || { echo "no $server: run spikes/first-view-time/build.sh" >&2; exit 1; }
 switches="${1:-}"
 shift || true

@@ -1,7 +1,8 @@
-diff -ruN engine.orig/src/journal.rs engine/src/journal.rs
---- a/src/journal.rs	2026-11-10 03:56:58.582659872 -0600
-+++ b/src/journal.rs	2026-11-10 03:58:23.797178892 -0600
-@@ -24,7 +24,7 @@
+diff --git a/src/journal.rs b/src/journal.rs
+index 16edd30..941fb90 100644
+--- a/src/journal.rs
++++ b/src/journal.rs
+@@ -24,7 +24,7 @@ use crate::ledger::{self, RunPaths};
  use crate::sys;
  
  pub(crate) use crate::event::PipelineKind;
@@ -10,10 +11,11 @@ diff -ruN engine.orig/src/journal.rs engine/src/journal.rs
  
  /// The next sequence number this process's stream may claim on each run's journal,
  /// shared by every writer it opens there. See [`Journal::open`].
-diff -ruN engine.orig/src/journal_selected.rs engine/src/journal_selected.rs
---- a/src/journal_selected.rs	2026-11-10 03:56:58.582860622 -0600
-+++ b/src/journal_selected.rs	2026-11-10 03:59:52.587774331 -0600
-@@ -51,6 +51,29 @@
+diff --git a/src/journal_selected.rs b/src/journal_selected.rs
+index 15e571e..06343ef 100644
+--- a/src/journal_selected.rs
++++ b/src/journal_selected.rs
+@@ -51,6 +51,29 @@ fn workers() -> usize {
      std::thread::available_parallelism().map_or(4, |cores| cores.get().min(MOST_WORKERS))
  }
  
@@ -43,7 +45,7 @@ diff -ruN engine.orig/src/journal_selected.rs engine/src/journal_selected.rs
  /// What a [`read_selected`] keeps of a journal.
  #[derive(Debug, Clone, Copy, PartialEq, Eq)]
  pub enum Selection<'a> {
-@@ -65,6 +88,14 @@
+@@ -65,6 +88,14 @@ pub enum Selection<'a> {
      FirstScreen {
          /// The node whose records are all kept, whatever their kind.
          node: Option<&'a str>,
@@ -58,7 +60,7 @@ diff -ruN engine.orig/src/journal_selected.rs engine/src/journal_selected.rs
      },
      /// One owner's records, plus the journal's first and last: `Some(node)` that
      /// node's, and `None` those with no node.
-@@ -87,6 +118,11 @@
+@@ -87,6 +118,11 @@ pub struct SelectedRecords {
      pub places: Vec<Option<usize>>,
      /// That store's length.
      pub store_len: usize,
@@ -70,10 +72,13 @@ diff -ruN engine.orig/src/journal_selected.rs engine/src/journal_selected.rs
      /// The highest `seq` in the whole journal.
      pub last_seq: u64,
      /// Per node, each kept record's place among that node's records in the merged
-@@ -333,6 +369,33 @@
+@@ -325,10 +361,29 @@ fn in_order<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec
      })
  }
  
+-/// `lines` parsed in their order, `None` for one that does not parse.
+-fn parsed_records(lines: &[&Skim<'_>]) -> Vec<Option<Envelope>> {
+-    in_order(lines, |skim| match &skim.parsed {
 +/// Where a line in the writers' form opens its payload.
 +const PAYLOAD: &[u8] = b",\"payload\":{";
 +
@@ -91,20 +96,16 @@ diff -ruN engine.orig/src/journal_selected.rs engine/src/journal_selected.rs
 +    serde_json::from_slice::<Envelope>(&text).ok()
 +}
 +
-+/// [`parsed_records`], with each line `stubs` marks read as [`stub_of`] reads it.
++/// Each kept line parsed in its order (`None` for one that does not parse), with each line `stubs` marks read as [`stub_of`] reads it.
 +fn parsed_or_stubs(lines: &[&Skim<'_>], stubs: &[bool]) -> Vec<Option<Envelope>> {
 +    let items: Vec<(&Skim<'_>, bool)> = lines.iter().copied().zip(stubs.iter().copied()).collect();
 +    in_order(&items, |(skim, stub)| match &skim.parsed {
-+        Some(event) => Some((**event).clone()),
+         Some(event) => Some((**event).clone()),
 +        None if *stub => stub_of(skim.line),
-+        None => serde_json::from_slice::<Envelope>(skim.line).ok(),
-+    })
-+}
-+
- /// Each stream's lines in its own order, and every line's index in merged order: what
- /// [`merge_order`](crate::journal::merge_order) answers for the same records.
- ///
-@@ -394,12 +457,16 @@
+         None => serde_json::from_slice::<Envelope>(skim.line).ok(),
+     })
+ }
+@@ -394,12 +449,16 @@ fn select(
      selection: &Selection<'_>,
      skim: for<'a> fn(&'a [u8]) -> Option<Skim<'a>>,
  ) -> Option<SelectedRecords> {
@@ -121,7 +122,7 @@ diff -ruN engine.orig/src/journal_selected.rs engine/src/journal_selected.rs
      let mut stream_end = vec![false; lines.len()];
      let mut repeated = vec![false; lines.len()];
      for queue in &queues {
-@@ -427,10 +494,31 @@
+@@ -427,10 +486,31 @@ fn select(
          })
          .collect();
      let asked = match selection {
@@ -154,7 +155,7 @@ diff -ruN engine.orig/src/journal_selected.rs engine/src/journal_selected.rs
  
      let mut before_evidence = vec![false; lines.len()];
      if matches!(selection, Selection::FirstScreen { .. }) {
-@@ -464,6 +552,21 @@
+@@ -464,6 +544,21 @@ fn select(
          }
      };
  
@@ -176,7 +177,7 @@ diff -ruN engine.orig/src/journal_selected.rs engine/src/journal_selected.rs
      let mut kept: Vec<(&Skim<'_>, Option<usize>)> = Vec::new();
      let mut places = Vec::new();
      let mut share_places = Vec::new();
-@@ -482,16 +585,27 @@
+@@ -482,16 +577,27 @@ fn select(
              share_lengths[node] - 1
          });
          if chosen(*index, at) {
@@ -205,7 +206,7 @@ diff -ruN engine.orig/src/journal_selected.rs engine/src/journal_selected.rs
          .into_iter()
          .zip(kept.iter().zip(share_places))
      {
-@@ -506,10 +620,14 @@
+@@ -506,10 +612,14 @@ fn select(
          .filter(|(_, places)| !places.is_empty())
          .map(|(name, places)| ((*name).to_owned(), places))
          .collect();
@@ -220,7 +221,7 @@ diff -ruN engine.orig/src/journal_selected.rs engine/src/journal_selected.rs
          last_seq,
          shares,
      })
-@@ -560,9 +678,11 @@
+@@ -560,9 +670,11 @@ fn whole_file(path: &Path) -> Option<Vec<u8>> {
  /// the complete read follows. The module note says what the read rests on.
  #[must_use]
  pub fn read_selected(journal: &Path, selection: &Selection<'_>) -> SelectedRecords {
@@ -232,10 +233,11 @@ diff -ruN engine.orig/src/journal_selected.rs engine/src/journal_selected.rs
      crate::loopstats::journal_read(journal, 0, bytes.len() as u64);
      select(&bytes, selection, |line| {
          skimmed_line(line).or_else(|| parsed_line(line))
-diff -ruN engine.orig/src/views.rs engine/src/views.rs
---- a/src/views.rs	2026-11-10 03:56:58.591574345 -0600
-+++ b/src/views.rs	2026-11-10 03:58:35.239244843 -0600
-@@ -2031,6 +2031,8 @@
+diff --git a/src/views.rs b/src/views.rs
+index 9d90ca4..311d431 100644
+--- a/src/views.rs
++++ b/src/views.rs
+@@ -2031,6 +2031,8 @@ impl RunView {
                  root: paths.dir.parent().unwrap_or(Path::new(".")).to_path_buf(),
              });
          }
@@ -244,7 +246,7 @@ diff -ruN engine.orig/src/views.rs engine/src/views.rs
          let journal = paths.journal();
          let stamp = crate::appendstamp::Stamp::read(&journal);
          let receipt = stamp
-@@ -2038,21 +2040,28 @@
+@@ -2038,21 +2040,28 @@ impl RunView {
              .and_then(|stamp| crate::appendstamp::Receipt::read(&journal, stamp));
          let mut launch: LaunchRecord = ledger::read_json(&paths.launch())?;
          (launch.labels, launch.group) = crate::labels::effective(paths, &launch)?;
@@ -273,7 +275,7 @@ diff -ruN engine.orig/src/views.rs engine/src/views.rs
          // Where appended bytes lie past what these records cover, the stamp must not
          // answer "unchanged" for them.
          let stamp = stamp.filter(|stamp| stamp.len == coverage.bytes);
-@@ -2069,6 +2078,7 @@
+@@ -2069,6 +2078,7 @@ impl RunView {
              ),
              edges: EdgesResolved::Open,
          };
