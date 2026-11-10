@@ -2215,6 +2215,17 @@ fn a_host_that_has_not_enabled_human_items_is_refused_on_every_route() {
         ),
         http::post(
             server.address,
+            "/api/human-items/answers",
+            r#"{"answers":[{"id":"hi-0000000000000000000a","text":"x"}]}"#,
+        ),
+        // Off is off before a batch's shape is judged.
+        http::post(
+            server.address,
+            "/api/human-items/answers",
+            r#"{"answers":[]}"#,
+        ),
+        http::post(
+            server.address,
             "/api/human-items",
             &input(
                 "manager-off",
@@ -2348,6 +2359,238 @@ fn a_server_started_in_a_removed_directory_refuses_human_items_naming_why() {
     child.wait().expect("reap the server");
 }
 
+/// A question offering `choices`, each `(id, title)`, otherwise as [`input`] raises one.
+fn question_offering(session: &str, dedup: &str, choices: &[(&str, &str)]) -> Value {
+    let mut raised = input(
+        session,
+        dedup,
+        "question",
+        "low",
+        json!({"scope": "nothing"}),
+    );
+    raised["choices"] = choices
+        .iter()
+        .map(|(id, title)| json!({"id": id, "title": title, "description": format!("Why *{title}*.")}))
+        .collect();
+    raised
+}
+
+/// One answer route takes a choice, words, or both, and refuses as it always has.
+#[test]
+fn a_single_answer_takes_a_choice_words_or_both_and_keeps_its_refusals() {
+    let world = World::new();
+    let owner = "manager";
+    let offered = [("eu", "Europe"), ("us", "United States")];
+    let [choice, words, both, stray] = ["choice", "words", "both", "stray"]
+        .map(|dedup| world.raise(owner, &question_offering(owner, dedup, &offered)));
+    let server = world.serve(Some(owner));
+    let answer = |id: &str, body: Value| {
+        http::post(
+            server.address,
+            &format!("/api/human-items/{id}/answer"),
+            &body.to_string(),
+        )
+    };
+
+    for (id, body, picked, text) in [
+        (&choice, json!({"choice": "eu"}), json!("eu"), Value::Null),
+        (
+            &words,
+            json!({"choice": null, "text": "Neither"}),
+            Value::Null,
+            json!("Neither"),
+        ),
+        (
+            &both,
+            json!({"choice": "us", "text": "For now"}),
+            json!("us"),
+            json!("For now"),
+        ),
+    ] {
+        let response = answer(id, body);
+        assert_eq!(response.status, 200, "{}", response.body);
+        assert!(response.json()["event_id"].is_string(), "{}", response.body);
+        let stored = world.stored(id);
+        assert_eq!(stored["state"], "answered");
+        assert_eq!(
+            stored["resolution"]["choice"],
+            if picked.is_null() {
+                Value::Null
+            } else {
+                picked
+            }
+        );
+        assert_eq!(stored["resolution"]["text"], text);
+        assert_eq!(
+            stored["resolution"]["actor"],
+            format!("browser:session:{owner}")
+        );
+    }
+
+    assert!(error(
+        &answer(&stray, json!({"choice": "mars"})),
+        409,
+        "human_item_conflict"
+    )
+    .contains("mars"));
+    error(
+        &answer(&stray, json!({"text": "   "})),
+        409,
+        "human_item_conflict",
+    );
+    error(&answer(&stray, json!({})), 409, "human_item_conflict");
+    error(
+        &answer(&choice, json!({"choice": "us"})),
+        409,
+        "human_item_conflict",
+    );
+    error(
+        &answer("hi-0000000000000000000a", json!({"choice": "eu"})),
+        404,
+        "human_item_not_found",
+    );
+    error(
+        &answer(&stray, json!({"text": "x", "actor": "someone"})),
+        422,
+        "invalid_request",
+    );
+    assert_eq!(world.stored(&stray)["state"], "open");
+}
+
+/// One request is the engine's one batch: a mixed one answers what it can, tells
+/// the rest why, and reaches the owner's watch as events carrying one batch id.
+#[test]
+fn a_batch_answers_what_it_can_and_reports_every_refusal_in_the_engines_receipt() {
+    let world = World::new();
+    let owner = "manager";
+    let offered = [("eu", "Europe"), ("us", "United States")];
+    let [choice, words, both, wrong, settled] = ["choice", "words", "both", "wrong", "settled"]
+        .map(|dedup| world.raise(owner, &question_offering(owner, dedup, &offered)));
+    world.ok(Some(owner), &["human-items", "dismiss", &settled]);
+    world.watch(owner);
+    let server = world.serve(None);
+    let batch = json!({"answers": [
+        {"id": choice, "choice": "eu"},
+        {"id": words, "choice": null, "text": "Neither"},
+        {"id": both, "choice": "us", "text": "For now"},
+        {"id": wrong, "choice": "mars"},
+        {"id": settled, "text": "Too late"},
+        {"id": "hi-0000000000000000000a", "text": "Nobody"},
+    ]});
+
+    let response = http::post(
+        server.address,
+        "/api/human-items/answers",
+        &batch.to_string(),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let receipt = response.json();
+    let batch_id = receipt["batch"]
+        .as_str()
+        .expect("an accepted batch's id")
+        .to_owned();
+    assert_eq!(
+        receipt["answered"]
+            .as_array()
+            .expect("answered")
+            .iter()
+            .map(|r| id_of(&r["item"]))
+            .collect::<Vec<_>>(),
+        [choice.clone(), words.clone(), both.clone()]
+    );
+    let refused = receipt["refused"].as_array().expect("refused");
+    assert_eq!(
+        refused
+            .iter()
+            .map(|r| r["id"].as_str().expect("an id"))
+            .collect::<Vec<_>>(),
+        [wrong.as_str(), settled.as_str(), "hi-0000000000000000000a"]
+    );
+    assert!(refused[0]["refusal"]["reason"]
+        .as_str()
+        .expect("a reason")
+        .contains("mars"));
+    assert_eq!(world.stored(&wrong)["state"], "open");
+    assert_eq!(world.stored(&settled)["state"], "dismissed");
+    assert_eq!(world.stored(&choice)["resolution"]["actor"], "browser");
+    assert_eq!(world.stored(&choice)["resolution"]["choice"], "eu");
+    assert_eq!(world.stored(&both)["resolution"]["text"], "For now");
+
+    let delivered = world.watch(owner);
+    assert_eq!(delivered.len(), 3, "{delivered:?}");
+    for event in &delivered {
+        assert_eq!(
+            event["payload"]["batch"]["id"],
+            batch_id.as_str(),
+            "{event}"
+        );
+        assert_eq!(event["payload"]["batch"]["size"], 3, "{event}");
+    }
+
+    // Every entry refused is still a receipt, and it carries no batch id.
+    let response = http::post(
+        server.address,
+        "/api/human-items/answers",
+        &json!({"answers": [{"id": wrong, "choice": "mars"}]}).to_string(),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let receipt = response.json();
+    assert!(receipt.get("batch").is_none(), "{receipt}");
+    assert_eq!(receipt["answered"], json!([]));
+    assert_eq!(receipt["refused"].as_array().expect("refused").len(), 1);
+}
+
+/// A batch malformed as a whole is the error contract, and writes nothing.
+#[test]
+fn a_malformed_batch_is_refused_whole_with_nothing_written() {
+    let world = World::new();
+    let owner = "manager";
+    let question = world.raise(
+        owner,
+        &question_offering(owner, "open", &[("eu", "Europe")]),
+    );
+    let journal = world
+        .base()
+        .join(fixture_run::RUNS_DIR)
+        .join(onepipeline::human_items::JOURNAL_PATH);
+    let before = std::fs::read(&journal).expect("the journal");
+    let server = world.serve(Some(owner));
+    let many: Vec<Value> = (0..51)
+        .map(|n| json!({"id": format!("hi-{n:020x}"), "text": "x"}))
+        .collect();
+    for body in [
+        json!({"answers": []}),
+        json!({"answers": many}),
+        json!({"answers": [{"id": question, "text": "a"}, {"id": question, "text": "b"}]}),
+        json!({"answers": [{"id": question}]}),
+        json!({"answers": [{"id": question, "choice": null, "text": null}]}),
+        json!({"answers": [{"id": question, "text": "   "}]}),
+        json!({"answers": [{"id": "not an id", "text": "x"}]}),
+        json!({"answers": [{"id": question, "text": "x", "actor": "someone"}]}),
+    ] {
+        error(
+            &http::post(
+                server.address,
+                "/api/human-items/answers",
+                &body.to_string(),
+            ),
+            422,
+            "invalid_request",
+        );
+    }
+    error(
+        &http::post(server.address, "/api/human-items/answers", "not json"),
+        422,
+        "invalid_request",
+    );
+    assert_eq!(
+        std::fs::read(&journal).expect("the journal"),
+        before,
+        "nothing was written"
+    );
+    assert_eq!(world.stored(&question)["state"], "open");
+}
+
 /// What each human-item route served from the live engine, held to the
 /// goldens `tests/contract.rs` maps to the route table and reconciles with the
 /// engine's own types. Timestamps are the clock's and are pinned before the
@@ -2405,6 +2648,14 @@ fn every_human_item_route_serves_the_payload_its_golden_pins() {
                 server.address,
                 &format!("/api/human-items/{canary}/answer"),
                 r#"{"text":"eu-west"}"#,
+            ),
+        ),
+        (
+            "human-item-answers.json",
+            http::post(
+                server.address,
+                "/api/human-items/answers",
+                &json!({"answers": [{"id": onepipeline::human_items::item_id_for("nightly"), "text": "Yes"}]}).to_string(),
             ),
         ),
         (
@@ -2522,6 +2773,9 @@ fn pin_clock(value: &mut Value) {
             for (key, held) in map.iter_mut() {
                 if matches!(key.as_str(), "created_at" | "updated_at") && held.is_string() {
                     *held = json!("2026-01-01T00:00:00.000Z");
+                } else if key == "batch" && held.is_string() {
+                    // Minted fresh per batch; a golden pins that one is there.
+                    *held = json!("golden-batch");
                 } else {
                     pin_clock(held);
                 }
@@ -3198,19 +3452,28 @@ fn an_open_view_rides_out_a_journal_it_cannot_read_and_catches_up_on_the_same_st
     let mut tab = HumanItemsTab::open(&server, json!({ "type": "human-items" }));
     let shown = tab.state["visible"].clone();
 
-    // The directory moved aside and a plain file left where it was, so every
-    // read the engine makes of it is refused, for several polls.
-    let directory = world.root.join("human-items");
-    let away = world.root.join("human-items.away");
-    std::fs::rename(&directory, &away).expect("take the items away");
-    std::fs::write(&directory, "not a directory").expect("a file in their place");
+    // A directory where the engine opens its index lock refuses every read for
+    // several polls. The items stay where they are throughout, so a poll landing
+    // while the lock is swapped reads what the tab already shows.
+    let lock = world.root.join("human-items").join("index.lock");
+    let deadline = Instant::now() + PATIENCE;
+    while std::fs::remove_file(&lock)
+        .and_then(|()| std::fs::create_dir(&lock))
+        .is_err()
+    {
+        assert!(Instant::now() < deadline, "a poll kept the index lock");
+    }
+    error(
+        &http::get(server.address, "/api/human-items"),
+        409,
+        "human_item_conflict",
+    );
     assert!(tab.drain().is_empty(), "a refused read sends nothing");
     assert_eq!(tab.state["visible"], shown);
 
     // Put back, with a change it has not read: a read that was refused was not
     // forgotten, so the same stream carries it with nothing asked of the tab.
-    std::fs::remove_file(&directory).expect("remove the file");
-    std::fs::rename(&away, &directory).expect("put the items back");
+    std::fs::remove_dir(&lock).expect("give the lock back");
     raised(&world, "after", "task");
     tab.until_current(&server);
     assert_eq!(

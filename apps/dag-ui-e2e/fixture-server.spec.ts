@@ -1,5 +1,6 @@
 import { Server } from "node:net";
 import { expect, type Page, test } from "@playwright/test";
+import { z } from "zod";
 import { runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
 import { graphNodes } from "./observatory-locators";
@@ -120,4 +121,50 @@ test("a fixture server stopped and rebuilt serves its view on the same origin th
   } finally {
     await taking.leave();
   }
+});
+
+/** `GET /api/human-items`, as far as the next journey reads it. */
+const listedStamps = z.looseObject({
+  items: z.array(
+    z.looseObject({ item: z.looseObject({ created_at: z.string() }) }),
+  ),
+});
+
+/**
+ * The screenshot tier gates on image hashes and an item's detail prints when it was
+ * raised, so a world built for a capture has to read the capture's clock through the
+ * real server; a journey's world, which names none, keeps the engine's own stamps.
+ */
+test("a human-items world reads the clock a capture names, and the engine's without one", async ({
+  request,
+}) => {
+  const raisedAt = async (env: Record<string, string>): Promise<number[]> => {
+    const server = await startFixtureServer(
+      "restamped-world",
+      ["--human-items-world", "realistic"],
+      env,
+    );
+    try {
+      const response = await request.get(`${server.origin}/api/human-items`);
+      expect(response.status()).toBe(200);
+      const { items } = listedStamps.parse(await response.json());
+      return items.map(({ item }) => Date.parse(item.created_at));
+    } finally {
+      await server.stop();
+    }
+  };
+  const instant = "2099-09-23T09:00:00.000Z";
+  const hour = 3_600_000;
+
+  const captured = await raisedAt({ DAG_UI_FIXTURE_NOW: instant });
+  expect(captured.length).toBeGreaterThan(0);
+  for (const stamp of captured) {
+    expect(stamp).toBeLessThan(Date.parse(instant));
+    expect(stamp).toBeGreaterThan(Date.parse(instant) - hour);
+  }
+  expect(await raisedAt({ DAG_UI_FIXTURE_NOW: instant })).toEqual(captured);
+
+  const started = Date.now();
+  for (const stamp of await raisedAt({}))
+    expect(Math.abs(stamp - started)).toBeLessThan(hour);
 });

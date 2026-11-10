@@ -114,14 +114,30 @@ const MEASURES = {
     };
   },
   "human-items-lag"(telemetry) {
-    const { value } = slowest(telemetry, (page) => page.lag.p95_s ?? Infinity);
+    const { value: spaced } = slowest(
+      telemetry,
+      (page) => page.lag.p95_s ?? Infinity,
+    );
+    const { batch } = telemetry;
+    const lag = (name) => batch.tabs[name].lag_s;
     return {
-      value,
-      detail: pages(telemetry, (page) => ({
-        ...page.lag,
-        window_s: page.window_s,
-        host_load: page.host_load,
-      })),
+      value: Math.max(spaced, ...PAGES.map(lag)),
+      detail: {
+        ...pages(telemetry, (page) => ({
+          ...page.lag,
+          window_s: page.window_s,
+          host_load: page.host_load,
+        })),
+        spaced_p95_s: spaced,
+        batch: {
+          questions: batch.questions,
+          response_s: batch.response_s,
+          commit_after_press_s:
+            (batch.committed_at_ms - batch.pressed_at_ms) / 1000,
+          lag_s: Object.fromEntries(PAGES.map((name) => [name, lag(name)])),
+          host_load: batch.host_load,
+        },
+      },
     };
   },
 };

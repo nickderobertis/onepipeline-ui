@@ -1696,9 +1696,9 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "oneagentgraph"
-version = "0.9.3"
+version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5842dcd05c648f157eba051461715ce3188bd250ee6f510b0423c2e4519d479e"
+checksum = "248b1eda725ee8b946a53c24851208376a3d03f5c5e4fa50e8c476b965d5f2ef"
 dependencies = [
  "clap",
  "libc",
@@ -1739,9 +1739,9 @@ dependencies = [
 
 [[package]]
 name = "onejudge"
-version = "0.22.1"
+version = "0.22.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04fa448faccc8b6f088e5b954d9c6e2581f3a9faef24cfa613673d09fe85af94"
+checksum = "2d8a71178dbdcd5425076d869ab62385d5393ef7570620da215e7508f2ebaa36"
 dependencies = [
  "clap",
  "oneharness-core",
@@ -1756,9 +1756,9 @@ dependencies = [
 
 [[package]]
 name = "onemessagebus"
-version = "0.9.4"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37765a19a871ae7e89e87441dc70a3c7df312917b8fed9397529b2050571613a"
+checksum = "949aa9f076e710679ff61a44d253d815b873a81c57cce5ca2074a1cef4f59947"
 dependencies = [
  "getrandom 0.3.4",
  "jsonschema 0.56.0",
@@ -1778,9 +1778,9 @@ dependencies = [
 
 [[package]]
 name = "onepipeline"
-version = "0.103.0"
+version = "0.105.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5dac4d46adaa58c863f7d4b88b3abff84d35b7c1b90665fb4975e81b34ea766"
+checksum = "e34d0af2c4bf3cb54136624a0dddc9e0d0b775fc125cb5434616161426ac2e31"
 dependencies = [
  "async-trait",
  "clap",
@@ -1808,7 +1808,7 @@ dependencies = [
 
 [[package]]
 name = "onepipeline-ui"
-version = "0.72.0"
+version = "0.76.0"
 dependencies = [
  "assert_cmd",
  "auditable-info",
@@ -1961,9 +1961,9 @@ dependencies = [
 
 [[package]]
 name = "onevcs"
-version = "0.62.1"
+version = "0.63.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "775325e2ea50353f114fc5f4e53558c5b6849fefb16e196d1c067a15fe5a8f3d"
+checksum = "66f02655ef29ffaebf15e73e8d3129aba5c33b4e04beec7a0f191354928c9633"
 dependencies = [
  "clap",
  "dunce",
@@ -2575,7 +2575,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
 dependencies = [
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.23.1",
  "encoding_rs_io",
  "granit-parser",
  "nohash-hasher",

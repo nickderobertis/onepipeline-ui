@@ -13,7 +13,9 @@
  * - every request the browser sends (`page.on("request")`);
  * - per write, the lag from its commit — the journal's own modification time —
  *   to the page's list rendering the change, seen by a DOM observer in the page;
- * - when each `human-items.patch` frame arrived, as a breakdown of that lag.
+ * - when each `human-items.patch` frame arrived, as a breakdown of that lag;
+ * - for one 50-answer batch sent from the page, from the send bar's press to each
+ *   of two open tabs' list no longer holding any of the 50.
  *
  * This asserts behaviour only, and holds no time bound beyond a guard against a
  * hang: every threshold is the budgets file's.
@@ -196,6 +198,7 @@ async function raise(
   kind: "question" | "task",
   priority: string,
   body: string,
+  choices: readonly object[] = [],
 ): Promise<string> {
   const input = join(world.work, `raise-${key}.json`);
   writeFileSync(
@@ -207,6 +210,7 @@ async function raise(
       kind,
       title: titleOf(key),
       body,
+      ...(choices.length === 0 ? {} : { choices }),
       priority,
       owner: { session: OWNER, run: null, plan: null },
       block: { scope: "nothing" },
@@ -1278,6 +1282,197 @@ if (HOST_RUNS_ROOT !== undefined)
     else writeFileSync(HOST_OUTPUT, `${JSON.stringify(measured, null, 2)}\n`);
   });
 
+const BATCH_BODY = "What this batched question asks of a person.";
+
+/** One choice a batched question offers, by position. */
+const choiceFor = (at: number) => ({
+  id: `option-${at}`,
+  title: `Option ${at}`,
+  description: `Why option ${at} would do.`,
+});
+
+/** One batch sent from a filtered tab, watched in it and in an unfiltered one. */
+async function measureBatch(browser: Browser, world: World, grown: string) {
+  const { origin, server } = await serveFresh(world, grown, "batch");
+  const context = await browser.newContext();
+  try {
+    const titles: string[] = [];
+    const ids: string[] = [];
+    for (let index = 0; index < workload.batch_questions; index += 1) {
+      const key = `batch-${index}`;
+      const choices =
+        index < workload.batch_with_choices
+          ? Array.from({ length: workload.batch_choices_each }, (_, at) =>
+              choiceFor(at),
+            )
+          : [];
+      ids.push(
+        await raise(
+          world,
+          key,
+          "question",
+          WRITTEN_PRIORITY,
+          BATCH_BODY,
+          choices,
+        ),
+      );
+      titles.push(titleOf(key));
+    }
+    const last = titles.at(-1) ?? "";
+    const openTab = async (filtered: boolean) => {
+      const tab = await context.newPage();
+      await tab.goto(`${origin}/human-items`);
+      const list = actionItemList(tab);
+      await expect(
+        list.getByRole("article", { name: last, exact: true }),
+      ).toBeVisible({
+        timeout: NEVER,
+      });
+      if (filtered) {
+        await tab
+          .getByRole("group", { name: "Filter action items" })
+          .getByLabel("Priority", { exact: true })
+          .selectOption(WRITTEN_PRIORITY);
+        await expect(
+          list.getByRole("heading", { name: "Critical" }),
+        ).toHaveCount(0, { timeout: NEVER });
+      }
+      return tab;
+    };
+    const unfiltered = await openTab(false);
+    const filtered = await openTab(true);
+    await observe(unfiltered);
+    await observe(filtered);
+    const heard: Record<"unfiltered" | "filtered", number> = {
+      unfiltered: 0,
+      filtered: 0,
+    };
+    unfiltered.on("request", () => {
+      heard.unfiltered += 1;
+    });
+    filtered.on("request", () => {
+      heard.filtered += 1;
+    });
+    const batches: unknown[] = [];
+    filtered.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/human-items/answers")
+        batches.push(request.postDataJSON());
+    });
+
+    const list = actionItemList(filtered);
+    for (const [index, title] of titles.entries()) {
+      const shown = list.getByRole("article", { name: title, exact: true });
+      if (index < workload.batch_with_choices)
+        await shown
+          .getByRole("button", {
+            name: choiceFor(index % 3).title,
+            exact: true,
+          })
+          .click();
+      else
+        await shown
+          .getByRole("textbox", { name: `Answer: ${title}`, exact: true })
+          .fill(`Typed answer ${index}`);
+    }
+    const bar = filtered.getByRole("button", {
+      name: `Send ${workload.batch_questions} answers`,
+    });
+    await expect(bar).toBeEnabled({ timeout: NEVER });
+    const start = hostLoad();
+    const responded = filtered.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/human-items/answers",
+    );
+    const pressed_at_ms = Date.now();
+    await bar.click();
+    await responded;
+    const response_s = seconds(Date.now() - pressed_at_ms);
+    const leftOf = (rendered: Rendered) =>
+      titles.map((title) => rendered.gone[title]);
+    const emptied = (rendered: Rendered) =>
+      leftOf(rendered).every((at) => at !== undefined);
+    for (const tab of [unfiltered, filtered])
+      await expect
+        .poll(async () => emptied(await renderedOn(tab)), { timeout: NEVER })
+        .toBe(true);
+    const committed_at_ms = statSync(world.journal).mtimeMs;
+    const end = hostLoad();
+
+    // Behaviour: one request, every answer as drafted, neither list holds any.
+    expect(batches).toHaveLength(1);
+    const { answers } = z
+      .object({
+        answers: z.array(
+          z.object({
+            id: z.string(),
+            choice: z.string().optional(),
+            text: z.string().optional(),
+          }),
+        ),
+      })
+      .parse(batches[0]);
+    expect(answers).toHaveLength(workload.batch_questions);
+    let answered = 0;
+    for (const [index, id] of ids.entries()) {
+      const shown = z
+        .object({
+          item: z.object({
+            state: z.string(),
+            resolution: z.object({
+              choice: z.string().nullable().optional(),
+              text: z.string().nullable(),
+            }),
+          }),
+        })
+        .parse(JSON.parse(await humanItems(world, ["show", id, "--json"])));
+      expect(shown.item.state).toBe("answered");
+      if (index < workload.batch_with_choices)
+        expect(shown.item.resolution.choice).toBe(`option-${index % 3}`);
+      else expect(shown.item.resolution.text).toBe(`Typed answer ${index}`);
+      answered += 1;
+    }
+    const tabOf = async (tab: Page, name: "unfiltered" | "filtered") => {
+      const rendered = await renderedOn(tab);
+      const left_at_ms = Math.max(
+        ...leftOf(rendered).map((at) => at ?? Number.POSITIVE_INFINITY),
+      );
+      const stillListed = await actionItemList(tab)
+        .getByRole("heading", { level: 3 })
+        .allTextContents();
+      return {
+        lag_s: (left_at_ms - pressed_at_ms) / 1000,
+        left_at_ms,
+        requests: heard[name],
+        still_listed: stillListed.filter((title) => titles.includes(title))
+          .length,
+      };
+    };
+    const tabs = {
+      unfiltered: await tabOf(unfiltered, "unfiltered"),
+      filtered: await tabOf(filtered, "filtered"),
+    };
+    expect(tabs.unfiltered.requests).toBe(0);
+    for (const name of ["unfiltered", "filtered"] as const)
+      expect(tabs[name].still_listed).toBe(0);
+    return {
+      questions: workload.batch_questions,
+      with_choices: workload.batch_with_choices,
+      choices_each: workload.batch_choices_each,
+      requests: batches.length,
+      answers_in_request: answers.length,
+      answered,
+      pressed_at_ms,
+      committed_at_ms,
+      response_s,
+      tabs,
+      host_load: { start, end },
+    };
+  } finally {
+    await context.close();
+    await stopServing(server);
+  }
+}
+
 test("Action items follows the CLI's writes on the stream it already holds, filtered or not", async ({
   browser,
 }) => {
@@ -1310,6 +1505,7 @@ test("Action items follows the CLI's writes on the stream it already holds, filt
       filtered: await measureOn("filtered"),
     };
     const large_run = await measureLargeRun(browser);
+    const batch = await measureBatch(browser, world, grown);
     const git = (args: string[]) =>
       execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
     const telemetry = telemetrySchema.parse({
@@ -1323,6 +1519,7 @@ test("Action items follows the CLI's writes on the stream it already holds, filt
       },
       human_items,
       large_run,
+      batch,
     });
     mkdirSync(join(import.meta.dirname, "telemetry"), { recursive: true });
     writeFileSync(TELEMETRY, `${JSON.stringify(telemetry, null, 2)}\n`);

@@ -139,6 +139,7 @@ DELETE /api/v2/subscriptions/{subscription}  # retire it
 GET /api/human-items                  # the host-wide action items: the engine's views, owner-scoped (sample mode only)
 POST /api/human-items                 # raise one, as its owner
 GET /api/human-items/{id}             # one item and every step it blocks
+POST /api/human-items/answers         # answer several open questions as one batch
 POST /api/human-items/{id}/answer     # answer an open question
 POST /api/human-items/{id}/complete   # complete an open task, design reviews included
 POST /api/human-items/{id}/dismiss    # dismiss an open item, with an optional reason

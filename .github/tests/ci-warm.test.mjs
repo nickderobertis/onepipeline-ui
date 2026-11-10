@@ -334,7 +334,13 @@ export function compileSignature(tokens) {
   }
   if (tokens[i] === "env") i += 1;
   if (tokens[i] === "nice" && tokens[i + 1] === "-n") i += 3;
-  const rest = tokens.slice(i);
+  let rest = tokens.slice(i);
+  // A coverage unit is `cargo llvm-cov --no-report <its arguments>` by contract
+  // (scripts/coverage-unit.sh), and reads alike to the warm line that compiles it.
+  if (rest[0] === "bash" && rest[1] === "scripts/coverage-unit.sh") {
+    const split = rest.indexOf("--");
+    rest = ["cargo", "llvm-cov", ...rest.slice(split + 1), "--no-report"];
+  }
   if (rest[0] === "just" && rest[1] === "wheel-linux")
     return [...env, ...rest].join(" ");
   if (rest[0] === "maturin" && rest[1] === "build")

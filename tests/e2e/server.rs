@@ -17755,6 +17755,386 @@ fn an_adopted_run_cuts_its_nodes_branch_at_the_name_the_linked_engine_renders() 
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+/// A node whose session opened on a worktree the repository's `post-checkout`
+/// failed to provision is served as before: onepipeline 0.104 raises a
+/// non-blocking `provisioning-failed` surface for that session and the session
+/// opens regardless, so the run detail answers with the node, its status, its
+/// branch and its publication exactly as for any other dispatched node, and the
+/// surface reaches a reader as the engine queued it. Every record here is the
+/// linked engine's and `onevcs`'s own: the hook fails under real git, `onevcs`
+/// records it on the session's stream, and the engine raises the surface.
+#[cfg(unix)]
+#[test]
+fn a_node_whose_worktree_provisioning_failed_is_served_as_the_engine_recorded_it() {
+    const HOOK_SAID: &str = "the toolchain did not install";
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let repo = scratch_repo::seed(&dir);
+    scratch_repo::commit_post_checkout(
+        &repo,
+        &format!("#!/bin/sh\necho '{HOOK_SAID}' >&2\nexit 3\n"),
+    );
+    let log = dir.join("harness.log");
+    // llmlint: ignore[e2e_not_mocked] the stand-in replaces only the harness program, which bills a model call (`write_harness_standin`); every layer this journey asserts on — the hook under real git, onevcs cutting the session and the pinned engine raising the surface — runs for real.
+    let standin = write_committing_harness_standin(&dir, &log);
+    write_extending_config(&dir, &standin);
+    let graph = write_node_scope_graph(&dir);
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::DISPATCH_NODE_ID;
+    fixture_run::write_awaiting_session(
+        &root,
+        run,
+        &dir,
+        &graph,
+        &repo.alias,
+        scratch_repo::BASE_BRANCH,
+    );
+
+    let state = dir.join("state");
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            ("XDG_STATE_HOME", &state.display().to_string()),
+            (
+                scratch_repo::GIT_CONFIG_ENV,
+                &repo.gitconfig.display().to_string(),
+            ),
+            (onevcs::branches::PREFIX_ENV, ""),
+        ],
+    );
+    let pid = serving.drive_fixture(run);
+    let driver = RetainedDriver(pid);
+
+    let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}"));
+    eventually("the adopted run's node settled", || {
+        matches!(
+            detail().json()["graph"]["node_status"][node].as_str(),
+            Some("done" | "failed")
+        )
+    });
+
+    // The engine's own record: the surface it queued for the failed session,
+    // read off the journal it wrote rather than off anything served.
+    let journal = fs::read_to_string(serving.run_dir(run).join("events.jsonl"))
+        .expect("the engine's journal");
+    let queued: Vec<Value> = journal
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| {
+            record["kind"] == json!("planner-surface-queued")
+                && record["payload"]["kind"] == json!("provisioning-failed")
+        })
+        .collect();
+    assert_eq!(queued.len(), 1, "{journal}");
+    let message = queued[0]["payload"]["message"]
+        .as_str()
+        .expect("the surface's message");
+    assert!(
+        message.contains(&format!("node: {node}"))
+            && message.contains("hook: post-checkout")
+            && message.contains("ended: exited with status 3")
+            && message.contains(HOOK_SAID),
+        "{message}"
+    );
+    assert_eq!(queued[0]["payload"]["blocking"], json!(false));
+
+    let served = detail();
+    assert_eq!(served.status, 200, "{}", served.body);
+    let served = served.json();
+    assert_enveloped(&served);
+    assert_eq!(served["run"]["run_id"], json!(run), "{}", served["run"]);
+    assert_eq!(served["graph"]["run_id"], json!(run));
+    assert_eq!(
+        served["graph"]["node_status"][node],
+        json!("done"),
+        "{}",
+        served["graph"]
+    );
+    assert!(
+        fs::read_to_string(&log).is_ok_and(|ran| ran.contains("committing-harness")),
+        "the node settled without the harness running"
+    );
+    let branch = served["graph"]["node_results"][node]["branch"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the node's branch: {}", served["graph"]))
+        .to_owned();
+    assert!(branch.contains(node), "{branch}");
+    assert_eq!(
+        served["node_details"][node]["publication"]["branch"],
+        json!(branch),
+        "{}",
+        served["node_details"]
+    );
+
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    );
+    assert_eq!(timeline.status, 200, "{}", timeline.body);
+    let events = events_on(&timeline.json());
+    assert!(
+        events
+            .iter()
+            .any(|event| event["kind"] == json!("worktree-provision-failed")
+                && event["node_id"] == json!(node)),
+        "the timeline lists no worktree-provision-failed for the node: {events:?}"
+    );
+    let surfaced: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["surface"]["kind"] == json!("provisioning-failed"))
+        .map(|event| &event["surface"])
+        .collect();
+    assert_eq!(
+        surfaced,
+        [&json!({
+            "kind": "provisioning-failed",
+            "message": message,
+            "source": queued[0]["payload"]["source"],
+            "blocking": false,
+        })],
+        "{events:?}"
+    );
+
+    let channel = http::get(serving.address, &format!("/api/v2/runs/{run}/channel"));
+    assert_eq!(channel.status, 200, "{}", channel.body);
+    let channel = channel.json();
+    let waiting: Vec<&Value> = channel["waiting"]
+        .as_array()
+        .expect("the waiting surfaces")
+        .iter()
+        .filter(|surface| surface["kind"] == json!("provisioning-failed"))
+        .collect();
+    assert_eq!(waiting.len(), 1, "{channel}");
+    assert_eq!(waiting[0]["message"], json!(message));
+    assert_eq!(waiting[0]["blocking"], json!(false));
+    drop(driver);
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+/// A run launched under a bus configuration declaring a message hook is read
+/// and supervised through this server as the engine recorded it.
+///
+/// The launch is the pinned engine's own `start --bus-config` over a real
+/// `local-md` store, and the hook is a real command on the channel's `replies`
+/// queue: it drops any envelope carrying [`HOOK_DROPS`] and prints every other
+/// back unchanged. The server's own linked engine runs that hook on each reply
+/// it is handed, so a dropped envelope answers the engine's own `dropped`
+/// receipt with nothing applied, and a kept one settles the node; the retained
+/// driver then settles the run. The plan, the node statuses and the settlement
+/// the server answers are each held to the records the engine wrote.
+#[cfg(unix)]
+#[test]
+fn a_run_launched_with_a_bus_hook_is_served_and_supervised_as_the_engine_recorded_it() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const HOOK_DROPS: &str = "hold-this-back";
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    fixture_run::configure_local_md_store(&dir);
+    let graph = write_node_scope_graph(&dir);
+    let node = fixture_run::APPROVAL_NODE_ID;
+    create_store_task(
+        &dir,
+        "Approve the change",
+        onetaskgraph_core::Body::plain("Approve the change."),
+        &[
+            ("onepipeline.id", json!(node)),
+            ("onepipeline.kind", json!("human")),
+        ],
+        &[],
+    );
+    let hook = dir.join("hold-back.sh");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\nline=$(cat)\ncase \"$line\" in\n  *{HOOK_DROPS}*) exit 0 ;;\nesac\n\
+             printf '%s\\n' \"$line\"\n"
+        ),
+    )
+    .expect("the hook");
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).expect("chmod the hook");
+    let bus = dir.join("onemessagebus.yaml");
+    fs::write(
+        &bus,
+        format!(
+            "version: 1\ntransport: {{kind: local}}\nhooks:\n  - {{on: replies, command: [{:?}]}}\n",
+            hook.display().to_string()
+        ),
+    )
+    .expect("the bus configuration");
+
+    let project = format!(
+        "{}:{}",
+        fixture_run::LOCAL_MD_SOURCE,
+        fixture_run::LOCAL_MD_PROJECT
+    );
+    let run = started_and_let_go(&provisioned_onepipeline(
+        &root,
+        &dir,
+        &graph,
+        &[
+            "start",
+            &project,
+            "--detach",
+            "--bus-config",
+            &bus.display().to_string(),
+        ],
+    ));
+    // The engine recorded the hook as the launch declared it, so the bus every
+    // writer of this run opens — this server's included — runs it.
+    assert_eq!(
+        launch_record(&root, &run)["bus_config"]["hooks"],
+        json!([{ "on": "replies", "command": [hook.display().to_string()] }]),
+    );
+
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+    let run_dir = serving.run_dir(&run);
+    let detail_path = format!("/api/v2/runs/{run}");
+    let detail = || {
+        let read = http::get(serving.address, &detail_path);
+        assert_eq!(read.status, 200, "{}", read.body);
+        let read = read.json();
+        assert_enveloped(&read);
+        read
+    };
+    let journal = || -> Vec<Value> {
+        fs::read_to_string(run_dir.join("events.jsonl"))
+            .expect("the engine's journal")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("a journal record"))
+            .collect()
+    };
+    let settled_records = || -> Vec<Value> {
+        journal()
+            .into_iter()
+            .filter(|record| {
+                record["kind"] == json!("node-settled") && record["labels"]["node"] == json!(node)
+            })
+            .map(|record| record["payload"].clone())
+            .collect()
+    };
+
+    // The plan served is the one the engine wrote: every task, every field of
+    // each the server serves, as `plan.json` holds it.
+    let launched = detail();
+    let recorded: Value = serde_json::from_str(
+        &fs::read_to_string(run_dir.join("plan.json")).expect("the engine's plan"),
+    )
+    .expect("the plan parses");
+    let served_tasks = launched["graph"]["plan"]["tasks"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the plan's tasks: {launched}"));
+    let recorded_tasks = recorded["tasks"].as_array().expect("the recorded tasks");
+    assert_eq!(served_tasks.len(), recorded_tasks.len(), "{launched}");
+    for (served, recorded) in served_tasks.iter().zip(recorded_tasks) {
+        for (key, value) in served.as_object().expect("a task") {
+            assert_eq!(&recorded[key], value, "task field {key}: {recorded}");
+        }
+    }
+    assert_eq!(served_tasks[0]["id"], json!(node));
+    assert_eq!(launched["graph"]["plan"]["name"], recorded["name"]);
+    assert_eq!(
+        settled_records(),
+        [json!({ "status": "waiting" })],
+        "the launch settled the approval as anything but waiting"
+    );
+    assert_eq!(launched["graph"]["node_status"][node], json!("waiting"));
+
+    let reply = |envelope: Value| {
+        let answered = http::post(
+            serving.address,
+            &format!("{detail_path}/channel/reply"),
+            &envelope.to_string(),
+        );
+        assert_eq!(answered.status, 200, "{}", answered.body);
+        answered.json()
+    };
+    let settle = |evidence: &str| {
+        json!({"version": 2, "commands": [{
+            "op": "settle", "id": node, "outcome": "done", "evidence": evidence,
+        }]})
+    };
+
+    // The hook drops this envelope: the receipt is the engine's own `dropped`
+    // one, the bus's drop log holds what the hook dropped, and nothing reached
+    // the run — no command queued, no edit committed, the node still waiting.
+    let dropped = reply(settle(HOOK_DROPS));
+    assert_eq!(dropped["run_id"], json!(run));
+    assert_eq!(
+        dropped["receipt"],
+        json!({ "reply": 0, "state": "dropped", "commands": "dropped" }),
+        "{dropped}"
+    );
+    let drop_log = fs::read_to_string(run_dir.join("channel").join("replies-dropped.jsonl"))
+        .expect("the bus's drop log");
+    let drops: Vec<Value> = drop_log
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a drop record"))
+        .collect();
+    assert_eq!(drops.len(), 1, "{drop_log}");
+    assert_eq!(drops[0]["queue"], json!("replies"));
+    assert_eq!(
+        drops[0]["hook"]["command"],
+        json!([hook.display().to_string()])
+    );
+    assert_eq!(
+        drops[0]["message"]["commands"][0]["evidence"],
+        json!(HOOK_DROPS)
+    );
+    assert!(
+        !journal()
+            .iter()
+            .any(|record| record["kind"] == json!("edit-committed")),
+        "a dropped envelope was committed"
+    );
+    assert_eq!(settled_records(), [json!({ "status": "waiting" })]);
+    assert_eq!(detail()["graph"]["node_status"][node], json!("waiting"));
+
+    // The hook keeps this one, unchanged: the receipt says it applied and says
+    // nothing of a hook, and the engine settles the approval from its evidence.
+    const EVIDENCE: &str = "Approved in the browser";
+    let kept = reply(settle(EVIDENCE));
+    assert_eq!(
+        kept["receipt"],
+        json!({ "reply": 0, "state": "applied", "commands": "applied" }),
+        "{kept}"
+    );
+
+    let pid = serving.drive_fixture(&run);
+    let driver = RetainedDriver(pid);
+    eventually("the adopted engine settled the hooked run", || {
+        detail()["run"]["state"] == json!("settled")
+    });
+    eventually("the adopted engine let go", || !process_is_live(pid));
+    drop(driver);
+
+    // The settlement served is the one the engine journalled, field for field.
+    let settlements = settled_records();
+    assert_eq!(settlements.len(), 2, "{settlements:?}");
+    let settlement = &settlements[1];
+    assert_eq!(settlement["detail"], json!(EVIDENCE), "{settlement}");
+    let settled = detail();
+    assert_eq!(settled["graph"]["node_status"][node], settlement["status"]);
+    let result = &settled["graph"]["node_results"][node];
+    for key in ["status", "outcome", "detail"] {
+        assert_eq!(result[key], settlement[key], "{key}: {result}");
+    }
+    let exited = journal()
+        .into_iter()
+        .rfind(|record| record["kind"] == json!("driver-exited"))
+        .expect("the adopted driver's exit");
+    assert_eq!(exited["payload"]["settlement"], json!("complete"));
+    assert_eq!(settled["graph"]["result"]["state"], json!("complete"));
+    assert_eq!(settled["graph"]["result"]["ok"], json!(true));
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 /// A harness stand-in for a dispatch on either side of the publication boundary:
 /// it records the argv it was given in `argv-<pid>.txt` under `records`, and the
 /// first line of its stdin — the stream-json prompt frame, where the turn was

@@ -7,6 +7,7 @@ import {
   type HumanItemNode,
   type HumanItemView,
 } from "@onepipeline-ui/dag-model";
+import { formatAbsoluteTimestamp } from "../../lib/time";
 
 /**
  * What a reader sees of an action item, derived from the engine's record and
@@ -122,6 +123,42 @@ export function blockedGroups(detail: HumanItemDetail): {
     offset += count;
     return { phrase: phrases[index] ?? "", nodes };
   });
+}
+
+/** One labelled field of an item's metadata block. */
+export interface MetadataField {
+  readonly label: string;
+  readonly value: string;
+}
+
+/**
+ * Everything about an item rather than in it, as the detail's metadata block
+ * labels it. The tracker and the blocked steps are the block's own, since
+ * those are a link and a list.
+ */
+export function metadataFields(view: HumanItemView): MetadataField[] {
+  const { item } = view;
+  const { plan, run } = item.owner;
+  const blocks = blockedPhrases(view).join("; ");
+  const resolvedLabel: Partial<Record<HumanItem["state"], string>> = {
+    answered: "Answered",
+    completed: "Completed",
+    dismissed: "Dismissed",
+  };
+  const resolved = resolvedLabel[item.state];
+  return [
+    { label: "Priority", value: priorityLabel(item) },
+    { label: "Kind", value: kindLabel(item) },
+    { label: "State", value: stateLabel(item) },
+    { label: "Source", value: sourceWords(item) },
+    ...(plan === null ? [] : [{ label: "Plan", value: plan }]),
+    ...(run === null ? [] : [{ label: "Run", value: run }]),
+    { label: "Blocks", value: blocks === "" ? "Nothing" : blocks },
+    { label: "Raised", value: formatAbsoluteTimestamp(item.created_at) },
+    ...(resolved === undefined
+      ? []
+      : [{ label: resolved, value: formatAbsoluteTimestamp(item.updated_at) }]),
+  ];
 }
 
 /**

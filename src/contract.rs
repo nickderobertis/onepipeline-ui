@@ -470,6 +470,8 @@ pub mod routes {
     pub const HUMAN_ITEMS: &str = "/api/human-items";
     /// One human item and every step it blocks.
     pub const HUMAN_ITEM: &str = "/api/human-items/{id}";
+    /// `POST`: answer several questions as one batch.
+    pub const HUMAN_ITEM_ANSWERS: &str = "/api/human-items/answers";
     /// Answer an open question: `apply(Answer)`.
     pub const HUMAN_ITEM_ANSWER: &str = "/api/human-items/{id}/answer";
     /// Complete an open task, design reviews included: `apply(Complete)`.
@@ -542,7 +544,7 @@ pub mod routes {
     }
 
     /// How many routes the contract defines.
-    pub const COUNT: usize = 38;
+    pub const COUNT: usize = 39;
 
     /// Every route above with its method, in the order `docs/contract.md`
     /// lists them.
@@ -580,6 +582,7 @@ pub mod routes {
         get(HUMAN_ITEMS),
         post(HUMAN_ITEMS),
         get(HUMAN_ITEM),
+        post(HUMAN_ITEM_ANSWERS),
         post(HUMAN_ITEM_ANSWER),
         post(HUMAN_ITEM_COMPLETE),
         post(HUMAN_ITEM_DISMISS),
@@ -925,9 +928,22 @@ pub struct StopRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HumanItemAnswerRequest {
-    /// The answer. Blank once trimmed is the engine's refusal.
-    // llmlint: ignore[invalid_states_unrepresentable] the engine's `HumanItemAction::Answer` declares its text a `String` and its own decoder and `apply` refuse a blank one in their own words; a type here that refused first would restate the engine's rule in this crate's words.
-    pub text: String,
+    /// The picked choice's id, or none.
+    // llmlint: ignore[invalid_states_unrepresentable] the engine's `HumanItemAction::Answer` declares flat optional `choice` and `text`, and its `apply` refuses an answer naming neither, a blank text or a choice the question does not offer in its own words; a type here that refused first would restate the engine's rule in this crate's words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choice: Option<String>,
+    /// The person's own words, or none.
+    // llmlint: ignore[invalid_states_unrepresentable] as `choice` above: the rule over the pair is the engine's, stated at its `apply`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+/// The body of `POST /api/human-items/answers`: the engine's own batch entries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HumanItemAnswersRequest {
+    /// One entry per item; `HumanItems::answer_batch` refuses a malformed list.
+    pub answers: Vec<onepipeline::human_items::HumanItemBatchAnswer>,
 }
 
 /// The body of `POST /api/human-items/{id}/complete`: nothing.

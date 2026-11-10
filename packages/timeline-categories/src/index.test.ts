@@ -56,6 +56,10 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "edit-committed": "repository",
   "command-accepted": "planning",
   "planner-surface-queued": "planning",
+  // A surface a bus hook kept off the run's channel: the exchange with the
+  // planner, like the queueing it stands in for.
+  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns the kind and this package owns the category it reads under; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS` and refuses a declared kind with no entry here, so the row cannot live in the producer.
+  "planner-surface-dropped": "planning",
   "planner-surfaced": "planning",
   "planner-replied": "planning",
   "decision-pending": "planning",

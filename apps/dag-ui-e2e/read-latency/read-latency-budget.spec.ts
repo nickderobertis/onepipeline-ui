@@ -118,6 +118,32 @@ const largeRun = (overrides: object = {}) => ({
   host_load: { start: load, end: load },
   ...overrides,
 });
+/** A batch phase whose slowest tab took `slowest` seconds. */
+const batch = (slowest = 1) => {
+  const pressed_at_ms = 1_000_000;
+  const tab = (lag_s: number) => ({
+    lag_s,
+    left_at_ms: pressed_at_ms + lag_s * 1000,
+    requests: 0,
+    still_listed: 0,
+  });
+  return {
+    questions: workload.batch_questions,
+    with_choices: workload.batch_with_choices,
+    choices_each: workload.batch_choices_each,
+    requests: 1,
+    answers_in_request: workload.batch_questions,
+    answered: workload.batch_questions,
+    pressed_at_ms,
+    committed_at_ms: pressed_at_ms + 200,
+    response_s: 0.4,
+    tabs: { unfiltered: tab(slowest), filtered: tab(0.5) },
+    host_load: {
+      start: { load_1m: 1, load_5m: 1, load_15m: 1, cores: 8 },
+      end: { load_1m: 1, load_5m: 1, load_15m: 1, cores: 8 },
+    },
+  };
+};
 
 const telemetry = (overrides: object = {}) => ({
   schema_version: 2,
@@ -130,6 +156,7 @@ const telemetry = (overrides: object = {}) => ({
     filtered: { ...page(4, 1.5), filter: FILTERED },
   },
   large_run: largeRun(),
+  batch: batch(),
   ...overrides,
 });
 
@@ -269,6 +296,34 @@ test("a run with no mark fails the check, naming the reading", () => {
   expect(check(path, [["first-view", 1]])[0]?.verdict).not.toBe("within");
 });
 
+test("a batch tab slower than the spaced writes becomes the figure, with each part in its detail", () => {
+  const results = check(recorded(telemetry({ batch: batch(2.4) })));
+  const lag = results.find(({ id }) => id === "runner-human-items-lag");
+  expect(lag?.actual).toBe(2.4);
+  expect(lag?.verdict).toBe("within");
+  const detail = z
+    .object({
+      spaced_p95_s: z.number(),
+      batch: z.object({
+        response_s: z.number(),
+        lag_s: z.object({ unfiltered: z.number(), filtered: z.number() }),
+      }),
+    })
+    .parse(JSON.parse(lag?.detail ?? "{}"));
+  expect(detail.spaced_p95_s).toBe(1.5);
+  expect(detail.batch.lag_s).toStrictEqual({ unfiltered: 2.4, filtered: 0.5 });
+  expect(detail.batch.response_s).toBe(0.4);
+});
+
+test("telemetry with no batch phase is refused rather than reported", () => {
+  const none = Object.fromEntries(
+    Object.entries(telemetry()).filter(([key]) => key !== "batch"),
+  );
+  const run = measure("human-items-lag", recorded(none));
+  expect(run.status).toBe(1);
+  expect(run.stderr).toContain("dag-ui-read-latency:test");
+});
+
 test("names the target to run when the telemetry is absent", () => {
   const run = measure("human-items-lag", join(tmpdir(), "no-such-telemetry"));
   expect(run.status).toBe(1);
@@ -302,6 +357,26 @@ test("refuses telemetry that was not recorded over the stated workload", () => {
       human_items: {
         unfiltered: { ...page(0, 0.8), filter: FILTERED },
         filtered: { ...page(0, 0.8), filter: FILTERED },
+      },
+    }),
+    // A batch smaller than stated, one still listed, and one the reader sent.
+    telemetry({ batch: { ...batch(), answers_in_request: 3 } }),
+    telemetry({
+      batch: {
+        ...batch(),
+        tabs: {
+          ...batch().tabs,
+          filtered: { ...batch().tabs.filtered, still_listed: 1 },
+        },
+      },
+    }),
+    telemetry({
+      batch: {
+        ...batch(),
+        tabs: {
+          ...batch().tabs,
+          unfiltered: { ...batch().tabs.unfiltered, requests: 2 },
+        },
       },
     }),
   ]) {
@@ -343,6 +418,18 @@ test("the budgets file states the workload workload.json records", () => {
     `spaced ${workload.write_spacing_s} s apart`,
   ])
     expect(text.split(stated)).toHaveLength(3);
+  const questions = workload.batch_questions;
+  const chosen = workload.batch_with_choices;
+  const typed = questions - chosen;
+  // Only the page-update budget times the batch, so each figure is stated once.
+  for (const stated of [
+    `for one ${questions}-answer batch sent at once from the page`,
+    `${questions} open high-priority questions raised through the real CLI`,
+    `(${chosen} offering ${workload.batch_choices_each} choices, ${typed} offering none)`,
+    `drafts all ${questions} (${chosen} by a choice press, ${typed} by typed text)`,
+    `carrying ${questions} answers`,
+  ])
+    expect(text.split(stated)).toHaveLength(2);
 });
 
 test("the large-run corpus writes the shapes its drivers are read from, at a small size", () => {

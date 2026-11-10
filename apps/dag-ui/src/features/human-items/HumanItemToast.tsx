@@ -5,13 +5,11 @@ import type { Toast } from "./useHumanItems";
 import { useToastLifecycle } from "./useToastLifecycle";
 
 const PAST = {
-  answer: "Answered",
   complete: "Completed",
   dismiss: "Dismissed",
 } as const;
 
 const DOING = {
-  answer: "Answering",
   complete: "Completing",
   dismiss: "Dismissing",
 } as const;
@@ -23,7 +21,7 @@ function sentence(toast: Toast): string {
   const { action, title, phase, error, followUp } = toast;
   if (phase === "failed")
     return `Not ${PAST[action].toLowerCase()}: ${title}. ${error ?? ""}`.trim();
-  const undone = action === "answer" ? "Reopened" : UNDONE[action];
+  const undone = UNDONE[action];
   const noted = action === "dismiss" ? "Reason" : "Comment";
   if (followUp?.phase === "failed")
     return followUp.kind === "undo"
@@ -66,7 +64,7 @@ export function HumanItemToast({
   const { action, phase, followUp } = toast;
   const failed = phase === "failed" || followUp?.phase === "failed";
 
-  const resolving = action !== "answer" && phase !== "failed";
+  const resolving = phase !== "failed";
   const undone = followUp?.kind === "undo" && followUp.phase === "done";
   const noteLabel = action === "dismiss" ? "Add reason" : "Add comment";
   const noteName = action === "dismiss" ? "Reason" : "Comment";

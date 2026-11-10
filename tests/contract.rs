@@ -80,6 +80,7 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::HUMAN_ITEMS, "human-items.json"),
     (routes::HUMAN_ITEMS, "human-items-raise.json"),
     (routes::HUMAN_ITEM, "human-item.json"),
+    (routes::HUMAN_ITEM_ANSWERS, "human-item-answers.json"),
     (routes::HUMAN_ITEM_ANSWER, "human-item-answer.json"),
     (routes::HUMAN_ITEM_COMPLETE, "human-item-complete.json"),
     (routes::HUMAN_ITEM_DISMISS, "human-item-dismiss.json"),
@@ -4209,12 +4210,31 @@ fn the_checked_in_human_item_schema_is_the_linked_engines() {
     );
 }
 
+/// **The page's batch limit is the linked engine's.** The send bar splits drafts at
+/// this number, and a constant the schema does not carry can only be held here.
+#[test]
+fn the_pages_batch_limit_is_the_linked_engines() {
+    let page = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("apps/dag-ui/src/features/human-items/human-item-drafts.ts"),
+    )
+    .expect("the page's draft module reads");
+    let declared = format!(
+        "export const MAX_BATCH_ANSWERS = {};",
+        onepipeline::human_items::MAX_BATCH_ANSWERS
+    );
+    assert!(
+        page.contains(&declared),
+        "the page does not declare {declared}"
+    );
+}
+
 /// **Every human-item golden is a record the engine accepts.** Each route's
 /// fixture decodes as the engine's own type for that route — whose decoders
 /// validate state, resolution, counts and previews.
 #[test]
 fn every_human_item_fixture_is_the_engines_record() {
-    use onepipeline::human_items::{HumanItemDetail, HumanItemReceipt};
+    use onepipeline::human_items::{HumanItemBatchReceipt, HumanItemDetail, HumanItemReceipt};
     use onepipeline_ui::human_items::HumanItemList;
 
     let read =
@@ -4235,6 +4255,9 @@ fn every_human_item_fixture_is_the_engines_record() {
         serde_json::from_str::<HumanItemReceipt>(&read(receipt))
             .unwrap_or_else(|err| panic!("{receipt} is not the engine's receipt: {err}"));
     }
+    let batch: HumanItemBatchReceipt = serde_json::from_str(&read("human-item-answers.json"))
+        .expect("the batch answer is the engine's HumanItemBatchReceipt");
+    assert_eq!(batch.answered.len(), 1, "the batch golden pins one answer");
     // The schema's own vocabulary agrees: no owner-ended state, and the four
     // priorities with their display labels.
     let schema = onepipeline::human_items::schemas();

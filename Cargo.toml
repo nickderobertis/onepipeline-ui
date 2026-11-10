@@ -1,6 +1,6 @@
 [package]
 name = "onepipeline-ui"
-version = "0.72.0"
+version = "0.76.0"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
@@ -150,17 +150,17 @@ oneharness-core = "0.29.1"
 # major `onepipeline` itself resolves — the record this reads was written by the
 # release the engine links — and never moved on its own: `tests/packaging.rs`
 # reconciles the two edges the lockfile records.
-oneagentgraph = "0.9.0"
+oneagentgraph = "0.11.0"
 # The document a settled member's report *is*, linked rather than copied — why,
 # and why it is unpinned, is in `src/AGENTS.md`.
-onejudge = "0.22.0"
+onejudge = "0.22.4"
 # The correlation a channel reply is answered under is that library's own
 # token, parsed by its own parser: `POST .../channel/reply?correlation=C` hands
 # the query through `onemessagebus::Correlation` rather than a copy of its
 # grammar. Held at the version the SDK's own requirement resolves to, so one
 # copy of this library is linked rather than two; `tests/packaging.rs`
 # reconciles the edges the lockfile records.
-onemessagebus = "0.9.1"
+onemessagebus = "0.10.0"
 # This crate's own public surface is made of this library's types:
 # `error::ApiError::from_engine` and `from_engine_unscoped` take an
 # `onepipeline::Error`,
@@ -174,9 +174,9 @@ onemessagebus = "0.9.1"
 # it cannot notice, because both sides' rustdoc still spells the path
 # `onepipeline::Error` while the type behind it changed identity, so
 # `scripts/semver-check.sh` refuses a release that moved this line while the
-# commits release-plz versions from announce no break. At `=0.103.0` this crate's
-# surface follows onepipeline 0.103's: `error::ApiError::from_engine` takes that
-# release's `onepipeline::Error`, which 0.102's is not.
+# commits release-plz versions from announce no break. At `=0.105.0` this crate's
+# surface follows onepipeline 0.105's: `error::ApiError::from_engine` takes that
+# release's `onepipeline::Error`, which 0.104's is not.
 #
 # The engine pin also fixes the linked plan-store, onevcs, oneagentgraph and
 # onejudge families. A host holds its engine and this reader to one linked
@@ -185,7 +185,7 @@ onemessagebus = "0.9.1"
 # The test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.103.0"
+onepipeline = "=0.105.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -222,9 +222,9 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right. Exact, at the
-# release the linked engine's lock resolves (0.103.0 requires ^0.62.1); earlier
+# release the linked engine's lock resolves (0.105.0 requires ^0.63.0); earlier
 # moves are in docs/engine-dependency-history.md.
-onevcs = "=0.62.1"
+onevcs = "=0.63.0"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
