@@ -10,7 +10,7 @@ import { AppErrorBoundary } from "./AppErrorBoundary";
 
 /**
  * Bring the app up, and — where a first screen stands — behind it: it takes the first
- * answer over, and the screen comes down in the frame after the app has drawn its own,
+ * answer over, and the screen comes down in the same commit the app first draws in,
  * so nothing a reader is looking at jumps.
  */
 export function mountApp(

@@ -66,7 +66,12 @@ function openNode(id: string): void {
   });
 }
 
-function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
+/**
+ * The first screen's graph: its layout through the real `layoutDag`, each card's
+ * reason and awaits line, and the transform the canvas's own `fitView` arrives at, so
+ * the real canvas replaces these cards where they stand.
+ */
+function useFirstGraph(nodes: readonly NodeView[]) {
   const reasons = new Map(
     nodes.map((node) => [
       node.id,
@@ -100,8 +105,6 @@ function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
   );
   const wrap = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState({ zoom: 1, x: 0, y: 0 });
-  // The transform the canvas's own `fitView` arrives at, so the real canvas replaces
-  // these cards where they stand.
   useLayoutEffect(() => {
     const box = wrap.current;
     if (box === null || width === 0 || height === 0) return;
@@ -122,6 +125,12 @@ function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
       y: box.clientHeight / 2 - (height / 2) * zoom,
     });
   }, [width, height]);
+  return { layout, reasons, awaits, width, height, wrap, fit };
+}
+
+function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
+  const { layout, reasons, awaits, width, height, wrap, fit } =
+    useFirstGraph(nodes);
   return (
     <div
       className="graph-wrap first-graph"
@@ -164,7 +173,6 @@ function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
               aria-label={`${node.label}: ${node.state}`}
               className={`dag-node state-${node.state} token-${node.style}`}
               key={node.id}
-              // The list beside this canvas is the keyboard path, as on the real one.
               onClick={() => openNode(node.id)}
               style={{
                 position: "absolute",
@@ -352,14 +360,15 @@ function Overall({
   );
 }
 
-function NodeTimeline({
-  timeline,
-  node,
-}: {
-  readonly timeline?: RunTimeline;
-  readonly node: NodeView;
-}) {
-  const projection = nodeTimelineV2(timeline, node.id);
+/**
+ * A node timeline's first screen: its projection, the transcript's rows, the plot's
+ * axis, and the stretch before each span's held rows, which is not yet loaded.
+ */
+function useFirstNodeTimeline(
+  timeline: RunTimeline | undefined,
+  nodeId: string,
+) {
+  const projection = nodeTimelineV2(timeline, nodeId);
   const reading = transcriptEntries(projection.tree, new Set());
   const rows = reading.flatMap((entry) =>
     entry.entryKind === "row" ? [entry.row] : [],
@@ -382,6 +391,20 @@ function NodeTimeline({
         return [];
       return [[Date.parse(span.started_at), Date.parse(earliest.at)]];
     },
+  );
+  return { projection, rows, range, unheld };
+}
+
+function NodeTimeline({
+  timeline,
+  node,
+}: {
+  readonly timeline?: RunTimeline;
+  readonly node: NodeView;
+}) {
+  const { projection, rows, range, unheld } = useFirstNodeTimeline(
+    timeline,
+    node.id,
   );
   return (
     <section aria-label={`Timeline for ${node.label}`} className="node-view">

@@ -3,7 +3,7 @@
  *
  * This is the first-screen chunk's reading of the address: it imports nothing that
  * parses a payload, because everything on this path counts against a run's first
- * second. `src/test/first-screen-address.test.ts` holds its two copied words to
+ * second. `src/test/first-screen-address.test.ts` holds its two copied profiles to
  * `useUrlSelection`'s, which is the reading the rest of the app takes.
  */
 import type { SubscriptionView } from "@onepipeline-ui/dag-model";
