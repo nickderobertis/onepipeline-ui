@@ -17915,6 +17915,226 @@ fn a_node_whose_worktree_provisioning_failed_is_served_as_the_engine_recorded_it
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+/// A run launched under a bus configuration declaring a message hook is read
+/// and supervised through this server as the engine recorded it.
+///
+/// The launch is the pinned engine's own `start --bus-config` over a real
+/// `local-md` store, and the hook is a real command on the channel's `replies`
+/// queue: it drops any envelope carrying [`HOOK_DROPS`] and prints every other
+/// back unchanged. The server's own linked engine runs that hook on each reply
+/// it is handed, so a dropped envelope answers the engine's own `dropped`
+/// receipt with nothing applied, and a kept one settles the node; the retained
+/// driver then settles the run. The plan, the node statuses and the settlement
+/// the server answers are each held to the records the engine wrote.
+#[cfg(unix)]
+#[test]
+fn a_run_launched_with_a_bus_hook_is_served_and_supervised_as_the_engine_recorded_it() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const HOOK_DROPS: &str = "hold-this-back";
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    fixture_run::configure_local_md_store(&dir);
+    let graph = write_node_scope_graph(&dir);
+    let node = fixture_run::APPROVAL_NODE_ID;
+    create_store_task(
+        &dir,
+        "Approve the change",
+        onetaskgraph_core::Body::plain("Approve the change."),
+        &[
+            ("onepipeline.id", json!(node)),
+            ("onepipeline.kind", json!("human")),
+        ],
+        &[],
+    );
+    let hook = dir.join("hold-back.sh");
+    fs::write(
+        &hook,
+        format!(
+            "#!/bin/sh\nline=$(cat)\ncase \"$line\" in\n  *{HOOK_DROPS}*) exit 0 ;;\nesac\n\
+             printf '%s\\n' \"$line\"\n"
+        ),
+    )
+    .expect("the hook");
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).expect("chmod the hook");
+    let bus = dir.join("onemessagebus.yaml");
+    fs::write(
+        &bus,
+        format!(
+            "version: 1\ntransport: {{kind: local}}\nhooks:\n  - {{on: replies, command: [{:?}]}}\n",
+            hook.display().to_string()
+        ),
+    )
+    .expect("the bus configuration");
+
+    let project = format!(
+        "{}:{}",
+        fixture_run::LOCAL_MD_SOURCE,
+        fixture_run::LOCAL_MD_PROJECT
+    );
+    let run = started_and_let_go(&provisioned_onepipeline(
+        &root,
+        &dir,
+        &graph,
+        &[
+            "start",
+            &project,
+            "--detach",
+            "--bus-config",
+            &bus.display().to_string(),
+        ],
+    ));
+    // The engine recorded the hook as the launch declared it, so the bus every
+    // writer of this run opens — this server's included — runs it.
+    assert_eq!(
+        launch_record(&root, &run)["bus_config"]["hooks"],
+        json!([{ "on": "replies", "command": [hook.display().to_string()] }]),
+    );
+
+    let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
+    let run_dir = serving.run_dir(&run);
+    let detail_path = format!("/api/v2/runs/{run}");
+    let detail = || {
+        let read = http::get(serving.address, &detail_path);
+        assert_eq!(read.status, 200, "{}", read.body);
+        let read = read.json();
+        assert_enveloped(&read);
+        read
+    };
+    let journal = || -> Vec<Value> {
+        fs::read_to_string(run_dir.join("events.jsonl"))
+            .expect("the engine's journal")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("a journal record"))
+            .collect()
+    };
+    let settled_records = || -> Vec<Value> {
+        journal()
+            .into_iter()
+            .filter(|record| {
+                record["kind"] == json!("node-settled") && record["labels"]["node"] == json!(node)
+            })
+            .map(|record| record["payload"].clone())
+            .collect()
+    };
+
+    // The plan served is the one the engine wrote: every task, every field of
+    // each the server serves, as `plan.json` holds it.
+    let launched = detail();
+    let recorded: Value = serde_json::from_str(
+        &fs::read_to_string(run_dir.join("plan.json")).expect("the engine's plan"),
+    )
+    .expect("the plan parses");
+    let served_tasks = launched["graph"]["plan"]["tasks"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the plan's tasks: {launched}"));
+    let recorded_tasks = recorded["tasks"].as_array().expect("the recorded tasks");
+    assert_eq!(served_tasks.len(), recorded_tasks.len(), "{launched}");
+    for (served, recorded) in served_tasks.iter().zip(recorded_tasks) {
+        for (key, value) in served.as_object().expect("a task") {
+            assert_eq!(&recorded[key], value, "task field {key}: {recorded}");
+        }
+    }
+    assert_eq!(served_tasks[0]["id"], json!(node));
+    assert_eq!(launched["graph"]["plan"]["name"], recorded["name"]);
+    assert_eq!(
+        settled_records(),
+        [json!({ "status": "waiting" })],
+        "the launch settled the approval as anything but waiting"
+    );
+    assert_eq!(launched["graph"]["node_status"][node], json!("waiting"));
+
+    let reply = |envelope: Value| {
+        let answered = http::post(
+            serving.address,
+            &format!("{detail_path}/channel/reply"),
+            &envelope.to_string(),
+        );
+        assert_eq!(answered.status, 200, "{}", answered.body);
+        answered.json()
+    };
+    let settle = |evidence: &str| {
+        json!({"version": 2, "commands": [{
+            "op": "settle", "id": node, "outcome": "done", "evidence": evidence,
+        }]})
+    };
+
+    // The hook drops this envelope: the receipt is the engine's own `dropped`
+    // one, the bus's drop log holds what the hook dropped, and nothing reached
+    // the run — no command queued, no edit committed, the node still waiting.
+    let dropped = reply(settle(HOOK_DROPS));
+    assert_eq!(dropped["run_id"], json!(run));
+    assert_eq!(
+        dropped["receipt"],
+        json!({ "reply": 0, "state": "dropped", "commands": "dropped" }),
+        "{dropped}"
+    );
+    let drop_log = fs::read_to_string(run_dir.join("channel").join("replies-dropped.jsonl"))
+        .expect("the bus's drop log");
+    let drops: Vec<Value> = drop_log
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a drop record"))
+        .collect();
+    assert_eq!(drops.len(), 1, "{drop_log}");
+    assert_eq!(drops[0]["queue"], json!("replies"));
+    assert_eq!(
+        drops[0]["hook"]["command"],
+        json!([hook.display().to_string()])
+    );
+    assert_eq!(
+        drops[0]["message"]["commands"][0]["evidence"],
+        json!(HOOK_DROPS)
+    );
+    assert!(
+        !journal()
+            .iter()
+            .any(|record| record["kind"] == json!("edit-committed")),
+        "a dropped envelope was committed"
+    );
+    assert_eq!(settled_records(), [json!({ "status": "waiting" })]);
+    assert_eq!(detail()["graph"]["node_status"][node], json!("waiting"));
+
+    // The hook keeps this one, unchanged: the receipt says it applied and says
+    // nothing of a hook, and the engine settles the approval from its evidence.
+    const EVIDENCE: &str = "Approved in the browser";
+    let kept = reply(settle(EVIDENCE));
+    assert_eq!(
+        kept["receipt"],
+        json!({ "reply": 0, "state": "applied", "commands": "applied" }),
+        "{kept}"
+    );
+
+    let pid = serving.drive_fixture(&run);
+    let driver = RetainedDriver(pid);
+    eventually("the adopted engine settled the hooked run", || {
+        detail()["run"]["state"] == json!("settled")
+    });
+    eventually("the adopted engine let go", || !process_is_live(pid));
+    drop(driver);
+
+    // The settlement served is the one the engine journalled, field for field.
+    let settlements = settled_records();
+    assert_eq!(settlements.len(), 2, "{settlements:?}");
+    let settlement = &settlements[1];
+    assert_eq!(settlement["detail"], json!(EVIDENCE), "{settlement}");
+    let settled = detail();
+    assert_eq!(settled["graph"]["node_status"][node], settlement["status"]);
+    let result = &settled["graph"]["node_results"][node];
+    for key in ["status", "outcome", "detail"] {
+        assert_eq!(result[key], settlement[key], "{key}: {result}");
+    }
+    let exited = journal()
+        .into_iter()
+        .rfind(|record| record["kind"] == json!("driver-exited"))
+        .expect("the adopted driver's exit");
+    assert_eq!(exited["payload"]["settlement"], json!("complete"));
+    assert_eq!(settled["graph"]["result"]["state"], json!("complete"));
+    assert_eq!(settled["graph"]["result"]["ok"], json!(true));
+    serving.stop_on(Stop::Terminate);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 /// A harness stand-in for a dispatch on either side of the publication boundary:
 /// it records the argv it was given in `argv-<pid>.txt` under `records`, and the
 /// first line of its stdin — the stream-json prompt frame, where the turn was

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.75.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.74.0...v0.75.0) - 2026-11-09
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine that runs the bus's message hooks ([#719](https://github.com/nickderobertis/onepipeline-ui/pull/719))
+
 ## [0.74.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.73.0...v0.74.0) - 2026-11-09
 
 ### Fixed
