@@ -882,6 +882,10 @@ p {
   border-left: 1px solid var(--border);
   background: var(--background);
   box-shadow: -12px 0 35px rgb(0 0 0 / 18%);
+  /* A column, so a failed read said under the item stays on screen: the detail
+     takes what the panel has left. */
+  display: flex;
+  flex-direction: column;
 }
 .drawer-close {
   position: absolute;
@@ -914,7 +918,8 @@ p {
 }
 
 .detail-drawer .timeline-detail {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
