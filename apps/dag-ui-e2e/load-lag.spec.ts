@@ -8,7 +8,7 @@
  */
 
 import { expect, test } from "@playwright/test";
-import { frameArrivals, lagStats, percentile, renderedAt } from "./load/lag";
+import { frameArrivals, lagStats, percentile, shownBy } from "./load/lag";
 
 const appended = [
   { seq: 10, at: 1_000, burst: false },
@@ -26,7 +26,7 @@ test("a view root's rise renders every record at or below it", () => {
       [13, 3_500],
     ] as const,
   };
-  expect(renderedAt(rendered, false, 11)).toBe(3_500);
+  expect(shownBy(rendered, false, 11)).toBe(3_500);
   expect(lagStats(appended, rendered, false)).toStrictEqual({
     records: 4,
     shown: 4,
@@ -42,7 +42,7 @@ test("a node timeline renders a record by its own row, or by the first later row
   // 11 had no row of its own: the window of latest rows had moved past it when
   // 12's appeared, which is when it was rendered. 13 never had a row nor one
   // after it: never shown, and never read as quick.
-  expect(renderedAt(rendered, true, 11)).toBe(3_200);
+  expect(shownBy(rendered, true, 11)).toBe(3_200);
   expect(lagStats(appended, rendered, true)).toStrictEqual({
     records: 4,
     shown: 3,

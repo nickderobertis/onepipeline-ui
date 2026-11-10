@@ -101,11 +101,12 @@ async function start(): Promise<void> {
   const drawn = createRoot(element);
   drawn.render(<FirstScreenLoading address={address} />);
   const read = await firstRead(address);
+  // llmlint: ignore-block[boundary_inputs_validated] the contract parser refuses this same answer when the app adopts it (`LiveView`'s `initial`, through `parseSubscribed`) and replaces the screen with the failure; parsing it here too puts zod and every schema in the first-screen chunk and 25-70 ms of parse on the first view's critical path, against 0.13 s of headroom under its 1.5 s line. Validating it before this render without that cost is a drafted follow-up, by the manager's ruling.
   if (read.answer !== undefined)
-    // llmlint: ignore[boundary_inputs_validated] the contract parser refuses this same answer when the app adopts it (`LiveView`'s `initial`, through `parseSubscribed`) and replaces the screen with the failure; parsing it here too puts zod and every schema in the first-screen chunk and 25-70 ms of parse on the first view's critical path, against 0.13 s of headroom under its 1.5 s line. Validating it before this render without that cost is a drafted follow-up, by the manager's ruling.
     drawn.render(
       <FirstScreen address={address} answer={read.answer as FirstAnswer} />,
     );
+  // llmlint: ignore-end[boundary_inputs_validated]
   const { mountApp } = await import("./app/mount");
   mountApp(element, read, drawn);
 }

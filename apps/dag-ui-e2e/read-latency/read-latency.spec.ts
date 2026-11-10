@@ -1039,7 +1039,7 @@ async function restArrived(
         .number()
         .nullable()
         .parse(
-          // llmlint: ignore[e2e_uses_accessible_selectors] this runs inside the page to stamp the moment the last loading value is gone with the page's own clock, where Playwright's role engine does not exist; the status line and the `Turns` group are read by the role and name the app gives them, and a locator awaited from outside would time the round trip rather than the render.
+          // llmlint: ignore-block[e2e_uses_accessible_selectors] this runs inside the page to stamp the moment the last loading value is gone with the page's own clock, where Playwright's role engine does not exist; the status line and the `Turns` group are read by the role and name the app gives them, and a locator awaited from outside would time the round trip rather than the render.
           await opened.page.evaluate(() => {
             const quiet = [
               ...document.querySelectorAll('[role="status"]'),
@@ -1056,6 +1056,7 @@ async function restArrived(
             return quiet || turnsLoading ? null : performance.now();
           }),
         );
+    // llmlint: ignore-end[e2e_uses_accessible_selectors]
     let at: number | null = null;
     const deadline = Date.now() + 600_000;
     while (at === null && Date.now() < deadline) {

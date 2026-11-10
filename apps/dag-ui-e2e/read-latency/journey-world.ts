@@ -8,6 +8,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -98,6 +99,11 @@ export const JOURNEY_WORKLOAD = {
   },
 } as const;
 
+/** What a journey changes of a workload file: the large run's state; the rest as written. */
+const workloadSchema = z.looseObject({
+  large: z.looseObject({ state: z.enum(["live", "settled"]) }),
+});
+
 /** Write a corpus of `workload` (a path, or a shape) into a fresh workspace. */
 export function buildWorld(
   workload: string | object = JOURNEY_WORKLOAD,
@@ -106,11 +112,11 @@ export function buildWorld(
   const workspace = mkdtempSync(join(tmpdir(), "dag-ui-read-latency-j-"));
   const runsRoot = join(workspace, "runs");
   const file = join(workspace, "workload.json");
-  const declared = (
+  const declared = workloadSchema.parse(
     typeof workload === "string"
-      ? JSON.parse(execFileSync("cat", [workload], { encoding: "utf8" }))
-      : structuredClone(workload)
-  ) as { large: { state: string } };
+      ? JSON.parse(readFileSync(workload, "utf8"))
+      : structuredClone(workload),
+  );
   if (state !== undefined) declared.large.state = state;
   writeFileSync(file, JSON.stringify(declared));
   const facts = factsSchema.parse(

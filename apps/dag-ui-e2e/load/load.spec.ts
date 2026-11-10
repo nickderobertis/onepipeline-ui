@@ -69,7 +69,7 @@ import harnessBinaries from "../fixtures/harness-binaries.json" with {
   type: "json",
 };
 import { treeCpuSeconds } from "./cpu";
-import { frameArrivals, lagStats, percentile, renderedAt } from "./lag";
+import { frameArrivals, lagStats, percentile, shownBy } from "./lag";
 import {
   ACTION_ITEM_CHANGES,
   type Measured,
@@ -584,7 +584,7 @@ function everyRecordShown(
     .split("\n")
     .filter(Boolean)
     .map((line) => appendedSchema.parse(JSON.parse(line)))
-    .every(({ seq }) => renderedAt(observed, rowsShown, seq) !== undefined);
+    .every(({ seq }) => shownBy(observed, rowsShown, seq) !== undefined);
 }
 
 /**
@@ -612,12 +612,13 @@ async function holdNodeWindow(
     const more = transcript.getByRole("button", { name: /^Show \d+ more/u });
     for (let opened = 0; opened < 50 && (await more.count()) > 0; opened += 1)
       await more.last().click();
-    // llmlint: ignore[e2e_uses_accessible_selectors] a row's journal sequence number is what the window is held to, and only the attribute the view writes for the observer above carries it; the transcript itself is found by its role and name, and its collapsed runs opened by their own control.
+    // llmlint: ignore-block[e2e_uses_accessible_selectors] a row's journal sequence number is what the window is held to, and only the attribute the view writes for the observer above carries it; the transcript itself is found by its role and name, and its collapsed runs opened by their own control.
     const shown = await transcript
       .locator("[data-journal-seq]")
       .evaluateAll((rows) =>
         rows.map((row) => Number(row.getAttribute("data-journal-seq"))),
       );
+    // llmlint: ignore-end[e2e_uses_accessible_selectors]
     expect(new Set(shown).size, `tab ${tab} shows a row twice`).toBe(
       shown.length,
     );
@@ -933,7 +934,7 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
       // Two clocks read independently agree for every record shown: none is
       // rendered before it was appended, nor before a frame reached the page.
       for (const { seq, at } of appended) {
-        const shown = renderedAt(observed, rowsShown, seq);
+        const shown = shownBy(observed, rowsShown, seq);
         if (shown === undefined) continue;
         expect(
           shown,
