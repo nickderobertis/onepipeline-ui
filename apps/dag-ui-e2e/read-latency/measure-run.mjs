@@ -10,6 +10,8 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -37,8 +39,14 @@ const run = spawnSync(
     "test",
     "--config",
     join(HERE, "read-latency.config.ts"),
+    // The host measurement alone: other journeys' titles name first screens too.
+    "read-latency.spec.ts",
     "-g",
-    "first screens",
+    "as this host holds them",
+    // Its own artifacts, apart from a tier's run of the same config, which
+    // Playwright would otherwise clear at this run's start.
+    "--output",
+    mkdtempSync(join(tmpdir(), "measure-run-")),
   ],
   {
     stdio: "inherit",

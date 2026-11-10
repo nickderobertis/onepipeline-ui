@@ -152,6 +152,7 @@ async function recovers(page: Page, served: Served) {
 }
 
 for (const [name, viewport] of FAILURE_VIEWPORTS) {
+  // llmlint: ignore-block[e2e_not_mocked, tests_mirror_real_usage] the task's acceptance criteria make the network boundary this journey's only doubled party, standing in for a slow host and a third-party proxy; the server, the release build and the corpus are real, and nothing in the page or the client is replaced. A held, failed, 524 or unanswered first answer and a stream never opened are what a host or proxy does to a real read, and `progress.failed` is the contract's field as the server sets it when its complete read fails, which `tests/e2e/live.rs`'s `a_complete_read_that_fails_keeps_the_screen_says_why_and_a_later_tab_retries` causes for real on the server; here the browser's handling of that served field is what is held.
   test.describe(`at ${name} width`, () => {
     test.use({ viewport });
     const url = (served: Served) =>
@@ -281,12 +282,15 @@ test("progress.failed shows the error and keeps the held screen", async ({
   }
 });
 
+// llmlint: ignore-end[e2e_not_mocked, tests_mirror_real_usage]
+
 test("a failed page says so at its control, and Try again takes the page", async ({
   page,
 }) => {
   const served = await serve(world);
   try {
     let refusing = true;
+    // llmlint: ignore[e2e_not_mocked] the acceptance criteria require a failed page to recover at its control: the proxy's 524 is doubled at the network boundary, the journey's only doubled party, and Try again then takes the real server's page.
     await page.route("**/timeline/events**", (route) =>
       refusing ? route.fulfill({ status: 524, body: "" }) : route.continue(),
     );
@@ -351,14 +355,12 @@ test("a transient append during a read of the wire leaves no whole events", asyn
     await expect
       .poll(() => wire.frames.length, { timeout: 30_000 })
       .toBeGreaterThan(0);
-    for (const { event, data } of wire.frames)
-      if (event === "timeline.patch")
-        expect(
-          frameCarriesWholeEvents(
-            subscriptionFrameSchema.parse(data) as never,
-            "run",
-          ),
-        ).toBe(false);
+    for (const { event, data } of wire.frames) {
+      if (event !== "timeline.patch") continue;
+      const frame = subscriptionFrameSchema.parse(data);
+      if (!("ops" in frame)) throw new Error("a timeline.patch with no ops");
+      expect(frameCarriesWholeEvents(frame, "run")).toBe(false);
+    }
     await completeDocuments(served, run);
   } finally {
     await stop(served);

@@ -53,6 +53,7 @@ import {
   test,
 } from "@playwright/test";
 import { z } from "zod";
+import { visibleOf } from "./journey-world";
 import largeWorkload from "./large-run-workload.json" with { type: "json" };
 import {
   checkAnswer,
@@ -63,6 +64,7 @@ import {
 } from "./mark";
 import {
   FIRST_VIEWS,
+  firstViewSchema,
   type LargeRun,
   type Reading,
   telemetrySchema,
@@ -625,6 +627,7 @@ const hostEnv = (workspace: string, runsRoot: string): NodeJS.ProcessEnv => {
  * A `claude` on PATH that takes 20 s and records each start: a status read that
  * asked the host for its provider report would wait on it and leave a line.
  */
+// llmlint: ignore[e2e_not_mocked] the task's status budget is stated over exactly this: a `claude` on PATH that takes 20 s and records each start, so a status read that started the provider sweep would wait on it and leave a line; the server, its status route and the checkpoint it reads are real.
 function writeStandIn(dir: string): string {
   mkdirSync(dir, { recursive: true });
   const log = join(dir, "claude-starts.log");
@@ -636,6 +639,21 @@ function writeStandIn(dir: string): string {
   );
   return log;
 }
+
+/** What the driver figures read of each journal record. */
+const journalRecordSchema = z.looseObject({
+  ts: z.string(),
+  stream: z.string(),
+  kind: z.string(),
+  labels: z.looseObject({ node: z.string().optional() }).optional(),
+  payload: z
+    .looseObject({
+      transcript: z
+        .looseObject({ history_id: z.string().optional() })
+        .optional(),
+    })
+    .optional(),
+});
 
 /** The driver figures read off the corpus itself, never off the corpus's word. */
 function readCorpusDrivers(
@@ -652,7 +670,9 @@ function readCorpusDrivers(
   )
     .split("\n")
     .filter((line) => line.trim() !== "");
-  const records = journal.map((line) => JSON.parse(line));
+  const records = journal.map((line) =>
+    journalRecordSchema.parse(JSON.parse(line)),
+  );
   const facts = world.facts;
   const nodeOf = (record: { labels?: { node?: string } }) =>
     record.labels?.node;
@@ -892,7 +912,9 @@ async function firstViewReading(
       const text = await page.evaluate("window.__firstAnswer");
       if (typeof text === "string") {
         posted.body = text;
-        answer = JSON.parse(text) as Answer;
+        answer = {
+          initial: { snapshot: { visible: visibleOf(JSON.parse(text)) } },
+        };
       }
     }
     if (answer !== undefined) {
@@ -1017,6 +1039,7 @@ async function restArrived(
         .number()
         .nullable()
         .parse(
+          // llmlint: ignore[e2e_uses_accessible_selectors] this runs inside the page to stamp the moment the last loading value is gone with the page's own clock, where Playwright's role engine does not exist; the status line and the `Turns` group are read by the role and name the app gives them, and a locator awaited from outside would time the round trip rather than the render.
           await opened.page.evaluate(() => {
             const quiet = [
               ...document.querySelectorAll('[role="status"]'),
@@ -1072,7 +1095,7 @@ async function historyPage(
   const opened = await firstViewReading(browser, world, port, "node", complete);
   const { page } = opened;
   const transcript = page.getByRole("region", { name: "Node transcript" });
-  const rows = transcript.locator(".transcript-item");
+  const rows = transcript.getByRole("article");
   const loadEarlier = page.getByRole("button", { name: "Load earlier rows" });
   const pageRead = async () => {
     await loadEarlier.waitFor({ timeout: NEVER });
@@ -1158,7 +1181,9 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
   try {
     const hostStart = hostLoad();
     const complete = await readComplete(world, port);
-    const first: Record<string, unknown> = {};
+    const first: Partial<
+      Record<(typeof FIRST_VIEWS)[number], LargeRun["first_view"]["graph"]>
+    > = {};
     let overallBytes = 0;
     for (const view of FIRST_VIEWS) {
       // A primer that leaves the bundle in this context's HTTP cache.
@@ -1237,22 +1262,27 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
       if (view === "overall")
         overallBytes = readings[0]?.first_answer_bytes ?? 0;
     }
-    const medians = FIRST_VIEWS.map(
-      (view) =>
-        (first[view] as { median_s: number | null }).median_s ?? Infinity,
-    );
+    const taken = (view: (typeof FIRST_VIEWS)[number]) => {
+      const measured = first[view];
+      if (measured === undefined) throw new Error(`no ${view} view was read`);
+      return measured;
+    };
+    const medians = FIRST_VIEWS.map((view) => taken(view).median_s ?? Infinity);
     const slowestIndex = medians.indexOf(Math.max(...medians));
-    const firstView = {
-      ...first,
-      slowest_view: FIRST_VIEWS[slowestIndex],
+    const firstView: LargeRun["first_view"] = {
+      graph: taken("graph"),
+      overall: taken("overall"),
+      node: taken("node"),
+      slowest_view: FIRST_VIEWS[slowestIndex] ?? "graph",
       slowest_s: medians[slowestIndex] ?? 0,
     };
     const rest = await restArrived(world, port, browser, complete);
     const history = await historyPage(world, port, browser, complete);
     const status = await statusRead(world, port);
+    const unread: Record<string, number> = {};
     const corpus =
       world.facts === undefined
-        ? ({} as Record<string, number>)
+        ? unread
         : readCorpusDrivers(world, {
             graph: complete.detail.graph,
             spans: complete.spans,
@@ -1260,7 +1290,7 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
           });
     return {
       corpus,
-      first_view: firstView as LargeRun["first_view"],
+      first_view: firstView,
       rest_arrived: rest,
       history_page: history,
       status,
@@ -1280,6 +1310,9 @@ if (HOST_RUNS_ROOT !== undefined)
     if (HOST_OUTPUT === undefined)
       console.log(JSON.stringify(measured, null, 2));
     else writeFileSync(HOST_OUTPUT, `${JSON.stringify(measured, null, 2)}\n`);
+    // Written first, so a run whose screens went wrong still leaves its figures to
+    // read; it is a failure all the same.
+    firstViewSchema.parse(measured.first_view);
   });
 
 const BATCH_BODY = "What this batched question asks of a person.";

@@ -52,6 +52,7 @@ import { promisify } from "node:util";
 import { gzipSync } from "node:zlib";
 import {
   subscriptionSnapshotSchema,
+  TIMELINE_WINDOW_EVENTS,
   type TimelineEventRow,
   timelineEventsPageSchema,
 } from "@onepipeline-ui/dag-model";
@@ -586,9 +587,6 @@ function everyRecordShown(
     .every(({ seq }) => renderedAt(observed, rowsShown, seq) !== undefined);
 }
 
-/** A node's first answer holds its latest this many rows, as `src/contract.rs` declares. */
-const NODE_WINDOW_ROWS = 40;
-
 /**
  * A live node timeline under its window of latest rows, held to what was appended
  * to it: each tab shows the latest appended rows, each once and in order; the
@@ -606,7 +604,7 @@ async function holdNodeWindow(
 ): Promise<void> {
   const [first] = pages;
   if (first === undefined) throw new Error("no tab was opened");
-  const latest = appended.slice(-NODE_WINDOW_ROWS);
+  const latest = appended.slice(-TIMELINE_WINDOW_EVENTS);
   for (const [tab, page] of pages.entries()) {
     const transcript = page.getByRole("region", { name: "Node transcript" });
     // A collapsed run stands for rows the page holds: opened by its own control,
@@ -614,6 +612,7 @@ async function holdNodeWindow(
     const more = transcript.getByRole("button", { name: /^Show \d+ more/u });
     for (let opened = 0; opened < 50 && (await more.count()) > 0; opened += 1)
       await more.last().click();
+    // llmlint: ignore[e2e_uses_accessible_selectors] a row's journal sequence number is what the window is held to, and only the attribute the view writes for the observer above carries it; the transcript itself is found by its role and name, and its collapsed runs opened by their own control.
     const shown = await transcript
       .locator("[data-journal-seq]")
       .evaluateAll((rows) =>
@@ -702,6 +701,14 @@ async function holdNodeWindow(
   );
   if (visible.type !== "timeline")
     throw new Error(`a node timeline answered ${visible.type}`);
+  // The server's window is the one the client's constant names: the answer lists
+  // the node's latest rows, that many of them, across its spans.
+  const listed = new Set(
+    visible.timeline.spans.flatMap(({ events }) => events.map(({ id }) => id)),
+  );
+  expect(listed, "the first answer's window across the node's spans").toEqual(
+    new Set(whole.rows.slice(-TIMELINE_WINDOW_EVENTS).map(({ id }) => id)),
+  );
   const spans = new Set(visible.timeline.spans.map(({ id }) => id));
   for (const { span_id } of whole.rows)
     expect(spans, `row of span ${span_id}`).toContain(span_id);

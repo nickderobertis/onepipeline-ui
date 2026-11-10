@@ -436,6 +436,7 @@ test("a record appended to the open live run reaches every view as a patch, with
     await shown(page, view, node);
     // The app takes over from the first screen and reads the run's status once, for
     // its control panel, after the view has opened; only what follows is under test.
+    // llmlint: ignore[e2e_uses_accessible_selectors] the app replaces the first screen with no visible jump by design, so nothing a person can perceive says which of the two is drawn; this marker is the one difference, and only waiting for the app to have taken over is read from it.
     await expect(page.locator("[data-first-screen]")).toHaveCount(0);
     const since = Date.now();
     const marker = `live ${view} ${since}`;

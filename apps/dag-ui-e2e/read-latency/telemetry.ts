@@ -228,15 +228,18 @@ const viewSchema = z
     }
   });
 
+/** A run's first views: each reached its mark, and held to its answer and the complete document. */
+export const firstViewSchema = z.object({
+  graph: viewSchema,
+  overall: viewSchema,
+  node: viewSchema,
+  slowest_view: z.enum(FIRST_VIEWS),
+  slowest_s: figure,
+});
+
 const largeRunSchema = z.object({
   corpus: corpusSchema,
-  first_view: z.object({
-    graph: viewSchema,
-    overall: viewSchema,
-    node: viewSchema,
-    slowest_view: z.enum(FIRST_VIEWS),
-    slowest_s: figure,
-  }),
+  first_view: firstViewSchema,
   rest_arrived: z.object({
     overall_s: figure,
     graph_s: seconds,

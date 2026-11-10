@@ -47,6 +47,7 @@ async function reachMark(
   feed?: (visible: Body["initial"]["snapshot"]["visible"]) => void,
 ): Promise<Marked> {
   await observe(page);
+  // llmlint: ignore-block[e2e_not_mocked, tests_mirror_real_usage] the acceptance criteria require that answers fed with one value wrong or missing are each refused by the same check that passes the real ones, so it cannot pass while blind to a wrong value; the real server's answer is fetched and only the one value under test is changed, and with no `feed` the answer passes through untouched.
   await page.route("**/api/v2/subscriptions", async (route) => {
     if (route.request().method() !== "POST" || feed === undefined)
       return route.continue();
@@ -55,6 +56,7 @@ async function reachMark(
     feed(body.initial.snapshot.visible);
     return route.fulfill({ response: answer, json: body });
   });
+  // llmlint: ignore-end[e2e_not_mocked, tests_mirror_real_usage]
   await page.goto(`${served.origin}${addressOf(run, view, node)}`);
   await expect
     .poll(() => page.evaluate("window.__firstAnswer !== undefined"), {
@@ -409,8 +411,10 @@ test("each view's first screen renders while the status read and the sidebar are
       held.push(route);
       await new Promise(() => undefined);
     };
+    // llmlint: ignore-block[e2e_not_mocked] the acceptance criteria ask for each view's first screen while the status read and the sidebar are held: holding those two requests at the network boundary is what states it, and the first answer comes from the real server unchanged.
     await page.route("**/api/v2/runs/*/status", hold);
     await page.route("**/api/v2/events**", hold);
+    // llmlint: ignore-end[e2e_not_mocked]
     for (const view of ["graph", "overall", "node"] as const) {
       await page.goto("about:blank");
       const node = view === "node" ? world.facts.large.busiestNode : undefined;

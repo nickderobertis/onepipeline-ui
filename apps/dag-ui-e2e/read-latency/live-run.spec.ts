@@ -234,7 +234,7 @@ test("a node settling during the rest is not moved back when a complete read tha
   }
 });
 
-test("after the rest, Turns, a session link, activity, a node's detail and usage reach the page equal to a fresh document", async ({
+test("after the rest, Turns reaches the page equal to a fresh document and usage is labelled as of its fold", async ({
   page,
 }) => {
   const world = copyWorld(base);

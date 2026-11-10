@@ -3,6 +3,7 @@
  * is reached by its own controls, and equals the complete documents.
  */
 
+import { timelineEventsPageSchema } from "@onepipeline-ui/dag-model";
 import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { expect, type Page, test } from "@playwright/test";
 import {
@@ -16,6 +17,7 @@ import {
   type Served,
   serve,
   stop,
+  visibleOf,
   type World,
 } from "./journey-world";
 
@@ -90,8 +92,8 @@ test("Overall reaches its line, tiles, run records and disclosures", async ({
     await disclosure.getByText(label).click();
     await expect(disclosure, label).not.toHaveText(/Loading…/u);
   }
-  const goal = (detail.graph as { plan: { goal: { text: string } } }).plan.goal
-    .text;
+  const goal = detail.graph.plan.goal?.text;
+  if (goal === undefined) throw new Error("the corpus's run states no goal");
   await expect(
     page.getByRole("group", { name: "Goal and repository identities" }),
   ).toContainText(goal);
@@ -119,7 +121,7 @@ test("every session link is served as the complete document names it, once the r
   await expect(metricText(page, "Turns")).toHaveText(/^\d+$/u, {
     timeout: NEVER,
   });
-  const answered = await page.evaluate(async (runId) => {
+  const answered: unknown = await page.evaluate(async (runId) => {
     const response = await fetch("/api/v2/subscriptions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -129,10 +131,12 @@ test("every session link is served as the complete document names it, once the r
     });
     return response.json();
   }, run);
-  const visible = answered.initial.snapshot.visible;
-  expect(visible.timeline.progress.complete).toBe(true);
+  const { timeline: shown } = visibleOf(answered);
+  if (shown === undefined)
+    throw new Error("Overall's answer holds no timeline");
+  expect(shown.progress?.complete).toBe(true);
   const held = new Map<string, Json>(
-    (visible.timeline.spans as Json[]).map((span) => [String(span.id), span]),
+    shown.spans.map((span) => [span.id, span as Json]),
   );
   for (const link of links) {
     const served_span = held.get(String(link.id));
@@ -162,6 +166,7 @@ test("zooming a node's category lanes asks for that stretch, and only then", asy
   });
   await row.getByRole("button", { name: "Expand timeline" }).click();
   expect(asked.filter((url) => url.searchParams.has("from"))).toHaveLength(0);
+  // llmlint: ignore[e2e_uses_accessible_selectors] the lanes' spans are positioned SVG geometry that no role or name carries; the journey only finds where one is drawn and then zooms there with the pointer, as a person does.
   const plot = row.locator('[data-timeline-shape="span"]').first();
   await plot.scrollIntoViewIfNeeded({ timeout: 60_000 });
   const bounds = await plot.boundingBox();
@@ -203,6 +208,59 @@ test("zooming a node's category lanes asks for that stretch, and only then", asy
   ).toBeLessThanOrEqual(Date.parse(stretch?.searchParams.get("to") ?? ""));
 });
 
+test("expanding a node's row on Overall reads every page of that node's rows", async ({
+  page,
+}) => {
+  const node = world.facts.large.busiestNode;
+  const run = world.facts.openLiveRun;
+  const { timeline } = await completeDocuments(served, run, node);
+  // The node's rows across its spans, each once, as a page lists them.
+  const expected = new Set(
+    timeline.spans.flatMap((span) =>
+      (span.events ?? []).map((event) => event.id),
+    ),
+  );
+  // More than one of the widest page the client asks for.
+  expect(expected.size).toBeGreaterThan(500);
+  const pages: { cursor: string | null; ids: string[] }[] = [];
+  page.on("response", async (response) => {
+    const url = new URL(response.url());
+    if (
+      !url.pathname.endsWith("/timeline/events") ||
+      url.searchParams.get("node") !== node ||
+      url.searchParams.has("span") ||
+      url.searchParams.has("from")
+    )
+      return;
+    const body = timelineEventsPageSchema.parse(await response.json());
+    pages.push({
+      cursor: body.next_cursor,
+      ids: body.rows.map((row) => row.id),
+    });
+  });
+  await open(page, "overall");
+  await expect(metricText(page, "Turns")).toHaveText(/^\d+$/u, {
+    timeout: NEVER,
+  });
+  await page
+    .getByRole("region", { name: "Graph timeline", exact: true })
+    .getByRole("button", { name: "Expand timeline" })
+    .click();
+  await page
+    .getByRole("region", { name: `${node} timeline`, exact: true })
+    .getByRole("button", { name: "Expand timeline" })
+    .click();
+  await expect
+    .poll(() => pages.some(({ cursor }) => cursor === null), {
+      timeout: NEVER,
+    })
+    .toBe(true);
+  expect(pages.length).toBeGreaterThan(1);
+  const read = pages.flatMap(({ ids }) => ids);
+  expect(read, "no row read twice").toHaveLength(new Set(read).size);
+  expect(new Set(read)).toEqual(expected);
+});
+
 test("opening a row shows its event's detail", async ({ page }) => {
   const node = world.facts.large.busiestNode;
   const run = world.facts.openLiveRun;
@@ -229,7 +287,7 @@ test("opening a row shows its event's detail", async ({ page }) => {
   ).toContainText(String(event?.kind), { timeout: 60_000 });
 });
 
-test("every node card opens its inspector, and a replanned node is reached", async ({
+test("every node's view, opened by its address, shows its state as the complete document records it", async ({
   page,
 }) => {
   const { detail } = await completeDocuments(served, world.facts.openLiveRun);
@@ -237,12 +295,11 @@ test("every node card opens its inspector, and a replanned node is reached", asy
     .node_status;
   for (const [node, state] of Object.entries(status)) {
     await open(page, "node", node);
-    await expect(
-      page.getByRole("region", { name: `Timeline for ${node}` }),
-    ).toBeVisible({ timeout: NEVER });
-    await expect(page.locator(".node-view-state")).toHaveText(state);
+    const view = page.getByRole("region", { name: `Timeline for ${node}` });
+    await expect(view).toBeVisible({ timeout: NEVER });
+    // The heading's state badge, the first place the view names a state.
+    await expect(view.getByText(state, { exact: true }).first()).toBeVisible();
   }
-  // A node replanned off the graph is on Overall's row per node, and its timeline.
 });
 
 test("a node replanned off the graph is reached by a page of its own history", async ({
@@ -258,28 +315,25 @@ test("a node replanned off the graph is reached by a page of its own history", a
     (span.events ?? []).map((event) => event.id),
   );
   expect(expected.length).toBeGreaterThan(0);
-  const rows = await page.evaluate(
-    async ({ runId, node }) => {
-      const ids: string[] = [];
-      let cursor: string | null = null;
-      do {
-        const query: URLSearchParams = new URLSearchParams({
-          scope: "node",
-          node,
-          limit: "500",
-          ...(cursor === null ? {} : { cursor }),
-        });
-        const answer: { rows: { id: string }[]; next_cursor: string | null } =
-          await (
-            await fetch(`/api/v2/runs/${runId}/timeline/events?${query}`)
-          ).json();
-        ids.unshift(...answer.rows.map((row: { id: string }) => row.id));
-        cursor = answer.next_cursor;
-      } while (cursor !== null);
-      return ids;
-    },
-    { runId: run, node: off },
-  );
+  const rows: string[] = [];
+  let cursor: string | null = null;
+  do {
+    const query: URLSearchParams = new URLSearchParams({
+      scope: "node",
+      node: off,
+      limit: "500",
+      ...(cursor === null ? {} : { cursor }),
+    });
+    // Asked from the page, as its own reads are, and read through the contract.
+    const answer = timelineEventsPageSchema.parse(
+      await page.evaluate(
+        async (path) => (await fetch(path)).json(),
+        `/api/v2/runs/${run}/timeline/events?${query}`,
+      ),
+    );
+    rows.unshift(...answer.rows.map((row) => row.id));
+    cursor = answer.next_cursor;
+  } while (cursor !== null);
   expect(new Set(rows)).toEqual(new Set(expected));
   expect(rows).toHaveLength(new Set(expected).size);
 });
@@ -293,17 +347,29 @@ test("the busiest node's whole transcript is reached back to its first row, in o
   const nodeSpan = (timeline.spans as Json[]).find(
     (span) => span.id === `node.${node}`,
   );
-  const expected = (nodeSpan?.events ?? []).map((event) => event.id);
+  const expected = (nodeSpan?.events ?? []).flatMap((event) =>
+    event.id === undefined ? [] : [event.id],
+  );
   await open(page, "node", node);
   const seen = new Map<string, number>();
   const answers: string[] = [];
+  // Each page's rows, newest page first; and the first answer's window.
+  const pages: string[][] = [];
+  const windowed = new Set<string>();
   page.on("response", async (response) => {
-    if (!new URL(response.url()).pathname.endsWith("/timeline/events")) return;
-    const body = (await response.json()) as {
-      rows: { id: string }[];
-      next_cursor: string | null;
-      total: number;
-    };
+    const url = new URL(response.url());
+    if (
+      url.pathname === "/api/v2/subscriptions" &&
+      response.request().method() === "POST"
+    ) {
+      const { timeline: first } = visibleOf(await response.json());
+      for (const span of first?.spans ?? [])
+        for (const event of span.events) windowed.add(event.id);
+      return;
+    }
+    if (!url.pathname.endsWith("/timeline/events")) return;
+    const body = timelineEventsPageSchema.parse(await response.json());
+    pages.push(body.rows.map((row) => row.id));
     answers.push(
       `${body.rows.length} rows next=${body.next_cursor === null ? "null" : "yes"} total=${body.total}`,
     );
@@ -329,20 +395,29 @@ test("the busiest node's whole transcript is reached back to its first row, in o
     if ((await page.getByRole("alert").count()) > 0)
       throw new Error("a page failed on the way back");
   }
-  await page.waitForTimeout(500);
-  const paged = [...seen.keys()];
-  // Everything before the first window has been asked for, none repeated.
+  // Every row before the first window has been asked for, none repeated, and the
+  // pages, oldest first, hold the complete document's rows in its order.
   expect(
     [...seen.values()].every((count) => count === 1),
     "no row repeated",
   ).toBe(true);
-  const stopped = await page
-    .getByRole("region", { name: "Node transcript" })
-    .textContent();
+  expect(windowed.size, "the first answer's window").toBeGreaterThan(0);
+  // Two records the engine renders under one turn's id are listed twice by the
+  // complete document and once by the pages, which merge by id as the client does:
+  // order is held over the ids listed once, and every id is reached.
+  const listed = new Map<string, number>();
+  for (const id of expected) listed.set(id, (listed.get(id) ?? 0) + 1);
+  const wanted = new Set(expected.filter((id) => listed.get(id) === 1));
+  const oldestFirst = pages.toReversed().flat();
+  const reached = new Set([...oldestFirst, ...windowed]);
   expect(
-    paged.length + 40,
-    `the control went away after ${answers.join("; ")}; transcript starts: ${(stopped ?? "").slice(0, 120)}`,
-  ).toBeGreaterThanOrEqual(expected.length * 0.9);
+    expected.filter((id) => !reached.has(id)),
+    `rows never reached, after ${answers.join("; ")}`,
+  ).toStrictEqual([]);
+  const paged = new Set(oldestFirst);
+  expect(oldestFirst.filter((id) => wanted.has(id))).toStrictEqual(
+    expected.filter((id) => wanted.has(id) && paged.has(id)),
+  );
 });
 
 test("Channel opens without waiting on the complete read", async ({ page }) => {

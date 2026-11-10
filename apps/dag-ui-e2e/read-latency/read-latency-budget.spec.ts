@@ -324,6 +324,48 @@ test("telemetry with no batch phase is refused rather than reported", () => {
   expect(run.stderr).toContain("dag-ui-read-latency:test");
 });
 
+const MEASURE_RUN = join(import.meta.dirname, "measure-run.mjs");
+const measureRun = (args: readonly string[]) =>
+  spawnSync(process.execPath, [MEASURE_RUN, ...args], { encoding: "utf8" });
+
+for (const [what, args] of [
+  ["no arguments", []],
+  ["no run", ["--runs-root", "/nowhere"]],
+  ["no runs root", ["--run", "r"]],
+  ["an unknown flag", ["--runs-root", "/nowhere", "--run", "r", "--fast"]],
+] as const)
+  test(`measure-run-load-on-host refuses ${what} as a usage error`, () => {
+    const run = measureRun(args);
+    expect(run.status).toBe(2);
+    expect(run.stderr).toMatch(/^measure-run: /mu);
+  });
+
+test("measure-run-load-on-host hands the root to the measurement and exits as it does", () => {
+  const dir = mkdtempSync(join(tmpdir(), "measure-run-spec-"));
+  try {
+    // A root that is a file: the measurement's server refuses it, which only the
+    // host measurement reaches, and only with the root it was handed.
+    const root = join(dir, "not-a-runs-root");
+    writeFileSync(root, "");
+    const output = join(dir, "measured.json");
+    const run = measureRun([
+      "--runs-root",
+      root,
+      "--run",
+      "r",
+      "--output",
+      output,
+    ]);
+    expect(run.status).toBe(1);
+    expect(`${run.stdout}${run.stderr}`).toContain(
+      "the large run's server never answered",
+    );
+    expect(existsSync(output)).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("names the target to run when the telemetry is absent", () => {
   const run = measure("human-items-lag", join(tmpdir(), "no-such-telemetry"));
   expect(run.status).toBe(1);

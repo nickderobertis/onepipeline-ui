@@ -14,11 +14,12 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { subscribedSchema } from "@onepipeline-ui/dag-model";
 import { expect, type Page } from "@playwright/test";
 import { z } from "zod";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- `journal.ts` is the single fixture writer for the journal (its own header says so), shared with sibling project `dag-ui-e2e`; a second writer is the drift it exists to prevent.
 import { appendRecords } from "../load/journal";
-import { SCREEN_OBSERVER, type ScreenState } from "./mark";
+import { SCREEN_OBSERVER, type ScreenState, type Visible } from "./mark";
 
 export const REPO = resolve(import.meta.dirname, "../../..");
 export const ENGINE = join(REPO, ".tools/bin/onepipeline");
@@ -240,6 +241,35 @@ export async function observe(page: Page): Promise<void> {
 export const screenStates = async (page: Page): Promise<ScreenState[]> =>
   (await page.evaluate("window.__firstScreen ?? []")) as ScreenState[];
 
+/**
+ * What a journey reads of the complete documents: each named member, and every
+ * other member as served, for the comparisons that read the documents whole.
+ */
+const completeDetailSchema = z.looseObject({
+  run: z.looseObject({ state: z.string(), turns: z.unknown() }),
+  graph: z.looseObject({
+    node_status: z.record(z.string(), z.string()),
+    plan: z.looseObject({
+      goal: z.looseObject({ text: z.string() }).nullable().optional(),
+    }),
+  }),
+});
+const completeTimelineSchema = z.looseObject({
+  spans: z.array(
+    z.looseObject({
+      id: z.string(),
+      events: z.array(z.looseObject({ id: z.string() })).optional(),
+    }),
+  ),
+});
+
+/** One complete document, refused unless it was served. */
+async function served200(url: string): Promise<unknown> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${url} answered ${response.status}`);
+  return response.json();
+}
+
 /** The complete documents, read off `served`. */
 export async function completeDocuments(
   served: Served,
@@ -247,13 +277,35 @@ export async function completeDocuments(
   node?: string,
 ) {
   const root = `${served.origin}/api/v2/runs/${encodeURIComponent(run)}`;
-  const detail = (await (await fetch(root)).json()) as Record<string, unknown>;
-  const timeline = (await (
-    await fetch(
-      `${root}/timeline?scope=${node === undefined ? "run" : `node&node=${encodeURIComponent(node)}`}`,
-    )
-  ).json()) as { spans: Record<string, unknown>[] };
-  return { detail, timeline };
+  const detail = await served200(root);
+  const timeline = await served200(
+    `${root}/timeline?scope=${node === undefined ? "run" : `node&node=${encodeURIComponent(node)}`}`,
+  );
+  // Validated, then handed on as served: a parse puts the members it names first,
+  // and the journeys compare documents member by member in the order served.
+  completeDetailSchema.parse(detail);
+  completeTimelineSchema.parse(timeline);
+  return {
+    detail: detail as z.infer<typeof completeDetailSchema>,
+    timeline: timeline as z.infer<typeof completeTimelineSchema>,
+  };
+}
+
+/** A run view's first answer, read through the contract's own parser. */
+export function visibleOf(body: unknown): Visible {
+  const { initial } = subscribedSchema.parse(body);
+  if (initial.type !== "snapshot")
+    throw new Error("a first answer that is a reset");
+  const { visible } = initial.snapshot;
+  switch (visible.type) {
+    case "detail":
+    case "channel":
+      return { detail: visible.detail };
+    case "timeline":
+      return { detail: visible.detail, timeline: visible.timeline };
+    default:
+      throw new Error(`a ${visible.type} view's answer, not a run view's`);
+  }
 }
 
 /** An append through the single fixture writer, as an executor's write lands. */
