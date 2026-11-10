@@ -849,6 +849,13 @@ impl LiveRun {
         node: Option<&NodeId>,
     ) -> Result<Self, ApiError> {
         let paths = store.present(run)?;
+        // A node's session rows come off the pointer file, and its agent count and
+        // rows are the only thing a first answer reads it for: read beside the
+        // journal rather than after it.
+        let pointer = node.map(|_| {
+            let paths = paths.clone();
+            std::thread::spawn(move || agents_of(&paths))
+        });
         let (view, indexed) = if std::fs::metadata(paths.journal())
             .is_ok_and(|about| about.len() <= WHOLE_READ_BYTES)
         {
@@ -872,9 +879,7 @@ impl LiveRun {
             (view, indexed)
         };
         let declared = store.declared(&view);
-        // A node's session rows come off the pointer file, and its agent count
-        // and rows are the only thing a first answer reads it for.
-        let agents = node.and_then(|_| agents_of(&paths));
+        let agents = pointer.and_then(|read| read.join().ok().flatten());
         Ok(Self {
             run: run.clone(),
             liveness: view.liveness(),
