@@ -591,7 +591,15 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
           new URL(response.url()).pathname === "/api/v2/subscriptions" &&
           response.request().method() === "POST",
       );
+      // The page's one stream, opened as its load ends: the window starts after
+      // it, so its opening is not read as a reconnect inside the window.
+      const streaming = page.waitForRequest(
+        (request) => new URL(request.url()).pathname === "/api/v2/events",
+        { timeout: 300_000 },
+      );
       await page.goto(`${served.origin}${address(served, variant)}`);
+      if (variant.kind === "action-items") await streaming;
+      else void streaming.catch(() => undefined);
       loads.push(await loaded(page, variant));
       if (variant.kind === "action-items" && tab === 1)
         await narrowActionItems(page);
