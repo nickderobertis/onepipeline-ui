@@ -51,6 +51,11 @@ import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { gzipSync } from "node:zlib";
 import {
+  subscriptionSnapshotSchema,
+  type TimelineEventRow,
+  timelineEventsPageSchema,
+} from "@onepipeline-ui/dag-model";
+import {
   type Browser,
   type BrowserContext,
   type CDPSession,
@@ -581,6 +586,147 @@ function everyRecordShown(
     .every(({ seq }) => renderedAt(observed, rowsShown, seq) !== undefined);
 }
 
+/** A node's first answer holds its latest this many rows, as `src/contract.rs` declares. */
+const NODE_WINDOW_ROWS = 40;
+
+/**
+ * A live node timeline under its window of latest rows, held to what was appended
+ * to it: each tab shows the latest appended rows, each once and in order; the
+ * history page route, read as the client reads it, reaches every appended record
+ * once and in order, and `total` counts every row it reaches; and a fresh first
+ * answer's `events_total` on each span is the count the page route gives for that
+ * span named, whose pages hold the appended records it carries once and in order,
+ * so a burst's records beyond the window are counted rather than lost.
+ */
+async function holdNodeWindow(
+  pages: readonly Page[],
+  run: string,
+  node: string,
+  appended: readonly number[],
+): Promise<void> {
+  const [first] = pages;
+  if (first === undefined) throw new Error("no tab was opened");
+  const latest = appended.slice(-NODE_WINDOW_ROWS);
+  for (const [tab, page] of pages.entries()) {
+    const transcript = page.getByRole("region", { name: "Node transcript" });
+    // A collapsed run stands for rows the page holds: opened by its own control,
+    // as a reader does, before the rows are read.
+    const more = transcript.getByRole("button", { name: /^Show \d+ more/u });
+    for (let opened = 0; opened < 50 && (await more.count()) > 0; opened += 1)
+      await more.last().click();
+    const shown = await transcript
+      .locator("[data-journal-seq]")
+      .evaluateAll((rows) =>
+        rows.map((row) => Number(row.getAttribute("data-journal-seq"))),
+      );
+    expect(new Set(shown).size, `tab ${tab} shows a row twice`).toBe(
+      shown.length,
+    );
+    const wanted = new Set(latest);
+    expect(
+      shown.filter((seq) => wanted.has(seq)),
+      `tab ${tab}'s latest appended rows, with no gap`,
+    ).toStrictEqual(latest);
+  }
+
+  /** Every page of the node's rows, or of one span's, oldest row first. */
+  const walk = async (span?: string, limit = 500) => {
+    const rows: TimelineEventRow[] = [];
+    let total: number | undefined;
+    let cursor: string | null = null;
+    do {
+      const query = new URLSearchParams({
+        scope: "node",
+        node,
+        limit: String(limit),
+        ...(span === undefined ? {} : { span }),
+        ...(cursor === null ? {} : { cursor }),
+      });
+      const answered = timelineEventsPageSchema.parse(
+        await first.evaluate(
+          async (path) => (await fetch(path)).json(),
+          `/api/v2/runs/${encodeURIComponent(run)}/timeline/events?${query}`,
+        ),
+      );
+      // Newest page first, each page in timeline order.
+      rows.unshift(...answered.rows);
+      total ??= answered.total;
+      cursor = limit === 1 ? null : answered.next_cursor;
+    } while (cursor !== null);
+    return { rows, total };
+  };
+  const written = new Set(appended);
+  const writtenIn = (rows: readonly TimelineEventRow[]) =>
+    rows.flatMap(({ seq }) =>
+      seq !== undefined && written.has(seq) ? [seq] : [],
+    );
+
+  // The node's rows: a row nested spans share is listed once, under the first.
+  const whole = await walk();
+  expect(
+    new Set(whole.rows.map(({ id }) => id)).size,
+    "a row paged twice",
+  ).toBe(whole.rows.length);
+  expect(whole.total, "the page route's total").toBe(whole.rows.length);
+  expect(
+    writtenIn(whole.rows),
+    "every appended record through the page route, once and in order",
+  ).toStrictEqual([...appended]);
+
+  const created = z
+    .object({
+      subscription: z.string(),
+      initial: z.object({ snapshot: z.unknown() }),
+    })
+    .parse(
+      await first.evaluate(
+        async (body) =>
+          (
+            await fetch("/api/v2/subscriptions", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body,
+            })
+          ).json(),
+        JSON.stringify({
+          view: { type: "timeline", run_id: run, scope: "node", node },
+        }),
+      ),
+    );
+  const { visible } = subscriptionSnapshotSchema.parse(
+    created.initial.snapshot,
+  );
+  await first.evaluate(
+    async (path) => void (await fetch(path, { method: "DELETE" })),
+    `/api/v2/subscriptions/${created.subscription}`,
+  );
+  if (visible.type !== "timeline")
+    throw new Error(`a node timeline answered ${visible.type}`);
+  const spans = new Set(visible.timeline.spans.map(({ id }) => id));
+  for (const { span_id } of whole.rows)
+    expect(spans, `row of span ${span_id}`).toContain(span_id);
+  // A span the appended records landed in is read whole; any other by its count.
+  const carrying = new Set(
+    whole.rows.flatMap(({ seq, span_id }) =>
+      seq !== undefined && written.has(seq) ? [span_id] : [],
+    ),
+  );
+  expect(carrying.size, "a span carrying the appended records").toBeGreaterThan(
+    0,
+  );
+  for (const span of visible.timeline.spans) {
+    const own = await walk(span.id, carrying.has(span.id) ? 500 : 1);
+    expect(span.events_total, `${span.id}'s events_total`).toBe(own.total);
+    if (!carrying.has(span.id)) continue;
+    expect(own.rows, `${span.id}'s pages`).toHaveLength(own.total ?? -1);
+    const held = writtenIn(own.rows);
+    expect(
+      held,
+      `${span.id}'s appended records, once and in order`,
+    ).toStrictEqual(appended.filter((seq) => held.includes(seq)));
+  }
+}
+
 async function measure(browser: Browser, variant: Variant): Promise<Measured> {
   const served = await serveFresh(variant.name);
   const contexts: BrowserContext[] = [];
@@ -796,6 +942,13 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
           `record ${seq} rendered before its frame arrived`,
         ).toBeGreaterThanOrEqual(arrived ?? 0);
       }
+      if (rowsShown)
+        await holdNodeWindow(
+          pages,
+          openLiveRun,
+          liveNode,
+          appended.map(({ seq }) => seq),
+        );
       const burst = appended.filter((item) => item.burst);
       lag = {
         measured_as: rowsShown
