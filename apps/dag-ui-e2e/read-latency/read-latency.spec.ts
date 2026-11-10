@@ -1003,30 +1003,42 @@ async function restArrived(
       )
         framesBytes += Buffer.byteLength(event.data);
     });
-    // The rest has arrived once the page no longer says it is loading any of it.
-    const pending = (states: ScreenState[]) => {
-      const last = states.at(-1);
-      return (
-        last === undefined ||
-        last.still_loading ||
-        last.turns?.value === "Loading…"
-      );
-    };
-    let states: ScreenState[] = [];
+    // The mark is taken; the observer that found it, which reads the whole screen
+    // on every change, is stopped so it does not slow the page it times.
+    await opened.page.evaluate("window.__firstScreenStop?.()");
+    // The rest has arrived once the page no longer says it is loading any of it:
+    // no quiet line, and no Turns tile still reading Loading….
+    const arrivedAt = async (): Promise<number | null> =>
+      z
+        .number()
+        .nullable()
+        .parse(
+          await opened.page.evaluate(() => {
+            const quiet = [
+              ...document.querySelectorAll('[role="status"]'),
+            ].some((element) =>
+              element.textContent?.includes(
+                "The rest of this run's history is still loading",
+              ),
+            );
+            const turns = [...document.querySelectorAll('[role="group"]')].find(
+              (group) => group.getAttribute("aria-label") === "Turns",
+            );
+            const turnsLoading =
+              turns?.querySelector("strong")?.textContent === "Loading…";
+            return quiet || turnsLoading ? null : performance.now();
+          }),
+        );
+    let at: number | null = null;
     const deadline = Date.now() + 600_000;
-    for (;;) {
-      states = z
-        .array(z.custom<ScreenState>())
-        .parse(await opened.page.evaluate("window.__firstScreen ?? []"));
-      if (!pending(states)) break;
-      if (Date.now() > deadline) break;
-      await opened.page.waitForTimeout(200);
+    while (at === null && Date.now() < deadline) {
+      at = await arrivedAt();
+      if (at === null) await opened.page.waitForTimeout(100);
     }
-    const lastState = states.at(-1);
     const seconds =
-      opened.state === undefined || lastState === undefined || pending(states)
+      opened.state === undefined || at === null
         ? null
-        : (lastState.at - opened.state.at) / 1000;
+        : (at - opened.state.at) / 1000;
     const peak = peakRssMb(opened.server.pid ?? 0);
     await opened.context.close();
     await stopServing(opened.server);

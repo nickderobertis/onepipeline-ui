@@ -123,7 +123,11 @@ export const SCREEN_OBSERVER = `
     };
   };
   const look = () => { states.push(snapshot()); };
-  new MutationObserver(look).observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
+  const observer = new MutationObserver(look);
+  observer.observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
+  // Once a reading has its mark, nothing reads the states after it: stopped, so a
+  // reading taken later is of the page alone.
+  window.__firstScreenStop = () => observer.disconnect();
 })();
 `;
 // llmlint: ignore-end[e2e_uses_accessible_selectors]
