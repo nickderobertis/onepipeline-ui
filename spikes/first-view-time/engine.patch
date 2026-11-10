@@ -1,0 +1,283 @@
+diff -ruN engine.orig/src/journal.rs engine/src/journal.rs
+--- a/src/journal.rs	2026-11-10 03:56:58.582659872 -0600
++++ b/src/journal.rs	2026-11-10 03:58:23.797178892 -0600
+@@ -24,7 +24,7 @@
+ use crate::sys;
+ 
+ pub(crate) use crate::event::PipelineKind;
+-pub use crate::journal_selected::{read_selected, SelectedRecords, Selection};
++pub use crate::journal_selected::{read_selected, spike_take_split, SelectedRecords, Selection};
+ 
+ /// The next sequence number this process's stream may claim on each run's journal,
+ /// shared by every writer it opens there. See [`Journal::open`].
+diff -ruN engine.orig/src/journal_selected.rs engine/src/journal_selected.rs
+--- a/src/journal_selected.rs	2026-11-10 03:56:58.582860622 -0600
++++ b/src/journal_selected.rs	2026-11-10 03:59:52.587774331 -0600
+@@ -51,6 +51,29 @@
+     std::thread::available_parallelism().map_or(4, |cores| cores.get().min(MOST_WORKERS))
+ }
+ 
++thread_local! {
++    static SPIKE_SPLIT: std::cell::RefCell<Vec<(&'static str, f64)>> =
++        const { std::cell::RefCell::new(Vec::new()) };
++}
++
++/// The first-view-time spike: record `value` (seconds, or a count) for this thread's
++/// split of the read in progress.
++pub(crate) fn spike_record(name: &'static str, value: f64) {
++    SPIKE_SPLIT.with(|split| split.borrow_mut().push((name, value)));
++}
++
++/// The first-view-time spike: seconds since `since`, recorded under `name`, and now.
++pub(crate) fn spike_lap(name: &'static str, since: std::time::Instant) -> std::time::Instant {
++    let now = std::time::Instant::now();
++    spike_record(name, (now - since).as_secs_f64());
++    now
++}
++
++/// The first-view-time spike: what this thread's reads recorded, emptied.
++pub fn spike_take_split() -> Vec<(&'static str, f64)> {
++    SPIKE_SPLIT.with(|split| std::mem::take(&mut *split.borrow_mut()))
++}
++
+ /// What a [`read_selected`] keeps of a journal.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ pub enum Selection<'a> {
+@@ -65,6 +88,14 @@
+     FirstScreen {
+         /// The node whose records are all kept, whatever their kind.
+         node: Option<&'a str>,
++        /// The first-view-time spike's prototype (a): with `node` named, only that
++        /// node's latest this-many records, and those any other node would keep, are
++        /// parsed whole; each other record of it is kept as a stub, its payload empty,
++        /// so every place and count over the node's records stays the complete read's.
++        node_latest: Option<usize>,
++        /// The first-view-time spike's prototype (b): a kept record of one of these
++        /// kinds, and not of `node`, is kept as a stub, its payload empty.
++        stub_kinds: Option<&'a [&'a str]>,
+     },
+     /// One owner's records, plus the journal's first and last: `Some(node)` that
+     /// node's, and `None` those with no node.
+@@ -87,6 +118,11 @@
+     pub places: Vec<Option<usize>>,
+     /// That store's length.
+     pub store_len: usize,
++    /// The first-view-time spike: how many records the merged store holds of the node
++    /// a [`Selection::FirstScreen`] named, where it named one.
++    pub node_records: Option<usize>,
++    /// The first-view-time spike: how many kept records are stubs.
++    pub stubs: usize,
+     /// The highest `seq` in the whole journal.
+     pub last_seq: u64,
+     /// Per node, each kept record's place among that node's records in the merged
+@@ -333,6 +369,33 @@
+     })
+ }
+ 
++/// Where a line in the writers' form opens its payload.
++const PAYLOAD: &[u8] = b",\"payload\":{";
++
++/// The record `line` holds with its payload left empty: its opening up to the payload,
++/// and its artifacts. Only a line [`skimmed_line`] read is ever stubbed, so both are
++/// where that read found them.
++fn stub_of(line: &[u8]) -> Option<Envelope> {
++    let payload = memchr::memmem::find(line, PAYLOAD)?;
++    let body = line.strip_suffix(b"]}")?;
++    let artifacts = memchr::memmem::rfind(body, ARTIFACTS)?;
++    let mut text = Vec::with_capacity(payload + 16 + line.len() - artifacts);
++    text.extend_from_slice(&line[..payload]);
++    text.extend_from_slice(b",\"payload\":{}");
++    text.extend_from_slice(&line[artifacts..]);
++    serde_json::from_slice::<Envelope>(&text).ok()
++}
++
++/// [`parsed_records`], with each line `stubs` marks read as [`stub_of`] reads it.
++fn parsed_or_stubs(lines: &[&Skim<'_>], stubs: &[bool]) -> Vec<Option<Envelope>> {
++    let items: Vec<(&Skim<'_>, bool)> = lines.iter().copied().zip(stubs.iter().copied()).collect();
++    in_order(&items, |(skim, stub)| match &skim.parsed {
++        Some(event) => Some((**event).clone()),
++        None if *stub => stub_of(skim.line),
++        None => serde_json::from_slice::<Envelope>(skim.line).ok(),
++    })
++}
++
+ /// Each stream's lines in its own order, and every line's index in merged order: what
+ /// [`merge_order`](crate::journal::merge_order) answers for the same records.
+ ///
+@@ -394,12 +457,16 @@
+     selection: &Selection<'_>,
+     skim: for<'a> fn(&'a [u8]) -> Option<Skim<'a>>,
+ ) -> Option<SelectedRecords> {
++    let lap = std::time::Instant::now();
+     let finished: Vec<&[u8]> = finished_lines(bytes).collect();
++    let lap = spike_lap("lines_s", lap);
+     let lines: Vec<Skim<'_>> = in_order(&finished, |line| skim(line))
+         .into_iter()
+         .flatten()
+         .collect();
++    let lap = spike_lap("skim_s", lap);
+     let (queues, order) = merged(&lines);
++    let lap = spike_lap("merge_s", lap);
+     let mut stream_end = vec![false; lines.len()];
+     let mut repeated = vec![false; lines.len()];
+     for queue in &queues {
+@@ -427,10 +494,31 @@
+         })
+         .collect();
+     let asked = match selection {
+-        Selection::FirstScreen { node } | Selection::Share(node) => {
++        Selection::FirstScreen { node, .. } | Selection::Share(node) => {
+             node.map(|node| node_ids.get(node).copied())
+         }
+     };
++    // The asked node's records, each with whether it is among the latest `n` of them.
++    let (node_latest, stub_kinds) = match selection {
++        Selection::FirstScreen {
++            node_latest,
++            stub_kinds,
++            ..
++        } => (*node_latest, *stub_kinds),
++        Selection::Share(_) => (None, None),
++    };
++    let mut latest = vec![false; lines.len()];
++    let mut node_records = None;
++    if let Some(Some(asked)) = asked {
++        let mut seen = 0_usize;
++        for index in order.iter().rev() {
++            if node_of[*index] == Some(asked) && !repeated[*index] {
++                latest[*index] = node_latest.is_none_or(|latest| seen < latest);
++                seen += 1;
++            }
++        }
++        node_records = Some(seen);
++    }
+ 
+     let mut before_evidence = vec![false; lines.len()];
+     if matches!(selection, Selection::FirstScreen { .. }) {
+@@ -464,6 +552,21 @@
+         }
+     };
+ 
++    let lap = spike_lap("index_s", lap);
++    let stubbed = |index: usize| {
++        let line = &lines[index];
++        let of_asked = asked.is_some_and(|asked| asked.is_some() && asked == node_of[index]);
++        if of_asked {
++            node_latest.is_some()
++                && !latest[index]
++                && SKIPPED_KINDS.contains(&line.kind.as_ref())
++                && !stream_end[index]
++                && !before_evidence[index]
++        } else {
++            stub_kinds.is_some_and(|kinds| kinds.contains(&line.kind.as_ref()))
++        }
++    };
++    let mut stubs = Vec::new();
+     let mut kept: Vec<(&Skim<'_>, Option<usize>)> = Vec::new();
+     let mut places = Vec::new();
+     let mut share_places = Vec::new();
+@@ -482,16 +585,27 @@
+             share_lengths[node] - 1
+         });
+         if chosen(*index, at) {
++            stubs.push(line.parsed.is_none() && stubbed(*index));
+             kept.push((line, node_of[*index]));
+             places.push(place);
+             share_places.push(share_place);
+         }
+     }
+ 
++    let lap = spike_lap("choose_s", lap);
+     let mut share_lists: Vec<Vec<usize>> = vec![Vec::new(); names.len()];
+     let mut events = Vec::with_capacity(kept.len());
+     let lines_kept: Vec<&Skim<'_>> = kept.iter().map(|(line, _)| *line).collect();
+-    for (record, ((_, node), share_place)) in parsed_records(&lines_kept)
++    spike_record("lines", lines.len() as f64);
++    spike_record("kept", lines_kept.len() as f64);
++    spike_record(
++        "kept_bytes",
++        lines_kept.iter().map(|line| line.line.len()).sum::<usize>() as f64,
++    );
++    spike_record("stubs", stubs.iter().filter(|stub| **stub).count() as f64);
++    let parsed = parsed_or_stubs(&lines_kept, &stubs);
++    let lap = spike_lap("parse_s", lap);
++    for (record, ((_, node), share_place)) in parsed
+         .into_iter()
+         .zip(kept.iter().zip(share_places))
+     {
+@@ -506,10 +620,14 @@
+         .filter(|(_, places)| !places.is_empty())
+         .map(|(name, places)| ((*name).to_owned(), places))
+         .collect();
++    spike_lap("assemble_s", lap);
++    let stub_count = stubs.iter().filter(|stub| **stub).count();
+     Some(SelectedRecords {
+         events,
+         places,
+         store_len,
++        node_records,
++        stubs: stub_count,
+         last_seq,
+         shares,
+     })
+@@ -560,9 +678,11 @@
+ /// the complete read follows. The module note says what the read rests on.
+ #[must_use]
+ pub fn read_selected(journal: &Path, selection: &Selection<'_>) -> SelectedRecords {
++    let lap = std::time::Instant::now();
+     let Some(bytes) = whole_file(journal) else {
+         return SelectedRecords::default();
+     };
++    spike_lap("read_file_s", lap);
+     crate::loopstats::journal_read(journal, 0, bytes.len() as u64);
+     select(&bytes, selection, |line| {
+         skimmed_line(line).or_else(|| parsed_line(line))
+diff -ruN engine.orig/src/views.rs engine/src/views.rs
+--- a/src/views.rs	2026-11-10 03:56:58.591574345 -0600
++++ b/src/views.rs	2026-11-10 03:58:35.239244843 -0600
+@@ -2031,6 +2031,8 @@
+                 root: paths.dir.parent().unwrap_or(Path::new(".")).to_path_buf(),
+             });
+         }
++        use crate::journal_selected::spike_lap as lap_at;
++        let lap = std::time::Instant::now();
+         let journal = paths.journal();
+         let stamp = crate::appendstamp::Stamp::read(&journal);
+         let receipt = stamp
+@@ -2038,21 +2040,28 @@
+             .and_then(|stamp| crate::appendstamp::Receipt::read(&journal, stamp));
+         let mut launch: LaunchRecord = ledger::read_json(&paths.launch())?;
+         (launch.labels, launch.group) = crate::labels::effective(paths, &launch)?;
++        let lap = lap_at("stamp_launch_s", lap);
+         let mut state = crate::projection::fold(&events);
++        let lap = lap_at("fold_s", lap);
+         landings_the_run_re_read(&mut state, paths);
++        let lap = lap_at("landings_s", lap);
+         crate::heartbeat::apply(paths, &mut state);
++        let lap = lap_at("heartbeat_s", lap);
+         let root = paths
+             .dir
+             .parent()
+             .map_or_else(ledger::runs_root, Path::to_path_buf);
+         state.cross_dag = crate::crossdag::resolve_open(&root, &state);
++        let lap = lap_at("crossdag_s", lap);
+         let mut coverage = crate::checkpoint::Coverage::default();
+         for event in &events {
+             coverage.absorb(Some(event), 0);
+         }
++        let lap = lap_at("coverage_s", lap);
+         coverage.bytes = stamp.as_ref().map_or(0, |stamp| {
+             crate::journal_selected::covered_bytes(&journal, stamp.len, &coverage.streams)
+         });
++        let lap = lap_at("covered_bytes_s", lap);
+         // Where appended bytes lie past what these records cover, the stamp must not
+         // answer "unchanged" for them.
+         let stamp = stamp.filter(|stamp| stamp.len == coverage.bytes);
+@@ -2069,6 +2078,7 @@
+             ),
+             edges: EdgesResolved::Open,
+         };
++        lap_at("result_upstreams_s", lap);
+         Ok(Self {
+             paths: paths.clone(),
+             launch,

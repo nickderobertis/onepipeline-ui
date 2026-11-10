@@ -121,6 +121,9 @@ path = "src/lib.rs"
 # `tests/packaging.rs` holds every job that compiles the binary to that.
 [features]
 bundled-ui = []
+# The first-view-time spike's engine prototypes (src/spike.rs): built only by
+# spikes/first-view-time, over a patched engine. Never published.
+spike-engine = []
 
 [dependencies]
 axum = "0.8"

@@ -55,6 +55,7 @@ pub mod liveness;
 pub mod patch;
 pub mod payload;
 pub mod server;
+pub mod spike;
 pub mod store;
 pub mod telemetry;
 pub mod ui;

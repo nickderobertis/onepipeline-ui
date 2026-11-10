@@ -524,11 +524,52 @@ async fn subscribe(State(serving): Store, raw: String) -> Response {
         Err(error) => return error.into_response(),
     };
     let hub = serving.hub.clone();
+    if crate::spike::tracing() {
+        return subscribe_traced(hub, request).await;
+    }
     match tokio::task::spawn_blocking(move || hub.subscribe(&request)).await {
         Ok(Ok(subscribed)) => (axum::http::StatusCode::CREATED, Json(subscribed)).into_response(),
         Ok(Err(error)) => error.into_response(),
         Err(_) => ApiError::Read("unexpected read failure".to_owned()).into_response(),
     }
+}
+
+/// [`subscribe`], with what its answer cost appended to the spike's trace: the
+/// blocking read's spans, and the serialization of the body `Json` would write.
+async fn subscribe_traced(hub: Hub, request: SubscribeRequest) -> Response {
+    let entered = std::time::Instant::now();
+    let view = format!("{:?}", request.view);
+    let joined = tokio::task::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        let _ = crate::spike::take();
+        let subscribed = hub.subscribe(&request);
+        crate::spike::record("subscribe_s", started.elapsed().as_secs_f64());
+        (subscribed, crate::spike::take())
+    })
+    .await;
+    let Ok((subscribed, spans)) = joined else {
+        return ApiError::Read("unexpected read failure".to_owned()).into_response();
+    };
+    let subscribed = match subscribed {
+        Ok(subscribed) => subscribed,
+        Err(error) => return error.into_response(),
+    };
+    let serializing = std::time::Instant::now();
+    let body = serde_json::to_vec(&subscribed).unwrap_or_default();
+    let serialize_s = serializing.elapsed().as_secs_f64();
+    crate::spike::write(&serde_json::json!({
+        "view": view,
+        "handler_s": entered.elapsed().as_secs_f64(),
+        "serialize_s": serialize_s,
+        "answer_bytes": body.len(),
+        "spans": spans,
+    }));
+    (
+        axum::http::StatusCode::CREATED,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    )
+        .into_response()
 }
 
 /// `DELETE /api/v2/subscriptions/{subscription}`: `204`, whether or not it was

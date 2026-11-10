@@ -857,7 +857,11 @@ impl LiveRun {
         // journal rather than after it.
         let pointer = node.map(|_| {
             let paths = paths.clone();
-            std::thread::spawn(move || agents_of(&paths))
+            std::thread::spawn(move || {
+                let started = std::time::Instant::now();
+                let agents = agents_of(&paths);
+                (agents, started.elapsed().as_secs_f64())
+            })
         });
         let (view, indexed) = if std::fs::metadata(paths.journal())
             .is_ok_and(|about| about.len() <= WHOLE_READ_BYTES)
@@ -867,22 +871,41 @@ impl LiveRun {
             indexed.holds_whole(None);
             (view, indexed)
         } else {
-            let selection = onepipeline::journal::Selection::FirstScreen {
-                node: node.map(NodeId::as_str),
+            let selection = crate::spike::first_screen(node.map(NodeId::as_str));
+            let mut selected = {
+                let _span = crate::spike::span("read_selected_s");
+                onepipeline::journal::read_selected(&paths.journal(), &selection)
             };
-            let mut selected = onepipeline::journal::read_selected(&paths.journal(), &selection);
+            crate::spike::engine_split("read_selected");
+            crate::spike::record("kept_records", selected.events.len());
+            crate::spike::record("store_len", selected.store_len);
             let events = std::mem::take(&mut selected.events);
-            let view = RunView::over_selected(&paths, events)
-                .map_err(|error| ApiError::Engine(error.to_string()))?;
+            let view = {
+                let _span = crate::spike::span("over_selected_s");
+                RunView::over_selected(&paths, events)
+                    .map_err(|error| ApiError::Engine(error.to_string()))?
+            };
+            crate::spike::engine_split("over_selected");
+            let indexed_span = crate::spike::span("indexed_s");
             let mut indexed = Indexed::selective(&view, selected);
+            drop(indexed_span);
             // The selection kept every record of the node it was taken for.
             if let Some(node) = node {
                 indexed.holds_whole(Some(node.as_str()));
             }
             (view, indexed)
         };
-        let declared = store.declared(&view);
-        let agents = pointer.and_then(|read| read.join().ok().flatten());
+        let declared = {
+            let _span = crate::spike::span("declared_s");
+            store.declared(&view)
+        };
+        let waited = crate::spike::span("pointer_wait_s");
+        let agents = pointer.and_then(|read| {
+            let (agents, took) = read.join().ok()?;
+            crate::spike::record("pointer_read_s", took);
+            agents
+        });
+        drop(waited);
         Ok(Self {
             run: run.clone(),
             liveness: view.liveness(),
@@ -1044,6 +1067,7 @@ impl LiveRun {
             } else {
                 filter.clone()
             };
+            let _span = crate::spike::span("detail_build_s");
             let body = if self.complete() {
                 let agents = self.agent_count();
                 DetailBody::Live(LiveDetail::build(
@@ -1066,10 +1090,12 @@ impl LiveRun {
             };
             self.details.insert(detail_key.clone(), held);
         }
+        let detail_wire = crate::spike::span("detail_wire_s");
         let detail = enveloped(
             &self.details[&detail_key].wire(),
             &self.details[&detail_key].observed_at,
         );
+        drop(detail_wire);
         let run = self.run.as_str().to_owned();
         let run = run.as_str();
         match visible {
@@ -1088,8 +1114,12 @@ impl LiveRun {
                     }
                     // Selective: every record of the node, and its session rows,
                     // whatever view this run was opened for.
-                    self.hold_node_share(node);
+                    {
+                        let _span = crate::spike::span("hold_node_share_s");
+                        self.hold_node_share(node);
+                    }
                     if self.agents.is_none() {
+                        let _span = crate::spike::span("agents_late_s");
                         self.agents = agents_of(&self.view.paths);
                     }
                 }
@@ -1106,6 +1136,7 @@ impl LiveRun {
                                 TimelineScope::Run if !self.complete() => None,
                                 _ => self.agents.as_ref(),
                             };
+                            let build_span = crate::spike::span("timeline_build_s");
                             let built = LiveTimeline::build(
                                 &self.view,
                                 &self.indexed,
@@ -1115,6 +1146,8 @@ impl LiveRun {
                                 agents,
                                 self.render_window(scope),
                             );
+                            drop(build_span);
+                            let wire_span = crate::spike::span("timeline_wire_s");
                             let window = wire_window(scope);
                             let since = progressive::window_start(built.payload(), window);
                             let mut wire = progressive::wire_timeline_from(
@@ -1124,6 +1157,7 @@ impl LiveRun {
                                 since.clone(),
                             );
                             wire["progress"] = self.timeline_progress(scope);
+                            drop(wire_span);
                             self.timelines.push((
                                 scope.clone(),
                                 key.clone(),
@@ -1140,8 +1174,10 @@ impl LiveRun {
                             self.timelines.len() - 1
                         }
                     };
+                let envelope_span = crate::spike::span("timeline_envelope_s");
                 let (_, _, timeline) = &self.timelines[at];
                 let timeline = enveloped(&timeline.wire, &timeline.observed_at);
+                drop(envelope_span);
                 Ok(match scope {
                     TimelineScope::Node(node) => json!({
                         "type": "timeline", "run_id": run, "scope": "node", "node": node,
@@ -1347,8 +1383,14 @@ impl Hub {
                     } => Some(node),
                     _ => None,
                 };
-                let live = self.live_run(&run, node)?;
-                lock(&live).ensure(&shared.store, &visible, spec)?;
+                let live = {
+                    let _span = crate::spike::span("live_run_s");
+                    self.live_run(&run, node)?
+                };
+                {
+                    let _span = crate::spike::span("ensure_first_s");
+                    lock(&live).ensure(&shared.store, &visible, spec)?;
+                }
                 Some(live)
             }
         };
@@ -1367,20 +1409,28 @@ impl Hub {
         if !run_view {
             self.first_look();
         }
+        let locking = crate::spike::span("sidebar_lock_s");
         let sidebar = lock(&shared.sidebar);
+        drop(locking);
+        let locking = crate::spike::span("run_lock_s");
         let mut run = live.as_ref().map(|live| lock(live));
+        drop(locking);
         let mut reading = human_items.as_ref().map(|_| lock(&shared.human_items));
+        let ensure_boundary = crate::spike::span("ensure_boundary_s");
         let visible_state = match (run.as_mut(), &human_items, reading.as_mut()) {
             (Some(run), _, _) => run.ensure(&shared.store, &visible, spec)?,
             (None, Some(view), Some(reading)) => self.ensure_human_items(reading, view)?,
             _ => json!({ "type": "sidebar" }),
         };
+        drop(ensure_boundary);
         let rows = if run_view {
             Value::Null
         } else {
             Value::Array(sidebar.snapshot())
         };
+        let locking = crate::spike::span("state_lock_s");
         let mut state = lock(&shared.state);
+        drop(locking);
         // The reading is held for this subscription from the boundary on: a tick
         // that let it go between its opening and now — when no subscription yet
         // wanted it — would leave the subscription with nothing refreshing it.
@@ -1409,20 +1459,27 @@ impl Hub {
                 deferred: run_view.then(Vec::new),
             },
         );
+        let releasing = crate::spike::span("release_s");
         drop(state);
         drop(reading);
         let begin_complete = run.as_mut().is_some_and(|run| run.claim_complete());
         drop(run);
         drop(sidebar);
+        drop(releasing);
+        let polling = crate::spike::span("start_polling_s");
         self.start_polling();
+        drop(polling);
         if run_view {
+            let _span = crate::spike::span("send_sidebar_s");
             self.send_sidebar(subscription, visible.run_id().cloned());
         }
         if begin_complete {
             if let Some(live) = &live {
+                let _span = crate::spike::span("spawn_complete_s");
                 self.spawn_complete(live);
             }
         }
+        let _snapshot = crate::spike::span("snapshot_json_s");
         let id = self.id(seq);
         let snapshot = json!({ "id": id, "sidebar": rows, "visible": visible_state });
         let initial = match request.origin {

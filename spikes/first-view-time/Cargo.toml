@@ -1,0 +1,33 @@
+# The first-view-time spike's prototype server: this branch's library, with the
+# `spike-engine` feature, over the locked engine with `engine.patch` applied (made by
+# `build.sh` into an untracked copy under `target/spike-first-view/`). Its own
+# workspace, lock and target directory, so nothing here reaches the root manifest, its
+# lock or anything published; the root crate still builds the released engine.
+[package]
+name = "first-view-time-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "onepipeline-api-spike"
+path = "src/main.rs"
+
+[dependencies]
+onepipeline-ui = { path = "../..", features = ["bundled-ui", "spike-engine"] }
+clap = { version = "4.6", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+pprof = { version = "0.15", default-features = false, features = ["cpp"] }
+
+# The root crate's release profile (thin LTO, one codegen unit), with line tables kept
+# for the sampler's symbols rather than stripped: debuginfo does not change codegen.
+[profile.release]
+strip = false
+debug = "line-tables-only"
+lto = "thin"
+codegen-units = 1
+
+[patch.crates-io]
+onepipeline = { path = "../../target/spike-first-view/engine" }

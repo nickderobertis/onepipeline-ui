@@ -81,6 +81,19 @@ const HOST_RUNS_ROOT = process.env.READ_LATENCY_RUNS_ROOT;
 const HOST_OUTPUT = process.env.READ_LATENCY_OUTPUT;
 const HOST_RUN = process.env.READ_LATENCY_RUN;
 const HOST_NODE = process.env.READ_LATENCY_NODE;
+/**
+ * The first-view-time spike's harness (`measure-run.mjs --corpus`): a large corpus
+ * generated once into this directory and kept, so each measurement reads the same
+ * bytes; the server measured, when not the release build; the prototype switches it
+ * runs with; and whether only the first views are taken.
+ */
+const KEPT_CORPUS = process.env.READ_LATENCY_CORPUS;
+const SERVER = process.env.READ_LATENCY_SERVER;
+const SPIKE = process.env.READ_LATENCY_SPIKE ?? "";
+const FIRST_VIEW_ONLY = process.env.READ_LATENCY_FIRST_VIEW_ONLY === "1";
+const VIEWS = (process.env.READ_LATENCY_VIEWS ?? "")
+  .split(",")
+  .filter((view) => view !== "");
 const ENGINE = join(REPO, ".tools/bin/onepipeline");
 /** The session every item here is raised as. */
 const OWNER = "read-latency-session";
@@ -96,6 +109,7 @@ const run = promisify(execFile);
  * the cargo target directory `scripts/build-linux-wheel.sh` gives that target.
  */
 function releaseBinary(): string {
+  if (SERVER !== undefined) return SERVER;
   const triple = "x86_64-unknown-linux-gnu";
   const binary = join(
     REPO,
@@ -584,6 +598,8 @@ interface LargeWorld {
   readonly facts: z.infer<typeof largeFactsSchema> | undefined;
   readonly standInLog: string;
   readonly writer: ChildProcess | undefined;
+  /** A corpus the harness keeps, which nothing here removes. */
+  readonly kept?: boolean;
 }
 
 const largeFactsSchema = z.object({
@@ -731,14 +747,20 @@ function buildLargeWorld(): LargeWorld {
       writer: undefined,
     };
   }
-  const workspace = mkdtempSync(join(tmpdir(), "dag-ui-read-latency-large-"));
+  const workspace =
+    KEPT_CORPUS ?? mkdtempSync(join(tmpdir(), "dag-ui-read-latency-large-"));
   const runsRoot = join(workspace, "runs");
+  const factsFile = join(workspace, "facts.json");
+  const reused = KEPT_CORPUS !== undefined && existsSync(factsFile);
+  if (KEPT_CORPUS !== undefined) mkdirSync(workspace, { recursive: true });
   const facts = largeFactsSchema.parse(
     JSON.parse(
-      execFileSync(process.execPath, [CORPUS, runsRoot, LARGE_WORKLOAD], {
-        encoding: "utf8",
-        maxBuffer: 1 << 24,
-      }),
+      reused
+        ? readFileSync(factsFile, "utf8")
+        : execFileSync(process.execPath, [CORPUS, runsRoot, LARGE_WORKLOAD], {
+            encoding: "utf8",
+            maxBuffer: 1 << 24,
+          }),
     ),
   );
   const providerBin = join(workspace, "provider-bin");
@@ -747,7 +769,14 @@ function buildLargeWorld(): LargeWorld {
   env.PATH = `${providerBin}:${process.env.PATH ?? ""}`;
   // The engine writes its own fold into `checkpoint.json` on a read: the checkpoint
   // every reader then opens is the real one, of the real size.
-  execFileSync(ENGINE, ["status", facts.openLiveRun], { env, stdio: "ignore" });
+  if (!reused) {
+    execFileSync(ENGINE, ["status", facts.openLiveRun], {
+      env,
+      stdio: "ignore",
+    });
+    if (KEPT_CORPUS !== undefined)
+      writeFileSync(factsFile, JSON.stringify(facts));
+  }
   const log = join(workspace, "appended.jsonl");
   writeFileSync(log, "");
   const runs = facts.otherLiveRuns.map((liveRun) => ({
@@ -782,11 +811,22 @@ function buildLargeWorld(): LargeWorld {
     facts,
     standInLog,
     writer,
+    kept: KEPT_CORPUS !== undefined,
   };
 }
 
-/** One fresh release server over `world`, on `port`, that has answered one sidebar read. */
+let traces = 0;
+
+/**
+ * One fresh release server over `world`, on `port`, that has answered one sidebar read.
+ * It runs with the spike's switches, and writes what each subscription's answer cost
+ * to a trace of its own (`ONEPIPELINE_UI_SPIKE_TRACE`), which a server built without
+ * the spike's instrumentation leaves unwritten.
+ */
 async function serveLarge(world: LargeWorld, port: number) {
+  traces += 1;
+  const trace = join(world.workspace, `trace-${process.pid}-${traces}.jsonl`);
+  rmSync(trace, { force: true });
   const server: ChildProcess = spawn(
     releaseBinary(),
     [
@@ -799,7 +839,15 @@ async function serveLarge(world: LargeWorld, port: number) {
       OWNER,
       "--ui",
     ],
-    { stdio: "ignore", env: world.env, cwd: world.workspace },
+    {
+      stdio: "ignore",
+      env: {
+        ...world.env,
+        ONEPIPELINE_UI_SPIKE: SPIKE,
+        ONEPIPELINE_UI_SPIKE_TRACE: trace,
+      },
+      cwd: world.workspace,
+    },
   );
   const origin = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + NEVER;
@@ -815,8 +863,17 @@ async function serveLarge(world: LargeWorld, port: number) {
   }
   // The budget's "fresh server that has answered one sidebar read".
   await fetch(`${origin}/api/v2/runs`);
-  return { origin, server };
+  return { origin, server, trace };
 }
+
+/** What the server's trace says each subscription's answer cost, in the order made. */
+const serverSplit = (trace: string): unknown[] =>
+  existsSync(trace)
+    ? readFileSync(trace, "utf8")
+        .split("\n")
+        .filter((line) => line !== "")
+        .map((line) => JSON.parse(line) as unknown)
+    : [];
 
 /** The first answer, pared to what a mark and the complete comparison read. */
 interface Answer {
@@ -848,13 +905,13 @@ async function firstViewReading(
   cachedContext?: BrowserContext,
   run = world.run,
 ): Promise<{
-  reading: Reading;
+  reading: Reading & { server_split?: unknown[] };
   state: ScreenState | undefined;
   context: BrowserContext;
   page: Page;
   server: ChildProcess;
 }> {
-  const { origin, server } = await serveLarge(world, port);
+  const { origin, server, trace } = await serveLarge(world, port);
   const context =
     cachedContext ??
     (await browser.newContext({ viewport: { width: 1440, height: 900 } }));
@@ -916,7 +973,7 @@ async function firstViewReading(
   const posted2 = posted;
   const body = posted2?.body ?? "";
   const load = hostLoad();
-  const reading: Reading = {
+  const reading: Reading & { server_split?: unknown[] } = {
     seconds: mark === undefined ? null : mark.at / 1000,
     navigation_to_post_s:
       posted2 === undefined ? null : (posted2.at - Number(navStart)) / 1000,
@@ -940,6 +997,7 @@ async function firstViewReading(
         ).length === 0,
     },
     host_load: load,
+    server_split: serverSplit(trace),
   };
   return { reading, state: mark, context, page, server };
 }
@@ -1160,7 +1218,10 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
     const complete = await readComplete(world, port);
     const first: Record<string, unknown> = {};
     let overallBytes = 0;
-    for (const view of FIRST_VIEWS) {
+    const views = FIRST_VIEWS.filter(
+      (view) => VIEWS.length === 0 || VIEWS.includes(view),
+    );
+    for (const view of views) {
       // A primer that leaves the bundle in this context's HTTP cache.
       const primer = await firstViewReading(
         browser,
@@ -1184,6 +1245,17 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
         readings.push(taken.reading);
         await taken.page.close();
         await stopServing(taken.server);
+      }
+      if (FIRST_VIEW_ONLY) {
+        await primer.context.close();
+        const seconds = readings.flatMap((reading) =>
+          reading.seconds === null ? [] : [reading.seconds],
+        );
+        first[view] = {
+          readings,
+          median_s: seconds.length === 3 ? median(seconds) : null,
+        };
+        continue;
       }
       const coldContext = await browser.newContext({
         viewport: { width: 1440, height: 900 },
@@ -1237,16 +1309,23 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
       if (view === "overall")
         overallBytes = readings[0]?.first_answer_bytes ?? 0;
     }
-    const medians = FIRST_VIEWS.map(
+    const medians = views.map(
       (view) =>
         (first[view] as { median_s: number | null }).median_s ?? Infinity,
     );
     const slowestIndex = medians.indexOf(Math.max(...medians));
     const firstView = {
       ...first,
-      slowest_view: FIRST_VIEWS[slowestIndex],
+      slowest_view: views[slowestIndex],
       slowest_s: medians[slowestIndex] ?? 0,
     };
+    if (FIRST_VIEW_ONLY)
+      return {
+        first_view: firstView,
+        spike: SPIKE,
+        server: releaseBinary(),
+        host_load: { start: hostStart, end: hostLoad() },
+      } as unknown as LargeRun;
     const rest = await restArrived(world, port, browser, complete);
     const history = await historyPage(world, port, browser, complete);
     const status = await statusRead(world, port);
@@ -1264,15 +1343,18 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
       rest_arrived: rest,
       history_page: history,
       status,
+      spike: SPIKE,
+      server: releaseBinary(),
       host_load: { start: hostStart, end: hostLoad() },
-    };
+    } as LargeRun;
   } finally {
     world.writer?.kill("SIGTERM");
-    rmSync(world.workspace, { recursive: true, force: true });
+    if (world.kept !== true)
+      rmSync(world.workspace, { recursive: true, force: true });
   }
 }
 
-if (HOST_RUNS_ROOT !== undefined)
+if (HOST_RUNS_ROOT !== undefined || KEPT_CORPUS !== undefined)
   test("one run's first screens, as this host holds them", async ({
     browser,
   }) => {
