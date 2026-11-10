@@ -5452,8 +5452,12 @@ pub(crate) enum ItemsWindow {
 #[derive(Debug, Default)]
 pub(crate) struct Rendered {
     pub(crate) entries: std::collections::HashMap<usize, (Option<String>, Value)>,
-    /// Under [`ItemsWindow::Page`], the id of every row its bounds admit.
+    /// Under [`ItemsWindow::Page`], the id of every row its bounds admit but
+    /// the cursor: what its `total` counts.
     pub(crate) counted: HashSet<String>,
+    /// Under [`ItemsWindow::Page`], the id of every row older than its cursor:
+    /// the page and every page after it.
+    pub(crate) older: HashSet<String>,
     /// How many entries were rendered rather than reused, since this was made.
     pub(crate) fresh: usize,
 }
@@ -5513,12 +5517,9 @@ impl Lens<'_> {
         } = self.window
         {
             ordered.retain(|(index, event)| {
-                let key = self.page_key(*index, event);
                 self.filter.allows(event)
-                    && key.is_some_and(|(at, order)| {
-                        before.is_none_or(|before| (at, order) < before)
-                            && from.is_none_or(|from| at >= from)
-                            && to.is_none_or(|to| at <= to)
+                    && self.page_key(*index, event).is_some_and(|(at, _)| {
+                        from.is_none_or(|from| at >= from) && to.is_none_or(|to| at <= to)
                     })
             });
             if let Some(rendered) = self.rendered {
@@ -5526,6 +5527,17 @@ impl Lens<'_> {
                 for (index, _) in &ordered {
                     let id = self.row_id(*index);
                     rendered.counted.insert(id);
+                }
+            }
+            ordered.retain(|(index, event)| {
+                self.page_key(*index, event)
+                    .is_some_and(|key| before.is_none_or(|before| key < before))
+            });
+            if let Some(rendered) = self.rendered {
+                let mut rendered = rendered.borrow_mut();
+                for (index, _) in &ordered {
+                    let id = self.row_id(*index);
+                    rendered.older.insert(id);
                 }
             }
             if let Some(since) = self.since {

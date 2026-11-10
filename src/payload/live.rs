@@ -428,6 +428,12 @@ impl LiveTimeline {
         self.rendered.borrow().counted.len()
     }
 
+    /// Under [`ItemsWindow::Page`], how many rows are older than its cursor:
+    /// that page and every page after it.
+    pub(crate) fn older(&self) -> usize {
+        self.rendered.borrow().older.len()
+    }
+
     pub(crate) fn rendered(&self) -> usize {
         self.rendered.borrow().fresh
     }

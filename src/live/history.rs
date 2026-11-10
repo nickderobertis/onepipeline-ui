@@ -130,6 +130,14 @@ fn from_selected(
     let mut page = page_of(&built.payload()["spans"], query)?;
     if query.span.is_none() {
         page["total"] = json!(built.counted());
+        // The window rendered this page and the row before it at most, so whether
+        // an older page exists is read off every row the cursor leaves, counted.
+        let rows = page["rows"].as_array().map_or(&[][..], Vec::as_slice);
+        let more = built.older() > rows.len();
+        page["next_cursor"] = match rows.first().and_then(payload::row_order) {
+            Some((at, order)) if more => json!(PageCursor { at, order }.encode()),
+            _ => Value::Null,
+        };
     }
     Ok(page)
 }

@@ -2783,6 +2783,15 @@ fn a_nodes_window_is_its_latest_rows_and_pages_reach_every_row_either_side_of_th
                 let line = activity(&journal, run, node, &format!("row {marker}"));
                 live_journal::append_lines(&journal, &[line]);
             }
+            // The node's latest records are ones no span lists, so a page's window
+            // cannot learn from its records alone whether an older page is left.
+            for _ in 0..12 {
+                let mut line: Value =
+                    serde_json::from_str(&activity(&journal, run, node, "beat")).expect("json");
+                line["kind"] = json!("member-heartbeat");
+                line["payload"] = json!({});
+                live_journal::append_lines(&journal, &[line.to_string()]);
+            }
         },
         &[(onepipeline_ui::live::COMPLETE_READ_HOLD_ENV, "2500")],
     );
@@ -2818,6 +2827,30 @@ fn a_nodes_window_is_its_latest_rows_and_pages_reach_every_row_either_side_of_th
     // Before the rest: every page of the span, newest first, is the whole list.
     let walked = walk_pages(&live, run, node, whole["id"].as_str().expect("an id"));
     assert_eq!(walked, *whole_rows, "pages before the rest");
+    // And every row of the node, page by page across its spans, each once, in
+    // the timeline's order: a page whose window renders only itself still says
+    // when an older page is left.
+    let mut every: Vec<Value> = Vec::new();
+    for span in full["spans"].as_array().expect("spans") {
+        for row in span["events"].as_array().into_iter().flatten() {
+            if !every.iter().any(|held| held["id"] == row["id"]) {
+                every.push(row.clone());
+            }
+        }
+    }
+    every.sort_by_key(|row| {
+        (
+            row["at"].as_str().unwrap_or_default().to_owned(),
+            row["journal_order"].as_u64(),
+        )
+    });
+    let ids = |rows: &[Value]| -> Vec<Value> { rows.iter().map(|row| row["id"].clone()).collect() };
+    let across = walk_node_pages(&live, run, node);
+    assert_eq!(
+        ids(&across),
+        ids(&every),
+        "the node's pages before the rest"
+    );
     tab.settle_after_first();
     assert_eq!(
         tab.state["visible"]["timeline"]["progress"]["complete"],
@@ -2825,6 +2858,8 @@ fn a_nodes_window_is_its_latest_rows_and_pages_reach_every_row_either_side_of_th
     );
     let walked = walk_pages(&live, run, node, whole["id"].as_str().expect("an id"));
     assert_eq!(walked, *whole_rows, "the same rows after the rest");
+    let across = walk_node_pages(&live, run, node);
+    assert_eq!(ids(&across), ids(&every), "the node's pages after the rest");
     // `span` adds the span's whole fields but its list.
     let page = http::get(
         live.address(),
@@ -2837,6 +2872,29 @@ fn a_nodes_window_is_its_latest_rows_and_pages_reach_every_row_either_side_of_th
     assert_eq!(page["span"]["id"], whole["id"]);
     assert!(page["span"].get("events").is_none());
     assert_eq!(page["total"], json!(whole_rows.len()));
+}
+
+/// Every row of a node's pages across its spans, newest page first, walked
+/// back to the first with a limit far below the node's rows.
+fn walk_node_pages(live: &Live, run: &str, node: &str) -> Vec<Value> {
+    let mut rows: Vec<Value> = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut path = format!("/api/v2/runs/{run}/timeline/events?scope=node&node={node}&limit=5");
+        if let Some(cursor) = &cursor {
+            path.push_str(&format!("&cursor={cursor}"));
+        }
+        let page = http::get(live.address(), &path);
+        assert_eq!(page.status, 200, "{path}: {}", page.body);
+        let page = page.json();
+        let mut held: Vec<Value> = page["rows"].as_array().expect("rows").clone();
+        held.extend(rows);
+        rows = held;
+        match page["next_cursor"].as_str() {
+            Some(next) => cursor = Some(next.to_owned()),
+            None => return rows,
+        }
+    }
 }
 
 fn walk_pages(live: &Live, run: &str, node: &str, span: &str) -> Vec<Value> {
