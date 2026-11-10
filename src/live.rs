@@ -982,7 +982,7 @@ impl LiveRun {
         // rows here is seconds under this run's lock, and its first page keeps a
         // whole view of the node of its own.
         if self.complete() && matches!(scope, TimelineScope::Run) {
-            ItemsWindow::All
+            ItemsWindow::Counted
         } else {
             wire_window(scope)
         }

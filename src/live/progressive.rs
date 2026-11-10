@@ -119,7 +119,7 @@ pub(super) fn wire_span(
     }
     let held = events.map_or(0, Vec::len);
     let listed = match window {
-        ItemsWindow::Nothing => json!([]),
+        ItemsWindow::Nothing | ItemsWindow::Counted => json!([]),
         ItemsWindow::Latest(_) => Value::Array(
             events
                 .map(|events| {
@@ -390,7 +390,14 @@ impl CompleteRead {
                     scope.clone(),
                     filter.clone(),
                     self.agents.as_ref(),
-                    ItemsWindow::All,
+                    // Overall lists no rows once published, only how many each span
+                    // holds: rendering the run's every row is most of what the rest
+                    // would cost. A node renders all of its own, for its pages.
+                    if matches!(scope, TimelineScope::Run) {
+                        ItemsWindow::Counted
+                    } else {
+                        ItemsWindow::All
+                    },
                 );
                 self.timelines
                     .push((scope.clone(), key.clone(), filter.clone(), built));

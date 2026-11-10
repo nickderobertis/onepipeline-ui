@@ -5428,6 +5428,9 @@ pub(crate) enum ItemsWindow {
     /// None at all: a span's bounds and status are read off the records, not
     /// its list.
     Nothing,
+    /// None listed, and how many the filter admits counted: Overall once its
+    /// rest has arrived, whose spans carry `events_total` and no rows.
+    Counted,
     /// One history page's rows and those just older, across every span: rows
     /// strictly older than `before`, within `from` and `to`, the latest `limit`
     /// and one more of them. Every row the bounds admit is counted, rendered or
@@ -5494,6 +5497,13 @@ impl Lens<'_> {
     fn listing(&self, events: &[(usize, &Envelope)]) -> (Vec<Value>, Option<usize>) {
         if self.window == ItemsWindow::Nothing {
             return (Vec::new(), None);
+        }
+        if self.window == ItemsWindow::Counted {
+            let total = events
+                .iter()
+                .filter(|(_, event)| self.filter.allows(event))
+                .count();
+            return (Vec::new(), Some(total));
         }
         let mut ordered = events.to_vec();
         ordered.sort_by_key(|(index, event)| (millis_of(&event.ts), *index));
@@ -5662,7 +5672,7 @@ pub(crate) fn share_spans(
 ) -> Vec<Value> {
     // A span's own fields read no transcript, so a reading that renders no list
     // does not fold one.
-    let no_records = window == ItemsWindow::Nothing;
+    let no_records = matches!(window, ItemsWindow::Nothing | ItemsWindow::Counted);
     let transcripts = if no_records {
         Transcripts::of(&(*view).over(&[]), declared)
     } else {
