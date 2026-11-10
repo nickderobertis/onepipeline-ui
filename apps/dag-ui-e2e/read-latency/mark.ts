@@ -6,6 +6,8 @@
  * the check to refusing one wrong value at a time.
  */
 import type { LiveRunDetail, RunTimeline } from "@onepipeline-ui/dag-model";
+// llmlint: ignore-end[shared_ui_graduates_to_its_own_project]
+import { z } from "zod";
 // llmlint: ignore-block[shared_ui_graduates_to_its_own_project] no second app consumes these: this is dag-ui's own first-screen check, in its e2e project, whose project.json declares `implicitDependencies: ["dag-ui"]`, so the graph holds the edge. The expected screen is the app's own models over the answer the browser received, because a second reading here would mark a screen against itself. Graduating these to a shared project would move about 2,100 lines out of the app, including timeline-model's React elements and the item-reading component, for a test oracle alone; that move is drafted as a follow-up.
 // eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
 import { graphTimeline } from "../../dag-ui/src/features/timeline/graph-timeline";
@@ -25,43 +27,49 @@ import {
 } from "../../dag-ui/src/lib/run-model";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
 import { formatDurationSeconds } from "../../dag-ui/src/lib/time";
-// llmlint: ignore-end[shared_ui_graduates_to_its_own_project]
 
 export type FirstView = "graph" | "overall" | "node";
 
-export interface Bar {
-  readonly id: string;
-  readonly left: number;
-  readonly width: number;
-}
+const barSchema = z.object({
+  id: z.string(),
+  left: z.number(),
+  width: z.number(),
+});
+export type Bar = z.infer<typeof barSchema>;
 
-export interface Tile {
-  readonly value: string | null;
-}
+const tileSchema = z.object({ value: z.string().nullable() });
+export type Tile = z.infer<typeof tileSchema>;
 
-export interface ScreenState {
-  at: number;
-  first: boolean;
-  header: string | null;
-  hero: string | null;
-  hero_lines: string;
-  cards: {
-    name: string | null;
-    reason: string | null;
-    awaits: string | null;
-  }[];
-  status: Tile | null;
-  nodes: Tile | null;
-  wall: Tile | null;
-  turns: Tile | null;
-  still_loading: boolean;
-  range: readonly [number, number] | null;
-  bars: Bar[];
-  line: number;
-  node_heading: string | null;
-  node_state: string | null;
-  rows: (string | null)[];
-}
+/**
+ * One state `SCREEN_OBSERVER` read off the page. It crosses from the browser as
+ * untyped JSON, so every reading of it goes through this schema.
+ */
+export const screenStateSchema = z.object({
+  at: z.number(),
+  first: z.boolean(),
+  header: z.string().nullable(),
+  hero: z.string().nullable(),
+  hero_lines: z.string(),
+  cards: z.array(
+    z.object({
+      name: z.string().nullable(),
+      reason: z.string().nullable(),
+      awaits: z.string().nullable(),
+    }),
+  ),
+  status: tileSchema.nullable(),
+  nodes: tileSchema.nullable(),
+  wall: tileSchema.nullable(),
+  turns: tileSchema.nullable(),
+  still_loading: z.boolean(),
+  range: z.tuple([z.number(), z.number()]).readonly().nullable(),
+  bars: z.array(barSchema),
+  line: z.number(),
+  node_heading: z.string().nullable(),
+  node_state: z.string().nullable(),
+  rows: z.array(z.string().nullable()),
+});
+export type ScreenState = z.infer<typeof screenStateSchema>;
 
 // llmlint: ignore-block[e2e_uses_accessible_selectors] a passive observer inside the page, which times the moment a state is on screen and serialises it for `checkScreen`: Playwright's role engine does not exist there, and every reading is of an element the app names (`Run header`, `Run metrics`, `Node transcript`, a card's aria-label) or of the plot's own geometry, which no role carries.
 export const SCREEN_OBSERVER = `

@@ -60,6 +60,7 @@ import {
   checkScreen,
   SCREEN_OBSERVER,
   type ScreenState,
+  screenStateSchema,
   type Visible,
 } from "./mark";
 import {
@@ -78,7 +79,10 @@ const TELEMETRY = join(import.meta.dirname, "telemetry/read-latency.json");
 const CORPUS = join(import.meta.dirname, "../load/corpus.mjs");
 const WORKLOAD = join(import.meta.dirname, "workload.json");
 const LARGE_WORKLOAD = join(import.meta.dirname, "large-run-workload.json");
-/** `measure-run-load-on-host`'s root, read as it stands; nothing is written to it. */
+/**
+ * `measure-run-load-on-host`'s root, served as it stands: this harness writes no run
+ * there, and the server it starts writes only what its own reads of a run write.
+ */
 const HOST_RUNS_ROOT = process.env.READ_LATENCY_RUNS_ROOT;
 const HOST_OUTPUT = process.env.READ_LATENCY_OUTPUT;
 const HOST_RUN = process.env.READ_LATENCY_RUN;
@@ -919,7 +923,7 @@ async function firstViewReading(
     }
     if (answer !== undefined) {
       const states = z
-        .array(z.custom<ScreenState>())
+        .array(screenStateSchema)
         .parse(await page.evaluate("window.__firstScreen ?? []"));
       mark = states.find(
         (state) =>

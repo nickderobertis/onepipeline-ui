@@ -20,7 +20,12 @@ import { expect, type Page } from "@playwright/test";
 import { z } from "zod";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- `journal.ts` is the single fixture writer for the journal (its own header says so), shared with sibling project `dag-ui-e2e`; a second writer is the drift it exists to prevent.
 import { appendRecords } from "../load/journal";
-import { SCREEN_OBSERVER, type ScreenState, type Visible } from "./mark";
+import {
+  SCREEN_OBSERVER,
+  type ScreenState,
+  screenStateSchema,
+  type Visible,
+} from "./mark";
 
 export const REPO = resolve(import.meta.dirname, "../../..");
 export const ENGINE = join(REPO, ".tools/bin/onepipeline");
@@ -245,7 +250,9 @@ export async function observe(page: Page): Promise<void> {
 }
 
 export const screenStates = async (page: Page): Promise<ScreenState[]> =>
-  (await page.evaluate("window.__firstScreen ?? []")) as ScreenState[];
+  z
+    .array(screenStateSchema)
+    .parse(await page.evaluate("window.__firstScreen ?? []"));
 
 /**
  * What a journey reads of the complete documents: each named member, and every

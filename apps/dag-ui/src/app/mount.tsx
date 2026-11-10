@@ -18,7 +18,6 @@ export function mountApp(
   first: FirstRead | undefined,
   drawn?: Root,
 ): void {
-  // Nothing drawn behind means the app takes the root straight over.
   const app = drawn === undefined ? firstRoot : document.createElement("div");
   if (app !== firstRoot) {
     app.setAttribute("data-app-behind-first-screen", "");
