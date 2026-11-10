@@ -1379,6 +1379,72 @@ fn the_browser_clients_copy_of_each_schema_version_matches_this_one() {
     }
 }
 
+/// What a first answer's `detail` may carry is declared twice: here, as the paths
+/// the server keeps and marks loading, and in the browser client's model, whose
+/// parser refuses a member outside its list. A path one side gains alone is either
+/// one the server drops or one the client refuses, so the two lists are reconciled
+/// here as sets. The client's list adds what every detail carries beside the kept
+/// fields: the envelope's three members, `progress`, and the empty `node_details`.
+#[test]
+fn the_browser_clients_first_answer_paths_are_the_ones_the_server_keeps() {
+    use onepipeline_ui::contract::{DETAIL_FIRST_KEPT, DETAIL_FIRST_LOADING};
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/index.ts");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the model that carries the copy has moved, so this gate no \
+             longer guards anything",
+            path.display()
+        )
+    });
+    let opening = "export const FIRST_ANSWER_DETAIL_PATHS: readonly string[] = [\n";
+    let start = source
+        .find(opening)
+        .unwrap_or_else(|| panic!("{} declares no `{opening}`", path.display()))
+        + opening.len();
+    let end = start + source[start..].find("];").expect("the list's end");
+    let client: std::collections::BTreeSet<&str> = source[start..end]
+        .lines()
+        .map(|line| line.trim().trim_end_matches(',').trim_matches('"'))
+        .filter(|line| !line.is_empty())
+        .collect();
+    let server: std::collections::BTreeSet<&str> = DETAIL_FIRST_KEPT
+        .iter()
+        .chain(DETAIL_FIRST_LOADING)
+        .copied()
+        .chain([
+            "api_version",
+            "telemetry_schema_version",
+            "observed_at",
+            "progress",
+            "node_details",
+        ])
+        .collect();
+    assert_eq!(
+        client,
+        server,
+        "{}'s FIRST_ANSWER_DETAIL_PATHS has drifted from DETAIL_FIRST_KEPT and \
+         DETAIL_FIRST_LOADING",
+        path.display()
+    );
+}
+
+/// A node's window is declared here and in the browser client's model, which
+/// reads a node timeline's answer holding more rows than it as a contract
+/// violation; the two are one number.
+#[test]
+fn the_browser_clients_node_window_is_the_servers() {
+    use onepipeline_ui::contract::NODE_WINDOW_EVENTS;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/index.ts");
+    let source = fs::read_to_string(&path).expect("the client's model");
+    let declaration = format!("export const TIMELINE_WINDOW_EVENTS = {NODE_WINDOW_EVENTS};");
+    assert!(
+        source.contains(&declaration),
+        "{} does not declare `{declaration}`; the client's node window has drifted from \
+         this crate's",
+        path.display()
+    );
+}
+
 /// The reference vocabulary is declared twice — here and in the browser client's
 /// model — because a Rust enum cannot be read from TypeScript.
 ///

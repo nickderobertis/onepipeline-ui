@@ -2559,8 +2559,6 @@ fn a_stream_asked_for_gzip_sends_each_frame_encoded_as_it_happens() {
     );
 }
 
-// A run's progressive opening.
-
 /// Each path `DETAIL_FIRST_KEPT` names, and `progress`, `node_details`, walking
 /// `detail` — so a member the contract does not name fails by name.
 fn only_named_members(detail: &Value) {
@@ -2912,6 +2910,145 @@ fn node_window_and_pages(selective: bool) {
     assert_eq!(page["span"]["id"], whole["id"]);
     assert!(page["span"].get("events").is_none());
     assert_eq!(page["total"], json!(whole_rows.len()));
+}
+
+/// A history page's bounds, filter and total, held to the complete document
+/// before the rest arrives and after: `from` and `to` admit the rows stamped at
+/// them, a filter narrows the rows as it narrows the document, and every page of
+/// one query says the same total, which is the rows its pages hold.
+#[test]
+fn a_pages_bounds_filter_and_total_are_the_complete_documents() {
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::NODE_ID;
+    let live = Live::start_with(
+        |root| {
+            growing_run(root, run);
+            let journal = root.join(run).join("events.jsonl");
+            for marker in 0..30 {
+                let line = activity(&journal, run, node, &format!("row {marker}"));
+                live_journal::append_lines(&journal, &[line]);
+            }
+        },
+        &[(onepipeline_ui::live::COMPLETE_READ_HOLD_ENV, "2500")],
+    );
+    let mut tab = Tab::first(
+        &live,
+        &json!({ "type": "timeline", "run_id": run, "scope": "node", "node": node }),
+    );
+    let document = |filter: &str| -> Vec<Value> {
+        let full = fresh(
+            live.address(),
+            &format!("/api/v2/runs/{run}/timeline?scope=node&node={node}{filter}"),
+        );
+        let mut every: Vec<Value> = Vec::new();
+        for span in full["spans"].as_array().expect("spans") {
+            for row in span["events"].as_array().into_iter().flatten() {
+                if !every.iter().any(|held| held["id"] == row["id"]) {
+                    every.push(row.clone());
+                }
+            }
+        }
+        every.sort_by_key(|row| {
+            (
+                row["at"].as_str().unwrap_or_default().to_owned(),
+                row["journal_order"].as_u64(),
+            )
+        });
+        every
+    };
+    let ids = |rows: &[Value]| -> Vec<Value> { rows.iter().map(|row| row["id"].clone()).collect() };
+    let every = document("");
+    let planned = document("&filter=planner");
+    assert!(every.len() > 20, "rows enough to bound");
+    assert!(
+        !planned.is_empty() && planned.len() < every.len(),
+        "a filter that narrows: {} of {}",
+        planned.len(),
+        every.len()
+    );
+    let from = every[5]["at"].as_str().expect("a stamp").to_owned();
+    let to = every[every.len() - 6]["at"]
+        .as_str()
+        .expect("a stamp")
+        .to_owned();
+    let bounded: Vec<Value> = every
+        .iter()
+        .filter(|row| {
+            let at = row["at"].as_str().unwrap_or_default();
+            at >= from.as_str() && at <= to.as_str()
+        })
+        .cloned()
+        .collect();
+    assert!(bounded.len() < every.len(), "bounds that leave rows out");
+    let check = |phase: &str| {
+        let (rows, totals) = walk_query(&live, run, &format!("scope=node&node={node}&limit=3"));
+        assert_eq!(ids(&rows), ids(&every), "{phase}: every row");
+        assert!(
+            totals.iter().all(|total| *total == every.len()),
+            "{phase}: totals {totals:?}"
+        );
+        let query = format!("scope=node&node={node}&limit=3&from={from}&to={to}");
+        let (rows, totals) = walk_query(&live, run, &query);
+        assert_eq!(
+            ids(&rows),
+            ids(&bounded),
+            "{phase}: rows within the bounds, theirs included"
+        );
+        assert!(
+            totals.iter().all(|total| *total == bounded.len()),
+            "{phase}: bounded totals {totals:?}"
+        );
+        let (rows, totals) = walk_query(
+            &live,
+            run,
+            &format!("scope=node&node={node}&limit=3&filter=planner"),
+        );
+        assert_eq!(ids(&rows), ids(&planned), "{phase}: filtered rows");
+        assert!(
+            totals.iter().all(|total| *total == planned.len()),
+            "{phase}: filtered totals {totals:?}"
+        );
+    };
+    check("before the rest");
+    tab.settle_after_first();
+    assert_eq!(
+        tab.state["visible"]["timeline"]["progress"]["complete"],
+        true
+    );
+    check("after the rest");
+}
+
+/// Every row of one page query, oldest first, and the total each page said.
+fn walk_query(live: &Live, run: &str, query: &str) -> (Vec<Value>, Vec<usize>) {
+    let mut rows: Vec<Value> = Vec::new();
+    let mut totals = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut path = format!("/api/v2/runs/{run}/timeline/events?{query}");
+        if let Some(cursor) = &cursor {
+            path.push_str(&format!("&cursor={cursor}"));
+        }
+        let page = http::get(live.address(), &path);
+        assert_eq!(page.status, 200, "{path}: {}", page.body);
+        let page = page.json();
+        totals.push(usize::try_from(page["total"].as_u64().expect("a total")).expect("a count"));
+        let mut held: Vec<Value> = page["rows"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .map(|row| {
+                let mut row = row.clone();
+                row.as_object_mut().expect("a row").remove("span_id");
+                row
+            })
+            .collect();
+        held.extend(rows);
+        rows = held;
+        match page["next_cursor"].as_str() {
+            Some(next) => cursor = Some(next.to_owned()),
+            None => return (rows, totals),
+        }
+    }
 }
 
 /// Every row of a node's pages across its spans, newest page first, walked
