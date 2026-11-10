@@ -1528,7 +1528,10 @@ impl Hub {
                         .map(|held| held.visible.clone()),
                     _ => Some(json!({ "type": "sidebar" })),
                 };
-                let sidebar_pending = held.deferred.is_some();
+                // A reset re-sends the whole view, so nothing held behind the
+                // sidebar's rows is sent after it; and where the rows are read
+                // it carries them, so no `sidebar.snapshot` follows it either.
+                let sidebar_pending = held.deferred.is_some() && !sidebar.read;
                 let seq = state.next;
                 state.next += 1;
                 let id = self.id(seq);
@@ -1543,6 +1546,7 @@ impl Hub {
                     .get_mut(&subscription)
                     .expect("held above");
                 held.frames.clear();
+                held.deferred = sidebar_pending.then(Vec::new);
                 held.first = seq;
                 held.last = seq;
                 held.boundary = seq;

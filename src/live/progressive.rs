@@ -784,6 +784,14 @@ impl Hub {
                 let sidebar = lock(&shared.sidebar);
                 let rows = serde_json::Value::Array(sidebar.snapshot()).to_string();
                 let mut state = lock(&shared.state);
+                // A reset that carried the rows already sent them.
+                let pending = state
+                    .subscriptions
+                    .get(&subscription)
+                    .is_some_and(|held| held.deferred.is_some());
+                if !pending {
+                    return;
+                }
                 hub.emit(&mut state, subscription, &Change::SidebarRows(rows.into()));
                 let flushed = state
                     .subscriptions
