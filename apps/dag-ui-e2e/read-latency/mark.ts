@@ -6,6 +6,7 @@
  * the check to refusing one wrong value at a time.
  */
 import type { LiveRunDetail, RunTimeline } from "@onepipeline-ui/dag-model";
+// llmlint: ignore-block[shared_ui_graduates_to_its_own_project] no second app consumes these: this is dag-ui's own first-screen check, in its e2e project, whose project.json declares `implicitDependencies: ["dag-ui"]`, so the graph holds the edge. The expected screen is the app's own models over the answer the browser received, because a second reading here would mark a screen against itself. Graduating these to a shared project would move about 2,100 lines out of the app, including timeline-model's React elements and the item-reading component, for a test oracle alone; that move is drafted as a follow-up.
 // eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
 import { graphTimeline } from "../../dag-ui/src/features/timeline/graph-timeline";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
@@ -24,6 +25,7 @@ import {
 } from "../../dag-ui/src/lib/run-model";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
 import { formatDurationSeconds } from "../../dag-ui/src/lib/time";
+// llmlint: ignore-end[shared_ui_graduates_to_its_own_project]
 
 export type FirstView = "graph" | "overall" | "node";
 
