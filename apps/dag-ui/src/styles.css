@@ -3154,11 +3154,13 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   max-width: calc(100vw - 96px);
 }
 
+/* At phone width the main column runs off the right edge, so the banner is held
+   to the screen; at its top, clear of the toasts that rise from its bottom. */
 @media (max-width: 640px) {
   .live-issue {
     position: fixed;
+    top: 0;
     right: 0;
-    bottom: 0;
     left: 0;
     z-index: 50;
     max-width: none;

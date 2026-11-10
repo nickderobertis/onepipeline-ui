@@ -21,6 +21,21 @@ export interface FirstRead {
   readonly error?: Error;
 }
 
+/** The `{error: {code, message}}` a refusal carries, in the server's own words. */
+function refusalOf(
+  body: unknown,
+): { readonly code?: string; readonly message?: string } | undefined {
+  if (typeof body !== "object" || body === null || !("error" in body))
+    return undefined;
+  const error = (body as { error: unknown }).error;
+  if (typeof error !== "object" || error === null) return undefined;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return {
+    ...(typeof code === "string" ? { code } : {}),
+    ...(typeof message === "string" ? { message } : {}),
+  };
+}
+
 async function firstRead(address: FirstAddress): Promise<FirstRead> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), READ_DEADLINE_MS);
@@ -31,13 +46,26 @@ async function firstRead(address: FirstAddress): Promise<FirstRead> {
       body: JSON.stringify({ view: address.view }),
       signal: controller.signal,
     });
-    if (!response.ok)
+    if (!response.ok) {
+      const refused = await response.json().then(
+        (body: unknown) => refusalOf(body),
+        () => undefined,
+      );
+      // A run or node the address names that is not served is the app's to
+      // answer, as it always has: by opening what is served instead.
+      if (
+        refused?.code === "run_not_found" ||
+        refused?.code === "node_not_found"
+      )
+        return { address };
       return {
         address,
         error: new Error(
-          `Telemetry request failed with status ${response.status}`,
+          refused?.message ??
+            `Telemetry request failed with status ${response.status}`,
         ),
       };
+    }
     return { address, answer: await response.json() };
   } catch (caught) {
     return {
