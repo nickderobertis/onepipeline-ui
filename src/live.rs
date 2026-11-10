@@ -853,7 +853,8 @@ impl LiveRun {
             .is_ok_and(|about| about.len() <= WHOLE_READ_BYTES)
         {
             let view = store.view(run)?;
-            let indexed = Indexed::of(&view);
+            let mut indexed = Indexed::of(&view);
+            indexed.holds_whole(None);
             (view, indexed)
         } else {
             let selection = onepipeline::journal::Selection::FirstScreen {
@@ -863,7 +864,11 @@ impl LiveRun {
             let events = std::mem::take(&mut selected.events);
             let view = RunView::over_selected(&paths, events)
                 .map_err(|error| ApiError::Engine(error.to_string()))?;
-            let indexed = Indexed::selective(&view, selected);
+            let mut indexed = Indexed::selective(&view, selected);
+            // The selection kept every record of the node it was taken for.
+            if let Some(node) = node {
+                indexed.holds_whole(Some(node.as_str()));
+            }
             (view, indexed)
         };
         let declared = store.declared(&view);
@@ -1831,7 +1836,9 @@ impl Hub {
             Ok(Refreshed::Unchanged) => Some(Touched::default()),
             Ok(Refreshed::Appended { first }) => Some(run.indexed.extend(&run.view, first)),
             Ok(Refreshed::Reread) => {
+                // A reread reads the store whole, selective or not.
                 run.indexed = Indexed::of(&run.view);
+                run.indexed.holds_whole(None);
                 run.declared = shared.store.declared(&run.view);
                 None
             }

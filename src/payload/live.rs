@@ -105,6 +105,11 @@ pub(crate) struct Indexed {
     /// A node's records, whole, read apart from a selective view that holds
     /// only some of them; that node's rows are read from here.
     held_shares: HashMap<String, (Vec<Envelope>, Vec<usize>)>,
+    /// Nodes whose every record the view itself holds: the node a selective
+    /// read was taken for, or all of them where the store was read whole.
+    whole_nodes: HashSet<String>,
+    /// Whether the view holds every record of the store.
+    whole_store: bool,
     /// The run's own records, whole, for a page read apart from a selective view.
     held_run: Option<(Vec<Envelope>, Vec<usize>)>,
 }
@@ -169,7 +174,18 @@ impl Indexed {
 
     /// Whether every record of `node` is read: the view's, or a held share.
     pub(crate) fn holds_share(&self, node: &str) -> bool {
-        self.held_shares.contains_key(node)
+        self.whole_store || self.whole_nodes.contains(node) || self.held_shares.contains_key(node)
+    }
+
+    /// Say the view holds every record of `node`, or of every node: a share
+    /// read for it again would read nothing the view does not have.
+    pub(crate) fn holds_whole(&mut self, node: Option<&str>) {
+        match node {
+            Some(node) => {
+                self.whole_nodes.insert(node.to_owned());
+            }
+            None => self.whole_store = true,
+        }
     }
 
     /// Index the records from `first` on, which a refresh appended, and say
