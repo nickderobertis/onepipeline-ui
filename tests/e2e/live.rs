@@ -2773,12 +2773,52 @@ fn overall_holds_every_span_without_its_events_and_the_rest_adds_sessions_and_to
 
 #[test]
 fn a_nodes_window_is_its_latest_rows_and_pages_reach_every_row_either_side_of_the_rest() {
+    node_window_and_pages(false);
+}
+
+/// The same, over a journal long enough that the node's first answer is a
+/// selective read of it: a page before the rest is then served from that read,
+/// which holds every record of the node, rather than from the journal again.
+#[test]
+fn a_selective_first_answer_serves_its_nodes_pages_before_the_rest() {
+    node_window_and_pages(true);
+}
+
+/// Another node's records, appended to `journal` until it is past the size a
+/// first answer reads whole.
+fn pad_past_a_whole_read(journal: &Path, run: &str) {
+    let template: Value = serde_json::from_str(&activity(
+        journal,
+        run,
+        "padding-node",
+        &"padding ".repeat(250),
+    ))
+    .expect("json");
+    let first = template["seq"].as_u64().expect("a seq");
+    let lines: Vec<String> = (0..700_u64)
+        .map(|offset| {
+            let mut line = template.clone();
+            line["seq"] = json!(first + offset);
+            line.to_string()
+        })
+        .collect();
+    live_journal::append_lines(journal, &lines);
+    assert!(
+        fs::metadata(journal).expect("a journal").len() > 1024 * 1024 + 64 * 1024,
+        "a journal past a whole read"
+    );
+}
+
+fn node_window_and_pages(selective: bool) {
     let run = fixture_run::RUN_ID;
     let node = fixture_run::NODE_ID;
     let live = Live::start_with(
         |root| {
             growing_run(root, run);
             let journal = root.join(run).join("events.jsonl");
+            if selective {
+                pad_past_a_whole_read(&journal, run);
+            }
             for marker in 0..55 {
                 let line = activity(&journal, run, node, &format!("row {marker}"));
                 live_journal::append_lines(&journal, &[line]);

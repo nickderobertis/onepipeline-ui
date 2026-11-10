@@ -42,9 +42,12 @@ impl Hub {
                     let mut guard = lock(&live);
                     from_kept(&mut guard, query, selected.as_ref())?
                 } else {
-                    let selected = read_share(&paths, &query.owner);
+                    // A node's first answer read every record of that node: its page
+                    // is built from that reading rather than from the journal again.
+                    let held = holds_owner(&lock(&live), &query.owner);
+                    let selected = (!held).then(|| read_share(&paths, &query.owner));
                     let mut guard = lock(&live);
-                    from_selected(&mut guard, query, &selected)?
+                    from_selected(&mut guard, query, selected.as_ref())?
                 }
             }
             None => {
@@ -54,7 +57,7 @@ impl Hub {
                     PageOwner::Run => None,
                 };
                 let mut alone = LiveRun::open_selective(&shared.store, run, node)?;
-                from_selected(&mut alone, query, &selected)?
+                from_selected(&mut alone, query, Some(&selected))?
             }
         };
         Ok(RunStore::envelope(page))
@@ -70,6 +73,16 @@ fn read_share(
         PageOwner::Node(node) | PageOwner::RunNode(node) => Selection::Share(Some(node.as_str())),
     };
     journal::read_selected(&paths.journal(), &selection)
+}
+
+/// Whether `run`'s own reading holds every record a page of `owner` lists: a
+/// node's, where the run was opened for that node's timeline. A run-level share
+/// and a run's node share are read apart, as their scopes are built over them.
+fn holds_owner(run: &LiveRun, owner: &PageOwner) -> bool {
+    match owner {
+        PageOwner::Node(node) => run.indexed.holds_share(node.as_str()),
+        PageOwner::Run | PageOwner::RunNode(_) => false,
+    }
 }
 
 fn scope_of(owner: &PageOwner) -> TimelineScope {
@@ -90,11 +103,12 @@ fn check_node(run: &LiveRun, owner: &PageOwner) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// A page before the run's complete read ended, from that share's records alone.
+/// A page before the run's complete read ended, from that share's records alone:
+/// `selected`, or the run's own reading where that already holds them.
 fn from_selected(
     run: &mut LiveRun,
     query: &TimelineEventsQuery,
-    selected: &onepipeline::journal::SelectedRecords,
+    selected: Option<&onepipeline::journal::SelectedRecords>,
 ) -> Result<Value, ApiError> {
     check_node(run, &query.owner)?;
     let filter = RunStore::resolve(&run.view, query.filter.as_ref())?;
@@ -106,7 +120,16 @@ fn from_selected(
         PageOwner::Node(node) | PageOwner::RunNode(node) => Some(node.as_str()),
     };
     let scope = scope_of(&query.owner);
-    let indexed: Indexed = run.indexed.reading_share(&run.view, selected, held);
+    // A reading that no longer holds the share when this lock is taken reads it here.
+    let reread = match selected {
+        Some(_) => None,
+        None if holds_owner(run, &query.owner) => None,
+        None => Some(read_share(&run.view.paths, &query.owner)),
+    };
+    let share: Option<Indexed> = selected
+        .or(reread.as_ref())
+        .map(|selected| run.indexed.reading_share(&run.view, selected, held));
+    let indexed = share.as_ref().unwrap_or(&run.indexed);
     // Only this page's rows are rendered and the rest of the share counted,
     // except for one span asked for whole, whose own list is the answer.
     let window = match query.span {
@@ -120,7 +143,7 @@ fn from_selected(
     };
     let built = LiveTimeline::build(
         &run.view,
-        &indexed,
+        indexed,
         &run.declared,
         scope,
         filter,
