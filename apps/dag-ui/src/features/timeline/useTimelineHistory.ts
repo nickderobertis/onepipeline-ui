@@ -1,19 +1,22 @@
 // llmlint: ignore-file[stateful_logic_extracted_to_hooks] this is the hook: everything a run's
 // history pages hold lives here so the two timeline views only ask for the next piece.
-import type {
-  RunTimeline,
-  TimelineEventRow,
-  TimelineSpan,
+import {
+  type RunTimeline,
+  type TimelineEventRow,
+  type TimelineSpan,
+  timelineSpanSchema,
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { useCallback, useMemo, useRef, useState } from "react";
 
-/** Rows a zoom or a whole row's expansion asks for per request. */
+/** Rows a zoom, a span's or a whole row's expansion asks for per request. */
 const WIDE_PAGE = 500;
-/** How many pages one asked-for stretch reads before it stops and waits to be asked. */
-const MOST_PAGES = 40;
 
 type Interval = readonly [number, number];
+
+/** A page's `span`: the span's whole fields, its events left out. */
+const spanFieldsSchema = timelineSpanSchema.omit({ events: true });
+type SpanFields = Omit<TimelineSpan, "events">;
 
 export interface HistoryFailure {
   readonly message: string;
@@ -108,7 +111,7 @@ export function useTimelineHistory({
   readonly timeline?: RunTimeline;
 }): TimelineHistory {
   const rows = useRef(new Map<string, TimelineEventRow>());
-  const spanFields = useRef(new Map<string, Record<string, unknown>>());
+  const spanFields = useRef(new Map<string, SpanFields>());
   const cursors = useRef(new Map<string, string | null>());
   const asked = useRef(new Set<string>());
   const [version, setVersion] = useState(0);
@@ -162,11 +165,7 @@ export function useTimelineHistory({
         const fields = spanFields.current.get(span.id);
         return fields === undefined
           ? withRows
-          : ({
-              ...withRows,
-              ...fields,
-              events: withRows.events,
-            } as TimelineSpan);
+          : { ...withRows, ...fields, events: withRows.events };
       }),
     };
   }, [timeline, version, scope]);
@@ -212,35 +211,11 @@ export function useTimelineHistory({
       });
   }, [bump, client, cursor, failed, filter, nodeId, runId, scope, take]);
 
-  const loadSpan = useCallback(
-    (spanId: string) => {
-      if (asked.current.has(`span:${spanId}`)) return;
-      asked.current.add(`span:${spanId}`);
-      client
-        .getTimelineEvents(runId, {
-          scope,
-          span: spanId,
-          ...(nodeId === undefined ? {} : { node: nodeId }),
-          ...(filter === undefined ? {} : { filter }),
-        })
-        .then((page) => {
-          take(page);
-          const { span } = page;
-          if (span !== undefined) spanFields.current.set(spanId, span);
-          bump();
-        })
-        .catch((caught: unknown) => {
-          asked.current.delete(`span:${spanId}`);
-          failed(caught, () => loadSpan(spanId));
-        });
-    },
-    [bump, client, failed, filter, nodeId, runId, scope, take],
-  );
-
   const readAll = useCallback(
     async (
       query: {
         readonly node?: string;
+        readonly span?: string;
         readonly from?: string;
         readonly to?: string;
       },
@@ -248,7 +223,7 @@ export function useTimelineHistory({
     ) => {
       try {
         let next: string | undefined;
-        for (let page = 0; page < MOST_PAGES; page += 1) {
+        for (;;) {
           const answered = await client.getTimelineEvents(runId, {
             scope,
             limit: WIDE_PAGE,
@@ -257,6 +232,9 @@ export function useTimelineHistory({
             ...(filter === undefined ? {} : { filter }),
           });
           take(answered);
+          const { span } = answered;
+          if (query.span !== undefined && span !== undefined)
+            spanFields.current.set(query.span, spanFieldsSchema.parse(span));
           bump();
           if (answered.next_cursor === null) return;
           next = answered.next_cursor;
@@ -266,6 +244,22 @@ export function useTimelineHistory({
       }
     },
     [bump, client, failed, filter, runId, scope, take],
+  );
+
+  const loadSpan = useCallback(
+    (spanId: string) => {
+      const key = `span:${spanId}`;
+      if (asked.current.has(key)) return;
+      asked.current.add(key);
+      void readAll(
+        { span: spanId, ...(nodeId === undefined ? {} : { node: nodeId }) },
+        () => {
+          asked.current.delete(key);
+          loadSpan(spanId);
+        },
+      );
+    },
+    [nodeId, readAll],
   );
 
   const loadRow = useCallback(
