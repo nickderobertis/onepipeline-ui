@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
-  "recorded_at": "2026-11-11T02:59:32.357Z",
-  "commit": "a1260a6bee076d34df4463a22fa4044c48ee533a",
+  "recorded_at": "2026-11-11T06:50:32.632Z",
+  "commit": "7d5c2cc80b1c797a87e70898ad85f3cbd2fbda6b",
   "dirty": false,
   "window_s": 120,
   "workload": {
@@ -17,12 +17,12 @@
     "nothing-open": {
       "kind": "nothing-open",
       "tabs": 1,
-      "load_s": [7.57],
+      "load_s": [7.62],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0043,
+      "mb_per_min": 0.0042,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 4257
+        "GET /api/v2/events?after&subscription": 4240
       },
       "frames_per_min": 115,
       "frames_by_type": {
@@ -46,22 +46,22 @@
         }
       },
       "server_cpu": {
-        "seconds": 0.79,
+        "seconds": 0.89,
         "window_s": 120,
-        "cores": 0.0066,
-        "cores_per_tab": 0.0066
+        "cores": 0.0074,
+        "cores_per_tab": 0.0074
       },
       "host_load": {
         "start": {
-          "load_1m": 3.01,
-          "load_5m": 4.86,
-          "load_15m": 3.77,
+          "load_1m": 5.49,
+          "load_5m": 5.37,
+          "load_15m": 4.76,
           "cores": 20
         },
         "end": {
-          "load_1m": 1.03,
-          "load_5m": 3.56,
-          "load_15m": 3.42,
+          "load_1m": 3.66,
+          "load_5m": 4.79,
+          "load_15m": 4.63,
           "cores": 20
         }
       }
@@ -70,12 +70,12 @@
       "kind": "settled",
       "view": "graph",
       "tabs": 1,
-      "load_s": [7.72],
+      "load_s": [8.26],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0062,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 6199
+        "GET /api/v2/events?after&subscription": 6190
       },
       "frames_per_min": 115,
       "frames_by_type": {
@@ -99,22 +99,22 @@
         }
       },
       "server_cpu": {
-        "seconds": 0.95,
+        "seconds": 1.04,
         "window_s": 120,
-        "cores": 0.0079,
-        "cores_per_tab": 0.0079
+        "cores": 0.0087,
+        "cores_per_tab": 0.0087
       },
       "host_load": {
         "start": {
-          "load_1m": 1.47,
-          "load_5m": 3.53,
-          "load_15m": 3.41,
+          "load_1m": 3.37,
+          "load_5m": 4.67,
+          "load_15m": 4.59,
           "cores": 20
         },
         "end": {
-          "load_1m": 0.58,
-          "load_5m": 2.53,
-          "load_15m": 3.06,
+          "load_1m": 3.26,
+          "load_5m": 4.16,
+          "load_15m": 4.41,
           "cores": 20
         }
       }
@@ -123,12 +123,12 @@
       "kind": "settled",
       "view": "overall",
       "tabs": 1,
-      "load_s": [8.21],
+      "load_s": [7.72],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0062,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 6255
+        "GET /api/v2/events?after&subscription": 6226
       },
       "frames_per_min": 115,
       "frames_by_type": {
@@ -152,22 +152,22 @@
         }
       },
       "server_cpu": {
-        "seconds": 0.97,
+        "seconds": 1.01,
         "window_s": 120,
-        "cores": 0.0081,
-        "cores_per_tab": 0.0081
+        "cores": 0.0084,
+        "cores_per_tab": 0.0084
       },
       "host_load": {
         "start": {
-          "load_1m": 0.9,
-          "load_5m": 2.48,
-          "load_15m": 3.03,
+          "load_1m": 3.17,
+          "load_5m": 4.08,
+          "load_15m": 4.38,
           "cores": 20
         },
         "end": {
-          "load_1m": 0.93,
-          "load_5m": 1.99,
-          "load_15m": 2.78,
+          "load_1m": 1.87,
+          "load_5m": 3.46,
+          "load_15m": 4.12,
           "cores": 20
         }
       }
@@ -176,166 +176,7 @@
       "kind": "settled",
       "view": "node",
       "tabs": 1,
-      "load_s": [8.05],
-      "requests_per_min": 0,
-      "requests_per_min_by_route": {},
-      "mb_per_min": 0.0062,
-      "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 6213
-      },
-      "frames_per_min": 115,
-      "frames_by_type": {
-        "run.changed": {
-          "frames_per_min": 115,
-          "bytes_per_min": 51188
-        }
-      },
-      "repeated_snapshot": {
-        "in_window": {
-          "frames": 0,
-          "bytes": 0
-        },
-        "at_load": {
-          "frames": 0,
-          "bytes": 0
-        },
-        "after_reconnect": {
-          "frames": 0,
-          "bytes": 0
-        }
-      },
-      "server_cpu": {
-        "seconds": 0.95,
-        "window_s": 120,
-        "cores": 0.0079,
-        "cores_per_tab": 0.0079
-      },
-      "host_load": {
-        "start": {
-          "load_1m": 0.95,
-          "load_5m": 1.94,
-          "load_15m": 2.75,
-          "cores": 20
-        },
-        "end": {
-          "load_1m": 0.32,
-          "load_5m": 1.39,
-          "load_15m": 2.45,
-          "cores": 20
-        }
-      }
-    },
-    "stopped-graph": {
-      "kind": "stopped",
-      "view": "graph",
-      "tabs": 1,
-      "load_s": [8.21],
-      "requests_per_min": 0,
-      "requests_per_min_by_route": {},
-      "mb_per_min": 0.0062,
-      "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 6188
-      },
-      "frames_per_min": 115,
-      "frames_by_type": {
-        "run.changed": {
-          "frames_per_min": 115,
-          "bytes_per_min": 51186
-        }
-      },
-      "repeated_snapshot": {
-        "in_window": {
-          "frames": 0,
-          "bytes": 0
-        },
-        "at_load": {
-          "frames": 0,
-          "bytes": 0
-        },
-        "after_reconnect": {
-          "frames": 0,
-          "bytes": 0
-        }
-      },
-      "server_cpu": {
-        "seconds": 0.86,
-        "window_s": 120,
-        "cores": 0.0072,
-        "cores_per_tab": 0.0072
-      },
-      "host_load": {
-        "start": {
-          "load_1m": 0.68,
-          "load_5m": 1.4,
-          "load_15m": 2.43,
-          "cores": 20
-        },
-        "end": {
-          "load_1m": 0.64,
-          "load_5m": 1.11,
-          "load_15m": 2.19,
-          "cores": 20
-        }
-      }
-    },
-    "stopped-overall": {
-      "kind": "stopped",
-      "view": "overall",
-      "tabs": 1,
-      "load_s": [7.72],
-      "requests_per_min": 0,
-      "requests_per_min_by_route": {},
-      "mb_per_min": 0.0063,
-      "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 6267
-      },
-      "frames_per_min": 115,
-      "frames_by_type": {
-        "run.changed": {
-          "frames_per_min": 115,
-          "bytes_per_min": 51188
-        }
-      },
-      "repeated_snapshot": {
-        "in_window": {
-          "frames": 0,
-          "bytes": 0
-        },
-        "at_load": {
-          "frames": 0,
-          "bytes": 0
-        },
-        "after_reconnect": {
-          "frames": 0,
-          "bytes": 0
-        }
-      },
-      "server_cpu": {
-        "seconds": 0.82,
-        "window_s": 120,
-        "cores": 0.0068,
-        "cores_per_tab": 0.0068
-      },
-      "host_load": {
-        "start": {
-          "load_1m": 0.93,
-          "load_5m": 1.15,
-          "load_15m": 2.18,
-          "cores": 20
-        },
-        "end": {
-          "load_1m": 0.68,
-          "load_5m": 1.01,
-          "load_15m": 2,
-          "cores": 20
-        }
-      }
-    },
-    "stopped-node": {
-      "kind": "stopped",
-      "view": "node",
-      "tabs": 1,
-      "load_s": [8.04],
+      "load_s": [7.56],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0062,
@@ -364,22 +205,181 @@
         }
       },
       "server_cpu": {
-        "seconds": 0.84,
+        "seconds": 0.99,
         "window_s": 120,
-        "cores": 0.007,
-        "cores_per_tab": 0.007
+        "cores": 0.0083,
+        "cores_per_tab": 0.0083
       },
       "host_load": {
         "start": {
-          "load_1m": 0.76,
-          "load_5m": 1.01,
-          "load_15m": 1.99,
+          "load_1m": 2.13,
+          "load_5m": 3.44,
+          "load_15m": 4.1,
           "cores": 20
         },
         "end": {
-          "load_1m": 0.5,
-          "load_5m": 0.81,
-          "load_15m": 1.79,
+          "load_1m": 1.54,
+          "load_5m": 2.72,
+          "load_15m": 3.75,
+          "cores": 20
+        }
+      }
+    },
+    "stopped-graph": {
+      "kind": "stopped",
+      "view": "graph",
+      "tabs": 1,
+      "load_s": [7.72],
+      "requests_per_min": 0,
+      "requests_per_min_by_route": {},
+      "mb_per_min": 0.0062,
+      "bytes_per_min_by_route": {
+        "GET /api/v2/events?after&subscription": 6185
+      },
+      "frames_per_min": 115,
+      "frames_by_type": {
+        "run.changed": {
+          "frames_per_min": 115,
+          "bytes_per_min": 51186
+        }
+      },
+      "repeated_snapshot": {
+        "in_window": {
+          "frames": 0,
+          "bytes": 0
+        },
+        "at_load": {
+          "frames": 0,
+          "bytes": 0
+        },
+        "after_reconnect": {
+          "frames": 0,
+          "bytes": 0
+        }
+      },
+      "server_cpu": {
+        "seconds": 0.89,
+        "window_s": 120,
+        "cores": 0.0074,
+        "cores_per_tab": 0.0074
+      },
+      "host_load": {
+        "start": {
+          "load_1m": 1.46,
+          "load_5m": 2.62,
+          "load_15m": 3.7,
+          "cores": 20
+        },
+        "end": {
+          "load_1m": 2.73,
+          "load_5m": 2.83,
+          "load_15m": 3.65,
+          "cores": 20
+        }
+      }
+    },
+    "stopped-overall": {
+      "kind": "stopped",
+      "view": "overall",
+      "tabs": 1,
+      "load_s": [7.69],
+      "requests_per_min": 0,
+      "requests_per_min_by_route": {},
+      "mb_per_min": 0.0063,
+      "bytes_per_min_by_route": {
+        "GET /api/v2/events?after&subscription": 6260
+      },
+      "frames_per_min": 115,
+      "frames_by_type": {
+        "run.changed": {
+          "frames_per_min": 115,
+          "bytes_per_min": 51188
+        }
+      },
+      "repeated_snapshot": {
+        "in_window": {
+          "frames": 0,
+          "bytes": 0
+        },
+        "at_load": {
+          "frames": 0,
+          "bytes": 0
+        },
+        "after_reconnect": {
+          "frames": 0,
+          "bytes": 0
+        }
+      },
+      "server_cpu": {
+        "seconds": 0.85,
+        "window_s": 120,
+        "cores": 0.0071,
+        "cores_per_tab": 0.0071
+      },
+      "host_load": {
+        "start": {
+          "load_1m": 3.31,
+          "load_5m": 2.95,
+          "load_15m": 3.67,
+          "cores": 20
+        },
+        "end": {
+          "load_1m": 2.09,
+          "load_5m": 2.63,
+          "load_15m": 3.47,
+          "cores": 20
+        }
+      }
+    },
+    "stopped-node": {
+      "kind": "stopped",
+      "view": "node",
+      "tabs": 1,
+      "load_s": [7.57],
+      "requests_per_min": 0,
+      "requests_per_min_by_route": {},
+      "mb_per_min": 0.0062,
+      "bytes_per_min_by_route": {
+        "GET /api/v2/events?after&subscription": 6219
+      },
+      "frames_per_min": 115,
+      "frames_by_type": {
+        "run.changed": {
+          "frames_per_min": 115,
+          "bytes_per_min": 51188
+        }
+      },
+      "repeated_snapshot": {
+        "in_window": {
+          "frames": 0,
+          "bytes": 0
+        },
+        "at_load": {
+          "frames": 0,
+          "bytes": 0
+        },
+        "after_reconnect": {
+          "frames": 0,
+          "bytes": 0
+        }
+      },
+      "server_cpu": {
+        "seconds": 0.88,
+        "window_s": 120,
+        "cores": 0.0073,
+        "cores_per_tab": 0.0073
+      },
+      "host_load": {
+        "start": {
+          "load_1m": 2.13,
+          "load_5m": 2.6,
+          "load_15m": 3.44,
+          "cores": 20
+        },
+        "end": {
+          "load_1m": 1.66,
+          "load_5m": 2.24,
+          "load_15m": 3.2,
           "cores": 20
         }
       }
@@ -388,18 +388,18 @@
       "kind": "live",
       "view": "graph",
       "tabs": 1,
-      "load_s": [8.21],
+      "load_s": [7.69],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0116,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 11649
+        "GET /api/v2/events?after&subscription": 11603
       },
       "frames_per_min": 170.5,
       "frames_by_type": {
         "detail.patch": {
           "frames_per_min": 55,
-          "bytes_per_min": 39985
+          "bytes_per_min": 39987
         },
         "run.changed": {
           "frames_per_min": 115.5,
@@ -421,44 +421,44 @@
         }
       },
       "server_cpu": {
-        "seconds": 7.72,
+        "seconds": 8.27,
         "window_s": 120,
-        "cores": 0.0643,
-        "cores_per_tab": 0.0643
+        "cores": 0.0689,
+        "cores_per_tab": 0.0689
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 0.183,
-        "p95_s": 0.46,
-        "max_s": 0.837,
+        "p50_s": 0.553,
+        "p95_s": 0.553,
+        "max_s": 1,
         "measured_as": "the view root's data-journal-seq reaching the record's number",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 0.183,
-          "p95_s": 0.183,
-          "max_s": 0.183
+          "p50_s": 0.553,
+          "p95_s": 0.553,
+          "max_s": 0.553
         },
         "frame_arrival": {
-          "p50_s": 0.177,
-          "p95_s": 0.439,
-          "max_s": 0.743
+          "p50_s": 0.547,
+          "p95_s": 0.547,
+          "max_s": 0.949
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 1.08,
-          "load_5m": 0.93,
-          "load_15m": 1.81,
+          "load_1m": 2.25,
+          "load_5m": 2.34,
+          "load_15m": 3.22,
           "cores": 20
         },
         "end": {
-          "load_1m": 0.51,
-          "load_5m": 0.8,
-          "load_15m": 1.66,
+          "load_1m": 1.78,
+          "load_5m": 2.12,
+          "load_15m": 3.03,
           "cores": 20
         }
       }
@@ -467,18 +467,18 @@
       "kind": "live",
       "view": "graph",
       "tabs": 2,
-      "load_s": [8.69, 2.46],
+      "load_s": [8.23, 2.54],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0116,
+      "mb_per_min": 0.0115,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 11595
+        "GET /api/v2/events?after&subscription": 11536
       },
-      "frames_per_min": 171,
+      "frames_per_min": 170.5,
       "frames_by_type": {
         "detail.patch": {
-          "frames_per_min": 55.5,
-          "bytes_per_min": 40327
+          "frames_per_min": 55,
+          "bytes_per_min": 39991
         },
         "run.changed": {
           "frames_per_min": 115.5,
@@ -500,44 +500,44 @@
         }
       },
       "server_cpu": {
-        "seconds": 8.08,
+        "seconds": 8.51,
         "window_s": 120,
-        "cores": 0.0673,
-        "cores_per_tab": 0.0337
+        "cores": 0.0709,
+        "cores_per_tab": 0.0355
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 0.534,
-        "p95_s": 0.534,
-        "max_s": 0.93,
+        "p50_s": 0.357,
+        "p95_s": 0.485,
+        "max_s": 0.761,
         "measured_as": "the view root's data-journal-seq reaching the record's number",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 0.534,
-          "p95_s": 0.534,
-          "max_s": 0.534
+          "p50_s": 0.357,
+          "p95_s": 0.357,
+          "max_s": 0.357
         },
         "frame_arrival": {
-          "p50_s": 0.528,
-          "p95_s": 0.528,
-          "max_s": 0.873
+          "p50_s": 0.35,
+          "p95_s": 0.452,
+          "max_s": 0.699
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 0.87,
-          "load_5m": 0.87,
-          "load_15m": 1.66,
+          "load_1m": 2.17,
+          "load_5m": 2.18,
+          "load_15m": 3.02,
           "cores": 20
         },
         "end": {
-          "load_1m": 0.83,
-          "load_5m": 0.76,
-          "load_15m": 1.51,
+          "load_1m": 2.58,
+          "load_5m": 2.24,
+          "load_15m": 2.93,
           "cores": 20
         }
       }
@@ -546,12 +546,12 @@
       "kind": "live",
       "view": "overall",
       "tabs": 1,
-      "load_s": [8.69],
+      "load_s": [8.19],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0138,
+      "mb_per_min": 0.0139,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 13809
+        "GET /api/v2/events?after&subscription": 13946
       },
       "frames_per_min": 225.5,
       "frames_by_type": {
@@ -561,11 +561,11 @@
         },
         "timeline.patch": {
           "frames_per_min": 49.5,
-          "bytes_per_min": 16203
+          "bytes_per_min": 16202
         },
         "run.changed": {
           "frames_per_min": 121,
-          "bytes_per_min": 53973
+          "bytes_per_min": 53974
         }
       },
       "repeated_snapshot": {
@@ -583,44 +583,44 @@
         }
       },
       "server_cpu": {
-        "seconds": 10.2,
+        "seconds": 10.32,
         "window_s": 120,
-        "cores": 0.085,
-        "cores_per_tab": 0.085
+        "cores": 0.086,
+        "cores_per_tab": 0.086
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 0.228,
-        "p95_s": 0.482,
-        "max_s": 0.823,
+        "p50_s": 0.339,
+        "p95_s": 0.431,
+        "max_s": 0.773,
         "measured_as": "the view root's data-journal-seq reaching the record's number",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 0.228,
-          "p95_s": 0.228,
-          "max_s": 0.228
+          "p50_s": 0.339,
+          "p95_s": 0.339,
+          "max_s": 0.339
         },
         "frame_arrival": {
-          "p50_s": 0.222,
-          "p95_s": 0.46,
-          "max_s": 0.747
+          "p50_s": 0.333,
+          "p95_s": 0.403,
+          "max_s": 0.695
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 1.62,
-          "load_5m": 0.94,
-          "load_15m": 1.56,
+          "load_1m": 2.66,
+          "load_5m": 2.29,
+          "load_15m": 2.93,
           "cores": 20
         },
         "end": {
-          "load_1m": 0.72,
-          "load_5m": 0.86,
-          "load_15m": 1.45,
+          "load_1m": 1.73,
+          "load_5m": 2.09,
+          "load_15m": 2.78,
           "cores": 20
         }
       }
@@ -629,22 +629,22 @@
       "kind": "live",
       "view": "overall",
       "tabs": 2,
-      "load_s": [8.19, 2.38],
+      "load_s": [7.72, 2.39],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0135,
+      "mb_per_min": 0.0136,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 13559
+        "GET /api/v2/events?after&subscription": 13583
       },
       "frames_per_min": 220,
       "frames_by_type": {
         "detail.patch": {
           "frames_per_min": 55,
-          "bytes_per_min": 39998
+          "bytes_per_min": 39997
         },
         "timeline.patch": {
           "frames_per_min": 49.5,
-          "bytes_per_min": 16213
+          "bytes_per_min": 16214
         },
         "run.changed": {
           "frames_per_min": 115.5,
@@ -666,44 +666,44 @@
         }
       },
       "server_cpu": {
-        "seconds": 10.2,
+        "seconds": 10.6,
         "window_s": 120,
-        "cores": 0.085,
-        "cores_per_tab": 0.0425
+        "cores": 0.0883,
+        "cores_per_tab": 0.0442
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 0.628,
-        "p95_s": 0.628,
-        "max_s": 0.827,
+        "p50_s": 0.22,
+        "p95_s": 0.488,
+        "max_s": 0.825,
         "measured_as": "the view root's data-journal-seq reaching the record's number",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 0.628,
-          "p95_s": 0.628,
-          "max_s": 0.628
+          "p50_s": 0.22,
+          "p95_s": 0.22,
+          "max_s": 0.22
         },
         "frame_arrival": {
-          "p50_s": 0.541,
-          "p95_s": 0.541,
-          "max_s": 0.757
+          "p50_s": 0.128,
+          "p95_s": 0.472,
+          "max_s": 0.742
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 1.29,
-          "load_5m": 0.99,
-          "load_15m": 1.48,
+          "load_1m": 2.22,
+          "load_5m": 2.18,
+          "load_15m": 2.8,
           "cores": 20
         },
         "end": {
-          "load_1m": 0.94,
-          "load_5m": 0.94,
-          "load_15m": 1.4,
+          "load_1m": 1.86,
+          "load_5m": 2.08,
+          "load_15m": 2.69,
           "cores": 20
         }
       }
@@ -712,26 +712,26 @@
       "kind": "live",
       "view": "node",
       "tabs": 1,
-      "load_s": [8.71],
+      "load_s": [8.24],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.1741,
+      "mb_per_min": 0.1744,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 174136
+        "GET /api/v2/events?after&subscription": 174388
       },
-      "frames_per_min": 220,
+      "frames_per_min": 225.5,
       "frames_by_type": {
         "detail.patch": {
           "frames_per_min": 55,
-          "bytes_per_min": 39988
+          "bytes_per_min": 39987
         },
         "timeline.patch": {
           "frames_per_min": 49.5,
-          "bytes_per_min": 872590
+          "bytes_per_min": 872588
         },
         "run.changed": {
-          "frames_per_min": 115.5,
-          "bytes_per_min": 51517
+          "frames_per_min": 121,
+          "bytes_per_min": 53974
         }
       },
       "repeated_snapshot": {
@@ -749,44 +749,44 @@
         }
       },
       "server_cpu": {
-        "seconds": 40.46,
+        "seconds": 40.08,
         "window_s": 120,
-        "cores": 0.3372,
-        "cores_per_tab": 0.3372
+        "cores": 0.334,
+        "cores_per_tab": 0.334
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 1.237,
-        "p95_s": 1.238,
-        "max_s": 1.337,
+        "p50_s": 0.803,
+        "p95_s": 0.893,
+        "max_s": 1.219,
         "measured_as": "the record's row appearing on the node timeline",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 1.238,
-          "p95_s": 1.238,
-          "max_s": 1.238
+          "p50_s": 0.803,
+          "p95_s": 0.804,
+          "max_s": 0.804
         },
         "frame_arrival": {
-          "p50_s": 0.01,
-          "p95_s": 0.705,
-          "max_s": 0.903
+          "p50_s": 0.477,
+          "p95_s": 0.722,
+          "max_s": 0.944
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 1.26,
-          "load_5m": 1.01,
-          "load_15m": 1.41,
+          "load_1m": 2.06,
+          "load_5m": 2.11,
+          "load_15m": 2.68,
           "cores": 20
         },
         "end": {
-          "load_1m": 1.46,
-          "load_5m": 1.19,
-          "load_15m": 1.43,
+          "load_1m": 1.92,
+          "load_5m": 2.08,
+          "load_15m": 2.6,
           "cores": 20
         }
       }
@@ -795,26 +795,26 @@
       "kind": "live",
       "view": "node",
       "tabs": 2,
-      "load_s": [8.7, 2.09],
+      "load_s": [8.2, 2.11],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.1741,
+      "mb_per_min": 0.1743,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 174118
+        "GET /api/v2/events?after&subscription": 174336
       },
-      "frames_per_min": 220,
+      "frames_per_min": 221,
       "frames_by_type": {
+        "run.changed": {
+          "frames_per_min": 116.5,
+          "bytes_per_min": 51996
+        },
         "detail.patch": {
           "frames_per_min": 55,
-          "bytes_per_min": 39998
+          "bytes_per_min": 40004
         },
         "timeline.patch": {
           "frames_per_min": 49.5,
-          "bytes_per_min": 872594
-        },
-        "run.changed": {
-          "frames_per_min": 115.5,
-          "bytes_per_min": 51554
+          "bytes_per_min": 872599
         }
       },
       "repeated_snapshot": {
@@ -832,44 +832,44 @@
         }
       },
       "server_cpu": {
-        "seconds": 39.66,
+        "seconds": 40.76,
         "window_s": 120,
-        "cores": 0.3305,
-        "cores_per_tab": 0.1652
+        "cores": 0.3397,
+        "cores_per_tab": 0.1698
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 1.126,
-        "p95_s": 1.126,
-        "max_s": 1.232,
+        "p50_s": 1.269,
+        "p95_s": 1.27,
+        "max_s": 1.381,
         "measured_as": "the record's row appearing on the node timeline",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 1.126,
-          "p95_s": 1.126,
-          "max_s": 1.127
+          "p50_s": 1.269,
+          "p95_s": 1.27,
+          "max_s": 1.27
         },
         "frame_arrival": {
-          "p50_s": 0.406,
-          "p95_s": 0.737,
-          "max_s": 0.901
+          "p50_s": 0.545,
+          "p95_s": 0.719,
+          "max_s": 0.955
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 1.16,
-          "load_5m": 1.16,
-          "load_15m": 1.4,
+          "load_1m": 2.89,
+          "load_5m": 2.38,
+          "load_15m": 2.66,
           "cores": 20
         },
         "end": {
-          "load_1m": 1.23,
-          "load_5m": 1.16,
-          "load_15m": 1.36,
+          "load_1m": 2.31,
+          "load_5m": 2.37,
+          "load_15m": 2.62,
           "cores": 20
         }
       }
@@ -883,17 +883,17 @@
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0117,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 11691
+        "GET /api/v2/events?after&subscription": 11688
       },
-      "frames_per_min": 176,
+      "frames_per_min": 170.5,
       "frames_by_type": {
         "detail.patch": {
           "frames_per_min": 55,
-          "bytes_per_min": 39984
+          "bytes_per_min": 39977
         },
         "run.changed": {
-          "frames_per_min": 121,
-          "bytes_per_min": 53960
+          "frames_per_min": 115.5,
+          "bytes_per_min": 51504
         }
       },
       "repeated_snapshot": {
@@ -911,44 +911,44 @@
         }
       },
       "server_cpu": {
-        "seconds": 7.74,
+        "seconds": 7.77,
         "window_s": 120,
-        "cores": 0.0645,
-        "cores_per_tab": 0.0645
+        "cores": 0.0648,
+        "cores_per_tab": 0.0648
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 0.167,
-        "p95_s": 0.462,
-        "max_s": 0.764,
+        "p50_s": 0.108,
+        "p95_s": 0.457,
+        "max_s": 0.66,
         "measured_as": "the view root's data-journal-seq reaching the record's number",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 0.167,
-          "p95_s": 0.167,
-          "max_s": 0.167
+          "p50_s": 0.108,
+          "p95_s": 0.108,
+          "max_s": 0.108
         },
         "frame_arrival": {
-          "p50_s": 0.164,
-          "p95_s": 0.426,
-          "max_s": 0.651
+          "p50_s": 0.105,
+          "p95_s": 0.443,
+          "max_s": 0.613
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 1.41,
-          "load_5m": 1.27,
-          "load_15m": 1.38,
+          "load_1m": 2.44,
+          "load_5m": 2.4,
+          "load_15m": 2.61,
           "cores": 20
         },
         "end": {
-          "load_1m": 0.56,
-          "load_5m": 1.06,
-          "load_15m": 1.29,
+          "load_1m": 2.04,
+          "load_5m": 2.29,
+          "load_15m": 2.55,
           "cores": 20
         }
       }
@@ -957,18 +957,18 @@
       "kind": "live",
       "view": "channel",
       "tabs": 2,
-      "load_s": [8.23, 2.36],
+      "load_s": [8.73, 2.37],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0116,
+      "mb_per_min": 0.0115,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 11637
+        "GET /api/v2/events?after&subscription": 11564
       },
-      "frames_per_min": 171,
+      "frames_per_min": 170.5,
       "frames_by_type": {
         "detail.patch": {
-          "frames_per_min": 55.5,
-          "bytes_per_min": 40367
+          "frames_per_min": 55,
+          "bytes_per_min": 39996
         },
         "run.changed": {
           "frames_per_min": 115.5,
@@ -990,44 +990,44 @@
         }
       },
       "server_cpu": {
-        "seconds": 7.78,
+        "seconds": 7.91,
         "window_s": 120,
-        "cores": 0.0648,
-        "cores_per_tab": 0.0324
+        "cores": 0.0659,
+        "cores_per_tab": 0.033
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 0.219,
-        "p95_s": 0.471,
-        "max_s": 0.872,
+        "p50_s": 0.315,
+        "p95_s": 0.447,
+        "max_s": 0.762,
         "measured_as": "the view root's data-journal-seq reaching the record's number",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 0.219,
-          "p95_s": 0.219,
-          "max_s": 0.219
+          "p50_s": 0.315,
+          "p95_s": 0.315,
+          "max_s": 0.315
         },
         "frame_arrival": {
-          "p50_s": 0.216,
-          "p95_s": 0.433,
-          "max_s": 0.769
+          "p50_s": 0.313,
+          "p95_s": 0.425,
+          "max_s": 0.692
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 1.27,
-          "load_5m": 1.17,
-          "load_15m": 1.32,
+          "load_1m": 2.29,
+          "load_5m": 2.33,
+          "load_15m": 2.55,
           "cores": 20
         },
         "end": {
-          "load_1m": 1.74,
-          "load_5m": 1.25,
-          "load_15m": 1.32,
+          "load_1m": 1.63,
+          "load_5m": 2.04,
+          "load_15m": 2.42,
           "cores": 20
         }
       }
@@ -1035,7 +1035,7 @@
     "host": {
       "kind": "host",
       "tabs": 1,
-      "load_s": [7.12],
+      "load_s": [7.07],
       "requests_per_min": 2,
       "requests_per_min_by_route": {
         "GET /api/v2/host": 0.5,
@@ -1045,11 +1045,11 @@
       },
       "mb_per_min": 0.0082,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 4277,
+        "GET /api/v2/events?after&subscription": 4274,
         "GET /api/v2/unwatched": 135,
-        "GET /api/v2/host": 555,
+        "GET /api/v2/host": 556,
         "GET /api/v2/runs?include_settled&limit": 1030,
-        "GET /api/v2/projects": 2199
+        "GET /api/v2/projects": 2202
       },
       "frames_per_min": 115,
       "frames_by_type": {
@@ -1073,22 +1073,22 @@
         }
       },
       "server_cpu": {
-        "seconds": 0.84,
+        "seconds": 0.88,
         "window_s": 120,
-        "cores": 0.007,
-        "cores_per_tab": 0.007
+        "cores": 0.0073,
+        "cores_per_tab": 0.0073
       },
       "host_load": {
         "start": {
-          "load_1m": 2.02,
-          "load_5m": 1.35,
-          "load_15m": 1.35,
+          "load_1m": 2.3,
+          "load_5m": 2.15,
+          "load_15m": 2.44,
           "cores": 20
         },
         "end": {
-          "load_1m": 0.48,
-          "load_5m": 1.02,
-          "load_15m": 1.23,
+          "load_1m": 1.71,
+          "load_5m": 1.96,
+          "load_15m": 2.33,
           "cores": 20
         }
       }
@@ -1096,12 +1096,12 @@
     "action-items": {
       "kind": "action-items",
       "tabs": 1,
-      "load_s": [2.06],
+      "load_s": [2.07],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0068,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 6803
+        "GET /api/v2/events?after&subscription": 6812
       },
       "frames_per_min": 135,
       "frames_by_type": {
@@ -1129,22 +1129,22 @@
         }
       },
       "server_cpu": {
-        "seconds": 1.05,
+        "seconds": 1.09,
         "window_s": 120,
-        "cores": 0.0088,
-        "cores_per_tab": 0.0088
+        "cores": 0.0091,
+        "cores_per_tab": 0.0091
       },
       "host_load": {
         "start": {
-          "load_1m": 0.6,
-          "load_5m": 1.02,
-          "load_15m": 1.23,
+          "load_1m": 1.89,
+          "load_5m": 1.98,
+          "load_15m": 2.33,
           "cores": 20
         },
         "end": {
-          "load_1m": 0.46,
-          "load_5m": 0.84,
-          "load_15m": 1.14,
+          "load_1m": 1.76,
+          "load_5m": 1.91,
+          "load_15m": 2.26,
           "cores": 20
         }
       }
@@ -1152,12 +1152,12 @@
     "action-items-2-tabs": {
       "kind": "action-items",
       "tabs": 2,
-      "load_s": [2.07, 2.07],
+      "load_s": [2.08, 2.07],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
       "mb_per_min": 0.0067,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 6689
+        "GET /api/v2/events?after&subscription": 6699
       },
       "frames_per_min": 131,
       "frames_by_type": {
@@ -1185,22 +1185,22 @@
         }
       },
       "server_cpu": {
-        "seconds": 1.21,
+        "seconds": 1.22,
         "window_s": 120,
-        "cores": 0.0101,
-        "cores_per_tab": 0.005
+        "cores": 0.0102,
+        "cores_per_tab": 0.0051
       },
       "host_load": {
         "start": {
-          "load_1m": 0.65,
-          "load_5m": 0.86,
-          "load_15m": 1.13,
+          "load_1m": 1.78,
+          "load_5m": 1.9,
+          "load_15m": 2.24,
           "cores": 20
         },
         "end": {
-          "load_1m": 0.77,
-          "load_5m": 0.93,
-          "load_15m": 1.13,
+          "load_1m": 1.7,
+          "load_5m": 1.79,
+          "load_15m": 2.16,
           "cores": 20
         }
       }
