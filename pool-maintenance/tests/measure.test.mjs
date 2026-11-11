@@ -152,6 +152,49 @@ test("the timed pass removes exactly the superseded build and reports itself", (
   assert.match(run.stderr, /the timed pass removed \d+ entries, all the alternative build's/);
 });
 
+test("a private tree starts from the checkout's ordinary build, and the timed pass still removes exactly the alternative build", () => {
+  const root = fixture();
+  // Every compilation, logged by a wrapper that runs the compiler unchanged, so
+  // what the measurement compiled is read off the compiler's own invocations.
+  const log = join(root, "rustc.log");
+  const wrapper = join(root, "rustc-wrapper.sh");
+  writeFileSync(wrapper, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexec "$@"\n`, { mode: 0o755 });
+  const env = { ...process.env, RUSTC_WRAPPER: wrapper };
+  delete env.CARGO_TARGET_DIR;
+  // The ordinary build the gate's tiers leave in the checkout's own target.
+  const ordinary = spawnSync("cargo", ["nextest", "run", "--locked", "--no-run"], {
+    cwd: root,
+    env,
+    encoding: "utf8",
+  });
+  assert.equal(ordinary.status, 0, ordinary.stderr);
+  writeFileSync(log, "");
+
+  const result = join(root, "result.json");
+  const run = spawnSync(join(root, "pool-maintenance", "measure.sh"), [], {
+    cwd: tmpdir(),
+    env: { ...env, ONEBUDGETSPEC_RESULT: result },
+    encoding: "utf8",
+  });
+  assert.equal(run.status, 0, run.stderr);
+
+  const compiled = readFileSync(log, "utf8")
+    .split("\n")
+    .filter((line) => line.includes("--crate-name fixture_unit"));
+  assert.ok(compiled.length > 0, "the alternative build compiled nothing");
+  for (const line of compiled)
+    assert.match(
+      line,
+      /feature="bundled-ui"/,
+      `the ordinary build was compiled again rather than taken from the checkout's: ${line}`,
+    );
+  const alternative = lines(root, "alternative");
+  assert.ok(alternative.some((entry) => entry.includes("fixture_unit-")));
+  assert.deepEqual(lines(root, "removed"), alternative);
+  const report = JSON.parse(readFileSync(result, "utf8"));
+  assert.ok(Number(/builds removed: (\d+)/.exec(report.detail)?.[1]) > 0, report.detail);
+});
+
 test("a tree with no browser view is refused before anything is built", () => {
   const root = fixture({ view: false });
   const run = measure(root);

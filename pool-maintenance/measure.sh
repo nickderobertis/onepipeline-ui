@@ -82,6 +82,33 @@ list_entries() {
   done | LC_ALL=C sort
 }
 
+# A private tree with no build yet starts from the ordinary build the checkout's
+# own target already holds — the one every uninstrumented test tier and the CI
+# cache leave in `target/debug` — rather than compiling it again: the same units
+# the ordinary build below would write, so that build only fills in what the copy
+# lacks, and the alternative build and the timed pass face exactly the workload
+# they did. A fingerprint is written after its unit's output, so copying the
+# fingerprints first means every unit the copy calls fresh was whole when it was
+# read, even with another build writing to `target/debug` meanwhile; a unit
+# finished after that is simply built here. `incremental` comes too, so the
+# ordinary build's entries there supersede the alternative's as a build here
+# would have. Every copied entry is stamped one
+# instant, so none of them can age past the maintenance window between the
+# untimed pass and the timed one: the timed pass can select only what the
+# alternative build creates, as before.
+SEED="$PWD/target/debug"
+if [ ! -d "$PROFILE/.fingerprint" ] && [ -d "$SEED/.fingerprint" ]; then
+  step="seeding the private tree from $SEED"
+  mkdir -p "$PROFILE"
+  seeded="$(date +%Y%m%d%H%M.%S)"
+  for dir in .fingerprint build deps incremental; do
+    if [ -d "$SEED/$dir" ]; then
+      cp -a "$SEED/$dir" "$PROFILE/"
+    fi
+  done
+  find "$PROFILE" -exec touch -h -t "$seeded" {} +
+fi
+
 step="the untimed backlog pass ('just pool-maintenance')"
 started="$EPOCHREALTIME"
 prune
