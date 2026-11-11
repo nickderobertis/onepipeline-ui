@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import {
   Fragment,
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -587,6 +588,11 @@ function NodeExecution({
     onSelectItem(id);
     sync.scrollTo(id);
   };
+  // The transcript's rows take one opener across renders, so a page of earlier
+  // rows renders the rows it brought rather than every row already shown.
+  const selectNow = useRef(select);
+  selectNow.current = select;
+  const openRow = useCallback((id: string) => selectNow.current(id), []);
   const transcript = useRef<HTMLElement | null>(null);
   // One ref across renders, as the hook's own is: a new one would have the sync
   // attach and detach its scroll listener on every render.
@@ -756,7 +762,7 @@ function NodeExecution({
             entry.entryKind === "row" ? (
               <TranscriptItem
                 key={entry.row.id}
-                onOpen={select}
+                onOpen={openRow}
                 register={sync.register}
                 row={entry.row}
                 selected={entry.row.id === selectedItemId}
@@ -874,17 +880,52 @@ function CollapsedRun({
   );
 }
 
-function TranscriptItem({
-  row,
-  selected,
-  register,
-  onOpen,
-}: {
+interface TranscriptItemProps {
   readonly row: TimelineRow;
   readonly selected: boolean;
   readonly register: (id: string, element: HTMLElement | null) => void;
   readonly onOpen: (id: string) => void;
-}) {
+}
+
+/**
+ * Whether two renderings of a transcript row draw the same thing: every field the
+ * row shows, compared by value, because each page of earlier rows projects the
+ * node's timeline again and hands every row back as a new object. Reading back a
+ * long transcript otherwise re-rendered every row already shown on every page,
+ * which grew each page's cost with the history behind it.
+ */
+function drawsTheSame(was: TranscriptItemProps, now: TranscriptItemProps) {
+  const [a, b] = [was.row, now.row];
+  return (
+    was.selected === now.selected &&
+    was.register === now.register &&
+    was.onOpen === now.onOpen &&
+    a.id === b.id &&
+    a.rowKind === b.rowKind &&
+    a.displayLabel === b.displayLabel &&
+    a.displayKind === b.displayKind &&
+    a.startedAt === b.startedAt &&
+    a.durationMs === b.durationMs &&
+    a.status === b.status &&
+    a.sessionName === b.sessionName &&
+    a.dispatch?.label === b.dispatch?.label &&
+    (a.rowKind === "event" && b.rowKind === "event"
+      ? a.category === b.category && a.event.seq === b.event.seq
+      : a.rowKind !== "event" && b.rowKind !== "event")
+  );
+}
+
+const TranscriptItem = memo(function TranscriptItem({
+  row,
+  selected,
+  register,
+  onOpen,
+}: TranscriptItemProps) {
+  const { id } = row;
+  const registered = useCallback(
+    (element: HTMLElement | null) => register(id, element),
+    [register, id],
+  );
   return (
     <article
       aria-label={row.displayLabel}
@@ -893,7 +934,7 @@ function TranscriptItem({
       data-journal-seq={row.rowKind === "event" ? row.event.seq : undefined}
       data-row-id={row.id}
       data-selected={selected}
-      ref={(element) => register(row.id, element)}
+      ref={registered}
     >
       <button
         aria-label={`Open ${row.displayLabel}`}
@@ -919,7 +960,7 @@ function TranscriptItem({
       </button>
     </article>
   );
-}
+}, drawsTheSame);
 
 /**
  * The prose for a node's Task tab, wherever the plan put it.
