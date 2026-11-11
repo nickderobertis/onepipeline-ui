@@ -3,10 +3,17 @@
  * first answer does not carry reads "Loading…" — never an empty, a zero or a
  * default — and becomes the served value once the rest arrives. The rest is held
  * at the network boundary, the one doubled party: the page's event stream, which
- * carries it, does not open until the journey lets it.
+ * carries it, does not open until the journey lets it. And the app replacing the
+ * first screen moves nothing that screen drew.
  */
 import { runDetailSchema } from "@onepipeline-ui/dag-model";
-import { expect, type Page, type Route, test } from "@playwright/test";
+import {
+  expect,
+  type Locator,
+  type Page,
+  type Route,
+  test,
+} from "@playwright/test";
 import { runs } from "./fixture-facts";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
 
@@ -161,3 +168,104 @@ test("a node's turns, task, overrides, criteria and remote read as loading, then
     await server.stop();
   }
 });
+
+/** What each view's first screen draws, found as the app finds the same thing. */
+const DRAWN: Record<
+  "overall" | "graph" | "node",
+  (page: Page) => Record<string, Locator>
+> = {
+  overall: (page) => ({
+    "the run's heading": page.locator(".overall-hero h2"),
+    ...Object.fromEntries(
+      ["Status", "Nodes", "Wall time", "Turns"].flatMap((name) => {
+        const tile = page.getByRole("group", { name, exact: true });
+        return [
+          [`the ${name} tile`, tile],
+          [`the ${name} value`, tile.locator("strong")],
+        ];
+      }),
+    ),
+    "the graph timeline's plot": page.getByLabel(/^Timeline plot/u).first(),
+  }),
+  graph: (page) => ({
+    "the first node card": page
+      .getByRole("article")
+      .filter({ hasText: "archive" })
+      .first(),
+    "its name": page
+      .getByRole("article")
+      .filter({ hasText: "archive" })
+      .first()
+      .locator("strong"),
+  }),
+  node: (page) => ({
+    "the node's name": page.locator(".breadcrumb-node"),
+    "its state": page.locator(".node-view-state"),
+    "its turns": page.locator(".node-view-meta"),
+    "the node's plot": page.getByLabel(/^Timeline plot/u).first(),
+    "the transcript": page.getByRole("region", { name: "Node transcript" }),
+    ...Object.fromEntries(
+      [0, 1, 2, 3, 4, 5, 6, 7].map((index) => [
+        `transcript row ${index + 1}`,
+        page
+          .getByRole("region", { name: "Node transcript" })
+          .getByRole("article")
+          .nth(index),
+      ]),
+    ),
+  }),
+};
+
+const BOOKMARKS = {
+  overall: () => `/?run=${runs().history}&view=overall`,
+  graph: () => `/?run=${runs().history}&view=graph`,
+  node: () => `/?run=${runs().live}&node=foundation`,
+} as const;
+
+for (const view of ["overall", "graph", "node"] as const)
+  test(`the app replacing ${view}'s first screen moves nothing the first screen drew`, async ({
+    page,
+  }) => {
+    const server = await startFixtureServer("held-rest", []);
+    try {
+      // The app is its own chunk, fetched after the first screen is drawn: held,
+      // the first screen stays up to be measured.
+      const release = await hold(page, "**/assets/mount-*.js");
+      // And the rest, so the app draws the same answer the first screen did: a value
+      // the rest changes is an update, not a move.
+      await hold(page, "**/api/v2/events?*");
+      await page.goto(`${server.origin}${BOOKMARKS[view]()}`);
+      const drawn = DRAWN[view](page);
+      const boxes = async () => {
+        const measured: Record<
+          string,
+          { x: number; y: number; width: number }
+        > = {};
+        for (const [name, element] of Object.entries(drawn)) {
+          await expect(element, name).toBeVisible();
+          const box = await element.boundingBox();
+          if (box === null) throw new Error(`${name} has no box`);
+          measured[name] = box;
+        }
+        return measured;
+      };
+      // llmlint: ignore[e2e_uses_accessible_selectors] the first screen marks its root for the swap; that attribute is the only thing telling it from the app, whose own tabs are the sign it has arrived.
+      await expect(page.locator("[data-first-screen]")).toHaveCount(1);
+      const first = await boxes();
+      release();
+      await expect(page.locator("[data-first-screen]")).toHaveCount(0);
+      await expect(page.getByRole("tab", { name: "Graph" })).toBeVisible();
+      const app = await boxes();
+      for (const [name, before] of Object.entries(first)) {
+        const after = app[name];
+        if (after === undefined) throw new Error(`${name} went`);
+        for (const axis of ["x", "y", "width"] as const)
+          expect(
+            Math.abs(after[axis] - before[axis]),
+            `${name} ${axis}: ${before[axis]} -> ${after[axis]}`,
+          ).toBeLessThanOrEqual(1);
+      }
+    } finally {
+      await server.stop();
+    }
+  });

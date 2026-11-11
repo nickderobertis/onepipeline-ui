@@ -3260,18 +3260,12 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   white-space: nowrap;
 }
 
-.first-plot {
-  position: relative;
-  height: 40px;
-  overflow: hidden;
-  border-radius: 6px;
-  background: var(--muted);
-}
-
+/* The frame is the app's plot's own classes; a bar sits where the app's span does. */
 .first-plot-bar {
   position: absolute;
-  top: 6px;
-  bottom: 6px;
+  top: 0;
+  height: 20px;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--primary) 70%, transparent);
 }
 

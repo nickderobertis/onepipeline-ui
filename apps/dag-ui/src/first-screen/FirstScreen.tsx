@@ -13,11 +13,20 @@
  */
 import { layoutDag } from "@onepipeline-ui/dag-layout";
 import type { LiveRunDetail, RunTimeline } from "@onepipeline-ui/dag-model";
-import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  type ReactNode,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { graphTimeline } from "../features/timeline/graph-timeline";
 import {
+  collapseLabel,
   nodeTimelineV2,
+  type TimelineRow,
   transcriptEntries,
+  transcriptRuns,
 } from "../features/timeline/timeline-model";
 import {
   HISTORY_LOADING_TEXT,
@@ -31,7 +40,11 @@ import {
   nodeReason,
   nodeViews,
 } from "../lib/run-model";
-import { formatDurationSeconds } from "../lib/time";
+import {
+  formatDuration,
+  formatDurationSeconds,
+  formatTimestamp,
+} from "../lib/time";
 import type { FirstAddress } from "./address";
 
 /** The part of a subscription's first answer this screen reads. */
@@ -45,6 +58,52 @@ export interface FirstAnswer {
       };
     };
   };
+}
+
+/**
+ * Room the app takes on arrival, drawn as a static box of the size and place the app
+ * draws it at, so nothing this screen draws moves when the app replaces it. Out of the
+ * accessibility tree and out of reach of the pointer and keyboard: it is not a control
+ * until the app's own is there.
+ */
+function Reserved({
+  className,
+  children,
+}: {
+  readonly className?: string;
+  readonly children?: ReactNode;
+}) {
+  return (
+    <div aria-hidden="true" className={className} inert>
+      {children}
+    </div>
+  );
+}
+
+/** Where the app draws an icon beside a label, at that icon's size. */
+function IconRoom({ size }: { readonly size: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: "inline-block",
+        flexShrink: 0,
+        width: size,
+        height: size,
+      }}
+    />
+  );
+}
+
+/** The app's line-variant tab row: labels where the app's tabs are, nothing to press. */
+const TAB_ROW =
+  "inline-flex h-9 w-fit items-center justify-center gap-1 rounded-none p-[3px] text-sm font-medium text-muted-foreground";
+const TAB =
+  "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 whitespace-nowrap";
+
+/** The legend and controls row above a timeline plot, at its height. */
+function TimelineHead() {
+  return <Reserved className="mb-3 h-8" />;
 }
 
 /**
@@ -168,36 +227,43 @@ function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
           const reason = reasons.get(node.id);
           const awaited = awaits.get(node.id);
           return (
-            // biome-ignore lint/a11y/useKeyWithClickEvents: the card mirrors the canvas's, which takes the pointer alone; the list beside it is the keyboard path, as on the real one.
-            <article
-              aria-label={`${node.label}: ${node.state}`}
-              className={`dag-node state-${node.state} token-${node.style}`}
+            // The canvas's node wrapper: the layout's place and size, which the card fills.
+            <div
               key={node.id}
-              onClick={() => openNode(node.id)}
               style={{
                 position: "absolute",
                 left: node.x,
                 top: node.y,
                 width: node.width,
-                minHeight: node.height,
+                height: node.height,
               }}
             >
-              <div className="node-heading">
-                <span className="eyebrow">{node.kind}</span>
-              </div>
-              <strong>{node.label}</strong>
-              <span className="node-status">{node.state}</span>
-              {reason !== undefined && (
-                <span className="node-reason" title={reason}>
-                  {reason}
-                </span>
-              )}
-              {awaited !== undefined && (
-                <span className="node-awaits" title={awaited}>
-                  {awaited}
-                </span>
-              )}
-            </article>
+              {/* biome-ignore lint/a11y/useKeyWithClickEvents: the card mirrors the canvas's, which takes the pointer alone; the list beside it is the keyboard path, as on the real one. */}
+              <article
+                aria-label={`${node.label}: ${node.state}`}
+                className={`dag-node state-${node.state} token-${node.style}`}
+                onClick={() => openNode(node.id)}
+              >
+                <div className="node-heading">
+                  <span className="inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-border px-1.5 py-0 text-[9px] font-medium tracking-[.1em] whitespace-nowrap text-foreground uppercase">
+                    {node.kind}
+                  </span>
+                  <IconRoom size={17} />
+                </div>
+                <strong>{node.label}</strong>
+                <span className="node-status">{node.state}</span>
+                {reason !== undefined && (
+                  <span className="node-reason" title={reason}>
+                    {reason}
+                  </span>
+                )}
+                {awaited !== undefined && (
+                  <span className="node-awaits" title={awaited}>
+                    {awaited}
+                  </span>
+                )}
+              </article>
+            </div>
           );
         })}
       </div>
@@ -238,40 +304,48 @@ function Plot({
 }) {
   const span = Math.max(range[1] - range[0], 1);
   const percent = (time: number) => ((time - range[0]) / span) * 100;
+  // The app's plot, collapsed: its frame, one lane the bars sit in, and the axis row.
   return (
     <div
       aria-label={`Timeline plot ${label}`}
-      className="first-plot"
-      data-first-plot-range={`${range[0]},${range[1]}`}
+      className="first-plot relative overflow-hidden rounded-lg border bg-muted/40 pb-3 pt-7"
       role="img"
     >
-      {items.map((item) => (
-        <span
-          className="first-plot-bar"
-          data-end={item.end}
-          data-span-id={item.id}
-          data-start={item.start}
-          key={item.id}
-          style={{
-            left: `${percent(item.start)}%`,
-            width: `max(${percent(item.end) - percent(item.start)}%, 0.05%)`,
-          }}
-        />
-      ))}
-      {unheld.map(([from, to]) => (
-        <span
-          className="history-hatch"
-          data-from={from}
-          data-to={to}
-          key={`${from}-${to}`}
-          style={{
-            left: `${percent(from)}%`,
-            width: `${percent(to) - percent(from)}%`,
-          }}
+      <div className="relative grid gap-2">
+        <div
+          className="relative h-6 border-b border-border/60"
+          data-first-plot-range={`${range[0]},${range[1]}`}
         >
-          <span className="history-hatch-label">{STILL_LOADING_TEXT}</span>
-        </span>
-      ))}
+          {items.map((item) => (
+            <span
+              className="first-plot-bar"
+              data-end={item.end}
+              data-span-id={item.id}
+              data-start={item.start}
+              key={item.id}
+              style={{
+                left: `${percent(item.start)}%`,
+                width: `max(${percent(item.end) - percent(item.start)}%, 0.05%)`,
+              }}
+            />
+          ))}
+          {unheld.map(([from, to]) => (
+            <span
+              className="history-hatch"
+              data-from={from}
+              data-to={to}
+              key={`${from}-${to}`}
+              style={{
+                left: `${percent(from)}%`,
+                width: `${percent(to) - percent(from)}%`,
+              }}
+            >
+              <span className="history-hatch-label">{STILL_LOADING_TEXT}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+      <Reserved className="relative mt-2 h-4" />
     </div>
   );
 }
@@ -290,6 +364,7 @@ function Metric({
       className="metric flex flex-row items-center gap-3 rounded-xl border bg-card p-4 text-card-foreground"
       role="group"
     >
+      <IconRoom size={24} />
       <div>
         <p>{label}</p>
         <strong>{value}</strong>
@@ -325,6 +400,19 @@ function Overall({
               : "no events recorded yet"}
           </p>
         </section>
+        {/* The run's records, each a closed disclosure in the app. */}
+        <Reserved>
+          {[
+            "Timing and usage",
+            "Goal and repository identities",
+            "Recorded results",
+            "Provider health",
+          ].map((record) => (
+            <details key={record}>
+              <summary>{record}</summary>
+            </details>
+          ))}
+        </Reserved>
         <section aria-label="Run metrics" className="metric-grid">
           <Metric label="Status" value={detail.run.state} />
           <Metric label="Nodes" value={String(detail.run.nodes.length)} />
@@ -341,19 +429,27 @@ function Overall({
             value={typeof turns === "number" ? String(turns) : LOADING_TEXT}
           />
         </section>
-        <div className="section-heading">
-          <h3>Graph timeline</h3>
-        </div>
-        <div className="graph-timeline">
-          <Plot
-            items={graph.line.items.map((item) => ({
-              id: item.id,
-              start: item.start,
-              end: item.end ?? graph.range[1],
-            }))}
-            label="Graph timeline"
-            range={graph.range}
-          />
+        <div className="flex flex-col gap-0 rounded-xl border bg-card py-[15px] text-card-foreground shadow-sm">
+          <div className="px-[15px]">
+            <div className="section-heading">
+              <IconRoom size={16} />
+              <h3>Graph timeline</h3>
+            </div>
+            <div className="graph-timeline">
+              <section className="timeline rounded-xl border bg-card p-4">
+                <TimelineHead />
+                <Plot
+                  items={graph.line.items.map((item) => ({
+                    id: item.id,
+                    start: item.start,
+                    end: item.end ?? graph.range[1],
+                  }))}
+                  label="Graph timeline"
+                  range={graph.range}
+                />
+              </section>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -373,6 +469,7 @@ function useFirstNodeTimeline(
   const rows = reading.flatMap((entry) =>
     entry.entryKind === "row" ? [entry.row] : [],
   );
+  const entries = reading;
   const starts = projection.items.map((item) => item.start);
   const ends = projection.items.map((item) => item.end ?? item.start);
   const range: readonly [number, number] =
@@ -392,7 +489,7 @@ function useFirstNodeTimeline(
       return [[Date.parse(span.started_at), Date.parse(earliest.at)]];
     },
   );
-  return { projection, rows, range, unheld };
+  return { projection, rows, entries, range, unheld };
 }
 
 function NodeTimeline({
@@ -402,65 +499,151 @@ function NodeTimeline({
   readonly timeline?: RunTimeline;
   readonly node: NodeView;
 }) {
-  const { projection, rows, range, unheld } = useFirstNodeTimeline(
+  const { projection, entries, range, unheld } = useFirstNodeTimeline(
     timeline,
     node.id,
+  );
+  const toLoad = (timeline?.spans ?? []).some(
+    (span) =>
+      span.events_total !== undefined && span.events_total > span.events.length,
   );
   return (
     <section aria-label={`Timeline for ${node.label}`} className="node-view">
       <header className="node-view-head">
-        <span className="breadcrumb-node">{node.label}</span>
+        <nav>
+          <ol className="breadcrumb">
+            <li>
+              <Reserved className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium whitespace-nowrap">
+                <IconRoom size={16} />
+                Graph
+              </Reserved>
+            </li>
+            <li>
+              <span className="breadcrumb-node">{node.label}</span>
+            </li>
+          </ol>
+        </nav>
         <div className="node-view-facts">
-          <span className="node-view-state">{node.status}</span>
+          <span className="node-view-state inline-flex w-fit shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-full border px-2 py-0.5 text-xs font-medium tracking-[.03em] whitespace-nowrap uppercase">
+            <span
+              aria-hidden="true"
+              className="size-1.5 rounded-full bg-current"
+            />
+            {node.status}
+          </span>
           <span className="node-view-meta">
             {node.kind} node · turns {LOADING_TEXT}
           </span>
         </div>
       </header>
-      <section
-        aria-label="Node timeline"
-        className="node-timeline-sticky"
-        data-testid="node-timeline"
-      >
-        <Plot
-          items={projection.items.map((item) => ({
-            id: item.id,
-            start: item.start,
-            end: item.end ?? item.start,
-          }))}
-          label="Node timeline plot"
-          range={range}
-          unheld={unheld}
-        />
-      </section>
-      <section aria-label="Node transcript" className="node-transcript">
-        {unheld.length > 0 && (
-          <button className="load-earlier" disabled type="button">
-            Load earlier rows
-          </button>
-        )}
-        {rows.map((row) => (
-          <article
-            aria-label={row.displayLabel}
-            className="transcript-item"
-            key={row.id}
-          >
-            <button
-              aria-label={`Open ${row.displayLabel}`}
-              onClick={() =>
-                ask((params) => {
-                  params.set("event", row.id);
-                })
-              }
-              type="button"
+      <div className="node-tabs">
+        <Reserved className="mx-5 inline-flex h-9 w-fit flex-none items-center justify-start gap-1 p-[3px] text-sm font-medium text-muted-foreground">
+          {[
+            "Timeline",
+            "Task",
+            "Acceptance criteria",
+            "Dependencies",
+            "Remote",
+          ].map((tab) => (
+            <span className={TAB} key={tab}>
+              {tab}
+            </span>
+          ))}
+        </Reserved>
+        <div className="node-timeline-panel flex-1">
+          <div className="node-execution" data-expanded="false">
+            <section
+              aria-label="Node timeline"
+              className="node-timeline-sticky"
+              data-testid="node-timeline"
             >
-              <span className="eyebrow">{row.displayKind}</span>
-              <strong>{row.displayLabel}</strong>
-            </button>
-          </article>
-        ))}
-      </section>
+              <section className="timeline rounded-xl border bg-card p-4">
+                <TimelineHead />
+                <Plot
+                  items={projection.items.map((item) => ({
+                    id: item.id,
+                    start: item.start,
+                    end: item.end ?? item.start,
+                  }))}
+                  label="Node timeline plot"
+                  range={range}
+                  unheld={unheld}
+                />
+              </section>
+            </section>
+            <section aria-label="Node transcript" className="node-transcript">
+              {toLoad && (
+                <button className="load-earlier" disabled type="button">
+                  Load earlier rows
+                </button>
+              )}
+              {transcriptRuns(entries).map((run) => {
+                const items = run.entries.map((entry) =>
+                  entry.entryKind === "row" ? (
+                    <FirstRow key={entry.row.id} row={entry.row} />
+                  ) : (
+                    <Reserved
+                      className="transcript-collapsed"
+                      key={`collapse-${entry.group.id}`}
+                    >
+                      <span>
+                        <span aria-hidden="true">…</span>
+                        {`Show ${collapseLabel(entry.hidden, entry.group.kind)}`}
+                      </span>
+                    </Reserved>
+                  ),
+                );
+                return run.dispatch === undefined ? (
+                  <Fragment key={run.id}>{items}</Fragment>
+                ) : (
+                  <section
+                    aria-label={run.dispatch.label}
+                    className="transcript-dispatch"
+                    key={run.id}
+                  >
+                    <h3>{run.dispatch.label}</h3>
+                    {items}
+                  </section>
+                );
+              })}
+            </section>
+          </div>
+        </div>
+      </div>
     </section>
+  );
+}
+
+/** One transcript row as the app draws it, opening the record when pressed. */
+function FirstRow({ row }: { readonly row: TimelineRow }) {
+  return (
+    <article
+      aria-label={row.displayLabel}
+      className="transcript-item"
+      data-row-id={row.id}
+    >
+      <button
+        aria-label={`Open ${row.displayLabel}`}
+        onClick={() =>
+          ask((params) => {
+            params.set("event", row.id);
+          })
+        }
+        type="button"
+      >
+        <span className="eyebrow">
+          {row.rowKind === "event" && <IconRoom size={12} />}
+          {row.displayKind}
+        </span>
+        <strong>{row.displayLabel}</strong>
+        <span className="transcript-facts">
+          {formatTimestamp(row.startedAt)}
+          {row.durationMs !== null && ` · ${formatDuration(row.durationMs)}`}
+          {` · ${row.status ?? "recorded"}`}
+          {row.sessionName !== undefined && ` · ${row.sessionName}`}
+        </span>
+      </button>
+    </article>
   );
 }
 
@@ -495,7 +678,34 @@ function Shell({
             </div>
           </div>
         </section>
-        <div className="min-h-0 flex-1">{children}</div>
+        <Reserved className="run-header-details">
+          <details>
+            <summary>Run details</summary>
+          </details>
+        </Reserved>
+        <div className="flex min-h-0 flex-1 flex-col gap-0">
+          <Reserved className="view-tabs">
+            <div className={TAB_ROW}>
+              {["Graph", "Overall", "Channel"].map((view) => (
+                <span className={TAB} key={view}>
+                  <IconRoom size={15} />
+                  {view}
+                </span>
+              ))}
+            </div>
+            <div className="detail-switch">
+              {["Decisions", "Detailed activity"].map((level) => (
+                <span
+                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium whitespace-nowrap"
+                  key={level}
+                >
+                  {level}
+                </span>
+              ))}
+            </div>
+          </Reserved>
+          <div className="min-h-0 flex-1">{children}</div>
+        </div>
       </main>
       {loading && (
         <p className="history-loading" role="status">
