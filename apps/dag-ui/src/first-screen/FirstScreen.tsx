@@ -40,11 +40,8 @@ import {
   nodeReason,
   nodeViews,
 } from "../lib/run-model";
-import {
-  formatDuration,
-  formatDurationSeconds,
-  formatTimestamp,
-} from "../lib/time";
+import { Timestamp } from "../lib/Timestamp";
+import { formatDuration, formatDurationSeconds } from "../lib/time";
 import type { FirstAddress } from "./address";
 
 /** The part of a subscription's first answer this screen reads. */
@@ -637,7 +634,7 @@ function FirstRow({ row }: { readonly row: TimelineRow }) {
         </span>
         <strong>{row.displayLabel}</strong>
         <span className="transcript-facts">
-          {formatTimestamp(row.startedAt)}
+          <Timestamp at={row.startedAt} />
           {row.durationMs !== null && ` · ${formatDuration(row.durationMs)}`}
           {` · ${row.status ?? "recorded"}`}
           {row.sessionName !== undefined && ` · ${row.sessionName}`}

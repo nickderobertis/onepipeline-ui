@@ -284,3 +284,45 @@ for (const view of ["overall", "graph", "node"] as const)
       await server.stop();
     }
   });
+
+// The first screen's rows are the app's rows: each carries its recorded moment as a
+// `<time>` whose `datetime` is the instant, so a reader (or a journey) reading the
+// stamps before the app's chunk lands reads the same ones it reads after. Drawn as
+// bare text, they read as rows with no time at all (CI run 42991374679).
+test("a node's first screen stamps each transcript row with the moment the app does", async ({
+  page,
+}) => {
+  const server = await startFixtureServer("held-rest", []);
+  try {
+    const release = await hold(page, "**/assets/mount-*.js");
+    await page.goto(`${server.origin}${BOOKMARKS.node()}`);
+    const rows = page
+      .getByRole("region", { name: "Node transcript" })
+      .getByRole("article");
+    const stamps = () =>
+      rows.evaluateAll((articles) =>
+        articles.map((article) => ({
+          label: article.getAttribute("aria-label"),
+          times: [...article.querySelectorAll("time")].map((time) =>
+            time.getAttribute("datetime"),
+          ),
+        })),
+      );
+    // llmlint: ignore[e2e_uses_accessible_selectors] the first screen marks its root for the swap; that attribute is the only thing telling it from the app, whose own tabs are the sign it has arrived.
+    const firstScreen = page.locator("[data-first-screen]");
+    await expect(firstScreen).toHaveCount(1);
+    await expect(rows.first()).toBeVisible();
+    const first = await stamps();
+    expect(first.length).toBeGreaterThan(0);
+    for (const { label, times } of first) {
+      expect(times, `${label}'s stamp`).toHaveLength(1);
+      expect(Number.isNaN(Date.parse(times[0] ?? "")), `${label}`).toBe(false);
+    }
+    release();
+    await expect(firstScreen).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Graph" })).toBeVisible();
+    await expect.poll(stamps).toEqual(first);
+  } finally {
+    await server.stop();
+  }
+});
