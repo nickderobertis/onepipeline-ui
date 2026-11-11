@@ -1,4 +1,4 @@
-import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { STILL_LOADING_TEXT } from "../../lib/loading";
 import type { HistoryFailure } from "./useTimelineHistory";
@@ -42,6 +42,44 @@ export function LoadEarlier({
 }
 
 /**
+ * The plot `container` holds, once it is there. Until it is found it is looked for
+ * after every render and whenever the container's contents change, and it is looked
+ * for again if it is replaced, so a plot mounted after its container, or a container
+ * mounted after this, still gets its overlay on the frame it appears.
+ */
+function usePlotElement(
+  container: { readonly current: HTMLElement | null },
+  wanted: boolean,
+): HTMLElement | null {
+  const [plot, setPlot] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (plot !== null && !plot.isConnected) setPlot(null);
+  });
+  // No dependency list: the container is a ref, whose filling no dependency sees.
+  useLayoutEffect(() => {
+    const root = container.current;
+    if (!wanted || plot !== null || root === null) return;
+    const look = (): boolean => {
+      const found = root.querySelector<HTMLElement>(
+        '[aria-label^="Timeline plot"]',
+      );
+      if (found === null) return false;
+      if (getComputedStyle(found).position === "static")
+        found.style.position = "relative";
+      setPlot(found);
+      return true;
+    };
+    if (look()) return;
+    const observer = new MutationObserver(() => {
+      if (look()) observer.disconnect();
+    });
+    observer.observe(root, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  });
+  return plot;
+}
+
+/**
  * The stretches of a plot not held, hatched over it. Drawn inside the plot so the
  * percentages run along the axis the plot draws, and hatched opaque so nothing of the
  * rows either side shows through.
@@ -56,19 +94,7 @@ export function PlotHatches({
   readonly range: readonly [number, number];
   readonly stretches: readonly (readonly [number, number])[];
 }): ReactNode {
-  const [plot, setPlot] = useState<HTMLElement | null>(null);
-  const looked = useRef(false);
-  useLayoutEffect(() => {
-    if (stretches.length === 0 || looked.current) return;
-    const found = container.current?.querySelector<HTMLElement>(
-      '[aria-label^="Timeline plot"]',
-    );
-    if (found === null || found === undefined) return;
-    if (getComputedStyle(found).position === "static")
-      found.style.position = "relative";
-    looked.current = true;
-    setPlot(found);
-  }, [container, stretches]);
+  const plot = usePlotElement(container, stretches.length > 0);
   if (plot === null) return null;
   const span = Math.max(range[1] - range[0], 1);
   const percent = (time: number) =>

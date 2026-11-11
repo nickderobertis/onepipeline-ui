@@ -114,6 +114,8 @@ export function useTimelineHistory({
   const spanFields = useRef(new Map<string, SpanFields>());
   const cursors = useRef(new Map<string, string | null>());
   const asked = useRef(new Set<string>());
+  /** Spans read to their first row, whose count no longer says what is missing. */
+  const wholeSpans = useRef(new Set<string>());
   const [version, setVersion] = useState(0);
   const [failure, setFailure] = useState<HistoryFailure>();
   const [loadingEarlier, setLoadingEarlier] = useState(false);
@@ -170,12 +172,17 @@ export function useTimelineHistory({
     };
   }, [timeline, version, scope]);
 
-  const unheld = useMemo(
-    () => (scope === "node" ? unheldStretches(merged?.spans ?? []) : []),
-    [merged, scope],
-  );
-
   const cursor = nodeId ?? "";
+  // A span's count is of journal records, and two records can share one row id,
+  // so a span read to its start can hold fewer rows than it counts. What has been
+  // read to the start is held whole, and only the rest can still be unloaded.
+  const unheld = useMemo(() => {
+    void version;
+    if (scope !== "node" || cursors.current.get(cursor) === null) return [];
+    return unheldStretches(
+      (merged?.spans ?? []).filter((span) => !wholeSpans.current.has(span.id)),
+    );
+  }, [merged, scope, cursor, version]);
   const canLoadEarlier =
     scope === "node" && cursors.current.has(cursor)
       ? cursors.current.get(cursor) !== null
@@ -235,6 +242,13 @@ export function useTimelineHistory({
           const { span } = answered;
           if (query.span !== undefined && span !== undefined)
             spanFields.current.set(query.span, spanFieldsSchema.parse(span));
+          if (
+            answered.next_cursor === null &&
+            query.span !== undefined &&
+            query.from === undefined &&
+            query.to === undefined
+          )
+            wholeSpans.current.add(query.span);
           bump();
           if (answered.next_cursor === null) return;
           next = answered.next_cursor;

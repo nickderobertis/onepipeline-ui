@@ -341,6 +341,89 @@ for (const terminal of corpus.terminations) {
   });
 }
 
+test("a node's unloaded history is hatched over exactly the rows its window left out, and goes once they are read", async ({
+  page,
+  request,
+}) => {
+  const replay = await import("./fixtures/timeline-retries.json", {
+    with: { type: "json" },
+  });
+  const fixture = replay.default;
+  const served = parseRunTimeline(
+    await (
+      await request.get(
+        `${SERVED_UI_URL}/api/v2/runs/${fixture.run_id}/timeline?scope=node&node=${fixture.node}`,
+      )
+    ).json(),
+  );
+  const answered = page.waitForResponse((response) => {
+    if (new URL(response.url()).pathname !== API_V2_PATHS.subscriptions)
+      return false;
+    return response.request().postDataJSON()?.view?.scope === "node";
+  });
+  await page.goto(`/?run=${fixture.run_id}&node=${fixture.node}`);
+  const subscribed = subscribedSchema.parse(await (await answered).json());
+  if (
+    subscribed.initial.type !== "snapshot" ||
+    subscribed.initial.snapshot.visible.type !== "timeline"
+  )
+    throw new Error("the node was not answered with a timeline snapshot");
+  const window = parseRunTimeline(subscribed.initial.snapshot.visible.timeline);
+  const held = new Set(
+    window.spans.flatMap((span) => span.events.map((event) => event.id)),
+  );
+  // What the window left out, as the complete document lists it.
+  const missing = served.spans
+    .flatMap((span) => span.events)
+    .filter((event) => !held.has(event.id))
+    .map((event) => Date.parse(event.at));
+  expect(missing.length).toBeGreaterThan(0);
+  const plot = page
+    .getByRole("region", { name: "Node timeline" })
+    .locator('[aria-label^="Timeline plot"]')
+    .first();
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] a hatch is a drawn overlay with no role of its own; its words are read by text below, and its bounds are the data attributes the plot draws it from.
+  const hatches = page.locator(".history-hatch");
+  // The app's own plot, once it has replaced the first screen's.
+  await expect(page.locator(".first-plot")).toHaveCount(0);
+  await expect(hatches.first()).toBeVisible();
+  const bounds = await hatches.evaluateAll((elements) =>
+    elements.map((element): [number, number] => [
+      Number(element.getAttribute("data-from")),
+      Number(element.getAttribute("data-to")),
+    ]),
+  );
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
+  for (const hatch of await hatches.all())
+    await expect(hatch).toContainText("Still loading");
+  // Every left-out row falls inside a hatch, so nothing unloaded reads as empty.
+  for (const at of missing)
+    expect(
+      bounds.some(([from, to]) => at >= from && at <= to),
+      `a row at ${new Date(at).toISOString()} outside every hatch ${JSON.stringify(bounds)}`,
+    ).toBe(true);
+  // Each hatch ends where the window's own rows begin, so nothing held is covered.
+  const heldStarts = new Set(
+    window.spans.flatMap((span) =>
+      span.events.length === 0 ? [] : [Date.parse(span.events[0]?.at ?? "")],
+    ),
+  );
+  for (const [, to] of bounds) expect(heldStarts.has(to)).toBe(true);
+  // And it is drawn on the plot, inside its width.
+  const area = await plot.boundingBox();
+  if (area === null) throw new Error("no plot");
+  for (const hatch of await hatches.all()) {
+    const box = await hatch.boundingBox();
+    if (box === null) throw new Error("a hatch with no box");
+    expect(box.width).toBeGreaterThan(0);
+    expect(box.x).toBeGreaterThanOrEqual(area.x - 1);
+    expect(box.x + box.width).toBeLessThanOrEqual(area.x + area.width + 1);
+  }
+  // Read back through the page's own control, nothing is left unloaded.
+  await loadAllEarlierRows(page);
+  await expect(hatches).toHaveCount(0);
+});
+
 test("retries, equal timestamps and repeated relays keep every record under its served identity", async ({
   page,
   request,
