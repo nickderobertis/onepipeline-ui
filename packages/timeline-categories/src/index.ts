@@ -239,6 +239,16 @@ const CATEGORY_EXCEPTIONS: Readonly<Record<string, EventCategory>> = {
   // words names a rule, and `edit-committed`, the other half of the same split,
   // is filed under the edit it made rather than under the exchange.
   "command-accepted": "planning",
+  // A `kind: command` node's command started, and how it ended: the node's own
+  // unit of work opened, run and closed, which is what a session is to a reader.
+  // `command` is not a rule word because `command-accepted` above is the planner
+  // and the run talking, and `started` and `exited` name no rule.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, so the copy cannot drift, and it failed naming exactly these two kinds when the pin moved to 0.106.3.
+  // llmlint: ignore-block[changed_behavior_has_e2e] the category decision is pinned by the corpus rather than a journey, uniformly for every kind this table files. `apps/dag-ui-e2e/AGENTS.md` records that split: a journey counts the scheme against `EVENT_CATEGORIES` and must not restate the vocabulary. What the browser tier proves is the drawing, which filing these two kinds does not change.
+  "command-started": "session",
+  "command-exited": "session",
+  // llmlint: ignore-end[changed_behavior_has_e2e]
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // The PR body could not be drafted, which is a fact about the publication.
   "body-not-drafted": "publication",
   // One acceptance criterion ruled on. `checked` is not `check`, and a word is
