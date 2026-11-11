@@ -62,7 +62,7 @@
       "//api-server-end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]"
     },
     "test-large": {
-      "//": "One large run's first screens, the rest arriving, its history pages and its status read, at the workload large-run/budgets.yaml states: fresh timings on a release build, alone and never cached, as `test`'s are. Its own target so its telemetry and `budgets-large` are apart from Action items'; test-linux selects it on every pull request that reaches this project and on the release pull request's sweep. Writes through the real CLI, so it provisions the sibling.",
+      "//": "One large run's first screens, the rest arriving, its history pages and its status read, at the workload large-run/budgets.yaml states: fresh timings on a release build, alone and never cached, as `test`'s are. Its own target so its telemetry and `budgets-large` are apart from Action items'; ci.yml's `budgets` job runs it (`scripts/ci-job.sh read-latency`) on every pull request that reaches this project and on the release pull request's sweep. Writes through the real CLI, so it provisions the sibling.",
       "command": "npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts --project=large",
       "cache": false,
       "parallelism": false,
@@ -84,7 +84,7 @@
       ]
     },
     "test-journeys": {
-      "//": "The large-corpus journeys over the release server: first screens against their documents, the wire and its errors, a live run, and reaching everything by the page's own controls. test-linux selects them on every pull request that reaches this project and on the release pull request's sweep. They time nothing, so they record no telemetry and may use several workers, and they never run beside a timing.",
+      "//": "The large-corpus journeys over the release server: first screens against their documents, the wire and its errors, a live run, and reaching everything by the page's own controls. ci.yml's `budgets` job runs them (`scripts/ci-job.sh read-latency`) on every pull request that reaches this project and on the release pull request's sweep. They time nothing, so they record no telemetry and may use several workers, and they never run beside a timing.",
       "command": "npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts --project=journeys",
       "cache": false,
       "parallelism": false,
@@ -137,7 +137,7 @@
       "inputs": ["manifestText"]
     },
     "check": {
-      "//": "The default check plus budgets, the large run's timings and the large-corpus journeys: test-linux's broader tier reaches them through this, and its affected tier names each target.",
+      "//": "The default check plus budgets, the large run's timings and the large-corpus journeys: the `budgets` job's read-latency step runs it last on the release pull request's sweep, and names each target on every other pull request that reaches this project.",
       "executor": "nx:noop",
       "dependsOn": [
         "format-check",

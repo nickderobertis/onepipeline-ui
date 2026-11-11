@@ -7,7 +7,8 @@ import { defineConfig } from "@playwright/test";
  * `large` holds one large run's telemetry and the host measurement of a run,
  * `dag-ui-read-latency:test-large`, and
  * `journeys` the large-corpus journeys, `dag-ui-read-latency:test-journeys`.
- * test-linux runs all three wherever a change reaches this project.
+ * ci.yml's `budgets` job runs all three, one at a time, wherever a change reaches
+ * this project (`scripts/ci-job.sh read-latency`).
  *
  * No `webServer`: each measured page starts its own `onepipeline-api serve` over
  * the corpus this tier generates. The two timing projects take one worker,

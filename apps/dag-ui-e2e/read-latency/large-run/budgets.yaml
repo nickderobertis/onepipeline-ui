@@ -3,9 +3,9 @@ schema_version: 1
 # `dag-ui-read-latency:test-large` records over the workload each description
 # states; the one runner reports the figure and its breakdown and compares
 # nothing. No budget here carries a `host` label. They are recorded apart from
-# `../budgets.yaml`'s, by a target of their own, and test-linux runs that target
-# and `budgets-large` on every pull request that reaches this project and on the
-# release pull request's sweep, so a regression fails the change that made it.
+# `../budgets.yaml`'s, by a target of their own, and the `budgets` job runs that
+# target and `budgets-large` on every pull request that reaches this project and on
+# the release pull request's sweep, so a regression fails the change that made it.
 budgets:
   - id: dag-ui-run-first-view-seconds
     description: >-

@@ -31,6 +31,11 @@ const vendored = (tag) =>
     `.github/reporting/fixtures/onebudgetspec-github-action/${tag}/action.yml`,
   );
 
+/** The steps that provision and run the read-latency timings, on a pull request. */
+const READ_LATENCY_STEPS = 6;
+/** The report runs whatever the timings did, unless the run was cancelled. */
+const CANCELLED_ONLY = ["$", "{{ !cancelled() }}"].join("");
+
 const actionStep = (job) =>
   (job?.steps ?? []).find((step) => step.uses?.startsWith(`${ACTION}@`));
 
@@ -59,9 +64,36 @@ export function reportJobProblems(workflow) {
     problems.push(`budgets is granted ${granted}`);
   if (job.concurrency?.["cancel-in-progress"] !== false)
     problems.push("a newer budgets run cancels the comment writer");
-  // It builds and tests nothing: a checkout and the action are all of it.
-  if (job.steps?.length !== 2)
-    problems.push(`budgets has ${job.steps?.length} steps`);
+  // It builds nothing. A checkout opens it and the action closes it; between them,
+  // on a pull request alone, it provisions and runs dag-ui-read-latency's timings,
+  // journeys and budgets (`just ci-read-latency`), which run alone on this runner
+  // rather than after test-linux's CPU-bound pool: those steps and no others.
+  const steps = job.steps ?? [];
+  if (steps.length !== READ_LATENCY_STEPS + 2)
+    problems.push(`budgets has ${steps.length} steps`);
+  const between = steps.slice(1, -1);
+  for (const step of between)
+    if (step.if !== "github.event_name == 'pull_request'")
+      problems.push(
+        `the budgets step ${step.name ?? step.uses} runs on a push as well`,
+      );
+  const timings = between.filter((step) =>
+    step.run?.includes("just ci-read-latency"),
+  );
+  if (timings.length !== 1)
+    problems.push(
+      `budgets runs the read-latency timings ${timings.length} times`,
+    );
+  if (
+    between.some((step) =>
+      /\b(cargo|nx(\.sh)? run-many|ci-test-linux)\b/u.test(step.run ?? ""),
+    )
+  )
+    problems.push("budgets builds or tests beyond the read-latency timings");
+  if (steps.at(-1) !== actionStep(job))
+    problems.push("the report is not the job's last step");
+  if (actionStep(job) && actionStep(job).if !== CANCELLED_ONLY)
+    problems.push("a failed timing skips the report");
   const checkout = job.steps?.[0];
   if (!checkout?.uses?.startsWith("actions/checkout@"))
     problems.push("budgets does not start with a checkout");
@@ -131,7 +163,36 @@ test("a job that parts from the shape or the released definition is refused", ()
     [(w) => delete w.jobs.budgets, /no budgets job/],
     [(w) => (w.jobs.budgets.if = "success()"), /runs if success/],
     [(w) => w.jobs.budgets.needs.pop(), /budgets needs/],
-    [(w) => w.jobs.budgets.steps.push({ run: "just build" }), /3 steps/],
+    [
+      (w) => w.jobs.budgets.steps.splice(1, 0, { run: "just build" }),
+      new RegExp(`${READ_LATENCY_STEPS + 3} steps`),
+    ],
+    [
+      (w) => w.jobs.budgets.steps.push({ run: "just build" }),
+      /not the job's last step/,
+    ],
+    [
+      (w) => {
+        const timing = w.jobs.budgets.steps.find((step) =>
+          step.run?.includes("just ci-read-latency"),
+        );
+        delete timing.if;
+      },
+      /runs on a push as well/,
+    ],
+    [
+      (w) => {
+        const timing = w.jobs.budgets.steps.find((step) =>
+          step.run?.includes("just ci-read-latency"),
+        );
+        timing.run = "just ci-test-linux";
+      },
+      /read-latency timings 0 times/,
+    ],
+    [
+      (w) => delete actionStep(w.jobs.budgets).if,
+      /failed timing skips the report/,
+    ],
     [(w) => (w.jobs.budgets.steps[0].with["fetch-depth"] = 1), /ancestry/],
     [
       (w) => (actionStep(w.jobs.budgets).uses = `${ACTION}@v9.9.9`),
