@@ -507,6 +507,24 @@ test("the budgets file states the workload workload.json records", () => {
     expect(text.split(stated)).toHaveLength(2);
 });
 
+/** The members of a generated journal record this test reads. */
+const journalRecordSchema = z.looseObject({
+  stream: z.string(),
+  kind: z.string(),
+  labels: z.looseObject({ node: z.string().optional() }),
+  payload: z.looseObject({
+    transcript: z.looseObject({ history_id: z.string() }).optional(),
+  }),
+});
+type JournalRecord = z.infer<typeof journalRecordSchema>;
+
+/** The members of a generated plan this test reads. */
+const planSchema = z.looseObject({
+  tasks: z.array(
+    z.looseObject({ id: z.string(), deps: z.array(z.string()).optional() }),
+  ),
+});
+
 test("the large-run corpus writes the shapes its drivers are read from, at a small size", () => {
   const dir = mkdtempSync(join(tmpdir(), "read-latency-corpus-"));
   try {
@@ -557,12 +575,13 @@ test("the large-run corpus writes the shapes its drivers are read from, at a sma
         ),
       );
     const run = join(root, facts.openLiveRun);
-    const records = readFileSync(join(run, "events.jsonl"), "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line));
-    const nodeOf = (record: { labels: { node?: string } }) =>
-      record.labels.node;
+    const records = z.array(journalRecordSchema).parse(
+      readFileSync(join(run, "events.jsonl"), "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line)),
+    );
+    const nodeOf = (record: JournalRecord) => record.labels.node;
     // Sized to the workload, a node off the plan, and more than one stream.
     const journalBytes = readFileSync(join(run, "events.jsonl")).length;
     expect(Math.abs(journalBytes - 3_000_000)).toBeLessThan(3_000_000 * 0.03);
@@ -573,13 +592,15 @@ test("the large-run corpus writes the shapes its drivers are read from, at a sma
       records.filter((record) => nodeOf(record) === facts.large.busiestNode)
         .length,
     ).toBeGreaterThanOrEqual(300);
-    const plan = JSON.parse(readFileSync(join(run, "plan.json"), "utf8"));
-    expect(plan.tasks.map((task: { id: string }) => task.id)).not.toContain(
+    const plan = planSchema.parse(
+      JSON.parse(readFileSync(join(run, "plan.json"), "utf8")),
+    );
+    expect(plan.tasks.map((task) => task.id)).not.toContain(
       facts.large.offGraphNode,
     );
-    expect(
-      plan.tasks.flatMap((task: { deps?: string[] }) => task.deps ?? []),
-    ).toContain(facts.large.crossRunRef);
+    expect(plan.tasks.flatMap((task) => task.deps ?? [])).toContain(
+      facts.large.crossRunRef,
+    );
     // Each stream's edge rests on a record a read by kind would drop.
     const firstOfStream = new Map<string, { kind: string }>();
     const lastOfStream = new Map<string, { kind: string }>();
@@ -599,7 +620,7 @@ test("the large-run corpus writes the shapes its drivers are read from, at a sma
       (record) => record.payload.transcript !== undefined,
     );
     expect(references.length).toBeGreaterThan(0);
-    expect(references[0].payload.transcript.history_id).toMatch(
+    expect(references[0]?.payload.transcript?.history_id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/u,
     );
     // The harness-scope spans' pointer file, one line per span.
