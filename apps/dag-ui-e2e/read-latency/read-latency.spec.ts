@@ -1132,7 +1132,8 @@ interface HistoryPages {
   /** Asks again once the rest has arrived. */
   readonly after: (page: Page) => Promise<void>;
   readonly result: () => {
-    node_before_rest_s: number;
+    /** `null` only on a host's run whose rest arrived before a page was asked for. */
+    node_before_rest_s: number | null;
     node_after_rest_s: number;
     overall_span_page_s: number | null;
     slowest_s: number;
@@ -1144,13 +1145,17 @@ interface HistoryPages {
  * The busiest node's history pages, asked for by the page's own control on the
  * node opening the rest-arrived reading holds: one page before the rest is
  * published and one after, then Overall's span page as the client asks for it.
+ * The corpus is sized so its rest is still loading when the first page is asked
+ * for, and a corpus whose rest was not is refused. A host's run may be small
+ * enough that its rest arrives first; that run has no page before the rest.
  */
 function historyPages(
   world: LargeWorld,
   port: number,
   complete: Complete,
 ): HistoryPages {
-  let before: number | undefined;
+  const generated = world.facts !== undefined;
+  let before: number | null | undefined;
   let after: number | undefined;
   let rowsAfter = 0;
   let overallSpan: number | null = null;
@@ -1170,10 +1175,14 @@ function historyPages(
   return {
     async before(page) {
       // The "before" reading is only that while the rest is still loading.
-      if ((await page.getByText(HISTORY_LOADING).count()) === 0)
-        throw new Error(
-          "the rest of the run arrived before the first page was asked for",
-        );
+      if ((await page.getByText(HISTORY_LOADING).count()) === 0) {
+        if (generated)
+          throw new Error(
+            "the rest of the run arrived before the first page was asked for",
+          );
+        before = null;
+        return;
+      }
       before = (await pageRead(page)).seconds;
     },
     async after(page) {
@@ -1205,7 +1214,7 @@ function historyPages(
         node_before_rest_s: before,
         node_after_rest_s: after,
         overall_span_page_s: overallSpan,
-        slowest_s: Math.max(before, after),
+        slowest_s: Math.max(before ?? after, after),
         rows_shown_after: rowsAfter,
       };
     },
@@ -1224,7 +1233,8 @@ async function statusRead(world: LargeWorld, port: number) {
       expect(response.ok, `status of ${run}`).toBe(true);
       return (Date.now() - started) / 1000;
     };
-    const small = await timed(world.smallRun);
+    // A host's root names no small run of its own, so only its run is read.
+    const small = world.smallRun === "" ? null : await timed(world.smallRun);
     const large = await timed(world.run);
     const starts = existsSync(world.standInLog)
       ? readFileSync(world.standInLog, "utf8").split("\n").filter(Boolean)
@@ -1233,7 +1243,7 @@ async function statusRead(world: LargeWorld, port: number) {
     return {
       small_s: small,
       large_s: large,
-      slowest_s: Math.max(small, large),
+      slowest_s: Math.max(small ?? large, large),
       checkpoint_bytes: statSync(
         join(world.runsRoot, world.run, "checkpoint.json"),
       ).size,
@@ -1244,7 +1254,24 @@ async function statusRead(world: LargeWorld, port: number) {
   }
 }
 
-async function measureLargeRun(browser: Browser): Promise<LargeRun> {
+/**
+ * What one measurement holds. A generated corpus fills every figure, which the
+ * large-run telemetry's schema requires; a host's run may leave the two this
+ * names `null`, as `historyPages` and `statusRead` say.
+ */
+type Measured = Omit<LargeRun, "history_page" | "status"> & {
+  readonly history_page: Omit<
+    LargeRun["history_page"],
+    "node_before_rest_s"
+  > & {
+    readonly node_before_rest_s: number | null;
+  };
+  readonly status: Omit<LargeRun["status"], "small_s"> & {
+    readonly small_s: number | null;
+  };
+};
+
+async function measureLargeRun(browser: Browser): Promise<Measured> {
   const world = buildLargeWorld();
   const port = await freePort();
   try {
@@ -1354,10 +1381,17 @@ if (HOST_RUNS_ROOT !== undefined)
   test("one run's first screens, as this host holds them", async ({
     browser,
   }) => {
-    const measured = await measureLargeRun(browser);
+    // `measure-run.mjs` names the file and prints it, so the runner's own
+    // report never shares a stream with the figures.
     if (HOST_OUTPUT === undefined)
-      console.log(JSON.stringify(measured, null, 2));
-    else writeFileSync(HOST_OUTPUT, `${JSON.stringify(measured, null, 2)}\n`);
+      throw new Error(
+        "a host measurement needs READ_LATENCY_OUTPUT to write to",
+      );
+    const measured = await measureLargeRun(browser);
+    writeFileSync(
+      HOST_OUTPUT,
+      `${JSON.stringify({ run: HOST_RUN, node: HOST_NODE, ...measured }, null, 2)}\n`,
+    );
     // Written first, so a run whose screens went wrong still leaves its figures to
     // read; it is a failure all the same.
     firstViewSchema.parse(measured.first_view);

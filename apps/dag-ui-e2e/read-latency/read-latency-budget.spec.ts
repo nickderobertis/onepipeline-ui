@@ -351,6 +351,10 @@ for (const [what, args] of [
   ["no run", ["--runs-root", "/nowhere"]],
   ["no runs root", ["--run", "r"]],
   ["an unknown flag", ["--runs-root", "/nowhere", "--run", "r", "--fast"]],
+  [
+    "a run with no journal to choose a node from",
+    ["--runs-root", "/nowhere", "--run", "r"],
+  ],
 ] as const)
   test(`measure-run-load-on-host refuses ${what} as a usage error`, () => {
     const run = measureRun(args);
@@ -371,6 +375,8 @@ test("measure-run-load-on-host hands the root to the measurement and exits as it
       root,
       "--run",
       "r",
+      "--node",
+      "n",
       "--output",
       output,
     ]);
