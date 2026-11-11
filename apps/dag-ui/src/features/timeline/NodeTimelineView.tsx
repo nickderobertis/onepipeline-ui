@@ -828,15 +828,6 @@ function timeRange(
   return [first, last > first ? last : first + 1];
 }
 
-/**
- * The middle of a collapsed run, and the one control that puts it back.
- *
- * The count and the kind are the button's own words rather than a shape beside it,
- * so a reader who cannot see the ellipsis is told exactly what is behind it and how
- * much of it there is. `aria-expanded` is what says which way the control goes, and
- * it is the same button both ways: one thing to find, one thing to press.
- */
-/** Where each transcript row stands on screen, by row id, in the order shown. */
 /** Within this many pixels of its top, the transcript reads earlier rows. */
 const NEAR_TOP_PX = 120;
 
@@ -847,6 +838,7 @@ function nearTop(transcript: HTMLElement): boolean {
   return transcript.scrollTop < NEAR_TOP_PX;
 }
 
+/** Where each transcript row stands on screen, by row id, in the order shown. */
 function transcriptPlaces(transcript: HTMLElement | null): Map<string, number> {
   const places = new Map<string, number>();
   for (const row of transcript?.querySelectorAll<HTMLElement>(
@@ -856,6 +848,14 @@ function transcriptPlaces(transcript: HTMLElement | null): Map<string, number> {
   return places;
 }
 
+/**
+ * The middle of a collapsed run, and the one control that puts it back.
+ *
+ * The count and the kind are the button's own words rather than a shape beside it,
+ * so a reader who cannot see the ellipsis is told exactly what is behind it and how
+ * much of it there is. `aria-expanded` is what says which way the control goes, and
+ * it is the same button both ways: one thing to find, one thing to press.
+ */
 function CollapsedRun({
   entry,
   onToggle,
