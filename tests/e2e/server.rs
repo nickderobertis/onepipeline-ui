@@ -18135,6 +18135,150 @@ fn a_run_launched_with_a_bus_hook_is_served_and_supervised_as_the_engine_recorde
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
+/// The recorded run [`a_run_launched_with_validators_is_read_as_its_engine_recorded_it`]
+/// serves: launch record, plan and journal exactly as an engine linking a bus
+/// that still had validators wrote them (`tests/fixtures/validators/README.md`).
+const VALIDATORS_RUN: &str = "nx-heal-removal-revise";
+
+/// A run an engine launched with `validators:` in its bus configuration, before
+/// `onemessagebus` removed them, is read through this server as that engine
+/// recorded it.
+///
+/// The linked engine no longer runs validators, so it reads such a record with
+/// the key set aside: the plan, the node's status, its settlement and the run's
+/// state are each held to the recorded files, and reading them leaves the
+/// launch record byte for byte as it was written. What it cannot do is judge an
+/// offer the way the run was launched to, so a reply handed to the run is
+/// refused in the engine's own words, and the run's channel holds nothing.
+#[test]
+fn a_run_launched_with_validators_is_read_as_its_engine_recorded_it() {
+    let recorded = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/validators")
+        .join(VALIDATORS_RUN);
+    let read_recorded = |name: &str| -> String {
+        fs::read_to_string(recorded.join(name)).expect("a recorded run file")
+    };
+    let launch: Value = serde_json::from_str(&read_recorded("launch.json")).expect("the launch");
+    assert!(
+        launch["bus_config"]["validators"]
+            .as_array()
+            .is_some_and(|validators| !validators.is_empty()),
+        "the recorded launch declares no validators: {launch}"
+    );
+    let session = launch["session"].as_str().expect("the launching session");
+
+    let serving = Serving::start_as(
+        |runs| {
+            let run = runs.join(VALIDATORS_RUN);
+            fs::create_dir_all(&run).expect("the run directory");
+            for name in ["launch.json", "plan.json", "events.jsonl"] {
+                fs::copy(recorded.join(name), run.join(name)).expect("a recorded run file");
+            }
+        },
+        session,
+    );
+    let run_dir = serving.run_dir(VALIDATORS_RUN);
+    let detail_path = format!("/api/v2/runs/{VALIDATORS_RUN}");
+    let read = http::get(serving.address, &detail_path);
+    assert_eq!(read.status, 200, "{}", read.body);
+    let detail = read.json();
+    assert_enveloped(&detail);
+
+    // The plan served is the one the engine wrote: every field the server
+    // serves of each task is the one `plan.json` holds. The older plan names
+    // no task `kind`, so that one alone is the default the linked engine reads
+    // it as.
+    let plan: Value = serde_json::from_str(&read_recorded("plan.json")).expect("the plan");
+    let served_tasks = detail["graph"]["plan"]["tasks"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the plan's tasks: {detail}"));
+    let recorded_tasks = plan["tasks"].as_array().expect("the recorded tasks");
+    assert_eq!(served_tasks.len(), recorded_tasks.len(), "{detail}");
+    for (served, recorded) in served_tasks.iter().zip(recorded_tasks) {
+        for (key, value) in served.as_object().expect("a task") {
+            if recorded.get(key).is_none() && key == "kind" {
+                assert_eq!(value, &json!("agent"), "{served}");
+                continue;
+            }
+            assert_eq!(&recorded[key], value, "task field {key}: {recorded}");
+        }
+    }
+    assert_eq!(detail["graph"]["plan"]["name"], plan["name"]);
+
+    // Every node the engine settled is served in the status and with the
+    // outcome its `node-settled` record carries.
+    let journal: Vec<Value> = read_recorded("events.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a journal record"))
+        .collect();
+    let settlements: Vec<&Value> = journal
+        .iter()
+        .filter(|record| record["kind"] == json!("node-settled"))
+        .collect();
+    assert!(!settlements.is_empty(), "the recorded run settled no node");
+    for record in settlements {
+        let node = record["labels"]["node"].as_str().expect("a settled node");
+        let settlement = &record["payload"];
+        assert_eq!(
+            detail["graph"]["node_status"][node], settlement["status"],
+            "{node}: {detail}"
+        );
+        let result = &detail["graph"]["node_results"][node];
+        for key in ["status", "outcome"] {
+            assert_eq!(result[key], settlement[key], "{node} {key}: {result}");
+        }
+    }
+    // Its one node failed and its driver exited, so the run ended failed.
+    assert!(
+        journal
+            .iter()
+            .any(|record| record["kind"] == json!("driver-exited")),
+        "the recorded driver never exited"
+    );
+    assert_eq!(
+        detail["run"]["state"],
+        json!("ended-failed"),
+        "{}",
+        detail["run"]
+    );
+
+    // The record is read, never rewritten: its validators are still there.
+    assert_eq!(
+        fs::read_to_string(run_dir.join("launch.json")).expect("the served launch record"),
+        read_recorded("launch.json"),
+        "reading the run rewrote its launch record"
+    );
+
+    // A reply is refused in the engine's own words, and nothing reaches the run.
+    let refused = http::post(
+        serving.address,
+        &format!("{detail_path}/channel/reply"),
+        &json!({"version": 2, "commands": [
+            {"op": "finding", "message": "the run is worth a second look"}
+        ]})
+        .to_string(),
+    );
+    assert_eq!(refused.status, 422, "{}", refused.body);
+    let refused = refused.json();
+    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
+    let message = refused["error"]["message"].as_str().expect("a message");
+    for said in [
+        "launched with onemessagebus validators",
+        "this engine no longer runs",
+        "let the run settle, or stop it",
+    ] {
+        assert!(
+            message.contains(said),
+            "not refused saying {said:?}: {message}"
+        );
+    }
+    assert!(
+        !run_dir.join("channel").join("replies.jsonl").exists(),
+        "a refused reply reached the run's channel"
+    );
+    serving.stop_on(Stop::Terminate);
+}
+
 /// A harness stand-in for a dispatch on either side of the publication boundary:
 /// it records the argv it was given in `argv-<pid>.txt` under `records`, and the
 /// first line of its stdin — the stream-json prompt frame, where the turn was
