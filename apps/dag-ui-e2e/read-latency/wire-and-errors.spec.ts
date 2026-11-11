@@ -11,6 +11,7 @@ import {
 } from "@onepipeline-ui/dag-model";
 import { READ_DEADLINE_MS } from "@onepipeline-ui/telemetry-client";
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { z } from "zod";
 import {
   addressOf,
   appendTo,
@@ -22,10 +23,24 @@ import {
   serve,
   stop,
   toolPayload,
+  visibleOf,
   type World,
 } from "./journey-world";
 
 const HISTORY_LOADING = "The rest of this run's history is still loading";
+
+/** The path to a first answer's progress, keeping every member it does not list. */
+const heldAnswerSchema = z.looseObject({
+  initial: z.looseObject({
+    snapshot: z.looseObject({
+      visible: z.looseObject({
+        detail: z.looseObject({
+          progress: z.record(z.string(), z.unknown()),
+        }),
+      }),
+    }),
+  }),
+});
 
 let world: World;
 test.beforeAll(() => {
@@ -278,13 +293,12 @@ test("progress.failed shows the error and keeps the held screen", async ({
     await page.route("**/api/v2/subscriptions", async (route) => {
       if (route.request().method() !== "POST") return route.continue();
       const answer = await route.fetch();
-      const body = (await answer.json()) as {
-        initial: {
-          snapshot: {
-            visible: { detail: { progress: Record<string, unknown> } };
-          };
-        };
-      };
+      const raw: unknown = await answer.json();
+      // The contract's own parser refuses an answer it does not name; the
+      // loose parse below keeps every member it does not list, so the wire
+      // carries the server's answer with only `progress.failed` added.
+      visibleOf(raw);
+      const body = heldAnswerSchema.parse(raw);
       body.initial.snapshot.visible.detail.progress.failed =
         "the complete read failed";
       return route.fulfill({ response: answer, json: body });

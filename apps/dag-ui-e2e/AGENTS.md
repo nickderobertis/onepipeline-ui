@@ -33,15 +33,11 @@ no verdict of its is replayed. A new read budget extends its `workload.json`,
 sizes, run as a command rather than imported across the project line, so a change to the
 generator alone selects `dag-ui-e2e` and not this project.
 
-Its timings are split by what fits where. `test` records Action items' figures into
-`telemetry/read-latency.json` for `budgets.yaml`, on every pull request that selects
-the project. `test-large` records one large run's first screens, rest, history and
-status into `telemetry/read-latency-large.json` for `large-run/budgets.yaml`.
-`test-journeys` drives the large-corpus journeys. The last two are reached only
-through `check`, which the release pull request's sweep runs, because beside the
-affected tier they ran test-linux past its 36-minute cap. A new large-run budget
-goes in `large-run/budgets.yaml` and the `large-run` document, not beside Action
-items'.
+Only Action items' timings run on an ordinary pull request. The large run's timings
+and the large-corpus journeys ran test-linux past its 36-minute cap beside the affected
+tier, so `check` alone reaches them and the release pull request's sweep holds them. A new
+large-run budget joins `large-run/budgets.yaml` and its telemetry document, never the
+affected tier's.
 
 ## Reaching the app
 

@@ -5,6 +5,7 @@
  * same checks refuse it by name, so they cannot pass blind.
  */
 import { expect, type Page, test } from "@playwright/test";
+import { z } from "zod";
 import {
   addressOf,
   buildWorld,
@@ -17,6 +18,7 @@ import {
   screenStates,
   serve,
   stop,
+  visibleOf,
   type World,
 } from "./journey-world";
 import {
@@ -52,7 +54,12 @@ async function reachMark(
     if (route.request().method() !== "POST" || feed === undefined)
       return route.continue();
     const answer = await route.fetch();
-    const body = (await answer.json()) as Body;
+    const raw: unknown = await answer.json();
+    // The contract's own parser refuses an answer it does not name before one
+    // value of the raw body is changed in place, so the wire carries the
+    // server's answer with that one value different.
+    visibleOf(raw);
+    const body = raw as Body;
     feed(body.initial.snapshot.visible);
     return route.fulfill({ response: answer, json: body });
   });
@@ -63,10 +70,9 @@ async function reachMark(
       timeout: NEVER,
     })
     .toBe(true);
-  const answer = JSON.parse(
-    (await page.evaluate("window.__firstAnswer")) as string,
-  ) as Body;
-  const visible = answer.initial.snapshot.visible;
+  const visible = visibleOf(
+    JSON.parse(z.string().parse(await page.evaluate("window.__firstAnswer"))),
+  );
   const deadline = Date.now() + NEVER / 5;
   let last: readonly string[] = ["no state recorded"];
   for (;;) {
@@ -322,7 +328,6 @@ for (const wrong of WRONG_ANSWERS)
     }
   });
 
-/** One value wrong on the page rather than in the answer. */
 /** The state a view's mark was reached at; a view that reached none fails here. */
 function marked(
   reached: { readonly state: ScreenState | undefined },

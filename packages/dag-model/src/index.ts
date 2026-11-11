@@ -2917,12 +2917,15 @@ export const FIRST_ANSWER_DETAIL_PATHS: readonly string[] = [
   "node_details",
 ];
 
-function allowedTree(paths: readonly string[]): Map<string, unknown> {
-  const root = new Map<string, unknown>();
+/** The members a path list allows, one level per step; `*` stands for any key or item. */
+type AllowedTree = Map<string, AllowedTree>;
+
+function allowedTree(paths: readonly string[]): AllowedTree {
+  const root: AllowedTree = new Map();
   for (const path of paths) {
     let at = root;
     for (const step of path.split(".")) {
-      let next = at.get(step) as Map<string, unknown> | undefined;
+      let next = at.get(step);
       if (next === undefined) {
         next = new Map();
         at.set(step, next);
@@ -2937,13 +2940,13 @@ const FIRST_ANSWER_TREE = allowedTree(FIRST_ANSWER_DETAIL_PATHS);
 
 function unnamedBelow(
   value: unknown,
-  allowed: Map<string, unknown>,
+  allowed: AllowedTree,
   path: string,
   found: string[],
 ): void {
   if (allowed.size === 0) return;
   if (Array.isArray(value)) {
-    const each = allowed.get("*") as Map<string, unknown> | undefined;
+    const each = allowed.get("*");
     if (each === undefined) return;
     value.forEach((item, index) => {
       unnamedBelow(item, each, `${path}[${index}]`, found);
@@ -2952,9 +2955,7 @@ function unnamedBelow(
   }
   if (typeof value !== "object" || value === null) return;
   for (const [key, member] of Object.entries(value)) {
-    const below = (allowed.get(key) ?? allowed.get("*")) as
-      | Map<string, unknown>
-      | undefined;
+    const below = allowed.get(key) ?? allowed.get("*");
     if (below === undefined) {
       found.push(`${path}.${key}`);
       continue;
@@ -2992,8 +2993,12 @@ export function timelineViolations(
 ): readonly string[] {
   const found: string[] = [];
   timeline.spans.forEach((raw, index) => {
-    const span = raw as Record<string, unknown>;
     const at = `timeline.spans[${index}]`;
+    if (!isRecord(raw)) {
+      found.push(`${at}: not an object`);
+      return;
+    }
+    const span = raw;
     spanMemberViolations(span, at, found);
     if (span.harness_scope !== undefined && scope === "run" && !complete)
       found.push(`${at}.harness_scope`);
@@ -3156,6 +3161,10 @@ function applyOne(root: Json, op: PatchOp): Json {
     }
     throw new PatchError("a deletion names an object member");
   });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isObject(value: Json): value is Record<string, Json> {

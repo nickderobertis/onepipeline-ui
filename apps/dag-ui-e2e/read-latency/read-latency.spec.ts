@@ -951,17 +951,13 @@ async function firstViewReading(
       }
     }
     if (answer !== undefined) {
+      const { visible } = answer.initial.snapshot;
       const states = z
         .array(screenStateSchema)
         .parse(await page.evaluate("window.__firstScreen ?? []"));
       mark = states.find(
         (state) =>
-          checkScreen(
-            view,
-            (answer as Answer).initial.snapshot.visible,
-            state,
-            world.busiestNode,
-          ).length === 0,
+          checkScreen(view, visible, state, world.busiestNode).length === 0,
       );
       if (mark !== undefined) break;
     }

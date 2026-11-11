@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { STILL_LOADING_TEXT } from "../../lib/loading";
 import type { HistoryFailure } from "./useTimelineHistory";
 
-/** The control beside a page's rows: it loads the next, or says the last failed. */
+/** Says a page of history failed, naming what failed, with Try again beside it. */
 export function HistoryFailed({
   failure,
 }: {
