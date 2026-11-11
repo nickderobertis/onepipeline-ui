@@ -18228,17 +18228,28 @@ fn a_run_launched_with_validators_is_read_as_its_engine_recorded_it() {
             assert_eq!(result[key], settlement[key], "{node} {key}: {result}");
         }
     }
-    // Its one node failed and its driver exited, so the run ended failed.
+    // Its one node failed and its driver exited. Only the host that recorded
+    // the driver can prove it over by its pid, and there the failed node ends
+    // the run; anywhere else the engine cannot, and a driver last heard from
+    // long ago reads parked. The run was recorded on an operator's host, so
+    // which of the two this journey sees depends on where it runs.
     assert!(
         journal
             .iter()
             .any(|record| record["kind"] == json!("driver-exited")),
         "the recorded driver never exited"
     );
+    let here = onepipeline_ui::liveness::hostname();
+    let state = if launch["host"] == json!(here) {
+        "ended-failed"
+    } else {
+        "parked"
+    };
     assert_eq!(
         detail["run"]["state"],
-        json!("ended-failed"),
-        "{}",
+        json!(state),
+        "recorded on {}, read on {here}: {}",
+        launch["host"],
         detail["run"]
     );
 
