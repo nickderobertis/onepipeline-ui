@@ -18205,8 +18205,6 @@ fn a_run_launched_with_validators_is_read_as_its_engine_recorded_it() {
     }
     assert_eq!(detail["graph"]["plan"]["name"], plan["name"]);
 
-    // Every node the engine settled is served in the status and with the
-    // outcome its `node-settled` record carries.
     let journal: Vec<Value> = read_recorded("events.jsonl")
         .lines()
         .map(|line| serde_json::from_str(line).expect("a journal record"))
@@ -18253,14 +18251,12 @@ fn a_run_launched_with_validators_is_read_as_its_engine_recorded_it() {
         detail["run"]
     );
 
-    // The record is read, never rewritten: its validators are still there.
     assert_eq!(
         fs::read_to_string(run_dir.join("launch.json")).expect("the served launch record"),
         read_recorded("launch.json"),
         "reading the run rewrote its launch record"
     );
 
-    // A reply is refused in the engine's own words, and nothing reaches the run.
     let refused = http::post(
         serving.address,
         &format!("{detail_path}/channel/reply"),
