@@ -25,7 +25,7 @@ use std::{
 };
 
 /// What the loopback Linear holds, and every document it was sent.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Workspace {
     projects: Vec<Value>,
     issues: Vec<Value>,
@@ -153,7 +153,59 @@ impl Workspace {
         }
     }
 
+    /// A document the plugin composed of several of its own single-root documents, each under
+    /// its alias `a<i>` with its variables renamed `$<name>_<i>`, answered as Linear answers one
+    /// (`graphql::composed`): every alias as its document alone, under that alias — or, when one
+    /// alias is refused, that refusal alone, at that alias's path, with no `data` and nothing of
+    /// any alias applied.
+    fn answer_batch(
+        &mut self,
+        singles: &[&str],
+        variables: &Value,
+    ) -> Result<(u16, Value), String> {
+        let before = self.clone();
+        let mut data = serde_json::Map::new();
+        for (at, single) in singles.iter().enumerate() {
+            let alias = format!("a{at}");
+            let suffix = format!("_{at}");
+            let own: serde_json::Map<String, Value> = variables
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter_map(|(name, value)| {
+                    name.strip_suffix(&suffix)
+                        .map(|name| (name.to_owned(), value.clone()))
+                })
+                .collect();
+            let (status, mut answer) = self.answer_valid(single, &Value::Object(own))?;
+            if let Some(error) = answer["errors"].get_mut(0) {
+                let rest: Vec<Value> = error["path"]
+                    .as_array()
+                    .map(|path| path.iter().skip(1).cloned().collect())
+                    .unwrap_or_default();
+                error["path"] = std::iter::once(json!(alias)).chain(rest).collect();
+                let error = error.take();
+                let unexpected = std::mem::take(&mut self.unexpected);
+                *self = Workspace {
+                    unexpected,
+                    ..before
+                };
+                return Ok((status, json!({"data": null, "errors": [error]})));
+            }
+            let root = answer["data"]
+                .as_object_mut()
+                .and_then(|roots| roots.values_mut().next())
+                .map(Value::take)
+                .ok_or_else(|| format!("`{alias}` answered no root"))?;
+            data.insert(alias, root);
+        }
+        Ok((200, json!({ "data": data })))
+    }
+
     fn answer_valid(&mut self, query: &str, variables: &Value) -> Result<(u16, Value), String> {
+        if let Some(singles) = graphql::decomposed(query) {
+            return self.answer_batch(&singles, variables);
+        }
         let input = &variables["input"];
         let data = match query {
             q if q == graphql::RESOLUTION => resolution(),
