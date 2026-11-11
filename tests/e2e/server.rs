@@ -18283,7 +18283,6 @@ fn a_run_launched_with_validators_is_read_as_its_engine_recorded_it() {
         !run_dir.join("channel").join("replies.jsonl").exists(),
         "a refused reply reached the run's channel"
     );
-    serving.stop_on(Stop::Terminate);
 }
 
 /// A harness stand-in for a dispatch on either side of the publication boundary:
