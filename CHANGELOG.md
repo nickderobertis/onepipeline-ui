@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.78.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.77.0...v0.78.0) - 2026-11-11
+
+### Fixed
+
+- *(release)* [**breaking**] let a release be cut when the v0.77.0 baseline no longer builds ([#731](https://github.com/nickderobertis/onepipeline-ui/pull/731))
+- *(deps)* link the engine that links oneagentgraph 0.11.4 ([#729](https://github.com/nickderobertis/onepipeline-ui/pull/729))
+
 ## [0.77.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.76.0...v0.77.0) - 2026-11-10
 
 ### Fixed
