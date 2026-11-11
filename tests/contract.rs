@@ -23,10 +23,11 @@ use onepipeline_ui::api::RunApi;
 use onepipeline_ui::cli::{Cli, Command, ServeArgs, SessionId, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, DispatchId, Envelope, ErrorEnvelope,
-    EventFrame, EventsQuery, Health, HealthStatus, NextQuery, NodeId, PageLimit, PageOwner,
-    ProjectId, ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery, ShutdownRequest,
-    ShutdownScope, SseEvent, StopRequest, SurfaceRequest, TimelineEventsQuery, TimelineQuery,
-    TimelineScope, TranscriptQuery, API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION,
+    EventFrame, EventsPageLimit, EventsQuery, Health, HealthStatus, NextQuery, NodeId, PageLimit,
+    PageOwner, ProjectId, ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery,
+    ShutdownRequest, ShutdownScope, SseEvent, StopRequest, SurfaceRequest, TimelineEventsQuery,
+    TimelineQuery, TimelineScope, TranscriptQuery, API_VERSION, RUNS_PAGE_LIMIT,
+    TELEMETRY_SCHEMA_VERSION, TIMELINE_EVENTS_PAGE, TIMELINE_EVENTS_PAGE_MAX,
     TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
@@ -568,7 +569,7 @@ fn every_route_serves_the_payload_its_golden_pins() {
                     from: None,
                     to: None,
                     filter: None,
-                    limit: 2,
+                    limit: EventsPageLimit::try_from(2).expect("in range"),
                 },
             ))
         }),
@@ -2168,6 +2169,26 @@ fn a_run_list_query_cannot_carry_a_page_size_outside_the_bound() {
     });
     let encoded: Value = serde_json::to_value(&query).expect("serialize the query");
     assert_eq!(encoded["limit"], serde_json::json!(RUNS_PAGE_LIMIT));
+}
+
+/// A page of a run's history holds at least one row and at most the bound, however
+/// the query is built: the route's parser and a caller of the hub alike go
+/// through the one constructor, and the default is the page the contract states.
+#[test]
+fn a_history_page_cannot_carry_a_limit_outside_the_bound() {
+    for refused in [0, TIMELINE_EVENTS_PAGE_MAX + 1] {
+        let error = EventsPageLimit::try_from(refused).expect_err("out of range");
+        assert_eq!(error.code(), "invalid_request", "limit={refused}");
+    }
+    for held in [1, TIMELINE_EVENTS_PAGE_MAX] {
+        assert_eq!(
+            EventsPageLimit::try_from(held)
+                .map(EventsPageLimit::get)
+                .ok(),
+            Some(held)
+        );
+    }
+    assert_eq!(EventsPageLimit::default().get(), TIMELINE_EVENTS_PAGE);
 }
 
 /// The browser client sends the page bound explicitly so its continuation pages

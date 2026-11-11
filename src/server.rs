@@ -37,13 +37,13 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::api::RunApi;
 use crate::contract::{
-    routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId, EventsQuery,
-    HumanItemAnswerRequest, HumanItemAnswersRequest, HumanItemCompleteRequest,
-    HumanItemDismissRequest, HumanItemId, HumanItemNoteRequest, HumanItemReopenRequest, NextQuery,
-    NodeId, PageCursor, PageLimit, PageOwner, ProjectId, RunId, RunQuery, RunSelection, RunsPage,
-    RunsQuery, ShutdownRequest, SpanId, StopRequest, SubscribeRequest, SubscriptionId,
-    SurfaceRequest, TimelineEventsQuery, TimelineQuery, TimelineScope, TranscriptQuery,
-    TIMELINE_EVENTS_PAGE, TIMELINE_EVENTS_PAGE_MAX,
+    routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId,
+    EventsPageLimit, EventsQuery, HumanItemAnswerRequest, HumanItemAnswersRequest,
+    HumanItemCompleteRequest, HumanItemDismissRequest, HumanItemId, HumanItemNoteRequest,
+    HumanItemReopenRequest, NextQuery, NodeId, PageCursor, PageLimit, PageOwner, ProjectId, RunId,
+    RunQuery, RunSelection, RunsPage, RunsQuery, ShutdownRequest, SpanId, StopRequest,
+    SubscribeRequest, SubscriptionId, SurfaceRequest, TimelineEventsQuery, TimelineQuery,
+    TimelineScope, TranscriptQuery,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
@@ -642,18 +642,10 @@ fn timeline_events_query(raw: &HashMap<String, String>) -> Result<TimelineEvents
             .transpose()
     };
     let limit = match raw.get("limit") {
-        None => TIMELINE_EVENTS_PAGE,
-        Some(limit) => {
-            let limit: usize = limit.parse().map_err(|_| {
-                ApiError::InvalidRequest(format!("limit must be a number, got {limit:?}"))
-            })?;
-            if limit == 0 || limit > TIMELINE_EVENTS_PAGE_MAX {
-                return Err(ApiError::InvalidRequest(format!(
-                    "limit must be between 1 and {TIMELINE_EVENTS_PAGE_MAX}"
-                )));
-            }
-            limit
-        }
+        None => EventsPageLimit::default(),
+        Some(limit) => EventsPageLimit::try_from(limit.parse::<usize>().map_err(|_| {
+            ApiError::InvalidRequest(format!("limit must be a number, got {limit:?}"))
+        })?)?,
     };
     Ok(TimelineEventsQuery {
         owner,

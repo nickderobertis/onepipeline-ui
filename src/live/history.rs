@@ -138,7 +138,7 @@ fn from_selected(
             before: query.cursor.map(|cursor| (cursor.at, cursor.order)),
             from: query.from,
             to: query.to,
-            limit: query.limit,
+            limit: query.limit.get(),
         },
     };
     let built = LiveTimeline::build(
@@ -288,7 +288,7 @@ fn page_of(spans: &Value, query: &TimelineEventsQuery) -> Result<Value, ApiError
             } < cursor
         })
     });
-    let start = older.saturating_sub(query.limit);
+    let start = older.saturating_sub(query.limit.get());
     let next_cursor = (start > 0).then(|| {
         PageCursor {
             at: rows[start].0 .0,

@@ -1495,7 +1495,40 @@ pub struct TimelineEventsQuery {
     /// Which rows, as `?filter=` elsewhere.
     pub filter: Option<FilterSpec>,
     /// How many rows at most.
-    pub limit: usize,
+    pub limit: EventsPageLimit,
+}
+
+/// How many rows a page of `GET .../timeline/events` holds: at least one and at
+/// most [`TIMELINE_EVENTS_PAGE_MAX`], so a caller that skips the HTTP parser
+/// cannot ask for an empty or unbounded page either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventsPageLimit(usize);
+
+impl EventsPageLimit {
+    /// How many rows this page holds.
+    #[must_use]
+    pub fn get(self) -> usize {
+        self.0
+    }
+}
+
+impl Default for EventsPageLimit {
+    fn default() -> Self {
+        Self(TIMELINE_EVENTS_PAGE)
+    }
+}
+
+impl TryFrom<usize> for EventsPageLimit {
+    type Error = ApiError;
+
+    fn try_from(requested: usize) -> Result<Self, Self::Error> {
+        if requested == 0 || requested > TIMELINE_EVENTS_PAGE_MAX {
+            return Err(ApiError::InvalidRequest(format!(
+                "limit must be between 1 and {TIMELINE_EVENTS_PAGE_MAX}"
+            )));
+        }
+        Ok(Self(requested))
+    }
 }
 
 /// What a timeline request is scoped to.
