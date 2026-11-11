@@ -380,7 +380,7 @@ test("a node's unloaded history is hatched over exactly the rows its window left
   expect(missing.length).toBeGreaterThan(0);
   const plot = page
     .getByRole("region", { name: "Node timeline" })
-    .locator('[aria-label^="Timeline plot"]')
+    .getByLabel(/^Timeline plot/u)
     .first();
   // llmlint: ignore-block[e2e_uses_accessible_selectors] a hatch is a drawn overlay with no role of its own; its words are read by text below, and its bounds are the data attributes the plot draws it from.
   const hatches = page.locator(".history-hatch");
@@ -422,6 +422,124 @@ test("a node's unloaded history is hatched over exactly the rows its window left
   // Read back through the page's own control, nothing is left unloaded.
   await loadAllEarlierRows(page);
   await expect(hatches).toHaveCount(0);
+});
+
+/** Every page of a run's history the page asks for, as it asks. */
+function historyAsks(page: Page): URL[] {
+  const asked: URL[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/timeline/events")) asked.push(url);
+  });
+  return asked;
+}
+
+/** The retries fixture's node, opened and drawn by the app itself. */
+async function openRetriesNode(page: Page) {
+  const replay = await import("./fixtures/timeline-retries.json", {
+    with: { type: "json" },
+  });
+  const fixture = replay.default;
+  await page.goto(`/?run=${fixture.run_id}&node=${fixture.node}`);
+  // llmlint: ignore[e2e_uses_accessible_selectors] the first screen's plot carries the same name as the app's; its class is the only thing telling the two apart, and the journey waits for the app's.
+  await expect(page.locator(".first-plot")).toHaveCount(0);
+  const plot = page
+    .getByRole("region", { name: "Node timeline" })
+    .getByLabel(/^Timeline plot/u)
+    .first();
+  await expect(plot).toBeVisible();
+  return { fixture, plot };
+}
+
+test("zooming a node's plot asks for that stretch of its rows, and a failed stretch recovers by Try again", async ({
+  page,
+}) => {
+  const asked = historyAsks(page);
+  let failed = 0;
+  // llmlint: ignore-block[e2e_not_mocked, tests_mirror_real_usage] the network boundary is the only doubled party: the first stretch read is answered 503 as a failing host answers it, and every other read reaches the real server.
+  await page.route("**/timeline/events?*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.has("from") && failed === 0) {
+      failed += 1;
+      return route.fulfill({ status: 503, body: "unavailable" });
+    }
+    return route.continue();
+  });
+  // llmlint: ignore-end[e2e_not_mocked, tests_mirror_real_usage]
+  const { fixture, plot } = await openRetriesNode(page);
+  expect(asked.filter((url) => url.searchParams.has("from"))).toHaveLength(0);
+  // llmlint: ignore[e2e_uses_accessible_selectors] the plot's spans are positioned SVG geometry that no role or name carries; the journey only finds where one is drawn and then zooms there with the pointer, as a person does.
+  const shape = plot.locator('[data-timeline-shape="span"]').first();
+  const bounds = await shape.boundingBox();
+  if (bounds === null) throw new Error("the node's plot has no span drawn");
+  await page.mouse.move(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2,
+  );
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, -240);
+  await page.keyboard.up("Control");
+  await expect
+    .poll(() => asked.filter((url) => url.searchParams.has("from")).length)
+    .toBeGreaterThan(0);
+  const stretch = asked.find((url) => url.searchParams.has("from"));
+  expect(stretch?.searchParams.get("scope")).toBe("node");
+  expect(stretch?.searchParams.get("node")).toBe(fixture.node);
+  expect(Date.parse(stretch?.searchParams.get("from") ?? "")).toBeLessThan(
+    Date.parse(stretch?.searchParams.get("to") ?? ""),
+  );
+  // The failed read says so at the transcript's control, and Try again reads it.
+  const alert = page
+    .getByRole("region", { name: "Node transcript" })
+    .getByRole("alert");
+  await expect(alert).toContainText("Earlier rows did not load");
+  const before = asked.length;
+  await alert.getByRole("button", { name: "Try again" }).click();
+  await expect
+    .poll(() =>
+      asked
+        .slice(before)
+        .some(
+          (url) =>
+            url.searchParams.get("from") === stretch?.searchParams.get("from"),
+        ),
+    )
+    .toBe(true);
+  await expect(alert).toHaveCount(0);
+});
+
+test("scrolling a node's transcript up to its top asks for the rows before it and draws them", async ({
+  page,
+}) => {
+  const asked = historyAsks(page);
+  await openRetriesNode(page);
+  const transcript = page.getByRole("region", { name: "Node transcript" });
+  const rows = transcript.getByRole("article");
+  await expect(rows.first()).toBeVisible();
+  const shown = await rows.count();
+  const paged = () =>
+    asked.filter(
+      (url) =>
+        !url.searchParams.has("from") &&
+        !url.searchParams.has("span") &&
+        url.searchParams.get("scope") === "node",
+    ).length;
+  expect(paged()).toBe(0);
+  // Scrolled as a person scrolls, with the wheel over the transcript: down into
+  // the rows it opens on, then back up to its top.
+  await transcript.hover();
+  await expect(async () => {
+    await page.mouse.wheel(0, 600);
+    expect(
+      await transcript.evaluate((element) => element.scrollTop),
+    ).toBeGreaterThan(120);
+  }).toPass();
+  expect(paged()).toBe(0);
+  await expect(async () => {
+    await page.mouse.wheel(0, -2000);
+    expect(paged()).toBeGreaterThan(0);
+  }).toPass();
+  await expect.poll(() => rows.count()).toBeGreaterThan(shown);
 });
 
 test("retries, equal timestamps and repeated relays keep every record under its served identity", async ({
