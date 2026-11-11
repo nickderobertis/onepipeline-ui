@@ -6,16 +6,19 @@ import { defineConfig } from "@playwright/test";
  * read-latency telemetry and the runner that reads it, `dag-ui-read-latency:test`.
  * `large` holds one large run's telemetry and the host measurement of a run,
  * `dag-ui-read-latency:test-large`, and
- * `journeys` the large-corpus journeys, `dag-ui-read-latency:test-journeys`. Those
- * two targets have edges of their own because they took longer than
- * test-linux's affected tier had left inside its cap; the release pull request's
- * sweep reaches them through `check`.
+ * `journeys` the large-corpus journeys, `dag-ui-read-latency:test-journeys`.
+ * test-linux runs all three wherever a change reaches this project.
  *
  * No `webServer`: each measured page starts its own `onepipeline-api serve` over
- * the corpus this tier generates. One worker, because nothing may run beside a
- * timing, and no timeout on a window of known length: a page's own waits guard
- * against a hang.
+ * the corpus this tier generates. The two timing projects take one worker,
+ * because nothing may run beside a timing, and no timeout on a window of known
+ * length: a page's own waits guard against a hang. The journeys time nothing,
+ * and their target runs alone, so they take JOURNEY_WORKERS — one file each,
+ * every file over a world of its own — and finish in the time of their longest
+ * file rather than of all of them.
  */
+const JOURNEY_WORKERS = 4;
+
 /**
  * The large run's measurements, by title: the one that records its figures, a
  * host's measurement of one of its own runs, and the journey that drives that
@@ -31,11 +34,13 @@ export default defineConfig({
       name: "budgets",
       testMatch: ["read-latency.spec.ts", "read-latency-budget.spec.ts"],
       grepInvert: LARGE_RUN,
+      workers: 1,
     },
     {
       name: "large",
       testMatch: ["read-latency.spec.ts", "measure-run.spec.ts"],
       grep: LARGE_RUN,
+      workers: 1,
     },
     {
       name: "journeys",
@@ -44,11 +49,14 @@ export default defineConfig({
         "wire-and-errors.spec.ts",
         "live-run.spec.ts",
         "reach-everything.spec.ts",
+        "reach-pages.spec.ts",
+        "reach-transcript.spec.ts",
       ],
+      workers: JOURNEY_WORKERS,
     },
   ],
   outputDir: join(import.meta.dirname, "../test-results/read-latency"),
-  workers: 1,
+  workers: JOURNEY_WORKERS,
   fullyParallel: false,
   timeout: 0,
   reporter: "list",

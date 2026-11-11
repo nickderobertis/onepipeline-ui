@@ -334,7 +334,13 @@ const LARGE_RUN_TASKS: [&str; 5] = [
 
 /// The jobs ci.yml defines: the four a pull request's checks run in and the
 /// `budgets` report after them. A large-run tier is not a job of its own.
-const CI_JOBS: [&str; 5] = ["lint", "test-linux", "test-windows", "test-macos", "budgets"];
+const CI_JOBS: [&str; 5] = [
+    "lint",
+    "test-linux",
+    "test-windows",
+    "test-macos",
+    "budgets",
+];
 
 /// A change that slows a large run's first screen is caught on the pull request
 /// that makes it: test-linux's affected tier selects the large run's timings,
@@ -378,10 +384,9 @@ fn the_large_run_timings_journeys_and_budgets_run_wherever_the_read_paths_change
             "the release pull request's sweep does not run {task}: {selected:?}"
         );
     }
-    let workflow = fs::read_to_string(workspace.root().join(".github/workflows/ci.yml"))
-        .expect("read ci.yml");
-    let workflow: serde_json::Value =
-        serde_saphyr::from_str(&workflow).expect("ci.yml is YAML");
+    let workflow =
+        fs::read_to_string(workspace.root().join(".github/workflows/ci.yml")).expect("read ci.yml");
+    let workflow: serde_json::Value = serde_saphyr::from_str(&workflow).expect("ci.yml is YAML");
     let jobs: BTreeSet<&str> = workflow["jobs"]
         .as_object()
         .expect("ci.yml names its jobs")

@@ -4,18 +4,18 @@
  */
 
 import { timelineEventsPageSchema } from "@onepipeline-ui/dag-model";
-import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { expect, type Page, test } from "@playwright/test";
 import {
   addressOf,
   buildWorld,
-  completeDocuments,
   LARGE_WORKLOAD,
   metricText,
   NEVER,
   removeWorld,
   type Served,
   serve,
+  settledDetail,
+  settledTimeline,
   stop,
   visibleOf,
   type World,
@@ -41,35 +41,11 @@ const open = (page: Page, view: "graph" | "overall" | "node", node?: string) =>
     `${served.origin}${addressOf(world.facts.openLiveRun, view, node)}`,
   );
 
-test("the union of every span's pages is the complete document's events, in order", async () => {
-  const run = world.facts.openLiveRun;
-  const { timeline } = await completeDocuments(served, run);
-  const client = new TelemetryClient(served.origin);
-  for (const span of timeline.spans as Json[]) {
-    const all = (span.events ?? []).map((event) => event.id);
-    if (all.length === 0) continue;
-    const collected: unknown[] = [];
-    let cursor: string | undefined;
-    for (;;) {
-      const page = await client.getTimelineEvents(run, {
-        ...(span.node_id === undefined ? {} : { node: span.node_id as string }),
-        span: span.id,
-        limit: 500,
-        ...(cursor === undefined ? {} : { cursor }),
-      });
-      collected.unshift(...page.rows.map((row) => row.id));
-      if (page.next_cursor === null) break;
-      cursor = page.next_cursor;
-    }
-    expect(collected, `span ${span.id}`).toStrictEqual(all);
-  }
-});
-
 test("Overall reaches its line, tiles, run records and disclosures", async ({
   page,
 }) => {
   await open(page, "overall");
-  const { detail } = await completeDocuments(served, world.facts.openLiveRun);
+  const detail = await settledDetail(world, served, world.facts.openLiveRun);
   const run = detail.run as { state: string; turns: number; nodes: unknown[] };
   await expect(metricText(page, "Turns")).toHaveText(String(run.turns), {
     timeout: NEVER,
@@ -112,7 +88,7 @@ test("every session link is served as the complete document names it, once the r
   page,
 }) => {
   const run = world.facts.openLiveRun;
-  const { timeline } = await completeDocuments(served, run);
+  const timeline = await settledTimeline(world, served, run);
   const links = (timeline.spans as Json[]).filter(
     (span) => span.harness_scope !== undefined,
   );
@@ -185,7 +161,11 @@ test("zooming a node's category lanes asks for that stretch, and only then", asy
     .toBe(true);
   const stretch = asked.find((url) => url.searchParams.has("from"));
   // Opening a run-level span, which is what clicking one selects, asks for it whole.
-  const { timeline } = await completeDocuments(served, world.facts.openLiveRun);
+  const timeline = await settledTimeline(
+    world,
+    served,
+    world.facts.openLiveRun,
+  );
   const runSpan = (timeline.spans as Json[]).find(
     (span) => span.node_id === undefined && span.harness_scope === undefined,
   );
@@ -213,7 +193,7 @@ test("expanding a node's row on Overall reads every page of that node's rows", a
 }) => {
   const node = world.facts.large.busiestNode;
   const run = world.facts.openLiveRun;
-  const { timeline } = await completeDocuments(served, run, node);
+  const timeline = await settledTimeline(world, served, run, node);
   // The node's rows across its spans, each once, as a page lists them.
   const expected = new Set(
     timeline.spans.flatMap((span) =>
@@ -264,7 +244,7 @@ test("expanding a node's row on Overall reads every page of that node's rows", a
 test("opening a row shows its event's detail", async ({ page }) => {
   const node = world.facts.large.busiestNode;
   const run = world.facts.openLiveRun;
-  const { timeline } = await completeDocuments(served, run, node);
+  const timeline = await settledTimeline(world, served, run, node);
   const events = new Map<string, Json>();
   for (const span of timeline.spans as Json[])
     for (const event of span.events ?? []) {
@@ -290,7 +270,7 @@ test("opening a row shows its event's detail", async ({ page }) => {
 test("every node's view, opened by its address, shows its state as the complete document records it", async ({
   page,
 }) => {
-  const { detail } = await completeDocuments(served, world.facts.openLiveRun);
+  const detail = await settledDetail(world, served, world.facts.openLiveRun);
   const status = (detail.graph as { node_status: Record<string, string> })
     .node_status;
   for (const [node, state] of Object.entries(status)) {
@@ -310,7 +290,7 @@ test("a node replanned off the graph is reached by a page of its own history", a
   const off = world.facts.large.offGraphNode;
   const run = world.facts.openLiveRun;
   await open(page, "overall");
-  const { timeline } = await completeDocuments(served, run, off);
+  const timeline = await settledTimeline(world, served, run, off);
   const expected = (timeline.spans as Json[]).flatMap((span) =>
     (span.events ?? []).map((event) => event.id),
   );
@@ -336,88 +316,6 @@ test("a node replanned off the graph is reached by a page of its own history", a
   } while (cursor !== null);
   expect(new Set(rows)).toEqual(new Set(expected));
   expect(rows).toHaveLength(new Set(expected).size);
-});
-
-test("the busiest node's whole transcript is reached back to its first row, in order", async ({
-  page,
-}) => {
-  const node = world.facts.large.busiestNode;
-  const run = world.facts.openLiveRun;
-  const { timeline } = await completeDocuments(served, run, node);
-  const nodeSpan = (timeline.spans as Json[]).find(
-    (span) => span.id === `node.${node}`,
-  );
-  const expected = (nodeSpan?.events ?? []).flatMap((event) =>
-    event.id === undefined ? [] : [event.id],
-  );
-  await open(page, "node", node);
-  const seen = new Map<string, number>();
-  const answers: string[] = [];
-  // Each page's rows, newest page first; and the first answer's window.
-  const pages: string[][] = [];
-  const windowed = new Set<string>();
-  page.on("response", async (response) => {
-    const url = new URL(response.url());
-    if (
-      url.pathname === "/api/v2/subscriptions" &&
-      response.request().method() === "POST"
-    ) {
-      const { timeline: first } = visibleOf(await response.json());
-      for (const span of first?.spans ?? [])
-        for (const event of span.events) windowed.add(event.id);
-      return;
-    }
-    if (!url.pathname.endsWith("/timeline/events")) return;
-    const body = timelineEventsPageSchema.parse(await response.json());
-    pages.push(body.rows.map((row) => row.id));
-    answers.push(
-      `${body.rows.length} rows next=${body.next_cursor === null ? "null" : "yes"} total=${body.total}`,
-    );
-    for (const row of body.rows) seen.set(row.id, (seen.get(row.id) ?? 0) + 1);
-  });
-  await expect(
-    page.getByRole("region", { name: "Node transcript" }),
-  ).toBeVisible({
-    timeout: NEVER,
-  });
-  await expect(page.getByText(HISTORY_LOADING)).toHaveCount(0, {
-    timeout: NEVER,
-  });
-  const load = page.getByRole("button", { name: "Load earlier rows" });
-  // Paged until the server says there is no earlier row; a scroll may take a page of
-  // its own, so each round waits for an answer rather than for the control.
-  while (answers.at(-1)?.includes("next=null") !== true) {
-    const asked = answers.length;
-    await load.first().click({ timeout: NEVER });
-    await expect
-      .poll(() => answers.length, { timeout: NEVER })
-      .toBeGreaterThan(asked);
-    if ((await page.getByRole("alert").count()) > 0)
-      throw new Error("a page failed on the way back");
-  }
-  // Every row before the first window has been asked for, none repeated, and the
-  // pages, oldest first, hold the complete document's rows in its order.
-  expect(
-    [...seen.values()].every((count) => count === 1),
-    "no row repeated",
-  ).toBe(true);
-  expect(windowed.size, "the first answer's window").toBeGreaterThan(0);
-  // Two records the engine renders under one turn's id are listed twice by the
-  // complete document and once by the pages, which merge by id as the client does:
-  // order is held over the ids listed once, and every id is reached.
-  const listed = new Map<string, number>();
-  for (const id of expected) listed.set(id, (listed.get(id) ?? 0) + 1);
-  const wanted = new Set(expected.filter((id) => listed.get(id) === 1));
-  const oldestFirst = pages.toReversed().flat();
-  const reached = new Set([...oldestFirst, ...windowed]);
-  expect(
-    expected.filter((id) => !reached.has(id)),
-    `rows never reached, after ${answers.join("; ")}`,
-  ).toStrictEqual([]);
-  const paged = new Set(oldestFirst);
-  expect(oldestFirst.filter((id) => wanted.has(id))).toStrictEqual(
-    expected.filter((id) => wanted.has(id) && paged.has(id)),
-  );
 });
 
 test("Channel opens its queue on the large run, reached from Overall", async ({
