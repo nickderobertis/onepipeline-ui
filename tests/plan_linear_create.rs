@@ -373,7 +373,10 @@ async fn a_plan_copied_into_linear_creates_its_project_and_an_absent_id_reads_ab
     let report = engine
         .copy(&CopyRequest {
             items: CopyItems::new(vec![id("plan:harbor")]).expect("one item"),
-            scope: CopyScope::Projects { tasks: true },
+            scope: CopyScope::Projects {
+                tasks: true,
+                documents: false,
+            },
             status_policy: StatusPolicy::Source,
             destination: onetaskgraph_plugin_api::SourceName::new("linear").expect("a source name"),
             match_by: None,
