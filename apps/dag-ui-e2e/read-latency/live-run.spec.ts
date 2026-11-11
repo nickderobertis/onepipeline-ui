@@ -273,7 +273,8 @@ test("after the rest, Turns reaches the page equal to a fresh document and usage
         complete.detail.telemetry as { usage: { total: { cost_usd: number } } }
       ).usage.total.cost_usd;
       expect(usage).toBeGreaterThan(0);
-      // Timing and usage, as of their fold.
+      // The disclosure draws the whole-journal fold's figures, which arrive on the
+      // refold clock rather than with the rest, so it is read until the fold lands.
       const timing = page.getByRole("group", { name: "Timing and usage" });
       await timing.getByText("Timing and usage").click();
       await expect

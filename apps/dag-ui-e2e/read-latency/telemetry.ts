@@ -185,7 +185,7 @@ export const DRIVERS = {
   stand_in_provider: 1,
 } as const;
 export type Driver = keyof typeof DRIVERS;
-/** The largest a driver may read under the figure the budgets state. */
+/** The least fraction of a driver's stated figure a corpus must reach to stand for that workload. */
 const DRIVER_TOLERANCE = 0.95;
 
 const corpusSchema = z

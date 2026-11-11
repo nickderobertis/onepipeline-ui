@@ -420,7 +420,9 @@ test("the busiest node's whole transcript is reached back to its first row, in o
   );
 });
 
-test("Channel opens without waiting on the complete read", async ({ page }) => {
+test("Channel opens its queue on the large run, reached from Overall", async ({
+  page,
+}) => {
   await open(page, "overall");
   await page.goto(
     `${served.origin}${addressOf(world.facts.openLiveRun, "channel")}`,
