@@ -8,6 +8,7 @@
 import { spawn } from "node:child_process";
 import { expect, test } from "@playwright/test";
 import { treeCpuSeconds } from "./load/cpu";
+import { VARIANTS } from "./load/telemetry";
 
 /**
  * Busy-loop until the process has used `ms` of CPU. Counted in CPU rather than
@@ -53,4 +54,17 @@ test("a tree's CPU counts the process and its descendants, live and reaped", asy
 test("a process that is not there is refused, never read as idle", () => {
   expect(() => treeCpuSeconds(0)).toThrow("no process to account for");
   expect(() => treeCpuSeconds(2 ** 30)).toThrow();
+});
+
+test("the CPU budget reads the Action items variants, at one tab and at two", () => {
+  // The budget's `cpu` metric reads these by kind: a variant renamed or dropped
+  // here stops the budget reading Action items at all.
+  expect(
+    VARIANTS.filter((variant) => variant.kind === "action-items").map(
+      ({ name, tabs }) => [name, tabs],
+    ),
+  ).toStrictEqual([
+    ["action-items", 1],
+    ["action-items-2-tabs", 2],
+  ]);
 });

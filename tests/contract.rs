@@ -23,10 +23,12 @@ use onepipeline_ui::api::RunApi;
 use onepipeline_ui::cli::{Cli, Command, ServeArgs, SessionId, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
     routes, ArtifactId, AttestRequest, ConversationId, DispatchId, Envelope, ErrorEnvelope,
-    EventFrame, EventsQuery, Health, HealthStatus, NextQuery, NodeId, PageLimit, ProjectId,
-    ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery, ShutdownRequest, ShutdownScope,
-    SseEvent, StopRequest, SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery,
-    API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION, TIMELINE_SCHEMA_VERSION,
+    EventFrame, EventsPageLimit, EventsQuery, Health, HealthStatus, NextQuery, NodeId, PageLimit,
+    PageOwner, ProjectId, ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery,
+    ShutdownRequest, ShutdownScope, SseEvent, StopRequest, SurfaceRequest, TimelineEventsQuery,
+    TimelineQuery, TimelineScope, TranscriptQuery, API_VERSION, RUNS_PAGE_LIMIT,
+    TELEMETRY_SCHEMA_VERSION, TIMELINE_EVENTS_PAGE, TIMELINE_EVENTS_PAGE_MAX,
+    TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -43,6 +45,7 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUNS, "runs.json"),
     (routes::RUN, "run.json"),
     (routes::RUN_TIMELINE, "run-timeline.json"),
+    (routes::RUN_TIMELINE_EVENTS, "run-timeline-events.json"),
     (routes::RUN_CONVERSATION, "run-conversation.json"),
     (routes::RUN_ARTIFACT, "run-artifact.json"),
     (routes::EVENTS, "events.json"),
@@ -522,7 +525,7 @@ fn every_route_serves_the_payload_its_golden_pins() {
          would be pinned absent — read the server's own account of why on stderr"
     );
 
-    let served: [(&str, Value); 6] = [
+    let served: [(&str, Value); 7] = [
         (
             "runs.json",
             enveloped(store.runs(&RunsQuery::Page(RunsPage {
@@ -552,6 +555,24 @@ fn every_route_serves_the_payload_its_golden_pins() {
                 },
             )),
         ),
+        ("run-timeline-events.json", {
+            let hub = onepipeline_ui::live::Hub::new(
+                store_over(&root),
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            );
+            enveloped(hub.timeline_events(
+                &run,
+                &TimelineEventsQuery {
+                    owner: PageOwner::Node(NodeId::try_from(fixture_run::NODE_ID).expect("valid")),
+                    span: None,
+                    cursor: None,
+                    from: None,
+                    to: None,
+                    filter: None,
+                    limit: EventsPageLimit::try_from(2).expect("in range"),
+                },
+            ))
+        }),
         (
             "run-conversation.json",
             enveloped(store.conversation(
@@ -1205,7 +1226,7 @@ fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent()
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 27);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 28);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
@@ -1357,6 +1378,72 @@ fn the_browser_clients_copy_of_each_schema_version_matches_this_one() {
             path.display()
         );
     }
+}
+
+/// What a first answer's `detail` may carry is declared twice: here, as the paths
+/// the server keeps and marks loading, and in the browser client's model, whose
+/// parser refuses a member outside its list. A path one side gains alone is either
+/// one the server drops or one the client refuses, so the two lists are reconciled
+/// here as sets. The client's list adds what every detail carries beside the kept
+/// fields: the envelope's three members, `progress`, and the empty `node_details`.
+#[test]
+fn the_browser_clients_first_answer_paths_are_the_ones_the_server_keeps() {
+    use onepipeline_ui::contract::{DETAIL_FIRST_KEPT, DETAIL_FIRST_LOADING};
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/index.ts");
+    let source = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "read {}: {err} — the model that carries the copy has moved, so this gate no \
+             longer guards anything",
+            path.display()
+        )
+    });
+    let opening = "export const FIRST_ANSWER_DETAIL_PATHS: readonly string[] = [\n";
+    let start = source
+        .find(opening)
+        .unwrap_or_else(|| panic!("{} declares no `{opening}`", path.display()))
+        + opening.len();
+    let end = start + source[start..].find("];").expect("the list's end");
+    let client: std::collections::BTreeSet<&str> = source[start..end]
+        .lines()
+        .map(|line| line.trim().trim_end_matches(',').trim_matches('"'))
+        .filter(|line| !line.is_empty())
+        .collect();
+    let server: std::collections::BTreeSet<&str> = DETAIL_FIRST_KEPT
+        .iter()
+        .chain(DETAIL_FIRST_LOADING)
+        .copied()
+        .chain([
+            "api_version",
+            "telemetry_schema_version",
+            "observed_at",
+            "progress",
+            "node_details",
+        ])
+        .collect();
+    assert_eq!(
+        client,
+        server,
+        "{}'s FIRST_ANSWER_DETAIL_PATHS has drifted from DETAIL_FIRST_KEPT and \
+         DETAIL_FIRST_LOADING",
+        path.display()
+    );
+}
+
+/// A node's window is declared here and in the browser client's model, which
+/// reads a node timeline's answer holding more rows than it as a contract
+/// violation; the two are one number.
+#[test]
+fn the_browser_clients_node_window_is_the_servers() {
+    use onepipeline_ui::contract::NODE_WINDOW_EVENTS;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/index.ts");
+    let source = fs::read_to_string(&path).expect("the client's model");
+    let declaration = format!("export const TIMELINE_WINDOW_EVENTS = {NODE_WINDOW_EVENTS};");
+    assert!(
+        source.contains(&declaration),
+        "{} does not declare `{declaration}`; the client's node window has drifted from \
+         this crate's",
+        path.display()
+    );
 }
 
 /// The reference vocabulary is declared twice — here and in the browser client's
@@ -2082,6 +2169,26 @@ fn a_run_list_query_cannot_carry_a_page_size_outside_the_bound() {
     });
     let encoded: Value = serde_json::to_value(&query).expect("serialize the query");
     assert_eq!(encoded["limit"], serde_json::json!(RUNS_PAGE_LIMIT));
+}
+
+/// A page of a run's history holds at least one row and at most the bound, however
+/// the query is built: the route's parser and a caller of the hub alike go
+/// through the one constructor, and the default is the page the contract states.
+#[test]
+fn a_history_page_cannot_carry_a_limit_outside_the_bound() {
+    for refused in [0, TIMELINE_EVENTS_PAGE_MAX + 1] {
+        let error = EventsPageLimit::try_from(refused).expect_err("out of range");
+        assert_eq!(error.code(), "invalid_request", "limit={refused}");
+    }
+    for held in [1, TIMELINE_EVENTS_PAGE_MAX] {
+        assert_eq!(
+            EventsPageLimit::try_from(held)
+                .map(EventsPageLimit::get)
+                .ok(),
+            Some(held)
+        );
+    }
+    assert_eq!(EventsPageLimit::default().get(), TIMELINE_EVENTS_PAGE);
 }
 
 /// The browser client sends the page bound explicitly so its continuation pages

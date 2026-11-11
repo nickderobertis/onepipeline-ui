@@ -192,7 +192,14 @@ pub const API_VERSION: u32 = 2;
 /// record carried none. Every other field 26 served is served with the same
 /// meaning; the version moves because a client written against 26 switches on a
 /// vocabulary that holds neither word.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 27;
+///
+/// **Schema 28 is a run's progressive opening.** A subscription's first answer for
+/// a run view is served from a selective read and carries `progress`: `sidebar`
+/// is `null` and the rows arrive as the stream's first frame, `sidebar.snapshot`;
+/// `run.turns` may be `{"loading": true}`; a timeline span carries no whole
+/// `events`; `telemetry` carries `as_of`; `GET .../timeline/events` serves the
+/// rows a span's list leaves out. `docs/contract.md` states what each view holds.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 28;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
@@ -341,6 +348,57 @@ pub const TIMELINE_SCHEMA_VERSION: u32 = 15;
 /// cannot turn one request into an unbounded read of every recorded run.
 pub const RUNS_PAGE_LIMIT: usize = 50;
 
+/// What a first answer's `detail` holds of a complete one, as `a.b` paths with
+/// `*` for each element or key: the one declaration of it. A field joins only
+/// where the first screen draws it and a journey holds it equal to the complete
+/// document.
+pub const DETAIL_FIRST_KEPT: &[&str] = &[
+    "run.run_id",
+    "run.state",
+    "run.phase",
+    "run.last_event",
+    "run.timing.wall_seconds",
+    "run.nodes.*.node",
+    "run.nodes.*.status",
+    "run.nodes.*.outcome",
+    "run.nodes.*.failure",
+    "graph.last_seq",
+    "graph.run_id",
+    "graph.plan.goal",
+    "graph.plan.tasks.*.id",
+    "graph.plan.tasks.*.kind",
+    "graph.plan.tasks.*.name",
+    "graph.plan.tasks.*.deps",
+    "graph.plan.tasks.*.repo",
+    "graph.plan.tasks.*.steps",
+    "graph.node_status",
+    "graph.node_gated_by",
+    "graph.node_control",
+    "graph.result",
+    "graph.node_results.*.blocked_by",
+    "graph.node_results.*.awaiting",
+    "graph.node_results.*.outcome",
+    "graph.node_results.*.error",
+    "graph.node_results.*.detail",
+];
+
+/// What a first answer's `detail` marks loading, as `{"loading": true}` and named
+/// in `progress.loading`: a value a selective read cannot give.
+pub const DETAIL_FIRST_LOADING: &[&str] = &["run.turns"];
+
+/// What `timeline.progress.loading` names on Overall until the rest arrives.
+pub const SPANS_HARNESS_LOADING: &str = "spans[harness_scope]";
+
+/// How many of a node's latest rows its timeline view holds, across all its
+/// spans: each span lists only those of them that are its own.
+pub const NODE_WINDOW_EVENTS: usize = 40;
+
+/// The rows a page of `GET .../timeline/events` holds by default.
+pub const TIMELINE_EVENTS_PAGE: usize = 100;
+
+/// The most rows one page may hold.
+pub const TIMELINE_EVENTS_PAGE_MAX: usize = 500;
+
 /// The routes `docs/contract.md` defines, as axum path templates.
 pub mod routes {
     /// Liveness that never touches run storage.
@@ -351,6 +409,8 @@ pub mod routes {
     pub const RUN: &str = "/api/v2/runs/{run}";
     /// One run's timeline, at run or node scope.
     pub const RUN_TIMELINE: &str = "/api/v2/runs/{run}/timeline";
+    /// One page of a run's timeline rows, on demand.
+    pub const RUN_TIMELINE_EVENTS: &str = "/api/v2/runs/{run}/timeline/events";
     /// One conversation of one run.
     pub const RUN_CONVERSATION: &str = "/api/v2/runs/{run}/conversations/{id}";
     /// One recorded artifact of one run.
@@ -484,7 +544,7 @@ pub mod routes {
     }
 
     /// How many routes the contract defines.
-    pub const COUNT: usize = 38;
+    pub const COUNT: usize = 39;
 
     /// Every route above with its method, in the order `docs/contract.md`
     /// lists them.
@@ -493,6 +553,7 @@ pub mod routes {
         get(RUNS),
         get(RUN),
         get(RUN_TIMELINE),
+        get(RUN_TIMELINE_EVENTS),
         get(RUN_CONVERSATION),
         get(RUN_ARTIFACT),
         get(EVENTS),
@@ -1340,6 +1401,134 @@ pub struct TimelineQuery {
     /// a reader's attention deciding what the run did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<FilterSpec>,
+}
+
+/// A span's id as a timeline names it, as `?span=` carries it: not a path
+/// segment, because the engine names spans with `.` and `:` freely, but bounded
+/// and free of control characters.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SpanId(String);
+
+impl SpanId {
+    /// The id as served.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for SpanId {
+    type Error = ApiError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value.is_empty() || value.len() > 1024 || value.chars().any(char::is_control) {
+            return Err(ApiError::InvalidRequest(
+                "span must be 1 to 1024 bytes with no control character".to_owned(),
+            ));
+        }
+        Ok(Self(value.to_owned()))
+    }
+}
+
+impl fmt::Display for SpanId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Where a page of rows resumes: strictly older than this row, so an append
+/// between pages neither repeats nor skips one. Opaque on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PageCursor {
+    /// The row's epoch milliseconds.
+    pub at: i128,
+    /// The row's place in the journal.
+    pub order: u64,
+}
+
+impl PageCursor {
+    /// The cursor as the wire spells it.
+    #[must_use]
+    pub fn encode(self) -> String {
+        format!("{}.{}", self.at, self.order)
+    }
+}
+
+impl TryFrom<&str> for PageCursor {
+    type Error = ApiError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let refused =
+            || ApiError::InvalidRequest(format!("cursor {value:?} is not one this server issued"));
+        let (at, order) = value.split_once('.').ok_or_else(refused)?;
+        Ok(Self {
+            at: at.parse().map_err(|_| refused())?,
+            order: order.parse().map_err(|_| refused())?,
+        })
+    }
+}
+
+/// Which rows a page of `GET .../timeline/events` reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PageOwner {
+    /// The run's own spans.
+    Run,
+    /// One node's span on the run timeline.
+    RunNode(NodeId),
+    /// One node's own timeline.
+    Node(NodeId),
+}
+
+/// The validated query of `GET .../timeline/events`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimelineEventsQuery {
+    /// Whose rows.
+    pub owner: PageOwner,
+    /// One span of them, whose whole fields the answer then adds.
+    pub span: Option<SpanId>,
+    /// Older than this row, or the newest page.
+    pub cursor: Option<PageCursor>,
+    /// Rows at or after this instant, epoch milliseconds.
+    pub from: Option<i128>,
+    /// Rows at or before this instant, epoch milliseconds.
+    pub to: Option<i128>,
+    /// Which rows, as `?filter=` elsewhere.
+    pub filter: Option<FilterSpec>,
+    /// How many rows at most.
+    pub limit: EventsPageLimit,
+}
+
+/// How many rows a page of `GET .../timeline/events` holds: at least one and at
+/// most [`TIMELINE_EVENTS_PAGE_MAX`], so a caller that skips the HTTP parser
+/// cannot ask for an empty or unbounded page either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventsPageLimit(usize);
+
+impl EventsPageLimit {
+    /// How many rows this page holds.
+    #[must_use]
+    pub fn get(self) -> usize {
+        self.0
+    }
+}
+
+impl Default for EventsPageLimit {
+    fn default() -> Self {
+        Self(TIMELINE_EVENTS_PAGE)
+    }
+}
+
+impl TryFrom<usize> for EventsPageLimit {
+    type Error = ApiError;
+
+    fn try_from(requested: usize) -> Result<Self, Self::Error> {
+        if requested == 0 || requested > TIMELINE_EVENTS_PAGE_MAX {
+            return Err(ApiError::InvalidRequest(format!(
+                "limit must be between 1 and {TIMELINE_EVENTS_PAGE_MAX}"
+            )));
+        }
+        Ok(Self(requested))
+    }
 }
 
 /// What a timeline request is scoped to.

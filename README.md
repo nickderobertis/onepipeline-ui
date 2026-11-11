@@ -110,6 +110,7 @@ GET /healthz
 GET /api/v2/runs                      # list w/ session attribution
 GET /api/v2/runs/{run}                ?include_conversations=bool
 GET /api/v2/runs/{run}/timeline       ?scope=run|node&node=ID
+GET /api/v2/runs/{run}/timeline/events  ?scope=run|node&node=ID&span=SPAN&cursor=C&from=&to=&filter=&limit=N
 GET /api/v2/runs/{run}/conversations/{id}
 GET /api/v2/runs/{run}/artifacts/{id}
 GET /api/v2/events                    # SSE; a subscription's changes, else a fresh snapshot per connection
@@ -157,7 +158,7 @@ which is what its stops and shutdowns are judged by.
 <!-- llmlint: ignore[contracts_have_one_source_or_a_drift_gate] the route index above and the version below are both read back against their source rather than left as second copies: `tests/contract.rs::the_readme_indexes_every_route_and_names_the_served_schema` holds every `METHOD path` line in this file to `routes::TABLE` in order, and asserts this file names "`telemetry_schema_version` ({TELEMETRY_SCHEMA_VERSION})" for the constant the envelope is served at. Deleting the `GET /api/v2/projects/{project}/agents` line fails it naming that route in the diff, which is how the agents routes reached this index at all. -->
 
 Every successful response carries the schema-version preamble —
-`api_version`, `telemetry_schema_version` (27), `observed_at` — with the payload
+`api_version`, `telemetry_schema_version` (28), `observed_at` — with the payload
 flattened alongside it. Every failure carries `{"error": {"code", "message"}}`.
 
 Payloads themselves come from the onepipeline SDK. Anything presentation-worthy

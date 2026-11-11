@@ -51,6 +51,8 @@ test("fits the whole graph to its canvas before node measurements arrive", async
   // that waited for every card's resize observation never happens.
   const canvas = page.getByRole("application", { name: "DAG execution graph" });
   const cards = graphNodes(page);
+  // The node list is the app's, so it is there once the app replaced the first screen.
+  await expect(graphNodeList(page).getByRole("listitem").first()).toBeVisible();
   await expect(cards).toHaveCount(
     await graphNodeList(page).getByRole("listitem").count(),
   );

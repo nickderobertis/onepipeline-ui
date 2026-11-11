@@ -1,14 +1,20 @@
 #!/usr/bin/env node
 /**
- * The one generic runner every budget in `budgets.yaml` measures with.
+ * The one generic runner every budget in `budgets.yaml` and
+ * `large-run/budgets.yaml` measures with.
  *
- * It reads the telemetry `dag-ui-read-latency:test` recorded, reports one figure
- * and the breakdown behind it through the onebudgetspec reporter, and compares
- * nothing: the threshold is the budgets file's. It runs no scenario.
+ * It reads the telemetry its metric's target recorded — Action items' from
+ * `dag-ui-read-latency:test`, a large run's from `dag-ui-read-latency:test-large`
+ * — reports one figure and the breakdown behind it through the onebudgetspec
+ * reporter, and compares nothing: the threshold is the budgets file's. It runs
+ * no scenario.
  *
  *   node apps/dag-ui-e2e/read-latency/read-latency-budget.mjs \
  *     --telemetry apps/dag-ui-e2e/read-latency/telemetry/read-latency.json \
  *     --metric human-items-requests|human-items-lag
+ *   node apps/dag-ui-e2e/read-latency/read-latency-budget.mjs \
+ *     --telemetry apps/dag-ui-e2e/read-latency/telemetry/read-latency-large.json \
+ *     --metric first-view|rest-arrived|history-page|status
  *
  * Exits 0 having reported the figure, 1 when the telemetry is absent or does not
  * state the workload, and 2 on a usage error.
@@ -19,31 +25,45 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { report } from "@onebudgetspec/sdk";
-import { PAGES, telemetrySchema } from "./telemetry.ts";
+import {
+  FIRST_VIEWS,
+  largeTelemetrySchema,
+  PAGES,
+  telemetrySchema,
+} from "./telemetry.ts";
 
 class UsageError extends Error {}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../../..");
-const RECORDED = "apps/dag-ui-e2e/read-latency/telemetry/read-latency.json";
-const TARGET = "dag-ui-read-latency:test";
+/** Each document a metric reads: where it is recorded, by what, and its shape. */
+const DOCUMENTS = {
+  "human-items": {
+    recorded: "apps/dag-ui-e2e/read-latency/telemetry/read-latency.json",
+    target: "dag-ui-read-latency:test",
+    schema: telemetrySchema,
+  },
+  "large-run": {
+    recorded: "apps/dag-ui-e2e/read-latency/telemetry/read-latency-large.json",
+    target: "dag-ui-read-latency:test-large",
+    schema: largeTelemetrySchema,
+  },
+};
 
-function load(named) {
-  const path = resolve(ROOT, named);
+function load(named, { recorded, target, schema }) {
+  const path = resolve(ROOT, named ?? recorded);
   if (!existsSync(path))
     throw new Error(
-      `no telemetry at ${path}; ACTION: run 'nx run ${TARGET}', which records it`,
+      `no telemetry at ${path}; ACTION: run 'nx run ${target}', which records it`,
     );
-  const parsed = telemetrySchema.safeParse(
-    JSON.parse(readFileSync(path, "utf8")),
-  );
+  const parsed = schema.safeParse(JSON.parse(readFileSync(path, "utf8")));
   if (!parsed.success)
     throw new Error(
-      `the telemetry is not what ${TARGET} records (${parsed.error.issues
+      `the telemetry is not what ${target} records (${parsed.error.issues
         .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
         .join(
           "; ",
-        )}); ACTION: run 'nx run ${TARGET}' on this tree to record it`,
+        )}); ACTION: run 'nx run ${target}' on this tree to record it`,
     );
   return parsed.data;
 }
@@ -61,7 +81,48 @@ const pages = (telemetry, read) =>
     PAGES.map((page) => [page, read(telemetry.human_items[page])]),
   );
 
+const large = (telemetry) => telemetry.large_run;
+const provenance = (telemetry) => ({
+  corpus: large(telemetry).corpus,
+  host_load: large(telemetry).host_load,
+});
+
+/** The metrics Action items' telemetry answers; every other reads a large run's. */
+const HUMAN_ITEM_METRICS = ["human-items-requests", "human-items-lag"];
+
 const MEASURES = {
+  "first-view"(telemetry) {
+    const { first_view: view } = large(telemetry);
+    return {
+      value: view.slowest_s,
+      detail: {
+        slowest_view: view.slowest_view,
+        ...Object.fromEntries(FIRST_VIEWS.map((name) => [name, view[name]])),
+        ...provenance(telemetry),
+      },
+    };
+  },
+  "rest-arrived"(telemetry) {
+    const rest = large(telemetry).rest_arrived;
+    return {
+      value: rest.overall_s,
+      detail: { ...rest, ...provenance(telemetry) },
+    };
+  },
+  "history-page"(telemetry) {
+    const page = large(telemetry).history_page;
+    return {
+      value: page.slowest_s,
+      detail: { ...page, ...provenance(telemetry) },
+    };
+  },
+  status(telemetry) {
+    const status = large(telemetry).status;
+    return {
+      value: status.slowest_s,
+      detail: { ...status, ...provenance(telemetry) },
+    };
+  },
   "human-items-requests"(telemetry) {
     const { value } = slowest(telemetry, (page) => page.requests_per_min);
     return {
@@ -112,7 +173,11 @@ try {
     throw new UsageError(
       `--metric is one of ${Object.keys(MEASURES).join(", ")}`,
     );
-  const telemetry = load(values.telemetry ?? RECORDED);
+  const document =
+    DOCUMENTS[
+      HUMAN_ITEM_METRICS.includes(values.metric) ? "human-items" : "large-run"
+    ];
+  const telemetry = load(values.telemetry, document);
   const { value, detail } = MEASURES[values.metric](telemetry);
   report(
     value,

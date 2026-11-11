@@ -1,10 +1,17 @@
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
-import { telemetrySchema } from "./telemetry";
+import { DRIVERS, largeTelemetrySchema, telemetrySchema } from "./telemetry";
 import workload from "./workload.json" with { type: "json" };
 
 /**
@@ -59,6 +66,58 @@ const page = (requests: number, p95: number) => ({
 
 const FILTERED = { priority: "high" };
 
+const load = { load_1m: 1, load_5m: 1, load_15m: 1, cores: 8 };
+const reading = (seconds: number | null) => ({
+  seconds,
+  navigation_to_post_s: 0.05,
+  post_s: 0.5,
+  answer_to_mark_s: 0.05,
+  first_answer_bytes: 1_200_000,
+  first_answer_gzipped: 130_000,
+  checked: { screen_against_answer: true, answer_against_complete: true },
+  host_load: load,
+});
+const view = (seconds: number) => ({
+  readings: [reading(seconds), reading(seconds), reading(seconds)],
+  median_s: seconds,
+  cold_cache: reading(seconds + 0.1),
+  fresh_server: reading(seconds),
+  small_run_s: 0.1,
+});
+const largeRun = (overrides: object = {}) => ({
+  corpus: { ...DRIVERS },
+  first_view: {
+    graph: view(0.4),
+    overall: view(0.7),
+    node: view(0.6),
+    slowest_view: "overall",
+    slowest_s: 0.7,
+  },
+  rest_arrived: {
+    overall_s: 40,
+    graph_s: 35,
+    node_s: 42,
+    patch_frame_bytes: 900,
+    server_peak_rss_mb: 2_000,
+    complete: true,
+  },
+  history_page: {
+    node_before_rest_s: 0.6,
+    node_after_rest_s: 0.2,
+    overall_span_page_s: 0.3,
+    slowest_s: 0.6,
+    rows_shown_after: 180,
+  },
+  status: {
+    small_s: 0.05,
+    large_s: 0.4,
+    slowest_s: 0.4,
+    checkpoint_bytes: DRIVERS.checkpoint_bytes,
+    stand_in_starts: 0,
+  },
+  host_load: { start: load, end: load },
+  ...overrides,
+});
 /** A batch phase whose slowest tab took `slowest` seconds. */
 const batch = (slowest = 1) => {
   const pressed_at_ms = 1_000_000;
@@ -100,14 +159,26 @@ const telemetry = (overrides: object = {}) => ({
   ...overrides,
 });
 
+const largeTelemetry = (overrides: object = {}) => ({
+  schema_version: 1,
+  recorded_at: "2026-11-07T00:00:00.000Z",
+  commit: "a".repeat(40),
+  dirty: false,
+  large_run: largeRun(),
+  ...overrides,
+});
+
 /** The two budgets over `path`, through the real `onebudgetspec check`. */
-function check(path: string) {
+function check(
+  path: string,
+  metrics: readonly (readonly [string, number])[] = [
+    ["human-items-requests", 1],
+    ["human-items-lag", 3],
+  ],
+) {
   const dir = mkdtempSync(join(tmpdir(), "read-latency-budget-"));
   try {
-    const budgets = [
-      ["human-items-requests", 1],
-      ["human-items-lag", 3],
-    ].map(
+    const budgets = metrics.map(
       ([metric, threshold]) => `  - id: runner-${metric}
     description: The runner's ${metric} metric over a fixture.
     measure: reported
@@ -178,6 +249,71 @@ test("reports the slowest page's figure as recorded, and a figure over its line 
   expect(lag.unfiltered.frame_arrival.p95_s).toBe(0.6);
 });
 
+test("the large-run budgets report their figures and detail through the real check", () => {
+  largeTelemetrySchema.parse(largeTelemetry());
+  const results = check(recorded(largeTelemetry()), [
+    ["first-view", 1],
+    ["rest-arrived", 60],
+    ["history-page", 1],
+    ["status", 1],
+  ]);
+  expect(
+    Object.fromEntries(
+      results.map(({ id, actual, verdict }) => [id, [actual, verdict]]),
+    ),
+  ).toStrictEqual({
+    "runner-first-view": [0.7, "within"],
+    "runner-rest-arrived": [40, "within"],
+    "runner-history-page": [0.6, "within"],
+    "runner-status": [0.4, "within"],
+  });
+  expect(results[0]?.detail).toContain("corpus");
+  expect(results[3]?.detail).toContain("stand_in_starts");
+});
+
+// Every driver a budget names, as a corpus that did not hold it: the check fails
+// naming it rather than reading a smaller corpus as a pass.
+for (const driver of Object.keys(DRIVERS) as (keyof typeof DRIVERS)[]) {
+  test(`a corpus missing the ${driver} driver fails the check, naming it`, () => {
+    const corpus: Record<string, number> = { ...DRIVERS };
+    delete corpus[driver];
+    const path = recorded(largeTelemetry({ large_run: largeRun({ corpus }) }));
+    const run = measure("first-view", path);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(driver);
+    const results = check(path, [["first-view", 1]]);
+    expect(results[0]?.verdict).not.toBe("within");
+    expect(results[0]?.detail ?? run.stderr).toContain(driver);
+  });
+}
+
+test("a run with no mark fails the check, naming the reading", () => {
+  const graph = {
+    ...view(0.4),
+    readings: [reading(null), reading(0.4), reading(0.4)],
+  };
+  const path = recorded(
+    largeTelemetry({
+      large_run: largeRun({
+        first_view: { ...largeRun().first_view, graph },
+      }),
+    }),
+  );
+  const run = measure("first-view", path);
+  expect(run.status).toBe(1);
+  expect(run.stderr).toContain("no first-useful-screen mark");
+  expect(check(path, [["first-view", 1]])[0]?.verdict).not.toBe("within");
+});
+
+test("each metric reads only the document its own target records, and names that target", () => {
+  const large = measure("first-view", recorded(telemetry()));
+  expect(large.status).toBe(1);
+  expect(large.stderr).toContain("dag-ui-read-latency:test-large");
+  const human = measure("human-items-lag", recorded(largeTelemetry()));
+  expect(human.status).toBe(1);
+  expect(human.stderr).toContain("dag-ui-read-latency:test ");
+});
+
 test("a batch tab slower than the spaced writes becomes the figure, with each part in its detail", () => {
   const results = check(recorded(telemetry({ batch: batch(2.4) })));
   const lag = results.find(({ id }) => id === "runner-human-items-lag");
@@ -204,6 +340,65 @@ test("telemetry with no batch phase is refused rather than reported", () => {
   const run = measure("human-items-lag", recorded(none));
   expect(run.status).toBe(1);
   expect(run.stderr).toContain("dag-ui-read-latency:test");
+});
+
+const MEASURE_RUN = join(import.meta.dirname, "measure-run.mjs");
+const measureRun = (args: readonly string[]) =>
+  spawnSync(process.execPath, [MEASURE_RUN, ...args], { encoding: "utf8" });
+
+for (const [what, args] of [
+  ["no arguments", []],
+  ["no run", ["--runs-root", "/nowhere"]],
+  ["no runs root", ["--run", "r"]],
+  ["an unknown flag", ["--runs-root", "/nowhere", "--run", "r", "--fast"]],
+  [
+    "a run with no journal to choose a node from",
+    ["--runs-root", "/nowhere", "--run", "r"],
+  ],
+] as const)
+  test(`measure-run-load-on-host refuses ${what} as a usage error`, () => {
+    const run = measureRun(args);
+    expect(run.status).toBe(2);
+    expect(run.stderr).toMatch(/^measure-run: /mu);
+  });
+
+// The run is joined to the root to find its journal, so one that names anything
+// but a directory directly under it is refused before it names a path.
+for (const run of ["../r", "a/b", "."])
+  test(`measure-run-load-on-host refuses --run ${run} as a usage error`, () => {
+    const measured = measureRun(["--runs-root", "/nowhere", "--run", run]);
+    expect(measured.status).toBe(2);
+    expect(measured.stderr).toContain(
+      `measure-run: --run ${JSON.stringify(run)} names no directory directly under --runs-root`,
+    );
+  });
+
+test("measure-run-load-on-host hands the root to the measurement and exits as it does", () => {
+  const dir = mkdtempSync(join(tmpdir(), "measure-run-spec-"));
+  try {
+    // A root that is a file: the measurement's server refuses it, which only the
+    // host measurement reaches, and only with the root it was handed.
+    const root = join(dir, "not-a-runs-root");
+    writeFileSync(root, "");
+    const output = join(dir, "measured.json");
+    const run = measureRun([
+      "--runs-root",
+      root,
+      "--run",
+      "r",
+      "--node",
+      "n",
+      "--output",
+      output,
+    ]);
+    expect(run.status).toBe(1);
+    expect(`${run.stdout}${run.stderr}`).toContain(
+      "the large run's server never answered",
+    );
+    expect(existsSync(output)).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("names the target to run when the telemetry is absent", () => {
@@ -274,13 +469,32 @@ test("refuses a metric it does not measure, as a usage error", () => {
   expect(run.stderr).toContain("human-items-requests");
 });
 
-test("the budgets file names this runner's metrics, with no host label", () => {
-  const text = readFileSync(join(import.meta.dirname, "budgets.yaml"), "utf8");
-  for (const metric of ["human-items-requests", "human-items-lag"])
-    expect(text).toContain(
-      `command: [node, read-latency-budget.mjs, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, --metric, ${metric}]`,
-    );
-  expect(text).not.toMatch(/labels:/u);
+test("each budgets file names this runner's metrics and its own telemetry, with no host label", () => {
+  // Each names the telemetry it reads, so a job without that file, such as
+  // ci.yml's budgets job, reports the file missing rather than running the
+  // runner where its imports do not resolve.
+  for (const [file, runner, telemetry, metrics] of [
+    [
+      "budgets.yaml",
+      "read-latency-budget.mjs",
+      "read-latency.json",
+      ["human-items-requests", "human-items-lag"],
+    ],
+    [
+      "large-run/budgets.yaml",
+      "../read-latency-budget.mjs",
+      "read-latency-large.json",
+      ["first-view", "rest-arrived", "history-page", "status"],
+    ],
+  ] as const) {
+    const text = readFileSync(join(import.meta.dirname, file), "utf8");
+    for (const metric of metrics)
+      expect(text).toContain(
+        `command: [node, ${runner}, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/${telemetry}, --metric, ${metric}]`,
+      );
+    expect(text.match(/command:/gu)).toHaveLength(metrics.length);
+    expect(text).not.toMatch(/labels:/u);
+  }
 });
 
 test("the budgets file states the workload workload.json records", () => {
@@ -308,4 +522,133 @@ test("the budgets file states the workload workload.json records", () => {
     `carrying ${questions} answers`,
   ])
     expect(text.split(stated)).toHaveLength(2);
+});
+
+/** The members of a generated journal record this test reads. */
+const journalRecordSchema = z.looseObject({
+  stream: z.string(),
+  kind: z.string(),
+  labels: z.looseObject({ node: z.string().optional() }),
+  payload: z.looseObject({
+    transcript: z.looseObject({ history_id: z.string() }).optional(),
+  }),
+});
+type JournalRecord = z.infer<typeof journalRecordSchema>;
+
+/** The members of a generated plan this test reads. */
+const planSchema = z.looseObject({
+  tasks: z.array(
+    z.looseObject({ id: z.string(), deps: z.array(z.string()).optional() }),
+  ),
+});
+
+test("the large-run corpus writes the shapes its drivers are read from, at a small size", () => {
+  const dir = mkdtempSync(join(tmpdir(), "read-latency-corpus-"));
+  try {
+    const workload = join(dir, "workload.json");
+    writeFileSync(
+      workload,
+      JSON.stringify({
+        runs: 6,
+        projects: 3,
+        other_live_runs: 1,
+        stopped_runs: 1,
+        open_live_run_records_at_start: 3000,
+        settled_big_records: 60,
+        settled_small_records: 20,
+        large: {
+          state: "live",
+          records: 3000,
+          journal_bytes: 3_000_000,
+          streams: 60,
+          ordinary_spans: 100,
+          session_records: 29,
+          harness_spans: 50,
+          checkpoint_bytes: 700_000,
+          busiest_node_records: 300,
+          off_graph_node_records: 200,
+        },
+      }),
+    );
+    const root = join(dir, "runs");
+    const facts = z
+      .object({
+        openLiveRun: z.string(),
+        smallRun: z.string(),
+        large: z.object({
+          busiestNode: z.string(),
+          offGraphNode: z.string(),
+          gatedNode: z.string(),
+          crossRunRef: z.string(),
+        }),
+      })
+      .parse(
+        JSON.parse(
+          execFileSync(
+            process.execPath,
+            [join(import.meta.dirname, "../load/corpus.mjs"), root, workload],
+            { encoding: "utf8" },
+          ),
+        ),
+      );
+    const run = join(root, facts.openLiveRun);
+    const records = z.array(journalRecordSchema).parse(
+      readFileSync(join(run, "events.jsonl"), "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line)),
+    );
+    const nodeOf = (record: JournalRecord) => record.labels.node;
+    // Sized to the workload, a node off the plan, and more than one stream.
+    const journalBytes = readFileSync(join(run, "events.jsonl")).length;
+    expect(Math.abs(journalBytes - 3_000_000)).toBeLessThan(3_000_000 * 0.03);
+    expect(
+      new Set(records.map((record) => record.stream)).size,
+    ).toBeGreaterThan(40);
+    expect(
+      records.filter((record) => nodeOf(record) === facts.large.busiestNode)
+        .length,
+    ).toBeGreaterThanOrEqual(300);
+    const plan = planSchema.parse(
+      JSON.parse(readFileSync(join(run, "plan.json"), "utf8")),
+    );
+    expect(plan.tasks.map((task) => task.id)).not.toContain(
+      facts.large.offGraphNode,
+    );
+    expect(plan.tasks.flatMap((task) => task.deps ?? [])).toContain(
+      facts.large.crossRunRef,
+    );
+    // Each stream's edge rests on a record a read by kind would drop.
+    const firstOfStream = new Map<string, { kind: string }>();
+    const lastOfStream = new Map<string, { kind: string }>();
+    for (const record of records) {
+      if (!record.stream.startsWith("node-scope-")) continue;
+      if (!firstOfStream.has(record.stream))
+        firstOfStream.set(record.stream, record);
+      lastOfStream.set(record.stream, record);
+    }
+    expect(
+      [...firstOfStream.values()].every(
+        (record) => record.kind === "member-heartbeat",
+      ),
+    ).toBe(true);
+    // A reference into a session store, with its id a UUID v7.
+    const references = records.filter(
+      (record) => record.payload.transcript !== undefined,
+    );
+    expect(references.length).toBeGreaterThan(0);
+    expect(references[0]?.payload.transcript?.history_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+    // The harness-scope spans' pointer file, one line per span.
+    expect(
+      readFileSync(join(run, "oneharness-sessions.jsonl"), "utf8")
+        .split("\n")
+        .filter(Boolean),
+    ).toHaveLength(50);
+    expect(existsSync(join(root, facts.smallRun, "result.json"))).toBe(true);
+    expect(readdirSync(root)).toHaveLength(6);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

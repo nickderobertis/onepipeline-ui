@@ -1255,3 +1255,41 @@ function elapsed(startedAt: string, endedAt: string | null): number | null {
   const end = Date.parse(endedAt);
   return Number.isNaN(start) || Number.isNaN(end) ? null : end - start;
 }
+
+/**
+ * The transcript in the order it is read: one entry per item, except that the
+ * sessions of one dispatch travel together so they can be nested under its name.
+ *
+ * The rows of a dispatch arrive consecutively — the projection lists an agent session
+ * and then the sessions recorded inside it — so a run of them is a group, and every
+ * other row is a group of one. A collapse control travels with the run it stands
+ * for, so opening one inside a dispatch does not tear the dispatch in two.
+ */
+export function transcriptRuns(reading: readonly TranscriptEntry[]): readonly {
+  readonly id: string;
+  readonly dispatch?: DispatchGroup;
+  readonly entries: readonly TranscriptEntry[];
+}[] {
+  const runs: {
+    id: string;
+    dispatch?: DispatchGroup;
+    entries: TranscriptEntry[];
+  }[] = [];
+  for (const entry of reading) {
+    const subject = entry.entryKind === "row" ? entry.row : entry.group;
+    const open = runs.at(-1);
+    if (
+      subject.dispatch !== undefined &&
+      open?.dispatch !== undefined &&
+      open.dispatch.id === subject.dispatch.id
+    )
+      open.entries.push(entry);
+    else
+      runs.push({
+        id: subject.id,
+        dispatch: subject.dispatch,
+        entries: [entry],
+      });
+  }
+  return runs;
+}

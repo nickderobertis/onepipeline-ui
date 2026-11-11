@@ -27,7 +27,7 @@ import {
   TriangleAlert,
   Workflow,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChannelView } from "../features/control/ChannelView";
 import { RunActions } from "../features/control/RunActions";
 import { useRunControl } from "../features/control/useRunControl";
@@ -47,7 +47,9 @@ import { ShutdownStatus } from "../features/shutdown/ShutdownStatus";
 import { NodeTimelineView } from "../features/timeline/NodeTimelineView";
 import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
+import { runPageKind } from "../first-screen/address";
 import { useHumanItemsRoute } from "../lib/humanItemsRoute";
+import { HISTORY_LOADING_TEXT, LOADING_TEXT, loaded } from "../lib/loading";
 import { RecordDisclosure } from "../lib/RecordDisclosure";
 import {
   currentOverrides,
@@ -67,6 +69,7 @@ import {
   isRunView,
   useUrlSelection,
 } from "../lib/useUrlSelection";
+import type { FirstRead } from "../main";
 
 const defaultClient = new TelemetryClient(window.location.origin, {
   fetch: window.fetch.bind(window),
@@ -98,8 +101,14 @@ const noMorePages = () => Promise.resolve();
 
 export function App({
   client = defaultClient,
+  first,
+  onDrawn,
 }: {
   readonly client?: TelemetryClient;
+  /** The read the page's entry already made, taken over rather than repeated. */
+  readonly first?: FirstRead;
+  /** Called once the app has drawn what the first screen stood in for. */
+  readonly onDrawn?: () => void;
 }) {
   const selection = useUrlSelection();
   // The action-items page is a view of the host's attention rather than of a
@@ -117,14 +126,7 @@ export function App({
   const drawer = useNavigationDrawer();
   const telemetry = useDagTelemetry(client, {
     runId: selection.runId,
-    view:
-      selection.view === "overall"
-        ? "overall"
-        : selection.view === "channel"
-          ? "channel"
-          : selection.nodeId === undefined
-            ? "graph"
-            : "node",
+    view: runPageKind(selection.view, selection.nodeId),
     nodeId: selection.nodeId,
     filter,
     // An address naming no run opens the newest one served, except on the Host
@@ -134,6 +136,7 @@ export function App({
     humanItems: humanItemsSelection.view,
     navigationUpdates: updates.navigation,
     mainUpdates: updates.main,
+    ...(first === undefined ? {} : { first }),
   });
   const rows = telemetry.rows;
   const selectedRunId = telemetry.runId;
@@ -159,6 +162,23 @@ export function App({
     hostRefresh + (shuttingDown ? rowChanges : 0),
   );
   const graph = detail === undefined ? undefined : graphOf(detail);
+  const runLoaded = loaded(detail?.progress);
+  const historyFailed =
+    detail?.progress?.failed ?? telemetry.timeline?.progress?.failed;
+  const historyLoading =
+    !runless &&
+    (detail?.progress?.complete === false ||
+      telemetry.timeline?.progress?.complete === false);
+  const readFailed =
+    !runless && detail === undefined && telemetry.error !== undefined;
+  const drawnOnce = useRef(false);
+  useLayoutEffect(() => {
+    if (drawnOnce.current) return;
+    if (detail !== undefined || telemetry.error !== undefined) {
+      drawnOnce.current = true;
+      onDrawn?.();
+    }
+  }, [detail, telemetry.error, onDrawn]);
   const selectedNode = nodes.find(({ id }) => id === selection.nodeId);
   useEffect(() => {
     if (runless || !rows) return;
@@ -207,6 +227,7 @@ export function App({
       <div className="app-shell">
         <RunNavigation
           rows={telemetry.navigationRows}
+          failed={telemetry.rows === undefined && telemetry.error !== undefined}
           selectedRunId={selectedRunId}
           onSelect={(run) => {
             selection.selectRun(run);
@@ -339,7 +360,10 @@ export function App({
               className="run-header-details"
               onOpen={control.reread}
             >
-              <p>Launching session: {launchLabel(detail.launch)}</p>
+              <p>
+                Launching session:{" "}
+                {runLoaded ? launchLabel(detail.launch) : LOADING_TEXT}
+              </p>
               {/* A reading already shown stays beside this, so a failed re-read
                   says the figures below are the last ones served. */}
               {control.status.error && (
@@ -365,7 +389,9 @@ export function App({
                   <dt>Last progress</dt>
                   <dd>
                     <output aria-label="Last progress">
-                      {detail.run.last_progress_at === undefined ? (
+                      {!runLoaded ? (
+                        LOADING_TEXT
+                      ) : detail.run.last_progress_at === undefined ? (
                         "Not recorded"
                       ) : (
                         <Timestamp
@@ -386,16 +412,48 @@ export function App({
               )}
             </RecordDisclosure>
           )}
-          {telemetry.error && (
+          {telemetry.error && !readFailed && (
             // `Alert` carries `role="alert"` itself, so the banner keeps announcing
             // itself the moment a read fails.
             <Alert
-              className="rounded-none border-x-0 border-t-0"
+              className="live-issue rounded-none border-x-0 border-t-0"
               variant="destructive"
             >
               <TriangleAlert />
               <AlertTitle>Live telemetry issue</AlertTitle>
-              <AlertDescription>{telemetry.error.message}</AlertDescription>
+              <AlertDescription>
+                {telemetry.error.message}{" "}
+                <Button
+                  onClick={telemetry.refresh}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Try again
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+          {historyFailed !== undefined && (
+            <Alert
+              className="live-issue rounded-none border-x-0 border-t-0"
+              variant="destructive"
+            >
+              <TriangleAlert />
+              <AlertTitle>
+                The rest of this run's history did not load
+              </AlertTitle>
+              <AlertDescription>
+                {historyFailed}{" "}
+                <Button
+                  onClick={telemetry.refresh}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Try again
+                </Button>
+              </AlertDescription>
             </Alert>
           )}
           {telemetry.notice && (
@@ -488,8 +546,18 @@ export function App({
                 {/* A run is selected but its detail has not arrived yet — still loading. The
                   empty state means the server serves no run at all, so it is reached only
                   once the list is known and holds none. */}
-                {!detail &&
-                (telemetry.loading || selectedRunId !== undefined) ? (
+                {readFailed && telemetry.error ? (
+                  <div className="loading-state">
+                    <div className="read-failed" role="alert">
+                      <strong>This run's history did not load</strong>
+                      <p>{telemetry.error.message}</p>
+                      <button onClick={telemetry.refresh} type="button">
+                        Try again
+                      </button>
+                    </div>
+                  </div>
+                ) : !detail &&
+                  (telemetry.loading || selectedRunId !== undefined) ? (
                   <div aria-live="polite" className="loading-state">
                     <Skeleton className="h-2 w-48" />
                     <Skeleton className="h-2 w-32" />
@@ -500,19 +568,24 @@ export function App({
                     <ChannelView
                       channel={telemetry.channel}
                       client={client}
-                      decisions={graph?.decisions ?? []}
+                      decisions={graph?.decisions}
                       filter={filter}
                       journalSeq={graph?.last_seq}
                       observedAt={detail.observed_at}
-                      overrides={graph && currentOverrides(graph)}
+                      overrides={
+                        graph && runLoaded ? currentOverrides(graph) : undefined
+                      }
                       runId={selectedRunId}
                     />
                   ) : selection.view === "overall" ? (
                     <OverallView
                       client={client}
                       detail={detail}
+                      filter={filter}
+                      key={`${selectedRunId}:${filter ?? ""}`}
                       journalSeq={graph?.last_seq}
                       nodes={nodes}
+                      onRetry={telemetry.refresh}
                       timeline={telemetry.timeline}
                       timelineError={telemetry.timelineError}
                       onSelectNode={selection.selectNode}
@@ -524,6 +597,10 @@ export function App({
                     // one breadcrumb away rather than one narrow column beside it.
                     <NodeTimelineView
                       client={client}
+                      filter={filter}
+                      key={`${selectedRunId}:${selectedNode.id}:${filter ?? ""}`}
+                      runLoaded={runLoaded}
+                      onRetry={telemetry.refresh}
                       node={selectedNode}
                       nodes={nodes}
                       onBack={() => selection.selectNode(undefined)}
@@ -554,6 +631,11 @@ export function App({
             </Tabs>
           )}
         </main>
+        {historyLoading && historyFailed === undefined && (
+          <p className="history-loading" role="status">
+            {HISTORY_LOADING_TEXT}
+          </p>
+        )}
       </div>
     </TooltipProvider>
   );

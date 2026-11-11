@@ -314,6 +314,30 @@ fn the_linux_job_runs_what_check_selects_less_what_lint_runs() {
         .into_iter()
         .filter(|task| !packaging.contains(&task.as_str()))
         .collect();
+    // Reached only through `check`, so that the release pull request's sweep
+    // runs them and an ordinary pull request's affected tier does not: beside
+    // that tier they ran test-linux past its 36-minute cap (runs 42856794257 and
+    // 42909548558). Named one by one, so any other target `check` gains still
+    // fails here.
+    let release_sweep_only = [
+        "dag-ui-read-latency:test-journeys",
+        "dag-ui-read-latency:test-large",
+        "dag-ui-read-latency:budgets-large",
+    ];
+    for task in release_sweep_only {
+        assert!(
+            owed.contains(task),
+            "`check` no longer selects {task}, so the release pull request's sweep does not run it"
+        );
+        assert!(
+            !selected.contains(task),
+            "test-linux's affected tier selects {task}, which ran it past its cap"
+        );
+    }
+    let owed: BTreeSet<String> = owed
+        .into_iter()
+        .filter(|task| !release_sweep_only.contains(&task.as_str()))
+        .collect();
     assert_eq!(
         selected, owed,
         "test-linux's targets and `check`'s selection less lint's have parted"

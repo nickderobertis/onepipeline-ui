@@ -136,6 +136,35 @@ impl Tab {
             None,
         );
         assert_eq!(stream.status, 200);
+        let mut tab = Self {
+            subscription,
+            stream,
+            applied,
+            state: snapshot,
+            frames: Vec::new(),
+        };
+        // A run view settles once: the sidebar's rows, then the rest of the run.
+        // A journey about what comes before that opens with `Tab::first`.
+        tab.settle();
+        tab
+    }
+
+    /// A tab that has only the first answer, for a journey that holds what comes
+    /// before the rest.
+    fn first(live: &Live, view: &Value) -> Self {
+        let subscribed = live.subscribe(&json!({ "view": view }));
+        let snapshot = subscribed["initial"]["snapshot"].clone();
+        let subscription = subscribed["subscription"]
+            .as_str()
+            .expect("an id")
+            .to_owned();
+        let applied = snapshot["id"].as_str().expect("a snapshot id").to_owned();
+        let stream = http::stream(
+            live.address(),
+            &format!("/api/v2/events?subscription={subscription}&after={applied}"),
+            None,
+        );
+        assert_eq!(stream.status, 200);
         Self {
             subscription,
             stream,
@@ -143,6 +172,41 @@ impl Tab {
             state: snapshot,
             frames: Vec::new(),
         }
+    }
+
+    /// Read until the sidebar and the run's complete read have both landed.
+    fn settle(&mut self) {
+        while self.state["sidebar"].is_null()
+            || !self.detail_complete()
+            || !self.timeline_complete()
+        {
+            assert!(
+                self.receive(PATIENCE).is_some(),
+                "the stream went quiet before the run was complete: {:#}",
+                self.state["visible"]["detail"]["progress"]
+            );
+        }
+        self.frames.clear();
+    }
+
+    /// [`Self::settle`], keeping the frames read for what a journey holds of them.
+    fn settle_after_first(&mut self) {
+        while self.state["sidebar"].is_null()
+            || !self.detail_complete()
+            || !self.timeline_complete()
+        {
+            assert!(self.receive(PATIENCE).is_some(), "the rest never came");
+        }
+    }
+
+    fn detail_complete(&self) -> bool {
+        let progress = &self.state["visible"]["detail"]["progress"];
+        progress.is_null() || progress["complete"] == true
+    }
+
+    fn timeline_complete(&self) -> bool {
+        let progress = &self.state["visible"]["timeline"]["progress"];
+        progress.is_null() || progress["complete"] == true
     }
 
     /// Read until the stream goes quiet, applying each frame in order.
@@ -233,6 +297,9 @@ impl Tab {
         };
         let visible = &mut self.state["visible"];
         match frame["type"].as_str() {
+            Some("sidebar.snapshot") => {
+                self.state["sidebar"] = frame["rows"].clone();
+            }
             Some("run.changed") => {
                 let rows = self.state["sidebar"].as_array_mut().expect("rows");
                 let row = frame["row"].clone();
@@ -266,9 +333,30 @@ fn unstamped(mut payload: Value) -> Value {
     payload
 }
 
+/// What a subscription's payload and a route's complete document have in common:
+/// the subscription's `progress`, `telemetry.as_of` and each span's windowed
+/// list are its own, and a span's list is held to the complete one by page.
+fn comparable(payload: &Value) -> Value {
+    let mut payload = payload.clone();
+    if let Some(object) = payload.as_object_mut() {
+        object.remove("progress");
+        if let Some(telemetry) = object.get_mut("telemetry").and_then(Value::as_object_mut) {
+            telemetry.remove("as_of");
+        }
+        if let Some(spans) = object.get_mut("spans").and_then(Value::as_array_mut) {
+            for span in spans.iter_mut().filter_map(Value::as_object_mut) {
+                span.remove("events");
+                span.remove("events_total");
+            }
+        }
+    }
+    payload
+}
+
 /// Hold a patched payload to a fresh read, naming what differs rather than
 /// printing both whole.
 fn same(patched: &Value, fresh: &Value, what: &str) {
+    let (patched, fresh) = (&comparable(patched), &comparable(fresh));
     if patched != fresh {
         let mut ops = Vec::new();
         patch::diff(patched, fresh, &mut ops).expect("both payloads are objects");
@@ -699,6 +787,7 @@ fn a_reconnect_replays_every_frame_it_missed_exactly_once() {
 fn a_cursor_the_subscription_cannot_resume_from_is_answered_with_one_named_reset() {
     let run = fixture_run::RUN_ID;
     let live = Live::start(|root| growing_run(root, run));
+    let _settled = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
     let subscribed = live.subscribe(&json!({ "view": { "type": "detail", "run_id": run } }));
     let subscription = subscribed["subscription"].as_str().expect("an id");
     let snapshot_id = subscribed["initial"]["snapshot"]["id"]
@@ -730,12 +819,13 @@ fn a_cursor_the_subscription_cannot_resume_from_is_answered_with_one_named_reset
             "the reset echoes the cursor it refused"
         );
         assert_eq!(frame["snapshot"]["id"], frame["id"]);
-        assert_eq!(
-            unstamped(frame["snapshot"]["visible"]["detail"].clone()),
-            fresh(
+        same(
+            &unstamped(frame["snapshot"]["visible"]["detail"].clone()),
+            &fresh(
                 live.address(),
-                &format!("/api/v2/runs/{run}?include_conversations=false")
-            )
+                &format!("/api/v2/runs/{run}?include_conversations=false"),
+            ),
+            "the reset",
         );
         assert!(
             stream.frame_within(QUIET).is_none(),
@@ -1025,9 +1115,14 @@ fn a_run_no_look_has_listed_yet_is_in_the_snapshot_of_a_subscription_to_it() {
     // Written while the look is held, so no look has seen it.
     growing_run(&live.serving.runs_root(), fresh);
 
-    let subscribed = live.subscribe(&json!({ "view": { "type": "detail", "run_id": fresh } }));
-    let snapshot = &subscribed["initial"]["snapshot"];
-    assert_eq!(snapshot["visible"]["run_id"], fresh);
+    let mut opened = Tab::first(&live, &json!({ "type": "detail", "run_id": fresh }));
+    assert_eq!(opened.state["visible"]["run_id"], fresh);
+    assert!(
+        opened.state["sidebar"].is_null(),
+        "a run view's first answer waits on no rows"
+    );
+    let snapshot_frame = frame_of(&mut opened, "sidebar.snapshot");
+    let snapshot = json!({ "sidebar": snapshot_frame["rows"].clone() });
     let listed: Vec<&str> = snapshot["sidebar"]
         .as_array()
         .expect("rows")
@@ -1248,19 +1343,21 @@ fn a_label_change_without_growth_is_reread_and_served_as_what_changed() {
         .frames
         .iter()
         .all(|frame| frame["type"] != "reset" && frame["type"] != "snapshot"));
-    assert_eq!(
-        unstamped(tab.state["visible"]["detail"].clone()),
-        fresh(
+    same(
+        &unstamped(tab.state["visible"]["detail"].clone()),
+        &fresh(
             live.address(),
-            &format!("/api/v2/runs/{run}?include_conversations=false")
-        )
+            &format!("/api/v2/runs/{run}?include_conversations=false"),
+        ),
+        "the detail",
     );
-    assert_eq!(
-        unstamped(tab.state["visible"]["timeline"].clone()),
-        fresh(
+    same(
+        &unstamped(tab.state["visible"]["timeline"].clone()),
+        &fresh(
             live.address(),
-            &format!("/api/v2/runs/{run}/timeline?scope=run")
-        )
+            &format!("/api/v2/runs/{run}/timeline?scope=run"),
+        ),
+        "the timeline",
     );
 }
 
@@ -1506,6 +1603,21 @@ fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pin
         held_back = live_journal::hold_back(&journal, total / 2 + 1);
     });
     let subscribed = live.subscribe(&json!({ "view": { "type": "detail", "run_id": run } }));
+    // A run view's rows are its stream's first frame.
+    let mut first_stream = http::stream(
+        live.address(),
+        &format!(
+            "/api/v2/events?subscription={}",
+            subscribed["subscription"].as_str().expect("an id")
+        ),
+        None,
+    );
+    let sidebar_snapshot = first_stream
+        .frame_within(PATIENCE)
+        .expect("the sidebar's rows")
+        .json();
+    assert_eq!(sidebar_snapshot["type"], "sidebar.snapshot");
+    drop(first_stream);
     let mut detail = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
     let mut overall = Tab::open(
         &live,
@@ -1591,6 +1703,7 @@ fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pin
     pin_golden(
         "subscription-frames.json",
         &json!([
+            pin(&sidebar_snapshot),
             pin(&changed),
             pin(&removed),
             pin(&detail_patch),
@@ -2376,6 +2489,10 @@ fn a_run_that_moves_every_poll_has_its_row_pushed_at_most_once_per_interval_and_
 #[test]
 fn a_stream_asked_for_gzip_sends_each_frame_encoded_as_it_happens() {
     let live = Live::start(|root| growing_run(root, fixture_run::RUN_ID));
+    let _settled = Tab::open(
+        &live,
+        &json!({ "type": "detail", "run_id": fixture_run::RUN_ID }),
+    );
     let subscribed = live.subscribe(&json!({
         "view": { "type": "detail", "run_id": fixture_run::RUN_ID }
     }));
@@ -2417,7 +2534,11 @@ fn a_stream_asked_for_gzip_sends_each_frame_encoded_as_it_happens() {
             if frame.event == "detail.patch" {
                 break frame;
             }
-            assert_eq!(frame.event, "run.changed");
+            assert!(
+                matches!(frame.event.as_str(), "run.changed" | "sidebar.snapshot"),
+                "only a sidebar frame may come first: {}",
+                frame.event
+            );
         };
         let data = frame.json();
         assert_eq!(data["subscription"], subscription);
@@ -2435,5 +2556,772 @@ fn a_stream_asked_for_gzip_sends_each_frame_encoded_as_it_happens() {
         stream.wire < decoded,
         "{} encoded bytes for {decoded} decoded ones",
         stream.wire
+    );
+}
+
+/// Each path `DETAIL_FIRST_KEPT` names, and `progress`, `node_details`, walking
+/// `detail` — so a member the contract does not name fails by name.
+fn only_named_members(detail: &Value) {
+    fn walk(value: &Value, path: &str, allowed: &[String], out: &mut Vec<String>) {
+        let starred = format!("{path}.*");
+        let is_starred = !path.is_empty() && allowed.iter().any(|name| name.starts_with(&starred));
+        match value {
+            Value::Array(items) => {
+                for item in items {
+                    walk(item, &starred, allowed, out);
+                }
+            }
+            Value::Object(object) => {
+                for (key, member) in object {
+                    let joined = if path.is_empty() {
+                        key.clone()
+                    } else if is_starred {
+                        format!("{path}.*")
+                    } else {
+                        format!("{path}.{key}")
+                    };
+                    if allowed.contains(&joined) {
+                        continue;
+                    }
+                    if allowed
+                        .iter()
+                        .any(|name| name.starts_with(&format!("{joined}.")))
+                    {
+                        walk(member, &joined, allowed, out);
+                    } else {
+                        out.push(joined);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let allowed: Vec<String> = onepipeline_ui::contract::DETAIL_FIRST_KEPT
+        .iter()
+        .chain(
+            [
+                "run.turns",
+                "progress",
+                "node_details",
+                "observed_at",
+                "api_version",
+                "telemetry_schema_version",
+            ]
+            .iter(),
+        )
+        .map(|path| (*path).to_owned())
+        .collect();
+    let mut extra = Vec::new();
+    walk(detail, "", &allowed, &mut extra);
+    assert!(
+        extra.is_empty(),
+        "members the contract does not name: {extra:?}"
+    );
+}
+
+const HOLD: (&str, &str) = (onepipeline_ui::live::COMPLETE_READ_HOLD_ENV, "1500");
+
+#[test]
+fn a_first_answer_is_selective_and_the_rest_arrives_in_one_patch() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start_with(
+        |root| {
+            fixture_run::write(root, run);
+        },
+        &[HOLD],
+    );
+    let mut tab = Tab::first(&live, &json!({ "type": "detail", "run_id": run }));
+    assert!(tab.state["sidebar"].is_null(), "no rows in the answer");
+    let detail = tab.state["visible"]["detail"].clone();
+    only_named_members(&detail);
+    assert_eq!(detail["run"]["turns"], json!({ "loading": true }));
+    assert_eq!(
+        detail["progress"],
+        json!({ "complete": false, "loading": ["run.turns"] })
+    );
+    assert!(detail["telemetry"].is_null(), "no telemetry until the rest");
+    let full = fresh(
+        live.address(),
+        &format!("/api/v2/runs/{run}?include_conversations=false"),
+    );
+    for path in ["state", "phase"] {
+        assert_eq!(detail["run"][path], full["run"][path], "{path}");
+    }
+    assert_eq!(
+        detail["run"]["timing"]["wall_seconds"],
+        full["run"]["timing"]["wall_seconds"]
+    );
+    assert_eq!(detail["graph"]["node_status"], full["graph"]["node_status"]);
+    // The stream's first frame is the rows; one patch is the rest.
+    let first = tab.receive(PATIENCE).expect("the rows");
+    assert_eq!(first["type"], "sidebar.snapshot");
+    assert!(first["rows"]
+        .as_array()
+        .is_some_and(|rows| !rows.is_empty()));
+    let rest = tab.receive(PATIENCE).expect("the rest");
+    assert_eq!(rest["type"], "detail.patch");
+    assert_eq!(
+        tab.state["visible"]["detail"]["progress"],
+        json!({ "complete": true, "loading": [] })
+    );
+    assert!(tab.state["visible"]["detail"]["run"]["turns"].is_u64());
+    assert!(tab.state["visible"]["detail"]["telemetry"]["as_of"].is_string());
+    same(
+        &unstamped(tab.state["visible"]["detail"].clone()),
+        &full,
+        "the opened detail",
+    );
+    assert!(
+        tab.drain()
+            .iter()
+            .all(|frame| frame["type"] != "detail.patch"),
+        "one patch"
+    );
+    // A tab opening a run already read has it whole.
+    let second = Tab::first(&live, &json!({ "type": "detail", "run_id": run }));
+    assert_eq!(
+        second.state["visible"]["detail"]["progress"]["complete"],
+        true
+    );
+}
+
+#[test]
+fn overall_holds_every_span_without_its_events_and_the_rest_adds_sessions_and_totals() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start_with(
+        |root| {
+            fixture_run::write(root, run);
+            fixture_run::point_sessions(root, run);
+        },
+        &[HOLD],
+    );
+    let mut tab = Tab::first(
+        &live,
+        &json!({ "type": "timeline", "run_id": run, "scope": "run" }),
+    );
+    let timeline = tab.state["visible"]["timeline"].clone();
+    assert_eq!(
+        timeline["progress"]["loading"],
+        json!(["spans[harness_scope]"])
+    );
+    let spans = timeline["spans"].as_array().expect("spans");
+    assert!(!spans.is_empty());
+    for span in spans {
+        assert!(span.get("harness_scope").is_none(), "{span}");
+        assert_eq!(span["events"], json!([]), "{span}");
+        assert!(span.get("detail").is_none(), "{span}");
+        assert!(span.get("events_total").is_none(), "{span}");
+    }
+    let full = fresh(
+        live.address(),
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    );
+    let held: Vec<_> = full["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .filter(|span| span.get("harness_scope").is_none())
+        .collect();
+    assert_eq!(
+        held.len(),
+        spans.len(),
+        "every span but a harness session's"
+    );
+    for (mine, whole) in spans.iter().zip(&held) {
+        for field in ["id", "kind", "status", "started_at", "ended_at"] {
+            assert_eq!(mine[field], whole[field], "{field} of {}", whole["id"]);
+        }
+    }
+    tab.settle_after_first();
+    same(
+        &unstamped(tab.state["visible"]["timeline"].clone()),
+        &full,
+        "the opened timeline",
+    );
+    let total: usize = tab.state["visible"]["timeline"]["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .map(|span| span["events_total"].as_u64().expect("a total") as usize)
+        .sum();
+    assert_eq!(
+        total,
+        full["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .map(|span| span["events"].as_array().map_or(0, Vec::len))
+            .sum::<usize>(),
+    );
+    assert!(
+        tab.state["visible"]["timeline"]["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .all(|span| span["events"] == json!([])),
+        "no frame carried a span's whole list",
+    );
+    assert!(
+        tab.frames
+            .iter()
+            .all(|frame| !frame.to_string().contains("\"events\":[{")),
+        "a frame carried events",
+    );
+}
+
+#[test]
+fn a_nodes_window_is_its_latest_rows_and_pages_reach_every_row_either_side_of_the_rest() {
+    node_window_and_pages(false);
+}
+
+/// The same, over a journal long enough that the node's first answer is a
+/// selective read of it: a page before the rest is then served from that read,
+/// which holds every record of the node, rather than from the journal again.
+#[test]
+fn a_selective_first_answer_serves_its_nodes_pages_before_the_rest() {
+    node_window_and_pages(true);
+}
+
+/// Another node's records, appended to `journal` until it is past the size a
+/// first answer reads whole.
+fn pad_past_a_whole_read(journal: &Path, run: &str) {
+    let template: Value = serde_json::from_str(&activity(
+        journal,
+        run,
+        "padding-node",
+        &"padding ".repeat(250),
+    ))
+    .expect("json");
+    let first = template["seq"].as_u64().expect("a seq");
+    let lines: Vec<String> = (0..700_u64)
+        .map(|offset| {
+            let mut line = template.clone();
+            line["seq"] = json!(first + offset);
+            line.to_string()
+        })
+        .collect();
+    live_journal::append_lines(journal, &lines);
+    assert!(
+        fs::metadata(journal).expect("a journal").len() > 1024 * 1024 + 64 * 1024,
+        "a journal past a whole read"
+    );
+}
+
+fn node_window_and_pages(selective: bool) {
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::NODE_ID;
+    let live = Live::start_with(
+        |root| {
+            growing_run(root, run);
+            let journal = root.join(run).join("events.jsonl");
+            if selective {
+                pad_past_a_whole_read(&journal, run);
+            }
+            for marker in 0..55 {
+                let line = activity(&journal, run, node, &format!("row {marker}"));
+                live_journal::append_lines(&journal, &[line]);
+            }
+            // The node's latest records are ones no span lists, so a page's window
+            // cannot learn from its records alone whether an older page is left.
+            for _ in 0..12 {
+                let mut line: Value =
+                    serde_json::from_str(&activity(&journal, run, node, "beat")).expect("json");
+                line["kind"] = json!("member-heartbeat");
+                line["payload"] = json!({});
+                live_journal::append_lines(&journal, &[line.to_string()]);
+            }
+        },
+        &[(onepipeline_ui::live::COMPLETE_READ_HOLD_ENV, "2500")],
+    );
+    let mut tab = Tab::first(
+        &live,
+        &json!({ "type": "timeline", "run_id": run, "scope": "node", "node": node }),
+    );
+    let path = format!("/api/v2/runs/{run}/timeline?scope=node&node={node}");
+    let full = fresh(live.address(), &path);
+    let holder = |spans: &[Value]| -> Value {
+        spans
+            .iter()
+            .max_by_key(|span| span["events"].as_array().map_or(0, Vec::len))
+            .expect("a span")
+            .clone()
+    };
+    let whole = holder(full["spans"].as_array().expect("spans"));
+    let whole_rows = whole["events"].as_array().expect("events");
+    assert!(whole_rows.len() > 40, "a span longer than the window");
+    let held: Value = tab.state["visible"]["timeline"]["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .find(|span| span["id"] == whole["id"])
+        .expect("the span")
+        .clone();
+    assert_eq!(held["events_total"], json!(whole_rows.len()));
+    assert_eq!(
+        held["events"],
+        json!(whole_rows[whole_rows.len() - 40..].to_vec())
+    );
+    assert!(held.get("detail").is_none());
+    // Before the rest: every page of the span, newest first, is the whole list.
+    let walked = walk_pages(&live, run, node, whole["id"].as_str().expect("an id"));
+    assert_eq!(walked, *whole_rows, "pages before the rest");
+    // And every row of the node, page by page across its spans, each once, in
+    // the timeline's order: a page whose window renders only itself still says
+    // when an older page is left.
+    let mut every: Vec<Value> = Vec::new();
+    for span in full["spans"].as_array().expect("spans") {
+        for row in span["events"].as_array().into_iter().flatten() {
+            if !every.iter().any(|held| held["id"] == row["id"]) {
+                every.push(row.clone());
+            }
+        }
+    }
+    every.sort_by_key(|row| {
+        (
+            row["at"].as_str().unwrap_or_default().to_owned(),
+            row["journal_order"].as_u64(),
+        )
+    });
+    let ids = |rows: &[Value]| -> Vec<Value> { rows.iter().map(|row| row["id"].clone()).collect() };
+    let across = walk_node_pages(&live, run, node);
+    assert_eq!(
+        ids(&across),
+        ids(&every),
+        "the node's pages before the rest"
+    );
+    tab.settle_after_first();
+    assert_eq!(
+        tab.state["visible"]["timeline"]["progress"]["complete"],
+        true
+    );
+    let walked = walk_pages(&live, run, node, whole["id"].as_str().expect("an id"));
+    assert_eq!(walked, *whole_rows, "the same rows after the rest");
+    let across = walk_node_pages(&live, run, node);
+    assert_eq!(ids(&across), ids(&every), "the node's pages after the rest");
+    // `span` adds the span's whole fields but its list.
+    let page = http::get(
+        live.address(),
+        &format!(
+            "/api/v2/runs/{run}/timeline/events?scope=node&node={node}&span={}&limit=1",
+            whole["id"].as_str().expect("an id")
+        ),
+    )
+    .json();
+    assert_eq!(page["span"]["id"], whole["id"]);
+    assert!(page["span"].get("events").is_none());
+    assert_eq!(page["total"], json!(whole_rows.len()));
+}
+
+/// A history page's bounds, filter and total, held to the complete document
+/// before the rest arrives and after: `from` and `to` admit the rows stamped at
+/// them, a filter narrows the rows as it narrows the document, and every page of
+/// one query says the same total, which is the rows its pages hold.
+#[test]
+fn a_pages_bounds_filter_and_total_are_the_complete_documents() {
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::NODE_ID;
+    let live = Live::start_with(
+        |root| {
+            growing_run(root, run);
+            let journal = root.join(run).join("events.jsonl");
+            for marker in 0..30 {
+                let line = activity(&journal, run, node, &format!("row {marker}"));
+                live_journal::append_lines(&journal, &[line]);
+            }
+        },
+        &[(onepipeline_ui::live::COMPLETE_READ_HOLD_ENV, "2500")],
+    );
+    let mut tab = Tab::first(
+        &live,
+        &json!({ "type": "timeline", "run_id": run, "scope": "node", "node": node }),
+    );
+    let document = |filter: &str| -> Vec<Value> {
+        let full = fresh(
+            live.address(),
+            &format!("/api/v2/runs/{run}/timeline?scope=node&node={node}{filter}"),
+        );
+        let mut every: Vec<Value> = Vec::new();
+        for span in full["spans"].as_array().expect("spans") {
+            for row in span["events"].as_array().into_iter().flatten() {
+                if !every.iter().any(|held| held["id"] == row["id"]) {
+                    every.push(row.clone());
+                }
+            }
+        }
+        every.sort_by_key(|row| {
+            (
+                row["at"].as_str().unwrap_or_default().to_owned(),
+                row["journal_order"].as_u64(),
+            )
+        });
+        every
+    };
+    let ids = |rows: &[Value]| -> Vec<Value> { rows.iter().map(|row| row["id"].clone()).collect() };
+    let every = document("");
+    let planned = document("&filter=planner");
+    assert!(every.len() > 20, "rows enough to bound");
+    assert!(
+        !planned.is_empty() && planned.len() < every.len(),
+        "a filter that narrows: {} of {}",
+        planned.len(),
+        every.len()
+    );
+    let from = every[5]["at"].as_str().expect("a stamp").to_owned();
+    let to = every[every.len() - 6]["at"]
+        .as_str()
+        .expect("a stamp")
+        .to_owned();
+    let bounded: Vec<Value> = every
+        .iter()
+        .filter(|row| {
+            let at = row["at"].as_str().unwrap_or_default();
+            at >= from.as_str() && at <= to.as_str()
+        })
+        .cloned()
+        .collect();
+    assert!(bounded.len() < every.len(), "bounds that leave rows out");
+    let check = |phase: &str| {
+        let (rows, totals) = walk_query(&live, run, &format!("scope=node&node={node}&limit=3"));
+        assert_eq!(ids(&rows), ids(&every), "{phase}: every row");
+        assert!(
+            totals.iter().all(|total| *total == every.len()),
+            "{phase}: totals {totals:?}"
+        );
+        let query = format!("scope=node&node={node}&limit=3&from={from}&to={to}");
+        let (rows, totals) = walk_query(&live, run, &query);
+        assert_eq!(
+            ids(&rows),
+            ids(&bounded),
+            "{phase}: rows within the bounds, theirs included"
+        );
+        assert!(
+            totals.iter().all(|total| *total == bounded.len()),
+            "{phase}: bounded totals {totals:?}"
+        );
+        let (rows, totals) = walk_query(
+            &live,
+            run,
+            &format!("scope=node&node={node}&limit=3&filter=planner"),
+        );
+        assert_eq!(ids(&rows), ids(&planned), "{phase}: filtered rows");
+        assert!(
+            totals.iter().all(|total| *total == planned.len()),
+            "{phase}: filtered totals {totals:?}"
+        );
+    };
+    check("before the rest");
+    tab.settle_after_first();
+    assert_eq!(
+        tab.state["visible"]["timeline"]["progress"]["complete"],
+        true
+    );
+    check("after the rest");
+}
+
+/// Every row of one page query, oldest first, and the total each page said.
+fn walk_query(live: &Live, run: &str, query: &str) -> (Vec<Value>, Vec<usize>) {
+    let mut rows: Vec<Value> = Vec::new();
+    let mut totals = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut path = format!("/api/v2/runs/{run}/timeline/events?{query}");
+        if let Some(cursor) = &cursor {
+            path.push_str(&format!("&cursor={cursor}"));
+        }
+        let page = http::get(live.address(), &path);
+        assert_eq!(page.status, 200, "{path}: {}", page.body);
+        let page = page.json();
+        totals.push(usize::try_from(page["total"].as_u64().expect("a total")).expect("a count"));
+        let mut held: Vec<Value> = page["rows"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .map(|row| {
+                let mut row = row.clone();
+                row.as_object_mut().expect("a row").remove("span_id");
+                row
+            })
+            .collect();
+        held.extend(rows);
+        rows = held;
+        match page["next_cursor"].as_str() {
+            Some(next) => cursor = Some(next.to_owned()),
+            None => return (rows, totals),
+        }
+    }
+}
+
+/// Every row of a node's pages across its spans, newest page first, walked
+/// back to the first with a limit far below the node's rows.
+fn walk_node_pages(live: &Live, run: &str, node: &str) -> Vec<Value> {
+    let mut rows: Vec<Value> = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut path = format!("/api/v2/runs/{run}/timeline/events?scope=node&node={node}&limit=5");
+        if let Some(cursor) = &cursor {
+            path.push_str(&format!("&cursor={cursor}"));
+        }
+        let page = http::get(live.address(), &path);
+        assert_eq!(page.status, 200, "{path}: {}", page.body);
+        let page = page.json();
+        let mut held: Vec<Value> = page["rows"].as_array().expect("rows").clone();
+        held.extend(rows);
+        rows = held;
+        match page["next_cursor"].as_str() {
+            Some(next) => cursor = Some(next.to_owned()),
+            None => return rows,
+        }
+    }
+}
+
+fn walk_pages(live: &Live, run: &str, node: &str, span: &str) -> Vec<Value> {
+    let mut rows: Vec<Value> = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut path = format!(
+            "/api/v2/runs/{run}/timeline/events?scope=node&node={node}&span={span}&limit=7"
+        );
+        if let Some(cursor) = &cursor {
+            path.push_str(&format!("&cursor={cursor}"));
+        }
+        let page = http::get(live.address(), &path);
+        assert_eq!(page.status, 200, "{path}: {}", page.body);
+        let page = page.json();
+        let mut held: Vec<Value> = page["rows"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .map(|row| {
+                let mut row = row.clone();
+                row.as_object_mut().expect("a row").remove("span_id");
+                row
+            })
+            .collect();
+        held.extend(rows);
+        rows = held;
+        match page["next_cursor"].as_str() {
+            Some(next) => cursor = Some(next.to_owned()),
+            None => return rows,
+        }
+    }
+}
+
+#[test]
+fn a_page_refuses_what_it_cannot_answer() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let base = format!("/api/v2/runs/{run}/timeline/events");
+    for (query, status, code) in [
+        ("?scope=node".to_owned(), 422, "invalid_node_id"),
+        ("?scope=sideways".to_owned(), 422, "invalid_request"),
+        (
+            format!("?scope=node&node={}&limit=0", fixture_run::NODE_ID),
+            422,
+            "invalid_request",
+        ),
+        (
+            format!("?scope=node&node={}&limit=501", fixture_run::NODE_ID),
+            422,
+            "invalid_request",
+        ),
+        (
+            format!("?scope=node&node={}&cursor=nope", fixture_run::NODE_ID),
+            422,
+            "invalid_request",
+        ),
+        (
+            format!("?scope=node&node={}&from=yesterday", fixture_run::NODE_ID),
+            422,
+            "invalid_request",
+        ),
+        (
+            "?scope=node&node=no-such-node".to_owned(),
+            404,
+            "node_not_found",
+        ),
+        (
+            format!("?scope=node&node={}&span=none", fixture_run::NODE_ID),
+            404,
+            "span_not_found",
+        ),
+    ] {
+        let answer = http::get(live.address(), &format!("{base}{query}"));
+        assert_eq!(answer.status, status, "{query}: {}", answer.body);
+        assert_eq!(
+            answer.json()["error"]["code"],
+            code,
+            "{query}: {}",
+            answer.body
+        );
+    }
+    let missing = http::get(
+        live.address(),
+        "/api/v2/runs/run-no-such/timeline/events?scope=run",
+    );
+    assert_eq!(missing.status, 404);
+}
+
+#[test]
+fn a_held_nodes_queued_id_is_counted_over_the_whole_store_before_the_rest() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start_with(
+        |root| {
+            fixture_run::write_held(root, run);
+            // Three of the node's records the selective read holds two of, before
+            // its hold: the stream's middle one is not kept.
+            let journal = root.join(run).join("events.jsonl");
+            let extra: String = (1..=3)
+                .map(|seq| {
+                    format!(
+                        "{}\n",
+                        json!({
+                            "v": 1, "ts": "2026-08-07T12:00:00.500Z", "stream": "extra-stream",
+                            "seq": seq, "source": "agentgraph", "kind": "turn-activity",
+                            "labels": { "run_id": run, "node": fixture_run::HELD_BEHIND_NODE_ID },
+                            "payload": { "kind": "tool_call", "name": "Bash", "detail": "x" },
+                            "artifacts": [],
+                        })
+                    )
+                })
+                .collect();
+            let body = fs::read_to_string(&journal).expect("a journal");
+            fs::write(&journal, format!("{extra}{body}")).expect("rewritten");
+        },
+        &[HOLD],
+    );
+    let mut tab = Tab::first(
+        &live,
+        &json!({ "type": "timeline", "run_id": run, "scope": "run" }),
+    );
+    let queued = |timeline: &Value| -> Vec<String> {
+        timeline["spans"]
+            .as_array()
+            .expect("spans")
+            .iter()
+            .filter(|span| span["kind"] == "queued")
+            .map(|span| span["id"].as_str().expect("an id").to_owned())
+            .collect()
+    };
+    let held = queued(&tab.state["visible"]["timeline"]);
+    assert!(!held.is_empty(), "the fixture holds a node");
+    let full = fresh(
+        live.address(),
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    );
+    assert_eq!(held, queued(&full), "before the rest");
+    tab.settle_after_first();
+    assert_eq!(
+        queued(&tab.state["visible"]["timeline"]),
+        held,
+        "the rest moves no id"
+    );
+}
+
+#[test]
+fn a_run_still_appending_is_patched_from_the_selective_read_and_publishing_moves_nothing_back() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start_with(|root| growing_run(root, run), &[HOLD]);
+    let mut tab = Tab::first(&live, &json!({ "type": "detail", "run_id": run }));
+    let journal = live.journal(run);
+    let seq = |tab: &Tab| {
+        tab.state["visible"]["detail"]["graph"]["last_seq"]
+            .as_u64()
+            .expect("a seq")
+    };
+    let before = seq(&tab);
+    let line = activity(&journal, run, fixture_run::NODE_ID, "during");
+    live_journal::append_lines(&journal, &[line]);
+    tab.until_listed("the appended record", |tab| seq(tab) > before);
+    assert_eq!(
+        tab.state["visible"]["detail"]["progress"]["complete"], false,
+        "held"
+    );
+    let during = seq(&tab);
+    tab.settle_after_first();
+    assert!(seq(&tab) >= during, "the rest moved nothing back");
+    let line = activity(&journal, run, fixture_run::NODE_ID, "after");
+    live_journal::append_lines(&journal, &[line]);
+    let after = seq(&tab);
+    tab.until_listed("the record after the rest", |tab| seq(tab) > after);
+    tab.drain();
+    same(
+        &unstamped(tab.state["visible"]["detail"].clone()),
+        &fresh(
+            live.address(),
+            &format!("/api/v2/runs/{run}?include_conversations=false"),
+        ),
+        "the detail after the rest",
+    );
+}
+
+#[test]
+fn a_complete_read_that_fails_keeps_the_screen_says_why_and_a_later_tab_retries() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start_with(
+        |root| growing_run(root, run),
+        &[(onepipeline_ui::live::COMPLETE_READ_HOLD_ENV, "1200")],
+    );
+    let launch = live.serving.run_dir(run).join("launch.json");
+    let kept = fs::read(&launch).expect("a launch record");
+    let mut tab = Tab::first(&live, &json!({ "type": "detail", "run_id": run }));
+    fs::remove_file(&launch).expect("the launch record goes");
+    tab.until_listed("the failure", |tab| {
+        tab.state["visible"]["detail"]["progress"]["failed"].is_string()
+    });
+    let progress = tab.state["visible"]["detail"]["progress"].clone();
+    assert_eq!(progress["complete"], false);
+    assert!(
+        tab.state["visible"]["detail"]["graph"]["node_status"].is_object(),
+        "the screen stands"
+    );
+    fs::write(&launch, kept).expect("the launch record back");
+    // A later subscription starts the read again.
+    let mut retry = Tab::first(&live, &json!({ "type": "detail", "run_id": run }));
+    retry.settle_after_first();
+    assert!(retry.state["visible"]["detail"]["progress"]
+        .get("failed")
+        .is_none());
+}
+
+#[test]
+fn a_channel_view_opens_on_the_first_detail_without_waiting_for_the_rest() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start_with(|root| growing_run(root, run), &[HOLD]);
+    let tab = Tab::first(&live, &json!({ "type": "channel", "run_id": run }));
+    assert_eq!(tab.state["visible"]["type"], "channel");
+    assert_eq!(
+        tab.state["visible"]["detail"]["progress"]["complete"],
+        false
+    );
+    assert!(tab.state["visible"]["channel"].is_object());
+}
+
+#[test]
+fn a_fold_past_its_overdue_point_draws_as_loading_until_it_lands() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start_with(
+        |root| growing_run(root, run),
+        &[
+            (onepipeline_ui::live::TELEMETRY_REFOLD_ENV, "100"),
+            (onepipeline_ui::live::FOLD_HOLD_ENV, "2500"),
+        ],
+    );
+    let mut tab = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
+    let as_of = tab.state["visible"]["detail"]["telemetry"]["as_of"].clone();
+    assert!(as_of.is_string());
+    std::thread::sleep(Duration::from_millis(600));
+    let line = activity(&live.journal(run), run, fixture_run::NODE_ID, "stale");
+    live_journal::append_lines(&live.journal(run), &[line]);
+    tab.until_listed("the fold falling overdue", |tab| {
+        tab.state["visible"]["detail"]["progress"]["loading"]
+            == json!(["telemetry", "run.usage", "run.timing"])
+    });
+    assert_eq!(tab.state["visible"]["detail"]["progress"]["complete"], true);
+    tab.until_listed("the fold landing", |tab| {
+        tab.state["visible"]["detail"]["telemetry"]["as_of"] != as_of
+    });
+    assert_eq!(
+        tab.state["visible"]["detail"]["progress"]["loading"],
+        json!([])
     );
 }

@@ -1,23 +1,114 @@
-import "@xyflow/react/dist/style.css";
-// Every task this app shows is rendered by `@onetaskgraph/ui`; its stylesheet comes
-// first so this app's own rules, which theme it, follow it.
-import "@onetaskgraph/ui/styles.css";
 // `styles.css` imports the @oneharness/ui stylesheet through this app's Tailwind
 // build, so the design system's tokens, variants and layers arrive with the app's
 // own CSS rather than as raw text injected after first paint.
 import "./styles.css";
-import { StrictMode } from "react";
+import {
+  READ_DEADLINE_MS,
+  TelemetryDeadlineError,
+} from "@onepipeline-ui/telemetry-client/deadline";
 import { createRoot } from "react-dom/client";
-import { App } from "./app/App";
-import { AppErrorBoundary } from "./app/AppErrorBoundary";
+import { type FirstAddress, firstAddress } from "./first-screen/address";
+import {
+  type FirstAnswer,
+  FirstScreen,
+  FirstScreenLoading,
+} from "./first-screen/FirstScreen";
 
-const root = document.getElementById("root");
-if (!root) throw new Error("DAG UI root element is missing");
+/** How the first read went, handed to the app that takes it over. */
+export interface FirstRead {
+  readonly address: FirstAddress;
+  readonly answer?: unknown;
+  readonly error?: Error;
+}
 
-createRoot(root).render(
-  <StrictMode>
-    <AppErrorBoundary>
-      <App />
-    </AppErrorBoundary>
-  </StrictMode>,
-);
+/** The `{error: {code, message}}` a refusal carries, in the server's own words. */
+function refusalOf(
+  body: unknown,
+): { readonly code?: string; readonly message?: string } | undefined {
+  if (typeof body !== "object" || body === null || !("error" in body))
+    return undefined;
+  const error = (body as { error: unknown }).error;
+  if (typeof error !== "object" || error === null) return undefined;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return {
+    ...(typeof code === "string" ? { code } : {}),
+    ...(typeof message === "string" ? { message } : {}),
+  };
+}
+
+async function firstRead(address: FirstAddress): Promise<FirstRead> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), READ_DEADLINE_MS);
+  try {
+    const response = await fetch("/api/v2/subscriptions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ view: address.view }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const refused = await response.json().then(
+        (body: unknown) => refusalOf(body),
+        () => undefined,
+      );
+      // A run or node the address names that is not served is the app's to
+      // answer, as it always has: by opening what is served instead.
+      if (
+        refused?.code === "run_not_found" ||
+        refused?.code === "node_not_found"
+      )
+        return { address };
+      return {
+        address,
+        error: new Error(
+          refused?.message ??
+            `Telemetry request failed with status ${response.status}`,
+        ),
+      };
+    }
+    return { address, answer: await response.json() };
+  } catch (caught) {
+    return {
+      address,
+      error: controller.signal.aborted
+        ? new TelemetryDeadlineError("The read of this run's history")
+        : caught instanceof Error
+          ? caught
+          : new Error(String(caught)),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The page's entry. A run's address draws its first screen from one read and then
+ * fetches the rest of the app, the canvas and sidebar included, which takes that same
+ * read over and replaces the screen; any other address goes straight to the app.
+ */
+async function start(): Promise<void> {
+  const element = document.getElementById("root");
+  if (!element) throw new Error("DAG UI root element is missing");
+  const address = firstAddress(
+    window.location.search,
+    window.location.pathname,
+  );
+  if (address === undefined) {
+    const { mountApp } = await import("./app/mount");
+    mountApp(element, undefined, undefined);
+    return;
+  }
+  const drawn = createRoot(element);
+  drawn.render(<FirstScreenLoading address={address} />);
+  const read = await firstRead(address);
+  // llmlint: ignore-block[boundary_inputs_validated] the contract parser refuses this same answer when the app adopts it (`LiveView`'s `initial`, through `parseSubscribed`) and replaces the screen with the failure; parsing it here too puts zod and every schema in the first-screen chunk and 25-70 ms of parse on the first view's critical path, against 0.13 s of headroom under its 1.5 s line. Validating it before this render without that cost is a drafted follow-up, by the manager's ruling.
+  if (read.answer !== undefined)
+    drawn.render(
+      <FirstScreen address={address} answer={read.answer as FirstAnswer} />,
+    );
+  // llmlint: ignore-end[boundary_inputs_validated]
+  const { mountApp } = await import("./app/mount");
+  mountApp(element, read, drawn);
+}
+
+void start();

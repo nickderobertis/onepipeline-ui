@@ -37,17 +37,27 @@ export function percentile(
 const seconds = (ms: number) => Math.round(ms) / 1000;
 
 /**
- * When the page rendered the record numbered `seq`: its row's appearance on a
- * node timeline, or else the first rise of a view root to it or past it.
+ * When the page showed the record numbered `seq` or what followed it: its own
+ * row's appearance on a node timeline, or else the first rise of a view root to
+ * it or past it.
+ *
+ * A node timeline holds the node's latest rows, so a record a burst carried past
+ * that window before the page drew it never has a row of its own: what is read
+ * for it is the first row after it appearing, the window having moved past it,
+ * as a root's rise past a record is read for that record.
  */
-export function renderedAt(
+export function shownBy(
   rendered: Rendered,
   rowsShown: boolean,
   seq: number,
 ): number | undefined {
-  return rowsShown
-    ? rendered.rows[String(seq)]
-    : rendered.roots.find(([shown]) => shown >= seq)?.[1];
+  if (!rowsShown) return rendered.roots.find(([shown]) => shown >= seq)?.[1];
+  const own = rendered.rows[String(seq)];
+  if (own !== undefined) return own;
+  const later = Object.entries(rendered.rows)
+    .filter(([shown]) => Number(shown) > seq)
+    .map(([, at]) => at);
+  return later.length === 0 ? undefined : Math.min(...later);
 }
 
 /** Each shown record's lag in seconds, and the summary of them. */
@@ -57,7 +67,7 @@ export function lagStats(
   rowsShown: boolean,
 ) {
   const lags = appended.flatMap(({ seq, at }) => {
-    const shown = renderedAt(rendered, rowsShown, seq);
+    const shown = shownBy(rendered, rowsShown, seq);
     return shown === undefined ? [] : [seconds(shown - at)];
   });
   return {

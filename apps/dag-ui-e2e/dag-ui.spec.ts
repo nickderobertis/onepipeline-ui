@@ -2565,8 +2565,11 @@ test("recovers a node transcript with Refresh after a connection reset", async (
   await openObservatory(page, `/?run=${runId}&node=${narrow_node}`);
   expect((await reset).failure()?.errorText).toContain("ERR_CONNECTION_RESET");
   // The node's detail and timeline arrive together, so nothing of the node is
-  // held when its one read fails: the page says the live read failed.
-  await expect(page.getByRole("alert")).toContainText("Live telemetry issue");
+  // held when its one read fails: the page shows the design's Read failed view,
+  // which took the place of the "Live telemetry issue" banner for a first answer.
+  await expect(page.getByRole("alert")).toContainText(
+    "This run's history did not load",
+  );
   await expect(readingRows(page)).toHaveCount(0);
 
   await readNodeTranscript(page, runId, narrow_node, () =>
@@ -3961,22 +3964,20 @@ test("surfaces a telemetry read it cannot complete", async ({ page }) => {
   // EventSource both fail for real, and the operator must be told rather than shown
   // an empty graph that looks like "no runs yet".
   await page.goto(OFFLINE_UI_URL);
-  // Both failed reads are named in the shared banner.
-  const banner = page
-    .getByRole("alert")
-    .filter({ hasText: "Live telemetry issue" });
-  await expect(banner).toContainText("Live telemetry issue");
-  // The banner names the failure as well as announcing one: an operator who cannot
-  // see what broke cannot tell a wedged server from a mistyped API address.
-  await expect(
-    banner.locator('[data-slot="alert-description"]'),
-  ).not.toBeEmpty();
+  // A first read that fails is the Read failed view, in place of what it would
+  // have drawn, and the project list says it did not load rather than loading on.
+  const failed = page.getByRole("alert").filter({ hasText: "did not load" });
+  await expect(failed).toBeVisible();
+  await expect(page.getByText("Projects did not load")).toBeVisible();
+  // It names the failure as well as announcing one: an operator who cannot see
+  // what broke cannot tell a wedged server from a mistyped API address.
+  await expect(failed.locator("p")).not.toBeEmpty();
   await expect(page.getByText("Waiting for first update")).toBeVisible();
 
-  // The one control that can retry the read stays reachable while the read is
-  // failing, and reporting the failure again is the honest outcome of pressing it.
-  await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(banner).toContainText("Live telemetry issue");
+  // Try again stays reachable while the read is failing, and reporting the
+  // failure again is the honest outcome of pressing it.
+  await failed.getByRole("button", { name: "Try again" }).click();
+  await expect(failed).toBeVisible();
 });
 
 test("reports a reading the served run has no profile for", async ({
@@ -3992,13 +3993,16 @@ test("reports a reading the served run has no profile for", async ({
   // llmlint: ignore-end[tests_mirror_real_usage]
   await page.goto(`/?run=${runs().live}&view=graph`);
 
+  // A run's first answer refused is the Read failed view, not the stream's
+  // banner: it is the read of this run's history that did not load.
   const banner = page.getByRole("alert");
-  await expect(banner).toContainText("Live telemetry issue");
+  await expect(banner).toContainText("This run's history did not load");
   // In the server's own words, naming the reading it refused — an operator who
   // cannot see which reading was refused cannot tell it from a wedged read.
   await expect(banner).toContainText('"auditor" is not a filter profile');
+  await expect(banner.getByRole("button", { name: "Try again" })).toBeVisible();
   // And nothing is drawn under the name of a reading that was never served.
-  await expect(page.getByText("Loading execution history…")).toBeVisible();
+  await expect(graphNodes(page)).toHaveCount(0);
 });
 
 // The remaining journeys change what the server is serving, so they run last and in

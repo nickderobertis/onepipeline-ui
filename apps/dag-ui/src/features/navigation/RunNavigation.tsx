@@ -18,6 +18,7 @@ import { ROW_KEY_ATTRIBUTE, useRowMotion } from "./useRowMotion";
 /** One project list, with kinds discovered from the engine's effective labels. */
 export function RunNavigation({
   rows,
+  failed = false,
   selectedRunId,
   onSelect,
   onOpenProject,
@@ -33,6 +34,8 @@ export function RunNavigation({
 }: {
   /** The navigation's copy of the sidebar's rows, taken as its setting says. */
   readonly rows?: readonly SidebarRow[];
+  /** The read that brings the rows failed, so they are not still coming. */
+  readonly failed?: boolean;
   readonly selectedRunId?: string;
   readonly onSelect: (runId: string) => void;
   /** A project row's choice of its newest shown run, which leaves its runs in reach. */
@@ -131,7 +134,9 @@ export function RunNavigation({
           )}
           {updates}
           {rows === undefined ? (
-            <p role="status">Loading projects…</p>
+            <p role="status">
+              {failed ? "Projects did not load" : "Loading projects…"}
+            </p>
           ) : (
             <div className="nav-rows" ref={list}>
               {groups.map((group) => (

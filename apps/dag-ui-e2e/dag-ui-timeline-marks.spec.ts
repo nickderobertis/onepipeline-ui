@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { runs } from "./fixture-facts";
+import { appPlot } from "./observatory-locators";
 
 /**
  * Time marked on the run's and a node's visual timeline: axis markers at round
@@ -132,10 +133,11 @@ for (const [where, url, region] of [
   }) => {
     await page.goto(url(runs().live));
     const timeline = page.getByRole("region", { name: region });
+    // Only the app's plot zooms, and the first screen's region is replaced when the
+    // app takes over; scrolling to it before then scrolls a removed element.
+    const plot = appPlot(timeline);
+    await expect(plot).toBeVisible();
     await timeline.scrollIntoViewIfNeeded();
-    const plot = timeline.getByLabel(
-      "Timeline plot. Scroll to zoom or drag to select a range.",
-    );
     // Far past the narrowest window the view allows. The wheel scrolls the page as
     // well as zooming the plot, which can carry the plot out from under the pointer
     // and leave the rest of the wheel scrolling nothing, so each step points at it.

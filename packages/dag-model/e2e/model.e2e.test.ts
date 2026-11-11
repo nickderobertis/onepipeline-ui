@@ -1208,11 +1208,8 @@ test("the subscription and every frame type the server served parse through the 
   expect(subscribed.initial.type).toBe("snapshot");
   if (subscribed.initial.type !== "snapshot") return;
   const { snapshot } = subscribed.initial;
-  // Every sidebar row carries exactly the fields the contract lists for one.
-  for (const row of snapshot.sidebar)
-    expect(
-      Object.keys(row).filter((key) => key !== "started_at"),
-    ).toStrictEqual(SIDEBAR_ROW_FIELDS.filter((key) => key !== "started_at"));
+  // A run view's rows are its stream's first frame, not its snapshot.
+  expect(snapshot.sidebar).toBeNull();
   expect(snapshot.visible.type).toBe("detail");
   const humanItems = z
     .object({
@@ -1229,13 +1226,24 @@ test("the subscription and every frame type the server served parse through the 
   expect(new Set(frames.map((frame) => frame.type))).toStrictEqual(
     new Set(SUBSCRIPTION_FRAME_TYPES),
   );
-  // The detail patch the served stream carried applies to the detail the
-  // served snapshot holds, and the result is still a detail.
+  // Every sidebar row carries exactly the fields the contract lists for one.
+  for (const frame of frames)
+    if (frame.type === "sidebar.snapshot")
+      for (const row of frame.rows)
+        expect(
+          Object.keys(row).filter((key) => key !== "started_at"),
+        ).toStrictEqual(
+          SIDEBAR_ROW_FIELDS.filter((key) => key !== "started_at"),
+        );
+  // The detail patch the served stream carried leaves a detail still a detail.
   const patch = frames.find((frame) => frame.type === "detail.patch");
   if (patch?.type !== "detail.patch" || snapshot.visible.type !== "detail")
     throw new Error("no detail patch was served");
+  // This frame was sent once the rest had arrived, so it patches the complete
+  // document rather than the first answer's fewer members.
+  const complete = await served("run.json");
   expect(() =>
-    runDetailSchema.parse(applyPatch(snapshot.visible.detail, patch.ops)),
+    runDetailSchema.parse(applyPatch(complete, patch.ops)),
   ).not.toThrow();
   for (const frame of frames)
     if (frame.type !== "reset") expect(frame.base < frame.id).toBe(true);

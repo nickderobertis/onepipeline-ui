@@ -79,11 +79,24 @@ function variant(
   };
 }
 
+/** An Action items window: frames on its one stream and no human-item `GET`. */
+function actionItems(tabs: number, n: number) {
+  return {
+    ...variant("action-items", undefined, tabs, n),
+    requests_per_min_by_route: {},
+    frames_by_type: {
+      "human-items.patch": { frames_per_min: 20, bytes_per_min: 2_000 },
+    },
+  };
+}
+
 /** Telemetry of every variant the load journey records, `live-node` costliest. */
 function telemetry() {
   const variants: Record<string, unknown> = {
     "nothing-open": variant("nothing-open", undefined, 1, 0.5),
     host: variant("host", undefined, 1, 1),
+    "action-items": actionItems(1, 0.4),
+    "action-items-2-tabs": actionItems(2, 0.4),
   };
   views.forEach((view, at) => {
     variants[`settled-${view}`] = variant("settled", view, 1, 0.1 * (at + 1));

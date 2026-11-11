@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
-  "recorded_at": "2026-10-23T20:19:52.914Z",
-  "commit": "ef9d1d0c8a34c05e7ad70d9f2dc2ccb4a6a7759e",
+  "recorded_at": "2026-11-11T06:50:32.632Z",
+  "commit": "7d5c2cc80b1c797a87e70898ad85f3cbd2fbda6b",
   "dirty": false,
   "window_s": 120,
   "workload": {
@@ -17,12 +17,12 @@
     "nothing-open": {
       "kind": "nothing-open",
       "tabs": 1,
-      "load_s": [9.03],
+      "load_s": [7.62],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0054,
+      "mb_per_min": 0.0042,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 5393
+        "GET /api/v2/events?after&subscription": 4240
       },
       "frames_per_min": 115,
       "frames_by_type": {
@@ -46,23 +46,23 @@
         }
       },
       "server_cpu": {
-        "seconds": 3.09,
+        "seconds": 0.89,
         "window_s": 120,
-        "cores": 0.0258,
-        "cores_per_tab": 0.0258
+        "cores": 0.0074,
+        "cores_per_tab": 0.0074
       },
       "host_load": {
         "start": {
-          "load_1m": 9.77,
-          "load_5m": 6.84,
-          "load_15m": 8.58,
-          "cores": 8
+          "load_1m": 5.49,
+          "load_5m": 5.37,
+          "load_15m": 4.76,
+          "cores": 20
         },
         "end": {
-          "load_1m": 7.09,
-          "load_5m": 6.45,
-          "load_15m": 8.2,
-          "cores": 8
+          "load_1m": 3.66,
+          "load_5m": 4.79,
+          "load_15m": 4.63,
+          "cores": 20
         }
       }
     },
@@ -70,18 +70,18 @@
       "kind": "settled",
       "view": "graph",
       "tabs": 1,
-      "load_s": [7.87],
+      "load_s": [8.26],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0054,
+      "mb_per_min": 0.0062,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 5459
+        "GET /api/v2/events?after&subscription": 6190
       },
       "frames_per_min": 115,
       "frames_by_type": {
         "run.changed": {
           "frames_per_min": 115,
-          "bytes_per_min": 51182
+          "bytes_per_min": 51186
         }
       },
       "repeated_snapshot": {
@@ -99,23 +99,23 @@
         }
       },
       "server_cpu": {
-        "seconds": 2.78,
+        "seconds": 1.04,
         "window_s": 120,
-        "cores": 0.0232,
-        "cores_per_tab": 0.0232
+        "cores": 0.0087,
+        "cores_per_tab": 0.0087
       },
       "host_load": {
         "start": {
-          "load_1m": 5.87,
-          "load_5m": 6.22,
-          "load_15m": 8.1,
-          "cores": 8
+          "load_1m": 3.37,
+          "load_5m": 4.67,
+          "load_15m": 4.59,
+          "cores": 20
         },
         "end": {
-          "load_1m": 2.92,
-          "load_5m": 4.96,
-          "load_15m": 7.41,
-          "cores": 8
+          "load_1m": 3.26,
+          "load_5m": 4.16,
+          "load_15m": 4.41,
+          "cores": 20
         }
       }
     },
@@ -123,18 +123,18 @@
       "kind": "settled",
       "view": "overall",
       "tabs": 1,
-      "load_s": [7.93],
+      "load_s": [7.72],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0053,
+      "mb_per_min": 0.0062,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 5356
+        "GET /api/v2/events?after&subscription": 6226
       },
-      "frames_per_min": 113.5,
+      "frames_per_min": 115,
       "frames_by_type": {
         "run.changed": {
-          "frames_per_min": 113.5,
-          "bytes_per_min": 50513
+          "frames_per_min": 115,
+          "bytes_per_min": 51188
         }
       },
       "repeated_snapshot": {
@@ -152,23 +152,23 @@
         }
       },
       "server_cpu": {
-        "seconds": 2.89,
+        "seconds": 1.01,
         "window_s": 120,
-        "cores": 0.0241,
-        "cores_per_tab": 0.0241
+        "cores": 0.0084,
+        "cores_per_tab": 0.0084
       },
       "host_load": {
         "start": {
-          "load_1m": 3.19,
-          "load_5m": 4.91,
-          "load_15m": 7.35,
-          "cores": 8
+          "load_1m": 3.17,
+          "load_5m": 4.08,
+          "load_15m": 4.38,
+          "cores": 20
         },
         "end": {
-          "load_1m": 2.5,
-          "load_5m": 4.05,
-          "load_15m": 6.73,
-          "cores": 8
+          "load_1m": 1.87,
+          "load_5m": 3.46,
+          "load_15m": 4.12,
+          "cores": 20
         }
       }
     },
@@ -176,18 +176,18 @@
       "kind": "settled",
       "view": "node",
       "tabs": 1,
-      "load_s": [11.99],
+      "load_s": [7.56],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0054,
+      "mb_per_min": 0.0062,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 5400
+        "GET /api/v2/events?after&subscription": 6225
       },
-      "frames_per_min": 113.5,
+      "frames_per_min": 115,
       "frames_by_type": {
         "run.changed": {
-          "frames_per_min": 113.5,
-          "bytes_per_min": 50513
+          "frames_per_min": 115,
+          "bytes_per_min": 51188
         }
       },
       "repeated_snapshot": {
@@ -205,23 +205,23 @@
         }
       },
       "server_cpu": {
-        "seconds": 2.84,
+        "seconds": 0.99,
         "window_s": 120,
-        "cores": 0.0237,
-        "cores_per_tab": 0.0237
+        "cores": 0.0083,
+        "cores_per_tab": 0.0083
       },
       "host_load": {
         "start": {
-          "load_1m": 2.7,
-          "load_5m": 3.96,
-          "load_15m": 6.63,
-          "cores": 8
+          "load_1m": 2.13,
+          "load_5m": 3.44,
+          "load_15m": 4.1,
+          "cores": 20
         },
         "end": {
-          "load_1m": 2.76,
-          "load_5m": 3.58,
-          "load_15m": 6.17,
-          "cores": 8
+          "load_1m": 1.54,
+          "load_5m": 2.72,
+          "load_15m": 3.75,
+          "cores": 20
         }
       }
     },
@@ -229,18 +229,18 @@
       "kind": "stopped",
       "view": "graph",
       "tabs": 1,
-      "load_s": [8.38],
+      "load_s": [7.72],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0054,
+      "mb_per_min": 0.0062,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 5433
+        "GET /api/v2/events?after&subscription": 6185
       },
-      "frames_per_min": 114,
+      "frames_per_min": 115,
       "frames_by_type": {
         "run.changed": {
-          "frames_per_min": 114,
-          "bytes_per_min": 50736
+          "frames_per_min": 115,
+          "bytes_per_min": 51186
         }
       },
       "repeated_snapshot": {
@@ -258,23 +258,23 @@
         }
       },
       "server_cpu": {
-        "seconds": 2.89,
+        "seconds": 0.89,
         "window_s": 120,
-        "cores": 0.0241,
-        "cores_per_tab": 0.0241
+        "cores": 0.0074,
+        "cores_per_tab": 0.0074
       },
       "host_load": {
         "start": {
-          "load_1m": 2.9,
-          "load_5m": 3.57,
-          "load_15m": 6.12,
-          "cores": 8
+          "load_1m": 1.46,
+          "load_5m": 2.62,
+          "load_15m": 3.7,
+          "cores": 20
         },
         "end": {
-          "load_1m": 3.45,
-          "load_5m": 3.51,
-          "load_15m": 5.78,
-          "cores": 8
+          "load_1m": 2.73,
+          "load_5m": 2.83,
+          "load_15m": 3.65,
+          "cores": 20
         }
       }
     },
@@ -282,18 +282,18 @@
       "kind": "stopped",
       "view": "overall",
       "tabs": 1,
-      "load_s": [7.88],
+      "load_s": [7.69],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0054,
+      "mb_per_min": 0.0063,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 5437
+        "GET /api/v2/events?after&subscription": 6260
       },
-      "frames_per_min": 114.5,
+      "frames_per_min": 115,
       "frames_by_type": {
         "run.changed": {
-          "frames_per_min": 114.5,
-          "bytes_per_min": 50959
+          "frames_per_min": 115,
+          "bytes_per_min": 51188
         }
       },
       "repeated_snapshot": {
@@ -311,23 +311,23 @@
         }
       },
       "server_cpu": {
-        "seconds": 2.75,
+        "seconds": 0.85,
         "window_s": 120,
-        "cores": 0.0229,
-        "cores_per_tab": 0.0229
+        "cores": 0.0071,
+        "cores_per_tab": 0.0071
       },
       "host_load": {
         "start": {
-          "load_1m": 4.05,
-          "load_5m": 3.66,
-          "load_15m": 5.78,
-          "cores": 8
+          "load_1m": 3.31,
+          "load_5m": 2.95,
+          "load_15m": 3.67,
+          "cores": 20
         },
         "end": {
-          "load_1m": 3,
-          "load_5m": 3.48,
-          "load_15m": 5.46,
-          "cores": 8
+          "load_1m": 2.09,
+          "load_5m": 2.63,
+          "load_15m": 3.47,
+          "cores": 20
         }
       }
     },
@@ -335,18 +335,18 @@
       "kind": "stopped",
       "view": "node",
       "tabs": 1,
-      "load_s": [10.57],
+      "load_s": [7.57],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0054,
+      "mb_per_min": 0.0062,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 5397
+        "GET /api/v2/events?after&subscription": 6219
       },
-      "frames_per_min": 113,
+      "frames_per_min": 115,
       "frames_by_type": {
         "run.changed": {
-          "frames_per_min": 113,
-          "bytes_per_min": 50290
+          "frames_per_min": 115,
+          "bytes_per_min": 51188
         }
       },
       "repeated_snapshot": {
@@ -364,23 +364,23 @@
         }
       },
       "server_cpu": {
-        "seconds": 2.88,
+        "seconds": 0.88,
         "window_s": 120,
-        "cores": 0.024,
-        "cores_per_tab": 0.024
+        "cores": 0.0073,
+        "cores_per_tab": 0.0073
       },
       "host_load": {
         "start": {
-          "load_1m": 3.01,
-          "load_5m": 3.46,
-          "load_15m": 5.42,
-          "cores": 8
+          "load_1m": 2.13,
+          "load_5m": 2.6,
+          "load_15m": 3.44,
+          "cores": 20
         },
         "end": {
-          "load_1m": 4.14,
-          "load_5m": 3.78,
-          "load_15m": 5.3,
-          "cores": 8
+          "load_1m": 1.66,
+          "load_5m": 2.24,
+          "load_15m": 3.2,
+          "cores": 20
         }
       }
     },
@@ -388,22 +388,22 @@
       "kind": "live",
       "view": "graph",
       "tabs": 1,
-      "load_s": [10.95],
+      "load_s": [7.69],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.009,
+      "mb_per_min": 0.0116,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 9064
+        "GET /api/v2/events?after&subscription": 11603
       },
-      "frames_per_min": 149.5,
+      "frames_per_min": 170.5,
       "frames_by_type": {
-        "run.changed": {
-          "frames_per_min": 101.5,
-          "bytes_per_min": 45248
-        },
         "detail.patch": {
-          "frames_per_min": 48,
-          "bytes_per_min": 29446
+          "frames_per_min": 55,
+          "bytes_per_min": 39987
+        },
+        "run.changed": {
+          "frames_per_min": 115.5,
+          "bytes_per_min": 51504
         }
       },
       "repeated_snapshot": {
@@ -421,45 +421,45 @@
         }
       },
       "server_cpu": {
-        "seconds": 30.65,
+        "seconds": 8.27,
         "window_s": 120,
-        "cores": 0.2554,
-        "cores_per_tab": 0.2554
+        "cores": 0.0689,
+        "cores_per_tab": 0.0689
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 0.359,
-        "p95_s": 0.594,
-        "max_s": 2.086,
+        "p50_s": 0.553,
+        "p95_s": 0.553,
+        "max_s": 1,
         "measured_as": "the view root's data-journal-seq reaching the record's number",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 0.359,
-          "p95_s": 0.359,
-          "max_s": 0.359
+          "p50_s": 0.553,
+          "p95_s": 0.553,
+          "max_s": 0.553
         },
         "frame_arrival": {
-          "p50_s": 0.3,
-          "p95_s": 0.529,
-          "max_s": 2.016
+          "p50_s": 0.547,
+          "p95_s": 0.547,
+          "max_s": 0.949
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 4.98,
-          "load_5m": 3.99,
-          "load_15m": 5.34,
-          "cores": 8
+          "load_1m": 2.25,
+          "load_5m": 2.34,
+          "load_15m": 3.22,
+          "cores": 20
         },
         "end": {
-          "load_1m": 4.91,
-          "load_5m": 4.39,
-          "load_15m": 5.32,
-          "cores": 8
+          "load_1m": 1.78,
+          "load_5m": 2.12,
+          "load_15m": 3.03,
+          "cores": 20
         }
       }
     },
@@ -467,22 +467,22 @@
       "kind": "live",
       "view": "graph",
       "tabs": 2,
-      "load_s": [11.41, 2.25],
+      "load_s": [8.23, 2.54],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0089,
+      "mb_per_min": 0.0115,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 8975
+        "GET /api/v2/events?after&subscription": 11536
       },
-      "frames_per_min": 148,
+      "frames_per_min": 170.5,
       "frames_by_type": {
-        "run.changed": {
-          "frames_per_min": 99.5,
-          "bytes_per_min": 44394
-        },
         "detail.patch": {
-          "frames_per_min": 48.5,
-          "bytes_per_min": 29774
+          "frames_per_min": 55,
+          "bytes_per_min": 39991
+        },
+        "run.changed": {
+          "frames_per_min": 115.5,
+          "bytes_per_min": 51543
         }
       },
       "repeated_snapshot": {
@@ -500,45 +500,45 @@
         }
       },
       "server_cpu": {
-        "seconds": 31.4,
+        "seconds": 8.51,
         "window_s": 120,
-        "cores": 0.2617,
-        "cores_per_tab": 0.1308
+        "cores": 0.0709,
+        "cores_per_tab": 0.0355
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 0.388,
-        "p95_s": 0.571,
-        "max_s": 2.346,
+        "p50_s": 0.357,
+        "p95_s": 0.485,
+        "max_s": 0.761,
         "measured_as": "the view root's data-journal-seq reaching the record's number",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 0.388,
-          "p95_s": 0.388,
-          "max_s": 0.388
+          "p50_s": 0.357,
+          "p95_s": 0.357,
+          "max_s": 0.357
         },
         "frame_arrival": {
-          "p50_s": 0.373,
-          "p95_s": 0.538,
-          "max_s": 2.282
+          "p50_s": 0.35,
+          "p95_s": 0.452,
+          "max_s": 0.699
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 5.65,
-          "load_5m": 4.59,
-          "load_15m": 5.37,
-          "cores": 8
+          "load_1m": 2.17,
+          "load_5m": 2.18,
+          "load_15m": 3.02,
+          "cores": 20
         },
         "end": {
-          "load_1m": 5.27,
-          "load_5m": 4.78,
-          "load_15m": 5.34,
-          "cores": 8
+          "load_1m": 2.58,
+          "load_5m": 2.24,
+          "load_15m": 2.93,
+          "cores": 20
         }
       }
     },
@@ -546,26 +546,26 @@
       "kind": "live",
       "view": "overall",
       "tabs": 1,
-      "load_s": [18.67],
+      "load_s": [8.19],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.047,
+      "mb_per_min": 0.0139,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 47045
+        "GET /api/v2/events?after&subscription": 13946
       },
-      "frames_per_min": 192.5,
+      "frames_per_min": 225.5,
       "frames_by_type": {
-        "run.changed": {
-          "frames_per_min": 100.5,
-          "bytes_per_min": 44812
-        },
         "detail.patch": {
-          "frames_per_min": 48.5,
-          "bytes_per_min": 29800
+          "frames_per_min": 55,
+          "bytes_per_min": 39988
         },
         "timeline.patch": {
-          "frames_per_min": 43.5,
-          "bytes_per_min": 335266
+          "frames_per_min": 49.5,
+          "bytes_per_min": 16202
+        },
+        "run.changed": {
+          "frames_per_min": 121,
+          "bytes_per_min": 53974
         }
       },
       "repeated_snapshot": {
@@ -583,45 +583,45 @@
         }
       },
       "server_cpu": {
-        "seconds": 35.79,
+        "seconds": 10.32,
         "window_s": 120,
-        "cores": 0.2982,
-        "cores_per_tab": 0.2982
+        "cores": 0.086,
+        "cores_per_tab": 0.086
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 2.355,
-        "p95_s": 2.355,
-        "max_s": 2.599,
+        "p50_s": 0.339,
+        "p95_s": 0.431,
+        "max_s": 0.773,
         "measured_as": "the view root's data-journal-seq reaching the record's number",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 2.355,
-          "p95_s": 2.355,
-          "max_s": 2.355
+          "p50_s": 0.339,
+          "p95_s": 0.339,
+          "max_s": 0.339
         },
         "frame_arrival": {
-          "p50_s": 0.578,
-          "p95_s": 0.918,
-          "max_s": 1.912
+          "p50_s": 0.333,
+          "p95_s": 0.403,
+          "max_s": 0.695
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 5.57,
-          "load_5m": 4.9,
-          "load_15m": 5.36,
-          "cores": 8
+          "load_1m": 2.66,
+          "load_5m": 2.29,
+          "load_15m": 2.93,
+          "cores": 20
         },
         "end": {
-          "load_1m": 4.5,
-          "load_5m": 4.81,
-          "load_15m": 5.27,
-          "cores": 8
+          "load_1m": 1.73,
+          "load_5m": 2.09,
+          "load_15m": 2.78,
+          "cores": 20
         }
       }
     },
@@ -629,26 +629,26 @@
       "kind": "live",
       "view": "overall",
       "tabs": 2,
-      "load_s": [17.74, 6.94],
+      "load_s": [7.72, 2.39],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0473,
+      "mb_per_min": 0.0136,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 47305
+        "GET /api/v2/events?after&subscription": 13583
       },
-      "frames_per_min": 196,
+      "frames_per_min": 220,
       "frames_by_type": {
-        "run.changed": {
-          "frames_per_min": 104,
-          "bytes_per_min": 46402
-        },
         "detail.patch": {
-          "frames_per_min": 48.5,
-          "bytes_per_min": 29956
+          "frames_per_min": 55,
+          "bytes_per_min": 39997
         },
         "timeline.patch": {
-          "frames_per_min": 43.5,
-          "bytes_per_min": 335273
+          "frames_per_min": 49.5,
+          "bytes_per_min": 16214
+        },
+        "run.changed": {
+          "frames_per_min": 115.5,
+          "bytes_per_min": 51554
         }
       },
       "repeated_snapshot": {
@@ -666,45 +666,45 @@
         }
       },
       "server_cpu": {
-        "seconds": 35.17,
+        "seconds": 10.6,
         "window_s": 120,
-        "cores": 0.2931,
-        "cores_per_tab": 0.1465
+        "cores": 0.0883,
+        "cores_per_tab": 0.0442
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 1.917,
-        "p95_s": 1.917,
-        "max_s": 2.494,
+        "p50_s": 0.22,
+        "p95_s": 0.488,
+        "max_s": 0.825,
         "measured_as": "the view root's data-journal-seq reaching the record's number",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 1.917,
-          "p95_s": 1.917,
-          "max_s": 1.917
+          "p50_s": 0.22,
+          "p95_s": 0.22,
+          "max_s": 0.22
         },
         "frame_arrival": {
-          "p50_s": 1.641,
-          "p95_s": 1.641,
-          "max_s": 1.859
+          "p50_s": 0.128,
+          "p95_s": 0.472,
+          "max_s": 0.742
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 4.69,
-          "load_5m": 4.84,
-          "load_15m": 5.27,
-          "cores": 8
+          "load_1m": 2.22,
+          "load_5m": 2.18,
+          "load_15m": 2.8,
+          "cores": 20
         },
         "end": {
-          "load_1m": 4.06,
-          "load_5m": 4.56,
-          "load_15m": 5.11,
-          "cores": 8
+          "load_1m": 1.86,
+          "load_5m": 2.08,
+          "load_15m": 2.69,
+          "cores": 20
         }
       }
     },
@@ -712,26 +712,26 @@
       "kind": "live",
       "view": "node",
       "tabs": 1,
-      "load_s": [12.36],
+      "load_s": [8.24],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.162,
+      "mb_per_min": 0.1744,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 162011
+        "GET /api/v2/events?after&subscription": 174388
       },
-      "frames_per_min": 187.5,
+      "frames_per_min": 225.5,
       "frames_by_type": {
         "detail.patch": {
-          "frames_per_min": 46.5,
-          "bytes_per_min": 28553
+          "frames_per_min": 55,
+          "bytes_per_min": 39987
         },
         "timeline.patch": {
-          "frames_per_min": 41.5,
-          "bytes_per_min": 757006
+          "frames_per_min": 49.5,
+          "bytes_per_min": 872588
         },
         "run.changed": {
-          "frames_per_min": 99.5,
-          "bytes_per_min": 44370
+          "frames_per_min": 121,
+          "bytes_per_min": 53974
         }
       },
       "repeated_snapshot": {
@@ -749,45 +749,45 @@
         }
       },
       "server_cpu": {
-        "seconds": 51.59,
+        "seconds": 40.08,
         "window_s": 120,
-        "cores": 0.4299,
-        "cores_per_tab": 0.4299
+        "cores": 0.334,
+        "cores_per_tab": 0.334
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 2.16,
-        "p95_s": 2.161,
-        "max_s": 5.088,
+        "p50_s": 0.803,
+        "p95_s": 0.893,
+        "max_s": 1.219,
         "measured_as": "the record's row appearing on the node timeline",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 2.161,
-          "p95_s": 2.161,
-          "max_s": 2.161
+          "p50_s": 0.803,
+          "p95_s": 0.804,
+          "max_s": 0.804
         },
         "frame_arrival": {
-          "p50_s": 0.133,
-          "p95_s": 0.796,
-          "max_s": 1.995
+          "p50_s": 0.477,
+          "p95_s": 0.722,
+          "max_s": 0.944
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 3.78,
-          "load_5m": 4.44,
-          "load_15m": 5.05,
-          "cores": 8
+          "load_1m": 2.06,
+          "load_5m": 2.11,
+          "load_15m": 2.68,
+          "cores": 20
         },
         "end": {
-          "load_1m": 5.09,
-          "load_5m": 4.98,
-          "load_15m": 5.19,
-          "cores": 8
+          "load_1m": 1.92,
+          "load_5m": 2.08,
+          "load_15m": 2.6,
+          "cores": 20
         }
       }
     },
@@ -795,26 +795,26 @@
       "kind": "live",
       "view": "node",
       "tabs": 2,
-      "load_s": [14.83, 4.93],
+      "load_s": [8.2, 2.11],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.1614,
+      "mb_per_min": 0.1743,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 161393
+        "GET /api/v2/events?after&subscription": 174336
       },
-      "frames_per_min": 188,
+      "frames_per_min": 221,
       "frames_by_type": {
         "run.changed": {
-          "frames_per_min": 103.5,
-          "bytes_per_min": 46179
+          "frames_per_min": 116.5,
+          "bytes_per_min": 51996
         },
         "detail.patch": {
-          "frames_per_min": 44.5,
-          "bytes_per_min": 27507
+          "frames_per_min": 55,
+          "bytes_per_min": 40004
         },
         "timeline.patch": {
-          "frames_per_min": 40,
-          "bytes_per_min": 753511
+          "frames_per_min": 49.5,
+          "bytes_per_min": 872599
         }
       },
       "repeated_snapshot": {
@@ -832,45 +832,45 @@
         }
       },
       "server_cpu": {
-        "seconds": 54.03,
+        "seconds": 40.76,
         "window_s": 120,
-        "cores": 0.4503,
-        "cores_per_tab": 0.2251
+        "cores": 0.3397,
+        "cores_per_tab": 0.1698
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 2.024,
-        "p95_s": 2.182,
-        "max_s": 3.911,
+        "p50_s": 1.269,
+        "p95_s": 1.27,
+        "max_s": 1.381,
         "measured_as": "the record's row appearing on the node timeline",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 2.024,
-          "p95_s": 2.025,
-          "max_s": 2.025
+          "p50_s": 1.269,
+          "p95_s": 1.27,
+          "max_s": 1.27
         },
         "frame_arrival": {
-          "p50_s": 0.673,
-          "p95_s": 0.92,
-          "max_s": 2.136
+          "p50_s": 0.545,
+          "p95_s": 0.719,
+          "max_s": 0.955
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 5.42,
-          "load_5m": 5.05,
-          "load_15m": 5.21,
-          "cores": 8
+          "load_1m": 2.89,
+          "load_5m": 2.38,
+          "load_15m": 2.66,
+          "cores": 20
         },
         "end": {
-          "load_1m": 7.96,
-          "load_5m": 6.03,
-          "load_15m": 5.54,
-          "cores": 8
+          "load_1m": 2.31,
+          "load_5m": 2.37,
+          "load_15m": 2.62,
+          "cores": 20
         }
       }
     },
@@ -878,22 +878,22 @@
       "kind": "live",
       "view": "channel",
       "tabs": 1,
-      "load_s": [10.39],
+      "load_s": [8.23],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0087,
+      "mb_per_min": 0.0117,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 8773
+        "GET /api/v2/events?after&subscription": 11688
       },
-      "frames_per_min": 145.5,
+      "frames_per_min": 170.5,
       "frames_by_type": {
-        "run.changed": {
-          "frames_per_min": 97.5,
-          "bytes_per_min": 43461
-        },
         "detail.patch": {
-          "frames_per_min": 48,
-          "bytes_per_min": 29451
+          "frames_per_min": 55,
+          "bytes_per_min": 39977
+        },
+        "run.changed": {
+          "frames_per_min": 115.5,
+          "bytes_per_min": 51504
         }
       },
       "repeated_snapshot": {
@@ -911,45 +911,45 @@
         }
       },
       "server_cpu": {
-        "seconds": 29.83,
+        "seconds": 7.77,
         "window_s": 120,
-        "cores": 0.2486,
-        "cores_per_tab": 0.2486
+        "cores": 0.0648,
+        "cores_per_tab": 0.0648
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 0.403,
-        "p95_s": 0.547,
-        "max_s": 2.105,
+        "p50_s": 0.108,
+        "p95_s": 0.457,
+        "max_s": 0.66,
         "measured_as": "the view root's data-journal-seq reaching the record's number",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 0.403,
-          "p95_s": 0.403,
-          "max_s": 0.403
+          "p50_s": 0.108,
+          "p95_s": 0.108,
+          "max_s": 0.108
         },
         "frame_arrival": {
-          "p50_s": 0.354,
-          "p95_s": 0.528,
-          "max_s": 2.045
+          "p50_s": 0.105,
+          "p95_s": 0.443,
+          "max_s": 0.613
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 7.66,
-          "load_5m": 6.09,
-          "load_15m": 5.58,
-          "cores": 8
+          "load_1m": 2.44,
+          "load_5m": 2.4,
+          "load_15m": 2.61,
+          "cores": 20
         },
         "end": {
-          "load_1m": 6.28,
-          "load_5m": 6.24,
-          "load_15m": 5.7,
-          "cores": 8
+          "load_1m": 2.04,
+          "load_5m": 2.29,
+          "load_15m": 2.55,
+          "cores": 20
         }
       }
     },
@@ -957,22 +957,22 @@
       "kind": "live",
       "view": "channel",
       "tabs": 2,
-      "load_s": [10.42, 2.19],
+      "load_s": [8.73, 2.37],
       "requests_per_min": 0,
       "requests_per_min_by_route": {},
-      "mb_per_min": 0.0089,
+      "mb_per_min": 0.0115,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 8928
+        "GET /api/v2/events?after&subscription": 11564
       },
-      "frames_per_min": 148,
+      "frames_per_min": 170.5,
       "frames_by_type": {
-        "run.changed": {
-          "frames_per_min": 99.5,
-          "bytes_per_min": 44395
-        },
         "detail.patch": {
-          "frames_per_min": 48.5,
-          "bytes_per_min": 29808
+          "frames_per_min": 55,
+          "bytes_per_min": 39996
+        },
+        "run.changed": {
+          "frames_per_min": 115.5,
+          "bytes_per_min": 51543
         }
       },
       "repeated_snapshot": {
@@ -990,52 +990,52 @@
         }
       },
       "server_cpu": {
-        "seconds": 29.51,
+        "seconds": 7.91,
         "window_s": 120,
-        "cores": 0.2459,
-        "cores_per_tab": 0.123
+        "cores": 0.0659,
+        "cores_per_tab": 0.033
       },
       "lag": {
         "records": 500,
         "shown": 500,
         "never_shown": 0,
-        "p50_s": 0.261,
-        "p95_s": 0.518,
-        "max_s": 2.064,
+        "p50_s": 0.315,
+        "p95_s": 0.447,
+        "max_s": 0.762,
         "measured_as": "the view root's data-journal-seq reaching the record's number",
         "during_burst": {
           "records": 400,
           "shown": 400,
           "never_shown": 0,
-          "p50_s": 0.261,
-          "p95_s": 0.261,
-          "max_s": 0.261
+          "p50_s": 0.315,
+          "p95_s": 0.315,
+          "max_s": 0.315
         },
         "frame_arrival": {
-          "p50_s": 0.249,
-          "p95_s": 0.495,
-          "max_s": 1.988
+          "p50_s": 0.313,
+          "p95_s": 0.425,
+          "max_s": 0.692
         }
       },
       "host_load": {
         "start": {
-          "load_1m": 5.36,
-          "load_5m": 6.03,
-          "load_15m": 5.64,
-          "cores": 8
+          "load_1m": 2.29,
+          "load_5m": 2.33,
+          "load_15m": 2.55,
+          "cores": 20
         },
         "end": {
-          "load_1m": 7.12,
-          "load_5m": 6.57,
-          "load_15m": 5.9,
-          "cores": 8
+          "load_1m": 1.63,
+          "load_5m": 2.04,
+          "load_15m": 2.42,
+          "cores": 20
         }
       }
     },
     "host": {
       "kind": "host",
       "tabs": 1,
-      "load_s": [7.93],
+      "load_s": [7.07],
       "requests_per_min": 2,
       "requests_per_min_by_route": {
         "GET /api/v2/host": 0.5,
@@ -1043,13 +1043,13 @@
         "GET /api/v2/runs?include_settled&limit": 0.5,
         "GET /api/v2/projects": 0.5
       },
-      "mb_per_min": 0.0091,
+      "mb_per_min": 0.0082,
       "bytes_per_min_by_route": {
-        "GET /api/v2/events?after&subscription": 5367,
+        "GET /api/v2/events?after&subscription": 4274,
         "GET /api/v2/unwatched": 135,
-        "GET /api/v2/runs?include_settled&limit": 969,
-        "GET /api/v2/projects": 2145,
-        "GET /api/v2/host": 542
+        "GET /api/v2/host": 556,
+        "GET /api/v2/runs?include_settled&limit": 1030,
+        "GET /api/v2/projects": 2202
       },
       "frames_per_min": 115,
       "frames_by_type": {
@@ -1073,23 +1073,135 @@
         }
       },
       "server_cpu": {
-        "seconds": 3.17,
+        "seconds": 0.88,
         "window_s": 120,
-        "cores": 0.0264,
-        "cores_per_tab": 0.0264
+        "cores": 0.0073,
+        "cores_per_tab": 0.0073
       },
       "host_load": {
         "start": {
-          "load_1m": 6.53,
-          "load_5m": 6.46,
-          "load_15m": 5.87,
-          "cores": 8
+          "load_1m": 2.3,
+          "load_5m": 2.15,
+          "load_15m": 2.44,
+          "cores": 20
         },
         "end": {
-          "load_1m": 3.8,
-          "load_5m": 5.32,
-          "load_15m": 5.52,
-          "cores": 8
+          "load_1m": 1.71,
+          "load_5m": 1.96,
+          "load_15m": 2.33,
+          "cores": 20
+        }
+      }
+    },
+    "action-items": {
+      "kind": "action-items",
+      "tabs": 1,
+      "load_s": [2.07],
+      "requests_per_min": 0,
+      "requests_per_min_by_route": {},
+      "mb_per_min": 0.0068,
+      "bytes_per_min_by_route": {
+        "GET /api/v2/events?after&subscription": 6812
+      },
+      "frames_per_min": 135,
+      "frames_by_type": {
+        "human-items.patch": {
+          "frames_per_min": 20,
+          "bytes_per_min": 43602
+        },
+        "run.changed": {
+          "frames_per_min": 115,
+          "bytes_per_min": 51198
+        }
+      },
+      "repeated_snapshot": {
+        "in_window": {
+          "frames": 0,
+          "bytes": 0
+        },
+        "at_load": {
+          "frames": 0,
+          "bytes": 0
+        },
+        "after_reconnect": {
+          "frames": 0,
+          "bytes": 0
+        }
+      },
+      "server_cpu": {
+        "seconds": 1.09,
+        "window_s": 120,
+        "cores": 0.0091,
+        "cores_per_tab": 0.0091
+      },
+      "host_load": {
+        "start": {
+          "load_1m": 1.89,
+          "load_5m": 1.98,
+          "load_15m": 2.33,
+          "cores": 20
+        },
+        "end": {
+          "load_1m": 1.76,
+          "load_5m": 1.91,
+          "load_15m": 2.26,
+          "cores": 20
+        }
+      }
+    },
+    "action-items-2-tabs": {
+      "kind": "action-items",
+      "tabs": 2,
+      "load_s": [2.08, 2.07],
+      "requests_per_min": 0,
+      "requests_per_min_by_route": {},
+      "mb_per_min": 0.0067,
+      "bytes_per_min_by_route": {
+        "GET /api/v2/events?after&subscription": 6699
+      },
+      "frames_per_min": 131,
+      "frames_by_type": {
+        "run.changed": {
+          "frames_per_min": 111,
+          "bytes_per_min": 49462
+        },
+        "human-items.patch": {
+          "frames_per_min": 20,
+          "bytes_per_min": 43609
+        }
+      },
+      "repeated_snapshot": {
+        "in_window": {
+          "frames": 0,
+          "bytes": 0
+        },
+        "at_load": {
+          "frames": 0,
+          "bytes": 0
+        },
+        "after_reconnect": {
+          "frames": 0,
+          "bytes": 0
+        }
+      },
+      "server_cpu": {
+        "seconds": 1.22,
+        "window_s": 120,
+        "cores": 0.0102,
+        "cores_per_tab": 0.0051
+      },
+      "host_load": {
+        "start": {
+          "load_1m": 1.78,
+          "load_5m": 1.9,
+          "load_15m": 2.24,
+          "cores": 20
+        },
+        "end": {
+          "load_1m": 1.7,
+          "load_5m": 1.79,
+          "load_15m": 2.16,
+          "cores": 20
         }
       }
     }

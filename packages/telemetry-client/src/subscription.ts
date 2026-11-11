@@ -5,8 +5,8 @@ import {
   applyPatch,
   channelQueueSchema,
   humanItemsVisibleSchema,
+  liveRunDetailSchema,
   type ResetFrame,
-  runDetailSchema,
   runTimelineSchema,
   type SidebarRow,
   SUBSCRIPTION_FRAME_TYPES,
@@ -17,13 +17,15 @@ import {
   subscriptionFrameSchema,
   type VisibleState,
 } from "@onepipeline-ui/dag-model";
+import { READ_DEADLINE_MS, TelemetryDeadlineError } from "./deadline.js";
 
 /**
  * What a tab holds of the server: the sidebar's rows and the one visible view,
  * as of the frame `applied` names.
  */
 export interface LiveState {
-  readonly sidebar: readonly SidebarRow[];
+  /** Absent until the rows arrive: a run view's come as its stream's first frame. */
+  readonly sidebar: readonly SidebarRow[] | undefined;
   readonly visible: VisibleState;
   /** The id of the snapshot or frame this state is as of. */
   readonly applied: string;
@@ -50,6 +52,12 @@ export interface LiveViewOptions {
   readonly onConnected?: () => void;
   /** Start with the stream closed, until `resume`: the state is still answered. */
   readonly paused?: boolean;
+  /**
+   * The creation's answer a caller already holds for this view: taken as this
+   * subscription's, in place of creating one. Read through the contract's own parser,
+   * so a first screen drawn from it is refused here if it was not a valid answer.
+   */
+  readonly initial?: unknown;
 }
 
 /** The parts of the client a live view needs. */
@@ -63,6 +71,8 @@ export interface LiveTransport {
   retire(subscription: string, keepalive?: boolean): Promise<void>;
   open(url: URL): EventSource;
   url(path: string): URL;
+  /** The contract's parse of a creation's answer. */
+  parseSubscribed(answer: unknown): Subscribed;
 }
 
 /** How long a stream that dropped waits before it is opened again. */
@@ -99,6 +109,7 @@ export class LiveView {
   #state?: LiveState;
   #source?: EventSource;
   #retry?: ReturnType<typeof setTimeout>;
+  #opening?: ReturnType<typeof setTimeout>;
   #closed = false;
   #failed = false;
   /** Bumped by every `change`, so a creation it overtook is dropped. */
@@ -121,7 +132,17 @@ export class LiveView {
     globalThis.addEventListener?.("offline", this.#offline);
     globalThis.addEventListener?.("online", this.#online);
     globalThis.addEventListener?.("pagehide", this.#pagehide);
-    void this.#create({});
+    const initial = options.initial;
+    if (initial === undefined) void this.#create({});
+    else {
+      // Never before this constructor returns: `onState` is the caller's, and it
+      // may read the subscription it is being assigned, as `#create`'s answer can.
+      const generation = ++this.#generation;
+      queueMicrotask(() => {
+        if (generation === this.#generation && !this.#closed)
+          this.#adopt(initial);
+      });
+    }
   }
 
   /** The view this subscription shows. */
@@ -198,6 +219,27 @@ export class LiveView {
         .catch(() => undefined);
       return;
     }
+    this.#begin(subscribed);
+  }
+
+  /** A creation's answer a first screen already took, adopted rather than repeated. */
+  #adopt(answer: unknown) {
+    let subscribed: Subscribed;
+    try {
+      subscribed = this.#transport.parseSubscribed(answer);
+    } catch (caught) {
+      this.#options.onError?.(
+        new Error(
+          `The first answer failed contract validation: ${message(caught)}`,
+        ),
+      );
+      return;
+    }
+    this.#begin(subscribed);
+  }
+
+  /** Take a creation's answer and open its stream. */
+  #begin(subscribed: Subscribed) {
     const mismatch = disagreement(this.#view, subscribed);
     if (mismatch !== undefined) {
       this.#fail(new Error(`The subscription answered ${mismatch}`));
@@ -225,7 +267,9 @@ export class LiveView {
 
   #take(snapshot: SubscriptionSnapshot, cause: LiveCause) {
     this.#state = {
-      sidebar: snapshot.sidebar,
+      // A run view's snapshot holds no rows; those already held stay until its
+      // stream's first frame replaces them.
+      sidebar: snapshot.sidebar ?? this.#state?.sidebar,
       visible: snapshot.visible,
       applied: snapshot.id,
     };
@@ -250,7 +294,12 @@ export class LiveView {
     const source = this.#transport.open(url);
     this.#source = source;
     let reconnected = false;
+    this.#opening = setTimeout(() => {
+      if (this.#source !== source) return;
+      this.#fail(new TelemetryDeadlineError("Opening the live stream"));
+    }, READ_DEADLINE_MS);
     source.onopen = () => {
+      this.#opened();
       if (reconnected) this.#options.onConnected?.();
       reconnected = true;
     };
@@ -259,8 +308,10 @@ export class LiveView {
         if (this.#source !== source) return;
         // A named server-sent event is always delivered as a `MessageEvent`
         // whose data is the frame's text; anything else is not a frame.
-        if (raw instanceof MessageEvent && typeof raw.data === "string")
+        if (raw instanceof MessageEvent && typeof raw.data === "string") {
+          this.#opened();
           this.#receive(raw.data, type, raw.lastEventId);
+        }
       });
     }
     source.onerror = () => {
@@ -279,7 +330,14 @@ export class LiveView {
     };
   }
 
+  /** The stream answered: the deadline on opening it is over. */
+  #opened() {
+    if (this.#opening !== undefined) clearTimeout(this.#opening);
+    this.#opening = undefined;
+  }
+
   #disconnect() {
+    this.#opened();
     this.#source?.close();
     this.#source = undefined;
     if (this.#retry !== undefined) clearTimeout(this.#retry);
@@ -370,17 +428,20 @@ function applyFrame(
   asked: SubscriptionView,
 ): Omit<LiveState, "applied"> {
   switch (frame.type) {
+    case "sidebar.snapshot":
+      return { sidebar: frame.rows, visible: state.visible };
     case "run.changed": {
-      const at = state.sidebar.findIndex((row) => row.id === frame.row.id);
+      const held = state.sidebar ?? [];
+      const at = held.findIndex((row) => row.id === frame.row.id);
       const sidebar =
         at === -1
-          ? [...state.sidebar, frame.row]
-          : state.sidebar.map((row, index) => (index === at ? frame.row : row));
+          ? [...held, frame.row]
+          : held.map((row, index) => (index === at ? frame.row : row));
       return { sidebar, visible: state.visible };
     }
     case "run.removed":
       return {
-        sidebar: state.sidebar.filter((row) => row.id !== frame.run_id),
+        sidebar: state.sidebar?.filter((row) => row.id !== frame.run_id),
         visible: state.visible,
       };
     default:
@@ -463,7 +524,7 @@ function patched(
         ...visible,
         detail: (() => {
           const detail = patchedAs(
-            runDetailSchema,
+            liveRunDetailSchema,
             visible.detail,
             frame.ops,
             "detail",

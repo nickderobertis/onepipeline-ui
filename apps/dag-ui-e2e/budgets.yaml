@@ -76,10 +76,12 @@ budgets:
       Maximum server-process-tree CPU seconds divided by the 120 observation
       seconds and by live tab count, across one-tab and two-tab variants of
       Graph, Overall, node timeline and Channel on the live run (116,000 records,
-      appending 50 per minute and taking the burst). Includes the server's total
-      CPU, idle work included, with no baseline subtracted; excludes browser and
-      corpus-writer processes. Detail reports total CPU seconds, average total
-      cores, per-tab cores, tab count and page state. Estimate (manager-approved);
+      appending 50 per minute and taking the burst), and Action items receiving
+      40 external CLI changes on its existing stream, on one tab and on two tabs
+      holding different filters. Includes the server's total CPU, idle work
+      included, with no baseline subtracted; excludes browser and corpus-writer
+      processes. Detail reports total CPU seconds, average total cores, per-tab
+      cores, tab count and page state. Estimate (manager-approved);
       telemetry analysis only, approximately 2 seconds.
     measure: reported
     command: [node, request-load-budget.mjs, --telemetry, apps/dag-ui-e2e/telemetry/request-load.json, --metric, cpu]

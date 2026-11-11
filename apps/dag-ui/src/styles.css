@@ -882,6 +882,10 @@ p {
   border-left: 1px solid var(--border);
   background: var(--background);
   box-shadow: -12px 0 35px rgb(0 0 0 / 18%);
+  /* A column, so a failed read said under the item stays on screen: the detail
+     takes what the panel has left. */
+  display: flex;
+  flex-direction: column;
 }
 .drawer-close {
   position: absolute;
@@ -914,7 +918,8 @@ p {
 }
 
 .detail-drawer .timeline-detail {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -3217,4 +3222,136 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 }
 .remote-checks .check-failing td:nth-child(3)::after {
   content: " — failing";
+}
+
+/* A run still arriving: the quiet line, a stretch not held, and what stands in for it. */
+.history-loading {
+  position: fixed;
+  right: 24px;
+  bottom: 16px;
+  z-index: 40;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.history-hatch {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 40;
+  display: grid;
+  place-content: center;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--background) 0 6px,
+    color-mix(in srgb, var(--muted-foreground) 35%, var(--background)) 6px 12px
+  );
+}
+
+.history-hatch-label {
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* The frame is the app's plot's own classes; a bar sits where the app's span does. */
+.first-plot-bar {
+  position: absolute;
+  top: 0;
+  height: 20px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--primary) 70%, transparent);
+}
+
+.load-earlier {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--secondary);
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* A finger needs the height above; a pointer does not, and a log wants its rows. */
+@media (min-width: 640px) {
+  .load-earlier {
+    min-height: 24px;
+    margin-bottom: 4px;
+    font-size: 12px;
+  }
+}
+
+.read-failed {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  max-width: 320px;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.read-failed strong {
+  color: var(--destructive);
+  font-size: 16px;
+}
+
+.read-failed p {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 14px;
+}
+
+.read-failed button {
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 6px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.page-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  color: var(--destructive);
+  font-size: 13px;
+}
+
+.loading-value {
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+
+/* The main column runs wider than a phone; its recovery control stays on screen. */
+.live-issue {
+  position: sticky;
+  left: 0;
+  max-width: calc(100vw - 96px);
+}
+
+/* At phone width the main column runs off the right edge, so the banner is held
+   to the screen; at its top, clear of the toasts that rise from its bottom. */
+@media (max-width: 640px) {
+  .live-issue {
+    position: fixed;
+    top: 0;
+    right: 0;
+    left: 0;
+    z-index: 50;
+    max-width: none;
+  }
 }

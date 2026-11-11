@@ -17,6 +17,7 @@ import type {
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { CheckCheck, Inbox, MessageSquarePlus } from "lucide-react";
 import { useCallback, useId, useState } from "react";
+import { LOADING_TEXT } from "../../lib/loading";
 import { Outcome } from "../../lib/Outcome";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDurationSeconds, isoOfMillis } from "../../lib/time";
@@ -53,8 +54,8 @@ export function ChannelView({
   readonly client: TelemetryClient;
   readonly runId: string;
   readonly filter: string;
-  /** The decision points the graph holds, for the human actions among them. */
-  readonly decisions: readonly Decision[];
+  /** The decision points the graph holds; absent until the rest of the run arrives. */
+  readonly decisions?: readonly Decision[];
   /** When the graph was read, so a surface's age is against the payload's clock. */
   readonly observedAt: string;
   /** The queue as the subscription holds it; absent until it arrives. */
@@ -340,7 +341,7 @@ function Attestations({
 }: {
   readonly client: TelemetryClient;
   readonly runId: string;
-  readonly decisions: readonly Decision[];
+  readonly decisions?: readonly Decision[];
   readonly onWrote: () => void;
 }) {
   const attest = useAttest(client, runId, onWrote);
@@ -349,7 +350,9 @@ function Attestations({
       <h3 id="attest-heading">
         <CheckCheck size={15} /> Ready human actions
       </h3>
-      {decisions.length === 0 ? (
+      {decisions === undefined ? (
+        <p className="channel-empty">{LOADING_TEXT}</p>
+      ) : decisions.length === 0 ? (
         <p className="channel-empty">No decision point is holding the graph.</p>
       ) : (
         <ul className="attest-list">

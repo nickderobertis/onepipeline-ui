@@ -33,6 +33,12 @@ no verdict of its is replayed. A new read budget extends its `workload.json`,
 sizes, run as a command rather than imported across the project line, so a change to the
 generator alone selects `dag-ui-e2e` and not this project.
 
+Only Action items' timings run on an ordinary pull request. The large run's timings
+and the large-corpus journeys ran test-linux past its 36-minute cap beside the affected
+tier, so `check` alone reaches them and the release pull request's sweep holds them. A new
+large-run budget joins `large-run/budgets.yaml` and its telemetry document, never the
+affected tier's.
+
 ## Reaching the app
 
 Sibling dependencies here are `workspace:*`, as every one in this workspace is:

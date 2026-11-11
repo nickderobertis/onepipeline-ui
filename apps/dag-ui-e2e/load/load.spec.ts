@@ -28,7 +28,12 @@
  * Knobs: LOAD_WINDOW_S, LOAD_ONLY (comma-separated variant names).
  */
 
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import {
+  type ChildProcess,
+  execFile,
+  execFileSync,
+  spawn,
+} from "node:child_process";
 import {
   constants,
   copyFileSync,
@@ -43,7 +48,14 @@ import {
 import { createServer } from "node:net";
 import { availableParallelism, loadavg, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { gzipSync } from "node:zlib";
+import {
+  subscriptionSnapshotSchema,
+  TIMELINE_WINDOW_EVENTS,
+  type TimelineEventRow,
+  timelineEventsPageSchema,
+} from "@onepipeline-ui/dag-model";
 import {
   type Browser,
   type BrowserContext,
@@ -57,8 +69,9 @@ import harnessBinaries from "../fixtures/harness-binaries.json" with {
   type: "json",
 };
 import { treeCpuSeconds } from "./cpu";
-import { frameArrivals, lagStats, percentile, renderedAt } from "./lag";
+import { frameArrivals, lagStats, percentile, shownBy } from "./lag";
 import {
+  ACTION_ITEM_CHANGES,
   type Measured,
   telemetrySchema,
   VARIANTS,
@@ -69,6 +82,8 @@ import declared from "./workload.json" with { type: "json" };
 
 const REPO = resolve(import.meta.dirname, "../../..");
 const WRITER = join(import.meta.dirname, "writer.mjs");
+const ENGINE = join(REPO, ".tools/bin/onepipeline");
+const run = promisify(execFile);
 const TELEMETRY = join(import.meta.dirname, "../telemetry/request-load.json");
 const CORPUS = join(import.meta.dirname, "corpus.mjs");
 /** How long each variant is watched once loaded: whole seconds, 120 by default. */
@@ -138,6 +153,7 @@ interface Served {
   readonly workspace: string;
   readonly server: ChildProcess;
   readonly facts: z.infer<typeof corpusSchema>;
+  readonly env: NodeJS.ProcessEnv;
 }
 
 /** A fresh corpus and a fresh server over it, isolated as the fixtures are. */
@@ -164,6 +180,9 @@ async function serveFresh(name: string): Promise<Served> {
   symlinkSync(process.execPath, join(utilityBin, "node"));
   const providerConfig = join(workspace, "provider-config.toml");
   writeFileSync(providerConfig, "");
+  const config = join(workspace, "config/onepipeline");
+  mkdirSync(config, { recursive: true });
+  writeFileSync(join(config, "config.yaml"), "human_items:\n  enabled: true\n");
   mkdirSync(join(workspace, "onevcs-home"));
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -179,8 +198,10 @@ async function serveFresh(name: string): Promise<Served> {
     ONEAGENTGRAPH_STATE_DIR: join(workspace, "oneagentgraph"),
     ONEVCS_HOME: join(workspace, "onevcs-home"),
     ONEPIPELINE_PROJECT_DIR: join(workspace, "overrides"),
+    XDG_CONFIG_HOME: join(workspace, "config"),
     XDG_STATE_HOME: join(workspace, "state"),
     XDG_CACHE_HOME: join(workspace, "cache"),
+    ONEPIPELINE_RUNS_DIR: runsRoot,
   };
   for (const variable of [
     "COPILOT_GITHUB_TOKEN",
@@ -224,7 +245,7 @@ async function serveFresh(name: string): Promise<Served> {
       throw new Error(`the ${name} server never answered`);
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
-  return { origin, runsRoot, workspace, server, facts };
+  return { origin, runsRoot, workspace, server, facts, env };
 }
 
 async function stopServing(served: Served): Promise<void> {
@@ -403,20 +424,95 @@ async function keepRunsOpen(page: Page, until: () => boolean): Promise<void> {
   }
 }
 
+const ACTION_ITEM_OWNER = "load-action-items-session";
+
+/**
+ * The window's external Action items changes, spaced over it, through the real
+ * CLI: raises answered and completed in turn, so a tab is told of each by its
+ * one stream, and none is this tab's own write.
+ */
+async function externalActionItemChanges(served: Served): Promise<void> {
+  const raised: string[] = [];
+  const work = join(served.workspace, "action-work");
+  mkdirSync(work, { recursive: true });
+  const env = {
+    ...served.env,
+    ONEPIPELINE_LAUNCHER_SESSION: ACTION_ITEM_OWNER,
+  };
+  const started = Date.now();
+  const spacing = WINDOW_MS / ACTION_ITEM_CHANGES;
+  for (let index = 0; index < ACTION_ITEM_CHANGES; index += 1) {
+    await new Promise((wake) =>
+      setTimeout(wake, Math.max(0, started + index * spacing - Date.now())),
+    );
+    const last = raised.at(-1);
+    if (index % 4 === 3 && last !== undefined) {
+      await run(ENGINE, ["human-items", "complete", last], { cwd: work, env });
+      continue;
+    }
+    const input = join(work, `raise-${index}.json`);
+    writeFileSync(
+      input,
+      JSON.stringify({
+        schema_version: 1,
+        approval: null,
+        dedup_key: `load-${index}`,
+        kind: "task",
+        title: `Load action item ${index}`,
+        body: "An external change for the Action items page.",
+        priority: "high",
+        owner: { session: ACTION_ITEM_OWNER, run: null, plan: null },
+        block: { scope: "nothing" },
+      }),
+    );
+    const { stdout } = await run(
+      ENGINE,
+      ["human-items", "raise", "--input", input],
+      { cwd: work, env, maxBuffer: 1 << 24 },
+    );
+    raised.push(
+      z
+        .object({ item: z.object({ item: z.object({ id: z.string() }) }) })
+        .parse(JSON.parse(stdout)).item.item.id,
+    );
+  }
+}
+
+/** Narrow a tab's Action items to high priority, the second tab's different filter. */
+async function narrowActionItems(page: Page): Promise<void> {
+  await page
+    .getByRole("group", { name: "Filter action items" })
+    .getByLabel("Priority", { exact: true })
+    .selectOption("high");
+}
+
 /** The page has finished loading: its view drawn, and two quiet seconds after. */
 async function loaded(page: Page, variant: Variant): Promise<number> {
   const started = Date.now();
   const view =
-    variant.kind === "nothing-open" || variant.kind === "host"
-      ? page.getByRole("region", { name: "Host", exact: true })
-      : variant.view === "graph"
-        ? page.getByRole("application", { name: "DAG execution graph" })
-        : variant.view === "overall"
-          ? page.getByRole("region", { name: "Graph timeline" })
-          : variant.view === "channel"
-            ? page.getByRole("heading", { name: "Channel queue" })
-            : page.getByRole("region", { name: /^Timeline for / });
+    variant.kind === "action-items"
+      ? page.getByRole("region", { name: "Action item list" })
+      : variant.kind === "nothing-open" || variant.kind === "host"
+        ? page.getByRole("region", { name: "Host", exact: true })
+        : variant.view === "graph"
+          ? page.getByRole("application", { name: "DAG execution graph" })
+          : variant.view === "overall"
+            ? page.getByRole("region", { name: "Graph timeline" })
+            : variant.view === "channel"
+              ? page.getByRole("heading", { name: "Channel queue" })
+              : page.getByRole("region", { name: /^Timeline for / });
   await view.waitFor({ timeout: 300_000 });
+  // A run view has loaded once it holds the whole run, as it did when its first
+  // answer was the whole run: the window then reads the view kept live, not the
+  // one-off read of the rest, which each opening does once.
+  if (
+    variant.kind !== "action-items" &&
+    variant.kind !== "nothing-open" &&
+    variant.kind !== "host"
+  )
+    await expect(
+      page.getByText("The rest of this run's history is still loading"),
+    ).toHaveCount(0, { timeout: 600_000 });
   // The Host page has finished loading once its own listing has been read.
   if (variant.kind === "nothing-open" || variant.kind === "host")
     await page
@@ -434,6 +530,7 @@ const round = (value: number, places = 3) =>
 
 function address(served: Served, variant: Variant): string {
   const { settledRun, stoppedRun, openLiveRun, liveNode } = served.facts;
+  if (variant.kind === "action-items") return "/human-items";
   if (variant.kind === "nothing-open" || variant.kind === "host")
     return "/?page=host";
   const run =
@@ -487,7 +584,155 @@ function everyRecordShown(
     .split("\n")
     .filter(Boolean)
     .map((line) => appendedSchema.parse(JSON.parse(line)))
-    .every(({ seq }) => renderedAt(observed, rowsShown, seq) !== undefined);
+    .every(({ seq }) => shownBy(observed, rowsShown, seq) !== undefined);
+}
+
+/**
+ * A live node timeline under its window of latest rows, held to what was appended
+ * to it: each tab shows the latest appended rows, each once and in order; the
+ * history page route, read as the client reads it, reaches every appended record
+ * once and in order, and `total` counts every row it reaches; and a fresh first
+ * answer's `events_total` on each span is the count the page route gives for that
+ * span named, whose pages hold the appended records it carries once and in order,
+ * so a burst's records beyond the window are counted rather than lost.
+ */
+async function holdNodeWindow(
+  pages: readonly Page[],
+  run: string,
+  node: string,
+  appended: readonly number[],
+): Promise<void> {
+  const [first] = pages;
+  if (first === undefined) throw new Error("no tab was opened");
+  const latest = appended.slice(-TIMELINE_WINDOW_EVENTS);
+  for (const [tab, page] of pages.entries()) {
+    const transcript = page.getByRole("region", { name: "Node transcript" });
+    // A collapsed run stands for rows the page holds: opened by its own control,
+    // as a reader does, before the rows are read.
+    const more = transcript.getByRole("button", { name: /^Show \d+ more/u });
+    for (let opened = 0; opened < 50 && (await more.count()) > 0; opened += 1)
+      await more.last().click();
+    // llmlint: ignore-block[e2e_uses_accessible_selectors] a row's journal sequence number is what the window is held to, and only the attribute the view writes for the observer above carries it; the transcript itself is found by its role and name, and its collapsed runs opened by their own control.
+    const shown = await transcript
+      .locator("[data-journal-seq]")
+      .evaluateAll((rows) =>
+        rows.map((row) => Number(row.getAttribute("data-journal-seq"))),
+      );
+    // llmlint: ignore-end[e2e_uses_accessible_selectors]
+    expect(new Set(shown).size, `tab ${tab} shows a row twice`).toBe(
+      shown.length,
+    );
+    const wanted = new Set(latest);
+    expect(
+      shown.filter((seq) => wanted.has(seq)),
+      `tab ${tab}'s latest appended rows, with no gap`,
+    ).toStrictEqual(latest);
+  }
+
+  /** Every page of the node's rows, or of one span's, oldest row first. */
+  const walk = async (span?: string, limit = 500) => {
+    const rows: TimelineEventRow[] = [];
+    let total: number | undefined;
+    let cursor: string | null = null;
+    do {
+      const query = new URLSearchParams({
+        scope: "node",
+        node,
+        limit: String(limit),
+        ...(span === undefined ? {} : { span }),
+        ...(cursor === null ? {} : { cursor }),
+      });
+      const answered = timelineEventsPageSchema.parse(
+        await first.evaluate(
+          async (path) => (await fetch(path)).json(),
+          `/api/v2/runs/${encodeURIComponent(run)}/timeline/events?${query}`,
+        ),
+      );
+      // Newest page first, each page in timeline order.
+      rows.unshift(...answered.rows);
+      total ??= answered.total;
+      cursor = limit === 1 ? null : answered.next_cursor;
+    } while (cursor !== null);
+    return { rows, total };
+  };
+  const written = new Set(appended);
+  const writtenIn = (rows: readonly TimelineEventRow[]) =>
+    rows.flatMap(({ seq }) =>
+      seq !== undefined && written.has(seq) ? [seq] : [],
+    );
+
+  // The node's rows: a row nested spans share is listed once, under the first.
+  const whole = await walk();
+  expect(
+    new Set(whole.rows.map(({ id }) => id)).size,
+    "a row paged twice",
+  ).toBe(whole.rows.length);
+  expect(whole.total, "the page route's total").toBe(whole.rows.length);
+  expect(
+    writtenIn(whole.rows),
+    "every appended record through the page route, once and in order",
+  ).toStrictEqual([...appended]);
+
+  const created = z
+    .object({
+      subscription: z.string(),
+      initial: z.object({ snapshot: z.unknown() }),
+    })
+    .parse(
+      await first.evaluate(
+        async (body) =>
+          (
+            await fetch("/api/v2/subscriptions", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body,
+            })
+          ).json(),
+        JSON.stringify({
+          view: { type: "timeline", run_id: run, scope: "node", node },
+        }),
+      ),
+    );
+  const { visible } = subscriptionSnapshotSchema.parse(
+    created.initial.snapshot,
+  );
+  await first.evaluate(
+    async (path) => void (await fetch(path, { method: "DELETE" })),
+    `/api/v2/subscriptions/${created.subscription}`,
+  );
+  if (visible.type !== "timeline")
+    throw new Error(`a node timeline answered ${visible.type}`);
+  // The server's window is the one the client's constant names: the answer lists
+  // the node's latest rows, that many of them, across its spans.
+  const listed = new Set(
+    visible.timeline.spans.flatMap(({ events }) => events.map(({ id }) => id)),
+  );
+  expect(listed, "the first answer's window across the node's spans").toEqual(
+    new Set(whole.rows.slice(-TIMELINE_WINDOW_EVENTS).map(({ id }) => id)),
+  );
+  const spans = new Set(visible.timeline.spans.map(({ id }) => id));
+  for (const { span_id } of whole.rows)
+    expect(spans, `row of span ${span_id}`).toContain(span_id);
+  // A span the appended records landed in is read whole; any other by its count.
+  const carrying = new Set(
+    whole.rows.flatMap(({ seq, span_id }) =>
+      seq !== undefined && written.has(seq) ? [span_id] : [],
+    ),
+  );
+  expect(carrying.size, "a span carrying the appended records").toBeGreaterThan(
+    0,
+  );
+  for (const span of visible.timeline.spans) {
+    const own = await walk(span.id, carrying.has(span.id) ? 500 : 1);
+    expect(span.events_total, `${span.id}'s events_total`).toBe(own.total);
+    if (!carrying.has(span.id)) continue;
+    expect(own.rows, `${span.id}'s pages`).toHaveLength(own.total ?? -1);
+    const held = writtenIn(own.rows);
+    expect(
+      held,
+      `${span.id}'s appended records, once and in order`,
+    ).toStrictEqual(appended.filter((seq) => held.includes(seq)));
+  }
 }
 
 async function measure(browser: Browser, variant: Variant): Promise<Measured> {
@@ -511,8 +756,18 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
           new URL(response.url()).pathname === "/api/v2/subscriptions" &&
           response.request().method() === "POST",
       );
+      // The page's one stream, opened as its load ends: the window starts after
+      // it, so its opening is not read as a reconnect inside the window.
+      const streaming = page.waitForRequest(
+        (request) => new URL(request.url()).pathname === "/api/v2/events",
+        { timeout: 300_000 },
+      );
       await page.goto(`${served.origin}${address(served, variant)}`);
+      if (variant.kind === "action-items") await streaming;
+      else void streaming.catch(() => undefined);
       loads.push(await loaded(page, variant));
+      if (variant.kind === "action-items" && tab === 1)
+        await narrowActionItems(page);
       pages.push(page);
       // The byte accounting held to a response of known size: what the
       // recorder counted for the page's subscription is that answer's body as
@@ -569,6 +824,10 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
       ],
       { stdio: ["ignore", "inherit", "inherit"] },
     );
+    const external =
+      variant.kind === "action-items"
+        ? externalActionItemChanges(served)
+        : Promise.resolve();
     // The Host page's own refresh control, pressed once in its window: the
     // reads it takes are the Host page's, which no other state sends.
     if (variant.kind === "host") {
@@ -589,6 +848,7 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
       throw new Error(
         `the workload writer for ${variant.name} ended ${signal ?? `with ${code}`}`,
       );
+    await external;
     const end = Math.max(Date.now(), start + WINDOW_MS);
     const cpu = treeCpuSeconds(pid) - cpuStart;
     const loadEnd = hostLoad();
@@ -674,7 +934,7 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
       // Two clocks read independently agree for every record shown: none is
       // rendered before it was appended, nor before a frame reached the page.
       for (const { seq, at } of appended) {
-        const shown = renderedAt(observed, rowsShown, seq);
+        const shown = shownBy(observed, rowsShown, seq);
         if (shown === undefined) continue;
         expect(
           shown,
@@ -690,6 +950,13 @@ async function measure(browser: Browser, variant: Variant): Promise<Measured> {
           `record ${seq} rendered before its frame arrived`,
         ).toBeGreaterThanOrEqual(arrived ?? 0);
       }
+      if (rowsShown)
+        await holdNodeWindow(
+          pages,
+          openLiveRun,
+          liveNode,
+          appended.map(({ seq }) => seq),
+        );
       const burst = appended.filter((item) => item.burst);
       lag = {
         measured_as: rowsShown
@@ -775,6 +1042,11 @@ test("request load, frames, lag and server CPU in every page state", async ({
     // nothing whole, and every record appended to the open live run reaches the
     // view showing it. The figures themselves are the budgets' to judge.
     expect(measured.repeated_snapshot.in_window.frames, variant.name).toBe(0);
+    if (variant.kind === "action-items")
+      expect(
+        measured.frames_by_type["human-items.patch"]?.frames_per_min ?? 0,
+        `${variant.name} received no human-items.patch frames`,
+      ).toBeGreaterThan(0);
     if (measured.lag !== undefined)
       expect(measured.lag.never_shown, `${variant.name} never showed`).toBe(0);
   }

@@ -44,8 +44,9 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use crate::contract::{
-    Envelope, EventId, HumanItemId, RunId, SubscribeOrigin, SubscribeRequest, SubscriptionId,
-    SubscriptionView, ViewScope, API_VERSION, DISCONNECTED_GRACE, RETAINED_FRAMES,
+    Envelope, EventId, HumanItemId, NodeId, RunId, SubscribeOrigin, SubscribeRequest,
+    SubscriptionId, SubscriptionView, ViewScope, API_VERSION, DETAIL_FIRST_LOADING,
+    DISCONNECTED_GRACE, NODE_WINDOW_EVENTS, RETAINED_FRAMES, SPANS_HARNESS_LOADING,
     TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
@@ -54,9 +55,12 @@ use crate::patch::Op;
 use crate::payload::live::{
     DetailInputs, Indexed, LiveDetail, LiveTimeline, TimelineScope, Touched,
 };
-use crate::payload::{self, DeclaredMembers};
+use crate::payload::{self, ActivityFold, DeclaredMembers, ItemsWindow};
 use crate::store::RunStore;
 use crate::telemetry::RunTelemetry;
+
+mod history;
+mod progressive;
 
 /// How long the SDK's whole-journal telemetry fold is left behind the run once
 /// something moved: it is folded again on the first tick after this that carries
@@ -78,6 +82,20 @@ pub const TELEMETRY_REFOLD_ENV: &str = "ONEPIPELINE_UI_TELEMETRY_REFOLD_MS";
 /// for the journey that watches a disconnected subscription expire without
 /// waiting out the contract's two minutes. Unset, the contract's grace holds.
 pub const DISCONNECTED_GRACE_ENV: &str = "ONEPIPELINE_UI_SUBSCRIPTION_GRACE_MS";
+
+/// The environment variable that delays a run's complete read by this many
+/// milliseconds after its first answer, for a journey that must act while it is
+/// outstanding. Unset, it starts at once.
+pub const COMPLETE_READ_HOLD_ENV: &str = "ONEPIPELINE_UI_COMPLETE_READ_HOLD_MS";
+
+/// The environment variable that holds a refold off for this many milliseconds
+/// after the last one, for a journey that watches the fold fall overdue. Unset,
+/// nothing holds it.
+pub const FOLD_HOLD_ENV: &str = "ONEPIPELINE_UI_TELEMETRY_FOLD_HOLD_MS";
+
+/// How many refold intervals behind the fold may fall before its values draw as
+/// loading: `TELEMETRY_REFOLD`'s 10 s makes this the contract's 40 s.
+const OVERDUE_INTERVALS: u32 = 4;
 
 /// The environment variable naming a file the poller appends one JSON line to
 /// per refresh that moved something: what the refresh read, what each payload
@@ -112,6 +130,10 @@ struct Shared {
     polling: AtomicBool,
     trace: Option<PathBuf>,
     refold: Duration,
+    /// The least age a fold reaches before it may be taken again.
+    fold_hold: Duration,
+    /// How long a complete read waits before it starts.
+    complete_hold: Duration,
     /// How long a disconnected subscription keeps recording before it expires.
     grace: Duration,
 }
@@ -142,6 +164,9 @@ struct Subscription {
     boundary: u64,
     frames: VecDeque<Retained>,
     link: Link,
+    /// Frames held behind this subscription's `sidebar.snapshot`, for a run
+    /// view whose snapshot said `sidebar: null`; `None` once it has gone out.
+    deferred: Option<Vec<Change>>,
 }
 
 impl Subscription {
@@ -216,6 +241,7 @@ enum FrameKind {
     DetailPatch,
     TimelinePatch,
     ChannelPatch,
+    SidebarSnapshot,
     // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, and the plan names this file's `FrameKind` as the one declaration of the frame; reading and diffing the view stay in the poller the frame goes out on, and the records stay the engine's.
     HumanItemsPatch,
     Reset,
@@ -229,6 +255,7 @@ impl FrameKind {
             Self::DetailPatch => "detail.patch",
             Self::TimelinePatch => "timeline.patch",
             Self::ChannelPatch => "channel.patch",
+            Self::SidebarSnapshot => "sidebar.snapshot",
             Self::HumanItemsPatch => "human-items.patch",
             Self::Reset => "reset",
         }
@@ -237,7 +264,10 @@ impl FrameKind {
 
 /// One change, as every subscription it reaches is sent it: each frame type
 /// with the members it carries besides the common three, and no other pairing.
+#[derive(Clone)]
 enum Change {
+    /// A run view's sidebar rows, as its stream's first frame.
+    SidebarRows(Arc<str>),
     /// One complete trimmed row, already serialized.
     Row(Arc<str>),
     Removed(RunId),
@@ -264,6 +294,7 @@ enum Change {
 impl Change {
     fn kind(&self) -> FrameKind {
         match self {
+            Self::SidebarRows(_) => FrameKind::SidebarSnapshot,
             Self::Row(_) => FrameKind::RunChanged,
             Self::Removed(_) => FrameKind::RunRemoved,
             Self::Detail { .. } => FrameKind::DetailPatch,
@@ -277,6 +308,7 @@ impl Change {
     fn members(&self) -> String {
         let wire = |ops: &[Op]| Value::Array(ops.iter().map(Op::to_json).collect());
         let object = match self {
+            Self::SidebarRows(rows) => return format!("\"rows\":{rows}"),
             Self::Row(row) => return format!("\"row\":{row}"),
             Self::Removed(run) => json!({ "run_id": run }),
             Self::Detail { run, ops } | Self::Channel { run, ops } => {
@@ -292,6 +324,7 @@ impl Change {
                 scope: TimelineScope::Node(node),
                 ops,
             } => json!({ "run_id": run, "scope": "node", "node": node, "ops": wire(ops) }),
+            Self::Timeline { .. } => json!({}),
             Self::HumanItems { ops } => json!({ "ops": wire(ops) }),
         };
         let text = object.to_string();
@@ -651,17 +684,101 @@ struct LiveRun {
     view: RunView,
     indexed: Indexed,
     declared: DeclaredMembers,
-    details: HashMap<FilterKey, Held<LiveDetail>>,
-    timelines: Vec<(TimelineScope, FilterKey, Held<LiveTimeline>)>,
+    details: HashMap<FilterKey, HeldDetail>,
+    timelines: Vec<(TimelineScope, FilterKey, HeldTimeline)>,
+    /// The per-share timelines `GET .../timeline/events` reads once the run's
+    /// complete read has been published, kept current here rather than
+    /// rebuilt on a request.
+    history: Vec<(TimelineScope, FilterKey, Held<LiveTimeline>)>,
     channel: Option<Held<Value>>,
     channel_stamp: Vec<(PathBuf, u64, SystemTime)>,
     telemetry: Folded,
+    /// What each node was last seen doing: one fold per opening.
+    activity: ActivityFold,
     agents: Option<Agents>,
     agents_stamp: Option<(u64, SystemTime)>,
     liveness: onepipeline::views::DriverLiveness,
     /// Whether the last refresh failed, so a failure is reported once per
     /// spell rather than every tick it lasts.
     failing: bool,
+    /// How far this reading has come.
+    reading: Reading,
+    /// Whether the telemetry fold is overdue, so its values draw as loading.
+    overdue: bool,
+}
+
+/// How far a held run's reading has come.
+enum Reading {
+    /// A selective read, whose complete read has not been started.
+    Selective,
+    /// A selective read, with its complete read running.
+    Running,
+    /// A selective read, whose complete read failed for this reason; a later
+    /// subscription starts it again.
+    Failed(String),
+    /// The complete read was published.
+    Complete,
+}
+
+/// A detail, as a subscription is shown it.
+enum DetailBody {
+    /// The kept fields of a selective read, trimmed as the contract says.
+    First(Value),
+    /// A complete reading, kept current as ever.
+    Live(LiveDetail),
+}
+
+struct HeldDetail {
+    body: DetailBody,
+    filter: EventFilter,
+    /// The `progress` member the subscriber holds.
+    progress: Value,
+    observed_at: String,
+}
+
+impl HeldDetail {
+    fn wire(&self) -> Value {
+        let body = match &self.body {
+            DetailBody::First(detail) => detail,
+            DetailBody::Live(detail) => detail.payload(),
+        };
+        let mut wire = body.clone();
+        wire["progress"] = self.progress.clone();
+        wire
+    }
+}
+
+/// What a kept timeline nobody shows has not been brought up to date with.
+#[derive(Default)]
+struct Behind {
+    /// Whether anything moved since it was last refreshed.
+    pending: bool,
+    /// What the refreshes it missed touched; `None` once one reread the store.
+    touched: Option<Touched>,
+    agents_moved: bool,
+}
+
+struct HeldTimeline {
+    /// While nobody shows it, what it has not caught up with: caught up when a tab
+    /// next opens it, so a view nobody shows is never rebuilt on a tick.
+    behind: Behind,
+    /// Where its wire window starts: a node's latest rows when first projected,
+    /// after which rows arriving are appended to it.
+    since: Option<(String, u64)>,
+    live: LiveTimeline,
+    /// What its subscribers hold: no whole list of events.
+    wire: Value,
+    window: ItemsWindow,
+    filter: EventFilter,
+    observed_at: String,
+}
+
+/// A timeline's wire window: Overall lists none, a node its latest.
+fn wire_window(scope: &TimelineScope) -> ItemsWindow {
+    match scope {
+        TimelineScope::Node(_) => ItemsWindow::Latest(NODE_WINDOW_EVENTS),
+        _ => ItemsWindow::Nothing,
+    }
 }
 
 /// A payload, and the instant it was last read at — the envelope's
@@ -685,49 +802,228 @@ impl Folded {
         let document = RunId::try_from(view.paths.run.as_str())
             .ok()
             .and_then(|run| crate::telemetry::of_aggregate(&run, &aggregate).ok());
+        let mut served = json!(aggregate);
+        // The time they were computed, which a reader of a run still appending
+        // reads the rest of them against.
+        served["as_of"] = json!(payload::now_rfc3339());
         Self {
             document,
-            served: json!(aggregate),
+            served,
             folded_at: Instant::now(),
             stale: false,
         }
     }
 
-    fn inputs(&self, agents: Option<usize>) -> DetailInputs<'_> {
+    /// No fold yet: a selective reading folds nothing of the run's whole
+    /// history, and shows none of what a fold would give.
+    fn none() -> Self {
+        Self {
+            document: None,
+            served: Value::Null,
+            folded_at: Instant::now(),
+            stale: false,
+        }
+    }
+
+    fn inputs<'a>(&'a self, agents: Option<usize>, activity: &'a ActivityFold) -> DetailInputs<'a> {
         DetailInputs {
             telemetry: self.document.as_ref(),
             sdk_telemetry: &self.served,
             agents,
+            activity: Some(activity),
         }
     }
 }
 
+/// A journal this small is read whole for its first answer. Selection drops
+/// heartbeats and activity except at a stream's ends, so on a run writing one
+/// stream a span resting on such a record would end early; reading it all costs
+/// less than a first screen can notice.
+const WHOLE_READ_BYTES: u64 = 1024 * 1024;
+
+fn agents_of(paths: &RunPaths) -> Option<Agents> {
+    onepipeline::verbs::agents(paths, AgentScope::Run).ok()
+}
+
 impl LiveRun {
-    fn open(store: &RunStore, run: &RunId) -> Result<Self, ApiError> {
-        let view = store.view(run)?;
-        let indexed = Indexed::of(&view);
+    /// A first reading of `run`, selective, holding all of `node`'s records when
+    /// one is named.
+    fn open_selective(
+        store: &RunStore,
+        run: &RunId,
+        node: Option<&NodeId>,
+    ) -> Result<Self, ApiError> {
+        let paths = store.present(run)?;
+        // A node's session rows come off the pointer file, and its agent count and
+        // rows are the only thing a first answer reads it for: read beside the
+        // journal rather than after it.
+        let pointer = node.map(|_| {
+            let paths = paths.clone();
+            std::thread::spawn(move || agents_of(&paths))
+        });
+        let (view, indexed) = if std::fs::metadata(paths.journal())
+            .is_ok_and(|about| about.len() <= WHOLE_READ_BYTES)
+        {
+            let view = store.view(run)?;
+            let mut indexed = Indexed::of(&view);
+            indexed.holds_whole(None);
+            (view, indexed)
+        } else {
+            let selection = onepipeline::journal::Selection::FirstScreen {
+                node: node.map(NodeId::as_str),
+            };
+            let mut selected = onepipeline::journal::read_selected(&paths.journal(), &selection);
+            let events = std::mem::take(&mut selected.events);
+            let view = RunView::over_selected(&paths, events)
+                .map_err(|error| ApiError::Engine(error.to_string()))?;
+            let mut indexed = Indexed::selective(&view, selected);
+            // The selection kept every record of the node it was taken for.
+            if let Some(node) = node {
+                indexed.holds_whole(Some(node.as_str()));
+            }
+            (view, indexed)
+        };
         let declared = store.declared(&view);
-        let paths = store.paths_of(run);
-        let agents = onepipeline::verbs::agents(&paths, AgentScope::Run).ok();
+        let agents = pointer.and_then(|read| read.join().ok().flatten());
         Ok(Self {
             run: run.clone(),
-            telemetry: Folded::of(&view),
             liveness: view.liveness(),
+            telemetry: Folded::none(),
+            activity: ActivityFold::default(),
             failing: false,
             indexed,
             declared,
             details: HashMap::new(),
             timelines: Vec::new(),
+            history: Vec::new(),
             channel: None,
             channel_stamp: channel_stamp(&paths.channel_dir()),
-            agents,
             agents_stamp: file_stamp(&paths.oneharness_sessions()),
+            agents,
             view,
+            reading: Reading::Selective,
+            overdue: false,
         })
+    }
+
+    /// Bring a kept timeline nobody showed up to date before a tab is shown it.
+    fn catch_up_timeline(&mut self, at: usize) {
+        let complete = self.complete();
+        let progress = self.timeline_progress(&self.timelines[at].0);
+        let (scope, _, held) = &mut self.timelines[at];
+        if !held.behind.pending {
+            return;
+        }
+        let behind = std::mem::take(&mut held.behind);
+        let agents = match scope {
+            TimelineScope::Run if !complete => None,
+            _ => self.agents.as_ref(),
+        };
+        held.live.refreshed(
+            &self.view,
+            &self.indexed,
+            &self.declared,
+            behind.touched.as_ref(),
+            agents,
+            behind.agents_moved,
+        );
+        held.since = progressive::window_start(held.live.payload(), held.window);
+        held.wire = progressive::wire_timeline_from(
+            held.live.payload(),
+            held.window,
+            complete,
+            held.since.clone(),
+        );
+        held.wire["progress"] = progress;
+        held.observed_at = payload::now_rfc3339();
     }
 
     fn agent_count(&self) -> Option<usize> {
         self.agents.as_ref().map(|agents| agents.sessions.len())
+    }
+
+    fn complete(&self) -> bool {
+        matches!(self.reading, Reading::Complete)
+    }
+
+    /// Claim the starting of the complete read, if none is held, running or
+    /// failed: a later subscription retries one that failed.
+    fn claim_complete(&mut self) -> bool {
+        match self.reading {
+            Reading::Selective | Reading::Failed(_) => {
+                self.reading = Reading::Running;
+                true
+            }
+            Reading::Running | Reading::Complete => false,
+        }
+    }
+
+    fn failed(&self) -> Option<&str> {
+        match &self.reading {
+            Reading::Failed(why) => Some(why),
+            Reading::Selective | Reading::Running | Reading::Complete => None,
+        }
+    }
+
+    /// The `progress` a detail is shown.
+    fn detail_progress(&self) -> Value {
+        if !self.complete() {
+            return progressive::progress(false, DETAIL_FIRST_LOADING, self.failed());
+        }
+        let loading: &[&str] = if self.overdue {
+            &["telemetry", "run.usage", "run.timing"]
+        } else {
+            &[]
+        };
+        progressive::progress(true, loading, None)
+    }
+
+    /// The `progress` a timeline is shown.
+    fn timeline_progress(&self, scope: &TimelineScope) -> Value {
+        let loading: &[&str] = if matches!(scope, TimelineScope::Run) && !self.complete() {
+            &[SPANS_HARNESS_LOADING]
+        } else {
+            &[]
+        };
+        progressive::progress(self.complete(), loading, self.failed())
+    }
+
+    /// The window a held timeline renders, which while selective is the wire's.
+    fn render_window(&self, scope: &TimelineScope) -> ItemsWindow {
+        // A node opened after the rest renders its window too: rendering all its
+        // rows here is seconds under this run's lock, and its first page keeps a
+        // whole view of the node of its own.
+        if self.complete() && matches!(scope, TimelineScope::Run) {
+            ItemsWindow::Counted
+        } else {
+            wire_window(scope)
+        }
+    }
+
+    /// A node the run's records, plan or state knows, whatever the view holds.
+    fn knows_node(&self, node: &NodeId, plan: &Value) -> bool {
+        plan["tasks"]
+            .as_array()
+            .is_some_and(|tasks| tasks.iter().any(|task| task["id"] == node.as_str()))
+            || self.view.state.statuses().contains_key(node.as_str())
+            || self
+                .view
+                .events
+                .iter()
+                .any(|event| event.labels.node.as_deref() == Some(node.as_str()))
+    }
+
+    /// Hold every record of `node`, for a selective reading opened for something
+    /// else.
+    fn hold_node_share(&mut self, node: &NodeId) {
+        if self.complete() || self.indexed.holds_share(node.as_str()) {
+            return;
+        }
+        let selected = onepipeline::journal::read_selected(
+            &self.view.paths.journal(),
+            &onepipeline::journal::Selection::Share(Some(node.as_str())),
+        );
+        self.indexed.hold_share(node.as_str(), &selected);
     }
 
     /// Make sure the payloads `visible` shows are being kept, building any that
@@ -746,20 +1042,34 @@ impl LiveRun {
             } else {
                 filter.clone()
             };
-            let built = LiveDetail::build(
-                &self.view,
-                &self.indexed,
-                &self.declared,
-                detail_filter,
-                &self.telemetry.inputs(self.agent_count()),
-            );
-            self.details.insert(detail_key.clone(), held(built));
+            let body = if self.complete() {
+                let agents = self.agent_count();
+                DetailBody::Live(LiveDetail::build(
+                    &self.view,
+                    &self.indexed,
+                    &self.declared,
+                    detail_filter.clone(),
+                    &self.telemetry.inputs(agents, &self.activity),
+                ))
+            } else {
+                DetailBody::First(progressive::trimmed_detail(&payload::first_detail(
+                    &self.view,
+                )))
+            };
+            let held = HeldDetail {
+                body,
+                filter: detail_filter,
+                progress: self.detail_progress(),
+                observed_at: payload::now_rfc3339(),
+            };
+            self.details.insert(detail_key.clone(), held);
         }
         let detail = enveloped(
-            self.details[&detail_key].payload.payload(),
+            &self.details[&detail_key].wire(),
             &self.details[&detail_key].observed_at,
         );
-        let run = self.run.as_str();
+        let run = self.run.as_str().to_owned();
+        let run = run.as_str();
         match visible {
             // Views of no run, which no run is ever asked for.
             Visible::Sidebar | Visible::HumanItems(_) => Ok(json!({ "type": "sidebar" })),
@@ -771,48 +1081,72 @@ impl LiveRun {
             } => {
                 if let TimelineScope::Node(node) = scope {
                     // A node of the plan, recorded or not, or one a record names.
-                    let planned = detail["graph"]["plan"]["tasks"]
-                        .as_array()
-                        .is_some_and(|tasks| tasks.iter().any(|task| task["id"] == node.as_str()));
-                    let known = planned
-                        || self.view.state.statuses().contains_key(node.as_str())
-                        || self
-                            .view
-                            .events
-                            .iter()
-                            .any(|event| event.labels.node.as_deref() == Some(node.as_str()));
-                    if !known {
+                    if !self.knows_node(node, &detail["graph"]["plan"]) {
                         return Err(ApiError::NodeNotFound(node.clone()));
+                    }
+                    // Selective: every record of the node, and its session rows,
+                    // whatever view this run was opened for.
+                    self.hold_node_share(node);
+                    if self.agents.is_none() {
+                        self.agents = agents_of(&self.view.paths);
                     }
                 }
                 let at =
                     match self.timelines.iter().position(|(held_scope, held_key, _)| {
                         held_scope == scope && held_key == key
                     }) {
-                        Some(at) => at,
+                        Some(at) => {
+                            self.catch_up_timeline(at);
+                            at
+                        }
                         None => {
+                            let agents = match scope {
+                                TimelineScope::Run if !self.complete() => None,
+                                _ => self.agents.as_ref(),
+                            };
                             let built = LiveTimeline::build(
                                 &self.view,
                                 &self.indexed,
                                 &self.declared,
                                 scope.clone(),
-                                filter,
-                                self.agents.as_ref(),
+                                filter.clone(),
+                                agents,
+                                self.render_window(scope),
                             );
-                            self.timelines
-                                .push((scope.clone(), key.clone(), held(built)));
+                            let window = wire_window(scope);
+                            let since = progressive::window_start(built.payload(), window);
+                            let mut wire = progressive::wire_timeline_from(
+                                built.payload(),
+                                window,
+                                self.complete(),
+                                since.clone(),
+                            );
+                            wire["progress"] = self.timeline_progress(scope);
+                            self.timelines.push((
+                                scope.clone(),
+                                key.clone(),
+                                HeldTimeline {
+                                    behind: Behind::default(),
+                                    since,
+                                    live: built,
+                                    wire,
+                                    window,
+                                    filter: filter.clone(),
+                                    observed_at: payload::now_rfc3339(),
+                                },
+                            ));
                             self.timelines.len() - 1
                         }
                     };
                 let (_, _, timeline) = &self.timelines[at];
-                let timeline = enveloped(timeline.payload.payload(), &timeline.observed_at);
+                let timeline = enveloped(&timeline.wire, &timeline.observed_at);
                 Ok(match scope {
-                    TimelineScope::Run => json!({
-                        "type": "timeline", "run_id": run, "scope": "run",
-                        "detail": detail, "timeline": timeline,
-                    }),
                     TimelineScope::Node(node) => json!({
                         "type": "timeline", "run_id": run, "scope": "node", "node": node,
+                        "detail": detail, "timeline": timeline,
+                    }),
+                    _ => json!({
+                        "type": "timeline", "run_id": run, "scope": "run",
                         "detail": detail, "timeline": timeline,
                     }),
                 })
@@ -832,6 +1166,16 @@ impl LiveRun {
             }
         }
     }
+}
+
+/// One fold of what each node was last seen doing, over a whole read.
+fn fold_activity(view: &RunView) -> ActivityFold {
+    let mut fold = ActivityFold::default();
+    for event in &view.events {
+        fold.absorb(event, &EventFilter::default());
+    }
+    fold.settle();
+    fold
 }
 
 fn held<T>(payload: T) -> Held<T> {
@@ -948,6 +1292,14 @@ impl Hub {
                 .ok()
                 .and_then(|ms| ms.parse().ok())
                 .map_or(TELEMETRY_REFOLD, Duration::from_millis),
+            fold_hold: std::env::var(FOLD_HOLD_ENV)
+                .ok()
+                .and_then(|ms| ms.parse().ok())
+                .map_or(Duration::ZERO, Duration::from_millis),
+            complete_hold: std::env::var(COMPLETE_READ_HOLD_ENV)
+                .ok()
+                .and_then(|ms| ms.parse().ok())
+                .map_or(Duration::ZERO, Duration::from_millis),
             grace: std::env::var(DISCONNECTED_GRACE_ENV)
                 .ok()
                 .and_then(|ms| ms.parse().ok())
@@ -986,7 +1338,14 @@ impl Hub {
             None => None,
             Some(run) => {
                 let run = RunId::try_from(run)?;
-                let live = self.live_run(&run)?;
+                let node = match &visible {
+                    Visible::Timeline {
+                        scope: TimelineScope::Node(node),
+                        ..
+                    } => Some(node),
+                    _ => None,
+                };
+                let live = self.live_run(&run, node)?;
                 lock(&live).ensure(&shared.store, &visible, spec)?;
                 Some(live)
             }
@@ -997,17 +1356,16 @@ impl Hub {
             let mut reading = lock(&shared.human_items);
             self.ensure_human_items(&mut reading, view)?;
         }
+        // A run view's snapshot waits on neither the sidebar nor the run's
+        // complete read: its rows arrive as the stream's first frame.
+        let run_view = visible.run_id().is_some();
         // Then the publication boundary: the sidebar, the run and the
         // subscriptions locked together, so every change after the snapshot is
         // one this subscription is sent and none before it is.
-        self.first_look();
-        // The run this subscription shows is under the root — it was opened
-        // above — so its snapshot lists it, however long ago the last look
-        // was: a tab told a run's detail but not that the run is served would
-        // open another one.
-        let missing = visible.run_id().and_then(|run| missing_row(shared, run));
-        let mut sidebar = lock(&shared.sidebar);
-        let added = missing.and_then(|(run, stamps, row)| sidebar.add(run, stamps, row));
+        if !run_view {
+            self.first_look();
+        }
+        let sidebar = lock(&shared.sidebar);
         let mut run = live.as_ref().map(|live| lock(live));
         let mut reading = human_items.as_ref().map(|_| lock(&shared.human_items));
         let visible_state = match (run.as_mut(), &human_items, reading.as_mut()) {
@@ -1015,7 +1373,11 @@ impl Hub {
             (None, Some(view), Some(reading)) => self.ensure_human_items(reading, view)?,
             _ => json!({ "type": "sidebar" }),
         };
-        let rows = sidebar.snapshot();
+        let rows = if run_view {
+            Value::Null
+        } else {
+            Value::Array(sidebar.snapshot())
+        };
         let mut state = lock(&shared.state);
         // The reading is held for this subscription from the boundary on: a tick
         // that let it go between its opening and now — when no subscription yet
@@ -1031,15 +1393,6 @@ impl Hub {
         if let SubscribeOrigin::Replaces(replaced) = request.origin {
             state.retire(replaced, Retired::Retired);
         }
-        // Every subscription already made is sent the row this one's snapshot
-        // carries, as a look would have sent it.
-        if let Some(RowChange::Changed(row)) = &added {
-            let change = Change::Row(Arc::clone(row));
-            let ids: Vec<SubscriptionId> = state.subscriptions.keys().copied().collect();
-            for id in ids {
-                self.emit(&mut state, id, &change);
-            }
-        }
         state.subscriptions.insert(
             subscription,
             Subscription {
@@ -1051,13 +1404,23 @@ impl Hub {
                 // Recording from now, for at most the grace, until a stream
                 // connects.
                 link: Link::drop_now(),
+                deferred: run_view.then(Vec::new),
             },
         );
         drop(state);
         drop(reading);
+        let begin_complete = run.as_mut().is_some_and(|run| run.claim_complete());
         drop(run);
         drop(sidebar);
         self.start_polling();
+        if run_view {
+            self.send_sidebar(subscription, visible.run_id().cloned());
+        }
+        if begin_complete {
+            if let Some(live) = &live {
+                self.spawn_complete(live);
+            }
+        }
         let id = self.id(seq);
         let snapshot = json!({ "id": id, "sidebar": rows, "visible": visible_state });
         let initial = match request.origin {
@@ -1165,13 +1528,17 @@ impl Hub {
                         .map(|held| held.visible.clone()),
                     _ => Some(json!({ "type": "sidebar" })),
                 };
+                // A reset re-sends the whole view, so nothing held behind the
+                // sidebar's rows is sent after it; and where the rows are read
+                // it carries them, so no `sidebar.snapshot` follows it either.
+                let sidebar_pending = held.deferred.is_some() && !sidebar.read;
                 let seq = state.next;
                 state.next += 1;
                 let id = self.id(seq);
                 let data = json!({
                     "id": id, "base": after.to_string(), "subscription": subscription,
                     "type": "reset", "reason": reason.as_str(),
-                    "snapshot": { "id": id, "sidebar": sidebar.snapshot(), "visible": visible_state },
+                    "snapshot": { "id": id, "sidebar": if sidebar_pending { Value::Null } else { Value::Array(sidebar.snapshot()) }, "visible": visible_state },
                 })
                 .to_string();
                 let held = state
@@ -1179,6 +1546,7 @@ impl Hub {
                     .get_mut(&subscription)
                     .expect("held above");
                 held.frames.clear();
+                held.deferred = sidebar_pending.then(Vec::new);
                 held.first = seq;
                 held.last = seq;
                 held.boundary = seq;
@@ -1243,11 +1611,19 @@ impl Hub {
     }
 
     /// The reading of `run`, opened if no subscription holds it yet.
-    fn live_run(&self, run: &RunId) -> Result<Arc<Mutex<LiveRun>>, ApiError> {
+    fn live_run(
+        &self,
+        run: &RunId,
+        node: Option<&NodeId>,
+    ) -> Result<Arc<Mutex<LiveRun>>, ApiError> {
         if let Some(live) = lock(&self.0.runs).get(run) {
             return Ok(Arc::clone(live));
         }
-        let opened = Arc::new(Mutex::new(LiveRun::open(&self.0.store, run)?));
+        let opened = Arc::new(Mutex::new(LiveRun::open_selective(
+            &self.0.store,
+            run,
+            node,
+        )?));
         Ok(Arc::clone(
             lock(&self.0.runs).entry(run.clone()).or_insert(opened),
         ))
@@ -1454,15 +1830,20 @@ impl Hub {
             .map(|held| Visible::of(&held.view))
             .filter(|visible| visible.run() == Some(run.run.as_str()))
             .collect();
+        // A complete reading keeps its unfiltered detail and Overall: a whole build of
+        // either is a long hold of this run's lock, and a tab opening it then waits.
+        let complete = run.complete();
         run.details.retain(|key, _| {
-            wanted.iter().any(|visible| {
-                !matches!(visible, Visible::Sidebar) && visible.detail_filter() == *key
-            })
+            (complete && key.names_none())
+                || wanted.iter().any(|visible| {
+                    !matches!(visible, Visible::Sidebar) && visible.detail_filter() == *key
+                })
         });
         run.timelines.retain(|(scope, key, _)| {
-            wanted.iter().any(|visible| {
-                matches!(visible, Visible::Timeline { scope: shown, filter, .. } if shown == scope && filter == key)
-            })
+            (complete && *scope == TimelineScope::Run && key.names_none())
+                || wanted.iter().any(|visible| {
+                    matches!(visible, Visible::Timeline { scope: shown, filter, .. } if shown == scope && filter == key)
+                })
         });
         if !wanted
             .iter()
@@ -1476,7 +1857,9 @@ impl Hub {
             Ok(Refreshed::Unchanged) => Some(Touched::default()),
             Ok(Refreshed::Appended { first }) => Some(run.indexed.extend(&run.view, first)),
             Ok(Refreshed::Reread) => {
+                // A reread reads the store whole, selective or not.
                 run.indexed = Indexed::of(&run.view);
+                run.indexed.holds_whole(None);
                 run.declared = shared.store.declared(&run.view);
                 None
             }
@@ -1495,33 +1878,66 @@ impl Hub {
             }
         };
         run.failing = false;
-        if touched.as_ref().is_some_and(Touched::any) || touched.is_none() {
+        if let Some(touched) = &touched {
+            if touched.any() {
+                run.telemetry.stale = true;
+                if run.complete() {
+                    let at = run.view.events.len().saturating_sub(touched.records);
+                    for event in &run.view.events[at..] {
+                        run.activity.absorb(event, &EventFilter::default());
+                    }
+                    run.activity.settle();
+                }
+            }
+        } else {
             run.telemetry.stale = true;
+            if run.complete() {
+                run.activity = fold_activity(&run.view);
+            }
         }
         let agents_stamp = file_stamp(&paths.oneharness_sessions());
         let agents_moved = agents_stamp != run.agents_stamp;
         if agents_moved {
             run.agents_stamp = agents_stamp;
-            run.agents = onepipeline::verbs::agents(&paths, AgentScope::Run).ok();
+            if run.agents.is_some() || run.complete() {
+                run.agents = agents_of(&paths);
+            }
         }
         let liveness = run.view.liveness();
         let liveness_moved = liveness != run.liveness;
         run.liveness = liveness;
         // The whole-journal fold is caught up on a tick that carries no change,
         // so a change is never held back by it — and, on a run that never goes
-        // quiet, at the latest once it is two intervals behind.
-        let aged = run.telemetry.folded_at.elapsed();
-        let quiet = touched.as_ref().is_some_and(|touched| !touched.any());
-        let refold =
-            run.telemetry.stale && ((quiet && aged >= shared.refold) || aged >= shared.refold * 2);
+        // quiet, at the latest once it is two intervals behind. A selective
+        // reading has no fold to catch up.
+        let complete = run.complete();
         let mut folded_ms = None;
-        if refold {
-            let folding = Instant::now();
-            run.telemetry = Folded::of(&run.view);
-            folded_ms = Some(folding.elapsed().as_secs_f64() * 1000.0);
+        let mut refold = false;
+        if complete {
+            let aged = run.telemetry.folded_at.elapsed();
+            let quiet = touched.as_ref().is_some_and(|touched| !touched.any());
+            refold = run.telemetry.stale
+                && aged >= shared.fold_hold
+                && ((quiet && aged >= shared.refold) || aged >= shared.refold * 2);
+            if refold {
+                let folding = Instant::now();
+                run.telemetry = Folded::of(&run.view);
+                folded_ms = Some(folding.elapsed().as_secs_f64() * 1000.0);
+            }
         }
-        let moved =
-            touched.as_ref().is_none_or(Touched::any) || agents_moved || liveness_moved || refold;
+        // Whether the fold's values are older than a reader should be shown as
+        // fact: past due with records since, or a fold that failed.
+        let overdue = complete
+            && (run.telemetry.document.is_none()
+                || (run.telemetry.stale
+                    && run.telemetry.folded_at.elapsed() >= shared.refold * OVERDUE_INTERVALS));
+        let overdue_moved = overdue != run.overdue;
+        run.overdue = overdue;
+        let moved = touched.as_ref().is_none_or(Touched::any)
+            || agents_moved
+            || liveness_moved
+            || refold
+            || overdue_moved;
         let channel_stamp = if run.channel.is_some() {
             channel_stamp(&paths.channel_dir())
         } else {
@@ -1538,6 +1954,14 @@ impl Hub {
         let mut ops_count = 0;
         if moved {
             let agents = run.agent_count();
+            let detail_progress = run.detail_progress();
+            let first_detail =
+                (!complete).then(|| progressive::trimmed_detail(&payload::first_detail(&run.view)));
+            let progresses: Vec<Value> = run
+                .timelines
+                .iter()
+                .map(|(scope, _, _)| run.timeline_progress(scope))
+                .collect();
             let LiveRun {
                 run: run_id,
                 view,
@@ -1545,18 +1969,40 @@ impl Hub {
                 declared,
                 details,
                 timelines,
+                history,
                 telemetry,
+                activity,
                 agents: agent_list,
                 ..
             } = run;
             for (key, detail) in details.iter_mut() {
-                let ops = detail.payload.refreshed(
-                    view,
-                    indexed,
-                    declared,
-                    touched.as_ref(),
-                    &telemetry.inputs(agents),
-                );
+                let mut ops = match (&mut detail.body, &first_detail) {
+                    (DetailBody::Live(live), _) => live.refreshed(
+                        view,
+                        indexed,
+                        declared,
+                        touched.as_ref(),
+                        &telemetry.inputs(agents, activity),
+                    ),
+                    (DetailBody::First(held), Some(new)) => {
+                        let mut ops = Vec::new();
+                        if let Err(refused) = crate::patch::diff(held, new, &mut ops) {
+                            eprintln!(
+                                "onepipeline-api: a first detail could not be patched: {refused}"
+                            );
+                        }
+                        *held = new.clone();
+                        ops
+                    }
+                    (DetailBody::First(_), None) => Vec::new(),
+                };
+                if detail.progress != detail_progress {
+                    detail.progress = detail_progress.clone();
+                    ops.extend(Op::set(
+                        &[crate::patch::Step::Key("progress".to_owned())],
+                        detail_progress.clone(),
+                    ));
+                }
                 if touched.is_none() {
                     rebuilt_whole.push(format!("detail:{key}"));
                 }
@@ -1574,17 +2020,60 @@ impl Hub {
                     ));
                 }
             }
-            for (scope, key, timeline) in timelines.iter_mut() {
-                let before = timeline.payload.rendered();
-                let ops = timeline.payload.refreshed(
+            for ((scope, key, timeline), progress) in timelines.iter_mut().zip(progresses) {
+                let shown = wanted.iter().any(|visible| {
+                    matches!(visible, Visible::Timeline { scope: held, filter, .. } if held == scope && filter == key)
+                });
+                if !shown {
+                    // Kept for the next tab to open it, and caught up then.
+                    let behind = &mut timeline.behind;
+                    behind.touched = match (behind.pending, &behind.touched, &touched) {
+                        (false, _, Some(now)) => Some(now.clone()),
+                        (true, Some(was), Some(now)) => {
+                            let mut both = was.clone();
+                            both.absorb(now);
+                            Some(both)
+                        }
+                        _ => None,
+                    };
+                    behind.pending = true;
+                    behind.agents_moved |= agents_moved || liveness_moved;
+                    continue;
+                }
+                // Past its first answer a node view holds every row from its
+                // window's start, so its rows are all rendered from here on.
+                if matches!(scope, TimelineScope::Node(_)) {
+                    timeline.live.widen();
+                }
+                let before = timeline.live.rendered();
+                let agents_for = match scope {
+                    TimelineScope::Run if !complete => None,
+                    _ => agent_list.as_ref(),
+                };
+                let full = timeline.live.refreshed(
                     view,
                     indexed,
                     declared,
                     touched.as_ref(),
-                    agent_list.as_ref(),
+                    agents_for,
                     agents_moved || liveness_moved,
                 );
-                rendered += timeline.payload.rendered() - before;
+                rendered += timeline.live.rendered() - before;
+                let mut ops = progressive::sync_timeline(
+                    &mut timeline.wire,
+                    timeline.live.payload(),
+                    &full,
+                    timeline.window,
+                    complete,
+                    timeline.since.as_ref(),
+                );
+                if timeline.wire["progress"] != progress {
+                    timeline.wire["progress"] = progress.clone();
+                    ops.extend(Op::set(
+                        &[crate::patch::Step::Key("progress".to_owned())],
+                        progress,
+                    ));
+                }
                 if touched.is_none() {
                     rebuilt_whole.push(format!("timeline:{key}"));
                 }
@@ -1603,6 +2092,16 @@ impl Hub {
                         },
                     ));
                 }
+            }
+            for (_, _, held) in history.iter_mut() {
+                held.payload.refreshed(
+                    view,
+                    indexed,
+                    declared,
+                    touched.as_ref(),
+                    agent_list.as_ref(),
+                    agents_moved || liveness_moved,
+                );
             }
         }
         if channel_moved {
@@ -1651,10 +2150,18 @@ impl Hub {
             .details
             .keys()
             .map(|key| format!("detail:{key}"))
-            .chain(run.timelines.iter().map(|(scope, key, _)| match scope {
-                TimelineScope::Run => format!("timeline:run:{key}"),
-                TimelineScope::Node(node) => format!("timeline:node {node}:{key}"),
-            }))
+            .chain(
+                run.timelines
+                    .iter()
+                    .filter(|(_, _, held)| !held.behind.pending)
+                    .map(|(scope, key, _)| match scope {
+                        TimelineScope::Run => format!("timeline:run:{key}"),
+                        TimelineScope::Node(node) => format!("timeline:node {node}:{key}"),
+                        TimelineScope::RunShare | TimelineScope::NodeShare(_) => {
+                            format!("history:{key}")
+                        }
+                    }),
+            )
             .chain(run.channel.as_ref().map(|_| "channel".to_owned()))
             .collect();
         self.trace(&json!({
@@ -1688,12 +2195,23 @@ impl Hub {
 
     /// Send `change` to one subscription, retaining it for a reconnect.
     fn emit(&self, state: &mut State, subscription: SubscriptionId, change: &Change) {
-        let seq = state.next;
-        state.next += 1;
-        let id = self.id(seq);
         let Some(held) = state.subscriptions.get_mut(&subscription) else {
             return;
         };
+        if let (Some(deferred), false) = (
+            held.deferred.as_mut(),
+            matches!(change, Change::SidebarRows(_)),
+        ) {
+            deferred.push(change.clone());
+            return;
+        }
+        let seq = state.next;
+        state.next += 1;
+        let id = self.id(seq);
+        let held = state
+            .subscriptions
+            .get_mut(&subscription)
+            .expect("held above");
         let base = self.id(held.last);
         held.last = seq;
         let kind = change.kind();
