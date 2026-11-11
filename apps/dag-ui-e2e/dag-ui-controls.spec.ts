@@ -858,12 +858,16 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
     }
 
     let current: string | undefined;
+    // The node a line is about stays open for the lines under it, which read its
+    // tabs: opening it again for each was a whole page load per line.
+    let open: Locator | undefined;
     for (const line of nodeLines) {
       const nodeLine = line.match(/^ {2}(\S+)\s+(\S+)(?: \(([^)]+)\))?(.*)$/);
       if (nodeLine !== null) {
         const [, id, , outcome, rest] = nodeLine;
         current = String(id);
         const view = await openNode(page, runId, String(id));
+        open = view;
         const task = await nodeTab(view, "Task");
         if (outcome !== undefined)
           await expect(task).toContainText(`Settled as${outcome}`);
@@ -890,7 +894,7 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
         continue;
       }
       const [, term, value] = under;
-      const view = await openNode(page, runId, id);
+      const view = open ?? (await openNode(page, runId, id));
       if (term === "detail")
         await expect(await nodeTab(view, "Task")).toContainText(
           `Outcome${value}`,
