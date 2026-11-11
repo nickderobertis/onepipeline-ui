@@ -45,7 +45,7 @@ use crate::stub_bin;
 /// Several targets and not one, because each of them is a tier a reader can ask
 /// for by name — that is what having an edge of their own means — and a tier
 /// reached on its own is exactly the one whose provisioning nothing else has done.
-const SUITES_THAT_START_THE_READ_API: [&str; 8] = [
+const SUITES_THAT_START_THE_READ_API: [&str; 9] = [
     "onepipeline-ui-versions:test",
     "onepipeline-ui-versions:test-quick",
     "onepipeline-ui-e2e:test",
@@ -53,11 +53,12 @@ const SUITES_THAT_START_THE_READ_API: [&str; 8] = [
     "onepipeline-ui-baseline:test-baseline",
     "dag-ui-e2e:test",
     "dag-ui-read-latency:test",
+    "dag-ui-read-latency:test-large",
     "dag-ui-read-latency:test-journeys",
 ];
 
 /// The targets those tasks are reached through, which is what Nx is asked for.
-const TIERS: &str = "test,test-quick,test-baseline,test-journeys";
+const TIERS: &str = "test,test-quick,test-baseline,test-large,test-journeys";
 
 const PROVISIONING: &str = "onepipeline-ui:ensure-sibling";
 

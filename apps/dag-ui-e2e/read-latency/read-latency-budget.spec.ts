@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
-import { DRIVERS, telemetrySchema } from "./telemetry";
+import { DRIVERS, largeTelemetrySchema, telemetrySchema } from "./telemetry";
 import workload from "./workload.json" with { type: "json" };
 
 /**
@@ -155,8 +155,16 @@ const telemetry = (overrides: object = {}) => ({
     unfiltered: page(0, 0.8),
     filtered: { ...page(4, 1.5), filter: FILTERED },
   },
-  large_run: largeRun(),
   batch: batch(),
+  ...overrides,
+});
+
+const largeTelemetry = (overrides: object = {}) => ({
+  schema_version: 1,
+  recorded_at: "2026-11-07T00:00:00.000Z",
+  commit: "a".repeat(40),
+  dirty: false,
+  large_run: largeRun(),
   ...overrides,
 });
 
@@ -242,7 +250,8 @@ test("reports the slowest page's figure as recorded, and a figure over its line 
 });
 
 test("the large-run budgets report their figures and detail through the real check", () => {
-  const results = check(recorded(telemetry()), [
+  largeTelemetrySchema.parse(largeTelemetry());
+  const results = check(recorded(largeTelemetry()), [
     ["first-view", 1],
     ["rest-arrived", 60],
     ["history-page", 1],
@@ -268,7 +277,7 @@ for (const driver of Object.keys(DRIVERS) as (keyof typeof DRIVERS)[]) {
   test(`a corpus missing the ${driver} driver fails the check, naming it`, () => {
     const corpus: Record<string, number> = { ...DRIVERS };
     delete corpus[driver];
-    const path = recorded(telemetry({ large_run: largeRun({ corpus }) }));
+    const path = recorded(largeTelemetry({ large_run: largeRun({ corpus }) }));
     const run = measure("first-view", path);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain(driver);
@@ -284,7 +293,7 @@ test("a run with no mark fails the check, naming the reading", () => {
     readings: [reading(null), reading(0.4), reading(0.4)],
   };
   const path = recorded(
-    telemetry({
+    largeTelemetry({
       large_run: largeRun({
         first_view: { ...largeRun().first_view, graph },
       }),
@@ -294,6 +303,15 @@ test("a run with no mark fails the check, naming the reading", () => {
   expect(run.status).toBe(1);
   expect(run.stderr).toContain("no first-useful-screen mark");
   expect(check(path, [["first-view", 1]])[0]?.verdict).not.toBe("within");
+});
+
+test("each metric reads only the document its own target records, and names that target", () => {
+  const large = measure("first-view", recorded(telemetry()));
+  expect(large.status).toBe(1);
+  expect(large.stderr).toContain("dag-ui-read-latency:test-large");
+  const human = measure("human-items-lag", recorded(largeTelemetry()));
+  expect(human.status).toBe(1);
+  expect(human.stderr).toContain("dag-ui-read-latency:test ");
 });
 
 test("a batch tab slower than the spaced writes becomes the figure, with each part in its detail", () => {
@@ -434,23 +452,32 @@ test("refuses a metric it does not measure, as a usage error", () => {
   expect(run.stderr).toContain("human-items-requests");
 });
 
-test("the budgets file names this runner's metrics, with no host label", () => {
-  const text = readFileSync(join(import.meta.dirname, "budgets.yaml"), "utf8");
+test("each budgets file names this runner's metrics and its own telemetry, with no host label", () => {
   // Each names the telemetry it reads, so a job without that file, such as
   // ci.yml's budgets job, reports the file missing rather than running the
   // runner where its imports do not resolve.
-  for (const metric of [
-    "human-items-requests",
-    "human-items-lag",
-    "first-view",
-    "rest-arrived",
-    "history-page",
-    "status",
-  ])
-    expect(text).toContain(
-      `command: [node, read-latency-budget.mjs, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, --metric, ${metric}]`,
-    );
-  expect(text).not.toMatch(/labels:/u);
+  for (const [file, runner, telemetry, metrics] of [
+    [
+      "budgets.yaml",
+      "read-latency-budget.mjs",
+      "read-latency.json",
+      ["human-items-requests", "human-items-lag"],
+    ],
+    [
+      "large-run/budgets.yaml",
+      "../read-latency-budget.mjs",
+      "read-latency-large.json",
+      ["first-view", "rest-arrived", "history-page", "status"],
+    ],
+  ] as const) {
+    const text = readFileSync(join(import.meta.dirname, file), "utf8");
+    for (const metric of metrics)
+      expect(text).toContain(
+        `command: [node, ${runner}, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/${telemetry}, --metric, ${metric}]`,
+      );
+    expect(text.match(/command:/gu)).toHaveLength(metrics.length);
+    expect(text).not.toMatch(/labels:/u);
+  }
 });
 
 test("the budgets file states the workload workload.json records", () => {

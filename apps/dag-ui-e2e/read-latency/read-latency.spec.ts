@@ -17,6 +17,11 @@
  * - for one 50-answer batch sent from the page, from the send bar's press to each
  *   of two open tabs' list no longer holding any of the 50.
  *
+ * Apart from those, one large run's first useful screens, the rest arriving, its
+ * history pages and its status read are recorded into
+ * `telemetry/read-latency-large.json` for `large-run/budgets.yaml`, by a test of
+ * their own that `dag-ui-read-latency:test-large` runs.
+ *
  * This asserts behaviour only, and holds no time bound beyond a guard against a
  * hang: every threshold is the budgets file's.
  */
@@ -67,6 +72,7 @@ import {
   FIRST_VIEWS,
   firstViewSchema,
   type LargeRun,
+  largeTelemetrySchema,
   type Reading,
   telemetrySchema,
 } from "./telemetry";
@@ -76,6 +82,10 @@ const HISTORY_LOADING = "The rest of this run's history is still loading";
 
 const REPO = resolve(import.meta.dirname, "../../..");
 const TELEMETRY = join(import.meta.dirname, "telemetry/read-latency.json");
+const LARGE_TELEMETRY = join(
+  import.meta.dirname,
+  "telemetry/read-latency-large.json",
+);
 const CORPUS = join(import.meta.dirname, "../load/corpus.mjs");
 const WORKLOAD = join(import.meta.dirname, "workload.json");
 const LARGE_WORKLOAD = join(import.meta.dirname, "large-run-workload.json");
@@ -1014,20 +1024,19 @@ async function readComplete(world: LargeWorld, port: number) {
   const { origin, server } = await serveLarge(world, port);
   try {
     const root = `${origin}/api/v2/runs/${encodeURIComponent(world.run)}`;
-    const detail = completeSchema.parse(await (await fetch(root)).json());
-    const timeline = timelineSchema.parse(
-      await (await fetch(`${root}/timeline?scope=run`)).json(),
-    );
-    const nodeTimeline =
+    const read = async (path: string): Promise<unknown> =>
+      (await fetch(`${root}${path}`)).json();
+    // Each document is its own whole read, and nothing here is timed, so the
+    // three are taken together: 59 s one after another and 32 s at once here.
+    const [detail, timeline, nodeTimeline] = await Promise.all([
+      read("").then((body) => completeSchema.parse(body)),
+      read("/timeline?scope=run").then((body) => timelineSchema.parse(body)),
       world.busiestNode === ""
-        ? { spans: [] }
-        : timelineSchema.parse(
-            await (
-              await fetch(
-                `${root}/timeline?scope=node&node=${encodeURIComponent(world.busiestNode)}`,
-              )
-            ).json(),
-          );
+        ? Promise.resolve({ spans: [] })
+        : read(
+            `/timeline?scope=node&node=${encodeURIComponent(world.busiestNode)}`,
+          ).then((body) => timelineSchema.parse(body)),
+    ]);
     return { detail, timeline, nodeTimeline, spans: timeline.spans };
   } finally {
     await stopServing(server);
@@ -1040,7 +1049,10 @@ async function restArrived(
   browser: Browser,
   complete: Complete,
 ) {
-  const measure = async (view: (typeof FIRST_VIEWS)[number]) => {
+  const measure = async (
+    view: (typeof FIRST_VIEWS)[number],
+    pages?: HistoryPages,
+  ) => {
     const opened = await firstViewReading(browser, world, port, view, complete);
     let framesBytes = 0;
     const cdp = await opened.context.newCDPSession(opened.page);
@@ -1055,6 +1067,9 @@ async function restArrived(
     // The mark is taken; the observer that found it, which reads the whole screen
     // on every change, is stopped so it does not slow the page it times.
     await opened.page.evaluate("window.__firstScreenStop?.()");
+    // The history page before the rest is published is read on this opening,
+    // which a fourth whole read of the run would otherwise be spent on.
+    if (pages !== undefined) await pages.before(opened.page);
     // The rest has arrived once the page no longer says it is loading any of it:
     // no quiet line, and no Turns tile still reading Loading….
     const arrivedAt = async (): Promise<number | null> =>
@@ -1090,6 +1105,7 @@ async function restArrived(
       opened.state === undefined || at === null
         ? null
         : (at - opened.state.at) / 1000;
+    if (pages !== undefined && at !== null) await pages.after(opened.page);
     const peak = peakRssMb(opened.server.pid ?? 0);
     await opened.context.close();
     await stopServing(opened.server);
@@ -1099,71 +1115,104 @@ async function restArrived(
   if (overall.seconds === null)
     throw new Error("Overall's loading values never arrived");
   const graph = await measure("graph");
-  const node = await measure("node");
+  const pages = historyPages(world, port, complete);
+  const node = await measure("node", pages);
   return {
-    overall_s: overall.seconds,
-    graph_s: graph.seconds,
-    node_s: node.seconds,
-    patch_frame_bytes: overall.framesBytes,
-    server_peak_rss_mb: Math.max(overall.peak, graph.peak, node.peak),
-    complete: true as const,
+    rest: {
+      overall_s: overall.seconds,
+      graph_s: graph.seconds,
+      node_s: node.seconds,
+      patch_frame_bytes: overall.framesBytes,
+      server_peak_rss_mb: Math.max(overall.peak, graph.peak, node.peak),
+      complete: true as const,
+    },
+    history: pages.result(),
   };
 }
 
-async function historyPage(
+interface HistoryPages {
+  /** Asks for earlier rows while the rest is still loading. */
+  readonly before: (page: Page) => Promise<void>;
+  /** Asks again once the rest has arrived. */
+  readonly after: (page: Page) => Promise<void>;
+  readonly result: () => {
+    node_before_rest_s: number;
+    node_after_rest_s: number;
+    overall_span_page_s: number | null;
+    slowest_s: number;
+    rows_shown_after: number;
+  };
+}
+
+/**
+ * The busiest node's history pages, asked for by the page's own control on the
+ * node opening the rest-arrived reading holds: one page before the rest is
+ * published and one after, then Overall's span page as the client asks for it.
+ */
+function historyPages(
   world: LargeWorld,
   port: number,
-  browser: Browser,
   complete: Complete,
-) {
-  const opened = await firstViewReading(browser, world, port, "node", complete);
-  const { page } = opened;
-  const transcript = page.getByRole("region", { name: "Node transcript" });
-  const rows = transcript.getByRole("article");
-  const loadEarlier = page.getByRole("button", { name: "Load earlier rows" });
-  const pageRead = async () => {
+): HistoryPages {
+  let before: number | undefined;
+  let after: number | undefined;
+  let rowsAfter = 0;
+  let overallSpan: number | null = null;
+  const pageRead = async (page: Page) => {
+    const transcript = page.getByRole("region", { name: "Node transcript" });
+    const rows = transcript.getByRole("article");
+    const loadEarlier = page.getByRole("button", { name: "Load earlier rows" });
     await loadEarlier.waitFor({ timeout: NEVER });
-    const before = await rows.count();
+    const shown = await rows.count();
     const asked = Date.now();
     await loadEarlier.click();
     await expect
       .poll(() => rows.count(), { timeout: NEVER })
-      .toBeGreaterThan(before);
-    return (Date.now() - asked) / 1000;
+      .toBeGreaterThan(shown);
+    return { seconds: (Date.now() - asked) / 1000, rows: await rows.count() };
   };
-  // The "before" reading is only that while the rest is still loading.
-  if ((await page.getByText(HISTORY_LOADING).count()) === 0)
-    throw new Error(
-      "the rest of the run arrived before the first page was asked for",
-    );
-  const before = await pageRead();
-  await expect(page.getByText(HISTORY_LOADING)).toHaveCount(0, {
-    timeout: 600_000,
-  });
-  const after = await pageRead();
-  const rowsAfter = await rows.count();
-  // Overall's span page, as the client's own request reads it.
-  const root = `http://127.0.0.1:${port}/api/v2/runs/${encodeURIComponent(world.run)}`;
-  const spansTimeline = timelineSchema.parse(
-    await (await fetch(`${root}/timeline?scope=run`)).json(),
-  );
-  const dispatch = spansTimeline.spans.find((span) => span.kind === "node");
-  let overallSpan: number | null = null;
-  if (dispatch !== undefined) {
-    const asked = Date.now();
-    await fetch(
-      `${root}/timeline/events?scope=run&node=${encodeURIComponent(String(dispatch.node_id))}&span=${encodeURIComponent(String(dispatch.id))}&limit=100`,
-    );
-    overallSpan = (Date.now() - asked) / 1000;
-  }
-  await opened.context.close();
-  await stopServing(opened.server);
   return {
-    node_before_rest_s: before,
-    node_after_rest_s: after,
-    overall_span_page_s: overallSpan,
-    slowest_s: Math.max(before, after),
-    rows_shown_after: rowsAfter,
+    async before(page) {
+      // The "before" reading is only that while the rest is still loading.
+      if ((await page.getByText(HISTORY_LOADING).count()) === 0)
+        throw new Error(
+          "the rest of the run arrived before the first page was asked for",
+        );
+      before = (await pageRead(page)).seconds;
+    },
+    async after(page) {
+      await expect(page.getByText(HISTORY_LOADING)).toHaveCount(0, {
+        timeout: 600_000,
+      });
+      const read = await pageRead(page);
+      after = read.seconds;
+      rowsAfter = read.rows;
+      // Overall's span page, as the client's own request reads it, from the
+      // server this opening holds the rest on.
+      const dispatch = complete.timeline.spans.find(
+        (span) => span.kind === "node",
+      );
+      if (dispatch !== undefined) {
+        const root = `http://127.0.0.1:${port}/api/v2/runs/${encodeURIComponent(world.run)}`;
+        const asked = Date.now();
+        const answer = await fetch(
+          `${root}/timeline/events?scope=run&node=${encodeURIComponent(String(dispatch.node_id))}&span=${encodeURIComponent(String(dispatch.id))}&limit=100`,
+        );
+        await answer.text();
+        overallSpan = (Date.now() - asked) / 1000;
+      }
+    },
+    result() {
+      if (before === undefined || after === undefined)
+        throw new Error("the busiest node's history pages were never read");
+      return {
+        node_before_rest_s: before,
+        node_after_rest_s: after,
+        overall_span_page_s: overallSpan,
+        slowest_s: Math.max(before, after),
+        rows_shown_after: rowsAfter,
+      };
+    },
   };
 }
 
@@ -1210,7 +1259,8 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
     > = {};
     let overallBytes = 0;
     for (const view of FIRST_VIEWS) {
-      // A primer that leaves the bundle in this context's HTTP cache.
+      // A primer that leaves the bundle in this context's HTTP cache. It is a
+      // new context on a fresh server, so its reading is the cold-cache one.
       const primer = await firstViewReading(
         browser,
         world,
@@ -1234,29 +1284,6 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
         await taken.page.close();
         await stopServing(taken.server);
       }
-      const coldContext = await browser.newContext({
-        viewport: { width: 1440, height: 900 },
-      });
-      const cold = await firstViewReading(
-        browser,
-        world,
-        port,
-        view,
-        complete,
-        coldContext,
-      );
-      await coldContext.close();
-      await stopServing(cold.server);
-      const fresh = await firstViewReading(
-        browser,
-        world,
-        port,
-        view,
-        complete,
-        primer.context,
-      );
-      await fresh.page.close();
-      await stopServing(fresh.server);
       let small: number | null = null;
       if (world.smallRun !== "" && view !== "node") {
         const tiny = await firstViewReading(
@@ -1279,8 +1306,10 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
       first[view] = {
         readings,
         median_s: taken.length === 3 ? median(taken) : null,
-        cold_cache: cold.reading,
-        fresh_server: fresh.reading,
+        cold_cache: primer.reading,
+        // Every reading is taken on a fresh server with the bundle cached, so
+        // the first of the three is that reading rather than a fourth like it.
+        fresh_server: readings[0] ?? primer.reading,
         small_run_s: small,
       };
       if (view === "overall")
@@ -1300,8 +1329,7 @@ async function measureLargeRun(browser: Browser): Promise<LargeRun> {
       slowest_view: FIRST_VIEWS[slowestIndex] ?? "graph",
       slowest_s: medians[slowestIndex] ?? 0,
     };
-    const rest = await restArrived(world, port, browser, complete);
-    const history = await historyPage(world, port, browser, complete);
+    const { rest, history } = await restArrived(world, port, browser, complete);
     const status = await statusRead(world, port);
     const unread: Record<string, number> = {};
     const corpus =
@@ -1530,6 +1558,30 @@ async function measureBatch(browser: Browser, world: World, grown: string) {
   }
 }
 
+/**
+ * The large run's figures, which `dag-ui-read-latency:test-large` records apart
+ * from Action items': taken together they ran past test-linux's 36-minute cap
+ * beside the affected tier (run 42909548558), so this one is reached by `check`,
+ * which the release pull request's sweep runs.
+ */
+test("a large run's first screens, the rest, its history and its status, at real size", async ({
+  browser,
+}) => {
+  test.skip(HOST_RUNS_ROOT !== undefined, "a host measurement reads one run");
+  const large_run = await measureLargeRun(browser);
+  const git = (args: string[]) =>
+    execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
+  const telemetry = largeTelemetrySchema.parse({
+    schema_version: 1,
+    recorded_at: new Date().toISOString(),
+    commit: git(["rev-parse", "HEAD"]),
+    dirty: git(["status", "--porcelain"]) !== "",
+    large_run,
+  });
+  mkdirSync(join(import.meta.dirname, "telemetry"), { recursive: true });
+  writeFileSync(LARGE_TELEMETRY, `${JSON.stringify(telemetry, null, 2)}\n`);
+});
+
 test("Action items follows the CLI's writes on the stream it already holds, filtered or not", async ({
   browser,
 }) => {
@@ -1561,7 +1613,6 @@ test("Action items follows the CLI's writes on the stream it already holds, filt
       unfiltered: await measureOn("unfiltered"),
       filtered: await measureOn("filtered"),
     };
-    const large_run = await measureLargeRun(browser);
     const batch = await measureBatch(browser, world, grown);
     const git = (args: string[]) =>
       execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
@@ -1575,7 +1626,6 @@ test("Action items follows the CLI's writes on the stream it already holds, filt
         write_spacing_s: workload.write_spacing_s,
       },
       human_items,
-      large_run,
       batch,
     });
     mkdirSync(join(import.meta.dirname, "telemetry"), { recursive: true });

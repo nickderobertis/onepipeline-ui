@@ -61,9 +61,10 @@ RECORDED_JOBS = json.loads((HERE / 'fixtures/own-run/jobs.json').read_text())
 SAVED = ('onepipeline-ui-macos-jobs-per-run', 'onepipeline-ui-macos-runs-per-change')
 POOL = 'onepipeline-ui-pool-maintenance-seconds'
 # Saved only when the affected tier selects their project, so here, as nothing selects it, none is.
-READ_LATENCY = ('dag-ui-human-items-requests-per-minute', 'dag-ui-human-items-update-lag-seconds',
-                'dag-ui-run-first-view-seconds', 'dag-ui-run-rest-arrived-seconds',
-                'dag-ui-run-history-page-seconds', 'dag-ui-run-status-read-seconds')
+READ_LATENCY = ('dag-ui-human-items-requests-per-minute', 'dag-ui-human-items-update-lag-seconds')
+# Saved only by the release pull request's sweep, which reaches `test-large` through `check`.
+LARGE_RUN = ('dag-ui-run-first-view-seconds', 'dag-ui-run-rest-arrived-seconds',
+             'dag-ui-run-history-page-seconds', 'dag-ui-run-status-read-seconds')
 # Its command runs in this job: nothing saves it, and a pull request's job measures the live listing.
 HEADROOM = 'onepipeline-ui-cache-headroom'
 # A push reads no saved results, so a row its merged run holds no figure for keeps its catalog reason.
@@ -72,6 +73,8 @@ PUSH_REASON = {
     POOL: 'its command reads ../apps/dag-ui/dist/index.html, which is not available in this job',
     **{budget: 'its command reads apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, which is not available in this job'
        for budget in READ_LATENCY},
+    **{budget: 'its command reads apps/dag-ui-e2e/read-latency/telemetry/read-latency-large.json, which is not available in this job'
+       for budget in LARGE_RUN},
 }
 OMITTED = {
     'onepipeline-ui-cd-job-time': 'actions-budget-figures.sh longest-job --stage cd',
@@ -89,7 +92,7 @@ OMITTED = {
 }
 OMITTED_LINE = (f'{len(OMITTED)} budgets are left out because a pull request cannot measure them '
                 '(label not-measured-on-pr).')
-SHOWN = {OWN_BUDGET, *CI_TIME, *SAVED, *READ_LATENCY, POOL, HEADROOM}
+SHOWN = {OWN_BUDGET, *CI_TIME, *SAVED, *READ_LATENCY, *LARGE_RUN, POOL, HEADROOM}
 CI_TIME_ID = 'onepipeline-ui-ci-check-time'
 # The targets the tier selects for these journeys' changes, and the one only a release pull request adds.
 SAVING_TARGETS = {'.github/project.json': 'budgets', '.github/reporting/project.json': 'budgets'}
@@ -523,7 +526,7 @@ class ProductionCatalog(unittest.TestCase):
         self.assertEqual(job.exit_code, 0, job.stdout)
         self.assertEqual(sorted(rows), sorted(SHOWN))
         self.assertEqual([r['id'] for r in verdicts(job).values() if r['verdict'] == 'error'], [])
-        for budget in (*SAVED, *READ_LATENCY, POOL):
+        for budget in (*SAVED, *READ_LATENCY, *LARGE_RUN, POOL):
             self.assertEqual(unavailable(job)[budget], reason(budget), budget)
             self.assertNotIn('verdict', rows[budget], budget)
         self.assertIn(rows[OWN_BUDGET].get('verdict'), (None, 'within', 'over'))

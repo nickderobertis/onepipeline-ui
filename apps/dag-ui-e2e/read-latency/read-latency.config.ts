@@ -2,23 +2,35 @@ import { join } from "node:path";
 import { defineConfig } from "@playwright/test";
 
 /**
- * Two projects over one release server. `budgets` holds the read-latency telemetry and
- * the runner that reads it, `dag-ui-read-latency:test`. `journeys` holds the
- * large-corpus journeys, `dag-ui-read-latency:test-journeys`. That target has an edge of
- * its own because they took longer than test-linux's affected tier had left inside its
- * cap; the release pull request's sweep reaches them through `check`.
+ * Three projects over one release server. `budgets` holds Action items'
+ * read-latency telemetry and the runner that reads it, `dag-ui-read-latency:test`.
+ * `large` holds one large run's telemetry, `dag-ui-read-latency:test-large`, and
+ * `journeys` the large-corpus journeys, `dag-ui-read-latency:test-journeys`. Those
+ * two targets have edges of their own because they took longer than
+ * test-linux's affected tier had left inside its cap; the release pull request's
+ * sweep reaches them through `check`.
  *
  * No `webServer`: each measured page starts its own `onepipeline-api serve` over
  * the corpus this tier generates. One worker, because nothing may run beside a
  * timing, and no timeout on a window of known length: a page's own waits guard
  * against a hang.
  */
+/** The test that records one large run's figures, by its title. */
+const LARGE_RUN =
+  /a large run's first screens, the rest, its history and its status/u;
+
 export default defineConfig({
   testDir: import.meta.dirname,
   projects: [
     {
       name: "budgets",
       testMatch: ["read-latency.spec.ts", "read-latency-budget.spec.ts"],
+      grepInvert: LARGE_RUN,
+    },
+    {
+      name: "large",
+      testMatch: ["read-latency.spec.ts"],
+      grep: LARGE_RUN,
     },
     {
       name: "journeys",

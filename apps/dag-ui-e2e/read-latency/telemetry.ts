@@ -1,9 +1,12 @@
 /**
- * `telemetry/read-latency.json`, declared once: the document
- * `read-latency.spec.ts` parses through this before writing it, and which
- * `read-latency-budget.mjs` parses through this before reading a figure off it.
- * The workload is held here too, so telemetry recorded over anything smaller than
- * what the budgets state is refused rather than read as a pass.
+ * `telemetry/read-latency.json` and `telemetry/read-latency-large.json`, declared
+ * once: the documents `read-latency.spec.ts` parses through this before writing
+ * them, and which `read-latency-budget.mjs` parses through this before reading a
+ * figure off one. The first holds Action items' figures, which
+ * `dag-ui-read-latency:test` records; the second a large run's, which
+ * `dag-ui-read-latency:test-large` records. The workload is held here too, so
+ * telemetry recorded over anything smaller than what the budgets state is
+ * refused rather than read as a pass.
  */
 
 import { z } from "zod";
@@ -279,7 +282,16 @@ export const telemetrySchema = z.object({
     unfiltered: selecting((filter) => Object.keys(filter).length === 0),
     filtered: selecting((filter) => Object.keys(filter).length > 0),
   }),
-  large_run: largeRunSchema,
   batch: batchSchema,
 });
 export type Telemetry = z.infer<typeof telemetrySchema>;
+
+/** `telemetry/read-latency-large.json`: one large run's first screens and the rest. */
+export const largeTelemetrySchema = z.object({
+  schema_version: z.literal(1),
+  recorded_at: z.iso.datetime(),
+  commit: z.string().regex(/^[0-9a-f]{40}$/u),
+  dirty: z.boolean(),
+  large_run: largeRunSchema,
+});
+export type LargeTelemetry = z.infer<typeof largeTelemetrySchema>;

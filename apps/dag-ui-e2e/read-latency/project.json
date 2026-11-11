@@ -61,6 +61,28 @@
       ],
       "//api-server-end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]"
     },
+    "test-large": {
+      "//": "One large run's first screens, the rest arriving, its history pages and its status read, at the workload large-run/budgets.yaml states: fresh timings on a release build, alone and never cached, as `test`'s are. Apart from `test` because the two together ran past test-linux's 36-minute cap beside the affected tier (run 42909548558); `check` reaches it, so the release pull request's sweep records and checks it. Writes through the real CLI, so it provisions the sibling.",
+      "command": "npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts --project=large",
+      "cache": false,
+      "parallelism": false,
+      "inputs": [
+        "default",
+        "apiServerSurface",
+        "{workspaceRoot}/apps/dag-ui-e2e/load/corpus.mjs",
+        "{workspaceRoot}/apps/dag-ui-e2e/load/journal.ts",
+        "{workspaceRoot}/apps/dag-ui-e2e/load/output.mjs",
+        "platform"
+      ],
+      "outputs": ["{projectRoot}/telemetry/read-latency-large.json"],
+      "dependsOn": [
+        "compile-release-server",
+        {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
+        }
+      ]
+    },
     "test-journeys": {
       "//": "The large-corpus journeys over the release server: first screens against their documents, the wire and its errors, a live run, and reaching everything by the page's own controls. Apart from `test` because they took longer than test-linux's affected tier had left inside its 36-minute cap beside every other task (run 42856794257). The release pull request's sweep reaches them through `check`, which the affected tier does not select. They time nothing, so they record no telemetry, and they never run beside a timing.",
       "command": "npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts --project=journeys",
@@ -91,6 +113,15 @@
       "cache": false,
       "dependsOn": ["test"]
     },
+    "budgets-large": {
+      "//": "Telemetry-only: the large run's budgets read what `test-large` just recorded and measure nothing themselves.",
+      "command": "node_modules/.bin/onebudgetspec check apps/dag-ui-e2e/read-latency/large-run/budgets.yaml --save-results target/budget-results/dag-ui-read-latency-large.json",
+      "outputs": [
+        "{workspaceRoot}/target/budget-results/dag-ui-read-latency-large.json"
+      ],
+      "cache": false,
+      "dependsOn": ["test-large"]
+    },
     "lint": {
       "command": "node node_modules/@biomejs/biome/bin/biome check apps/dag-ui-e2e/read-latency && npx eslint --max-warnings 0 apps/dag-ui-e2e/read-latency",
       "inputs": ["manifestText"]
@@ -106,15 +137,17 @@
       "inputs": ["manifestText"]
     },
     "check": {
-      "//": "The default check plus budgets and the large-corpus journeys, so test-linux's broader tier reaches them by target name and its affected tier, which selects no `check`, does not.",
+      "//": "The default check plus budgets, the large run's timings and the large-corpus journeys, so test-linux's broader tier reaches them by target name and its affected tier, which selects no `check`, does not.",
       "executor": "nx:noop",
       "dependsOn": [
         "format-check",
         "lint",
         "typecheck",
         "test",
+        "test-large",
         "test-journeys",
-        "budgets"
+        "budgets",
+        "budgets-large"
       ]
     }
   }
