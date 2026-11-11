@@ -89,8 +89,11 @@ pub const DISCONNECTED_GRACE_ENV: &str = "ONEPIPELINE_UI_SUBSCRIPTION_GRACE_MS";
 pub const COMPLETE_READ_HOLD_ENV: &str = "ONEPIPELINE_UI_COMPLETE_READ_HOLD_MS";
 
 /// The environment variable that holds a refold off for this many milliseconds
-/// after the last one, for a journey that watches the fold fall overdue. Unset,
-/// nothing holds it.
+/// after the fold went stale — the first record it has not folded — for a
+/// journey that watches the fold fall overdue. Counted from that record rather
+/// than from the last fold, so the overdue state is drawn before the held refold
+/// lands however long a loaded host takes to see the record. Unset, nothing
+/// holds it.
 pub const FOLD_HOLD_ENV: &str = "ONEPIPELINE_UI_TELEMETRY_FOLD_HOLD_MS";
 
 /// How many refold intervals behind the fold may fall before its values draw as
@@ -794,6 +797,8 @@ struct Folded {
     served: Value,
     folded_at: Instant,
     stale: bool,
+    /// When the first record this fold has not folded was seen.
+    stale_since: Option<Instant>,
 }
 
 impl Folded {
@@ -811,6 +816,7 @@ impl Folded {
             served,
             folded_at: Instant::now(),
             stale: false,
+            stale_since: None,
         }
     }
 
@@ -822,7 +828,14 @@ impl Folded {
             served: Value::Null,
             folded_at: Instant::now(),
             stale: false,
+            stale_since: None,
         }
+    }
+
+    /// Mark the fold behind the journal, from the first record it has not folded.
+    fn go_stale(&mut self) {
+        self.stale = true;
+        self.stale_since.get_or_insert_with(Instant::now);
     }
 
     fn inputs<'a>(&'a self, agents: Option<usize>, activity: &'a ActivityFold) -> DetailInputs<'a> {
@@ -1880,7 +1893,7 @@ impl Hub {
         run.failing = false;
         if let Some(touched) = &touched {
             if touched.any() {
-                run.telemetry.stale = true;
+                run.telemetry.go_stale();
                 if run.complete() {
                     let at = run.view.events.len().saturating_sub(touched.records);
                     for event in &run.view.events[at..] {
@@ -1890,7 +1903,7 @@ impl Hub {
                 }
             }
         } else {
-            run.telemetry.stale = true;
+            run.telemetry.go_stale();
             if run.complete() {
                 run.activity = fold_activity(&run.view);
             }
@@ -1916,8 +1929,12 @@ impl Hub {
         if complete {
             let aged = run.telemetry.folded_at.elapsed();
             let quiet = touched.as_ref().is_some_and(|touched| !touched.any());
+            let held = run
+                .telemetry
+                .stale_since
+                .is_some_and(|since| since.elapsed() < shared.fold_hold);
             refold = run.telemetry.stale
-                && aged >= shared.fold_hold
+                && !held
                 && ((quiet && aged >= shared.refold) || aged >= shared.refold * 2);
             if refold {
                 let folding = Instant::now();
