@@ -2782,6 +2782,71 @@ fn a_selective_first_answer_serves_its_nodes_pages_before_the_rest() {
     node_window_and_pages(true);
 }
 
+/// With no view of the run open, as a reader of the API alone asks: over a
+/// journal too long to read whole, a node's pages and one of its span's pages
+/// hold every row the node's complete document lists, each once and in its
+/// order, built from the one selective reading the page opens, which holds every
+/// record of the node.
+#[test]
+fn with_no_view_open_pages_over_a_long_journal_are_the_complete_rows() {
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::NODE_ID;
+    let live = Live::start_with(
+        |root| {
+            growing_run(root, run);
+            let journal = root.join(run).join("events.jsonl");
+            pad_past_a_whole_read(&journal, run);
+            for marker in 0..55 {
+                let line = activity(&journal, run, node, &format!("row {marker}"));
+                live_journal::append_lines(&journal, &[line]);
+            }
+        },
+        &[],
+    );
+    let ids = |rows: &[Value]| -> Vec<Value> { rows.iter().map(|row| row["id"].clone()).collect() };
+    let in_order = |document: &Value| -> Vec<Value> {
+        let mut every: Vec<Value> = Vec::new();
+        for span in document["spans"].as_array().expect("spans") {
+            for row in span["events"].as_array().into_iter().flatten() {
+                if !every.iter().any(|held| held["id"] == row["id"]) {
+                    every.push(row.clone());
+                }
+            }
+        }
+        every.sort_by_key(|row| {
+            (
+                row["at"].as_str().unwrap_or_default().to_owned(),
+                row["journal_order"].as_u64(),
+            )
+        });
+        every
+    };
+
+    let node_document = fresh(
+        live.address(),
+        &format!("/api/v2/runs/{run}/timeline?scope=node&node={node}"),
+    );
+    let every = in_order(&node_document);
+    assert!(every.len() > 55, "the node's rows: {}", every.len());
+    assert_eq!(
+        ids(&walk_node_pages(&live, run, node)),
+        ids(&every),
+        "the node's pages with no view open"
+    );
+    let span = node_document["spans"]
+        .as_array()
+        .expect("spans")
+        .iter()
+        .max_by_key(|span| span["events"].as_array().map_or(0, Vec::len))
+        .expect("a span");
+    let walked = walk_pages(&live, run, node, span["id"].as_str().expect("an id"));
+    assert_eq!(
+        walked,
+        *span["events"].as_array().expect("events"),
+        "a span's pages with no view open"
+    );
+}
+
 /// Another node's records, appended to `journal` until it is past the size a
 /// first answer reads whole.
 fn pad_past_a_whole_read(journal: &Path, run: &str) {
