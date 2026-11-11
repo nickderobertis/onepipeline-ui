@@ -165,9 +165,12 @@ export function useTimelineHistory({
       spans: timeline.spans.map((span) => {
         const withRows = rowsOfSpan(span, bySpan.get(span.id));
         const fields = spanFields.current.get(span.id);
+        // The served document is refreshed as records arrive and a page is read
+        // once, so the document wins: a span's page only fills in what the
+        // document does not carry yet, its `detail` before the rest arrives.
         return fields === undefined
           ? withRows
-          : { ...withRows, ...fields, events: withRows.events };
+          : { ...fields, ...withRows, events: withRows.events };
       }),
     };
   }, [timeline, version, scope]);

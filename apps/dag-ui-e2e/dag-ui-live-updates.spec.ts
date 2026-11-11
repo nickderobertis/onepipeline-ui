@@ -799,3 +799,87 @@ test("a server that restarted is recovered from: the page resubscribes from what
     })
     .toBeGreaterThanOrEqual(seq);
 });
+
+// Last in this file: it settles the live node, which the journeys above read as running.
+test("a span opened while it runs shows its end when the run records it, over what its page said", async ({
+  page,
+}) => {
+  const run = facts.openLiveRun;
+  const node = facts.liveNode;
+  const spanPages: URL[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (
+      url.pathname.endsWith("/timeline/events") &&
+      url.searchParams.has("span")
+    )
+      spanPages.push(url);
+  });
+  await page.goto(`${server.origin}${address(run, "node", node)}`);
+  await shown(page, "node", node);
+  // llmlint: ignore[e2e_uses_accessible_selectors] the app replaces the first screen with no visible jump by design, so nothing a person can perceive says which of the two is drawn; this marker is the one difference, and only waiting for the app to have taken over is read from it.
+  await expect(page.locator("[data-first-screen]")).toHaveCount(0);
+  // The worker's session is the node's running span: open it, which reads its page.
+  const transcript = page.getByRole("region", { name: "Node transcript" });
+  const session = transcript.getByRole("button", {
+    name: new RegExp(`^Open worker \\(.*-${node}\\.worker\\)$`, "u"),
+  });
+  await expect(session).toContainText("running");
+  await session.click();
+  const detail = page.getByRole("complementary");
+  await expect(detail).toContainText("still running");
+  await expect.poll(() => spanPages.length).toBeGreaterThan(0);
+  // The run records the session's end and the node's settlement.
+  const seq = nextSeq(server, run);
+  const stream = `a-recording-host-${run}`;
+  const at = new Date().toISOString();
+  appendRecords(journalOf(server, run), [
+    {
+      v: 1,
+      ts: at,
+      stream,
+      seq,
+      source: "pipeline",
+      kind: "member-ended",
+      labels: {
+        run_id: run,
+        node,
+        member: "worker",
+        persona: "worker",
+        session: `${stream}-${node}.worker`,
+      },
+      payload: {},
+      artifacts: [],
+    },
+    {
+      v: 1,
+      ts: at,
+      stream,
+      seq: seq + 1,
+      source: "pipeline",
+      kind: "node-settled",
+      labels: { run_id: run, node },
+      payload: { status: "done", outcome: "merged" },
+      artifacts: [],
+    },
+  ]);
+  // Its row and its open detail both say it ended, as the served document does,
+  // rather than holding what the span's page said while it ran.
+  const servedStatus = async () => {
+    const served = await page.request.get(
+      `${server.origin}/api/v2/runs/${run}/timeline?scope=node&node=${node}`,
+    );
+    return z
+      .object({
+        spans: z.array(
+          z.object({ id: z.string(), status: z.string().nullish() }),
+        ),
+      })
+      .parse(await served.json())
+      .spans.find((span) => span.id.endsWith(`-${node}.worker`))?.status;
+  };
+  await expect.poll(servedStatus, { timeout: FRAME_PATIENCE }).toBe("done");
+  await expect(session).toContainText("done", { timeout: FRAME_PATIENCE });
+  await expect(detail).not.toContainText("still running");
+  await expect(detail).toContainText("done");
+});
