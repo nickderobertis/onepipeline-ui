@@ -299,13 +299,16 @@ test("a node's first screen stamps each transcript row with the moment the app d
     const rows = page
       .getByRole("region", { name: "Node transcript" })
       .getByRole("article");
-    const stamps = () =>
-      rows.evaluateAll((articles) =>
-        articles.map((article) => ({
-          label: article.getAttribute("aria-label"),
-          times: [...article.querySelectorAll("time")].map((time) =>
-            time.getAttribute("datetime"),
-          ),
+    // Each row by its name, with the moments it shows by their `time` role.
+    const stamps = async () =>
+      Promise.all(
+        (await rows.all()).map(async (row) => ({
+          label: await row.getAttribute("aria-label"),
+          times: await row
+            .getByRole("time")
+            .evaluateAll((times) =>
+              times.map((time) => time.getAttribute("datetime")),
+            ),
         })),
       );
     // llmlint: ignore[e2e_uses_accessible_selectors] the first screen marks its root for the swap; that attribute is the only thing telling it from the app, whose own tabs are the sign it has arrived.

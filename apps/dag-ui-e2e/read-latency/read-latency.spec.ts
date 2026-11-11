@@ -52,6 +52,9 @@ import { promisify } from "node:util";
 import { gzipSync } from "node:zlib";
 import {
   liveRunDetailSchema,
+  type Progress,
+  patchOpSchema,
+  progressSchema,
   runTimelineSchema,
 } from "@onepipeline-ui/dag-model";
 import {
@@ -1065,6 +1068,10 @@ async function restArrived(
   ) => {
     const opened = await firstViewReading(browser, world, port, view, complete);
     let framesBytes = 0;
+    // The detail's `progress` as the server last published it, read off the
+    // patches the page applied: the page saying nothing is loading is only the
+    // rest arriving when the server also said `complete` and named no failure.
+    let served: Progress | undefined;
     const cdp = await opened.context.newCDPSession(opened.page);
     await cdp.send("Network.enable");
     cdp.on("Network.eventSourceMessageReceived", (event) => {
@@ -1073,6 +1080,8 @@ async function restArrived(
         event.eventName === "timeline.patch"
       )
         framesBytes += Buffer.byteLength(event.data);
+      if (event.eventName === "detail.patch")
+        served = progressPatched(served, event.data);
     });
     // The mark is taken; the observer that found it, which reads the whole screen
     // on every change, is stopped so it does not slow the page it times.
@@ -1111,6 +1120,13 @@ async function restArrived(
       at = await arrivedAt();
       if (at === null) await opened.page.waitForTimeout(100);
     }
+    if (
+      at !== null &&
+      (served?.complete !== true || served.failed !== undefined)
+    )
+      throw new Error(
+        `${view} drew no loading value, but the server's progress was ${JSON.stringify(served)}`,
+      );
     const seconds =
       opened.state === undefined || at === null
         ? null
@@ -1138,6 +1154,38 @@ async function restArrived(
     },
     history: pages.result(),
   };
+}
+
+/**
+ * `progress` after one `detail.patch` frame's ops: the whole member where an op
+ * sets it, one of its fields where an op sets that.
+ */
+function progressPatched(
+  progress: Progress | undefined,
+  frame: string,
+): Progress | undefined {
+  const ops = z
+    .object({ ops: z.array(patchOpSchema) })
+    .parse(JSON.parse(frame)).ops;
+  let next = progress;
+  for (const op of ops) {
+    const [member, field] = op.p;
+    if (member !== "progress" || "a" in op) continue;
+    if (field === undefined) {
+      next = "v" in op ? progressSchema.parse(op.v) : undefined;
+      continue;
+    }
+    if (typeof field !== "string") continue;
+    // The first answer's progress came with the snapshot; a field patched over it
+    // is read over "nothing known" rather than skipped.
+    const kept: Record<string, unknown> = {
+      ...(next ?? { complete: false, loading: [] }),
+    };
+    if ("v" in op) kept[field] = op.v;
+    else delete kept[field];
+    next = progressSchema.parse(kept);
+  }
+  return next;
 }
 
 interface HistoryPages {

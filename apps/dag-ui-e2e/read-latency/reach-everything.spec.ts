@@ -424,9 +424,13 @@ test("Channel opens its queue on the large run, reached from Overall", async ({
   page,
 }) => {
   await open(page, "overall");
-  await page.goto(
-    `${served.origin}${addressOf(world.facts.openLiveRun, "channel")}`,
-  );
+  // By the view tabs, as a reader on Overall moves to Channel: the app is the one
+  // that replaced the first screen, so its tabs are the sign it has arrived.
+  const tab = page.getByRole("tab", { name: "Channel", exact: true });
+  await expect(tab).toBeVisible({ timeout: NEVER });
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  await expect(page).toHaveURL(/[?&]view=channel(?:&|$)/u);
   await expect(
     page.getByRole("heading", { name: "Channel queue" }),
   ).toBeVisible({
