@@ -186,8 +186,19 @@ test("records appended before, during and after the rest reach a node's timeline
           { timeout: 60_000 },
         )
         .toBe(1);
-      await expect(transcript.getByText(before)).toHaveCount(1);
-      await expect(transcript.getByText(during)).toHaveCount(1);
+      // Read as `after` is: a later update can fold the earlier rows back into a
+      // collapsed run, which the reader opens to see them, so each is counted
+      // with the runs open.
+      for (const row of [before, during])
+        await expect
+          .poll(
+            async () => {
+              await expandRows(page);
+              return transcript.getByText(row).count();
+            },
+            { timeout: 60_000 },
+          )
+          .toBe(1);
     } finally {
       await stop(served);
     }
