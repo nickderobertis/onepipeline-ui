@@ -362,6 +362,22 @@ for (const [what, args] of [
     expect(run.stderr).toMatch(/^measure-run: /mu);
   });
 
+// Refused by the read API's own identifier rule, before either names a path.
+for (const [what, args, flag] of [
+  ["a run that climbs out of its root", ["--run", "../r"], "--run"],
+  [
+    "a node that is not an identifier",
+    ["--run", "r", "--node", "a/b"],
+    "--node",
+  ],
+] as const)
+  test(`measure-run-load-on-host refuses ${what} as a usage error`, () => {
+    const run = measureRun(["--runs-root", "/nowhere", ...args]);
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain(`measure-run: ${flag} `);
+    expect(run.stderr).toContain("is not a run or node identifier");
+  });
+
 test("measure-run-load-on-host hands the root to the measurement and exits as it does", () => {
   const dir = mkdtempSync(join(tmpdir(), "measure-run-spec-"));
   try {

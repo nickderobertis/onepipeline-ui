@@ -28,6 +28,14 @@ import { parseArgs } from "node:util";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
+/**
+ * The read API's own rule for a run or node identifier (`check_segment` in
+ * src/contract.rs): a bare name of at most 128 ASCII letters, digits, `-`, `_`
+ * and `.`, not starting with `.`. A run named any other way is not one the
+ * server serves, and joined to the root it could name a path outside it.
+ */
+const IDENTIFIER = /^(?!\.)[A-Za-z0-9._-]{1,128}$/u;
+
 /** The node with the most records in a run's journal, or `undefined` if none is named. */
 async function busiestNode(journal) {
   const counts = new Map();
@@ -63,6 +71,14 @@ try {
   }));
   if (values["runs-root"] === undefined || values.run === undefined)
     throw new Error("--runs-root and --run are required");
+  for (const [flag, value] of [
+    ["--run", values.run],
+    ["--node", values.node],
+  ])
+    if (value !== undefined && !IDENTIFIER.test(value))
+      throw new Error(
+        `${flag} ${JSON.stringify(value)} is not a run or node identifier: at most 128 ASCII letters, digits, '-', '_' and '.', not starting with '.'`,
+      );
   node = values.node;
   if (node === undefined) {
     const journal = join(values["runs-root"], values.run, "events.jsonl");
