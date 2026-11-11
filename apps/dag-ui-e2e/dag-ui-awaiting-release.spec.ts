@@ -70,6 +70,9 @@ test("a held and a draft node show their own words and the releases each awaits 
   const { held, draft, producer } = awaiting();
   const engine = lastSegment(producer);
   await page.goto(`${SERVED_UI_URL}/?run=${runs().awaiting}&view=graph`);
+  // The cards are measured below, and the first screen's are replaced when the
+  // app takes over: the node list is the app's, so it is there once that is done.
+  await expect(graphNodeList(page).getByRole("listitem").first()).toBeVisible();
 
   const heldCard = card(page, held, "complete-but-held");
   const draftCard = card(page, draft, "complete-but-draft");
