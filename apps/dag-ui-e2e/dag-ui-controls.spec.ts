@@ -882,6 +882,35 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
         await expect(identity).toContainText(repo);
     }
 
+    // Each node's transcript reading, asked first, so a node whose transcript the
+    // engine refuses is checked on the page opened for its results lines below
+    // rather than on a page opened for that alone.
+    const transcriptOf = new Map<string, string | undefined>();
+    for (const { id } of tasks) {
+      const response = await page.request.get(
+        `/api/v2/runs/${runId}/transcript?node=${encodeURIComponent(id)}`,
+      );
+      if (!response.ok()) {
+        // The engine refuses a node it recorded nothing for, and so does the
+        // view: that node's header counts no turns.
+        expect((await refusedBy(response, 422)).message).toContain(
+          `has recorded nothing for node '${id}'`,
+        );
+        transcriptOf.set(id, undefined);
+        continue;
+      }
+      transcriptOf.set(
+        id,
+        runTranscriptSchema.parse(await response.json()).rendered,
+      );
+    }
+    const countsNoTurns = new Set<string>();
+    const noTurns = async (id: string, view: Locator) => {
+      if (!transcriptOf.has(id) || transcriptOf.get(id) !== undefined) return;
+      await expect(view.getByText(/ node · 0 turns · /)).toBeVisible();
+      countsNoTurns.add(id);
+    };
+
     let current: string | undefined;
     // The node a line is about stays open for the lines under it, which read its
     // tabs: opening it again for each was a whole page load per line.
@@ -893,6 +922,7 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
         current = String(id);
         const view = await openNode(page, runId, String(id));
         open = view;
+        await noTurns(String(id), view);
         const task = await nodeTab(view, "Task");
         if (outcome !== undefined)
           await expect(task).toContainText(`Settled as${outcome}`);
@@ -948,23 +978,12 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
 
     const perNode: string[] = [];
     for (const { id } of tasks) {
-      const response = await page.request.get(
-        `/api/v2/runs/${runId}/transcript?node=${encodeURIComponent(id)}`,
-      );
-      if (!response.ok()) {
-        // The engine refuses a node it recorded nothing for, and so does the
-        // view: that node's header counts no turns.
-        expect((await refusedBy(response, 422)).message).toContain(
-          `has recorded nothing for node '${id}'`,
-        );
-        await expect(
-          (await openNode(page, runId, id)).getByText(/ node · 0 turns · /),
-        ).toBeVisible();
+      const rendered = transcriptOf.get(id);
+      if (rendered === undefined) {
+        if (!countsNoTurns.has(id))
+          await noTurns(id, await openNode(page, runId, id));
         continue;
       }
-      const rendered = runTranscriptSchema.parse(
-        await response.json(),
-      ).rendered;
       perNode.push(rendered);
       unmapped.push(
         ...(await expectTranscriptShown(
