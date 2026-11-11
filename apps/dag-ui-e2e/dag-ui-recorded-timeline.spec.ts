@@ -542,6 +542,40 @@ test("scrolling a node's transcript up to its top asks for the rows before it an
   await expect.poll(() => rows.count()).toBeGreaterThan(shown);
 });
 
+// A transcript already at its top scrolls no further, so the browser reports no
+// scroll for a reader who wheels or keys up there again: the ask has to come from
+// that gesture itself, or a reader who reached the top while a page could not be
+// asked (CI run 42978308166) is left with no way to the rows before it.
+for (const [how, gesture] of [
+  ["wheels up", (page: Page) => page.mouse.wheel(0, -600)],
+  ["presses Home", (page: Page) => page.keyboard.press("Home")],
+] as const)
+  test(`a reader already at the transcript's top who ${how} is shown the rows before it`, async ({
+    page,
+  }) => {
+    const asked = historyAsks(page);
+    await openRetriesNode(page);
+    const transcript = page.getByRole("region", { name: "Node transcript" });
+    const rows = transcript.getByRole("article");
+    await expect(rows.first()).toBeVisible();
+    const shown = await rows.count();
+    const paged = () =>
+      asked.filter(
+        (url) =>
+          !url.searchParams.has("from") &&
+          !url.searchParams.has("span") &&
+          url.searchParams.get("scope") === "node",
+      ).length;
+    // Opened at its top, with nothing asked yet.
+    expect(await transcript.evaluate((element) => element.scrollTop)).toBe(0);
+    expect(paged()).toBe(0);
+    await transcript.hover();
+    await transcript.focus();
+    await gesture(page);
+    await expect.poll(paged).toBeGreaterThan(0);
+    await expect.poll(() => rows.count()).toBeGreaterThan(shown);
+  });
+
 test("retries, equal timestamps and repeated relays keep every record under its served identity", async ({
   page,
   request,

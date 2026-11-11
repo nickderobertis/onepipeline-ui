@@ -608,6 +608,15 @@ function NodeExecution({
     placesBeforeLoad.current = transcriptPlaces(transcript.current);
     loadEarlier();
   };
+  /** Near the transcript's top, a reader's move upward asks for the page before. */
+  const askEarlierIfOpen = () => {
+    if (
+      history.canLoadEarlier &&
+      !history.loadingEarlier &&
+      history.failure === undefined
+    )
+      askEarlier();
+  };
   // biome-ignore lint/correctness/useExhaustiveDependencies: the rows the merged timeline brought are what moved the row being kept in place.
   useLayoutEffect(() => {
     const element = transcript.current;
@@ -712,15 +721,24 @@ function NodeExecution({
       <section
         aria-label="Node transcript"
         className="node-transcript"
+        onKeyDown={(event) => {
+          if (UPWARD_KEYS.has(event.key) && nearTop(event.currentTarget))
+            askEarlierIfOpen();
+        }}
         onScroll={(event) => {
           if (
-            event.currentTarget.scrollTop < 120 &&
-            Date.now() > ownScrollUntil.current &&
-            history.canLoadEarlier &&
-            !history.loadingEarlier &&
-            history.failure === undefined
+            nearTop(event.currentTarget) &&
+            Date.now() > ownScrollUntil.current
           )
-            askEarlier();
+            askEarlierIfOpen();
+        }}
+        // A transcript already at its top scrolls no further, so the browser
+        // reports no scroll for a reader who wheels or keys up there again; the
+        // gesture itself asks, and being the reader's own it is never the page's
+        // own scroll.
+        onWheel={(event) => {
+          if (event.deltaY < 0 && nearTop(event.currentTarget))
+            askEarlierIfOpen();
         }}
         ref={transcriptRef}
       >
@@ -819,6 +837,16 @@ function timeRange(
  * it is the same button both ways: one thing to find, one thing to press.
  */
 /** Where each transcript row stands on screen, by row id, in the order shown. */
+/** Within this many pixels of its top, the transcript reads earlier rows. */
+const NEAR_TOP_PX = 120;
+
+/** Keys that move a focused transcript upward. */
+const UPWARD_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
+
+function nearTop(transcript: HTMLElement): boolean {
+  return transcript.scrollTop < NEAR_TOP_PX;
+}
+
 function transcriptPlaces(transcript: HTMLElement | null): Map<string, number> {
   const places = new Map<string, number>();
   for (const row of transcript?.querySelectorAll<HTMLElement>(
