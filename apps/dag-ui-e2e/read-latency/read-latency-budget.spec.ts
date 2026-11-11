@@ -362,20 +362,15 @@ for (const [what, args] of [
     expect(run.stderr).toMatch(/^measure-run: /mu);
   });
 
-// Refused by the read API's own identifier rule, before either names a path.
-for (const [what, args, flag] of [
-  ["a run that climbs out of its root", ["--run", "../r"], "--run"],
-  [
-    "a node that is not an identifier",
-    ["--run", "r", "--node", "a/b"],
-    "--node",
-  ],
-] as const)
-  test(`measure-run-load-on-host refuses ${what} as a usage error`, () => {
-    const run = measureRun(["--runs-root", "/nowhere", ...args]);
-    expect(run.status).toBe(2);
-    expect(run.stderr).toContain(`measure-run: ${flag} `);
-    expect(run.stderr).toContain("is not a run or node identifier");
+// The run is joined to the root to find its journal, so one that names anything
+// but a directory directly under it is refused before it names a path.
+for (const run of ["../r", "a/b", "."])
+  test(`measure-run-load-on-host refuses --run ${run} as a usage error`, () => {
+    const measured = measureRun(["--runs-root", "/nowhere", "--run", run]);
+    expect(measured.status).toBe(2);
+    expect(measured.stderr).toContain(
+      `measure-run: --run ${JSON.stringify(run)} names no directory directly under --runs-root`,
+    );
   });
 
 test("measure-run-load-on-host hands the root to the measurement and exits as it does", () => {

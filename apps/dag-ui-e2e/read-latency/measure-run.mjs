@@ -21,20 +21,12 @@ import {
   readFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-
-/**
- * The read API's own rule for a run or node identifier (`check_segment` in
- * src/contract.rs): a bare name of at most 128 ASCII letters, digits, `-`, `_`
- * and `.`, not starting with `.`. A run named any other way is not one the
- * server serves, and joined to the root it could name a path outside it.
- */
-const IDENTIFIER = /^(?!\.)[A-Za-z0-9._-]{1,128}$/u;
 
 /** The node with the most records in a run's journal, or `undefined` if none is named. */
 async function busiestNode(journal) {
@@ -50,7 +42,8 @@ async function busiestNode(journal) {
       continue;
     }
     const node = record?.labels?.node;
-    if (typeof node === "string") counts.set(node, (counts.get(node) ?? 0) + 1);
+    if (typeof node === "string" && node !== "")
+      counts.set(node, (counts.get(node) ?? 0) + 1);
   }
   let busiest;
   for (const [node, count] of counts)
@@ -71,14 +64,14 @@ try {
   }));
   if (values["runs-root"] === undefined || values.run === undefined)
     throw new Error("--runs-root and --run are required");
-  for (const [flag, value] of [
-    ["--run", values.run],
-    ["--node", values.node],
-  ])
-    if (value !== undefined && !IDENTIFIER.test(value))
-      throw new Error(
-        `${flag} ${JSON.stringify(value)} is not a run or node identifier: at most 128 ASCII letters, digits, '-', '_' and '.', not starting with '.'`,
-      );
+  // The run is joined to the root to find its journal, so it must name one
+  // directory directly under it; whether that is a run the read API serves is
+  // the API's to say, as it says of a node.
+  const root = resolve(values["runs-root"]);
+  if (dirname(resolve(root, values.run)) !== root)
+    throw new Error(
+      `--run ${JSON.stringify(values.run)} names no directory directly under --runs-root`,
+    );
   node = values.node;
   if (node === undefined) {
     const journal = join(values["runs-root"], values.run, "events.jsonl");
