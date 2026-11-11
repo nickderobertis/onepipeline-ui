@@ -107,6 +107,11 @@
       "//": "Provision only the browser here. test and test-isolation build the API through dag-ui:build-api-server, so compilation can overlap the other test tiers.",
       "command": "npx playwright install chromium"
     },
+    "prioritize": {
+      "//": "A no-op that gives the browser suite another dependent. Nx starts the ready task with the most direct dependents first, so on test-linux's four cores a long suite with one dependent waited behind the tiers and ended the job: this no-op, and `check` naming it too, put it ahead of them (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` reaches it for the broader tier.",
+      "executor": "nx:noop",
+      "dependsOn": ["test"]
+    },
     "check": {
       "//": "The default check plus budgets, as github-workflows:check reaches its own: budgets read committed telemetry and are cached on it.",
       "executor": "nx:noop",
@@ -121,7 +126,8 @@
         "test-isolation",
         "doc",
         "coverage",
-        "budgets"
+        "budgets",
+        "prioritize"
       ]
     }
   }

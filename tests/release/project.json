@@ -117,9 +117,14 @@
       ],
       "inputs": ["releaseMachinery", "platform"]
     },
+    "prioritize": {
+      "//": "A no-op that gives `test-standalone`, a long suite with one dependent, another. Nx starts the ready task with the most direct dependents first, so on test-linux's four cores a long suite with one dependent waited behind the tiers and ended the job: this no-op, and `check` naming it too, put it ahead of them (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` reaches it, and names `test-standalone` too, for the broader tier.",
+      "executor": "nx:noop",
+      "dependsOn": ["test-standalone"]
+    },
     "check": {
       "executor": "nx:noop",
-      "dependsOn": ["lint", "test", "rehearse"]
+      "dependsOn": ["lint", "test", "rehearse", "test-standalone", "prioritize"]
     }
   }
 }
