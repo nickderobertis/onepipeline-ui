@@ -2,7 +2,8 @@
 //!
 //! Before a run's complete read ends this reads one share of its journal alone
 //! and never waits on that read; after, it reads a share's timeline kept inside
-//! the server, current from each refresh and rebuilt on no request.
+//! the server: built from the complete read the first time that share is asked
+//! for, then kept current by each refresh rather than rebuilt per request.
 
 use onepipeline::journal::{self, Selection};
 use serde_json::{json, Map, Value};
