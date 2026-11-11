@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.79.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.78.0...v0.79.0) - 2026-11-11
+
+### Added
+
+- [**breaking**] open a large run in under a second, loading the rest progressively ([#725](https://github.com/nickderobertis/onepipeline-ui/pull/725))
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine whose bus has no validators ([#739](https://github.com/nickderobertis/onepipeline-ui/pull/739))
+- *(deps)* [**breaking**] link the engine whose unpublished reads answer in a second ([#735](https://github.com/nickderobertis/onepipeline-ui/pull/735))
+
 ## [0.78.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.77.0...v0.78.0) - 2026-11-11
 
 ### Fixed
