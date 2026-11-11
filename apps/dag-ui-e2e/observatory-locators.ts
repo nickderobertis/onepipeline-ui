@@ -48,6 +48,21 @@ export const metrics = (page: Page): Locator =>
   page.getByRole("region", { name: "Run metrics" }).getByRole("group");
 
 /**
+ * The app's own timeline plot inside `region`, named for what it does.
+ *
+ * A run's address is first drawn by the first screen, whose plot is named
+ * `Timeline plot <view>` and does nothing, and the app then replaces that screen,
+ * every element of it, when its chunk arrives. A journey that finds a region or a
+ * transcript before then acts on an element about to be removed, which a loaded host
+ * makes likely: a focus lost with the screen, or a scroll on a node no longer
+ * attached (CI run 43007707623). Waiting for this name to be visible is waiting for
+ * the app, because only the app draws a plot a reader can zoom. Waiting for the first
+ * screen's plot to be gone is not: it is also gone before the first screen is drawn.
+ */
+export const appPlot = (region: Locator): Locator =>
+  region.getByLabel("Timeline plot. Scroll to zoom or drag to select a range.");
+
+/**
  * One named lane of an opened timeline row.
  *
  * A closed row is a single unnamed strip; opening it draws one lane per category and
@@ -57,9 +72,7 @@ export const metrics = (page: Page): Locator =>
  * or shut — and that legend is what a journey waiting on "Worker" would settle for.
  */
 export const timelineLane = (row: Locator, label: string): Locator =>
-  row
-    .getByLabel("Timeline plot. Scroll to zoom or drag to select a range.")
-    .getByText(label, { exact: true });
+  appPlot(row).getByText(label, { exact: true });
 
 /**
  * Open every collapsed project of the navigation, so a journey about runs can reach

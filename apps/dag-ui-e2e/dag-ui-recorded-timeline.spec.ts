@@ -5,7 +5,11 @@ import {
 } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import corpus from "./fixtures/timeline-recorded.json" with { type: "json" };
-import { loadAllEarlierRows, loadRunRecords } from "./observatory-locators";
+import {
+  appPlot,
+  loadAllEarlierRows,
+  loadRunRecords,
+} from "./observatory-locators";
 import { SERVED_UI_URL } from "./playwright.config";
 
 const nodeUrl = `/?run=${corpus.run_id}&node=${corpus.node}`;
@@ -378,14 +382,11 @@ test("a node's unloaded history is hatched over exactly the rows its window left
     .filter((event) => !held.has(event.id))
     .map((event) => Date.parse(event.at));
   expect(missing.length).toBeGreaterThan(0);
-  const plot = page
-    .getByRole("region", { name: "Node timeline" })
-    .getByLabel(/^Timeline plot/u)
-    .first();
+  // The app's own plot, once it has replaced the first screen's.
+  const plot = appPlot(page.getByRole("region", { name: "Node timeline" }));
+  await expect(plot).toBeVisible();
   // llmlint: ignore-block[e2e_uses_accessible_selectors] a hatch is a drawn overlay with no role of its own; its words are read by text below, and its bounds are the data attributes the plot draws it from.
   const hatches = page.locator(".history-hatch");
-  // The app's own plot, once it has replaced the first screen's.
-  await expect(page.locator(".first-plot")).toHaveCount(0);
   await expect(hatches.first()).toBeVisible();
   const bounds = await hatches.evaluateAll((elements) =>
     elements.map((element): [number, number] => [
@@ -441,12 +442,9 @@ async function openRetriesNode(page: Page) {
   });
   const fixture = replay.default;
   await page.goto(`/?run=${fixture.run_id}&node=${fixture.node}`);
-  // llmlint: ignore[e2e_uses_accessible_selectors] the first screen's plot carries the same name as the app's; its class is the only thing telling the two apart, and the journey waits for the app's.
-  await expect(page.locator(".first-plot")).toHaveCount(0);
-  const plot = page
-    .getByRole("region", { name: "Node timeline" })
-    .getByLabel(/^Timeline plot/u)
-    .first();
+  // The app's plot, so what follows acts on the app rather than on the first screen
+  // it replaces: a transcript focused before then loses its focus with the screen.
+  const plot = appPlot(page.getByRole("region", { name: "Node timeline" }));
   await expect(plot).toBeVisible();
   return { fixture, plot };
 }
