@@ -150,6 +150,12 @@ oneharness-core = "0.29.1"
 # major `onepipeline` itself resolves — the record this reads was written by the
 # release the engine links — and never moved on its own: `tests/packaging.rs`
 # reconciles the two edges the lockfile records.
+# Its patch releases can move its own `onejudge` across 0.x, which is why a
+# release here can stop building: 0.11.4 moved it from 0.22 to 0.23, and
+# v0.77.0's engine 0.106.0 (`oneagentgraph ^0.11.2`, `onejudge ^0.22.4`) then
+# resolves two copies of `onejudge` outside its lock and fails to compile.
+# Tightening this line cannot fix that, because the requirement that drifted is
+# the engine's. `scripts/semver-check.sh` says what lets a release past it.
 oneagentgraph = "0.11.0"
 # The document a settled member's report *is*, linked rather than copied — why,
 # and why it is unpinned, is in `src/AGENTS.md`.
