@@ -125,10 +125,12 @@ test("a node's turns, task, overrides, criteria and remote read as loading, then
     await expect(
       panel("Task").getByText(LOADING, { exact: true }).first(),
     ).toBeVisible();
-    const overrides = panel("Task")
-      .getByRole("term")
-      .filter({ hasText: "Graph overrides" })
-      .locator("xpath=following-sibling::dd[1]");
+    // The task's facts in the order the panel lists them: the third term names
+    // the overrides, and the third definition is their value.
+    await expect(panel("Task").getByRole("term").nth(2)).toHaveText(
+      "Graph overrides",
+    );
+    const overrides = panel("Task").getByRole("definition").nth(2);
     await expect(overrides).toHaveText(LOADING);
     await tabs.getByRole("tab", { name: "Acceptance criteria" }).click();
     await expect(panel("Acceptance criteria")).toHaveText(LOADING);
@@ -175,16 +177,20 @@ const DRAWN: Record<
   (page: Page) => Record<string, Locator>
 > = {
   overall: (page) => ({
-    "the run's heading": page.locator(".overall-hero h2"),
+    // The tiles first: they are drawn with the first answer, so once they are there
+    // the run's own heading is too, below the header's heading of the same run.
     ...Object.fromEntries(
       ["Status", "Nodes", "Wall time", "Turns"].flatMap((name) => {
         const tile = page.getByRole("group", { name, exact: true });
         return [
           [`the ${name} tile`, tile],
-          [`the ${name} value`, tile.locator("strong")],
+          [`the ${name} value`, tile.getByRole("strong")],
         ];
       }),
     ),
+    "the run's heading": page
+      .getByRole("heading", { level: 2, name: runs().history, exact: true })
+      .nth(1),
     "the graph timeline's plot": page.getByLabel(/^Timeline plot/u).first(),
   }),
   graph: (page) => ({
@@ -196,12 +202,20 @@ const DRAWN: Record<
       .getByRole("article")
       .filter({ hasText: "archive" })
       .first()
-      .locator("strong"),
+      .getByRole("strong"),
   }),
   node: (page) => ({
-    "the node's name": page.locator(".breadcrumb-node"),
-    "its state": page.locator(".node-view-state"),
-    "its turns": page.locator(".node-view-meta"),
+    "the node's name": page
+      .getByRole("region", { name: "Timeline for foundation" })
+      .getByText("foundation", { exact: true })
+      .first(),
+    "its state": page
+      .getByRole("region", { name: "Timeline for foundation" })
+      .getByText("done", { exact: true })
+      .first(),
+    "its turns": page
+      .getByRole("region", { name: "Timeline for foundation" })
+      .getByText(/ node · /u),
     "the node's plot": page.getByLabel(/^Timeline plot/u).first(),
     "the transcript": page.getByRole("region", { name: "Node transcript" }),
     ...Object.fromEntries(
@@ -250,10 +264,11 @@ for (const view of ["overall", "graph", "node"] as const)
         return measured;
       };
       // llmlint: ignore[e2e_uses_accessible_selectors] the first screen marks its root for the swap; that attribute is the only thing telling it from the app, whose own tabs are the sign it has arrived.
-      await expect(page.locator("[data-first-screen]")).toHaveCount(1);
+      const firstScreen = page.locator("[data-first-screen]");
+      await expect(firstScreen).toHaveCount(1);
       const first = await boxes();
       release();
-      await expect(page.locator("[data-first-screen]")).toHaveCount(0);
+      await expect(firstScreen).toHaveCount(0);
       await expect(page.getByRole("tab", { name: "Graph" })).toBeVisible();
       const app = await boxes();
       for (const [name, before] of Object.entries(first)) {
