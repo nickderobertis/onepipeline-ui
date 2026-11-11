@@ -9,7 +9,13 @@ import {
   runTimelineSchema,
   runTranscriptSchema,
 } from "@onepipeline-ui/dag-model";
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import {
+  expect,
+  type Locator,
+  type Page,
+  type Response,
+  test,
+} from "@playwright/test";
 import { z } from "zod";
 import { fixture, runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
@@ -612,10 +618,16 @@ test("preserves Reads facts as structured fields in Overall and run details", as
       `/api/v2/runs/${runId}/telemetry`,
       runTelemetryDocumentSchema,
     );
-    const statusResponse = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === `/api/v2/runs/${runId}/status`,
-    );
+    const isStatus = (response: Response) =>
+      new URL(response.url()).pathname === `/api/v2/runs/${runId}/status`;
+    // Every status answer the page is given: the first screen and the app each
+    // read it, and the age in seconds it carries is the one the page shows last.
+    const answers: Promise<unknown>[] = [];
+    const record = (response: Response) => {
+      if (isStatus(response)) answers.push(response.json());
+    };
+    page.on("response", record);
+    const statusResponse = page.waitForResponse(isStatus);
     await page.goto(`/?run=${runId}&view=overall`);
     const status = runStatusSchema.parse(await (await statusResponse).json());
     await expect(
@@ -630,9 +642,22 @@ test("preserves Reads facts as structured fields in Overall and run details", as
     await expect(header).toContainText(
       `Unread surfaces${status.unread_surfaces.count}`,
     );
-    await expect(header).toContainText(
-      `Oldest unread (seconds)${status.unread_surfaces.oldest_seconds ?? "None"}`,
-    );
+    const oldest = async () =>
+      runStatusSchema.parse(await answers.at(-1)).unread_surfaces
+        .oldest_seconds ?? "None";
+    await expect
+      .poll(
+        async () =>
+          (await header.textContent())?.includes(
+            `Oldest unread (seconds)${await oldest()}`,
+          ),
+        {
+          message: `Oldest unread (seconds) as last answered`,
+          timeout: 15_000,
+        },
+      )
+      .toBe(true);
+    page.off("response", record);
     // How long the journal has been quiet — the age Status printed for a parked
     // driver — read off the run's own last write, or said to be unrecorded.
     const lastProgress = detail.run.last_progress_at;
