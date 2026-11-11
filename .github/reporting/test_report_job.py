@@ -62,7 +62,7 @@ SAVED = ('onepipeline-ui-macos-jobs-per-run', 'onepipeline-ui-macos-runs-per-cha
 POOL = 'onepipeline-ui-pool-maintenance-seconds'
 # Saved only when the affected tier selects their project, so here, as nothing selects it, none is.
 READ_LATENCY = ('dag-ui-human-items-requests-per-minute', 'dag-ui-human-items-update-lag-seconds')
-# Saved only by the release pull request's sweep, which reaches `test-large` through `check`.
+# Saved only when test-linux selects `test-large`, so here, as nothing selects it, none is.
 LARGE_RUN = ('dag-ui-run-first-view-seconds', 'dag-ui-run-rest-arrived-seconds',
              'dag-ui-run-history-page-seconds', 'dag-ui-run-status-read-seconds')
 # Its command runs in this job: nothing saves it, and a pull request's job measures the live listing.

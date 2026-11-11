@@ -33,11 +33,12 @@ no verdict of its is replayed. A new read budget extends its `workload.json`,
 sizes, run as a command rather than imported across the project line, so a change to the
 generator alone selects `dag-ui-e2e` and not this project.
 
-Only Action items' timings run on an ordinary pull request. The large run's timings
-and the large-corpus journeys ran test-linux past its 36-minute cap beside the affected
-tier, so `check` alone reaches them and the release pull request's sweep holds them. A new
-large-run budget joins `large-run/budgets.yaml` and its telemetry document, never the
-affected tier's.
+Action items' timings (`test`), the large run's timings (`test-large`) and the
+large-corpus journeys (`test-journeys`) all run on every pull request that reaches this
+project, and on the release pull request's sweep: test-linux's affected tier names each
+target. They fit its 36-minute cap because they are cheap, not because they are moved —
+a new journey or budget makes room by making existing work cheaper. A new large-run
+budget joins `large-run/budgets.yaml` and its telemetry document.
 
 ## Reaching the app
 

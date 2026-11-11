@@ -1652,9 +1652,7 @@ async function measureBatch(browser: Browser, world: World, grown: string) {
 
 /**
  * The large run's figures, which `dag-ui-read-latency:test-large` records apart
- * from Action items': taken together they ran past test-linux's 36-minute cap
- * beside the affected tier (run 42909548558), so this one is reached by `check`,
- * which the release pull request's sweep runs.
+ * from Action items', for `budgets-large` to read.
  */
 test("a large run's first screens, the rest, its history and its status, at real size", async ({
   browser,

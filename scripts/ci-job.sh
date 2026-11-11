@@ -90,7 +90,11 @@ case "$job" in
       # list to `check`'s selection. Browser-bundle tests run here too, so their
       # result is proven before the broader release tier needs it. `prioritize`
       # runs nothing: it is the edge that has Nx start a long suite with the tiers.
-      targets="build,test,test-baseline,test-cost,test-isolation,doc,coverage,budgets,test-ci-jobs,install-smoke,wheel-smoke,prioritize"
+      # `test-large`, `test-journeys` and `budgets-large` are dag-ui-read-latency's
+      # large-run timings, journeys and budgets: a pull request that reaches the
+      # read paths they measure runs them here, so a slower first screen fails the
+      # change that made it rather than the release that carries it.
+      targets="build,test,test-baseline,test-cost,test-isolation,test-large,test-journeys,doc,coverage,budgets,budgets-large,test-ci-jobs,install-smoke,wheel-smoke,prioritize"
     fi
     ;;
   test-windows) targets="format-check,lint,test-quick,build,install-smoke" ;;
