@@ -51,6 +51,10 @@ import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { gzipSync } from "node:zlib";
 import {
+  liveRunDetailSchema,
+  runTimelineSchema,
+} from "@onepipeline-ui/dag-model";
+import {
   type Browser,
   type BrowserContext,
   expect,
@@ -1025,13 +1029,23 @@ async function readComplete(world: LargeWorld, port: number) {
     // Each document is its own whole read, and nothing here is timed, so the
     // three are taken together: 59 s one after another and 32 s at once here.
     const [detail, timeline, nodeTimeline] = await Promise.all([
-      read("").then((body) => completeSchema.parse(body)),
-      read("/timeline?scope=run").then((body) => timelineSchema.parse(body)),
+      read("").then((body) => {
+        // The contract's own schema holds every member the comparisons read.
+        liveRunDetailSchema.parse(body);
+        return completeSchema.parse(body);
+      }),
+      read("/timeline?scope=run").then((body) => {
+        runTimelineSchema.parse(body);
+        return timelineSchema.parse(body);
+      }),
       world.busiestNode === ""
         ? Promise.resolve({ spans: [] })
         : read(
             `/timeline?scope=node&node=${encodeURIComponent(world.busiestNode)}`,
-          ).then((body) => timelineSchema.parse(body)),
+          ).then((body) => {
+            runTimelineSchema.parse(body);
+            return timelineSchema.parse(body);
+          }),
     ]);
     return { detail, timeline, nodeTimeline, spans: timeline.spans };
   } finally {

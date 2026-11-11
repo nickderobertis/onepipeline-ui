@@ -15,7 +15,11 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { subscribedSchema } from "@onepipeline-ui/dag-model";
+import {
+  liveRunDetailSchema,
+  runTimelineSchema,
+  subscribedSchema,
+} from "@onepipeline-ui/dag-model";
 import { expect, type Page } from "@playwright/test";
 import { z } from "zod";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- `journal.ts` is the single fixture writer for the journal (its own header says so), shared with sibling project `dag-ui-e2e`; a second writer is the drift it exists to prevent.
@@ -294,8 +298,11 @@ export async function completeDocuments(
   const timeline = await served200(
     `${root}/timeline?scope=${node === undefined ? "run" : `node&node=${encodeURIComponent(node)}`}`,
   );
-  // Validated, then handed on as served: a parse puts the members it names first,
-  // and the journeys compare documents member by member in the order served.
+  // Validated whole through the contract's own schemas, then handed on as
+  // served: a parse puts the members it names first, and the journeys compare
+  // documents member by member in the order served.
+  liveRunDetailSchema.parse(detail);
+  runTimelineSchema.parse(timeline);
   completeDetailSchema.parse(detail);
   completeTimelineSchema.parse(timeline);
   return {
