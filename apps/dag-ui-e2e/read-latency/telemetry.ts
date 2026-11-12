@@ -147,14 +147,15 @@ export const FIRST_VIEWS = ["graph", "overall", "node"] as const;
  * Where the server spent a first answer's `POST`, off its own trace
  * (`ONEPIPELINE_UI_LIVE_TRACE`'s `subscribe` line): the engine's heads read and
  * the fetches of what the first screen draws, which a run read whole makes none
- * of, the detail and timeline the answer holds, the whole answer, and its
- * serialization. `null` where the server did no such step.
+ * of, holding and indexing the heads, the detail and timeline the answer holds, the
+ * whole answer, and its serialization. `null` where the server did no such step.
  */
 const serverSplitSchema = z.object({
   heads_s: seconds,
   fetch_s: seconds,
   fetched_records: count.nullable(),
   records: count.nullable(),
+  index_s: seconds,
   detail_s: seconds,
   timeline_s: seconds,
   answer_s: figure,

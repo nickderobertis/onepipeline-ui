@@ -1577,7 +1577,8 @@ impl Hub {
     ///
     /// Where [`TRACE_ENV`] names a file, one line of it says where the answer's time
     /// went: the engine's heads read and the fetches a long run's first answer
-    /// makes, the detail and timeline it builds, and the serialization.
+    /// makes, holding and indexing the heads, the detail and timeline it builds, and
+    /// the serialization.
     ///
     /// # Errors
     ///
@@ -1598,6 +1599,7 @@ impl Hub {
                 "fetch_ms": ms(split.fetch_s),
                 "fetched": split.fetched,
                 "records": split.records,
+                "index_ms": ms(split.index_s),
                 "detail_ms": ms(split.detail_s),
                 "timeline_ms": ms(split.timeline_s),
                 "answer_ms": (answered - started).as_secs_f64() * 1000.0,

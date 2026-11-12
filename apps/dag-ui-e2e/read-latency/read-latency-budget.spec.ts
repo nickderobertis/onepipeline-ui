@@ -77,6 +77,7 @@ const reading = (seconds: number | null) => ({
     fetch_s: 0.05,
     fetched_records: 30_000,
     records: 116_000,
+    index_s: 0.05,
     detail_s: 0.01,
     timeline_s: 0.1,
     answer_s: 0.4,

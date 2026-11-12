@@ -126,8 +126,12 @@ pub(super) fn read(paths: &RunPaths) -> Result<FirstRead, onepipeline::Error> {
         whole: vec![false; handles.len()],
         handles,
     };
+    let stubbed = headed_at.elapsed();
     headed.fetch(&mut view, &wanted)?;
+    let indexing = Instant::now();
     let indexed = Indexed::headed(&view, places, store_len, last_seq);
+    let took = (stubbed + indexing.elapsed()).as_secs_f64();
+    record(|split| split.index_s = Some(took));
     Ok(FirstRead {
         view,
         indexed,
@@ -225,6 +229,8 @@ pub(super) struct Split {
     pub(super) fetched: Option<usize>,
     /// How many records the heads read headed.
     pub(super) records: Option<usize>,
+    /// Holding every head as a record and indexing them.
+    pub(super) index_s: Option<f64>,
     /// Building the detail the answer holds.
     pub(super) detail_s: Option<f64>,
     /// Building the timeline the answer holds.

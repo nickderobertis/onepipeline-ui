@@ -239,10 +239,17 @@ impl Indexed {
                     touched.every_node |= event.kind.0 == super::vcs::RELEASE_OBSERVED;
                 }
                 Some(node) => {
-                    let at = *self.node_at.entry(node.to_owned()).or_insert_with(|| {
-                        self.nodes.push((node.to_owned(), Vec::new()));
-                        self.nodes.len() - 1
-                    });
+                    // Looked up before it is keyed, so a node already met costs no
+                    // allocation: a long run's records are nearly all of a few nodes.
+                    let at = match self.node_at.get(node) {
+                        Some(at) => *at,
+                        None => {
+                            self.nodes.push((node.to_owned(), Vec::new()));
+                            let at = self.nodes.len() - 1;
+                            self.node_at.insert(node.to_owned(), at);
+                            at
+                        }
+                    };
                     self.nodes[at].1.push(index);
                     touched.nodes.insert(node.to_owned());
                 }
