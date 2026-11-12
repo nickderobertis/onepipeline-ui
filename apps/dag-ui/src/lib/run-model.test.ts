@@ -22,6 +22,15 @@ import {
 const live = parseRunDetail(runDetail(LIVE_RUN));
 const summaries = parseRunList(runList).runs;
 
+function statusesWithout<Status>(
+  statuses: Readonly<Record<string, Status>>,
+  dropped: string,
+): Record<string, Status> {
+  return Object.fromEntries(
+    Object.entries(statuses).filter(([node]) => node !== dropped),
+  );
+}
+
 /**
  * The live run as served after a live edit took `dropped` off its graph: the plan
  * and the per-node statuses no longer name it, and everything else the server
@@ -30,7 +39,7 @@ const summaries = parseRunList(runList).runs;
 function withoutOnGraph(dropped: string): LiveRunDetail {
   const graph = live.graph;
   if (graph === undefined || graph === null) throw new Error("fixture graph");
-  const { [dropped]: _status, ...node_status } = graph.node_status;
+  const node_status = statusesWithout(graph.node_status, dropped);
   return {
     ...live,
     graph: {
@@ -96,8 +105,13 @@ describe("the node an address names", () => {
     expect(openedNode({ ...live, graph: null }, [], "publish")).toBeUndefined();
     const graph = live.graph;
     if (graph === undefined || graph === null) throw new Error("fixture graph");
-    const { publish: _status, ...node_status } = graph.node_status;
-    const statusless = { ...live, graph: { ...graph, node_status } };
+    const statusless = {
+      ...live,
+      graph: {
+        ...graph,
+        node_status: statusesWithout(graph.node_status, "publish"),
+      },
+    };
     expect(
       openedNode(statusless, nodeViews(statusless), "publish"),
     ).toBeUndefined();

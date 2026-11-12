@@ -48,10 +48,8 @@ import {
   recordedReason,
 } from "../../lib/run-model";
 
-/** What the transcript says once its pages have been read back to the node's first row. */
 const HISTORY_START_TEXT = "No earlier history remains";
 
-/** What a node off the run's graph shows where a plan task's words would be. */
 const OFF_GRAPH_TASK =
   "This node is not on the run's graph, so the plan holds no task for it.";
 

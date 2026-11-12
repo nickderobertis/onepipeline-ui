@@ -176,7 +176,6 @@ export function openedNode(
   };
 }
 
-/** How a node's header names what it is: its plan kind, or that it is off the graph. */
 export function nodeKindWord(node: NodeView): string {
   return node.offGraph === true ? "off-graph" : node.kind;
 }

@@ -20,6 +20,8 @@ const factsSchema = z.object({
   history: z.string().min(1),
   unkeyed: z.string().min(1),
   offGraph: z.string().min(1),
+  unrecorded: z.string().min(1),
+  onlyChecks: z.string().min(1),
   checks: z.number().int().positive(),
   historyId: z.string().min(1),
 });
@@ -46,7 +48,6 @@ const firstAnswerSchema = z.object({
   }),
 });
 
-/** What the page says while the rest of a run's history is on its way. */
 const HISTORY_LOADING_TEXT = "The rest of this run's history is still loading";
 
 let server: FixtureServer;
@@ -63,11 +64,13 @@ test.afterAll(async () => {
   await server.stop();
 });
 
-/** The value a facts list gives beside `term`. */
-const fact = (panel: Locator, term: string): Locator =>
-  panel.locator("dt", { hasText: new RegExp(`^${term}$`) }).locator("+ dd");
+/** The definition a facts list gives for `term`, read by role in list order. */
+async function fact(panel: Locator, term: string): Promise<Locator> {
+  const terms = await panel.getByRole("term").allTextContents();
+  expect(terms).toContain(term);
+  return panel.getByRole("definition").nth(terms.indexOf(term));
+}
 
-/** Everything the page throws, from the first navigation on. */
 function thrownBy(page: Page): string[] {
   const thrown: string[] = [];
   page.on("pageerror", (error) => thrown.push(error.message));
@@ -155,6 +158,43 @@ test("loading earlier rows that all fall into a collapsed run still shows the re
   await expect(
     transcript.getByRole("button", { name: /^Load(ing)? earlier rows/ }),
   ).toHaveCount(0);
+  expect(thrown).toStrictEqual([]);
+});
+
+test("reading back a history of nothing but collapsed checks ends by saying none remains", async ({
+  page,
+}) => {
+  const thrown = thrownBy(page);
+  const pages: string[] = [];
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname.endsWith("/timeline/events"))
+      pages.push(response.url());
+  });
+  await page.goto(
+    `${server.origin}/?run=${facts.run}&view=graph&node=${facts.onlyChecks}`,
+  );
+  const transcript = page.getByRole("region", { name: "Node transcript" });
+  const rows = transcript.getByRole("article");
+  await expect(
+    transcript.getByRole("button", { name: /^Show \d+ more change-check/ }),
+  ).toBeVisible();
+  const shownBefore = await rows.count();
+
+  await transcript.getByRole("button", { name: "Load earlier rows" }).click();
+
+  await expect(transcript.getByRole("status")).toHaveText(
+    "No earlier history remains",
+  );
+  await expect(
+    transcript.getByRole("button", { name: /^Load(ing)? earlier rows/ }),
+  ).toHaveCount(0);
+  expect(await rows.count()).toBe(shownBefore);
+  expect(pages.length).toBeGreaterThan(1);
+  await expect(
+    transcript.getByRole("button", {
+      name: `Show ${facts.checks - 2} more change-check events`,
+    }),
+  ).toBeVisible();
   expect(thrown).toStrictEqual([]);
 });
 
@@ -257,9 +297,9 @@ test("a link to a node the run recorded but its graph does not hold opens that n
   });
   await expect(view).toBeVisible();
   await expect(view.getByText("off-graph node")).toBeVisible();
-  // No per-node record names its status, so it reads as unknown rather than as
-  // a word the server never said.
-  await expect(view.locator(".node-view-state")).toHaveText(/unknown/i);
+  // The status and failure the run's closing result recorded for it.
+  await expect(view.getByText("cancelled", { exact: true })).toBeVisible();
+  await expect(view.getByText("This node was cancelled: agent")).toBeVisible();
   const transcript = view.getByRole("region", { name: "Node transcript" });
   await expect(transcript.getByRole("article").first()).toBeVisible();
   await expect(transcript).toContainText("push");
@@ -271,14 +311,35 @@ test("a link to a node the run recorded but its graph does not hold opens that n
   const panel = view.getByRole("tabpanel");
   await view.getByRole("tab", { name: "Task" }).click();
   await expect(panel).toContainText("not on the run's graph");
-  await expect(fact(panel, "Graph overrides")).toHaveText("None");
+  await expect(await fact(panel, "Graph overrides")).toHaveText("None");
   await view.getByRole("tab", { name: "Acceptance criteria" }).click();
   await expect(panel).toContainText("not on the run's graph");
   await view.getByRole("tab", { name: "Dependencies" }).click();
-  await expect(fact(panel, "Dependencies")).toHaveText("None");
-  await expect(fact(panel, "Unblocks")).toHaveText("None");
+  await expect(await fact(panel, "Dependencies")).toHaveText("None");
+  await expect(await fact(panel, "Unblocks")).toHaveText("None");
   await view.getByRole("tab", { name: "Remote" }).click();
-  await expect(fact(panel, "Release")).toHaveText("Not recorded");
+  await expect(await fact(panel, "Release")).toHaveText("Not recorded");
   await expect(page.getByRole("article", { name: /: done$/ })).toHaveCount(0);
+  expect(thrown).toStrictEqual([]);
+});
+
+test("a node off the graph that no record gives a status reads as unknown", async ({
+  page,
+}) => {
+  const thrown = thrownBy(page);
+  await page.goto(
+    `${server.origin}/?run=${facts.run}&view=graph&node=${facts.unrecorded}`,
+  );
+  const view = page.getByRole("region", {
+    name: `Timeline for ${facts.unrecorded}`,
+  });
+  await expect(view.getByText("off-graph node")).toBeVisible();
+  await expect(view.getByText("unknown", { exact: true })).toBeVisible();
+  await expect(
+    view
+      .getByRole("region", { name: "Node transcript" })
+      .getByRole("article")
+      .first(),
+  ).toBeVisible();
   expect(thrown).toStrictEqual([]);
 });
