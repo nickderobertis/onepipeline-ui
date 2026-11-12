@@ -1,4 +1,8 @@
-import { parseRunDetail, parseRunList } from "@onepipeline-ui/dag-model";
+import {
+  type LiveRunDetail,
+  parseRunDetail,
+  parseRunList,
+} from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
 import { LIVE_RUN, runDetail, runList } from "../test/fixtures";
 import {
@@ -9,12 +13,96 @@ import {
   isOwnWorkLost,
   isUnhealthy,
   launchLabel,
+  nodeKindWord,
   nodeReason,
   nodeViews,
+  openedNode,
 } from "./run-model";
 
 const live = parseRunDetail(runDetail(LIVE_RUN));
 const summaries = parseRunList(runList).runs;
+
+/**
+ * The live run as served after a live edit took `dropped` off its graph: the plan
+ * and the per-node statuses no longer name it, and everything else the server
+ * recorded for it stays.
+ */
+function withoutOnGraph(dropped: string): LiveRunDetail {
+  const graph = live.graph;
+  if (graph === undefined || graph === null) throw new Error("fixture graph");
+  const { [dropped]: _status, ...node_status } = graph.node_status;
+  return {
+    ...live,
+    graph: {
+      ...graph,
+      plan: {
+        ...graph.plan,
+        tasks: graph.plan.tasks.filter((task) => task.id !== dropped),
+      },
+      node_status,
+    },
+  };
+}
+
+describe("the node an address names", () => {
+  test("is the graph's own view of a node on the graph", () => {
+    const nodes = nodeViews(live);
+    expect(openedNode(live, nodes, "dashboard")).toBe(
+      nodes.find(({ id }) => id === "dashboard"),
+    );
+    expect(openedNode(live, nodes, undefined)).toBeUndefined();
+    expect(openedNode(undefined, nodes, "dashboard")).toBeUndefined();
+  });
+
+  test("is a view of what the run recorded for a node its graph no longer holds", () => {
+    const detail = withoutOnGraph("publish");
+    const opened = openedNode(detail, nodeViews(detail), "publish");
+    expect(opened).toMatchObject({
+      id: "publish",
+      label: "publish",
+      offGraph: true,
+      status: "failed",
+      failure: { class: "agent", detail: "Deploy failed" },
+      result: { detail: "Deploy failed" },
+      blockers: [],
+      dependents: [],
+    });
+    expect(opened?.task).toBeUndefined();
+    expect(opened?.telemetry?.node).toBe("publish");
+    if (opened === undefined) throw new Error("no view");
+    expect(nodeKindWord(opened)).toBe("off-graph");
+  });
+
+  test("reads a status the server recorded in no word it knows as unknown", () => {
+    const detail = withoutOnGraph("publish");
+    const odd = {
+      ...detail,
+      run: {
+        ...detail.run,
+        nodes: detail.run.nodes.map((node) =>
+          node.node === "publish" ? { ...node, status: "a-later-word" } : node,
+        ),
+      },
+    };
+    expect(openedNode(odd, nodeViews(odd), "publish")?.status).toBe("unknown");
+    expect(openedNode(odd, nodeViews(odd), "never-recorded")).toMatchObject({
+      status: "unknown",
+      offGraph: true,
+      telemetry: undefined,
+    });
+  });
+
+  test("is nothing while the graph is unknown, or for a planned node with no status", () => {
+    expect(openedNode({ ...live, graph: null }, [], "publish")).toBeUndefined();
+    const graph = live.graph;
+    if (graph === undefined || graph === null) throw new Error("fixture graph");
+    const { publish: _status, ...node_status } = graph.node_status;
+    const statusless = { ...live, graph: { ...graph, node_status } };
+    expect(
+      openedNode(statusless, nodeViews(statusless), "publish"),
+    ).toBeUndefined();
+  });
+});
 
 describe("node views", () => {
   test("classifies kind, reads the served status, and carries each node's record", () => {
