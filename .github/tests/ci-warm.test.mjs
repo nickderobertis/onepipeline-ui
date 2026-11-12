@@ -1216,7 +1216,6 @@ const compileEnvTexts = () =>
 
 test("the jobs and the warm build compile under one environment", () => {
   assert.deepEqual(compileEnvProblems(compileEnvTexts()), []);
-  // What the file exports is what a compile under either script sees.
   const seen = execFileSync(
     "bash",
     ["-c", `source ${COMPILE_ENV_FILE} && printenv OPENSSL_NO_VENDOR`],
