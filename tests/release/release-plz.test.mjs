@@ -33,6 +33,9 @@ const job = workflow.jobs["release-plz"];
 // tests/e2e/semver_check.rs drives this step's recipe through every answer it
 // can give; it builds two releases of a real crate, which a scratch one is not.
 const SEMVER_STEP = "Read the public surface against the baseline";
+// .github/tests/await-warm-build.test.mjs runs this step's command against a
+// GitHub double through every answer the warm build can give.
+const WARM_STEP = "Wait for main's Linux Rust build when it is building cold";
 
 // Cache lifecycle journeys run these other steps with the real sidecar and Nx.
 // This suite owns the release commands; unknown steps must be classified here.
@@ -43,6 +46,7 @@ const releaseSteps = new Set([
   "Tag and publish a merged version bump",
   "Use the latest release tag as the version baseline",
   SEMVER_STEP,
+  WARM_STEP,
   "Open or update the release PR",
   "Auto-merge the release PR when the gate is green",
 ]);
@@ -158,7 +162,8 @@ function runJob({ dir, repo }, { token, headCommit }) {
         .match(/^true$/)
     )
       continue;
-    if (!step.run || step.name === SEMVER_STEP) continue;
+    if (!step.run || step.name === SEMVER_STEP || step.name === WARM_STEP)
+      continue;
     ran.push(step.name ?? step.id);
     const outputs = join(dir, `output-${ran.length}`);
     writeFileSync(outputs, "");

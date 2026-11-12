@@ -245,3 +245,49 @@ run ended. So the time it can add is at most its own duration: 40.8 s for
 with a warm `target/debug`. Twice that for the hosted runner's four cores still
 leaves the job well inside its 36-minute cap. The next release pull request's
 Linux job validates this.
+
+## The release PR's first attempt restored the previous lock's build (2026-11-12)
+
+Four release-PR `test-linux` attempts were cancelled at the 36-minute cap
+between 2026-11-11 and 11-12, each the first attempt after an engine bump. Read
+with GET only from jobs 130533256712, 130551816996, 130707192842, 130730179700,
+130896145886, 130910835240, 131048958385 and 131155232787 (Nx's static-output
+groups are emitted at task completion), and from the `ci-cache.yml` runs for the
+same pushes. Two causes stacked.
+
+**The read-latency tail, removed by #746.** Before #746 the
+`dag-ui-read-latency` tasks ran last in test-linux's pool. In the one complete
+pre-#746 sweep (job 130730179700, 29 min of gate) they took 18:50→19:12, 22 of
+the gate's 29 minutes: `compile-release-server`, then `test` (4.5 min),
+`test-large` (1.3 min) and `test-journeys` (12 min). At every cancellation
+`test-journeys` was the task still running, 2.5–10.5 minutes in; no task hung.
+After #746 the release PRs' gates (jobs 131048958385 and 131155232787, the
+broader tier with every project) took 18.3 and 18.4 minutes and the jobs 20.2
+and 20.7.
+
+**A cold Rust build, removed here.** release-plz updates the release PR seconds
+after a push to `main`, and `ci-cache.yml`'s `warm-linux` for that push builds cold
+after a lock move: 17–25 minutes. Every cancelled first attempt restored the
+previous lock's key (`full match: false`) and every rerun the exact key:
+
+| Push | Warm build saved | Release PR's test-linux started | Restore |
+| --- | --- | --- | --- |
+| eb8673a, 12:44:54 | 13:10:19 | 12:50:19 | partial; cancelled |
+| ac26eb5, 17:54:45 | 18:19:29 | 17:59:53 | partial; cancelled |
+| 17b9c42, 00:56:02 | 01:21:26 | 01:00:20 | partial; cancelled |
+
+On the post-#746 tree the same cold restore still overran: job 131127140894 (an
+engine bump's own pull request, which nothing can warm first) spent 13.5 minutes
+in `dag-ui:build-api-server` alone and was cancelled at 36 minutes with the
+release chain unfinished. The Nx remote cache was trusted and read on every
+release-PR attempt (46–54 replayed tasks); it does not hold Cargo's build.
+
+So release-plz now waits, before it updates the release PR, for that push's
+`warm-linux` when the warm job is building cold, until 27 of release-plz's 30
+minutes are gone (`.github/scripts/await-warm-build.mjs`). Cold is the warm job's
+own decision: its step that drops an inexact restore runs, rather than reporting
+`skipped`. The measured release-plz runs reached the update 4.3–4.8 minutes in, so
+the longest measured warm build (25.4 minutes after the push) fits. An exact
+restore returns as soon as that step is decided. The release PR's first attempt
+therefore restores the exact build, as the two post-#746 release PRs above did,
+and those finished in 20.2 and 20.7 minutes of the 36-minute cap.
