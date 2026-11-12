@@ -72,6 +72,17 @@ const reading = (seconds: number | null) => ({
   navigation_to_post_s: 0.05,
   post_s: 0.5,
   answer_to_mark_s: 0.05,
+  server: {
+    heads_s: 0.2,
+    fetch_s: 0.05,
+    fetched_records: 30_000,
+    records: 116_000,
+    detail_s: 0.01,
+    timeline_s: 0.1,
+    answer_s: 0.4,
+    serialize_s: 0.02,
+    bytes: 1_200_000,
+  },
   first_answer_bytes: 1_200_000,
   first_answer_gzipped: 130_000,
   checked: { screen_against_answer: true, answer_against_complete: true },
@@ -160,7 +171,7 @@ const telemetry = (overrides: object = {}) => ({
 });
 
 const largeTelemetry = (overrides: object = {}) => ({
-  schema_version: 1,
+  schema_version: 2,
   recorded_at: "2026-11-07T00:00:00.000Z",
   commit: "a".repeat(40),
   dirty: false,
