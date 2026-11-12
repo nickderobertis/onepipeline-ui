@@ -379,9 +379,25 @@ fn the_large_run_timings_journeys_and_budgets_run_wherever_the_read_paths_change
         "apps/dag-ui-e2e/read-latency/large-run-workload.json",
         "src/live.rs",
         "src/live/progressive.rs",
+        "src/live/history.rs",
+        "src/live/first_screen.rs",
+        "apps/dag-ui/src/main.tsx",
+        "apps/dag-ui/src/first-screen/check.ts",
         "apps/dag-ui/src/first-screen/FirstScreen.tsx",
         "apps/dag-ui/src/features/timeline/NodeTimelineView.tsx",
     ];
+    // The tests a change to a first screen's read holds itself to, beside the
+    // timings: the Rust journeys over a long run's first answers, and the browser
+    // journey and unit test of the first screen's check of its answer.
+    let holding = |change: &str| -> &'static [&'static str] {
+        if change.starts_with("src/live") {
+            &["onepipeline-ui-e2e:test", "dag-ui-e2e:test"]
+        } else if change.starts_with("apps/dag-ui/src/") {
+            &["dag-ui:test", "dag-ui-e2e:test"]
+        } else {
+            &[]
+        }
+    };
     let leaves_them = |run: &Run, case: &str| {
         let linux = run.selected("test-linux");
         for task in LARGE_RUN_TASKS {
@@ -406,6 +422,13 @@ fn the_large_run_timings_journeys_and_budgets_run_wherever_the_read_paths_change
         let linux = recipe(&workspace, "ci-test-linux", &["--plan"], false);
         assert!(linux.output.status.success(), "{change}: {}", linux.log);
         leaves_them(&linux, change);
+        let tests = linux.selected("test-linux");
+        for task in holding(change) {
+            assert!(
+                tests.contains(*task),
+                "a pull request changing {change} does not run {task}: {tests:?}"
+            );
+        }
     }
 
     let swept = workspace(None);
