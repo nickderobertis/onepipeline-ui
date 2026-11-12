@@ -104,10 +104,10 @@ test("loading earlier rows that all fall into a collapsed run still shows the re
 
   await transcript.getByRole("button", { name: "Load earlier rows" }).click();
 
+  await expect.poll(() => rows.count()).toBeGreaterThan(shownBefore);
   await expect(transcript.getByRole("status")).toHaveText(
     "No earlier history remains",
   );
-  await expect.poll(() => rows.count()).toBeGreaterThan(shownBefore);
   // What the first page the click took brought beyond the window was nothing but
   // checks — the shape that left the reading unchanged — and the read went on
   // past it to the node's start.
@@ -128,6 +128,26 @@ test("a run whose dispatch spans have no dispatch id opens its Overall view whol
   page,
 }) => {
   const thrown = thrownBy(page);
+  await page.goto(`${server.origin}/?run=${facts.run}&view=overall`);
+  const overall = page.getByRole("region", {
+    name: "Graph timeline",
+    exact: true,
+  });
+  // The rest arrives as patches over the stream; one the view's schema refused
+  // used to leave "Timeline unavailable" where the plot should be.
+  await expect(
+    page.getByRole("heading", { name: "Graph timeline" }),
+  ).toBeVisible();
+  await expect(page.getByText(HISTORY_LOADING_TEXT)).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(overall).toBeVisible();
+  await overall.getByRole("button", { name: "Expand timeline" }).click();
+  await expect(
+    page.getByRole("region", { name: `${facts.unkeyed} timeline` }),
+  ).toBeVisible();
+  await expect(page.getByText("Timeline unavailable")).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
   // What the server serves for the run, read as the view's own schema reads it:
   // the unkeyed node's harness span is served with no dispatch id at all.
   const served = runTimelineSchema.parse(
@@ -147,20 +167,6 @@ test("a run whose dispatch spans have no dispatch id opens its Overall view whol
     node_id: facts.unkeyed,
   });
   expect(harness).not.toHaveProperty("dispatch_id");
-
-  await page.goto(`${server.origin}/?run=${facts.run}&view=overall`);
-  const overall = page.getByRole("region", {
-    name: "Graph timeline",
-    exact: true,
-  });
-  await expect(overall).toBeVisible();
-  await expect(page.getByText(HISTORY_LOADING_TEXT)).toHaveCount(0);
-  await overall.getByRole("button", { name: "Expand timeline" }).click();
-  await expect(
-    page.getByRole("region", { name: `${facts.unkeyed} timeline` }),
-  ).toBeVisible();
-  await expect(page.getByText("Timeline unavailable")).toHaveCount(0);
-  await expect(page.getByRole("alert")).toHaveCount(0);
   expect(thrown).toStrictEqual([]);
 });
 
