@@ -35,7 +35,8 @@
       "inputs": ["cacheContract", "platform"]
     },
     "test": {
-      "command": "node --test --test-concurrency=1 .github/tests/nx-cache/*.test.mjs",
+      "//concurrency": "Two files at once: each journey builds and reads its own fixture workspace, and the suite spends much of its time waiting on the nested Nx and Git processes it starts. Alone on four cores two at a time took 372 s of wall for 1062 CPU-seconds against 572 s for 1013 serially; beside five CPU-bound processes, 797 s against 1153 s.",
+      "command": "node --test --test-concurrency=2 .github/tests/nx-cache/*.test.mjs",
       "inputs": [
         "cacheContract",
         "platform",
