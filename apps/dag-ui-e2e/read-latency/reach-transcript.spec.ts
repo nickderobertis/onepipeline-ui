@@ -49,6 +49,8 @@ test("the busiest node's whole transcript is reached back to its first row, in o
   const node = world.facts.large.busiestNode;
   const run = world.facts.openLiveRun;
   const timeline = await settledTimeline(world, served, run, node);
+  // A span is the SDK's record, which the API passes through untyped
+  // as a JSON value (AGENTS.md); this reads only its id and events.
   const nodeSpan = (timeline.spans as Json[]).find(
     (span) => span.id === `node.${node}`,
   );

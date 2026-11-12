@@ -40,6 +40,8 @@ test("the union of every span's pages is the complete document's events, in orde
   const run = world.facts.openLiveRun;
   const timeline = await settledTimeline(world, served, run);
   const client = new TelemetryClient(served.origin);
+  // A span is the SDK's record, which the API passes through untyped
+  // as a JSON value (AGENTS.md); this reads only its id, events and node_id.
   const spans = (timeline.spans as Json[]).filter(
     (span) => (span.events ?? []).length > 0,
   );
@@ -53,6 +55,7 @@ test("the union of every span's pages is the complete document's events, in orde
     let cursor: string | undefined;
     for (;;) {
       const page = await client.getTimelineEvents(run, {
+        // A node span names its node by id, a string wherever it is present.
         ...(span.node_id === undefined ? {} : { node: span.node_id as string }),
         span: span.id,
         limit: 500,
