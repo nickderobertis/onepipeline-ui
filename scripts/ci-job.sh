@@ -152,7 +152,7 @@ if [ "$job" = "read-latency" ]; then
   if [ -n "${CI:-}" ]; then
     npx playwright install --with-deps chromium || exit $?
   else
-    npx playwright install chromium || exit $?
+    bash scripts/nx.sh run dag-ui-e2e:bootstrap --outputStyle=static || exit $?
   fi
   bash scripts/nx.sh run onepipeline-ui:ensure-sibling --outputStyle=static || exit $?
   for task in $tasks; do
