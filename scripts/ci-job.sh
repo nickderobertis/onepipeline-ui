@@ -162,13 +162,13 @@ if [ "$job" = "read-latency" ]; then
 fi
 
 # The selection, as Nx's own task graph rather than a reading of its output.
+# No arrays: macOS runs this under bash 3.2, where an empty one is unbound.
 nx_run() {
-  local leave=()
-  [ "$job" = "test-linux" ] && leave=(--exclude "$READ_LATENCY")
+  if [ "$job" = "test-linux" ]; then set -- --exclude "$READ_LATENCY" "$@"; fi
   if [ "$tier" = "broader" ]; then
-    bash scripts/nx.sh run-many -t "$targets" "${leave[@]}" "$@"
+    bash scripts/nx.sh run-many -t "$targets" "$@"
   else
-    bash scripts/nx-affected.sh -t "$targets" "${leave[@]}" "$@"
+    bash scripts/nx-affected.sh -t "$targets" "$@"
   fi
 }
 graph="$(nx_run --graph=stdout)" || {
