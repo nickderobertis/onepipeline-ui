@@ -106,7 +106,7 @@ const refusal = (answer: unknown): string | undefined => {
 
 /** Whether `reason` names `field`, and not a field whose name begins with it. */
 const names = (reason: string | undefined, field: string) =>
-  reason !== undefined && reason.startsWith(`${field} `);
+  reason?.startsWith(`${field} `) === true;
 
 it.each([
   ["detail", subscribed],
