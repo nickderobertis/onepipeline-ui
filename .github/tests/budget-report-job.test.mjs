@@ -237,6 +237,67 @@ test("a job that parts from the shape or the released definition is refused", ()
   }
 });
 
+// The release server crosses from test-linux to the budgets job by a path four
+// places spell: test-linux's upload, the budgets job's download directory and its
+// timing step, and `scripts/ci-job.sh read-latency`, which refuses to run without
+// it. They are one file, or the timings run on none.
+export function releaseServerPathProblems(workflow, ciJob) {
+  const NAME = "read-latency-release-server";
+  const BINARY = "onepipeline-api";
+  const named = (job) =>
+    (workflow.jobs?.[job]?.steps ?? []).filter(
+      (step) => step.with?.name === NAME,
+    );
+  const [upload] = named("test-linux");
+  const [download] = named("budgets");
+  if (!upload?.uses?.startsWith("actions/upload-artifact@"))
+    return [`test-linux uploads no ${NAME}`];
+  if (!download?.uses?.startsWith("actions/download-artifact@"))
+    return [`budgets downloads no ${NAME}`];
+  const serverIn = (text) => /server="?([^"\s]+)"?/.exec(text ?? "")?.[1];
+  const timing = (workflow.jobs.budgets.steps ?? []).find((step) =>
+    step.run?.includes("just ci-read-latency"),
+  );
+  const paths = {
+    "test-linux's upload": upload.with?.path,
+    "budgets' download": `${download.with?.path}/${BINARY}`,
+    "budgets' timing step": serverIn(timing?.run),
+    "scripts/ci-job.sh": serverIn(
+      ciJob.slice(ciJob.indexOf('if [ "$job" = "read-latency" ]')),
+    ),
+  };
+  const [first, ...rest] = Object.values(paths);
+  return rest.every((path) => path === first)
+    ? []
+    : [`the release server's path differs: ${JSON.stringify(paths)}`];
+}
+
+test("the release server the budgets job times is the one test-linux uploads", () => {
+  const ciJob = readFileSync("scripts/ci-job.sh", "utf8");
+  assert.deepEqual(releaseServerPathProblems(ci(), ciJob), []);
+  const moved = clone(ci());
+  moved.jobs.budgets.steps.find(
+    (step) => step.with?.name === "read-latency-release-server",
+  ).with.path = "target/release";
+  assert.match(
+    releaseServerPathProblems(moved, ciJob).join("\n"),
+    /release server's path differs/,
+  );
+  assert.match(
+    releaseServerPathProblems(
+      ci(),
+      ciJob.replace("x86_64-unknown-linux-gnu/release", "release"),
+    ).join("\n"),
+    /release server's path differs/,
+  );
+  const unnamed = clone(ci());
+  for (const step of unnamed.jobs["test-linux"].steps)
+    if (step.with?.name === "read-latency-release-server") delete step.with;
+  assert.deepEqual(releaseServerPathProblems(unnamed, ciJob), [
+    "test-linux uploads no read-latency-release-server",
+  ]);
+});
+
 const requested = (scenario) =>
   resolveWorkflow("ci.yml", ci(), scenario, { macosRequired: true })
     .filter((row) => row.requested)

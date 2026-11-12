@@ -383,6 +383,9 @@ function settledOnce<T>(
   if (run === world.facts.openLiveRun && !world.facts.large.settled)
     throw new Error(`${run} is live in this world; read its documents fresh`);
   const id = [world.workspace, run, key].join("\0");
+  // A key names one read and so one result type: the two callers above key a
+  // run's detail as `detail` and its timeline as `timeline\0<node>`, so what
+  // is stored under an id is always the `T` its caller's read returns.
   let held = settledReads.get(id) as Promise<T> | undefined;
   if (held === undefined) {
     held = read();
