@@ -233,55 +233,6 @@ const OWN_SERVERS = [
   "**/dag-ui-update-settings.spec.ts",
 ];
 
-/**
- * The shared-server specs `dag-ui-e2e:test` runs as a second run of this config,
- * beside the first: a run of its own chooses its own ports and fixture directory
- * (`currentSession` above), so these journeys get a server and a run directory of
- * their own and share no state with the first run's. They were half the serial
- * shared-server lane, which was the tier's longest — and the tier is the last link
- * of test-linux's critical path, after the server build.
- */
-const SECOND_RUN = [
-  "**/dag-ui.spec.ts",
-  "**/dag-ui-navigation.spec.ts",
-  "**/dag-ui-header.spec.ts",
-  "**/dag-ui-recorded-timeline.spec.ts",
-];
-
-/**
- * Which part of the tier this run is: unset, all of it (one shared-server lane
- * beside the own-servers lane); `first`, all of it but `SECOND_RUN`; `second`,
- * `SECOND_RUN` alone, over the servers this run starts. The two parts together
- * select exactly what the whole tier does.
- */
-const run = z
-  .enum(["first", "second"], {
-    message: "DAG_UI_E2E_RUN is first, second, or unset for the whole tier",
-  })
-  .optional()
-  .parse(process.env.DAG_UI_E2E_RUN || undefined);
-
-function projects() {
-  const shared = {
-    name: "shared-server",
-    testIgnore: [...NOT_THIS_TIER, ...OWN_SERVERS],
-    workers: 1,
-  };
-  const ownServers = {
-    name: "own-servers",
-    testMatch: OWN_SERVERS,
-    workers: 1,
-  };
-  if (run === "second")
-    return [{ ...shared, name: "shared-server-second", testMatch: SECOND_RUN }];
-  if (run === "first")
-    return [
-      { ...shared, testIgnore: [...shared.testIgnore, ...SECOND_RUN] },
-      ownServers,
-    ];
-  return [shared, ownServers];
-}
-
 export default defineConfig({
   testDir: ".",
   globalTeardown: "./global-teardown.ts",
@@ -303,10 +254,16 @@ export default defineConfig({
   // server shares that state and must not run against another. The specs in
   // `OWN_SERVERS` start a server per journey over a directory of their own, so they
   // share nothing with that lane and take their own (docs/linux-cold-cache-timing.md).
-  // `SECOND_RUN` is the same lane split across two runs, each over a server of its own.
   workers: 2,
   fullyParallel: false,
-  projects: projects(),
+  projects: [
+    {
+      name: "shared-server",
+      testIgnore: [...NOT_THIS_TIER, ...OWN_SERVERS],
+      workers: 1,
+    },
+    { name: "own-servers", testMatch: OWN_SERVERS, workers: 1 },
+  ],
   use: { baseURL: `http://${LOOPBACK}:${session.ui}` },
   /**
    * Every timeout below is a *readiness* budget: how long a process may take to bind
