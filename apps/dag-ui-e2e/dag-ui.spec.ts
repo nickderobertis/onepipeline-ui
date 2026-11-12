@@ -4785,15 +4785,29 @@ test("falls back to the empty state once no run is left", async ({ page }) => {
   const remaining = await allRunIds(page);
   const last = remaining.pop();
   if (last === undefined) throw new Error("fixture has no remaining runs");
+  // A run's own row, and no other's: one run's id begins another's
+  // (`dag-ui-recorded-timeline`, `dag-ui-recorded-timeline-clipping`), and the
+  // row's name is its state, its name and its counts, so the id is matched as
+  // a whole word of it.
+  const row = (runId: string) =>
+    page.getByRole("button", {
+      name: RegExp(
+        `(^|\\s)${runId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`,
+      ),
+    });
+  // Each removal reaches the page before the next is made, as a person removing
+  // runs one at a time would see it: the run's row goes, and the empty state is
+  // not shown while a run is still served.
   for (const runId of remaining) {
     changeServedRuns(["--remove-run", runId]);
+    await expect(row(runId)).toHaveCount(0);
     await expect(page.getByText("No DAG runs found")).toHaveCount(0);
   }
   changeServedRuns(["--remove-run", last]);
 
-  // Each removal reached the page as its own frame: the last run's row goes, the
-  // page lands on the empty state, and nothing reports a failure.
-  await expect(page.getByRole("button", { name: RegExp(last) })).toHaveCount(0);
+  // The last run's row goes, the page lands on the empty state, and nothing
+  // reports a failure.
+  await expect(row(last)).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: RegExp(runs().live) }),
   ).toHaveCount(0);

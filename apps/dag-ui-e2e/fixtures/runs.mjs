@@ -4247,6 +4247,197 @@ export function reviewLoopFacts() {
   return { run: REVIEW_LOOP.run_id, replied_node: REVIEW_LOOP_NODE };
 }
 
+/**
+ * A run shaped like the large ones a measurement on a real host found three views
+ * failing on, at the size a journey can afford.
+ *
+ * - Its id and one node's id together run past the identifier limit, so the key
+ *   a dispatch is grouped by cannot be formed for that node, and that node's
+ *   harness launch has no recorded end: the run-scope timeline serves that span
+ *   with no `dispatch_id` at all, never a `null`.
+ * - `LARGE_RUN_VIEWS.history` holds a long unbroken run of `change-check`
+ *   records behind its latest window, so a page read back lands wholly inside one
+ *   collapsed run; only the records before that run are anything else.
+ * - `LARGE_RUN_VIEWS.offGraph` recorded work under this run and is on no graph:
+ *   the plan never named it, as a node a live edit replaced is named by none,
+ *   and the run's closing result names it `cancelled`;
+ *   `LARGE_RUN_VIEWS.unrecorded` is off the graph and named by no result.
+ * - `LARGE_RUN_VIEWS.onlyChecks` recorded nothing but checks, so reading its
+ *   history back to the start never shows another row.
+ */
+export const LARGE_RUN_VIEWS = {
+  run: "Keep-every-view-of-a-long-run-whole-however-long-its-name-grows--and-open-each-node-it-recorded-work-for",
+  history: "checks",
+  unkeyed: "harness-outlived-its-dispatch-key",
+  offGraph: "replaced-before-the-graph-settled",
+  /** Off the graph too, and named by no result: nothing records its status. */
+  unrecorded: "dropped-with-no-result",
+  /** A node whose whole history is checks: read back, it shows nothing new. */
+  onlyChecks: "only-checks",
+  /**
+   * The checks behind the history node's latest window: more than a page holds,
+   * so the page read back lands wholly among them.
+   */
+  checks: 400,
+  /**
+   * The varied rows before the checks: more than the rest of the page that
+   * reaches past the checks, so the reading gains rows with history still left.
+   */
+  earliest: 250,
+  /** The varied rows after them, fewer than the latest window holds. */
+  tail: 20,
+  historyId: "01a00d0f-c094-7660-b26c-8a53baaf9e00",
+};
+
+/** Write the large-run views corpus under `root`: one settled run. */
+export function buildLargeRunViews(root) {
+  mkdirSync(root, { recursive: true });
+  const {
+    run: runId,
+    history,
+    unkeyed,
+    offGraph,
+    unrecorded,
+  } = LARGE_RUN_VIEWS;
+  const { dir, journal } = plannedRun(
+    root,
+    runId,
+    [
+      [history, "Wait out the required checks"],
+      [unkeyed, "Run under a name too long to key"],
+      [LARGE_RUN_VIEWS.onlyChecks, "Record nothing but checks"],
+    ],
+    HISTORIC,
+  );
+  // The result the driver wrote as it closed out, which still names the node
+  // a live edit took off the graph, in the words the run recorded for it.
+  writeJson(join(dir, "result.json"), {
+    run_id: runId,
+    state: "complete",
+    ok: false,
+    nodes: [
+      { id: history, status: "done", outcome: "merged" },
+      { id: unkeyed, status: "done", outcome: "merged" },
+      {
+        id: offGraph,
+        status: "cancelled",
+        outcome: "task-failed-change-open",
+        superseded_by: unkeyed,
+      },
+    ],
+  });
+  const run = { run_id: runId };
+  const node = (id) => ({ ...run, node: id });
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...node(history),
+    persona: "worker",
+  });
+  // The records before the run of checks, alternating so none collapse: what a
+  // reader paging back reaches.
+  for (let index = 0; index < LARGE_RUN_VIEWS.earliest; index += 1) {
+    journal
+      .advance(1)
+      .emit("vcs", index % 2 === 0 ? "fetch" : "push", node(history), {
+        remote: "origin",
+      });
+  }
+  for (let index = 0; index < LARGE_RUN_VIEWS.checks; index += 1) {
+    journal.advance(1).emit("vcs", "change-check", node(history), {
+      name: `check ${index}`,
+      required: false,
+      status: "completed",
+      conclusion: "success",
+      state: "success",
+    });
+  }
+  // Alternating, so none of the latest rows collapse with each other.
+  for (let index = 0; index < LARGE_RUN_VIEWS.tail; index += 1) {
+    journal
+      .advance(1)
+      .emit("vcs", index % 2 === 0 ? "push" : "fetch", node(history), {
+        remote: "origin",
+      });
+  }
+  journal.advance(1).emit("pipeline", "node-settled", node(history), {
+    status: "done",
+    outcome: "merged",
+    branch: "feature/checks",
+  });
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...node(unkeyed),
+    persona: "worker",
+  });
+  journal.advance(1).emit("pipeline", "node-settled", node(unkeyed), {
+    status: "done",
+    outcome: "merged",
+    branch: "feature/unkeyed",
+  });
+  // Work recorded for a node the plan never named.
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    ...node(offGraph),
+    persona: "worker",
+  });
+  const member = {
+    ...node(offGraph),
+    member: "worker",
+    persona: "worker",
+    session: `${streamOf(runId)}.worker`,
+  };
+  journal.advance(1).emit("agentgraph", "member-started", member, {});
+  journal.advance(1).emit("agentgraph", "turn-started", member, {
+    turn: 1,
+    role: "assistant",
+    instruction: "Carry on with the plan.",
+    model: "a-model",
+  });
+  journal.advance(1).emit("agentgraph", "turn-completed", member, {
+    turn: 1,
+    role: "assistant",
+  });
+  journal.advance(1).emit("vcs", "push", node(offGraph), { remote: "origin" });
+  journal.advance(1).emit("pipeline", "node-settled", node(offGraph), {
+    status: "failed",
+    detail: "replaced by a live edit",
+  });
+  journal
+    .advance(1)
+    .emit("vcs", "push", { ...node(unrecorded) }, { remote: "origin" });
+  for (let index = 0; index < LARGE_RUN_VIEWS.checks; index += 1) {
+    journal
+      .advance(1)
+      .emit("vcs", "change-check", node(LARGE_RUN_VIEWS.onlyChecks), {
+        name: `check ${index}`,
+        required: false,
+        status: "completed",
+        conclusion: "success",
+        state: "success",
+      });
+  }
+  journal.write();
+  // The unkeyed node's launch, with no history file behind it: a harness record
+  // with no recorded finish.
+  const store = join(root, "..", "oneharness-history");
+  mkdirSync(join(store, HARNESS_PROJECT), { recursive: true });
+  writePointerFile(dir, [
+    pointerLine(
+      store,
+      "worker-unkeyed-20260817T000100Z-3163902",
+      LARGE_RUN_VIEWS.historyId,
+      "claude-code",
+      stamp(
+        HISTORIC +
+          (LARGE_RUN_VIEWS.earliest + LARGE_RUN_VIEWS.checks + 30) * 1000,
+      ),
+      agentLabels(runId, "node", unkeyed, 1),
+    ),
+  ]);
+}
+
+/** What the large-run views corpus wrote, published beside it. */
+export function largeRunViewsFacts() {
+  return LARGE_RUN_VIEWS;
+}
+
 /** The recorded timeline and its stop-boundary recovery variants. */
 function buildRecordedTimelines(root) {
   const original = JSON.parse(

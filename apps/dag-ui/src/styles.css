@@ -3291,6 +3291,14 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   }
 }
 
+/* Where the pages ran out: said once, quietly, above the node's first row. */
+.history-start {
+  margin: 0 0 12px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  text-align: center;
+}
+
 .read-failed {
   display: grid;
   gap: 12px;

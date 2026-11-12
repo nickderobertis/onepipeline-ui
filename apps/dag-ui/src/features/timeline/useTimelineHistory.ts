@@ -30,9 +30,15 @@ export interface TimelineHistory {
   readonly unheld: readonly Interval[];
   /** Whether a page earlier than those held exists for `node`. */
   readonly canLoadEarlier: boolean;
+  /** Whether the pages have been read back to the node's first row. */
+  readonly readToStart: boolean;
   readonly loadingEarlier: boolean;
-  /** Read the next page back, by the page's own control or by scrolling. */
-  readonly loadEarlier: () => void;
+  /**
+   * Read the next page back, by the page's own control or by scrolling. `wide`
+   * asks for a wide page, for a read the view continues on its own because the
+   * page before it showed the reader nothing new.
+   */
+  readonly loadEarlier: (wide?: boolean) => void;
   /** Read one span whole: its fields and its rows, once. */
   readonly loadSpan: (spanId: string) => void;
   /** Read every row of a node's share of Overall; once. */
@@ -195,31 +201,37 @@ export function useTimelineHistory({
             span.events_total > span.events.length,
         );
 
-  const loadEarlier = useCallback(() => {
-    if (earlierFlight.current || scope !== "node" || nodeId === undefined)
-      return;
-    if (cursors.current.get(cursor) === null) return;
-    earlierFlight.current = true;
-    setLoadingEarlier(true);
-    const next = cursors.current.get(cursor) ?? undefined;
-    client
-      .getTimelineEvents(runId, {
-        scope,
-        node: nodeId,
-        ...(next === undefined ? {} : { cursor: next }),
-        ...(filter === undefined ? {} : { filter }),
-      })
-      .then((page) => {
-        take(page);
-        cursors.current.set(cursor, page.next_cursor);
-        bump();
-      })
-      .catch((caught: unknown) => failed(caught, loadEarlier))
-      .finally(() => {
-        earlierFlight.current = false;
-        setLoadingEarlier(false);
-      });
-  }, [bump, client, cursor, failed, filter, nodeId, runId, scope, take]);
+  const readToStart = scope === "node" && cursors.current.get(cursor) === null;
+
+  const loadEarlier = useCallback(
+    (wide?: boolean) => {
+      if (earlierFlight.current || scope !== "node" || nodeId === undefined)
+        return;
+      if (cursors.current.get(cursor) === null) return;
+      earlierFlight.current = true;
+      setLoadingEarlier(true);
+      const next = cursors.current.get(cursor) ?? undefined;
+      client
+        .getTimelineEvents(runId, {
+          scope,
+          node: nodeId,
+          ...(wide === true ? { limit: WIDE_PAGE } : {}),
+          ...(next === undefined ? {} : { cursor: next }),
+          ...(filter === undefined ? {} : { filter }),
+        })
+        .then((page) => {
+          take(page);
+          cursors.current.set(cursor, page.next_cursor);
+          bump();
+        })
+        .catch((caught: unknown) => failed(caught, () => loadEarlier(wide)))
+        .finally(() => {
+          earlierFlight.current = false;
+          setLoadingEarlier(false);
+        });
+    },
+    [bump, client, cursor, failed, filter, nodeId, runId, scope, take],
+  );
 
   const readAll = useCallback(
     async (
@@ -316,6 +328,7 @@ export function useTimelineHistory({
     ...(merged === undefined ? {} : { timeline: merged }),
     unheld,
     canLoadEarlier,
+    readToStart,
     loadingEarlier,
     loadEarlier,
     loadSpan,

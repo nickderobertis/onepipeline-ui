@@ -19,7 +19,7 @@ import {
   Timeline,
   useTimelineScrollSync,
 } from "@oneharness/ui";
-import type { RunTimeline } from "@onepipeline-ui/dag-model";
+import type { PlanTask, RunTimeline } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { TaskMarkdown } from "@onetaskgraph/ui";
 import {
@@ -44,8 +44,15 @@ import {
   awaitedReleases,
   isUnhealthy,
   type NodeView,
+  nodeKindWord,
   recordedReason,
 } from "../../lib/run-model";
+
+const HISTORY_START_TEXT = "No earlier history remains";
+
+const OFF_GRAPH_TASK =
+  "This node is not on the run's graph, so the plan holds no task for it.";
+
 import { StateBadge } from "../../lib/StateBadge";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration } from "../../lib/time";
@@ -163,7 +170,7 @@ export function NodeTimelineView({
           <StateBadge className="node-view-state" state={node.status} />
           <ControlBadge control={node.control} />
           <span className="node-view-meta">
-            {node.kind} node ·{" "}
+            {nodeKindWord(node)} node ·{" "}
             {runLoaded
               ? `${node.telemetry?.turns ?? 0} turns · ${node.telemetry?.lint ?? 0} lint turns`
               : `turns ${LOADING_TEXT}`}
@@ -201,7 +208,9 @@ export function NodeTimelineView({
         <TabsContent className="node-tab-panel" value="task">
           {/* The task is untrusted markdown: the shared package renders it
               safely, as every other place this app shows a task. */}
-          {runLoaded ? (
+          {node.task === undefined ? (
+            <p>{OFF_GRAPH_TASK}</p>
+          ) : runLoaded ? (
             <TaskMarkdown source={taskProse(node.task)} />
           ) : (
             <p className="loading-value">{LOADING_TEXT}</p>
@@ -225,11 +234,11 @@ export function NodeTimelineView({
               <dd>
                 {!runLoaded ? (
                   LOADING_TEXT
-                ) : (node.task.sets ?? []).length === 0 ? (
+                ) : (node.task?.sets ?? []).length === 0 ? (
                   "None"
                 ) : (
                   <ol aria-label="Graph overrides" className="sets-served">
-                    {node.task.sets?.map((entry, index) => (
+                    {node.task?.sets?.map((entry, index) => (
                       // biome-ignore lint/suspicious/noArrayIndexKey: an override's identity is its position in the ordered list.
                       <li key={index}>
                         <code>{entry}</code>
@@ -242,7 +251,9 @@ export function NodeTimelineView({
           </dl>
         </TabsContent>
         <TabsContent className="node-tab-panel" value="criteria">
-          {runLoaded ? (
+          {node.task === undefined ? (
+            <p>{OFF_GRAPH_TASK}</p>
+          ) : runLoaded ? (
             <TaskMarkdown source={acceptanceCriteria(node.task)} />
           ) : (
             <p className="loading-value">{LOADING_TEXT}</p>
@@ -253,7 +264,7 @@ export function NodeTimelineView({
             <div>
               <dt>Dependencies</dt>
               <dd>
-                {(node.task.deps ?? [])
+                {(node.task?.deps ?? [])
                   .map((dep) => {
                     const status = nodes.find(
                       (other) => other.id === dep,
@@ -610,8 +621,15 @@ function NodeExecution({
   // shown that new rows arrived directly above, not on the total growth.
   const placesBeforeLoad = useRef<Map<string, number> | undefined>(undefined);
   const { loadEarlier, loadSpan, loadStretch } = history;
+  // How many rows the reading showed when the reader asked for earlier ones. A
+  // page whose rows all join a collapsed run shows nothing new — the run still
+  // stands as its first row, one control and its last — so the read carries on
+  // until the reading gains a row or nothing earlier is left, rather than
+  // leaving a control that appears to do nothing.
+  const shownBeforeAsk = useRef<number | undefined>(undefined);
   const askEarlier = () => {
     placesBeforeLoad.current = transcriptPlaces(transcript.current);
+    shownBeforeAsk.current = entries.length;
     loadEarlier();
   };
   /** Near the transcript's top, a reader's move upward asks for the page before. */
@@ -643,6 +661,17 @@ function NodeExecution({
   // An address naming a row before the window is a person asking for it: read back
   // until it is held or there is nothing earlier.
   const { canLoadEarlier, loadingEarlier } = history;
+  const shownNow = entries.length;
+  useEffect(() => {
+    const before = shownBeforeAsk.current;
+    if (before === undefined || loadingEarlier) return;
+    if (shownNow > before || !canLoadEarlier || history.failure !== undefined) {
+      shownBeforeAsk.current = undefined;
+      return;
+    }
+    placesBeforeLoad.current = transcriptPlaces(transcript.current);
+    loadEarlier(true);
+  }, [shownNow, canLoadEarlier, loadingEarlier, loadEarlier, history.failure]);
   useEffect(() => {
     if (
       selectedItemId !== undefined &&
@@ -748,6 +777,11 @@ function NodeExecution({
         }}
         ref={transcriptRef}
       >
+        {history.readToStart && history.failure === undefined && (
+          <p className="history-start" role="status">
+            {HISTORY_START_TEXT}
+          </p>
+        )}
         {(history.canLoadEarlier || history.failure !== undefined) && (
           <LoadEarlier
             {...(history.failure === undefined
@@ -969,7 +1003,7 @@ const TranscriptItem = memo(function TranscriptItem({
  * is described once per step — so reading `task.task` alone left the tab blank for
  * exactly the nodes whose description is longest.
  */
-function taskProse(task: NodeView["task"]): string {
+function taskProse(task: PlanTask): string {
   if (task.task !== undefined) return task.task;
   const steps = task.steps ?? [];
   if (steps.length === 0) return "No task prose recorded.";
@@ -986,7 +1020,7 @@ function taskProse(task: NodeView["task"]): string {
  * given — so this shows the reader exactly the text the judge was handed, and says
  * so when the task names no bar at all.
  */
-function acceptanceCriteria(task: NodeView["task"]): string {
+function acceptanceCriteria(task: PlanTask): string {
   const prose = taskProse(task);
   // Any `##` heading whose words are "acceptance criteria", however it was cased
   // or spaced, up to the next heading of the same level or the end of the prose.
