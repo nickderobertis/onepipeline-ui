@@ -127,6 +127,18 @@ cargo_target="target/wheel-$target"
 mkdir -p -- "$out_abs" "$root/$cargo_target" \
   || fail "could not create $out_abs and $root/$cargo_target (mkdir's reason is above)" \
     "remove whatever file stands on either path, or make its parent writable by $(id -un)"
+# The image's Rust toolchain and the crates cargo downloads, kept for the next
+# build of this target in this checkout rather than fetched again in each fresh
+# container: test-linux builds the target three times, once compiling and twice
+# behind the wheel lock, and each fetched both (about a minute of each build's
+# setup). Mounted where the image's root keeps them, so every path the compiler
+# sees — and the source locations it writes into the binary — is the one a fresh
+# container uses. Under .tools, which no cache saves, and handed back with the
+# rest of the build's files.
+container_home=".tools/wheel-container-$target"
+mkdir -p -- "$root/$container_home/cargo" "$root/$container_home/rustup" \
+  || fail "could not create $root/$container_home, where the image's toolchain and crates are kept (mkdir's reason is above)" \
+    "remove whatever file stands on that path, or make $root/.tools writable by $(id -un)"
 
 # One build of a target at a time. `ci-test-linux` runs `wheel-smoke` beside the
 # release journeys, which build the same target through this script, and two
@@ -163,6 +175,11 @@ give_back() {
   if ! chown -R "$HOST_OWNER" "$CARGO_TARGET_DIR" "$OUT"; then
     echo "could not return $CARGO_TARGET_DIR and $OUT to $HOST_OWNER" >&2
     echo "ACTION: chown -R $HOST_OWNER them from a root container, as this build does, before building here again" >&2
+    [ "$status" -ne 0 ] || status=1
+  fi
+  if ! chown -R "$HOST_OWNER" "$HOME/.cargo" "$HOME/.rustup"; then
+    echo "could not return $HOME/.cargo and $HOME/.rustup, the checkout's .tools/wheel-container-$TARGET, to $HOST_OWNER" >&2
+    echo "ACTION: chown -R $HOST_OWNER .tools/wheel-container-$TARGET from a root container, or remove it, before building here again" >&2
     [ "$status" -ne 0 ] || status=1
   fi
   exit "$status"
@@ -205,6 +222,7 @@ SCRIPT
 
 docker run --rm --platform "$platform" \
   -v "$root":/io:ro -v "$root/$cargo_target":"/io/$cargo_target" -v "$out_abs":"/io/$out_rel" -w /io \
+  -v "$root/$container_home/cargo":/root/.cargo -v "$root/$container_home/rustup":/root/.rustup \
   -e TARGET="$target" -e OUT="$out_rel" -e CHANNEL="$channel" -e MATURIN_VERSION="$maturin_version" \
   -e RUSTUP_VERSION="$rustup_version" -e RUSTUP_SHA256="$rustup_sha256" \
   -e HOST_OWNER="$(id -u):$(id -g)" \

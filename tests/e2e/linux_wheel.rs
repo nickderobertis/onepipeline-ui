@@ -910,3 +910,56 @@ fn a_build_directory_that_cannot_be_created_is_named() {
     );
     assert!(!dir.join("docker.log").exists(), "docker was not run");
 }
+
+#[test]
+fn the_image_keeps_its_toolchain_and_crates_in_the_checkout_for_the_next_build() {
+    let (_scratch, dir) = scratch("container-home");
+    container_double(&dir, None);
+    let checkout = checkout_with_channel(&dir, &channel());
+    let checkout = checkout.canonicalize().expect("the scratch checkout resolves");
+    let output = script_in(&checkout, &dir);
+    assert!(output.status.success(), "the build succeeds");
+    let kept = checkout.join(".tools/wheel-container-x86_64-unknown-linux-gnu");
+    let invocation = fs::read_to_string(dir.join("docker.log")).expect("docker was run");
+    let args: Vec<&str> = invocation.lines().collect();
+    // Where the image's root keeps them, so the compiler sees the paths a fresh
+    // container gives it.
+    for (host, image) in [("cargo", "/root/.cargo"), ("rustup", "/root/.rustup")] {
+        let mount = format!("{}:{image}", kept.join(host).display());
+        assert!(
+            args.windows(2).any(|pair| pair == ["-v", &mount[..]]),
+            "docker mounts {mount}; it got {args:?}"
+        );
+        assert!(kept.join(host).is_dir(), "{host} is created before the container runs");
+    }
+    let home = dir.join("home");
+    let hand_back = format!(
+        "chown -R {} {} {}",
+        host_owner(),
+        home.join(".cargo").display(),
+        home.join(".rustup").display()
+    );
+    assert!(
+        container_calls(&dir).contains(&hand_back),
+        "the kept directories are handed back: `{hand_back}`; it ran {:?}",
+        container_calls(&dir)
+    );
+}
+
+#[test]
+fn a_toolchain_directory_that_cannot_be_created_is_named() {
+    let (_scratch, dir) = scratch("uncreatable-home");
+    docker_double(&dir, 0);
+    let checkout = checkout_with_channel(&dir, &channel());
+    fs::write(checkout.join(".tools"), "").expect("the obstructing file");
+    let output = script_in(&checkout, &dir);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("could not create")
+            && stderr.contains(".tools/wheel-container-x86_64-unknown-linux-gnu"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("ACTION: remove whatever file stands on that path"), "{stderr}");
+    assert!(!dir.join("docker.log").exists(), "docker was not run");
+}
