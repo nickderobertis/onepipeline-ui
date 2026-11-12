@@ -70,7 +70,7 @@
       "outputs": []
     },
     "prioritize": {
-      "//": "A no-op that gives `test` and the `bootstrap` it waits on a dependent each: Nx starts the ready task with the most direct dependents first, and this whole-workspace suite otherwise started only after the crate tiers (its bootstrap 22.6 minutes into a cold sweep on four cores), ending the job (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` reaches it, and names `bootstrap` too, for the broader tier.",
+      "//": "A no-op that gives `test` and the `bootstrap` it waits on a dependent each: Nx starts the ready task with the most direct dependents first, so this long whole-workspace suite starts with the tiers rather than after them (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` reaches it, and names `bootstrap` too, for the broader tier.",
       "executor": "nx:noop",
       "dependsOn": ["bootstrap", "test"]
     },
