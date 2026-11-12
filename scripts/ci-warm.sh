@@ -89,8 +89,10 @@ compile "just _crate-install-build" just _crate-install-build
 if [ "$os" = linux ]; then
   compile "just _crate-msrv" just _crate-msrv
   compile "just _crate-doc" just _crate-doc
+  # Through the script the tiers run under, so it compiles their units where they compile
+  # them: dependencies in the shared build directory, the workspace's apart.
   compile "just _tier-test-covered" \
-    cargo llvm-cov nextest --locked --no-report -E 'none()' --no-tests=pass
+    bash scripts/coverage-unit.sh --cargo -- nextest run --locked --no-run
   compile "nx dag-ui:build-api-server" bash scripts/nx.sh run dag-ui:build-api-server --skip-nx-cache
   compile "nx dag-ui-read-latency:compile-release-server" bash scripts/nx.sh run dag-ui-read-latency:compile-release-server --skip-nx-cache
   compile "test tests/e2e/linked_report.rs" \
