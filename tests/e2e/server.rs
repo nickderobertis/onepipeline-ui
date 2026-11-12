@@ -13559,7 +13559,7 @@ fn a_reply_reaches_the_engine_byte_for_byte_and_is_answered_in_its_words() {
 #[test]
 fn a_reply_through_the_route_is_journaled_as_the_users_and_a_body_claiming_the_managers_is_refused()
 {
-    let mut run_dir = PathBuf::new();
+    let mut run_dir = std::path::PathBuf::new();
     let serving = Serving::start(|root| {
         run_dir = fixture_run::write(root, fixture_run::RUN_ID);
     });
