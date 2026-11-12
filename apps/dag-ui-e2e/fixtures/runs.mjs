@@ -4257,7 +4257,7 @@ export function reviewLoopFacts() {
  *   with no `dispatch_id` at all, never a `null`.
  * - `LARGE_RUN_VIEWS.history` holds a long unbroken run of `change-check`
  *   records behind its latest window, so a page read back lands wholly inside one
- *   collapsed run; only its very first records are anything else.
+ *   collapsed run; only the records before that run are anything else.
  * - `LARGE_RUN_VIEWS.offGraph` recorded work under this run and is on no graph:
  *   the plan never named it, as a node a live edit replaced is named by none.
  */
@@ -4266,8 +4266,16 @@ export const LARGE_RUN_VIEWS = {
   history: "checks",
   unkeyed: "harness-outlived-its-dispatch-key",
   offGraph: "replaced-before-the-graph-settled",
-  /** The checks behind the history node's latest window: three pages and more. */
-  checks: 320,
+  /**
+   * The checks behind the history node's latest window: more than one wide page
+   * holds, so even a wide page read back lands wholly among them.
+   */
+  checks: 600,
+  /**
+   * The varied rows before the checks: more than the rest of the page that
+   * reaches past the checks, so the reading gains rows with history still left.
+   */
+  earliest: 400,
   /** The varied rows after them, fewer than the latest window holds. */
   tail: 20,
   historyId: "01a00d0f-c094-7660-b26c-8a53baaf9e00",
@@ -4292,8 +4300,15 @@ export function buildLargeRunViews(root) {
     ...node(history),
     persona: "worker",
   });
-  // The one record before the run of checks: what a reader paging back reaches.
-  journal.advance(1).emit("vcs", "fetch", node(history), { remote: "origin" });
+  // The records before the run of checks, alternating so none collapse: what a
+  // reader paging back reaches.
+  for (let index = 0; index < LARGE_RUN_VIEWS.earliest; index += 1) {
+    journal
+      .advance(1)
+      .emit("vcs", index % 2 === 0 ? "fetch" : "push", node(history), {
+        remote: "origin",
+      });
+  }
   for (let index = 0; index < LARGE_RUN_VIEWS.checks; index += 1) {
     journal.advance(1).emit("vcs", "change-check", node(history), {
       name: `check ${index}`,
@@ -4363,7 +4378,10 @@ export function buildLargeRunViews(root) {
       "worker-unkeyed-20260817T000100Z-3163902",
       LARGE_RUN_VIEWS.historyId,
       "claude-code",
-      stamp(HISTORIC + (LARGE_RUN_VIEWS.checks + 30) * 1000),
+      stamp(
+        HISTORIC +
+          (LARGE_RUN_VIEWS.earliest + LARGE_RUN_VIEWS.checks + 30) * 1000,
+      ),
       agentLabels(runId, "node", unkeyed, 1),
     ),
   ]);

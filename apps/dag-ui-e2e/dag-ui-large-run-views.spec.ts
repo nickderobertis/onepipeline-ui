@@ -70,18 +70,30 @@ function thrownBy(page: Page): string[] {
   return thrown;
 }
 
-test("loading earlier rows that all fall into a collapsed run still shows the reader more", async ({
-  page,
-}) => {
-  const thrown = thrownBy(page);
-  const pages: z.infer<typeof pageSchema>[] = [];
+/** One page of earlier rows as the page asked for and was answered it. */
+interface Asked {
+  readonly limit: string | null;
+  readonly rows: z.infer<typeof pageSchema>["rows"];
+}
+
+/**
+ * Open the history node, recording every page of earlier rows it is answered and
+ * the rows its first answer held, and return its transcript once it shows the
+ * run of checks collapsed at the top of its window.
+ */
+async function openHistory(page: Page) {
+  const pages: Asked[] = [];
   const windowed = new Set<string>();
   page.on("response", async (response) => {
-    const { pathname } = new URL(response.url());
-    if (pathname.endsWith("/timeline/events"))
-      pages.push(pageSchema.parse(await response.json()));
-    else if (
-      pathname === "/api/v2/subscriptions" &&
+    const url = new URL(response.url());
+    if (url.pathname.endsWith("/timeline/events")) {
+      if (!response.ok()) return;
+      pages.push({
+        limit: url.searchParams.get("limit"),
+        rows: pageSchema.parse(await response.json()).rows,
+      });
+    } else if (
+      url.pathname === "/api/v2/subscriptions" &&
       response.request().method() === "POST"
     ) {
       const { timeline } = firstAnswerSchema.parse(await response.json())
@@ -100,27 +112,82 @@ test("loading earlier rows that all fall into a collapsed run still shows the re
   await expect(
     transcript.getByRole("button", { name: /^Show \d+ more change-check/ }),
   ).toBeVisible();
+  return { pages, windowed, transcript, rows };
+}
+
+test("loading earlier rows that all fall into a collapsed run still shows the reader more", async ({
+  page,
+}) => {
+  const thrown = thrownBy(page);
+  const { pages, windowed, transcript, rows } = await openHistory(page);
+  const load = transcript.getByRole("button", { name: "Load earlier rows" });
   const shownBefore = await rows.count();
 
-  await transcript.getByRole("button", { name: "Load earlier rows" }).click();
+  await load.click();
 
   await expect.poll(() => rows.count()).toBeGreaterThan(shownBefore);
-  await expect(transcript.getByRole("status")).toHaveText(
-    "No earlier history remains",
-  );
-  // What the first page the click took brought beyond the window was nothing but
-  // checks — the shape that left the reading unchanged — and the read went on
-  // past it to the node's start.
+  // The first page the click took brought nothing beyond the window but checks —
+  // the shape that left the reading unchanged — so the read went on, one page
+  // more, and stopped there: the reading gained rows and earlier history is left.
   expect(windowed.size).toBeGreaterThan(0);
-  expect(pages.length).toBeGreaterThan(1);
   const brought = (pages[0]?.rows ?? []).filter((row) => !windowed.has(row.id));
   expect(brought.length).toBeGreaterThan(0);
   expect(new Set(brought.map((row) => row.kind))).toStrictEqual(
     new Set(["change-check"]),
   );
+  await expect(load).toBeEnabled();
+  expect(pages).toHaveLength(2);
+  await expect(transcript.getByRole("status")).toHaveCount(0);
+
+  // A reading that no longer opens on a collapsed run reads one ordinary page,
+  // here the last: the view then says nothing earlier remains.
+  const shownAfterFirst = await rows.count();
+  await load.click();
+  await expect(transcript.getByRole("status")).toHaveText(
+    "No earlier history remains",
+  );
+  expect(await rows.count()).toBeGreaterThan(shownAfterFirst);
+  expect(pages.at(-1)?.limit).toBeNull();
   await expect(
     transcript.getByRole("button", { name: /^Load(ing)? earlier rows/ }),
   ).toHaveCount(0);
+  expect(thrown).toStrictEqual([]);
+});
+
+test("a page the read went on to that fails says so, and Try again takes it", async ({
+  page,
+}) => {
+  const thrown = thrownBy(page);
+  const { pages, transcript, rows } = await openHistory(page);
+  // The second page of the click's read is refused once, by the server.
+  let asked = 0;
+  const retried: string[] = [];
+  await page.route("**/timeline/events?*", async (route) => {
+    asked += 1;
+    if (asked === 2) {
+      await route.fulfill({ status: 503, body: "unavailable" });
+      return;
+    }
+    if (asked > 2) retried.push(route.request().url());
+    await route.continue();
+  });
+  const shownBefore = await rows.count();
+
+  await transcript.getByRole("button", { name: "Load earlier rows" }).click();
+
+  const failed = transcript
+    .getByRole("alert")
+    .filter({ hasText: "Earlier rows did not load" });
+  await expect(failed).toBeVisible();
+  expect(await rows.count()).toBe(shownBefore);
+  await failed.getByRole("button", { name: "Try again" }).click();
+  await expect.poll(() => rows.count()).toBeGreaterThan(shownBefore);
+  await expect(failed).toHaveCount(0);
+  // The retry asked for the same wide page from the same place.
+  expect(retried).toHaveLength(1);
+  const retry = new URL(retried[0] ?? "");
+  expect(retry.searchParams.get("limit")).toBe(pages[0]?.limit);
+  expect(retry.searchParams.get("cursor")).not.toBeNull();
   expect(thrown).toStrictEqual([]);
 });
 

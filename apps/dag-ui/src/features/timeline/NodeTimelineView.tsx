@@ -629,10 +629,14 @@ function NodeExecution({
   // until the reading gains a row or nothing earlier is left, rather than
   // leaving a control that appears to do nothing.
   const shownBeforeAsk = useRef<number | undefined>(undefined);
+  // A reading that opens on a collapsed run will most likely fold the page before
+  // it into that run too, and a page costs the server about the same whatever its
+  // size: so that ask is a wide page at once, one request rather than two.
+  const opensCollapsed = useMemo(() => opensOnCollapsedRun(reading), [reading]);
   const askEarlier = () => {
     placesBeforeLoad.current = transcriptPlaces(transcript.current);
     shownBeforeAsk.current = entries.length;
-    loadEarlier();
+    loadEarlier(opensCollapsed);
   };
   /** Near the transcript's top, a reader's move upward asks for the page before. */
   const askEarlierIfOpen = () => {
@@ -868,6 +872,23 @@ function timeRange(
   const first = Math.min(...starts);
   const last = Math.max(...ends);
   return [first, last > first ? last : first + 1];
+}
+
+/**
+ * Whether the earliest record the reading shows is the first of a collapsed run:
+ * the spans bracketing it come before it, and the run's control right after.
+ */
+function opensOnCollapsedRun(reading: readonly TranscriptEntry[]): boolean {
+  const control = reading.findIndex((entry) => entry.entryKind === "collapse");
+  const entry = reading[control];
+  if (entry?.entryKind !== "collapse" || entry.expanded) return false;
+  return (
+    reading
+      .slice(0, control)
+      .filter(
+        (shown) => shown.entryKind === "row" && shown.row.rowKind === "event",
+      ).length <= 1
+  );
 }
 
 /** Within this many pixels of its top, the transcript reads earlier rows. */
