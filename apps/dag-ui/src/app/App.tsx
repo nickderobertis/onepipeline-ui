@@ -57,6 +57,7 @@ import {
   graphStateWord,
   launchLabel,
   nodeViews,
+  openedNode,
 } from "../lib/run-model";
 import { StructuredFields } from "../lib/StructuredFields";
 import { sidebarGroups } from "../lib/sidebar-model";
@@ -179,7 +180,7 @@ export function App({
       onDrawn?.();
     }
   }, [detail, telemetry.error, onDrawn]);
-  const selectedNode = nodes.find(({ id }) => id === selection.nodeId);
+  const selectedNode = openedNode(detail, nodes, selection.nodeId);
   useEffect(() => {
     if (runless || !rows) return;
     const groups = sidebarGroups(rows);

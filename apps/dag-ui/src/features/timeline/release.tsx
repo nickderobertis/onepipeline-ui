@@ -220,7 +220,7 @@ export function NodeRelease({ node }: { readonly node: NodeView }) {
   const release: NodeReleaseRecord | undefined =
     node.result?.release ?? undefined;
   if (release === undefined) return <>Not recorded</>;
-  const elsewhere = release.identity !== node.task.repo;
+  const elsewhere = release.identity !== node.task?.repo;
   return (
     <>
       {[

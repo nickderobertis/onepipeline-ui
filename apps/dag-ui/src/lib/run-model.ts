@@ -1,16 +1,17 @@
 import { DAG_NODE_STATES } from "@onepipeline-ui/dag-layout";
-import type {
-  AwaitedRelease,
-  Failure,
-  GraphResultItem,
-  LiveGraphState,
-  LiveNodeTelemetry,
-  LiveRunDetail,
-  NodeControl,
-  NodeDetail,
-  NodeStatus,
-  PlanTask,
-  RunLaunch,
+import {
+  type AwaitedRelease,
+  type Failure,
+  type GraphResultItem,
+  type LiveGraphState,
+  type LiveNodeTelemetry,
+  type LiveRunDetail,
+  type NodeControl,
+  type NodeDetail,
+  type NodeStatus,
+  nodeStatusSchema,
+  type PlanTask,
+  type RunLaunch,
 } from "@onepipeline-ui/dag-model";
 
 /** How a launching harness is named wherever this app names one. */
@@ -22,7 +23,18 @@ export interface NodeView {
   readonly kind: "agent" | "human" | "lifecycle";
   /** The authoritative `GraphState.node_status`, rendered without client-side defaults. */
   readonly status: NodeStatus;
-  readonly task: PlanTask;
+  /**
+   * The plan's task for this node. Absent only on a node that is not on the run's
+   * graph (`offGraph`): its records outlived the plan entry, and nothing else
+   * holds a task for it.
+   */
+  readonly task?: PlanTask;
+  /**
+   * A node the run recorded work for that its graph no longer holds — one a live
+   * edit replaced or removed. Opened by an address naming it, never drawn on the
+   * graph.
+   */
+  readonly offGraph?: true;
   readonly telemetry?: LiveNodeTelemetry;
   readonly result?: GraphResultItem;
   readonly detail?: NodeDetail;
@@ -120,6 +132,53 @@ export function nodeViews(detail: LiveRunDetail): NodeView[] {
       },
     ];
   });
+}
+
+/**
+ * The node an address names: the graph's own view of it, or — for a node the
+ * graph does not hold — a view of what the run recorded for it, so a link to a
+ * node a live edit replaced opens that node's timeline rather than the graph.
+ *
+ * `undefined` while the graph itself is not known, so a first answer that has
+ * not brought the plan yet does not call every node off the graph. Every field
+ * of an off-graph view is one the server served for that node — its status
+ * from the run's own per-node record, `unknown` where it recorded none — and
+ * none is filled in: it has no task, no dependencies and nothing it unblocks.
+ */
+export function openedNode(
+  detail: LiveRunDetail | undefined,
+  nodes: readonly NodeView[],
+  nodeId: string | undefined,
+): NodeView | undefined {
+  if (nodeId === undefined || detail === undefined) return undefined;
+  const graph = graphOf(detail);
+  if (graph === undefined) return undefined;
+  const onGraph = nodes.find(({ id }) => id === nodeId);
+  if (onGraph !== undefined) return onGraph;
+  if (graph.plan.tasks.some((task) => task.id === nodeId)) return undefined;
+  const telemetry = detail.run.nodes.find(({ node }) => node === nodeId);
+  const status = nodeStatusSchema.safeParse(telemetry?.status);
+  const result = graph.node_results[nodeId] ?? graph.result?.results?.[nodeId];
+  return {
+    id: nodeId,
+    label: nodeId,
+    // Not a kind the plan declared: the header names the node off the graph
+    // instead, and nothing else reads an off-graph node's kind.
+    kind: "agent",
+    offGraph: true,
+    status: status.success ? status.data : "unknown",
+    telemetry,
+    result,
+    detail: detail.node_details[nodeId],
+    failure: telemetry?.failure,
+    blockers: [],
+    dependents: [],
+  };
+}
+
+/** How a node's header names what it is: its plan kind, or that it is off the graph. */
+export function nodeKindWord(node: NodeView): string {
+  return node.offGraph === true ? "off-graph" : node.kind;
 }
 
 /**
