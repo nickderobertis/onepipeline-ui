@@ -18,6 +18,7 @@ import {
   useState,
 } from "react";
 import type { LiveHumanItems } from "../../lib/live-human-items";
+import { Timestamp } from "../../lib/Timestamp";
 import { HumanItemToast } from "./HumanItemToast";
 import type { Draft } from "./human-item-drafts";
 import {
@@ -31,6 +32,7 @@ import {
   GROUP_OPTIONS,
   type GroupBy,
   groupItems,
+  historyWords,
   isBlocking,
   KIND_CHOICES,
   kindLabel,
@@ -850,11 +852,23 @@ function DetailPane({
         )}
         <WriteStatus state={state} />
       </div>
+      {detail?.history !== undefined && detail.history.length > 0 && (
+        <History history={detail.history} />
+      )}
       <dl className="human-item-metadata">
-        {metadataFields(shown).map(({ label, value }) => (
-          <Fragment key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
+        {metadataFields(shown).map((field) => (
+          <Fragment key={field.label}>
+            <dt>{field.label}</dt>
+            <dd>
+              {"value" in field ? (
+                field.value
+              ) : (
+                <>
+                  {field.party !== undefined && `By ${field.party} · `}
+                  <Timestamp at={field.at} relative />
+                </>
+              )}
+            </dd>
           </Fragment>
         ))}
         {detail && detail.nodes.length > 0 && (
@@ -892,5 +906,35 @@ function DetailPane({
         )}
       </dl>
     </aside>
+  );
+}
+
+/**
+ * The engine's history of the item, as the detail route served it, oldest
+ * first: one row per entry, its action and party in the pane's own words and
+ * its moment as an age. Who made each ruling is context a reader reaches for,
+ * so it is plain text in the pane's one style, never a badge or a colour.
+ */
+function History({
+  history,
+}: {
+  readonly history: NonNullable<HumanItemDetail["history"]>;
+}) {
+  return (
+    <section aria-label="History" className="human-item-history">
+      <h3>History</h3>
+      <ol>
+        {history.map((entry, index) => (
+          // The engine's order is the entry's identity: two raises can share
+          // an instant, and nothing else tells them apart.
+          // biome-ignore lint/suspicious/noArrayIndexKey: the served list is append-only and oldest first, so an entry's position is stable.
+          <li key={index}>
+            {historyWords(entry)}
+            {" · "}
+            <Timestamp at={entry.at} relative />
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }

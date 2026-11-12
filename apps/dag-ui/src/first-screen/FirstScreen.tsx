@@ -37,8 +37,10 @@ import {
   awaitedLine,
   isUnhealthy,
   type NodeView,
+  nodeKindWord,
   nodeReason,
   nodeViews,
+  openedNode,
 } from "../lib/run-model";
 import { Timestamp } from "../lib/Timestamp";
 import { formatDuration, formatDurationSeconds } from "../lib/time";
@@ -145,7 +147,7 @@ function useFirstGraph(nodes: readonly NodeView[]) {
       ...(awaits.get(node.id) === undefined ? {} : { lines: 1 }),
     })),
     edges: nodes.flatMap((node) =>
-      (node.task.deps ?? [])
+      (node.task?.deps ?? [])
         .filter((dep) => drawn.has(dep))
         .map((dep) => ({
           id: `${dep}->${node.id}`,
@@ -529,7 +531,7 @@ function NodeTimeline({
             {node.status}
           </span>
           <span className="node-view-meta">
-            {node.kind} node · turns {LOADING_TEXT}
+            {nodeKindWord(node)} node · turns {LOADING_TEXT}
           </span>
         </div>
       </header>
@@ -738,7 +740,7 @@ export function FirstScreen({
 }) {
   const { detail, timeline } = answer.initial.snapshot.visible;
   const nodes = nodeViews(detail);
-  const opened = nodes.find((node) => node.id === address.nodeId);
+  const opened = openedNode(detail, nodes, address.nodeId);
   return (
     <Shell address={address} loading={detail.progress?.complete === false}>
       {address.kind === "overall" ? (

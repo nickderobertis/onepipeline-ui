@@ -58,6 +58,15 @@ const listedSchema = z.array(
     item: z.looseObject({ id: z.string().min(1), dedup_key: z.string() }),
   }),
 );
+/** A line of the journal, as far as moving its schema version back reads it. */
+const predatableSchema = z.looseObject({
+  payload: z.looseObject({
+    item_id: z.string().min(1),
+    schema_version: z.number().int(),
+    resolution: z.looseObject({ provenance: z.string().optional() }).nullish(),
+    by: z.looseObject({ provenance: z.string().optional() }).nullish(),
+  }),
+});
 /** A line of the journal, as far as restamping reads it. */
 const journalEventSchema = z.looseObject({
   ts: z.string(),
@@ -985,6 +994,188 @@ function buildLongTracker(workspace, token) {
   };
 }
 
+/**
+ * Write the events about each of `ids` as an engine of event schema version 1
+ * wrote them: the version that predates provenance, under which every event is
+ * the manager's. Only the version moves, and only on events that name no party
+ * already — which every manager's event of version 2 is — so what the page
+ * reads is the record a released engine left behind. The index is a fold of the
+ * old bytes, so it goes with them, as a restamp's does.
+ */
+// llmlint: ignore-block[tests_mirror_real_usage] the events are the real CLI's, read by the real server; only their schema version moves, back to the one the released engine wrote, because no engine of this release writes one and the page must still read every journal written before it.
+function predateProvenance(workspace, ids) {
+  const journal = join(paths(workspace).runs, "human-items", "events.ndjson");
+  const lines = readFileSync(journal, "utf8").trimEnd().split("\n");
+  const rewritten = lines.map((line) => {
+    const event = predatableSchema.parse(JSON.parse(line));
+    if (!ids.includes(event.payload.item_id)) return line;
+    const named = [event.payload.resolution, event.payload.by].some(
+      (party) => party?.provenance !== undefined,
+    );
+    if (named)
+      throw new Error(
+        `an event about ${event.payload.item_id} names a party, which no version 1 event does`,
+      );
+    event.payload.schema_version = 1;
+    return JSON.stringify(event);
+  });
+  writeFileSync(journal, `${rewritten.join("\n")}\n`);
+  rmSync(join(dirname(journal), "index.json"), { force: true });
+}
+// llmlint: ignore-end[tests_mirror_real_usage]
+
+/**
+ * Rulings each party made, for the page to say whose they were: items the
+ * manager's CLI raised and, with no `--as`, answered, completed or dismissed;
+ * two whose every event is of the version that predates provenance; and two
+ * left open for a journey to answer and complete through the page.
+ */
+function buildProvenance(workspace, token) {
+  const raised = (dedup, kind, title, body) =>
+    raise(workspace, token, SUPERVISOR_SESSION, {
+      dedup_key: dedup,
+      kind,
+      title,
+      body,
+      priority: "medium",
+      owner: owner(),
+      block: { scope: "nothing" },
+    });
+  const ids = {
+    answer: raised(
+      "provenance-answer",
+      "question",
+      "Which region should the canary run in?",
+      "The canary can run in eu-west or us-east; say which one the release train should use.",
+    ),
+    history: raised(
+      "provenance-history",
+      "task",
+      "File the flaky-runner report",
+      "Write up the flaky runner's last three failures and complete this task once it is filed.",
+    ),
+    legacy: raised(
+      "provenance-legacy",
+      "task",
+      "Rotate the staging certificate",
+      "Rotate the staging certificate before it expires and complete this task once it is live.",
+    ),
+    answered: raised(
+      "provenance-answered",
+      "question",
+      "Keep the legacy export format?",
+      "Some consumers still read the legacy export; say whether to keep writing it.",
+    ),
+    legacyAnswered: raised(
+      "provenance-legacy-answered",
+      "question",
+      "Should retries reuse the warm cache?",
+      "A retry could reuse the warm build cache or start cold; say which.",
+    ),
+    completed: raised(
+      "provenance-completed",
+      "task",
+      "Restore the build service",
+      "Bring the build service back and complete this task once builds pass again.",
+    ),
+    dismissed: raised(
+      "provenance-dismissed",
+      "task",
+      "Re-run the flaky screenshot job",
+      "Re-run the screenshot job that failed overnight and complete this task once it passes.",
+    ),
+  };
+  const manager = (args) => engine(workspace, token, args, SUPERVISOR_SESSION);
+  manager([
+    "human-items",
+    "answer",
+    ids.answered,
+    "--text",
+    "Keep it for one more release.",
+  ]);
+  manager(["human-items", "answer", ids.legacyAnswered, "--text", "Reuse it."]);
+  manager(["human-items", "complete", ids.completed]);
+  manager([
+    "human-items",
+    "dismiss",
+    ids.dismissed,
+    "--reason",
+    "Superseded by the nightly job.",
+  ]);
+  predateProvenance(workspace, [ids.legacy, ids.legacyAnswered]);
+  return { ids, runs: {}, plans: {} };
+}
+
+/**
+ * The rulings the gallery photographs, every one recorded by the CLI so its
+ * stamps move with the capture clock: a task the user completed and noted —
+ * `--as user` records what the page's routes record — that the manager then
+ * reopened and completed again with no `--as`, a question the user answered
+ * and one the manager answered — and one task still open, for the list to
+ * open on.
+ */
+function buildProvenanceGallery(workspace, token) {
+  const raised = (dedup, kind, title, body) =>
+    raise(workspace, token, SUPERVISOR_SESSION, {
+      dedup_key: dedup,
+      kind,
+      title,
+      body,
+      priority: "high",
+      owner: owner(),
+      block: { scope: "nothing" },
+    });
+  const ids = {
+    history: raised(
+      "gallery-history",
+      "task",
+      "File the flaky-runner report",
+      "Write up the flaky runner's last three failures and complete this task once the report is filed with the infrastructure team.",
+    ),
+    userAnswered: raised(
+      "gallery-user-answered",
+      "question",
+      "Which region should the canary run in?",
+      "The canary can run in eu-west or us-east; say which one the release train should use.",
+    ),
+    managerAnswered: raised(
+      "gallery-manager-answered",
+      "question",
+      "Keep the legacy export format?",
+      "Some consumers still read the legacy export; say whether to keep writing it.",
+    ),
+    open: raised(
+      "gallery-open",
+      "task",
+      "Rotate the staging certificate",
+      "Rotate the staging certificate before it expires and complete this task once it is live.",
+    ),
+  };
+  const as = (args, party) =>
+    engine(
+      workspace,
+      token,
+      party === undefined ? args : [...args, "--as", party],
+      SUPERVISOR_SESSION,
+    );
+  as(["human-items", "complete", ids.history], "user");
+  as(
+    ["human-items", "note", ids.history, "--text", "Filed as INFRA-212."],
+    "user",
+  );
+  as(["human-items", "reopen", ids.history]);
+  as(["human-items", "complete", ids.history]);
+  as(["human-items", "answer", ids.userAnswered, "--text", "eu-west"], "user");
+  as([
+    "human-items",
+    "answer",
+    ids.managerAnswered,
+    "--text",
+    "Keep it for one more release.",
+  ]);
+  return { ids, runs: {}, plans: {} };
+}
+
 const WORLDS = {
   sessions: { plans: {}, build: buildSessions },
   queue: { plans: QUEUE_PLANS, build: buildQueue },
@@ -1002,6 +1193,8 @@ const WORLDS = {
     build: buildLongTracker,
     createdPrefix: "VERY-LONG-TRACKER-REFERENCE-".repeat(3),
   },
+  provenance: { plans: {}, build: buildProvenance },
+  "provenance-gallery": { plans: {}, build: buildProvenanceGallery },
 };
 
 /**

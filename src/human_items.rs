@@ -23,6 +23,7 @@ use onepipeline::human_items::{
     HumanItemFilter, HumanItemInput, HumanItemReceipt, HumanItemRefusal, HumanItemState,
     HumanItemView, HumanItems as Engine, MAX_BATCH_ANSWERS,
 };
+use onepipeline::provenance::Provenance;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::SessionId;
@@ -162,8 +163,8 @@ impl HumanItems {
         let engine = self.engine()?;
         readable(&engine, id)?;
         // Over HTTP a write is a person's press in the browser, recorded so
-        // it reads apart from a manager's own CLI action; nobody is acted for
-        // (`docs/contract.md`, "Human items").
+        // it reads apart from a manager's own CLI action; nobody is acted for,
+        // and the words are the user's own (`docs/contract.md`, "Human items").
         let actor = actor(session);
         let id = id.as_str().to_owned();
         let action = match act {
@@ -173,28 +174,33 @@ impl HumanItems {
                 text,
                 actor,
                 on_behalf_of: None,
+                provenance: Provenance::User,
             },
             Act::Complete => HumanItemAction::Complete {
                 id,
                 actor,
                 on_behalf_of: None,
+                provenance: Provenance::User,
             },
             Act::Dismiss(reason) => HumanItemAction::Dismiss {
                 id,
                 reason,
                 actor,
                 on_behalf_of: None,
+                provenance: Provenance::User,
             },
             Act::Reopen => HumanItemAction::Reopen {
                 id,
                 actor,
                 on_behalf_of: None,
+                provenance: Provenance::User,
             },
             Act::Note(text) => HumanItemAction::Note {
                 id,
                 text,
                 actor,
                 on_behalf_of: None,
+                provenance: Provenance::User,
             },
         };
         engine.apply(action).map_err(refusal)
@@ -217,6 +223,7 @@ impl HumanItems {
                 Actor {
                     actor: actor(session),
                     on_behalf_of: None,
+                    provenance: Provenance::User,
                 },
             )
             .map_err(refusal)
