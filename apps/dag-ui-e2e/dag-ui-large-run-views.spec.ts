@@ -1,5 +1,5 @@
 import { runTimelineSchema } from "@onepipeline-ui/dag-model";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
 
@@ -62,6 +62,10 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await server.stop();
 });
+
+/** The value a facts list gives beside `term`. */
+const fact = (panel: Locator, term: string): Locator =>
+  panel.locator("dt", { hasText: new RegExp(`^${term}$`) }).locator("+ dd");
 
 /** Everything the page throws, from the first navigation on. */
 function thrownBy(page: Page): string[] {
@@ -159,15 +163,14 @@ test("a page the read went on to that fails says so, and Try again takes it", as
 }) => {
   const thrown = thrownBy(page);
   const { pages, transcript, rows } = await openHistory(page);
-  // The second page of the click's read is refused once, by the server.
+  // The second page of the click's read goes out to a server that has stopped:
+  // the request is held, never answered here, until the server is down, then
+  // sent on to it as it was asked.
   let asked = 0;
   const retried: string[] = [];
   await page.route("**/timeline/events?*", async (route) => {
     asked += 1;
-    if (asked === 2) {
-      await route.fulfill({ status: 503, body: "unavailable" });
-      return;
-    }
+    if (asked === 2) await server.stopServing();
     if (asked > 2) retried.push(route.request().url());
     await route.continue();
   });
@@ -180,6 +183,7 @@ test("a page the read went on to that fails says so, and Try again takes it", as
     .filter({ hasText: "Earlier rows did not load" });
   await expect(failed).toBeVisible();
   expect(await rows.count()).toBe(shownBefore);
+  await server.serveRebuilt();
   await failed.getByRole("button", { name: "Try again" }).click();
   await expect.poll(() => rows.count()).toBeGreaterThan(shownBefore);
   await expect(failed).toHaveCount(0);
@@ -253,6 +257,9 @@ test("a link to a node the run recorded but its graph does not hold opens that n
   });
   await expect(view).toBeVisible();
   await expect(view.getByText("off-graph node")).toBeVisible();
+  // No per-node record names its status, so it reads as unknown rather than as
+  // a word the server never said.
+  await expect(view.locator(".node-view-state")).toHaveText(/unknown/i);
   const transcript = view.getByRole("region", { name: "Node transcript" });
   await expect(transcript.getByRole("article").first()).toBeVisible();
   await expect(transcript).toContainText("push");
@@ -261,8 +268,17 @@ test("a link to a node the run recorded but its graph does not hold opens that n
     asked.some((url) => url.includes(encodeURIComponent(facts.offGraph))),
   ).toBe(true);
   // What the plan does not hold is said, not invented.
+  const panel = view.getByRole("tabpanel");
   await view.getByRole("tab", { name: "Task" }).click();
-  await expect(view).toContainText("not on the run's graph");
+  await expect(panel).toContainText("not on the run's graph");
+  await expect(fact(panel, "Graph overrides")).toHaveText("None");
+  await view.getByRole("tab", { name: "Acceptance criteria" }).click();
+  await expect(panel).toContainText("not on the run's graph");
+  await view.getByRole("tab", { name: "Dependencies" }).click();
+  await expect(fact(panel, "Dependencies")).toHaveText("None");
+  await expect(fact(panel, "Unblocks")).toHaveText("None");
+  await view.getByRole("tab", { name: "Remote" }).click();
+  await expect(fact(panel, "Release")).toHaveText("Not recorded");
   await expect(page.getByRole("article", { name: /: done$/ })).toHaveCount(0);
   expect(thrown).toStrictEqual([]);
 });
