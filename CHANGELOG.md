@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.81.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.80.2...v0.81.0) - 2026-11-12
+
+### Added
+
+- [**breaking**] record what a person submits in the browser as the user's and show who made each ruling ([#762](https://github.com/nickderobertis/onepipeline-ui/pull/762))
+
 ## [0.80.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.80.1...v0.80.2) - 2026-11-12
 
 ### Fixed
