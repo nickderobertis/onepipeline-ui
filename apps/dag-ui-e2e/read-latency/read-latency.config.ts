@@ -47,6 +47,7 @@ export default defineConfig({
       name: "journeys",
       testMatch: [
         "first-screen-marks.spec.ts",
+        "first-answer-fields.spec.ts",
         "wire-and-errors.spec.ts",
         "live-run.spec.ts",
         "reach-everything.spec.ts",
