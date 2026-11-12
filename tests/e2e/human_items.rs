@@ -1112,8 +1112,8 @@ fn every_action_through_the_route_resolves_once_and_reaches_only_its_owners_watc
         assert_eq!(stored["state"], state);
         assert_eq!(
             stored["resolution"],
-            json!({"actor": format!("browser:session:{owner}"), "on_behalf_of": null, "text": text, "reason": reason}),
-            "{verb} is a press in the browser through the acting session, on nobody's behalf"
+            json!({"actor": format!("browser:session:{owner}"), "on_behalf_of": null, "text": text, "reason": reason, "provenance": "user"}),
+            "{verb} is a press in the browser through the acting session, on nobody's behalf, in the user's words"
         );
         assert_eq!(serde_json::to_value(&receipt.item.item).unwrap(), stored);
         let kind = match verb {
@@ -1248,7 +1248,19 @@ fn every_action_through_the_cli_is_served_by_the_route_and_reaches_only_its_owne
         assert_eq!(detail["item"]["state"], state);
         assert_eq!(
             detail["item"]["resolution"],
-            json!({"actor": format!("session:{owner}"), "on_behalf_of": format!("user:{USER}"), "text": text, "reason": reason})
+            json!({"actor": format!("session:{owner}"), "on_behalf_of": format!("user:{USER}"), "text": text, "reason": reason}),
+            "a CLI resolution with no `--as` is the manager's, which writes no provenance key"
+        );
+        let history: Vec<(Value, Value)> = detail["history"]
+            .as_array()
+            .expect("the engine's history of the item")
+            .iter()
+            .map(|entry| (entry["action"].clone(), entry["provenance"].clone()))
+            .collect();
+        assert_eq!(
+            history.last(),
+            Some(&(json!(format!("human-item-{state}")), json!("manager"))),
+            "the route serves the CLI's resolution as the manager's: {history:?}"
         );
     }
     assert_eq!(delivered(&world.watch(owner)).len(), 4);
@@ -1798,7 +1810,7 @@ fn reopen_and_note_through_the_routes_are_a_browser_press_and_run_the_adapters_u
         let stored = world.stored(&task);
         assert_eq!(
             stored["resolution"],
-            json!({"actor": actor, "on_behalf_of": null, "text": "Done by hand.", "reason": null}),
+            json!({"actor": actor, "on_behalf_of": null, "text": "Done by hand.", "reason": null, "provenance": "user"}),
             "a note is the comment; who resolved it stays who resolved it"
         );
         error(
@@ -1842,7 +1854,8 @@ fn reopen_and_note_through_the_routes_are_a_browser_press_and_run_the_adapters_u
             );
             assert_eq!(
                 event["payload"].get("by").cloned(),
-                after_the_fact.then(|| json!({"actor": actor, "on_behalf_of": null})),
+                after_the_fact
+                    .then(|| json!({"actor": actor, "on_behalf_of": null, "provenance": "user"})),
                 "{event}"
             );
         }
@@ -1879,6 +1892,186 @@ fn reopen_and_note_through_the_routes_are_a_browser_press_and_run_the_adapters_u
             "human_item_not_found",
         );
     }
+}
+
+/// The provenance each journal event about `id` records, oldest first: the
+/// event's `by` on a reopen or a note, a resolution's on an answer, a
+/// completion or a dismissal, and no entry where neither is (a raise). An absent key is
+/// what the engine writes for the manager's words, so it reads as `manager`.
+fn recorded_provenance(world: &World, id: &str) -> Vec<(String, String)> {
+    std::fs::read_to_string(world.root.join(onepipeline::human_items::JOURNAL_PATH))
+        .expect("the journal")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("a journal line"))
+        .filter(|envelope| envelope["payload"]["item_id"] == id)
+        .filter_map(|envelope| {
+            let payload = &envelope["payload"];
+            let party = [&payload["by"], &payload["resolution"]]
+                .into_iter()
+                .find(|record| record.is_object())?;
+            Some((
+                payload["action"].as_str().expect("an action").to_owned(),
+                party["provenance"].as_str().unwrap_or("manager").to_owned(),
+            ))
+        })
+        .collect()
+}
+
+/// **Everything a person submits through the routes is the user's words.**
+/// Every action route — `answer`, the batch `answers`, `complete`, `dismiss`,
+/// `reopen` and `note` — reaches the engine with provenance `user`, which the
+/// engine writes on the item's event in `human-items/events.ndjson`. A body
+/// naming a `provenance` of its own, whichever party it claims, is refused
+/// `422 invalid_request` with the journal left byte for byte as it was: the
+/// party is the server's to state, as the actor is.
+#[test]
+fn every_action_through_the_routes_is_recorded_as_the_users_and_no_body_can_say_otherwise() {
+    let world = World::new();
+    let owner = "manager-provenance";
+    let raise = |dedup: &str, kind: &str| {
+        world.raise(
+            owner,
+            &input(owner, dedup, kind, "low", json!({"scope": "nothing"})),
+        )
+    };
+    let answered = raise("answered", "question");
+    let batched = raise("batched", "question");
+    let completed = raise("completed", "task");
+    let dismissed = raise("dismissed", "task");
+    let server = world.serve(Some(owner));
+    let post = |path: &str, body: &str| http::post(server.address, path, body);
+    let journal = || {
+        std::fs::read_to_string(world.root.join(onepipeline::human_items::JOURNAL_PATH))
+            .expect("the journal")
+    };
+
+    // Refused first, on every route and for either party, with nothing written.
+    let before = journal();
+    for party in ["manager", "user"] {
+        for (path, body) in [
+            (
+                format!("/api/human-items/{answered}/answer"),
+                json!({"text": "eu-west", "provenance": party}),
+            ),
+            (
+                "/api/human-items/answers".to_owned(),
+                json!({"answers": [{"id": batched, "text": "eu-west"}], "provenance": party}),
+            ),
+            (
+                "/api/human-items/answers".to_owned(),
+                json!({"answers": [{"id": batched, "text": "eu-west", "provenance": party}]}),
+            ),
+            (
+                format!("/api/human-items/{completed}/complete"),
+                json!({"provenance": party}),
+            ),
+            (
+                format!("/api/human-items/{dismissed}/dismiss"),
+                json!({"reason": "Superseded", "provenance": party}),
+            ),
+            (
+                format!("/api/human-items/{completed}/reopen"),
+                json!({"provenance": party}),
+            ),
+            (
+                format!("/api/human-items/{completed}/note"),
+                json!({"text": "Done by hand.", "provenance": party}),
+            ),
+        ] {
+            let message = error(&post(&path, &body.to_string()), 422, "invalid_request");
+            assert!(
+                message.contains("provenance"),
+                "{path} names the field it refused: {message}"
+            );
+        }
+    }
+    assert_eq!(journal(), before, "a refused body records nothing");
+
+    // Then each action through its route, recorded as the user's.
+    for (path, body) in [
+        (
+            format!("/api/human-items/{answered}/answer"),
+            json!({"text": "eu-west"}),
+        ),
+        (
+            "/api/human-items/answers".to_owned(),
+            json!({"answers": [{"id": batched, "text": "us-east"}]}),
+        ),
+        (format!("/api/human-items/{completed}/complete"), json!({})),
+        (
+            format!("/api/human-items/{dismissed}/dismiss"),
+            json!({"reason": "Superseded"}),
+        ),
+        (
+            format!("/api/human-items/{dismissed}/note"),
+            json!({"text": "Replaced by the new export."}),
+        ),
+        (format!("/api/human-items/{completed}/reopen"), json!({})),
+    ] {
+        let response = post(&path, &body.to_string());
+        assert_eq!(response.status, 200, "{path}: {}", response.body);
+    }
+    let user = |action: &str| (format!("human-item-{action}"), "user".to_owned());
+    assert_eq!(recorded_provenance(&world, &answered), [user("answered")]);
+    assert_eq!(recorded_provenance(&world, &batched), [user("answered")]);
+    assert_eq!(
+        recorded_provenance(&world, &completed),
+        [user("completed"), user("reopened")]
+    );
+    assert_eq!(
+        recorded_provenance(&world, &dismissed),
+        [user("dismissed"), user("noted")]
+    );
+    // The engine's own history, as the detail route serves it, says the same.
+    let history = http::get(server.address, &format!("/api/human-items/{completed}")).json()
+        ["history"]
+        .clone();
+    let parties: Vec<(Value, Value, Value)> = history
+        .as_array()
+        .expect("the history")
+        .iter()
+        .map(|entry| {
+            (
+                entry["action"].clone(),
+                entry["actor"].clone(),
+                entry["provenance"].clone(),
+            )
+        })
+        .collect();
+    // A raise is its asker's own, read as the manager's; the engine records a
+    // task's projection to its tracker as a raise of its own, so how many
+    // raises lead the history is the engine's to say.
+    let raises = parties
+        .iter()
+        .take_while(|(action, _, _)| action == "human-item-raised")
+        .count();
+    assert!(raises > 0, "the history opens with the raise: {parties:?}");
+    for raise in &parties[..raises] {
+        assert_eq!(
+            raise,
+            &(
+                json!("human-item-raised"),
+                json!(format!("session:{owner}")),
+                json!("manager")
+            )
+        );
+    }
+    assert_eq!(
+        parties[raises..],
+        [
+            (
+                json!("human-item-completed"),
+                json!(format!("browser:session:{owner}")),
+                json!("user")
+            ),
+            (
+                json!("human-item-reopened"),
+                json!(format!("browser:session:{owner}")),
+                json!("user")
+            ),
+        ],
+        "the detail serves the engine's history, oldest first"
+    );
 }
 
 /// A person's press in the browser and a manager's own CLI action over the

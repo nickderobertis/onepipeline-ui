@@ -78,5 +78,21 @@
   "reopen": {
     "available": false,
     "reason": "the item is open, so there is nothing to reopen"
-  }
+  },
+  "history": [
+    {
+      "action": "human-item-raised",
+      "at": "2026-11-12T12:52:12.548Z",
+      "actor": "session:claude-code-supervising-session",
+      "on_behalf_of": null,
+      "provenance": "manager"
+    },
+    {
+      "action": "human-item-raised",
+      "at": "2026-11-12T12:52:12.608Z",
+      "actor": "session:claude-code-supervising-session",
+      "on_behalf_of": null,
+      "provenance": "manager"
+    }
+  ]
 }

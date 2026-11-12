@@ -13743,6 +13743,7 @@ fn a_correlated_verdict_on_a_settled_run_reaches_its_listener_and_requests_no_co
                 abandoned: false,
                 asker: None,
                 correlation: None,
+                declined_ruling: None,
             },
             AskOptions {
                 blocking: false,

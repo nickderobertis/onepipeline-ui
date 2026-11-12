@@ -47,6 +47,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use onepipeline::agents::{AgentScope, Agents};
+use onepipeline::provenance::Provenance;
 use onepipeline::verbs;
 use onepipeline::views::{Listing, RunPaths, RunSummary, RunView, Skipped};
 use serde_json::{json, Value};
@@ -888,9 +889,16 @@ impl RunApi for RunStore {
     ) -> Result<Envelope<Value>, ApiError> {
         let paths = self.present(run)?;
         // The body, byte for byte: the engine parses it, validates it and rules
-        // on its author, and this crate reads nothing out of it first.
-        let receipt = verbs::reply(&paths, correlation.map(Correlation::inner), envelope)
-            .map_err(|error| Self::refused(run, error))?;
+        // on its author, and this crate reads nothing out of it first. A reply
+        // from the browser is a person's, so the engine records it as the
+        // user's words and refuses a body that states the manager's.
+        let receipt = verbs::reply_as(
+            &paths,
+            correlation.map(Correlation::inner),
+            envelope,
+            Provenance::User,
+        )
+        .map_err(|error| Self::refused(run, error))?;
         Ok(Self::envelope(payload::receipt(run, &receipt)))
     }
 
