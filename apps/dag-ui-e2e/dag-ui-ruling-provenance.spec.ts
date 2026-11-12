@@ -53,6 +53,8 @@ const QUEUED_MANAGER_NOTE = "Hold the release until the docs land.";
 const USER_REPLY = "Carry on with the narrower diff.";
 const MANAGER_REPLY = "Carry on; the manager agrees.";
 const UNRELATED = "Lunch is at noon in the large room.";
+const AMENDMENT = "Keep the diff to src/export.rs.";
+const AMENDMENT_REASON = "The fix has to touch src/schema.rs as well.";
 
 const factsSchema = z.object({
   runs: z.object({ busy: z.string().min(1), history: z.string().min(1) }),
@@ -117,6 +119,7 @@ function managerReply(served: FixtureServer, run: string, envelope: unknown) {
  * an envelope waits on the durable queue for that driver's reconciler.
  */
 function heldElsewhere(served: FixtureServer, run: string): void {
+  // llmlint: ignore[tests_mirror_real_usage] this is the record a driver on another host leaves, and the only state in which an envelope stays queued: a real driver here claims and applies every envelope within moments (the held-turn journey shows it applied), so the queued envelopes this journey must show a party on exist only behind a holder this host cannot reach. The engine and the read API reading it are both the real ones.
   writeFileSync(
     join(served.workspace, "runs", run, "owner.lock"),
     JSON.stringify({
@@ -192,6 +195,16 @@ test("the channel names each reply's and envelope's party once, plainly, and rea
     served,
     ["decline-ruling", run, "--ruling", `c${noted}.0`],
     DECLINE_REASON,
+  );
+  // And an amendment to its bar, declined in turn: a ruling of another kind.
+  const amended = managerReply(served, run, {
+    version: 4,
+    commands: [{ op: "amend", id: NODE, text: AMENDMENT }],
+  });
+  cli(
+    served,
+    ["decline-ruling", run, "--ruling", `c${amended}.0`],
+    AMENDMENT_REASON,
   );
 
   // Then a driver elsewhere holds the run, so every envelope after this waits
@@ -325,9 +338,11 @@ test("the channel names each reply's and envelope's party once, plainly, and rea
     .filter({ hasText: BLOCKING_FINDING });
   await expect(badges(blocking)).toHaveText(["finding", "blocking"]);
   await expect(blocking).toContainText(`node ${NODE}`);
-  const declined = surfaces
+  const declinedCards = surfaces
     .getByRole("listitem")
     .filter({ has: page.getByRole("region", { name: "Declined ruling" }) });
+  await expect(declinedCards).toHaveCount(2);
+  const declined = declinedCards.filter({ hasText: MANAGER_NOTE });
   await expect(badges(declined)).toHaveText(["declined-ruling"]);
   await expect(surfaces).not.toContainText("non-blocking");
 
@@ -338,8 +353,16 @@ test("the channel names each reply's and envelope's party once, plainly, and rea
     `${sentence}${MANAGER_NOTE}Reason: ${DECLINE_REASON}`,
   );
   await expect(ruling.getByRole("blockquote")).toHaveText(MANAGER_NOTE);
+  // The amendment names its own kind, from its own record.
+  const amendment = declinedCards.filter({ hasText: AMENDMENT });
+  await expect(badges(amendment)).toHaveText(["declined-ruling"]);
+  await expect(
+    amendment.getByRole("region", { name: "Declined ruling" }),
+  ).toHaveText(
+    `The proposal on ${NODE} declined the manager's amendment from reply ${amended}${AMENDMENT}Reason: ${AMENDMENT_REASON}`,
+  );
   const [surface] = (await channelOf(page, served, run)).surfaces.filter(
-    ({ kind }) => kind === "declined-ruling",
+    ({ declined_ruling }) => declined_ruling?.kind === "note",
   );
   expect(surface?.declined_ruling).toEqual({
     node: NODE,
@@ -408,6 +431,7 @@ test("a declined ruling's card is its record: rewriting the surface's message on
       : line;
   });
   expect(rewritten).not.toEqual(lines);
+  // llmlint: ignore[tests_mirror_real_usage] the acceptance criterion this journey answers asks for exactly this: only the surface record's `message`, rewritten on disk where the engine keeps it, with its typed record left as the engine wrote it, to prove the card reads nothing from the message. No public interface writes a message apart from its record.
   writeFileSync(store, `${rewritten.join("\n")}\n`);
   const [served_] = (await channelOf(page, served, run)).surfaces.filter(
     ({ kind }) => kind === "declined-ruling",

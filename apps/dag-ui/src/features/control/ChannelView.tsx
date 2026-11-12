@@ -401,6 +401,7 @@ function DeclinedRulingMessage({
   readonly ruling: DeclinedRuling;
   readonly source: string;
 }) {
+  // llmlint: ignore[changed_behavior_has_e2e] no record a real engine writes takes the "your" branch: `verbs::decline_ruling` refuses a user's ruling, which binds and cannot be declined, and every write of a surface holds its record to that, so no journey can raise one. The branch keeps the party read from the record rather than assumed, per the contract.
   const whose = ruling.provenance === "user" ? "your" : "the manager's";
   return (
     <section aria-label="Declined ruling" className="declined-ruling">
