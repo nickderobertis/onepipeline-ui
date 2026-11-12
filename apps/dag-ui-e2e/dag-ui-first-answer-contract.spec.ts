@@ -140,7 +140,11 @@ async function opened(page: Page) {
   return held;
 }
 
+/** How many pages take the alterations at once: each is one load of its own. */
+const LANES = 4;
+
 test("an answer missing or mistyping any field the first screen draws shows its contract failure, and no first screen", async ({
+  context,
   page,
 }) => {
   test.setTimeout(600_000);
@@ -210,19 +214,37 @@ test("an answer missing or mistyping any field the first screen draws shows its 
   );
   expect(names).toContain("answer.initial.snapshot.visible.detail.run.state");
 
-  const alert = page
-    .getByRole("alert")
-    .filter({ hasText: "This run's history did not load" });
-  for (const { view, name, answer, pass } of passes) {
-    held.alter = () => answer;
-    await page.goto(addresses[view] as string);
-    await expect(
-      alert,
-      `${view}'s answer with ${name} ${pass} shows the contract failure`,
-    ).toContainText(`The first answer failed contract validation: ${name} `);
-    expect(
-      await page.evaluate(() => window.__firstScreenDrawn),
-      `no first screen is drawn from ${view}'s answer with ${name} ${pass}`,
-    ).toBe(false);
-  }
+  // Each lane a page of its own, taking every LANES-th alteration in turn.
+  const lanes = [
+    { page, held },
+    ...(await Promise.all(
+      Array.from({ length: LANES - 1 }, async () => {
+        const lane = await context.newPage();
+        return { page: lane, held: await opened(lane) };
+      }),
+    )),
+  ];
+  await Promise.all(
+    lanes.map(async (lane, at) => {
+      const alert = lane.page
+        .getByRole("alert")
+        .filter({ hasText: "This run's history did not load" });
+      for (const { view, name, answer, pass } of passes.filter(
+        (_, index) => index % LANES === at,
+      )) {
+        lane.held.alter = () => answer;
+        await lane.page.goto(addresses[view] as string);
+        await expect(
+          alert,
+          `${view}'s answer with ${name} ${pass} shows the contract failure`,
+        ).toContainText(
+          `The first answer failed contract validation: ${name} `,
+        );
+        expect(
+          await lane.page.evaluate(() => window.__firstScreenDrawn),
+          `no first screen is drawn from ${view}'s answer with ${name} ${pass}`,
+        ).toBe(false);
+      }
+    }),
+  );
 });
