@@ -123,17 +123,26 @@ impl Indexed {
         indexed
     }
 
-    /// Index a view over a selective read's records, each at the place the
-    /// whole store gives it.
-    pub(crate) fn selective(
+    /// Index a view over a heads read's records, every record of the store, each
+    /// at the place the engine's merged store gives it: `places` parallel to the
+    /// view's events, of a store `store_len` long whose highest `seq` is `last_seq`.
+    pub(crate) fn headed(
         view: &RunView,
-        selected: onepipeline::journal::SelectedRecords,
+        places: Vec<Option<usize>>,
+        store_len: usize,
+        last_seq: u64,
     ) -> Self {
         let mut indexed = Self::of(view);
-        indexed.canonical = selected.places;
-        indexed.canonical_len = selected.store_len;
-        indexed.last_seq = selected.last_seq;
+        indexed.canonical = places;
+        indexed.canonical_len = store_len;
+        indexed.last_seq = last_seq;
         indexed
+    }
+
+    /// Whether the record at `index` of the view holds a place in the canonical
+    /// store, rather than repeating one already in it.
+    pub(crate) fn placed(&self, index: usize) -> bool {
+        self.canonical.get(index).is_some_and(Option::is_some)
     }
 
     /// Hold `node`'s whole share, read apart from a selective view that holds
@@ -484,11 +493,16 @@ impl LiveTimeline {
                 span
             }));
         }
-        let mut payload = json!({
-            "timeline_schema_version": crate::contract::TIMELINE_SCHEMA_VERSION,
-            "run_id": view.paths.run,
-            "spans": spans,
-        });
+        // The spans moved in rather than interpolated, which would serialize a
+        // copy of every one.
+        let mut payload = Value::Object(Map::from_iter([
+            (
+                "timeline_schema_version".to_owned(),
+                Value::from(crate::contract::TIMELINE_SCHEMA_VERSION),
+            ),
+            ("run_id".to_owned(), Value::from(view.paths.run.as_str())),
+            ("spans".to_owned(), Value::Array(spans)),
+        ]));
         let owned = payload["spans"].as_array().map_or(0, Vec::len);
         payload = self.harnessed(view, indexed, payload, agents);
         self.harness = payload["spans"].as_array().map_or(0, Vec::len) - owned;

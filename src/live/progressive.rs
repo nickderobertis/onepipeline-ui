@@ -630,6 +630,8 @@ impl Hub {
         } = read;
         run.view = view;
         run.indexed = indexed;
+        // The heads go with the reading they headed.
+        run.headed = None;
         run.declared = declared;
         run.agents = agents;
         run.agents_stamp = agents_stamp;

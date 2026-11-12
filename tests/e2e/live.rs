@@ -69,13 +69,27 @@ impl Live {
         self.serving.run_dir(run).join("events.jsonl")
     }
 
-    /// Every refresh the server traced, in order.
-    fn refreshes(&self) -> Vec<Value> {
+    /// Every line the server traced, in order.
+    fn traced(&self) -> Vec<Value> {
         fs::read_to_string(&self.trace)
             .unwrap_or_default()
             .lines()
             .filter_map(|line| serde_json::from_str(line).ok())
             .collect()
+    }
+
+    /// Every refresh the server traced, in order.
+    fn refreshes(&self) -> Vec<Value> {
+        let mut lines = self.traced();
+        lines.retain(|line| line.get("refresh").is_some());
+        lines
+    }
+
+    /// Every subscription's first answer the server traced, in order.
+    fn first_answers(&self) -> Vec<Value> {
+        let mut lines = self.traced();
+        lines.retain(|line| line.get("subscribe").is_some());
+        lines
     }
 
     /// Wait until the server traced a refresh of `run` after the `seen`th
@@ -3388,5 +3402,223 @@ fn a_fold_past_its_overdue_point_draws_as_loading_until_it_lands() {
     assert_eq!(
         tab.state["visible"]["detail"]["progress"]["loading"],
         json!([])
+    );
+}
+
+/// The kinds whose payload no first screen reads outside a node's window, as the
+/// test states them apart from the server: a long run's first answer fetches every
+/// other record whole, every record carrying evidence, and a node's latest rows.
+const HEADED_KINDS: [&str; 5] = [
+    "member-heartbeat",
+    "turn-activity",
+    "turn-message",
+    "turn-started",
+    "turn-completed",
+];
+
+/// A node's window, as `docs/contract.md` states it.
+const NODE_WINDOW: usize = onepipeline_ui::contract::NODE_WINDOW_EVENTS;
+
+/// A first answer's members with the instant each part was read left out, which no
+/// two reads share.
+fn first_screen_of(subscribed: &Value) -> Value {
+    let mut visible = subscribed["initial"]["snapshot"]["visible"].clone();
+    for part in ["detail", "timeline"] {
+        if let Some(object) = visible.get_mut(part).and_then(Value::as_object_mut) {
+            object.remove("observed_at");
+        }
+    }
+    visible
+}
+
+/// A stamp `offset_ms` after 13:00 on the fixture's day, in the writers' form.
+fn generated_stamp(offset_ms: u64) -> String {
+    let (seconds, ms) = (offset_ms / 1000, offset_ms % 1000);
+    format!(
+        "2026-08-07T{:02}:{:02}:{:02}.{ms:03}Z",
+        13 + seconds / 3600,
+        seconds / 60 % 60,
+        seconds % 60
+    )
+}
+
+/// The fixture run, grown past the length a first answer reads whole by records of
+/// the kinds a first screen reads only the heads of, each with a payload no other
+/// record carries: turns, their messages, tool calls and closes, and heartbeats, on
+/// three streams of their own, most of them the fixture node's and the rest its
+/// reviewer's, a few carrying evidence. Deterministic, so two roots written by it hold
+/// the same journal byte for byte.
+fn distinct_long_run(root: &Path, run: &str) {
+    let dir = fixture_run::write(root, run);
+    let journal = dir.join("events.jsonl");
+    let worker = json!({
+        "run_id": run, "node": fixture_run::NODE_ID, "member": "worker",
+        "persona": "worker", "session": fixture_run::CONVERSATION_ID,
+    });
+    let reviewer = json!({
+        "run_id": run, "node": fixture_run::REVIEW_NODE_ID, "member": "judge",
+        "persona": "judge", "session": fixture_run::REVIEW_CONVERSATION_ID,
+    });
+    let mut seqs = [0_u64; 3];
+    let mut lines = Vec::new();
+    for index in 0..1400_u64 {
+        let at = generated_stamp(index * 250);
+        let lane = usize::try_from(index % 3).expect("a lane");
+        seqs[lane] += 1;
+        let kind = HEADED_KINDS[usize::try_from(index % 5).expect("a kind")];
+        let words = format!("{kind} {index}: {}", "distinct words ".repeat(50));
+        let turn = index / 5 + 2;
+        let payload = match kind {
+            "turn-started" => json!({
+                "turn": turn, "role": "worker", "instruction": words, "started_at": at,
+            }),
+            "turn-message" => json!({ "turn": turn, "role": "worker", "text": words }),
+            "turn-activity" => json!({
+                "kind": "tool_call", "name": "Bash", "detail": words, "index": index,
+            }),
+            "turn-completed" => json!({
+                "turn": turn, "role": "worker",
+                "usage": { "input_tokens": index, "output_tokens": index + 1 },
+                "started_at": at, "finished_at": at,
+            }),
+            _ => json!({ "beat": index, "note": words }),
+        };
+        let artifacts = if index % 400 == 101 {
+            json!([{ "id": format!("artifact-generated-{index}"), "kind": "report", "bytes": 10 }])
+        } else {
+            json!([])
+        };
+        let stream = ["generated-a", "generated-b", "generated-c"][lane];
+        let labels = if index % 7 == 6 {
+            reviewer.clone()
+        } else {
+            worker.clone()
+        };
+        lines.push(
+            json!({
+                "v": 1,
+                "ts": at,
+                "stream": stream,
+                "seq": seqs[lane],
+                "source": "agentgraph",
+                "kind": kind,
+                "labels": labels,
+                "payload": payload,
+                "artifacts": artifacts,
+            })
+            .to_string(),
+        );
+    }
+    let mut text = fs::read_to_string(&journal).expect("a journal");
+    for line in &lines {
+        text.push_str(line);
+        text.push('\n');
+    }
+    fs::write(&journal, text).expect("the journal");
+    live_journal::receipt_for(&journal);
+}
+
+/// A long run's first answers, Graph's, Overall's and a node's, fetch whole only the
+/// records this crate decides a first screen reads, and are the first answers the
+/// same server gives when it reads the journal whole first: no value a first screen
+/// draws is read from a record it did not fetch.
+#[test]
+fn a_long_runs_first_answers_fetch_only_what_a_first_screen_reads_and_are_the_whole_reads() {
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::NODE_ID;
+    // The complete read holds off for the journey's length, so all three views are
+    // answered from the one first reading.
+    let hold = (onepipeline_ui::live::COMPLETE_READ_HOLD_ENV, "120000");
+    let whole_read = u64::MAX.to_string();
+    let headed = Live::start_with(|root| distinct_long_run(root, run), &[hold]);
+    let whole = Live::start_with(
+        |root| distinct_long_run(root, run),
+        &[hold, (onepipeline_ui::live::WHOLE_READ_ENV, &whole_read)],
+    );
+    let journal = headed.journal(run);
+    assert!(
+        fs::metadata(&journal).expect("a journal").len() > onepipeline_ui::live::WHOLE_READ_BYTES,
+        "a journal past a whole read"
+    );
+    let records: Vec<Value> = fs::read_to_string(&journal)
+        .expect("a journal")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a record"))
+        .collect();
+    let headed_only = |record: &Value| {
+        HEADED_KINDS.contains(&record["kind"].as_str().expect("a kind"))
+            && record["artifacts"].as_array().is_none_or(Vec::is_empty)
+    };
+    let read_whole = records.iter().filter(|record| !headed_only(record)).count();
+    // The node's latest rows are the generator's last records of it, each later
+    // than every record before it.
+    let window: Vec<&Value> = records
+        .iter()
+        .filter(|record| record["labels"]["node"] == node)
+        .rev()
+        .take(NODE_WINDOW)
+        .collect();
+    assert!(
+        window.iter().all(|record| record["stream"]
+            .as_str()
+            .is_some_and(|stream| stream.starts_with("generated-"))),
+        "the node's window is generated records"
+    );
+    let window_fetched = window.iter().filter(|record| headed_only(record)).count();
+    assert!(read_whole > 0 && window_fetched > 0);
+    assert!(
+        records.iter().filter(|record| headed_only(record)).count() > window_fetched,
+        "records a first screen reads only the heads of"
+    );
+
+    let views = [
+        (
+            "Graph",
+            json!({ "type": "detail", "run_id": run }),
+            Some(read_whole),
+        ),
+        (
+            "Overall",
+            json!({ "type": "timeline", "run_id": run, "scope": "run" }),
+            None,
+        ),
+        (
+            "the node",
+            json!({ "type": "timeline", "run_id": run, "scope": "node", "node": node }),
+            Some(window_fetched),
+        ),
+    ];
+    for (name, view, fetched) in views {
+        let mine = headed.subscribe(&json!({ "view": view }));
+        let theirs = whole.subscribe(&json!({ "view": view }));
+        let (mine, theirs) = (first_screen_of(&mine), first_screen_of(&theirs));
+        if mine != theirs {
+            let mut ops = Vec::new();
+            patch::diff(&mine, &theirs, &mut ops).expect("both answers are objects");
+            let ops: Vec<Value> = ops.iter().map(Op::to_json).collect();
+            panic!("{name}'s first answer differs from a whole read's by {ops:#?}");
+        }
+        let traced = headed.first_answers();
+        let traced = traced.last().expect("the first answer is traced");
+        assert_eq!(traced["subscribe"], view, "{name}");
+        // The reading is opened once, for Graph: Overall fetches nothing more and a
+        // node only its window's records.
+        assert_eq!(
+            traced["fetched"].as_u64().map(|count| count as usize),
+            fetched,
+            "{name}'s fetch: {traced}"
+        );
+        if fetched.is_some() {
+            assert_eq!(traced["records"], json!(records.len()), "{name}: {traced}");
+        }
+    }
+    // A whole read fetches nothing at all.
+    assert!(
+        whole
+            .first_answers()
+            .iter()
+            .all(|line| line["fetched"].is_null()),
+        "{:#?}",
+        whole.first_answers()
     );
 }
