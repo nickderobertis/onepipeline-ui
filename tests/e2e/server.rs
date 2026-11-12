@@ -16733,7 +16733,10 @@ fn launch_copied_from_plan_task_renderings(
         .block_on(
             engine.copy(&onetaskgraph_core::CopyRequest {
                 items: onetaskgraph_core::CopyItems::new(vec![drafted]).expect("one item"),
-                scope: onetaskgraph_core::CopyScope::Projects { tasks: true },
+                scope: onetaskgraph_core::CopyScope::Projects {
+                    tasks: true,
+                    documents: false,
+                },
                 status_policy: onetaskgraph_core::StatusPolicy::Source,
                 destination: onetaskgraph_plugin_api::SourceName::try_from(
                     COPY_DESTINATION.to_owned(),

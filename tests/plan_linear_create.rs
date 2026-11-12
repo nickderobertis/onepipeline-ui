@@ -24,6 +24,16 @@ use std::{
     thread,
 };
 
+/// A batched document this stand-in refused at one of its aliases.
+struct BatchRefusal {
+    /// The refused error's `path`, whose first element names the alias.
+    path: Value,
+    /// The `title` each alias's `input` carried, in alias order.
+    titles: Vec<Value>,
+    /// The titles of the issues held once the refusal was answered.
+    issues_after: Vec<Value>,
+}
+
 /// What the loopback Linear holds, and every document it was sent.
 #[derive(Default)]
 struct Workspace {
@@ -35,6 +45,11 @@ struct Workspace {
     /// retry after an undo of an earlier attempt does.
     first_project_id_held: bool,
     project_creates: Vec<String>,
+    /// The title of an issue whose first create finds its id already held, as a create
+    /// colliding with a record Linear holds does.
+    issue_id_held: Option<String>,
+    /// Every batched document refused at one alias, in the order it was answered.
+    batch_refusals: Vec<BatchRefusal>,
     /// Documents this stand-in does not answer, which the plugin must never have sent.
     unexpected: Vec<String>,
 }
@@ -153,7 +168,67 @@ impl Workspace {
         }
     }
 
+    /// A document the plugin composed of several of its own single-root documents, each under
+    /// its alias `a<i>` with its variables renamed `$<name>_<i>`, answered as Linear answers one
+    /// (`graphql::composed`): every alias as its document alone, under that alias — or, when one
+    /// alias is refused, that refusal alone, at that alias's path, with no `data` and nothing of
+    /// any alias applied.
+    fn answer_batch(
+        &mut self,
+        singles: &[&str],
+        variables: &Value,
+    ) -> Result<(u16, Value), String> {
+        let records = (self.projects.clone(), self.issues.clone());
+        let titles = (0..singles.len())
+            .map(|at| variables[format!("input_{at}")]["title"].clone())
+            .collect();
+        let mut data = serde_json::Map::new();
+        for (at, single) in singles.iter().enumerate() {
+            let alias = format!("a{at}");
+            let suffix = format!("_{at}");
+            let own: serde_json::Map<String, Value> = variables
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter_map(|(name, value)| {
+                    name.strip_suffix(&suffix)
+                        .map(|name| (name.to_owned(), value.clone()))
+                })
+                .collect();
+            let (status, mut answer) = self.answer_valid(single, &Value::Object(own))?;
+            // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] the source is the
+            // linked plugin's `graphql::composed` docs; it exports no builder of this answer to call,
+            // and this repository holds no Linear credential to gate it against the live service.
+            if let Some(error) = answer["errors"].get_mut(0) {
+                let rest: Vec<Value> = error["path"]
+                    .as_array()
+                    .map(|path| path.iter().skip(1).cloned().collect())
+                    .unwrap_or_default();
+                error["path"] = std::iter::once(json!(alias)).chain(rest).collect();
+                let error = error.take();
+                (self.projects, self.issues) = records;
+                self.batch_refusals.push(BatchRefusal {
+                    path: error["path"].clone(),
+                    titles,
+                    issues_after: self.issues.iter().map(|i| i["title"].clone()).collect(),
+                });
+                return Ok((status, json!({"data": null, "errors": [error]})));
+            }
+            // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
+            let root = answer["data"]
+                .as_object_mut()
+                .and_then(|roots| roots.values_mut().next())
+                .map(Value::take)
+                .ok_or_else(|| format!("`{alias}` answered no root"))?;
+            data.insert(alias, root);
+        }
+        Ok((200, json!({ "data": data })))
+    }
+
     fn answer_valid(&mut self, query: &str, variables: &Value) -> Result<(u16, Value), String> {
+        if let Some(singles) = graphql::decomposed(query) {
+            return self.answer_batch(&singles, variables);
+        }
         let input = &variables["input"];
         let data = match query {
             q if q == graphql::RESOLUTION => resolution(),
@@ -246,6 +321,10 @@ impl Workspace {
                         .as_u64()
                         .ok_or_else(|| format!("`priority` must be a whole number, not {other}"))?,
                 };
+                if self.issue_id_held.as_deref() == Some(title) {
+                    self.issue_id_held = None;
+                    self.burnt.push(id.clone());
+                }
                 if self.burnt.contains(&id) || self.issues.iter().any(|i| i["id"] == id) {
                     return Ok(id_conflict(MetadataRecord::Task, "issueCreate", &id));
                 }
@@ -261,6 +340,58 @@ impl Workspace {
                     "project": project.map(|p| json!({"id": p}))});
                 self.issues.push(issue.clone());
                 json!({"issueCreate": {"success": true, "issue": issue}})
+            }
+            // A whole rewrite of an issue this workspace holds, answered with the relations it
+            // holds, which in this workspace are none.
+            q if q == graphql::ISSUE_REWRITE => {
+                let id = required(variables, "id")?;
+                let fields = input
+                    .as_object()
+                    .ok_or_else(|| format!("`input` must be an object, not {input}"))?;
+                let mut rewrite = Vec::new();
+                for (field, value) in fields {
+                    let value = match field.as_str() {
+                        "title" => json!(required(input, field)?),
+                        "description" => json!(optional(input, field)?),
+                        "priority" => json!(value.as_u64().ok_or_else(|| format!(
+                            "`priority` must be a whole number, not {value}"
+                        ))?),
+                        "stateId" => status_of(
+                            input,
+                            &[
+                                ("STATE-TODO", "Todo", "unstarted"),
+                                ("STATE-DONE", "Done", "completed"),
+                            ],
+                            field,
+                        )?,
+                        "projectId" => {
+                            let project = required(input, field)?;
+                            if !self.projects.iter().any(|held| held["id"] == project) {
+                                return Ok(not_found(MetadataRecord::Project));
+                            }
+                            json!({"id": project})
+                        }
+                        // What a whole rewrite also carries, which this workspace holds none of.
+                        "labelIds" if value.as_array().is_some_and(Vec::is_empty) => continue,
+                        other => return Err(format!("the stand-in does not rewrite `{other}`")),
+                    };
+                    let key = match field.as_str() {
+                        "stateId" => "state",
+                        "projectId" => "project",
+                        other => other,
+                    };
+                    rewrite.push((key, value));
+                }
+                let Some(issue) = self.issues.iter_mut().find(|issue| issue["id"] == id) else {
+                    return Ok(not_found(MetadataRecord::Task));
+                };
+                for (key, value) in rewrite {
+                    issue[key] = value;
+                }
+                let mut issue = issue.clone();
+                issue["relations"] =
+                    json!({"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}});
+                json!({"issueUpdate": {"success": true, "issue": issue}})
             }
             // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
             _ => return Err("the stand-in does not answer this document".to_owned()),
@@ -321,17 +452,23 @@ fn read_request(mut stream: &TcpStream) -> Option<Value> {
     }
 }
 
+/// The titles of the plan's tasks, in the order the plugin batches their creates.
+const HARBOR_TASKS: [&str; 2] = ["Harbor crane 0", "Harbor crane 1"];
+
 fn id(text: &str) -> GlobalId {
     text.parse().expect("a qualified id")
 }
 
-#[tokio::test]
-async fn a_plan_copied_into_linear_creates_its_project_and_an_absent_id_reads_absent() {
-    let workspace = Arc::new(Mutex::new(Workspace {
-        first_project_id_held: true,
-        ..Workspace::default()
-    }));
-    let endpoint = serve(Arc::clone(&workspace));
+/// The two-task plan `harbor`, copied with its tasks into a loopback Linear serving `workspace`:
+/// the store's directory, the engine that copied it, and what the copy answered.
+async fn copy_harbor(
+    workspace: &Arc<Mutex<Workspace>>,
+) -> (
+    tempfile::TempDir,
+    onetaskgraph_core::Engine,
+    Result<onetaskgraph_core::CopyReport, onetaskgraph_core::EngineError>,
+) {
+    let endpoint = serve(Arc::clone(workspace));
     let dir = tempfile::tempdir().expect("a workspace");
     let plan = dir.path().join("plan");
     for kind in ["projects", "tasks/harbor", "documents"] {
@@ -342,8 +479,7 @@ async fn a_plan_copied_into_linear_creates_its_project_and_an_absent_id_reads_ab
         "---\ntitle: Harbor rollout\nstatus: todo\n---\nMove the harbor cranes.\n",
     )
     .expect("the project");
-    let tasks = ["Harbor crane 0", "Harbor crane 1"];
-    for (index, title) in tasks.iter().enumerate() {
+    for (index, title) in HARBOR_TASKS.iter().enumerate() {
         fs::write(
             plan.join(format!("tasks/harbor/crane-{index}.md")),
             format!(
@@ -373,7 +509,10 @@ async fn a_plan_copied_into_linear_creates_its_project_and_an_absent_id_reads_ab
     let report = engine
         .copy(&CopyRequest {
             items: CopyItems::new(vec![id("plan:harbor")]).expect("one item"),
-            scope: CopyScope::Projects { tasks: true },
+            scope: CopyScope::Projects {
+                tasks: true,
+                documents: false,
+            },
             status_policy: StatusPolicy::Source,
             destination: onetaskgraph_plugin_api::SourceName::new("linear").expect("a source name"),
             match_by: None,
@@ -387,8 +526,19 @@ async fn a_plan_copied_into_linear_creates_its_project_and_an_absent_id_reads_ab
             statuses: Vec::new(),
             conditions: CopyConditions::default(),
         })
-        .await
-        .expect("copy the plan into Linear");
+        .await;
+    (dir, engine, report)
+}
+
+#[tokio::test]
+async fn a_plan_copied_into_linear_creates_its_project_and_an_absent_id_reads_absent() {
+    let workspace = Arc::new(Mutex::new(Workspace {
+        first_project_id_held: true,
+        ..Workspace::default()
+    }));
+    let (_dir, engine, report) = copy_harbor(&workspace).await;
+    let report = report.expect("copy the plan into Linear");
+    let tasks = HARBOR_TASKS;
 
     {
         let held = workspace.lock().expect("the workspace");
@@ -472,4 +622,63 @@ async fn a_plan_copied_into_linear_creates_its_project_and_an_absent_id_reads_ab
     );
     let held = workspace.lock().expect("the workspace");
     assert!(held.unexpected.is_empty(), "{:#?}", held.unexpected);
+}
+
+#[tokio::test]
+async fn a_batch_refused_at_a_later_alias_applies_none_of_it_and_every_task_lands_once() {
+    let workspace = Arc::new(Mutex::new(Workspace {
+        issue_id_held: Some(HARBOR_TASKS[1].to_owned()),
+        ..Workspace::default()
+    }));
+    let (_dir, _engine, report) = copy_harbor(&workspace).await;
+
+    let held = workspace.lock().expect("the workspace");
+    // The plugin sent both creates as one document, and the stand-in refused it at the second
+    // alias — the later task, whose id was held — after the first alias had been applied.
+    let [refusal] = held.batch_refusals.as_slice() else {
+        panic!(
+            "exactly one batched document is refused: {} were",
+            held.batch_refusals.len()
+        );
+    };
+    assert_eq!(refusal.titles, HARBOR_TASKS.map(Value::from));
+    assert_eq!(refusal.path[0], "a1", "the refusal names the later alias");
+    // Nothing of the refused document stands: the earlier alias's issue was undone with it.
+    assert!(
+        refusal.issues_after.is_empty(),
+        "the refused document left issues applied: {:?}",
+        refusal.issues_after
+    );
+    assert!(held.unexpected.is_empty(), "{:#?}", held.unexpected);
+    // The plugin then sent the refused create on its own and the rest again, so each task is
+    // filed exactly once and reported created.
+    let report = report.expect("copy the plan into Linear");
+    assert_eq!(held.issues.len(), HARBOR_TASKS.len(), "{:#?}", held.issues);
+    for (index, title) in HARBOR_TASKS.iter().enumerate() {
+        let filed = held
+            .issues
+            .iter()
+            .filter(|issue| issue["title"] == *title)
+            .count();
+        assert_eq!(filed, 1, "{title} is filed once: {:#?}", held.issues);
+        assert!(
+            report.items.iter().any(|item| {
+                item.source.to_string() == format!("plan:harbor/crane-{index}")
+                    && matches!(
+                        item.action,
+                        CopyAction::Created {
+                            destination: Some(_),
+                            ..
+                        }
+                    )
+            }),
+            "task {index} must be reported created: {report:#?}"
+        );
+    }
+    assert!(
+        held.issues
+            .iter()
+            .all(|issue| issue["id"] != held.burnt[0].as_str()),
+        "no issue stands under the held id"
+    );
 }
