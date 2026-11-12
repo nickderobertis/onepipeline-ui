@@ -118,7 +118,7 @@
       "inputs": ["releaseMachinery", "platform"]
     },
     "prioritize": {
-      "//": "A no-op that gives `test-standalone` and the release build the rehearsal waits on (`compile-release-server`) another dependent each: Nx starts the ready task with the most direct dependents first, so both start with the tiers rather than after them, and the rehearsal, `test-staged` and `test` do not run alone at the end (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` reaches it, and names both, for the broader tier.",
+      "//": "Gives `test-standalone` and `compile-release-server` another direct dependent each, so Nx starts these long tasks with the tiers instead of after them (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` names both for the broader tier.",
       "executor": "nx:noop",
       "dependsOn": [
         "test-standalone",
