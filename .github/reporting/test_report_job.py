@@ -982,13 +982,27 @@ class ReplayedHostFigures(unittest.TestCase):
         self.assertNotIn('run-jobs --run 203', result.get('detail', ''))
 
 
+# The classes that write or read TELEMETRY / 'tools', which run in one process; every other
+# class runs beside them in a second (see the end of this file).
+TELEMETRY_CLASSES = ('SavedResults', 'ReportJob', 'ReplayedHostFigures')
+SHARD = 'REPORT_JOB_TEST_SHARD'
+
+
+def shared_tools():
+    """TELEMETRY / 'tools', which only the process running TELEMETRY_CLASSES may touch."""
+    if os.environ.get(SHARD) == 'rest':
+        raise AssertionError(f"this class touches {TELEMETRY / 'tools'}: add it to TELEMETRY_CLASSES")
+    return TELEMETRY / 'tools'
+
+
 def keep_tools(job):
     """The released tools as that job installed them, which `report-job:budgets` runs."""
+    shared_tools()
     shutil.copytree(job.temp / 'onebudgetspec-action/tools', TELEMETRY / 'tools', dirs_exist_ok=True)
 
 
 def check(arguments, cwd, environment=None):
-    tools = TELEMETRY / 'tools'
+    tools = shared_tools()
     if not (tools / 'onebudgetspec').exists():
         journey_tools()
     env = {**os.environ, 'PATH': f'{tools}{os.pathsep}{os.environ["PATH"]}', **(environment or {})}
@@ -1038,5 +1052,31 @@ def zip_of(name, content):
     return buffer.getvalue()
 
 
+def run_shards():
+    """The suite as two processes at once: TELEMETRY_CLASSES in one, every other class in the
+    other. Each journey waits on the processes it starts, so the two share a runner's cores
+    rather than one taking turns on a single one. Each process's output follows, whole."""
+    classes = [name for name, value in sorted(globals().items())
+               if isinstance(value, type) and issubclass(value, unittest.TestCase) and value.__module__ == '__main__']
+    unknown = sorted(set(TELEMETRY_CLASSES) - set(classes))
+    assert not unknown, f'TELEMETRY_CLASSES names no test class {unknown}'
+    shards = {'telemetry': list(TELEMETRY_CLASSES), 'rest': [name for name in classes if name not in TELEMETRY_CLASSES]}
+    running = {name: subprocess.Popen([sys.executable, __file__, *members], env={**os.environ, SHARD: name},
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+               for name, members in shards.items() if members}
+    failed = []
+    for name, process in running.items():
+        output, _ = process.communicate()
+        print(f'--- {name}: {" ".join(shards[name])}\n{output}', end='', flush=True)
+        if process.returncode != 0:
+            failed.append(name)
+    if failed:
+        print(f'report-job tests failed in: {", ".join(failed)}', file=sys.stderr)
+        sys.exit(1)
+
+
 if __name__ == '__main__':
-    unittest.main(verbosity=2)
+    if SHARD in os.environ or len(sys.argv) > 1:
+        unittest.main(verbosity=2)
+    else:
+        run_shards()
