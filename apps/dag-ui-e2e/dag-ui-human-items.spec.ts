@@ -4702,8 +4702,14 @@ test("an item still open under one filter is asked again under the next, so a dr
   const delivered = new Promise<void>((resolve) => {
     arrived = resolve;
   });
+  // Only the first ask is held. The page's later asks go to the server as they
+  // are, never through a route being removed under them: one caught by an
+  // unroute while its handler ran failed, and a failed ask is not asked again.
+  let held = false;
   // llmlint: ignore[e2e_not_mocked] the server's real answer is fetched and passed through untouched; only when it arrives is held, which is the late arrival under test and nothing a real server can be made to do for one read.
   await page.route(`**/api/human-items/${vanishing}`, async (route) => {
+    if (held) return route.fallback();
+    held = true;
     const response = await route.fetch();
     asked();
     await released;
@@ -4724,7 +4730,6 @@ test("an item still open under one filter is asked again under the next, so a dr
   await priority.selectOption("low");
   release();
   await delivered;
-  await page.unroute(`**/api/human-items/${vanishing}`);
 
   const notices = page.getByRole("list", { name: "Not sent" });
   await expect(notices).toContainText("Words outliving their item");
