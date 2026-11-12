@@ -82,14 +82,14 @@
   "history": [
     {
       "action": "human-item-raised",
-      "at": "2026-11-12T12:52:12.548Z",
+      "at": "2026-01-01T00:00:00.000Z",
       "actor": "session:claude-code-supervising-session",
       "on_behalf_of": null,
       "provenance": "manager"
     },
     {
       "action": "human-item-raised",
-      "at": "2026-11-12T12:52:12.608Z",
+      "at": "2026-01-01T00:00:00.000Z",
       "actor": "session:claude-code-supervising-session",
       "on_behalf_of": null,
       "provenance": "manager"

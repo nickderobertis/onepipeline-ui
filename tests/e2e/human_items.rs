@@ -2964,7 +2964,9 @@ fn pin_clock(value: &mut Value) {
     match value {
         Value::Object(map) => {
             for (key, held) in map.iter_mut() {
-                if matches!(key.as_str(), "created_at" | "updated_at") && held.is_string() {
+                // `at` is a history entry's instant, which the engine stamps
+                // when it journals the event.
+                if matches!(key.as_str(), "created_at" | "updated_at" | "at") && held.is_string() {
                     *held = json!("2026-01-01T00:00:00.000Z");
                 } else if key == "batch" && held.is_string() {
                     // Minted fresh per batch; a golden pins that one is there.
