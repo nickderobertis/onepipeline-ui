@@ -291,3 +291,13 @@ test = false
 strip = true
 lto = "thin"
 codegen-units = 1
+
+# Dependencies split their code generation across 16 units, which thin LTO still
+# optimizes across; this crate keeps one. With one unit everywhere the engine
+# family (onevcs, onetaskgraph-core, onepipeline) compiled one rustc at a time at
+# the end of every release build: a cold `-j4` build profiled 1043 s wall and
+# 2009 s of CPU, against 530 s and 1040 s like this, for a stripped binary of
+# 69.3 MB rather than 61.5 MB. On a pull request that moves the lock, that serial
+# tail was most of test-linux's release chain (docs/linux-cold-cache-timing.md).
+[profile.release.package."*"]
+codegen-units = 16
