@@ -100,13 +100,18 @@ SEED="$PWD/target/debug"
 if [ ! -d "$PROFILE/.fingerprint" ] && [ -d "$SEED/.fingerprint" ]; then
   step="seeding the private tree from $SEED"
   mkdir -p "$PROFILE"
-  seeded="$(date +%Y%m%d%H%M.%S)"
+  # The instant, at the filesystem's own precision rather than a whole second:
+  # stamped to a second that a source was written later in, a copied
+  # fingerprint reads older than its source and cargo compiles the unit again.
+  seeded="$MEASURED/seeded"
+  touch "$seeded"
   for dir in .fingerprint build deps incremental; do
     if [ -d "$SEED/$dir" ]; then
       cp -a "$SEED/$dir" "$PROFILE/"
     fi
   done
-  find "$PROFILE" -exec touch -h -t "$seeded" {} +
+  find "$PROFILE" -exec touch -h -r "$seeded" {} +
+  rm -f "$seeded"
 fi
 
 step="the untimed backlog pass ('just pool-maintenance')"
