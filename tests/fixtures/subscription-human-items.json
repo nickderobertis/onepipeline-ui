@@ -82,7 +82,16 @@
             "reopen": {
               "available": false,
               "reason": "the item is open, so there is nothing to reopen"
-            }
+            },
+            "history": [
+              {
+                "action": "human-item-raised",
+                "at": "2026-01-01T00:00:00.000Z",
+                "actor": "session:manager-of-items",
+                "on_behalf_of": null,
+                "provenance": "manager"
+              }
+            ]
           }
         }
       }
@@ -137,6 +146,21 @@
             "reason"
           ],
           "v": "an answered question cannot be reopened"
+        },
+        {
+          "p": [
+            "detail",
+            "history"
+          ],
+          "a": [
+            {
+              "action": "human-item-answered",
+              "at": "2026-01-01T00:00:00.000Z",
+              "actor": "user:operator",
+              "on_behalf_of": null,
+              "provenance": "manager"
+            }
+          ]
         }
       ]
     },

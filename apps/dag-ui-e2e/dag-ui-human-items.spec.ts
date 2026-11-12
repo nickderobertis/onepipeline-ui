@@ -59,6 +59,8 @@ const factsSchema = z.object({
 });
 type Facts = z.infer<typeof factsSchema>;
 
+/** Whose words an action was; a record naming none is the manager's. */
+const provenanceSchema = z.enum(["manager", "user"]);
 const storedSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -75,8 +77,16 @@ const storedSchema = z.object({
       text: z.string().nullable(),
       choice: z.string().nullable().optional(),
       reason: z.string().nullable(),
+      provenance: provenanceSchema.optional(),
     })
     .nullable(),
+});
+/** One entry of the engine's history of an item, as `show --json` prints it. */
+const historyEntrySchema = z.object({
+  action: z.string(),
+  at: z.string(),
+  actor: z.string(),
+  provenance: provenanceSchema,
 });
 const viewSchema = z.object({
   item: storedSchema,
@@ -87,10 +97,14 @@ const detailSchema = z.object({
   nodes: z.array(
     z.object({ run: z.string(), node: z.string(), title: z.string() }),
   ),
+  history: z.array(historyEntrySchema).optional(),
 });
 const deliveredSchema = z.object({
   kind: z.string(),
-  payload: z.object({ item_id: z.string() }),
+  payload: z.object({
+    item_id: z.string(),
+    by: z.object({ provenance: provenanceSchema.optional() }).nullish(),
+  }),
 });
 const approvalSchema = z.object({
   board_copy: z.string(),
@@ -252,6 +266,13 @@ function listed(served: FixtureServer, args: string[] = []) {
 
 /** The item events delivered to `session` that its watch had not printed. */
 function watch(served: FixtureServer, session: string) {
+  return delivered(served, session).map(
+    ({ kind, payload }) => [kind, payload.item_id] as const,
+  );
+}
+
+/** The same events, whole, as `human-items watch` printed them. */
+function delivered(served: FixtureServer, session: string) {
   let printed: string;
   try {
     printed = cli(served, ["human-items", "watch", "--session", session]);
@@ -263,10 +284,7 @@ function watch(served: FixtureServer, session: string) {
   return printed
     .split("\n")
     .filter((line) => line.trim() !== "")
-    .map((line) => {
-      const { kind, payload } = deliveredSchema.parse(JSON.parse(line));
-      return [kind, payload.item_id] as const;
-    });
+    .map((line) => deliveredSchema.parse(JSON.parse(line)));
 }
 
 /** Every approval record the approval authority wrote. */
@@ -1741,6 +1759,19 @@ test("ending its run retires the items holding that run's work, and leaves host 
   await expect(
     card(page, "Which region should the canary run in?"),
   ).toBeVisible();
+  // Its history says the engine retired it, in the manager's words, as every
+  // auto-resolution reads.
+  await page
+    .getByRole("button", {
+      name: "Details: Which region should the canary run in?",
+    })
+    .click();
+  await expect(
+    detailPane(page)
+      .getByRole("region", { name: "History" })
+      .getByRole("listitem")
+      .last(),
+  ).toHaveText(/^Resolved by the manager · \d+ \w+ ago$/u);
 });
 
 test("ten sessions see the host queue, and each answer reaches only its owner's watch", async ({
@@ -1771,6 +1802,8 @@ test("ten sessions see the host queue, and each answer reaches only its owner's 
       on_behalf_of: null,
       text: "Thursday",
       reason: null,
+      // A person at the page is the user, whichever session the server acts as.
+      provenance: "user",
     });
     for (const other of sessions)
       expect(watch(served, other)).toEqual(
@@ -4762,11 +4795,14 @@ test("choice buttons are reached by Tab and pressed from the keyboard, and resol
   await page.keyboard.press("Space");
   await expect(sendButton(page)).toHaveText("Send 1 answer");
   const pane = await openDetail(page, title);
-  await expect(metadataOf(pane, "Raised")).toHaveText(/\d{4}/u);
+  // When, as an age; who answered it, in words.
+  await expect(metadataOf(pane, "Raised")).toHaveText(RELATIVE);
   await expect(pane.getByRole("term")).not.toContainText(["Answered"]);
   await sendAnswers(page);
   await expect(metadataOf(pane, "State")).toHaveText("Answered");
-  await expect(metadataOf(pane, "Answered")).toHaveText(/\d{4}/u);
+  await expect(metadataOf(pane, "Answered")).toHaveText(
+    /^By you · \d+ \w+ ago$/u,
+  );
   expect(stored(served, id).resolution?.choice).toBe("eu");
   await pane.getByRole("button", { name: "Close detail" }).click();
 
@@ -4783,7 +4819,9 @@ test("choice buttons are reached by Tab and pressed from the keyboard, and resol
       .getByLabel("State", { exact: true })
       .selectOption(state);
     const resolved = await openDetail(page, taskTitle);
-    await expect(metadataOf(resolved, label)).toHaveText(/\d{4}/u);
+    await expect(metadataOf(resolved, label)).toHaveText(
+      /^By the manager · \d+ \w+ ago$/u,
+    );
     await resolved.getByRole("button", { name: "Close detail" }).click();
   }
 });
@@ -5408,3 +5446,283 @@ for (const [width, height] of [
     await expect(metadataOf(trackedPane, "Tracker")).toHaveText(reference);
   });
 }
+
+/** Every badge inside `scope`: what a party must never be shown as. */
+function badgesIn(scope: Locator): Locator {
+  // llmlint: ignore[e2e_uses_accessible_selectors] a badge is a styled span with no role or name of its own, so what the page must not render as one can only be found by the slot `@oneharness/ui` marks it with.
+  return scope.locator('[data-slot="badge"]');
+}
+
+/** The words a party is shown in: a person at this page is the user. */
+const PARTY = { user: "you", manager: "the manager" } as const;
+/** The words a history row opens with, per action the engine records. */
+const ACTION_WORDS: Record<string, string> = {
+  "human-item-raised": "Raised",
+  "human-item-answered": "Answered",
+  "human-item-completed": "Completed",
+  "human-item-dismissed": "Dismissed",
+  "human-item-reopened": "Reopened",
+  "human-item-noted": "Note",
+};
+/** An instant as the read contract serves it, which a reader is never shown. */
+const RFC_3339 = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/u;
+/** A calendar date, as an absolute reading would show it. */
+const ABSOLUTE_DATE = /\b[A-Z][a-z]{2} \d{1,2}, \d{4}\b/u;
+/** An age, as `Timestamp` reads one. */
+const RELATIVE = /^\d+ (second|minute|hour|day|month|year)s? ago$/u;
+
+/**
+ * `time` is a moment shown as an age: its `datetime` the instant `at` names,
+ * its title the exact local time of that instant, and its visible text a
+ * relative phrase — never the served string.
+ */
+async function expectAge(time: Locator, at: string): Promise<void> {
+  await expect(time).toHaveAttribute("datetime", new Date(at).toISOString());
+  await expect(time).toHaveText(RELATIVE);
+  const title = await time.getAttribute("title");
+  expect(title).not.toMatch(RFC_3339);
+  // The title is the local time to the second, with its zone spelled out.
+  const local = await time.evaluate((element, instant) => {
+    const shown = element.getAttribute("title") ?? "";
+    const clock = shown.replace(/(?<=[AP]M) .+$/u, "");
+    return Math.abs(Date.parse(clock) - Date.parse(instant));
+  }, at);
+  expect(local).toBeLessThan(1_000);
+}
+
+/** The engine's history of `id`, as the detail route serves it to the page. */
+async function servedHistory(page: Page, served: FixtureServer, id: string) {
+  const response = await page.request.get(
+    `${served.origin}/api/human-items/${id}`,
+  );
+  expect(response.ok()).toBe(true);
+  return detailSchema.parse(await response.json()).history ?? [];
+}
+
+/** Choose `state` in the page's State filter, as a reader would. */
+async function showState(page: Page, state: string): Promise<void> {
+  const asked = subscribedTo(page, state === "open" ? {} : { state });
+  await page
+    .getByRole("group", { name: "Filter action items" })
+    .getByLabel("State", { exact: true })
+    .selectOption(state);
+  await asked;
+}
+
+test("an answer and a completion sent from Action items are the user's, and what the manager or a released engine recorded still lists and resolves", async ({
+  page,
+}) => {
+  const served = await serveWorld("provenance");
+  const list = await open(page, served);
+  const answered = idOf(served, "answer");
+  const legacy = idOf(served, "legacy");
+  const legacyTitle = "Rotate the staging certificate";
+
+  // An answer through the page's send bar, recorded as the user's words.
+  await answerBox(page, "Which region should the canary run in?").fill(
+    "eu-west",
+  );
+  await sendAnswers(page);
+  await expect(
+    card(page, "Which region should the canary run in?"),
+  ).toHaveCount(0);
+  expect(stored(served, answered).resolution).toMatchObject({
+    actor: `browser:session:${SUPERVISOR}`,
+    text: "eu-west",
+    provenance: "user",
+  });
+
+  // An item whose records predate the field lists, opens and resolves: its
+  // raise reads as the manager's, its completion through the page the user's.
+  const journalled = journal(served)
+    .trimEnd()
+    .split("\n")
+    .map((line) =>
+      z
+        .object({
+          payload: z.object({
+            item_id: z.string(),
+            schema_version: z.number(),
+          }),
+        })
+        .parse(JSON.parse(line)),
+    )
+    .filter(({ payload }) => payload.item_id === legacy);
+  expect(journalled.map(({ payload }) => payload.schema_version)).toEqual(
+    journalled.map(() => 1),
+  );
+  await expect(card(page, legacyTitle)).toBeVisible();
+  await page.getByRole("button", { name: `Complete: ${legacyTitle}` }).click();
+  // The toast names no party: what the page sends is the user's by construction.
+  await expect(outcome(page)).toHaveText(`Completed: ${legacyTitle}`);
+  await expect(toast(page)).not.toContainText(/\byou\b|manager/u);
+  expect(stored(served, legacy)).toMatchObject({
+    state: "completed",
+    resolution: { provenance: "user" },
+  });
+  expect(
+    (await servedHistory(page, served, legacy)).map(
+      ({ action, provenance }) => [action, provenance],
+    ),
+  ).toEqual([
+    ...journalled.map(() => ["human-item-raised", "manager"]),
+    ["human-item-completed", "user"],
+  ]);
+
+  // No card names a party, in the default list or under any resolved state.
+  const party = /\byou\b|\bmanager\b|\buser\b/iu;
+  await expect(list).not.toContainText(party);
+  for (const [state, expected] of [
+    [
+      "answered",
+      [
+        "Which region should the canary run in?",
+        "Keep the legacy export format?",
+        "Should retries reuse the warm cache?",
+      ],
+    ],
+    ["completed", ["Restore the build service", legacyTitle]],
+    ["dismissed", ["Re-run the flaky screenshot job"]],
+  ] as const) {
+    await showState(page, state);
+    await expect
+      .poll(async () => [...(await titles(list))].sort())
+      .toEqual([...expected].sort());
+    await expect(list).not.toContainText(party);
+  }
+
+  // The manager's CLI dismissal reads as the manager's in the detail; the list
+  // stands on Dismissed from the loop above.
+  await page
+    .getByRole("button", { name: "Details: Re-run the flaky screenshot job" })
+    .click();
+  await expect(metadataOf(detailPane(page), "Dismissed")).toHaveText(
+    /^By the manager · \d+ \w+ ago$/u,
+  );
+  await expect(
+    detailPane(page)
+      .getByRole("region", { name: "History" })
+      .getByRole("listitem")
+      .last(),
+  ).toHaveText(/^Dismissed by the manager · \d+ \w+ ago$/u);
+
+  // The manager's CLI answer, and one a released engine wrote, are the
+  // manager's in the detail, which the user's answer is not.
+  await showState(page, "answered");
+  const pane = detailPane(page);
+  for (const [title, by] of [
+    ["Should retries reuse the warm cache?", "the manager"],
+    ["Keep the legacy export format?", "the manager"],
+    ["Which region should the canary run in?", "you"],
+  ] as const) {
+    await page.getByRole("button", { name: `Details: ${title}` }).click();
+    await expect(pane.getByRole("heading", { level: 2 })).toHaveText(title);
+    await expect(metadataOf(pane, "Answered")).toHaveText(
+      new RegExp(`^By ${by} · \\d+ \\w+ ago$`, "u"),
+    );
+    await expect(
+      pane.getByRole("region", { name: "History" }).getByRole("listitem"),
+    ).toHaveText([
+      /^Raised by the manager · /u,
+      new RegExp(`^Answered by ${by} · `, "u"),
+    ]);
+  }
+});
+
+test("the detail lists the engine's history oldest first, each row's party in words and its time as an age", async ({
+  page,
+}) => {
+  const served = await serveWorld("provenance");
+  await open(page, served);
+  const id = idOf(served, "history");
+  const title = "File the flaky-runner report";
+
+  // Completed and noted through the page, then reopened and completed again by
+  // the manager's own CLI, with no `--as`.
+  await page.getByRole("button", { name: `Complete: ${title}` }).click();
+  await expect(outcome(page)).toHaveText(`Completed: ${title}`);
+  await toast(page).getByRole("button", { name: "Add comment" }).click();
+  await toast(page)
+    .getByRole("textbox", { name: "Comment" })
+    .fill("Filed as INFRA-212");
+  await toast(page).getByRole("button", { name: "Send" }).click();
+  await expect(outcome(page)).toHaveText(`Comment saved: ${title}`);
+  await expect(toast(page)).not.toContainText(/\byou\b|manager/u);
+  // The page's note is the user's, on the event's `by`, as the owner's watch
+  // is told it.
+  const noted = delivered(served, SUPERVISOR).filter(
+    ({ kind, payload }) =>
+      kind === "human-item-noted" && payload.item_id === id,
+  );
+  expect(noted.map(({ payload }) => payload.by?.provenance)).toEqual(["user"]);
+  cli(served, ["human-items", "reopen", id], SUPERVISOR);
+  cli(served, ["human-items", "complete", id], SUPERVISOR);
+  expect(stored(served, id).resolution).not.toHaveProperty("provenance");
+
+  await showState(page, "completed");
+  await page.getByRole("button", { name: `Details: ${title}` }).click();
+  const pane = detailPane(page);
+  await expect(pane.getByRole("heading", { level: 2 })).toHaveText(title);
+  const history = await servedHistory(page, served, id);
+  expect(
+    history.map(({ action, provenance }) => [action, provenance]).slice(-4),
+  ).toEqual([
+    ["human-item-completed", "user"],
+    ["human-item-noted", "user"],
+    ["human-item-reopened", "manager"],
+    ["human-item-completed", "manager"],
+  ]);
+  const rows = pane
+    .getByRole("region", { name: "History" })
+    .getByRole("listitem");
+  await expect(rows).toHaveText(
+    history.map(
+      ({ action, provenance }) =>
+        new RegExp(
+          `^${ACTION_WORDS[action]} by ${PARTY[provenance]} · \\d+ \\w+ ago$`,
+          "u",
+        ),
+    ),
+  );
+  for (const [index, entry] of history.entries()) {
+    const row = rows.nth(index);
+    await expect(badgesIn(row)).toHaveCount(0);
+    await expectAge(row.getByRole("time"), entry.at);
+  }
+  // The user's row and the manager's read in one style and one colour.
+  const colour = (row: Locator) =>
+    row.evaluate((element) => getComputedStyle(element).color);
+  const userRow = history.findIndex(({ provenance }) => provenance === "user");
+  const managerRow = history.findIndex(
+    ({ provenance }) => provenance === "manager",
+  );
+  expect(await colour(rows.nth(userRow))).toBe(
+    await colour(rows.nth(managerRow)),
+  );
+
+  // The field table's times read the same way, and the resolution's party in
+  // words: no RFC 3339 string or absolute date-time anywhere in the pane.
+  const created = detailSchema
+    .extend({
+      item: storedSchema.extend({
+        created_at: z.string(),
+        updated_at: z.string(),
+      }),
+    })
+    .parse(JSON.parse(cli(served, ["human-items", "show", id, "--json"]))).item;
+  await expectAge(
+    metadataOf(pane, "Raised").getByRole("time"),
+    created.created_at,
+  );
+  await expectAge(
+    metadataOf(pane, "Completed").getByRole("time"),
+    created.updated_at,
+  );
+  await expect(metadataOf(pane, "Completed")).toHaveText(
+    /^By the manager · \d+ \w+ ago$/u,
+  );
+  expect(created.state).toBe("completed");
+  const text = await pane.innerText();
+  expect(text).not.toMatch(RFC_3339);
+  expect(text).not.toMatch(ABSOLUTE_DATE);
+});

@@ -1004,7 +1004,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
       { op: "settle", id: "ship", outcome: "done", evidence: "landed as #12" },
     ],
   });
-  expect(edit.version).toBe(3);
+  expect(edit.version).toBe(4);
   expect(edit.commands).toHaveLength(3);
   // The field the engine retired is refused by name, as the engine refuses it,
   // and an op the engine does not declare never reaches the wire.
@@ -1022,14 +1022,14 @@ test("a reply envelope composed against the engine's grammar carries what the en
     }).success,
   ).toBe(false);
   // Commands under no version, or another, are what the engine refuses as "an
-  // edit envelope requires version 3"; an envelope carrying neither half is one
+  // edit envelope requires version 4"; an envelope carrying neither half is one
   // the engine answers, naming no verdict, so it parses.
   const unversioned = replyEnvelopeSchema.safeParse({
     commands: [{ op: "drop", id: "obsolete", dependents: "detach" }],
   });
   expect(unversioned.success).toBe(false);
   expect(unversioned.error?.issues[0]?.message).toBe(
-    "an edit envelope requires version 3",
+    "an edit envelope requires version 4",
   );
   expect(
     replyEnvelopeSchema.safeParse({

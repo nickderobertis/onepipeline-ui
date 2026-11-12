@@ -61,18 +61,21 @@ export type HumanItemAction =
       readonly text?: string | null;
       readonly actor: string;
       readonly on_behalf_of: string | null;
+      readonly provenance?: Provenance;
       readonly action: "answer";
     }
   | {
       readonly answers: readonly HumanItemBatchAnswer[];
       readonly actor: string;
       readonly on_behalf_of: string | null;
+      readonly provenance?: Provenance;
       readonly action: "answer-batch";
     }
   | {
       readonly id: string;
       readonly actor: string;
       readonly on_behalf_of: string | null;
+      readonly provenance?: Provenance;
       readonly action: "complete";
     }
   | {
@@ -80,12 +83,14 @@ export type HumanItemAction =
       readonly reason?: string | null;
       readonly actor: string;
       readonly on_behalf_of: string | null;
+      readonly provenance?: Provenance;
       readonly action: "dismiss";
     }
   | {
       readonly id: string;
       readonly actor: string;
       readonly on_behalf_of: string | null;
+      readonly provenance?: Provenance;
       readonly action: "reopen";
     }
   | {
@@ -93,6 +98,7 @@ export type HumanItemAction =
       readonly text: string;
       readonly actor: string;
       readonly on_behalf_of: string | null;
+      readonly provenance?: Provenance;
       readonly action: "note";
     };
 export type HumanItemFilter = {
@@ -115,6 +121,7 @@ export type HumanItemDetail = {
   readonly blocked: HumanItemBlocked;
   readonly nodes: readonly HumanItemNode[];
   readonly reopen: HumanItemReopen;
+  readonly history?: readonly HumanItemHistoryEntry[];
 };
 export type HumanItemReceipt = {
   readonly item: HumanItemView;
@@ -197,6 +204,14 @@ export type HumanItemEventBatch = {
 export type HumanItemEventBy = {
   readonly actor: string;
   readonly on_behalf_of: string | null;
+  readonly provenance?: Provenance;
+};
+export type HumanItemHistoryEntry = {
+  readonly action: HumanItemEventAction;
+  readonly at: string;
+  readonly actor: string;
+  readonly on_behalf_of: string | null;
+  readonly provenance: Provenance;
 };
 export type HumanItemKind = "task" | "question";
 export type HumanItemNode = {
@@ -219,6 +234,7 @@ export type HumanItemResolution = {
   readonly text: string | null;
   readonly choice?: string | null;
   readonly reason: string | null;
+  readonly provenance?: Provenance;
 };
 export type HumanItemSampleApproval = {
   readonly approval: HumanItemApproval;
@@ -227,6 +243,7 @@ export type HumanItemSampleApproval = {
 };
 export type HumanItemState = "open" | "answered" | "completed" | "dismissed";
 export type HumanItemTracker = { readonly task: string; readonly url: string };
+export type Provenance = "manager" | "user";
 export type Ticket = {
   readonly id: string;
   readonly url: string;

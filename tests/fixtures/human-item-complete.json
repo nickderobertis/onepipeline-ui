@@ -24,7 +24,8 @@
         "actor": "browser:session:claude-code-supervising-session",
         "on_behalf_of": null,
         "text": null,
-        "reason": null
+        "reason": null,
+        "provenance": "user"
       },
       "tracker": {
         "task": "board:I_2",

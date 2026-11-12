@@ -24,6 +24,7 @@
         "default",
         "apiServerSurface",
         "{workspaceRoot}/tests/fixtures/history/**",
+        "{workspaceRoot}/tests/fixtures/released-rulings/**",
         "{workspaceRoot}/tests/support/github_board.py",
         "{workspaceRoot}/tests/support/approval_authority.py",
         "platform"

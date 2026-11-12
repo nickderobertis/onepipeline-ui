@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Provenance } from "./human-items.generated.js";
 import {
   humanItemFilterSchema,
   humanItemsVisibleSchema,
@@ -1983,6 +1984,45 @@ const verbEnvelope = {
 } as const;
 
 /**
+ * Whose words a ruling is, as the engine's `onepipeline::provenance::Provenance`
+ * spells it: a manager's ruling is a strong default a dispatch may decline with
+ * its reason, and a user's binds. A record without the field — every one written
+ * before engine 0.110.0 — is the manager's ({@link provenanceOf}).
+ */
+export const provenanceSchema: z.ZodType<Provenance> = z.enum([
+  "manager",
+  "user",
+]);
+
+/** `provenance` as a record states it, absent read as the engine reads it: `manager`. */
+export const provenanceOf = (stated: unknown): Provenance =>
+  stated === "user" ? "user" : "manager";
+
+/** What kind of ruling a dispatch declined, as the engine's `RulingKind` spells it. */
+export const rulingKindSchema = z.enum(["note", "amendment", "answer"]);
+
+/**
+ * The record every `declined-ruling` surface carries beside its message, as the
+ * engine's `channel::DeclinedRuling` declares it (its `schemas/planner-channel.json`):
+ * the node the ruling was addressed to, the reference it was given, its party,
+ * its kind, the id of the reply envelope that carried it, its text and the reason
+ * it was declined. Closed, as the engine closes it. A reader takes every fact of a
+ * declined ruling from here and never from the surface's `message`.
+ */
+export const declinedRulingSchema = z.strictObject({
+  node: z.string(),
+  ruling: z.string(),
+  provenance: provenanceSchema,
+  kind: rulingKindSchema,
+  reply: counter,
+  text: z.string(),
+  reason: z.string(),
+});
+
+/** The surface kind whose record is a {@link declinedRulingSchema}. */
+export const DECLINED_RULING_KIND = "declined-ruling";
+
+/**
  * One surface the run raised, as the engine's own channel records it.
  *
  * `kind` and `source` are the host's own words, relayed as recorded: the engine
@@ -2002,6 +2042,20 @@ export const channelSurfaceSchema = openObject({
   queued_at: nonnegative,
   workstream: z.string().min(1).optional(),
   abandoned: z.boolean().optional(),
+  declined_ruling: declinedRulingSchema.optional(),
+}).superRefine((surface, context) => {
+  // The engine holds every write to this: the record is on every
+  // `declined-ruling` surface and on no other.
+  if (
+    (surface.kind === DECLINED_RULING_KIND) !==
+    (surface.declined_ruling !== undefined)
+  )
+    context.addIssue({
+      code: "custom",
+      path: ["declined_ruling"],
+      message:
+        "a declined-ruling surface, and only one, carries its declined ruling",
+    });
 });
 
 /**
@@ -2019,7 +2073,7 @@ export const channelSurfaceSchema = openObject({
  * to. The engine still reads the bytes it is sent, not this parse — a client
  * sends the envelope verbatim and shows the engine's refusal verbatim.
  */
-export const REPLY_ENVELOPE_VERSION = 3;
+export const REPLY_ENVELOPE_VERSION = 4;
 
 /** Who a note is for: the worker's task, the supervisor's, or both parties. */
 export const noteAddresseeSchema = z.enum(["worker", "supervisor", "both"]);
@@ -2210,11 +2264,15 @@ export const replyEnvelopeSchema = z
     message: z.string().optional(),
     reason: z.string().optional(),
     commands: z.array(replyCommandSchema).optional(),
+    // Whose words the envelope is; absent, the manager's. The read API records
+    // what the browser sends as the user's and refuses a body claiming the
+    // manager's, so a composer never writes it.
+    provenance: provenanceSchema.optional(),
   })
   .strict()
   // An edit envelope is read at exactly the version the engine writes: a
   // `commands` array under any other `version`, or none, is refused by the
-  // engine with "an edit envelope requires version 3", so it is refused here
+  // engine with "an edit envelope requires version 4", so it is refused here
   // first. An envelope carrying neither half is deliberately *not* refused —
   // the engine answers one, naming no verdict — and a verdict alone names no
   // version, so nothing else is required.
@@ -2253,6 +2311,8 @@ export const queuedCommandsSchema = openObject({
   id: counter,
   author: z.string().min(1).optional(),
   commands: z.array(arbitraryRecord),
+  // Whose words the envelope is, written only for `user`.
+  provenance: provenanceSchema.optional(),
 });
 
 /** What became of one command of an envelope, in the reconciler's own words. */
@@ -3261,6 +3321,7 @@ export type ProjectGroup = z.infer<typeof projectGroupSchema>;
 export type ProjectList = z.infer<typeof projectListSchema>;
 export type ProjectDetail = z.infer<typeof projectDetailSchema>;
 export type ChannelSurface = z.infer<typeof channelSurfaceSchema>;
+export type DeclinedRuling = z.infer<typeof declinedRulingSchema>;
 export type ReplyCommand = z.infer<typeof replyCommandSchema>;
 export type ReplyOp = ReplyCommand["op"];
 export type ReplyEnvelope = z.infer<typeof replyEnvelopeSchema>;

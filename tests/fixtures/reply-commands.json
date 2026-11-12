@@ -1,5 +1,5 @@
 {
-  "reply_envelope_version": 3,
+  "reply_envelope_version": 4,
   "commands": {
     "review": {
       "required": [],
