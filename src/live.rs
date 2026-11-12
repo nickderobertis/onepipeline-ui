@@ -796,8 +796,8 @@ struct Folded {
     document: Option<RunTelemetry>,
     served: Value,
     folded_at: Instant,
-    stale: bool,
-    /// When the first record this fold has not folded was seen.
+    /// When the first record this fold has not folded was seen: `None` while
+    /// the fold holds every record, so it is stale exactly when this is set.
     stale_since: Option<Instant>,
 }
 
@@ -815,7 +815,6 @@ impl Folded {
             document,
             served,
             folded_at: Instant::now(),
-            stale: false,
             stale_since: None,
         }
     }
@@ -827,15 +826,18 @@ impl Folded {
             document: None,
             served: Value::Null,
             folded_at: Instant::now(),
-            stale: false,
             stale_since: None,
         }
     }
 
     /// Mark the fold behind the journal, from the first record it has not folded.
     fn go_stale(&mut self) {
-        self.stale = true;
         self.stale_since.get_or_insert_with(Instant::now);
+    }
+
+    /// Whether a record has been seen that this fold does not hold.
+    fn stale(&self) -> bool {
+        self.stale_since.is_some()
     }
 
     fn inputs<'a>(&'a self, agents: Option<usize>, activity: &'a ActivityFold) -> DetailInputs<'a> {
@@ -1933,7 +1935,7 @@ impl Hub {
                 .telemetry
                 .stale_since
                 .is_some_and(|since| since.elapsed() < shared.fold_hold);
-            refold = run.telemetry.stale
+            refold = run.telemetry.stale()
                 && !held
                 && ((quiet && aged >= shared.refold) || aged >= shared.refold * 2);
             if refold {
@@ -1946,7 +1948,7 @@ impl Hub {
         // fact: past due with records since, or a fold that failed.
         let overdue = complete
             && (run.telemetry.document.is_none()
-                || (run.telemetry.stale
+                || (run.telemetry.stale()
                     && run.telemetry.folded_at.elapsed() >= shared.refold * OVERDUE_INTERVALS));
         let overdue_moved = overdue != run.overdue;
         run.overdue = overdue;
