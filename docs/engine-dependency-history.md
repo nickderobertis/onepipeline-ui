@@ -746,6 +746,20 @@ public type or MSRV changes beyond the release `/healthz` reports.
 `tests/plan_linear_create.rs` holds the linked store to that over a loopback
 Linear.
 
+0.110.0 is the engine that records whose words a ruling is
+(`onepipeline::provenance::Provenance`, `manager` or `user`): reply envelope
+version 4 with its optional `provenance`, `verbs::reply_as`, a `provenance` on
+every human-item action, resolution and event `by` (human-items event schema
+version 2), the detail's engine-folded `history`, and the `declined-ruling`
+surface carrying its typed `declined_ruling` record. This crate moves to it so
+that what a person submits through the reply and human-item routes is recorded
+as the user's, binding the dispatches that read it, and so that the browser
+reads the records a host's engine of this release writes. The move is
+announced as a break: the re-exported engine types change, and the reply route
+refuses a body claiming the manager's words. Its oneagentgraph, onejudge,
+onemessagebus and onetaskgraph requirements are the ones 0.109.0 resolved; the
+test-only onevcs moves to 0.65.2 (^0.65.2).
+
 The test-only `onevcs` requirement, which the `EventKind` drift gate in
 `tests/contract.rs` reads, has followed the release each linked engine resolves:
 0.52.0 for engine 0.75.0 (^0.52.0), keeping one copy; 0.52.1 for 0.78.0, which

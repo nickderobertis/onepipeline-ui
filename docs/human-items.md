@@ -40,6 +40,18 @@ spike's six realistic items are taken, as the journeys' long-content fixture.
   and times, the blocked steps listed under their plan, is a labelled block at the
   bottom, wrapping long values rather than cutting them. A detail taller than the pane scrolls as a whole. It
   enumerates every blocked step, grouped under its plan.
+- **Who made each ruling is named quietly, in the detail alone.** No card names a
+  party, under any filter. The detail's **History** lists the engine's own `history`
+  as the detail route serves it, oldest first, one row per entry, in the pane's
+  normal text: its action and its party in words — "Raised by the manager",
+  "Answered by you", "Completed by the manager", "Note by you" — where "you" is
+  `user` (a person at this page is the user) and "the manager" is `manager`, or a
+  record with no `provenance`. The block's Answered, Completed or Dismissed row reads
+  the same way. A party is never a badge, pill or colour: the user's rows and the
+  manager's share one text style. Every time in the pane — each history row, the
+  Raised row and the resolution's row — is a relative phrase ("2 hours ago") drawn by
+  the page's one `Timestamp`, with the exact local time on hover and the served
+  instant as its `datetime`; no RFC 3339 string or absolute date-time is shown.
 - **Grouping.** The list is grouped by **Priority** by default, under a heading per
   value with its count — Critical, High, Medium, Low — and can be grouped by Kind,
   Source or Blocking instead, or by none. The choice is remembered per browser. The
@@ -120,7 +132,13 @@ spike's six realistic items are taken, as the journeys' long-content fixture.
   The engine records `browser:session:<id>` for the server’s acting session or
   `browser` without one, and `on_behalf_of: null`; the page sends neither. The
   `browser` prefix is what tells a person's press here from a manager's own CLI
-  action over the same journal, which records `session:<id>`. Owners and
+  action over the same journal, which records `session:<id>`. **What is sent here is
+  recorded with provenance `user`**: every answer, completion, dismissal, reopen and
+  note through the routes is the user's ruling, binding the dispatches that read it,
+  while a manager's CLI action with no `--as` is the manager's. A body naming its own
+  `provenance`, and a body claiming `manager` above all, is refused with nothing
+  recorded. The toast names no party: what the page sends is the user's by
+  construction. Owners and
   delivery to their watches stay unchanged. Raising still requires the server
   to act as the owner. A manager
   completing a task on a user's behalf, after that user approved in the manager's
