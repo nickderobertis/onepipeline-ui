@@ -484,15 +484,22 @@ test("replies and envelopes a released engine wrote, with no provenance, are ser
     ).toBeVisible();
   await expect(badges(outcomes)).toHaveText(["applied", "applied"]);
 
-  // And the main corpus's own replies, written in the released engine's shape
-  // by the fixture `tests/contract.rs` holds to the SDK's writer: the manager's.
+  // And the main corpus's own replies, written in the shape
+  // `tests/contract.rs` holds to the SDK's writer: the one the browser sent is
+  // the user's, and every one naming no party the manager's.
   const history = factsSchema.parse(served.facts).runs.history;
-  const written = (await channelOf(page, served, history)).replies;
-  expect(written.length).toBeGreaterThan(0);
+  const written = await channelOf(page, served, history);
+  expect(written.replies.length).toBeGreaterThan(1);
   const historyQueue = await openChannel(page, served, history);
-  await expect(historyQueue).not.toContainText("from you");
-  for (const { id } of written)
+  for (const { id, reply } of written.replies)
     await expect(
-      historyQueue.getByText(`Reply ${id} · from the manager`, { exact: true }),
+      historyQueue.getByText(
+        `Reply ${id} · from ${reply.provenance === "user" ? "you" : "the manager"}`,
+        { exact: true },
+      ),
     ).toBeVisible();
+  expect(
+    written.replies.filter(({ reply }) => reply.provenance === undefined)
+      .length,
+  ).toBeGreaterThan(0);
 });

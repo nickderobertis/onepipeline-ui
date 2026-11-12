@@ -1106,6 +1106,69 @@ function buildProvenance(workspace, token) {
   return { ids, runs: {}, plans: {} };
 }
 
+/**
+ * The rulings the gallery photographs, every one recorded by the CLI so its
+ * stamps move with the capture clock: a task the user completed and noted —
+ * `--as user` records what the page's routes record — that the manager then
+ * reopened and completed again with no `--as`, a question the user answered
+ * and one the manager answered.
+ */
+function buildProvenanceGallery(workspace, token) {
+  const raised = (dedup, kind, title, body) =>
+    raise(workspace, token, SUPERVISOR_SESSION, {
+      dedup_key: dedup,
+      kind,
+      title,
+      body,
+      priority: "high",
+      owner: owner(),
+      block: { scope: "nothing" },
+    });
+  const ids = {
+    history: raised(
+      "gallery-history",
+      "task",
+      "File the flaky-runner report",
+      "Write up the flaky runner's last three failures and complete this task once the report is filed with the infrastructure team.",
+    ),
+    userAnswered: raised(
+      "gallery-user-answered",
+      "question",
+      "Which region should the canary run in?",
+      "The canary can run in eu-west or us-east; say which one the release train should use.",
+    ),
+    managerAnswered: raised(
+      "gallery-manager-answered",
+      "question",
+      "Keep the legacy export format?",
+      "Some consumers still read the legacy export; say whether to keep writing it.",
+    ),
+  };
+  const as = (args, party) =>
+    engine(
+      workspace,
+      token,
+      party === undefined ? args : [...args, "--as", party],
+      SUPERVISOR_SESSION,
+    );
+  as(["human-items", "complete", ids.history], "user");
+  as(
+    ["human-items", "note", ids.history, "--text", "Filed as INFRA-212."],
+    "user",
+  );
+  as(["human-items", "reopen", ids.history]);
+  as(["human-items", "complete", ids.history]);
+  as(["human-items", "answer", ids.userAnswered, "--text", "eu-west"], "user");
+  as([
+    "human-items",
+    "answer",
+    ids.managerAnswered,
+    "--text",
+    "Keep it for one more release.",
+  ]);
+  return { ids, runs: {}, plans: {} };
+}
+
 const WORLDS = {
   sessions: { plans: {}, build: buildSessions },
   queue: { plans: QUEUE_PLANS, build: buildQueue },
@@ -1124,6 +1187,7 @@ const WORLDS = {
     createdPrefix: "VERY-LONG-TRACKER-REFERENCE-".repeat(3),
   },
   provenance: { plans: {}, build: buildProvenance },
+  "provenance-gallery": { plans: {}, build: buildProvenanceGallery },
 };
 
 /**

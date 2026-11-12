@@ -698,6 +698,8 @@ being photographed.
 | `30-action-items-comment` | the green toast after Complete, offering Reopen and taking a comment |
 | `31-action-items-refused` | the red toast with the engine's refusal of a review whose document changed, and the replacement card |
 | `32-action-items-reopen-unavailable` | Reopen greyed for a review with no undo, its question mark pressed and the reason showing |
+| `33-channel-declined-ruling` | a declined ruling read as one message from its typed record, beside replies and queued envelopes headed "from you" and "from the manager" |
+| `34-action-items-history` | an item's history in the detail: raised and completed by the manager, completed and noted by you, every time as an age |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the

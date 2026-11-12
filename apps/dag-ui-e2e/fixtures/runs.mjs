@@ -3235,9 +3235,21 @@ function writeNamedRun(root) {
   Journal.writeMerged(join(dir, "events.jsonl"), [driver, observers, nodes]);
 }
 
+/** The node of the history run whose dispatch declined the manager's note. */
+const DECLINING_NODE = "archive";
+/** The manager's note it declined, and why. */
+const DECLINED_NOTE = "Keep the archive under fifty files.";
+const DECLINE_REASON =
+  "The archive already holds sixty files that the release notes link to.";
+
 /**
- * Answers arrive out of question order. tests/contract.rs compares these records
- * and filenames with the SDK's actual channel writer so its storage cannot drift.
+ * Answers arrive out of question order, and the follow-up answer is the user's,
+ * sent from the browser, where every other reply is the manager's and says
+ * nothing of it. The dispatch of `archive` declined the manager's note, whose
+ * surface carries its typed record, and two envelopes still wait for the reconciler:
+ * one the user sent and one the manager sent, each carrying a note.
+ * tests/contract.rs compares these records and filenames with the SDK's actual
+ * channel writer so its storage cannot drift.
  */
 export function channelFixtureRecords() {
   const surfaces = [0, 1, 2].map((id) => ({
@@ -3246,12 +3258,37 @@ export function channelFixtureRecords() {
     kind: "finding",
     source: "proposal",
     blocking: false,
-    queued_at: now() - (3 - id) * 1000,
+    queued_at: now() - (4 - id) * 1000,
     correlation: `c-${String(id).padStart(32, "0")}`,
     message: `Question ${id} ${"long preview ".repeat(30)}\nQuestion final sentinel ${id}`,
   }));
+  const declined = {
+    event: "queued",
+    id: 3,
+    kind: "declined-ruling",
+    source: "proposal",
+    blocking: false,
+    queued_at: now() - 1000,
+    workstream: DECLINING_NODE,
+    message: `node '${DECLINING_NODE}' declined the manager's note (ruling \`c0.0\`, reply 0).\n\nThe ruling:\n${DECLINED_NOTE}\n\nWhy it was declined:\n${DECLINE_REASON}`,
+    declined_ruling: {
+      node: DECLINING_NODE,
+      ruling: "c0.0",
+      provenance: "manager",
+      kind: "note",
+      reply: 0,
+      text: DECLINED_NOTE,
+      reason: DECLINE_REASON,
+    },
+  };
+  const note = (text) => ({
+    op: "note",
+    id: DECLINING_NODE,
+    addressee: "worker",
+    text,
+  });
   return {
-    "surfaces.jsonl": surfaces,
+    "surfaces.jsonl": [...surfaces, declined],
     "replies.jsonl": [1, 0, 2, 3].map((id, index) => ({
       id: index,
       at: now(),
@@ -3259,6 +3296,7 @@ export function channelFixtureRecords() {
         ? {}
         : { correlation: surfaces[id === 3 ? 0 : id].correlation }),
       reply: {
+        ...(id === 3 ? { provenance: "user" } : {}),
         completion: false,
         ...(id === 2
           ? {}
@@ -3270,6 +3308,30 @@ export function channelFixtureRecords() {
             }),
       },
     })),
+    // Envelope 0 carried the note `archive` declined, so the reconciler had
+    // claimed and applied it; 1 and 2 still wait, past the cursor.
+    "commands.jsonl": [
+      { id: 0, author: "planner", commands: [note(DECLINED_NOTE)] },
+      {
+        id: 1,
+        author: "planner",
+        provenance: "user",
+        commands: [note("Link the archive from the release notes too.")],
+      },
+      {
+        id: 2,
+        author: "planner",
+        commands: [note("Hold the archive until the docs land.")],
+      },
+    ],
+    "command-outcomes.jsonl": [
+      {
+        id: 0,
+        applied: true,
+        results: [{ index: 0, op: "note", outcome: "applied" }],
+      },
+    ],
+    "commands-cursor.json": [1],
   };
 }
 
