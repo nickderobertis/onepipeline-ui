@@ -191,13 +191,10 @@ test("records appended before, during and after the rest reach a node's timeline
       // with the runs open.
       for (const row of [before, during])
         await expect
-          .poll(
-            async () => {
-              await expandRows(page);
-              return transcript.getByText(row).count();
-            },
-            { timeout: 60_000 },
-          )
+          .poll(async () => {
+            await expandRows(page);
+            return transcript.getByText(row).count();
+          })
           .toBe(1);
     } finally {
       await stop(served);
