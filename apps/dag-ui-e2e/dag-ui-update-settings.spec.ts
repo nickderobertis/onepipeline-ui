@@ -853,7 +853,14 @@ test("both off closes the stream; turning one on replays from the last applied e
 test("a change held for a view the person moved away from is dropped rather than shown at the next tick", async ({
   page,
 }) => {
-  const { served, facts } = await serveLive();
+  // The record below stales the run's telemetry fold, whose refold lands one
+  // quiet refold interval later as a change of its own on whatever view is then
+  // open. On a loaded host the journey reaches Overall after that, and the
+  // refold is held there as Overall's own change, which is not the graph's held
+  // one this asks about. So no refold lands while the journey runs.
+  const { served, facts } = await serveLive({
+    ONEPIPELINE_UI_TELEMETRY_REFOLD_MS: "600000",
+  });
   const run = facts.openLiveRun;
   const node = facts.liveNode;
   await openClocked(page, served.origin, `/?run=${run}&view=graph`);
