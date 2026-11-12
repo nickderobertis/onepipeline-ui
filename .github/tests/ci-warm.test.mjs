@@ -751,6 +751,10 @@ function warmFromScratch(args, { locked = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "ci-warm-legacy-"));
   mkdirSync(join(root, "scripts"));
   copyFileSync("scripts/ci-warm.sh", join(root, "scripts/ci-warm.sh"));
+  copyFileSync(
+    "scripts/ci-compile-env.sh",
+    join(root, "scripts/ci-compile-env.sh"),
+  );
   const legacy = join(
     root,
     "target/wheel-smoke/venv/lib/python3.12/site-packages/pip/_vendor/colorama/tests",
@@ -1162,5 +1166,90 @@ test("every tool ci.yml and ci-cache.yml install is at the tracked file's exact 
     "warm-linux",
     "warm-windows",
     "warm-macos",
+  ]);
+});
+
+// The compile environment both scripts take from scripts/ci-compile-env.sh: a
+// variable a build script reads (OPENSSL_NO_VENDOR) rebuilds that script and
+// every crate above it when it differs, so a job compiling under one value and a
+// warm build under another restores nothing. Each script sources the file before
+// its first compile; the file only exports.
+const COMPILE_ENV_FILE = "scripts/ci-compile-env.sh";
+const SOURCES_COMPILE_ENV = `source ${COMPILE_ENV_FILE}`;
+const FIRST_COMPILE = {
+  "scripts/ci-job.sh": "nx_run --parallel",
+  "scripts/ci-warm.sh": "\ncompile ",
+};
+export function compileEnvProblems(texts) {
+  const problems = [];
+  for (const [script, first] of Object.entries(FIRST_COMPILE)) {
+    const text = texts[script];
+    const at = text
+      .split("\n")
+      .findIndex((line) => line.trim() === SOURCES_COMPILE_ENV);
+    const sourced =
+      at < 0 ? -1 : text.split("\n").slice(0, at).join("\n").length;
+    if (sourced < 0) {
+      problems.push(`${script} does not source ${COMPILE_ENV_FILE}`);
+      continue;
+    }
+    const compiles = text.indexOf(first);
+    if (compiles < 0) problems.push(`${script}'s first compile moved`);
+    else if (compiles < sourced)
+      problems.push(`${script} compiles before it sources ${COMPILE_ENV_FILE}`);
+  }
+  for (const line of texts[COMPILE_ENV_FILE].split("\n")) {
+    if (line === "" || line.startsWith("#")) continue;
+    if (!/^export [A-Z_][A-Z0-9_]*=\S+$/.test(line))
+      problems.push(`${COMPILE_ENV_FILE} does more than export: '${line}'`);
+  }
+  return problems;
+}
+
+const compileEnvTexts = () =>
+  Object.fromEntries(
+    [...Object.keys(FIRST_COMPILE), COMPILE_ENV_FILE].map((file) => [
+      file,
+      readFileSync(file, "utf8"),
+    ]),
+  );
+
+test("the jobs and the warm build compile under one environment", () => {
+  assert.deepEqual(compileEnvProblems(compileEnvTexts()), []);
+  // What the file exports is what a compile under either script sees.
+  const seen = execFileSync(
+    "bash",
+    ["-c", `source ${COMPILE_ENV_FILE} && printenv OPENSSL_NO_VENDOR`],
+    { encoding: "utf8", env: { PATH: process.env.PATH } },
+  );
+  assert.equal(seen, "1\n");
+});
+
+test("a script that skips, or sources late, the compile environment is refused", () => {
+  const texts = compileEnvTexts();
+  const skipped = {
+    ...texts,
+    "scripts/ci-warm.sh": texts["scripts/ci-warm.sh"].replace(
+      SOURCES_COMPILE_ENV,
+      "",
+    ),
+  };
+  assert.deepEqual(compileEnvProblems(skipped), [
+    `scripts/ci-warm.sh does not source ${COMPILE_ENV_FILE}`,
+  ]);
+  const job = texts["scripts/ci-job.sh"];
+  const late = {
+    ...texts,
+    "scripts/ci-job.sh": `${job.replace(SOURCES_COMPILE_ENV, "")}\n${SOURCES_COMPILE_ENV}\n`,
+  };
+  assert.deepEqual(compileEnvProblems(late), [
+    `scripts/ci-job.sh compiles before it sources ${COMPILE_ENV_FILE}`,
+  ]);
+  const doing = {
+    ...texts,
+    [COMPILE_ENV_FILE]: `${texts[COMPILE_ENV_FILE]}cargo build\n`,
+  };
+  assert.deepEqual(compileEnvProblems(doing), [
+    `${COMPILE_ENV_FILE} does more than export: 'cargo build'`,
   ]);
 });

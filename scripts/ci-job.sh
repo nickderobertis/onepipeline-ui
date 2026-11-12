@@ -34,6 +34,10 @@ cd "$ROOT" || {
   exit 1
 }
 
+# The compile environment the jobs and the warm build share (scripts/ci-compile-env.sh).
+# shellcheck source=scripts/ci-compile-env.sh
+source scripts/ci-compile-env.sh
+
 usage() {
   echo "ci-job: $1" >&2
   echo "ACTION: run 'scripts/ci-job.sh lint|test-linux|test-windows|test-macos|read-latency [--tier affected|broader] [--plan]'" >&2
