@@ -8,8 +8,9 @@
  * It holds the real app's landmarks, classes and accessible names, so the swap moves
  * nothing a reader is looking at, and it reads the answer through the app's own view
  * models. Nothing here pulls the design system or the flow canvas in, and it parses no
- * schema: this path counts against a run's first second. The answer is parsed when the
- * app takes it over.
+ * schema: this path counts against a run's first second. `check.ts` holds every field
+ * it reads to its type before it is drawn, and the app parses the answer whole when it
+ * takes it over.
  */
 import { layoutDag } from "@onepipeline-ui/dag-layout";
 import type { LiveRunDetail, RunTimeline } from "@onepipeline-ui/dag-model";
