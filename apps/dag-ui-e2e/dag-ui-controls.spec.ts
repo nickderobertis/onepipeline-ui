@@ -127,7 +127,7 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   await composer.getByRole("button", { name: "Compose envelope" }).click();
   const editor = composer.getByLabel("Envelope (sent as typed)");
   await expect(editor).toHaveValue(
-    '{\n  "version": 3,\n  "commands": [\n    {\n      "op": "finding",\n      "message": "stop and read this first",\n      "blocking": true,\n      "id": "build"\n    }\n  ]\n}',
+    '{\n  "version": 4,\n  "commands": [\n    {\n      "op": "finding",\n      "message": "stop and read this first",\n      "blocking": true,\n      "id": "build"\n    }\n  ]\n}',
   );
   await composer.getByRole("button", { name: "Send reply" }).click();
   const applied = receipt(page, "Reply");
@@ -260,7 +260,7 @@ test("composes review replies, applies rework and reports retitle delivery refus
       .fill("review-draft-rework");
     const send = async (command: unknown, semanticRefusal?: string) => {
       await composer.getByRole("button", { name: "Compose envelope" }).click();
-      const expected = { version: 3, commands: [command] };
+      const expected = { version: 4, commands: [command] };
       const editor = composer.getByLabel("Envelope (sent as typed)");
       await expect(editor).toHaveValue(JSON.stringify(expected, null, 2));
       const answered = page.waitForResponse(
@@ -327,7 +327,7 @@ test("composes review replies, applies rework and reports retitle delivery refus
     const declineRefusal =
       "refused: decline: node 'review-draft': comment review-1 was not read for it — run `onepipeline review` and decline a comment it surfaced";
     const decline = {
-      version: 3,
+      version: 4,
       commands: [
         {
           op: "decline",

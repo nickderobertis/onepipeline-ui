@@ -7,6 +7,7 @@ import {
   type HumanItemChoice,
   type HumanItemDetail,
   type HumanItemFilter,
+  type HumanItemHistoryEntry,
   type HumanItemReceipt,
   type HumanItemView,
 } from "./human-items.generated.js";
@@ -55,12 +56,20 @@ const block = z.discriminatedUnion("scope", [
   z.strictObject({ scope: z.literal("host") }),
 ]);
 
+/**
+ * Whose words an action was, as the engine's `Provenance` spells it. A record
+ * that names none — every one written under human-items event schema version 1,
+ * and every manager's — is the manager's.
+ */
+const provenance = z.enum(["manager", "user"]);
+
 const resolution = z.strictObject({
   actor: z.string(),
   on_behalf_of: nullableString,
   text: nullableString,
   choice: nullableString.optional(),
   reason: nullableString,
+  provenance: provenance.optional(),
 });
 
 /** One answer a question offers, as the engine bounds it. */
@@ -271,12 +280,35 @@ function nodesProblem(detail: {
   return undefined;
 }
 
+/**
+ * One event the journal recorded about an item, as the engine folds it into a
+ * detail's `history`: the action, its RFC 3339 instant, who took it and whose
+ * words it was.
+ */
+const historyEntry: z.ZodType<HumanItemHistoryEntry> = z.strictObject({
+  action: z.enum([
+    "human-item-raised",
+    "human-item-answered",
+    "human-item-completed",
+    "human-item-dismissed",
+    "human-item-auto-resolved",
+    "human-item-reopened",
+    "human-item-noted",
+  ]),
+  at: z.string(),
+  actor: z.string(),
+  on_behalf_of: nullableString,
+  provenance,
+});
+
 export const humanItemDetailSchema: z.ZodType<HumanItemDetail> = z
   .strictObject({
     item: humanItemSchema,
     blocked,
     nodes: z.array(node),
     reopen,
+    // Oldest first, as the engine served it; the browser derives none of it.
+    history: z.array(historyEntry).optional(),
   })
   .superRefine((detail, context) => {
     const problem =

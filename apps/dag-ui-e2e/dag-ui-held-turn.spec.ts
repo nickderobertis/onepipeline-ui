@@ -106,7 +106,7 @@ test("a reply to a node whose turn is open is answered with the amend applied an
     const composer = page.getByRole("region", { name: "Reply" });
     await composer.getByLabel("Envelope (sent as typed)").fill(
       JSON.stringify({
-        version: 3,
+        version: 4,
         commands: [
           { op: "amend", id: facts.node, text: AMENDMENT },
           {

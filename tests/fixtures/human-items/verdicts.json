@@ -5380,6 +5380,672 @@
           "reason": "an answered question cannot be reopened"
         }
       }
+    },
+    {
+      "name": "an answer in the user's words",
+      "type": "HumanItemView",
+      "accept": true,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "question",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "answered",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": "eu-west",
+            "reason": null,
+            "provenance": "user"
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
+        }
+      }
+    },
+    {
+      "name": "an answer stating the manager's words",
+      "type": "HumanItemView",
+      "accept": true,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "question",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "answered",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": "eu-west",
+            "reason": null,
+            "provenance": "manager"
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
+        }
+      }
+    },
+    {
+      "name": "an answer in a party the engine does not name",
+      "type": "HumanItemView",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "question-canary",
+          "dedup_key": "dedup-question-canary",
+          "kind": "question",
+          "title": "Which region should the canary run in?",
+          "body": "The canary needs a region before deploy starts. us-east has more traffic; eu-west matches the incident report.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "deploy"
+          },
+          "approval": null,
+          "state": "answered",
+          "resolution": {
+            "actor": "claude-code-supervising-session",
+            "on_behalf_of": null,
+            "text": "eu-west",
+            "reason": null,
+            "provenance": "admin"
+          },
+          "tracker": null,
+          "created_at": "2026-10-29T09:05:00Z",
+          "updated_at": "sample-resolved"
+        },
+        "blocked": {
+          "total": 0,
+          "plans": []
+        },
+        "reopen": {
+          "available": false,
+          "reason": "an answered question cannot be reopened"
+        }
+      }
+    },
+    {
+      "name": "a detail with its history",
+      "type": "HumanItemDetail",
+      "accept": true,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "task-design",
+          "dedup_key": "dedup-task-design",
+          "kind": "task",
+          "title": "Review the action-items design",
+          "body": "Read the action-items design document and complete this task once its layout and keyboard flow look right to you.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "design"
+          },
+          "approval": {
+            "board_copy": "docs/design/action-items.md",
+            "key": "sha256:5d1c0a"
+          },
+          "state": "open",
+          "resolution": null,
+          "tracker": {
+            "task": "ONE-412",
+            "url": "https://linear.app/onepipeline/issue/ONE-412"
+          },
+          "created_at": "2026-10-29T09:10:00Z",
+          "updated_at": "2026-10-29T09:10:00Z"
+        },
+        "blocked": {
+          "total": 7,
+          "plans": [
+            {
+              "plan": "plan-a",
+              "count": 5,
+              "preview": [
+                {
+                  "run": "run-a",
+                  "node": "build",
+                  "title": "Build the release binaries"
+                },
+                {
+                  "run": "run-a",
+                  "node": "test",
+                  "title": "Run the release journeys"
+                },
+                {
+                  "run": "run-a",
+                  "node": "lint",
+                  "title": "Lint the changed files"
+                }
+              ]
+            },
+            {
+              "plan": "plan-b",
+              "count": 2,
+              "preview": [
+                {
+                  "run": "run-b",
+                  "node": "docs",
+                  "title": "Rewrite the operator guide"
+                },
+                {
+                  "run": "run-b",
+                  "node": "screens",
+                  "title": "Photograph every surface"
+                }
+              ]
+            }
+          ]
+        },
+        "nodes": [
+          {
+            "run": "run-a",
+            "node": "build",
+            "title": "Build the release binaries"
+          },
+          {
+            "run": "run-a",
+            "node": "test",
+            "title": "Run the release journeys"
+          },
+          {
+            "run": "run-a",
+            "node": "lint",
+            "title": "Lint the changed files"
+          },
+          {
+            "run": "run-a",
+            "node": "package",
+            "title": "Package the wheels"
+          },
+          {
+            "run": "run-a",
+            "node": "publish",
+            "title": "Publish to the registries"
+          },
+          {
+            "run": "run-b",
+            "node": "docs",
+            "title": "Rewrite the operator guide"
+          },
+          {
+            "run": "run-b",
+            "node": "screens",
+            "title": "Photograph every surface"
+          }
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        },
+        "history": [
+          {
+            "action": "human-item-raised",
+            "at": "2026-10-29T09:10:00.000Z",
+            "actor": "session:claude-code-supervising-session",
+            "on_behalf_of": null,
+            "provenance": "manager"
+          },
+          {
+            "action": "human-item-noted",
+            "at": "2026-10-29T10:10:00.000Z",
+            "actor": "browser:session:claude-code-supervising-session",
+            "on_behalf_of": null,
+            "provenance": "user"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a history entry naming no party",
+      "type": "HumanItemDetail",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "task-design",
+          "dedup_key": "dedup-task-design",
+          "kind": "task",
+          "title": "Review the action-items design",
+          "body": "Read the action-items design document and complete this task once its layout and keyboard flow look right to you.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "design"
+          },
+          "approval": {
+            "board_copy": "docs/design/action-items.md",
+            "key": "sha256:5d1c0a"
+          },
+          "state": "open",
+          "resolution": null,
+          "tracker": {
+            "task": "ONE-412",
+            "url": "https://linear.app/onepipeline/issue/ONE-412"
+          },
+          "created_at": "2026-10-29T09:10:00Z",
+          "updated_at": "2026-10-29T09:10:00Z"
+        },
+        "blocked": {
+          "total": 7,
+          "plans": [
+            {
+              "plan": "plan-a",
+              "count": 5,
+              "preview": [
+                {
+                  "run": "run-a",
+                  "node": "build",
+                  "title": "Build the release binaries"
+                },
+                {
+                  "run": "run-a",
+                  "node": "test",
+                  "title": "Run the release journeys"
+                },
+                {
+                  "run": "run-a",
+                  "node": "lint",
+                  "title": "Lint the changed files"
+                }
+              ]
+            },
+            {
+              "plan": "plan-b",
+              "count": 2,
+              "preview": [
+                {
+                  "run": "run-b",
+                  "node": "docs",
+                  "title": "Rewrite the operator guide"
+                },
+                {
+                  "run": "run-b",
+                  "node": "screens",
+                  "title": "Photograph every surface"
+                }
+              ]
+            }
+          ]
+        },
+        "nodes": [
+          {
+            "run": "run-a",
+            "node": "build",
+            "title": "Build the release binaries"
+          },
+          {
+            "run": "run-a",
+            "node": "test",
+            "title": "Run the release journeys"
+          },
+          {
+            "run": "run-a",
+            "node": "lint",
+            "title": "Lint the changed files"
+          },
+          {
+            "run": "run-a",
+            "node": "package",
+            "title": "Package the wheels"
+          },
+          {
+            "run": "run-a",
+            "node": "publish",
+            "title": "Publish to the registries"
+          },
+          {
+            "run": "run-b",
+            "node": "docs",
+            "title": "Rewrite the operator guide"
+          },
+          {
+            "run": "run-b",
+            "node": "screens",
+            "title": "Photograph every surface"
+          }
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        },
+        "history": [
+          {
+            "action": "human-item-raised",
+            "at": "2026-10-29T09:10:00.000Z",
+            "actor": "session:claude-code-supervising-session",
+            "on_behalf_of": null,
+            "provenance": null
+          }
+        ]
+      }
+    },
+    {
+      "name": "a history entry of an action the engine does not record",
+      "type": "HumanItemDetail",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "task-design",
+          "dedup_key": "dedup-task-design",
+          "kind": "task",
+          "title": "Review the action-items design",
+          "body": "Read the action-items design document and complete this task once its layout and keyboard flow look right to you.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "design"
+          },
+          "approval": {
+            "board_copy": "docs/design/action-items.md",
+            "key": "sha256:5d1c0a"
+          },
+          "state": "open",
+          "resolution": null,
+          "tracker": {
+            "task": "ONE-412",
+            "url": "https://linear.app/onepipeline/issue/ONE-412"
+          },
+          "created_at": "2026-10-29T09:10:00Z",
+          "updated_at": "2026-10-29T09:10:00Z"
+        },
+        "blocked": {
+          "total": 7,
+          "plans": [
+            {
+              "plan": "plan-a",
+              "count": 5,
+              "preview": [
+                {
+                  "run": "run-a",
+                  "node": "build",
+                  "title": "Build the release binaries"
+                },
+                {
+                  "run": "run-a",
+                  "node": "test",
+                  "title": "Run the release journeys"
+                },
+                {
+                  "run": "run-a",
+                  "node": "lint",
+                  "title": "Lint the changed files"
+                }
+              ]
+            },
+            {
+              "plan": "plan-b",
+              "count": 2,
+              "preview": [
+                {
+                  "run": "run-b",
+                  "node": "docs",
+                  "title": "Rewrite the operator guide"
+                },
+                {
+                  "run": "run-b",
+                  "node": "screens",
+                  "title": "Photograph every surface"
+                }
+              ]
+            }
+          ]
+        },
+        "nodes": [
+          {
+            "run": "run-a",
+            "node": "build",
+            "title": "Build the release binaries"
+          },
+          {
+            "run": "run-a",
+            "node": "test",
+            "title": "Run the release journeys"
+          },
+          {
+            "run": "run-a",
+            "node": "lint",
+            "title": "Lint the changed files"
+          },
+          {
+            "run": "run-a",
+            "node": "package",
+            "title": "Package the wheels"
+          },
+          {
+            "run": "run-a",
+            "node": "publish",
+            "title": "Publish to the registries"
+          },
+          {
+            "run": "run-b",
+            "node": "docs",
+            "title": "Rewrite the operator guide"
+          },
+          {
+            "run": "run-b",
+            "node": "screens",
+            "title": "Photograph every surface"
+          }
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        },
+        "history": [
+          {
+            "action": "human-item-approved",
+            "at": "2026-10-29T09:10:00.000Z",
+            "actor": "session:claude-code-supervising-session",
+            "on_behalf_of": null,
+            "provenance": "manager"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a history entry with a field it does not declare",
+      "type": "HumanItemDetail",
+      "accept": false,
+      "record": {
+        "item": {
+          "schema_version": 1,
+          "id": "task-design",
+          "dedup_key": "dedup-task-design",
+          "kind": "task",
+          "title": "Review the action-items design",
+          "body": "Read the action-items design document and complete this task once its layout and keyboard flow look right to you.",
+          "priority": "high",
+          "owner": {
+            "session": "claude-code-supervising-session",
+            "run": "run-a",
+            "plan": "plan-a"
+          },
+          "block": {
+            "scope": "work",
+            "run": "run-a",
+            "node": "design"
+          },
+          "approval": {
+            "board_copy": "docs/design/action-items.md",
+            "key": "sha256:5d1c0a"
+          },
+          "state": "open",
+          "resolution": null,
+          "tracker": {
+            "task": "ONE-412",
+            "url": "https://linear.app/onepipeline/issue/ONE-412"
+          },
+          "created_at": "2026-10-29T09:10:00Z",
+          "updated_at": "2026-10-29T09:10:00Z"
+        },
+        "blocked": {
+          "total": 7,
+          "plans": [
+            {
+              "plan": "plan-a",
+              "count": 5,
+              "preview": [
+                {
+                  "run": "run-a",
+                  "node": "build",
+                  "title": "Build the release binaries"
+                },
+                {
+                  "run": "run-a",
+                  "node": "test",
+                  "title": "Run the release journeys"
+                },
+                {
+                  "run": "run-a",
+                  "node": "lint",
+                  "title": "Lint the changed files"
+                }
+              ]
+            },
+            {
+              "plan": "plan-b",
+              "count": 2,
+              "preview": [
+                {
+                  "run": "run-b",
+                  "node": "docs",
+                  "title": "Rewrite the operator guide"
+                },
+                {
+                  "run": "run-b",
+                  "node": "screens",
+                  "title": "Photograph every surface"
+                }
+              ]
+            }
+          ]
+        },
+        "nodes": [
+          {
+            "run": "run-a",
+            "node": "build",
+            "title": "Build the release binaries"
+          },
+          {
+            "run": "run-a",
+            "node": "test",
+            "title": "Run the release journeys"
+          },
+          {
+            "run": "run-a",
+            "node": "lint",
+            "title": "Lint the changed files"
+          },
+          {
+            "run": "run-a",
+            "node": "package",
+            "title": "Package the wheels"
+          },
+          {
+            "run": "run-a",
+            "node": "publish",
+            "title": "Publish to the registries"
+          },
+          {
+            "run": "run-b",
+            "node": "docs",
+            "title": "Rewrite the operator guide"
+          },
+          {
+            "run": "run-b",
+            "node": "screens",
+            "title": "Photograph every surface"
+          }
+        ],
+        "reopen": {
+          "available": false,
+          "reason": "the item is open, so there is nothing to reopen"
+        },
+        "history": [
+          {
+            "action": "human-item-raised",
+            "at": "2026-10-29T09:10:00.000Z",
+            "actor": "session:claude-code-supervising-session",
+            "on_behalf_of": null,
+            "provenance": "manager",
+            "extra": 1
+          }
+        ]
+      }
     }
   ]
 }
