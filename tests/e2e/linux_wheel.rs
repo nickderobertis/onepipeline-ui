@@ -916,7 +916,9 @@ fn the_image_keeps_its_toolchain_and_crates_in_the_checkout_for_the_next_build()
     let (_scratch, dir) = scratch("container-home");
     container_double(&dir, None);
     let checkout = checkout_with_channel(&dir, &channel());
-    let checkout = checkout.canonicalize().expect("the scratch checkout resolves");
+    let checkout = checkout
+        .canonicalize()
+        .expect("the scratch checkout resolves");
     let output = script_in(&checkout, &dir);
     assert!(output.status.success(), "the build succeeds");
     let kept = checkout.join(".tools/wheel-container-x86_64-unknown-linux-gnu");
@@ -930,7 +932,10 @@ fn the_image_keeps_its_toolchain_and_crates_in_the_checkout_for_the_next_build()
             args.windows(2).any(|pair| pair == ["-v", &mount[..]]),
             "docker mounts {mount}; it got {args:?}"
         );
-        assert!(kept.join(host).is_dir(), "{host} is created before the container runs");
+        assert!(
+            kept.join(host).is_dir(),
+            "{host} is created before the container runs"
+        );
     }
     let home = dir.join("home");
     let hand_back = format!(
@@ -960,6 +965,9 @@ fn a_toolchain_directory_that_cannot_be_created_is_named() {
             && stderr.contains(".tools/wheel-container-x86_64-unknown-linux-gnu"),
         "{stderr}"
     );
-    assert!(stderr.contains("ACTION: remove whatever file stands on that path"), "{stderr}");
+    assert!(
+        stderr.contains("ACTION: remove whatever file stands on that path"),
+        "{stderr}"
+    );
     assert!(!dir.join("docker.log").exists(), "docker was not run");
 }
