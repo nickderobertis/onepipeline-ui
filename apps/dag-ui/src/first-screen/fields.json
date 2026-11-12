@@ -1,79 +1,963 @@
 {
-  "//": "Every field of a first answer FirstScreen reads, directly and through the view models it draws with, as check.ts's namedPath names it: a list's first item stands for the rest, `*` is any entry of a record, and a trailing `?` marks a field the contract lets an answer leave out. src/test/first-screen-check.test.ts holds the check to this list, and apps/dag-ui-e2e/dag-ui-first-answer-contract.spec.ts alters each of these fields in a served answer.",
+  "//": "Every field of a first answer FirstScreen reads, directly and through the view models it draws with, as check.ts declares them: `[0]` is any item of a list and `*` any entry of a record. Each says what the check holds it to, a value of another type it refuses (`wrong`), a value of its own type it refuses where there is one (`unfit`), and, for a member of a union's alternative, the union a refusal names. `exemplar` is an answer the check takes that holds every field. src/test/first-screen-check.test.ts holds this file to check.ts and every field to dag-model's schemas, and apps/dag-ui-e2e/dag-ui-first-answer-contract.spec.ts alters each field in a served answer.",
   "fields": [
-    "answer.initial",
-    "answer.initial.snapshot",
-    "answer.initial.snapshot.visible",
-    "answer.initial.snapshot.visible.detail",
-    "answer.initial.snapshot.visible.detail.progress?",
-    "answer.initial.snapshot.visible.detail.progress.complete",
-    "answer.initial.snapshot.visible.detail.node_details",
-    "answer.initial.snapshot.visible.detail.run",
-    "answer.initial.snapshot.visible.detail.run.run_id",
-    "answer.initial.snapshot.visible.detail.run.phase",
-    "answer.initial.snapshot.visible.detail.run.last_event",
-    "answer.initial.snapshot.visible.detail.run.state",
-    "answer.initial.snapshot.visible.detail.run.nodes",
-    "answer.initial.snapshot.visible.detail.run.nodes[0].node",
-    "answer.initial.snapshot.visible.detail.run.nodes[0].failure?",
-    "answer.initial.snapshot.visible.detail.run.nodes[0].outcome?",
-    "answer.initial.snapshot.visible.detail.run.timing",
-    "answer.initial.snapshot.visible.detail.run.timing.wall_seconds",
-    "answer.initial.snapshot.visible.detail.run.turns",
-    "answer.initial.snapshot.visible.detail.graph",
-    "answer.initial.snapshot.visible.detail.graph.plan",
-    "answer.initial.snapshot.visible.detail.graph.plan.tasks",
-    "answer.initial.snapshot.visible.detail.graph.plan.tasks[0].id",
-    "answer.initial.snapshot.visible.detail.graph.plan.tasks[0].kind?",
-    "answer.initial.snapshot.visible.detail.graph.plan.tasks[0].deps?",
-    "answer.initial.snapshot.visible.detail.graph.plan.goal?",
-    "answer.initial.snapshot.visible.detail.graph.plan.goal.text",
-    "answer.initial.snapshot.visible.detail.graph.node_status",
-    "answer.initial.snapshot.visible.detail.graph.node_status.*?",
-    "answer.initial.snapshot.visible.detail.graph.node_results",
-    "answer.initial.snapshot.visible.detail.graph.node_results.*?",
-    "answer.initial.snapshot.visible.detail.graph.node_results.*.blocked_by?",
-    "answer.initial.snapshot.visible.detail.graph.node_results.*.awaiting?",
-    "answer.initial.snapshot.visible.detail.graph.node_results.*.detail?",
-    "answer.initial.snapshot.visible.detail.graph.node_results.*.error?",
-    "answer.initial.snapshot.visible.detail.graph.node_results.*.outcome?",
-    "answer.initial.snapshot.visible.detail.graph.result",
-    "answer.initial.snapshot.visible.detail.graph.result.results?",
-    "answer.initial.snapshot.visible.detail.graph.node_control",
-    "answer.initial.snapshot.visible.detail.graph.node_gated_by",
-    "answer.initial.snapshot.visible.timeline?",
-    "answer.initial.snapshot.visible.timeline.spans",
-    "answer.initial.snapshot.visible.timeline.spans[0].id",
-    "answer.initial.snapshot.visible.timeline.spans[0].kind",
-    "answer.initial.snapshot.visible.timeline.spans[0].label",
-    "answer.initial.snapshot.visible.timeline.spans[0].started_at",
-    "answer.initial.snapshot.visible.timeline.spans[0].ended_at",
-    "answer.initial.snapshot.visible.timeline.spans[0].events",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].id",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].record_id?",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].step_id?",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].kind",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].at",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].status?",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].node_id?",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].dispatch_group?",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].description?",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].author?",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].journal_order?",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].redirection?",
-    "answer.initial.snapshot.visible.timeline.spans[0].events[0].surface?",
-    "answer.initial.snapshot.visible.timeline.spans[0].events_total?",
-    "answer.initial.snapshot.visible.timeline.spans[0].parent_id?",
-    "answer.initial.snapshot.visible.timeline.spans[0].node_id?",
-    "answer.initial.snapshot.visible.timeline.spans[0].status?",
-    "answer.initial.snapshot.visible.timeline.spans[0].count?",
-    "answer.initial.snapshot.visible.timeline.spans[0].total_duration_ms?",
-    "answer.initial.snapshot.visible.timeline.spans[0].harness_scope?",
-    "answer.initial.snapshot.visible.timeline.spans[0].agent_role?",
-    "answer.initial.snapshot.visible.timeline.spans[0].transport_role?",
-    "answer.initial.snapshot.visible.timeline.spans[0].dispatch_group?",
-    "answer.initial.snapshot.visible.timeline.spans[0].reference?",
-    "answer.initial.snapshot.visible.timeline.spans[0].reasons?",
-    "answer.initial.snapshot.visible.timeline.observed_at"
-  ]
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.progress",
+      "required": false,
+      "wrong": "an object"
+    },
+    {
+      "kind": "boolean",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.progress.complete",
+      "required": true,
+      "wrong": "yes"
+    },
+    {
+      "kind": "record",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.node_details",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.run",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.run.run_id",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.run.phase",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": true,
+      "field": "answer.initial.snapshot.visible.detail.run.last_event",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.run.state",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.run.nodes",
+      "required": true,
+      "wrong": "a list"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.run.nodes[0].node",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.run.nodes[0].failure",
+      "required": false,
+      "wrong": "an object"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.run.nodes[0].failure.detail",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.run.nodes[0].outcome",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.run.timing",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "number",
+      "nullable": true,
+      "field": "answer.initial.snapshot.visible.detail.run.timing.wall_seconds",
+      "required": true,
+      "wrong": "many",
+      "unfit": -1
+    },
+    {
+      "kind": "union",
+      "nullable": false,
+      "alternatives": ["integer", "object"],
+      "field": "answer.initial.snapshot.visible.detail.run.turns",
+      "required": true,
+      "wrong": "some"
+    },
+    {
+      "kind": "true",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.run.turns.loading",
+      "required": true,
+      "wrong": "yes",
+      "unfit": false,
+      "names": "answer.initial.snapshot.visible.detail.run.turns"
+    },
+    {
+      "kind": "object",
+      "nullable": true,
+      "field": "answer.initial.snapshot.visible.detail.graph",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.plan",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.plan.tasks",
+      "required": true,
+      "wrong": "a list"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.plan.tasks[0].id",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "enum",
+      "nullable": false,
+      "words": ["agent", "human"],
+      "field": "answer.initial.snapshot.visible.detail.graph.plan.tasks[0].kind",
+      "required": false,
+      "wrong": 42,
+      "unfit": "not-one-of-them"
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.plan.tasks[0].deps",
+      "required": false,
+      "wrong": "a list"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.plan.goal",
+      "required": false,
+      "wrong": "an object"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.plan.goal.text",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "record",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_status",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "enum",
+      "nullable": false,
+      "words": [
+        "pending",
+        "ready",
+        "running",
+        "waiting",
+        "blocked",
+        "skipped",
+        "done",
+        "not-completed",
+        "failed",
+        "parked",
+        "cancelled",
+        "complete-but-draft",
+        "complete-but-held",
+        "unknown"
+      ],
+      "field": "answer.initial.snapshot.visible.detail.graph.node_status.*",
+      "required": false,
+      "wrong": 42,
+      "unfit": "not-one-of-them"
+    },
+    {
+      "kind": "record",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_results",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_results.*",
+      "required": false,
+      "wrong": "an object"
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_results.*.blocked_by",
+      "required": false,
+      "wrong": "a list"
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_results.*.awaiting",
+      "required": false,
+      "wrong": "a list"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_results.*.awaiting[0].producer",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_results.*.awaiting[0].target",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_results.*.detail",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": true,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_results.*.error",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_results.*.outcome",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "object",
+      "nullable": true,
+      "field": "answer.initial.snapshot.visible.detail.graph.result",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "record",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.result.results",
+      "required": false,
+      "wrong": "an object"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.result.results.*",
+      "required": false,
+      "wrong": "an object"
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.result.results.*.blocked_by",
+      "required": false,
+      "wrong": "a list"
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.result.results.*.awaiting",
+      "required": false,
+      "wrong": "a list"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.result.results.*.awaiting[0].producer",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.result.results.*.awaiting[0].target",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.result.results.*.detail",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": true,
+      "field": "answer.initial.snapshot.visible.detail.graph.result.results.*.error",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.result.results.*.outcome",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "record",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_control",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "record",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_gated_by",
+      "required": true,
+      "wrong": "an object"
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.detail.graph.node_gated_by.*",
+      "required": false,
+      "wrong": "a list"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline",
+      "required": false,
+      "wrong": "an object"
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans",
+      "required": true,
+      "wrong": "a list"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].id",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "enum",
+      "nullable": false,
+      "words": [
+        "run",
+        "node",
+        "step",
+        "dispatch",
+        "verification",
+        "publication",
+        "pr-drafting",
+        "conflict-resolution",
+        "human-wait",
+        "rollup",
+        "queued"
+      ],
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].kind",
+      "required": true,
+      "wrong": 42,
+      "unfit": "not-one-of-them"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].label",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "timestamp",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].started_at",
+      "required": true,
+      "wrong": 42,
+      "unfit": "not a time"
+    },
+    {
+      "kind": "timestamp",
+      "nullable": true,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].ended_at",
+      "required": true,
+      "wrong": 42,
+      "unfit": "not a time"
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events",
+      "required": true,
+      "wrong": "a list"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].id",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].record_id",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].step_id",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].kind",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "timestamp",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].at",
+      "required": true,
+      "wrong": 42,
+      "unfit": "not a time"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].status",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].node_id",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].dispatch_group",
+      "required": false,
+      "wrong": "an object"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].dispatch_group.id",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].dispatch_group.label",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "integer",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].dispatch_group.order",
+      "required": true,
+      "wrong": "many",
+      "unfit": 1.5
+    },
+    {
+      "kind": "timestamp",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].dispatch_group.started_at",
+      "required": true,
+      "wrong": 42,
+      "unfit": "not a time"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].description",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].author",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "integer",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].journal_order",
+      "required": false,
+      "wrong": "many",
+      "unfit": 1.5
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].redirection",
+      "required": false,
+      "wrong": "an object"
+    },
+    {
+      "kind": "boolean",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].redirection.delivered",
+      "required": true,
+      "wrong": "yes"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].surface",
+      "required": false,
+      "wrong": "an object"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].surface.kind",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].surface.message",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "boolean",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events[0].surface.blocking",
+      "required": false,
+      "wrong": "yes"
+    },
+    {
+      "kind": "integer",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].events_total",
+      "required": false,
+      "wrong": "many",
+      "unfit": 1.5
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].parent_id",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].node_id",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].status",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "integer",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].count",
+      "required": false,
+      "wrong": "many",
+      "unfit": 1.5
+    },
+    {
+      "kind": "integer",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].total_duration_ms",
+      "required": false,
+      "wrong": "many",
+      "unfit": 1.5
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].harness_scope",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].agent_role",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "enum",
+      "nullable": false,
+      "words": ["agent", "judge", "llmlint"],
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].transport_role",
+      "required": false,
+      "wrong": 42,
+      "unfit": "not-one-of-them"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].dispatch_group",
+      "required": false,
+      "wrong": "an object"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].dispatch_group.id",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].dispatch_group.label",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "integer",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].dispatch_group.order",
+      "required": true,
+      "wrong": "many",
+      "unfit": 1.5
+    },
+    {
+      "kind": "timestamp",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].dispatch_group.started_at",
+      "required": true,
+      "wrong": 42,
+      "unfit": "not a time"
+    },
+    {
+      "kind": "object",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].reference",
+      "required": false,
+      "wrong": "an object"
+    },
+    {
+      "kind": "enum",
+      "nullable": false,
+      "words": [
+        "conversation",
+        "gate_log",
+        "worker_report",
+        "oneharness_session",
+        "pr"
+      ],
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].reference.kind",
+      "required": true,
+      "wrong": 42,
+      "unfit": "not-one-of-them"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].reference.value",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].reasons",
+      "required": false,
+      "wrong": "a list"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].reasons[0].kind",
+      "required": true,
+      "wrong": 42
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].reasons[0].ahead",
+      "required": false,
+      "wrong": "a list"
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].reasons[0].blocking",
+      "required": false,
+      "wrong": "a list"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].reasons[0].reference",
+      "required": false,
+      "wrong": 42
+    },
+    {
+      "kind": "array",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.spans[0].reasons[0].awaiting",
+      "required": false,
+      "wrong": "a list"
+    },
+    {
+      "kind": "string",
+      "nullable": false,
+      "field": "answer.initial.snapshot.visible.timeline.observed_at",
+      "required": true,
+      "wrong": 42
+    }
+  ],
+  "exemplar": {
+    "initial": {
+      "snapshot": {
+        "visible": {
+          "detail": {
+            "progress": {
+              "complete": true
+            },
+            "node_details": {
+              "x": {}
+            },
+            "run": {
+              "run_id": "x",
+              "phase": "x",
+              "last_event": "x",
+              "state": "x",
+              "nodes": [
+                {
+                  "node": "x",
+                  "failure": {
+                    "detail": "x"
+                  },
+                  "outcome": "x"
+                }
+              ],
+              "timing": {
+                "wall_seconds": 1
+              },
+              "turns": {
+                "loading": true
+              }
+            },
+            "graph": {
+              "plan": {
+                "tasks": [
+                  {
+                    "id": "x",
+                    "kind": "agent",
+                    "deps": ["x"]
+                  }
+                ],
+                "goal": {
+                  "text": "x"
+                }
+              },
+              "node_status": {
+                "x": "pending"
+              },
+              "node_results": {
+                "x": {
+                  "blocked_by": ["x"],
+                  "awaiting": [
+                    {
+                      "producer": "x",
+                      "target": "x"
+                    }
+                  ],
+                  "detail": "x",
+                  "error": "x",
+                  "outcome": "x"
+                }
+              },
+              "result": {
+                "results": {
+                  "x": {
+                    "blocked_by": ["x"],
+                    "awaiting": [
+                      {
+                        "producer": "x",
+                        "target": "x"
+                      }
+                    ],
+                    "detail": "x",
+                    "error": "x",
+                    "outcome": "x"
+                  }
+                }
+              },
+              "node_control": {
+                "x": {}
+              },
+              "node_gated_by": {
+                "x": ["x"]
+              }
+            }
+          },
+          "timeline": {
+            "spans": [
+              {
+                "id": "x",
+                "kind": "run",
+                "label": "x",
+                "started_at": "2026-01-01T00:00:00.000Z",
+                "ended_at": "2026-01-01T00:00:00.000Z",
+                "events": [
+                  {
+                    "id": "x",
+                    "record_id": "x",
+                    "step_id": "x",
+                    "kind": "x",
+                    "at": "2026-01-01T00:00:00.000Z",
+                    "status": "x",
+                    "node_id": "x",
+                    "dispatch_group": {
+                      "id": "x",
+                      "label": "x",
+                      "order": 1,
+                      "started_at": "2026-01-01T00:00:00.000Z"
+                    },
+                    "description": "x",
+                    "author": "x",
+                    "journal_order": 1,
+                    "redirection": {
+                      "delivered": true
+                    },
+                    "surface": {
+                      "kind": "x",
+                      "message": "x",
+                      "blocking": true
+                    }
+                  }
+                ],
+                "events_total": 1,
+                "parent_id": "x",
+                "node_id": "x",
+                "status": "x",
+                "count": 1,
+                "total_duration_ms": 1,
+                "harness_scope": "x",
+                "agent_role": "x",
+                "transport_role": "agent",
+                "dispatch_group": {
+                  "id": "x",
+                  "label": "x",
+                  "order": 1,
+                  "started_at": "2026-01-01T00:00:00.000Z"
+                },
+                "reference": {
+                  "kind": "conversation",
+                  "value": "x"
+                },
+                "reasons": [
+                  {
+                    "kind": "x",
+                    "ahead": ["x"],
+                    "blocking": ["x"],
+                    "reference": "x",
+                    "awaiting": ["x"]
+                  }
+                ]
+              }
+            ],
+            "observed_at": "x"
+          }
+        }
+      }
+    }
+  }
 }

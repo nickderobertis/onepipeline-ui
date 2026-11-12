@@ -9,9 +9,11 @@ import { runs } from "./fixture-facts";
  * `POST /api/v2/subscriptions`, altered in flight one field at a time.
  *
  * Every field the first screen draws, as `apps/dag-ui/src/first-screen/fields.json`
- * lists them (the list that app's unit test holds its check to), in the answers Graph,
- * a node and Overall receive, is taken out where the contract requires it and, in a
- * second pass, given a value of the wrong type. Each time the page must say
+ * declares them (the list that app's unit test holds its check to), in the answers
+ * Graph and a node receive, is given a value of the wrong type, a value of its type it
+ * never holds where there is one, and is taken out where the contract requires it. A
+ * field the served answer holds nothing of is grafted in from that file's exemplar
+ * first, so every field is altered in a served answer. Each time the page must say
  * the answer failed its contract, naming that field, and must never have drawn a first
  * screen from it; the answer as served draws each view's first screen. One server and
  * one settled run serve every pass.
@@ -37,22 +39,22 @@ const DRAWN =
 type Json = Record<string | number, unknown>;
 type Path = readonly (string | number)[];
 
-/** The fields the first screen draws, each a pattern and whether it may be left out. */
-const FIELDS = (
-  JSON.parse(
-    readFileSync(
-      join(import.meta.dirname, "../dag-ui/src/first-screen/fields.json"),
-      "utf8",
-    ),
-  ) as { fields: string[] }
-).fields.map((listed) => ({
-  steps: listed
-    .replace(/\?$/u, "")
-    .replace(/\[0\]/gu, ".0")
-    .split(".")
-    .slice(1),
-  required: !listed.endsWith("?"),
-}));
+/** One field the first screen draws, as `fields.json` declares it. */
+interface Listed {
+  readonly field: string;
+  readonly required: boolean;
+  readonly wrong: unknown;
+  readonly unfit?: unknown;
+  readonly names?: string;
+}
+
+/** Every field the first screen draws, and an answer that holds each of them. */
+const LISTED = JSON.parse(
+  readFileSync(
+    join(import.meta.dirname, "../dag-ui/src/first-screen/fields.json"),
+    "utf8",
+  ),
+) as { fields: Listed[]; exemplar: unknown };
 
 /** How the page names the field at `path`: `answer`, then its keys and indices. */
 const namedPath = (path: Path): string =>
@@ -62,66 +64,49 @@ const namedPath = (path: Path): string =>
     "answer",
   );
 
+const isHolder = (value: unknown): value is Json =>
+  typeof value === "object" && value !== null;
+
 /**
- * The fields of `answer` the list names, each where it is in this answer: `0` the
- * first item of a list and `*` the first entry of a record. A field this answer does
- * not hold is not drawn from it and is left out.
+ * A copy of the served `answer` holding `field`, and where it holds it: where the
+ * served answer holds what the field sits under, there — a list's first item, a
+ * record's first entry — and where it holds none of it, the exemplar's, grafted in.
  */
-function fieldsOf(answer: unknown): { path: Path; required: boolean }[] {
-  const found: { path: Path; required: boolean }[] = [];
-  for (const { steps, required } of FIELDS) {
-    let at: unknown = answer;
-    const path: (string | number)[] = [];
-    let held = true;
-    for (const step of steps) {
-      if (typeof at !== "object" || at === null) {
-        held = false;
-        break;
-      }
-      const key =
-        step === "*"
-          ? Object.keys(at)[0]
-          : step === "0" && Array.isArray(at)
-            ? 0
-            : step;
-      if (key === undefined || !(key in at)) {
-        held = false;
-        break;
-      }
-      path.push(key);
-      at = (at as Json)[key];
+function holding(answer: unknown, field: string): { answer: Json; path: Path } {
+  const copy = structuredClone(answer) as Json;
+  const steps = field.replace(/\[0\]/gu, ".[0]").split(".").slice(1);
+  const path: (string | number)[] = [];
+  let at: Json = copy;
+  let exemplar: unknown = LISTED.exemplar;
+  for (const [index, step] of steps.entries()) {
+    const example = exemplar as Json;
+    const key =
+      step === "[0]"
+        ? 0
+        : step === "*"
+          ? (Object.keys(at)[0] ?? (Object.keys(example)[0] as string))
+          : step;
+    const next = step === "*" ? Object.values(example)[0] : example[key];
+    const last = index === steps.length - 1;
+    if (last ? at[key] === undefined : !isHolder(at[key]))
+      at[key] = structuredClone(next);
+    path.push(key);
+    if (!last) {
+      at = at[key] as Json;
+      exemplar = next;
     }
-    if (held) found.push({ path, required });
   }
-  return found;
+  return { answer: copy, path };
 }
 
-/** A value of another type than `value`'s, which no field the list names may hold. */
-const wrongFor = (value: unknown): unknown =>
-  typeof value === "string"
-    ? 42
-    : typeof value === "number"
-      ? "many"
-      : typeof value === "boolean"
-        ? "yes"
-        : value === null
-          ? { wrong: true }
-          : "an object";
-
 /** `answer` with the value at `path` replaced, or removed where `value` is `undefined`. */
-function altered(answer: unknown, path: Path, value: unknown): unknown {
-  const copy = structuredClone(answer) as Json;
-  let at: Json = copy;
-  for (const step of path.slice(0, -1)) {
-    const next = at[step];
-    if (typeof next !== "object" || next === null)
-      throw new Error(`the answer has no ${namedPath(path)}`);
-    at = next as Json;
-  }
+function altered(answer: Json, path: Path, value: unknown): Json {
+  let at: Json = answer;
+  for (const step of path.slice(0, -1)) at = at[step] as Json;
   const last = path[path.length - 1] as string | number;
   if (value === undefined) delete at[last];
   else at[last] = value;
-  return copy;
+  return answer;
 }
 
 /** The page, with each first answer passed through whatever `alter` holds then. */
@@ -192,50 +177,44 @@ test("an answer missing or mistyping any field the first screen draws shows its 
   await draws("node");
   await draws("overall");
 
-  // Each field once, from the first view whose answer holds it.
-  const seen = new Set<string>();
+  // Every field once: a detail's in Graph's answer, a timeline's in the node's.
   const passes: {
     view: string;
     name: string;
-    path: Path;
-    value: unknown;
+    answer: Json;
     pass: string;
   }[] = [];
-  for (const view of ["graph", "node", "overall"]) {
-    for (const field of fieldsOf(answers[view])) {
-      const name = namedPath(field.path);
-      if (seen.has(name)) continue;
-      seen.add(name);
-      let current: unknown = answers[view];
-      for (const step of field.path) current = (current as Json)[step];
-      if (field.required)
-        passes.push({
-          view,
-          name,
-          path: field.path,
-          value: undefined,
-          pass: "missing",
-        });
+  for (const field of LISTED.fields) {
+    const view = field.field.includes(".visible.timeline") ? "node" : "graph";
+    const { answer, path } = holding(answers[view], field.field);
+    const name = field.names ?? namedPath(path);
+    const pass = (value: unknown, what: string) =>
       passes.push({
         view,
         name,
-        path: field.path,
-        value: wrongFor(current),
-        pass: "of the wrong type",
+        answer: altered(structuredClone(answer), path, value),
+        pass: what,
       });
-    }
+    pass(field.wrong, "of the wrong type");
+    if (field.unfit !== undefined)
+      pass(field.unfit, "holding a value it never holds");
+    if (field.required) pass(undefined, "missing");
   }
-  // The node's rows and Overall's spans are among what is altered.
-  expect(seen).toContain(
+  // The node's rows and the spans' nested members are among what is altered.
+  const names = passes.map((pass) => pass.name);
+  expect(names).toContain(
     "answer.initial.snapshot.visible.timeline.spans[0].events[0].at",
   );
-  expect(seen).toContain("answer.initial.snapshot.visible.detail.run.state");
+  expect(names).toContain(
+    "answer.initial.snapshot.visible.timeline.spans[0].reasons[0].ahead",
+  );
+  expect(names).toContain("answer.initial.snapshot.visible.detail.run.state");
 
   const alert = page
     .getByRole("alert")
     .filter({ hasText: "This run's history did not load" });
-  for (const { view, name, path, value, pass } of passes) {
-    held.alter = (answer) => altered(answer, path, value);
+  for (const { view, name, answer, pass } of passes) {
+    held.alter = () => answer;
     await page.goto(addresses[view] as string);
     await expect(
       alert,

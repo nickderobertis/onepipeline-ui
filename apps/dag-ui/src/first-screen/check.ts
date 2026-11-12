@@ -39,39 +39,49 @@ interface Holds {
   readonly nullable: boolean;
   /** The words an `enum` takes, and only those. */
   readonly words?: readonly string[];
+  /** The types a `union` takes, one per alternative. */
+  readonly alternatives?: readonly Kind[];
 }
 
-/** One field a check reads, in an answer it was asked to list them for. */
-export interface FirstScreenField extends Holds {
-  /** Where it is, from the answer, as keys and indices. */
-  readonly path: readonly (string | number)[];
+/**
+ * One field the check reads, wherever an answer holds it: what `fields.json` lists and
+ * a journey alters, one at a time, to watch each refused.
+ */
+export interface DeclaredField extends Holds {
   /**
-   * Where it is in any answer, as {@link namedPath} names it with a record's entry as
-   * `*`: what `fields.json` lists.
+   * Where it is in any answer, as {@link namedPath} names it, with `[0]` for any item of
+   * a list and `*` for any entry of a record.
    */
-  readonly pattern: string;
-  /** Whether the contract requires it, so an answer without it is refused. */
+  readonly field: string;
+  /** Whether the contract requires it where what holds it is there. */
   readonly required: boolean;
   /** A value of a type the field never holds, which the check refuses. */
   readonly wrong: unknown;
+  /** A value of the field's type the check still refuses, where there is one. */
+  readonly unfit?: unknown;
+  /**
+   * The field a refusal names, where it is not this one: a member of one of a union's
+   * alternatives is refused as the union.
+   */
+  readonly names?: string;
 }
 
-/** One value's check: why it fails at `path`, and the fields it reads in it. */
+/** One value's check: why it fails at `path`, the fields it reads, and a value it takes. */
 interface Check extends Holds {
   /** The reason `value` fails, or `undefined`. */
   readonly check: (value: unknown, path: string) => string | undefined;
-  /**
-   * Every field this check reads in `value`, at `at`: an array's first item's and a
-   * record's first entry's, which stand for every other.
-   */
-  readonly fields: (
-    value: unknown,
-    at: readonly (string | number)[],
+  /** Every field under this value, at `pattern`, whatever any answer holds. */
+  readonly declare: (
     pattern: string,
-    out: FirstScreenField[],
+    out: DeclaredField[],
+    names: string | undefined,
   ) => void;
+  /** A value this check takes, holding every field it reads. */
+  readonly exemplar: () => unknown;
   /** A value of a type this check refuses. */
   readonly wrong: unknown;
+  /** A value of its type this check refuses, where there is one. */
+  readonly unfit?: unknown;
 }
 
 /** How a value that is there reads in a reason. */
@@ -86,25 +96,32 @@ const wrong = (path: string, wanted: string, value: unknown) =>
     ? `${path} is missing`
     : `${path} is ${shown(value)}, not ${wanted}`;
 
-/** What `check` holds, as a field of the object holding it lists it. */
+/** What `check` holds, as the field holding it lists it. */
 const held = (check: Check): Holds => ({
   kind: check.kind,
   nullable: check.nullable,
   ...(check.words === undefined ? {} : { words: check.words }),
+  ...(check.alternatives === undefined
+    ? {}
+    : { alternatives: check.alternatives }),
 });
+
+const nothingUnder: Check["declare"] = () => undefined;
 
 /** A check of a value with no fields of its own. */
 const leaf = (
   kind: Kind,
   holds: (value: unknown) => boolean,
   wanted: string,
-  refused: unknown,
+  values: { exemplar: unknown; wrong: unknown; unfit?: unknown },
   words?: readonly string[],
 ): Check => ({
   check: (value, path) =>
     holds(value) ? undefined : wrong(path, wanted, value),
-  fields: () => undefined,
-  wrong: refused,
+  declare: nothingUnder,
+  exemplar: () => values.exemplar,
+  wrong: values.wrong,
+  ...(values.unfit === undefined ? {} : { unfit: values.unfit }),
   kind,
   nullable: false,
   ...(words === undefined ? {} : { words }),
@@ -114,28 +131,31 @@ const string = leaf(
   "string",
   (value) => typeof value === "string",
   "a string",
-  42,
+  {
+    exemplar: "x",
+    wrong: 42,
+  },
 );
 
 const boolean = leaf(
   "boolean",
   (value) => typeof value === "boolean",
   "a boolean",
-  "yes",
+  { exemplar: true, wrong: "yes" },
 );
 
 const number = leaf(
   "number",
   (value) => typeof value === "number" && Number.isFinite(value) && value >= 0,
   "a non-negative number",
-  "many",
+  { exemplar: 1, wrong: "many", unfit: -1 },
 );
 
 const counter = leaf(
   "integer",
   (value) => Number.isInteger(value) && (value as number) >= 0,
   "a non-negative integer",
-  "many",
+  { exemplar: 1, wrong: "many", unfit: 1.5 },
 );
 
 /** An instant `Date.parse` reads, which is how the screen places it. */
@@ -143,7 +163,7 @@ const timestamp = leaf(
   "timestamp",
   (value) => typeof value === "string" && !Number.isNaN(Date.parse(value)),
   "a timestamp",
-  42,
+  { exemplar: "2026-01-01T00:00:00.000Z", wrong: 42, unfit: "not a time" },
 );
 
 const oneOf = (words: readonly string[]): Check =>
@@ -151,42 +171,47 @@ const oneOf = (words: readonly string[]): Check =>
     "enum",
     (value) => typeof value === "string" && words.includes(value),
     `one of ${words.join(", ")}`,
-    42,
+    { exemplar: words[0], wrong: 42, unfit: "not-one-of-them" },
     words,
   );
 
-const isTrue = leaf("true", (value) => value === true, "true", "yes");
+const isTrue = leaf("true", (value) => value === true, "true", {
+  exemplar: true,
+  wrong: "yes",
+  unfit: false,
+});
 
 /** A field an answer may leave out, and which is checked where it is there. */
 const optional = (inner: Check): Check => ({
-  ...held(inner),
+  ...inner,
   check: (value, path) =>
     value === undefined ? undefined : inner.check(value, path),
-  fields: inner.fields,
-  wrong: inner.wrong,
 });
 
 const nullable = (inner: Check): Check => ({
-  ...held(inner),
+  ...inner,
   nullable: true,
   check: (value, path) =>
     value === null ? undefined : inner.check(value, path),
-  fields: (value, at, pattern, out) => {
-    if (value !== null) inner.fields(value, at, pattern, out);
-  },
-  wrong: inner.wrong,
 });
 
+/** One of two checks; the second's exemplar, which holds its fields, stands for it. */
 const either = (first: Check, second: Check, wanted: string): Check => ({
   check: (value, path) =>
     first.check(value, path) === undefined ||
     second.check(value, path) === undefined
       ? undefined
       : wrong(path, wanted, value),
-  fields: () => undefined,
+  // A member of an alternative is refused as the union it is part of.
+  declare: (pattern, out, names) => {
+    first.declare(pattern, out, names ?? pattern);
+    second.declare(pattern, out, names ?? pattern);
+  },
+  exemplar: second.exemplar,
   wrong: "some",
   kind: "union",
   nullable: false,
+  alternatives: [first.kind, second.kind],
 });
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -194,6 +219,25 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 
 /** Whether a member's check lets it be left out. */
 const optionalMembers = new WeakSet<Check>();
+
+/** One field, as the object or record holding it lists it, and every field under it. */
+function declared(
+  check: Check,
+  field: string,
+  required: boolean,
+  out: DeclaredField[],
+  names: string | undefined,
+): void {
+  out.push({
+    ...held(check),
+    field,
+    required,
+    wrong: check.wrong,
+    ...(check.unfit === undefined ? {} : { unfit: check.unfit }),
+    ...(names === undefined ? {} : { names }),
+  });
+  check.declare(field, out, names);
+}
 
 /** An open object: these members checked, any other left alone. */
 const object = (members: Readonly<Record<string, Check>>): Check => ({
@@ -205,22 +249,23 @@ const object = (members: Readonly<Record<string, Check>>): Check => ({
     }
     return undefined;
   },
-  fields: (value, at, pattern, out) => {
-    if (!isObject(value)) return;
-    for (const [name, member] of Object.entries(members)) {
-      const path = [...at, name];
-      const named = `${pattern}.${name}`;
-      out.push({
-        ...held(member),
-        path,
-        pattern: named,
-        required: !optionalMembers.has(member),
-        wrong: member.wrong,
-      });
-      if (value[name] !== undefined)
-        member.fields(value[name], path, named, out);
-    }
+  declare: (pattern, out, names) => {
+    for (const [name, member] of Object.entries(members))
+      declared(
+        member,
+        `${pattern}.${name}`,
+        !optionalMembers.has(member),
+        out,
+        names,
+      );
   },
+  exemplar: () =>
+    Object.fromEntries(
+      Object.entries(members).map(([name, member]) => [
+        name,
+        member.exemplar(),
+      ]),
+    ),
   wrong: "an object",
   kind: "object",
   nullable: false,
@@ -235,14 +280,15 @@ const array = (each: Check): Check => ({
     }
     return undefined;
   },
-  fields: (value, at, pattern, out) => {
-    if (Array.isArray(value) && value.length > 0)
-      each.fields(value[0], [...at, 0], `${pattern}[0]`, out);
-  },
+  declare: (pattern, out, names) => each.declare(`${pattern}[0]`, out, names),
+  exemplar: () => [each.exemplar()],
   wrong: "a list",
   kind: "array",
   nullable: false,
 });
+
+/** The key a record's exemplar holds its one entry under. */
+export const EXEMPLAR_KEY = "x";
 
 const record = (each: Check): Check => ({
   check: (value, path) => {
@@ -253,23 +299,12 @@ const record = (each: Check): Check => ({
     }
     return undefined;
   },
-  fields: (value, at, pattern, out) => {
-    if (!isObject(value)) return;
-    const [first] = Object.entries(value);
-    if (first === undefined) return;
-    const path = [...at, first[0]];
-    const named = `${pattern}.*`;
-    // A record may hold any key or none, so an entry is never missing.
-    if (each !== anything)
-      out.push({
-        ...held(each),
-        path,
-        pattern: named,
-        required: false,
-        wrong: each.wrong,
-      });
-    each.fields(first[1], path, named, out);
+  // A record may hold any key or none, so an entry of one is never required.
+  declare: (pattern, out, names) => {
+    if (each.kind !== "anything")
+      declared(each, `${pattern}.*`, false, out, names);
   },
+  exemplar: () => ({ [EXEMPLAR_KEY]: each.exemplar() }),
   wrong: "an object",
   kind: "record",
   nullable: false,
@@ -278,7 +313,8 @@ const record = (each: Check): Check => ({
 /** A value the screen reads only the presence of. */
 const anything: Check = {
   check: () => undefined,
-  fields: () => undefined,
+  declare: nothingUnder,
+  exemplar: () => ({}),
   wrong: undefined,
   kind: "anything",
   nullable: false,
@@ -482,14 +518,16 @@ export function checkFirstAnswer(
     : new FirstAnswerContractError(failed);
 }
 
-/**
- * Every field {@link checkFirstAnswer} reads in `value`, each list's first item's
- * standing for the rest: what a journey alters, one at a time, to watch each refused.
- */
-export function firstScreenFields(value: unknown): FirstScreenField[] {
-  const out: FirstScreenField[] = [];
-  answer.fields(value, [], "answer", out);
+/** Every field {@link checkFirstAnswer} reads, wherever an answer holds it. */
+export function declaredFields(): DeclaredField[] {
+  const out: DeclaredField[] = [];
+  answer.declare("answer", out, undefined);
   return out;
+}
+
+/** An answer {@link checkFirstAnswer} takes, holding every field it reads. */
+export function exemplarAnswer(): unknown {
+  return answer.exemplar();
 }
 
 /** How {@link checkFirstAnswer} names the field at `path`. */

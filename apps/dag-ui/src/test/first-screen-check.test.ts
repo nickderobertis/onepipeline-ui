@@ -13,23 +13,26 @@ import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import {
   checkFirstAnswer,
+  type DeclaredField,
+  declaredFields,
+  EXEMPLAR_KEY,
+  exemplarAnswer,
   FirstAnswerContractError,
-  type FirstScreenField,
-  firstScreenFields,
   NODE_STATUSES,
-  namedPath,
   REFERENCE_KINDS,
   SPAN_KINDS,
   TRANSPORT_ROLES,
 } from "../first-screen/check";
-import drawn from "../first-screen/fields.json" with { type: "json" };
+import listed from "../first-screen/fields.json" with { type: "json" };
 
 /**
- * The first screen's own check of its answer, field by field, over the answers the
- * server is pinned to serve: `tests/fixtures/subscriptions.json`, the subscription the
+ * The first screen's own check of its answer, field by field: over the answers the
+ * server is pinned to serve (`tests/fixtures/subscriptions.json`, the subscription the
  * contract's golden journey writes, and that detail beside the complete timeline
- * `tests/fixtures/run-timeline.json` pins, as an Overall or node answer carries one.
+ * `tests/fixtures/run-timeline.json` pins, as an Overall or node answer carries one),
+ * and over the check's own exemplar, which holds every field it reads.
  */
+
 /** One of the server's pinned goldens, by name. */
 const golden = (name: string): Record<string, unknown> =>
   JSON.parse(
@@ -41,8 +44,6 @@ const golden = (name: string): Record<string, unknown> =>
 const subscribed = golden("subscriptions.json") as {
   initial: { snapshot: { visible: Record<string, unknown> } };
 };
-const timeline = golden("run-timeline.json");
-const detailAnswer = subscribed;
 const timelineAnswer = {
   ...subscribed,
   initial: {
@@ -53,21 +54,32 @@ const timelineAnswer = {
         ...subscribed.initial.snapshot.visible,
         type: "timeline",
         scope: "run",
-        timeline,
+        timeline: golden("run-timeline.json"),
       },
     },
   },
 };
-const ANSWERS = { detail: detailAnswer, timeline: timelineAnswer } as const;
 
-/**
- * What `FirstScreen` reads of the timeline answer above, directly and through the view
- * models it draws with, stated apart from the check in `first-screen/fields.json`,
- * which the browser journey alters field by field: a field the check stops reading,
- * or one it reads that the list does not name, fails here.
- */
-const DRAWN: readonly string[] = drawn.fields;
 const VISIBLE = "answer.initial.snapshot.visible";
+const DECLARED = declaredFields();
+
+type Json = Record<string | number, unknown>;
+
+/** Where `field` is in the exemplar: its first item of each list, its one entry of each record. */
+const inExemplar = (field: string): (string | number)[] =>
+  field
+    .replace(/\[0\]/gu, ".0")
+    .split(".")
+    .slice(1)
+    .map((step) => (step === "0" ? 0 : step === "*" ? EXEMPLAR_KEY : step));
+
+/** How the check names a field at `path`. */
+const named = (path: readonly (string | number)[]) =>
+  path.reduce<string>(
+    (name, step) =>
+      typeof step === "number" ? `${name}[${step}]` : `${name}.${step}`,
+    "answer",
+  );
 
 /** `answer` with the value at `path` replaced, or removed where `value` is `undefined`. */
 function altered(
@@ -75,57 +87,75 @@ function altered(
   path: readonly (string | number)[],
   value: unknown,
 ): unknown {
-  const copy = structuredClone(answer) as Record<string | number, unknown>;
-  let at: Record<string | number, unknown> = copy;
-  for (const step of path.slice(0, -1))
-    at = at[step] as Record<string | number, unknown>;
+  const copy = structuredClone(answer) as Json;
+  let at: Json = copy;
+  for (const step of path.slice(0, -1)) at = at[step] as Json;
   const last = path[path.length - 1] as string | number;
   if (value === undefined) delete at[last];
   else at[last] = value;
   return copy;
 }
 
-describe.each(Object.entries(ANSWERS))("a first %s answer", (_, answer) => {
-  const fields = firstScreenFields(answer);
+/** The reason the check refuses `answer` for, which a passing answer has none of. */
+const refusal = (answer: unknown): string | undefined => {
+  const checked = checkFirstAnswer(answer);
+  return checked instanceof FirstAnswerContractError
+    ? checked.reason
+    : undefined;
+};
 
-  it("is one the full contract reads, and the first screen's check passes", () => {
+/** Whether `reason` names `field`, and not a field whose name begins with it. */
+const names = (reason: string | undefined, field: string) =>
+  reason !== undefined && reason.startsWith(`${field} `);
+
+it.each([
+  ["detail", subscribed],
+  ["timeline", timelineAnswer],
+])(
+  "a served first %s answer is one the full contract reads, and the check passes",
+  (_, answer) => {
     expect(() => subscribedSchema.parse(answer)).not.toThrow();
     expect(checkFirstAnswer(answer)).toBe(answer);
-  });
+  },
+);
 
-  it("names every field the first screen reads, each list's first standing for the rest", () => {
-    const named = fields.map(
-      (field) => `${field.pattern}${field.required ? "" : "?"}`,
-    );
-    expect(named).toEqual(
-      answer === timelineAnswer
-        ? DRAWN
-        : DRAWN.filter((name) => !name.startsWith(`${VISIBLE}.timeline.`)),
-    );
-  });
-
-  it.each(
-    firstScreenFields(answer).map((field) => [namedPath(field.path), field]),
-  )("is refused naming %s when it is of the wrong type", (name, field) => {
-    const checked = checkFirstAnswer(altered(answer, field.path, field.wrong));
-    expect(checked).toBeInstanceOf(FirstAnswerContractError);
-    expect((checked as FirstAnswerContractError).reason).toMatch(
-      new RegExp(`^${name.replace(/[.[\]]/gu, "\\$&")}(\\.|\\[| )`, "u"),
-    );
-  });
-
-  it.each(
-    firstScreenFields(answer)
-      .filter((field) => field.required)
-      .map((field) => [namedPath(field.path), field]),
-  )("is refused naming %s when it is missing", (name, field) => {
-    const checked = checkFirstAnswer(altered(answer, field.path, undefined));
-    expect(checked).toBeInstanceOf(FirstAnswerContractError);
-    expect((checked as FirstAnswerContractError).message).toBe(
-      `The first answer failed contract validation: ${name} is missing`,
-    );
-  });
+it("lists in fields.json exactly the fields the check reads, and an answer it takes", () => {
+  expect(listed.fields).toEqual(JSON.parse(JSON.stringify(DECLARED)));
+  expect(listed.exemplar).toEqual(exemplarAnswer());
+  expect(refusal(exemplarAnswer())).toBeUndefined();
+  expect(DECLARED.map((field) => field.field)).toContain(
+    `${VISIBLE}.timeline.spans[0].events[0].dispatch_group.order`,
+  );
 });
+
+describe.each(DECLARED.map((field) => [field.field, field] as const))(
+  "%s",
+  (_, field) => {
+    const path = inExemplar(field.field);
+    const name = field.names ?? named(path);
+    it("is refused, named, with a value of another type", () => {
+      expect(refusal(altered(exemplarAnswer(), path, field.wrong))).toSatisfy(
+        (reason: string | undefined) => names(reason, name),
+      );
+    });
+    it.runIf(field.unfit !== undefined)(
+      "is refused, named, with a value of its type it never holds",
+      () => {
+        expect(refusal(altered(exemplarAnswer(), path, field.unfit))).toSatisfy(
+          (reason: string | undefined) => names(reason, name),
+        );
+      },
+    );
+    it.runIf(field.required)("is refused, named, where it is missing", () => {
+      const reason = refusal(altered(exemplarAnswer(), path, undefined));
+      if (field.names === undefined) expect(reason).toBe(`${name} is missing`);
+      else
+        expect(reason).toSatisfy((held: string | undefined) =>
+          names(held, name),
+        );
+    });
+  },
+);
 
 it("refuses what is not an answer at all, naming where it stopped", () => {
   expect(checkFirstAnswer(null)).toEqual(
@@ -188,6 +218,8 @@ interface Definition {
   readonly in?: z.ZodType;
   readonly getter?: () => z.ZodType;
   readonly entries?: Record<string, string>;
+  readonly values?: readonly unknown[];
+  readonly options?: readonly z.ZodType[];
 }
 
 const definition = (schema: z.ZodType): Definition =>
@@ -235,43 +267,50 @@ function schemaAt(pattern: string): z.ZodType | undefined {
   for (const step of steps) {
     if (at === undefined) return undefined;
     const def = definition(unwrapped(at).schema);
+    // Through a union, the alternative that holds the step.
+    const shape =
+      def.type === "union"
+        ? (def.options ?? [])
+            .map((option) => definition(unwrapped(option).schema).shape)
+            .find((held) => held?.[step] !== undefined)
+        : def.shape;
     at =
       step === "[0]"
         ? def.element
         : step === "*"
           ? def.valueType
-          : def.shape?.[step];
+          : shape?.[step];
   }
   return at;
 }
 
 /** The zod types each of the check's kinds is held to. */
-const ZOD_TYPES: Readonly<Record<FirstScreenField["kind"], readonly string[]>> =
-  {
-    string: ["string"],
-    timestamp: ["string"],
-    boolean: ["boolean"],
-    number: ["number"],
-    integer: ["number"],
-    enum: ["enum"],
-    true: ["literal"],
-    union: ["union"],
-    object: ["object"],
-    array: ["array"],
-    record: ["record"],
-    anything: [],
-  };
+const ZOD_TYPES: Readonly<Record<DeclaredField["kind"], readonly string[]>> = {
+  string: ["string"],
+  timestamp: ["string"],
+  boolean: ["boolean"],
+  number: ["number"],
+  integer: ["number"],
+  enum: ["enum"],
+  true: ["literal"],
+  union: ["union"],
+  object: ["object"],
+  array: ["array"],
+  record: ["record"],
+  anything: [],
+};
 
 it.each(
-  firstScreenFields(timelineAnswer)
-    .filter((field) => field.pattern.startsWith(`${VISIBLE}.`))
-    .map((field) => [field.pattern, field] as const),
+  DECLARED.filter((field) => field.field.startsWith(`${VISIBLE}.`)).map(
+    (field) => [field.field, field] as const,
+  ),
 )("holds %s as the contract's schema declares it", (pattern, field) => {
   const declared = schemaAt(pattern);
   expect(declared, `the contract declares ${pattern}`).toBeDefined();
   const { schema, optional, nullable } = unwrapped(declared as z.ZodType);
-  const type = definition(schema).type;
-  if (field.kind !== "anything") expect(ZOD_TYPES[field.kind]).toContain(type);
+  const def = definition(schema);
+  if (field.kind !== "anything")
+    expect(ZOD_TYPES[field.kind]).toContain(def.type);
   expect(field.nullable, `${pattern} takes null`).toBe(nullable);
   // A record holds any key or none, so no entry of one is ever required.
   if (pattern.endsWith(".*")) expect(field.required).toBe(false);
@@ -282,6 +321,17 @@ it.each(
   else expect(field.required, `${pattern} may be left out`).toBe(!optional);
   if (field.kind === "enum")
     expect([...(field.words ?? [])].sort()).toEqual(
-      Object.values(definition(schema).entries ?? {}).sort(),
+      Object.values(def.entries ?? {}).sort(),
+    );
+  if (field.kind === "true") expect(def.values).toEqual([true]);
+  if (field.kind === "union")
+    expect(
+      (def.options ?? [])
+        .map((option) => definition(unwrapped(option).schema).type)
+        .sort(),
+    ).toEqual(
+      (field.alternatives ?? [])
+        .map((kind) => ZOD_TYPES[kind][0] ?? kind)
+        .sort(),
     );
 });
