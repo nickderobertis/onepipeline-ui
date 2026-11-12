@@ -16,7 +16,6 @@ const workflow = (name) =>
 // Cache prune: dero-skills 270bea5d287f6fe6a844fd6b882922eacadf6ecf.
 // Version-free inputs: dero-skills 63e071b72420bd6737226a50cb8a7a7760cc73a4.
 // Figures, version 13: dero-skills afc6829981.
-// Coverage unit, version 4: this copy leads dero-skills; its create-repo source adopts it.
 const upstream = {
   "scripts/coverage-unit.sh":
     "0b22963921bc9e2c4d314ddb545ea847b1e59d74b5dec2af1b763db12e4d771d",
