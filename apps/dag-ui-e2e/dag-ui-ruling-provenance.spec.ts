@@ -578,7 +578,15 @@ test("a declined answer to a dispatch's question reads as the manager's answer",
       { run, node: NODE },
     );
   } catch (unanswered) {
-    asked = `${(unanswered as { stdout?: string }).stdout ?? ""}${(unanswered as { stderr?: string }).stderr ?? ""}`;
+    // An ask nobody answers exits non-zero; what it printed rides on the
+    // error `execFileSync` throws, read through its declared shape.
+    const { stdout = "", stderr = "" } = z
+      .looseObject({
+        stdout: z.string().optional(),
+        stderr: z.string().optional(),
+      })
+      .parse(unanswered);
+    asked = `${stdout}${stderr}`;
   }
   const correlation = /c-[0-9a-f]{32}/u.exec(asked)?.[0];
   if (correlation === undefined)
