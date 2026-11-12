@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.80.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.80.0...v0.80.1) - 2026-11-12
+
+### Performance
+
+- *(ci)* hold the large-run budgets on pull requests within the existing CI limits ([#746](https://github.com/nickderobertis/onepipeline-ui/pull/746))
+
 ## [0.80.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.79.0...v0.80.0) - 2026-11-12
 
 ### Added
