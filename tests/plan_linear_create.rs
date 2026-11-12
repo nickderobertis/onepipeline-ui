@@ -196,6 +196,15 @@ impl Workspace {
                 })
                 .collect();
             let (status, mut answer) = self.answer_valid(single, &Value::Object(own))?;
+            // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] How Linear fails an
+            // aliased document — one error at the refused alias's path, no `data`, and nothing of
+            // any alias applied — is stated by the linked plugin itself, in the docs of
+            // `onetaskgraph_linear::graphql::composed` and its `batch` module, as measured against
+            // a sandbox team on 2026-11-11, and that plugin's recovery is built on it: it reads the
+            // refused alias off this `path` and re-sends the rest. The plugin exports no builder of
+            // that answer to call instead, and this repository holds no Linear credential to gate
+            // it against the live service, so no drift gate exists here; this follows the plugin's
+            // statement, which a plugin release changing it would change in the same docs.
             if let Some(error) = answer["errors"].get_mut(0) {
                 let rest: Vec<Value> = error["path"]
                     .as_array()
@@ -211,6 +220,7 @@ impl Workspace {
                 });
                 return Ok((status, json!({"data": null, "errors": [error]})));
             }
+            // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
             let root = answer["data"]
                 .as_object_mut()
                 .and_then(|roots| roots.values_mut().next())
