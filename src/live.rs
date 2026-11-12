@@ -871,8 +871,8 @@ fn agents_of(paths: &RunPaths) -> Option<Agents> {
 
 impl LiveRun {
     /// A first reading of `run`: a short journal whole, and a longer one as every
-    /// record's head with only the records a first screen reads whole fetched. A
-    /// node's window is fetched once its timeline's filter is known, by
+    /// record's head with only the records a first screen reads whole fetched. What
+    /// a node's screen reads of it is fetched once its timeline's filter is known, by
     /// [`hold_node_share`](Self::hold_node_share).
     fn open_selective(
         store: &RunStore,
@@ -1041,15 +1041,15 @@ impl LiveRun {
                 .any(|event| event.labels.node.as_deref() == Some(node.as_str()))
     }
 
-    /// Hold every record `node`'s timeline under `filter` draws whole: a heads
-    /// read's window of the node's latest rows, fetched, and otherwise the node's
-    /// every record, for a reading that holds only some of them.
+    /// Hold every record `node`'s timeline under `filter` draws whole: what a heads
+    /// read's node screen reads of it, fetched, and otherwise the node's every record,
+    /// for a reading that holds only some of them.
     fn hold_node_share(&mut self, node: &NodeId, filter: &EventFilter) {
         if self.complete() || self.indexed.holds_share(node.as_str()) {
             return;
         }
         if let Some(headed) = &mut self.headed {
-            match headed.hold_window(&mut self.view, &self.indexed, node.as_str(), filter) {
+            match headed.hold_node(&mut self.view, &self.indexed, node.as_str(), filter) {
                 Ok(()) => return,
                 // A journal rewritten under the heads read: the node's records are
                 // read whole instead, as its share.

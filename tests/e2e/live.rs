@@ -3405,9 +3405,10 @@ fn a_fold_past_its_overdue_point_draws_as_loading_until_it_lands() {
     );
 }
 
-/// The kinds whose payload no first screen reads outside a node's window, as the
+/// The kinds whose payload no first screen reads but in its opened node, as the
 /// test states them apart from the server: a long run's first answer fetches every
-/// other record whole, every record carrying evidence, and a node's latest rows.
+/// other record whole, every record carrying evidence, and, of a node it is opened
+/// on, its latest rows and every record but a heartbeat or a tool call.
 const HEADED_KINDS: [&str; 5] = [
     "member-heartbeat",
     "turn-activity",
@@ -3514,6 +3515,40 @@ fn distinct_long_run_then(root: &Path, run: &str, after: &[String]) {
             .to_string(),
         );
     }
+    // Last, one long turn of the node's agent: opened, then more tool calls than its
+    // window holds, then its words and close, so a row in the window is numbered among
+    // the session's agent turns by records long before it — the generated turns above
+    // are the other party's, which only their payloads say.
+    let long_turn = 1000;
+    let mut at = 1400 * 250;
+    let mut long = |kind: &str, payload: Value| {
+        at += 250;
+        seqs[0] += 1;
+        json!({
+            "v": 1, "ts": generated_stamp(at), "stream": "generated-a", "seq": seqs[0],
+            "source": "agentgraph", "kind": kind, "labels": worker.clone(),
+            "payload": payload, "artifacts": [],
+        })
+        .to_string()
+    };
+    lines.push(long(
+        "turn-started",
+        json!({ "turn": long_turn, "role": "assistant", "instruction": "the long turn" }),
+    ));
+    for call in 0..u64::try_from(NODE_WINDOW + 5).expect("a count") {
+        lines.push(long(
+            "turn-activity",
+            json!({ "kind": "tool_call", "name": "Bash", "detail": format!("long call {call}"), "index": call }),
+        ));
+    }
+    lines.push(long(
+        "turn-message",
+        json!({ "turn": long_turn, "role": "assistant", "text": "the long turn's words" }),
+    ));
+    lines.push(long(
+        "turn-completed",
+        json!({ "turn": long_turn, "role": "assistant", "usage": { "input_tokens": 1 } }),
+    ));
     let mut text = fs::read_to_string(&journal).expect("a journal");
     for line in lines.iter().chain(after) {
         text.push_str(line);
@@ -3658,7 +3693,16 @@ fn a_long_runs_first_answers_fetch_only_what_a_first_screen_reads_and_are_the_wh
             .is_some_and(|stream| stream.starts_with("generated-"))),
         "the node's window is generated records"
     );
-    let window_fetched = window.iter().filter(|record| headed_only(record)).count();
+    // And the node's own turns, wherever they lie: its rows are numbered by them.
+    let node_headed = ["member-heartbeat", "turn-activity"];
+    let window_fetched = records
+        .iter()
+        .filter(|record| record["labels"]["node"] == node && headed_only(record))
+        .filter(|record| {
+            window.contains(record)
+                || !node_headed.contains(&record["kind"].as_str().expect("a kind"))
+        })
+        .count();
     assert!(read_whole > 0 && window_fetched > 0);
     assert!(
         records.iter().filter(|record| headed_only(record)).count() > window_fetched,

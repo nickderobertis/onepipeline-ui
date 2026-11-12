@@ -5,9 +5,10 @@
 //! [`RunView::heads`], which folds the run's state and heads every record without
 //! parsing the payloads it can do without, and [`journal::fetch`], which reads whole
 //! records by the handles those heads hold. What a first screen reads whole is this
-//! crate's decision, because this crate is what draws it, and it is held in two
-//! places only: [`HEADED_KINDS`], and a node's latest [`NODE_WINDOW_EVENTS`] rows,
-//! which [`Headed::hold_window`] fetches once the subscription's filter is known.
+//! crate's decision, because this crate is what draws it, and it is held in three
+//! places only: [`HEADED_KINDS`], what an opened node's own records are read for
+//! ([`NODE_HEADED_KINDS`]), and that node's latest [`NODE_WINDOW_EVENTS`] rows, which
+//! [`Headed::hold_node`] fetches once the subscription's filter is known.
 //!
 //! Every record the journal holds is in the reading, in merged order and at the
 //! place the complete read gives it, so every count, bound and status a first
@@ -29,17 +30,17 @@ use crate::filter::EventFilter;
 use crate::payload::live::Indexed;
 use crate::payload::millis_of;
 
-/// The kinds whose payload no first screen reads outside a node's window; a first
-/// screen reads the payload of every record of every other kind, so those are
-/// fetched whole.
+/// The kinds whose payload no first screen reads, but in the node it is opened on;
+/// a first screen reads the payload of every record of every other kind, so those
+/// are fetched whole.
 ///
 /// By far the most numerous records of a long run: a member's heartbeat, and a
 /// turn's opening, messages, activity and close. Graph and the detail are drawn
 /// from the engine's fold, which [`RunView::heads`] gives without them; Overall's
 /// spans are bounded and statused by their records' heads, and the turns and harness
 /// sessions that are read from these kinds' payloads are drawn as loading until the
-/// complete read arrives; a node's rows are its window, fetched whole whatever its
-/// records' kinds. The list names what is left out rather than what is read so a
+/// complete read arrives; an opened node's own records are read as
+/// [`NODE_HEADED_KINDS`] says. The list names what is left out rather than what is read so a
 /// kind the engine adds is read whole until a first screen is shown not to need it,
 /// rather than drawn from a payload nobody fetched.
 pub(crate) const HEADED_KINDS: [&str; 5] = [
@@ -49,6 +50,15 @@ pub(crate) const HEADED_KINDS: [&str; 5] = [
     "turn-started",
     "turn-completed",
 ];
+
+/// The kinds of an opened node's own records whose payload its first screen reads
+/// only inside its window; the node's records of every other kind are fetched whole.
+///
+/// A node's rows are numbered into its sessions' turns by those turns' openings,
+/// messages and closes wherever they lie, so a row in the window can be numbered by a
+/// turn opened long before it: of [`HEADED_KINDS`], only a heartbeat and a tool call
+/// outside the window are drawn from their heads alone.
+pub(crate) const NODE_HEADED_KINDS: [&str; 2] = ["member-heartbeat", "turn-activity"];
 
 /// Whether a first screen reads `head`'s record whole: one whose kind it reads the
 /// payload of, or one carrying evidence, which the screen links to by its artifacts.
@@ -153,21 +163,30 @@ impl Headed {
         Ok(())
     }
 
-    /// Fetch the records of `node`'s latest [`NODE_WINDOW_EVENTS`] rows under
-    /// `filter`, as its timeline's window takes them, that the view holds as heads.
+    /// Fetch what `node`'s first screen under `filter` reads whole that the view holds
+    /// as heads: the records of its latest [`NODE_WINDOW_EVENTS`] rows, as its
+    /// timeline's window takes them, and every record of it of a kind outside
+    /// [`NODE_HEADED_KINDS`].
     ///
     /// # Errors
     ///
     /// A fetch's refusal: the journal was rewritten since its heads were read.
-    pub(super) fn hold_window(
+    pub(super) fn hold_node(
         &mut self,
         view: &mut RunView,
         indexed: &Indexed,
         node: &str,
         filter: &EventFilter,
     ) -> Result<(), onepipeline::Error> {
-        let window = window(view, indexed, node, filter);
-        self.fetch(view, &window)
+        let mut wanted = window(view, indexed, node, filter);
+        wanted.extend(view.events.iter().enumerate().filter_map(|(index, event)| {
+            (event.labels.node.as_deref() == Some(node)
+                && !NODE_HEADED_KINDS.contains(&event.kind.0.as_str()))
+            .then_some(index)
+        }));
+        wanted.sort_unstable();
+        wanted.dedup();
+        self.fetch(view, &wanted)
     }
 }
 
