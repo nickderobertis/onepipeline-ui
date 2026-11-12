@@ -971,3 +971,37 @@ fn a_toolchain_directory_that_cannot_be_created_is_named() {
     );
     assert!(!dir.join("docker.log").exists(), "docker was not run");
 }
+
+#[test]
+fn a_kept_toolchain_that_cannot_be_handed_back_fails_a_build_that_compiled() {
+    let (_scratch, dir) = scratch("failed-toolchain-hand-back");
+    let kept = format!(
+        "chown -R {} {}",
+        host_owner(),
+        dir.join("home/.cargo").display()
+    );
+    container_double(&dir, Some(&kept));
+    let out = out_arg(&dir);
+    let output = run(
+        &dir,
+        &path_with_double(&dir),
+        &["x86_64-unknown-linux-gnu", &out],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("could not return target/wheel-x86_64-unknown-linux-gnu"),
+        "the build's own files were handed back: {stderr}"
+    );
+    assert!(
+        stderr.contains(".tools/wheel-container-x86_64-unknown-linux-gnu")
+            && stderr.contains("could not return"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("ACTION: chown -R ")
+            && stderr.contains("or remove it, before building here again"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("the build stopped"), "{stderr}");
+}
