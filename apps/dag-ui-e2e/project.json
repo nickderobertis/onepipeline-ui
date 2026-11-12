@@ -19,7 +19,15 @@
       "outputs": []
     },
     "test": {
-      "command": "npx playwright test --config apps/dag-ui-e2e/playwright.config.ts",
+      "//": "Two runs of the tier's config at once, each over servers and a fixture directory of its own: `second` is the shared-server specs `playwright.config.ts` names in `SECOND_RUN`, `first` everything else. Together they select what one run without DAG_UI_E2E_RUN does.",
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          "DAG_UI_E2E_RUN=first npx playwright test --config apps/dag-ui-e2e/playwright.config.ts",
+          "DAG_UI_E2E_RUN=second npx playwright test --config apps/dag-ui-e2e/playwright.config.ts"
+        ],
+        "parallel": true
+      },
       "inputs": [
         "default",
         "apiServerSurface",
