@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.80.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.79.0...v0.80.0) - 2026-11-12
+
+### Added
+
+- *(deps)* [**breaking**] link the engine that translates expandable blocks on copy ([#742](https://github.com/nickderobertis/onepipeline-ui/pull/742))
+
 ## [0.79.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.78.0...v0.79.0) - 2026-11-11
 
 ### Added
