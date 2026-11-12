@@ -231,19 +231,26 @@ for (const width of [1440, 390]) {
         const secondaryMetadata =
           index === 0
             ? [
-                message.getByText("from proposal", { exact: true }),
-                message.getByText("non-blocking", { exact: true }),
-                message.getByText(new RegExp(`^surface ${id} ·`)),
+                // Where it came from and how old it is, as one muted line: a
+                // surface that holds nothing carries no badge saying so.
+                message.getByText(
+                  new RegExp(`^from proposal · surface ${id} · .+ old$`),
+                ),
               ]
             : [message.getByRole("time")];
         await expect(
           message.getByText(
-            index === 0 ? "finding" : `reply ${index === 1 ? 1 - id : 3}`,
+            index === 0
+              ? "finding"
+              : // A recorded reply names no party, so it is the manager's.
+                `Reply ${index === 1 ? 1 - id : 3} · from the manager`,
             {
               exact: true,
             },
           ),
         ).toBeVisible();
+        if (index === 0)
+          await expect(message).not.toContainText("non-blocking");
         for (const metadata of secondaryMetadata) {
           if (width === 390) await expect(metadata).toBeHidden();
           else await expect(metadata).toBeVisible();

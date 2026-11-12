@@ -83,7 +83,8 @@ test("raises a surface, claims it, and answers it with a reply composed by short
   const conversation = queue.getByRole("region", { name: "Surfaces" });
   await expect(conversation).toContainText("finding");
   await expect(conversation).toContainText("from proposal");
-  await expect(conversation).toContainText("non-blocking");
+  // A surface that holds nothing carries no badge saying so.
+  await expect(conversation).not.toContainText("blocking");
   await expect(conversation).toContainText(/\d+(ms|s) old/);
   await expect(conversation).toContainText(
     "the gate went red on the same hunk",

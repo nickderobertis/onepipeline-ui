@@ -138,7 +138,7 @@ test("a reply to a node whose turn is open is answered with the amend applied an
       .getByRole("region", { name: "Channel queue" })
       .getByRole("region", { name: "Command outcomes" });
     const outcome = outcomes.getByRole("listitem").first();
-    await expect(outcome).toContainText("envelope");
+    await expect(outcome).toContainText("Envelope");
     await expect(outcome).toContainText("applied");
     await expect(outcome).not.toContainText("not applied");
     await expect(outcome).toContainText('"op": "amend"');
