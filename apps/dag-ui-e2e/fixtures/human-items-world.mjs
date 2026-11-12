@@ -1111,7 +1111,8 @@ function buildProvenance(workspace, token) {
  * stamps move with the capture clock: a task the user completed and noted —
  * `--as user` records what the page's routes record — that the manager then
  * reopened and completed again with no `--as`, a question the user answered
- * and one the manager answered.
+ * and one the manager answered — and one task still open, for the list to
+ * open on.
  */
 function buildProvenanceGallery(workspace, token) {
   const raised = (dedup, kind, title, body) =>
@@ -1142,6 +1143,12 @@ function buildProvenanceGallery(workspace, token) {
       "question",
       "Keep the legacy export format?",
       "Some consumers still read the legacy export; say whether to keep writing it.",
+    ),
+    open: raised(
+      "gallery-open",
+      "task",
+      "Rotate the staging certificate",
+      "Rotate the staging certificate before it expires and complete this task once it is live.",
     ),
   };
   const as = (args, party) =>
