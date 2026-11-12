@@ -1759,6 +1759,19 @@ test("ending its run retires the items holding that run's work, and leaves host 
   await expect(
     card(page, "Which region should the canary run in?"),
   ).toBeVisible();
+  // Its history says the engine retired it, in the manager's words, as every
+  // auto-resolution reads.
+  await page
+    .getByRole("button", {
+      name: "Details: Which region should the canary run in?",
+    })
+    .click();
+  await expect(
+    detailPane(page)
+      .getByRole("region", { name: "History" })
+      .getByRole("listitem")
+      .last(),
+  ).toHaveText(/^Resolved by the manager · \d+ \w+ ago$/u);
 });
 
 test("ten sessions see the host queue, and each answer reaches only its owner's watch", async ({
@@ -5577,6 +5590,21 @@ test("an answer and a completion sent from Action items are the user's, and what
       .toEqual([...expected].sort());
     await expect(list).not.toContainText(party);
   }
+
+  // The manager's CLI dismissal reads as the manager's in the detail; the list
+  // stands on Dismissed from the loop above.
+  await page
+    .getByRole("button", { name: "Details: Re-run the flaky screenshot job" })
+    .click();
+  await expect(metadataOf(detailPane(page), "Dismissed")).toHaveText(
+    /^By the manager · \d+ \w+ ago$/u,
+  );
+  await expect(
+    detailPane(page)
+      .getByRole("region", { name: "History" })
+      .getByRole("listitem")
+      .last(),
+  ).toHaveText(/^Dismissed by the manager · \d+ \w+ ago$/u);
 
   // The manager's CLI answer, and one a released engine wrote, are the
   // manager's in the detail, which the user's answer is not.

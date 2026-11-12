@@ -295,8 +295,9 @@ const historyEntry: z.ZodType<HumanItemHistoryEntry> = z.strictObject({
     "human-item-reopened",
     "human-item-noted",
   ]),
-  at: z.string(),
-  actor: z.string(),
+  // An RFC 3339 instant, which the page shows as an age; never shown as served.
+  at: z.iso.datetime({ offset: true }),
+  actor: prose,
   on_behalf_of: nullableString,
   provenance,
 });

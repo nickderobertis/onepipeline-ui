@@ -78,8 +78,16 @@ async function serve(): Promise<FixtureServer> {
   return server;
 }
 
-/** `onepipeline ARGS… [FILE]` over the served runs root, as the manager. */
-function cli(served: FixtureServer, args: string[], input?: string): string {
+/**
+ * `onepipeline ARGS… [FILE]` over the served runs root, as the manager — or,
+ * given `dispatch`, as the dispatch of a run's node, whose environment names it.
+ */
+function cli(
+  served: FixtureServer,
+  args: string[],
+  input?: string,
+  dispatch?: { readonly run: string; readonly node: string },
+): string {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([name]) =>
@@ -101,6 +109,12 @@ function cli(served: FixtureServer, args: string[], input?: string): string {
       ONEAGENTGRAPH_STATE_DIR: join(dirname(runs), "oneagentgraph"),
       ONEPIPELINE_REPLY_TIMEOUT_SECONDS: "1",
       XDG_CONFIG_HOME: join(served.workspace, "config"),
+      ...(dispatch === undefined
+        ? {}
+        : {
+            ONEPIPELINE_RUN_ID: dispatch.run,
+            ONEPIPELINE_NODE_ID: dispatch.node,
+          }),
     },
     encoding: "utf8",
   });
@@ -526,4 +540,66 @@ test("replies and envelopes a released engine wrote, with no provenance, are ser
     written.replies.filter(({ reply }) => reply.provenance === undefined)
       .length,
   ).toBeGreaterThan(0);
+});
+
+test("a declined answer to a dispatch's question reads as the manager's answer", async ({
+  page,
+}) => {
+  const served = await serve();
+  const run = factsSchema.parse(served.facts).runs.busy;
+  managerReply(served, run, {
+    version: 4,
+    commands: [
+      {
+        op: "add",
+        node: {
+          id: NODE,
+          persona: "engineer",
+          task: "## What\nExport it.\n\n## Acceptance criteria\n\n- it is exported",
+        },
+      },
+    ],
+  });
+  // The node's dispatch asks, as `onepipeline ask` does; nothing answers within
+  // its window, so the question stays raised about the node.
+  let asked = "";
+  try {
+    asked = cli(
+      served,
+      [
+        "ask",
+        "--about",
+        NODE,
+        "--timeout",
+        "1",
+        "Which schema version should the export write?",
+      ],
+      undefined,
+      { run, node: NODE },
+    );
+  } catch (unanswered) {
+    asked = `${(unanswered as { stdout?: string }).stdout ?? ""}${(unanswered as { stderr?: string }).stderr ?? ""}`;
+  }
+  const correlation = /c-[0-9a-f]{32}/u.exec(asked)?.[0];
+  if (correlation === undefined)
+    throw new Error(`the question named no correlation: ${asked}`);
+  const answer = "Write version 2; version 1 readers are gone.";
+  const reply = receiptSchema.parse(
+    JSON.parse(
+      cli(
+        served,
+        ["reply", run, "--correlation", correlation],
+        JSON.stringify({ message: answer }),
+      ),
+    ),
+  ).reply;
+  const reason = "Version 1 readers still run in the nightly job.";
+  cli(served, ["decline-ruling", run, "--ruling", `a${reply}`], reason);
+
+  const queue = await openChannel(page, served, run);
+  await expect(
+    queue.getByRole("region", { name: "Declined ruling" }),
+  ).toHaveText(
+    `The proposal on ${NODE} declined the manager's answer from reply ${reply}${answer}Reason: ${reason}`,
+  );
 });
