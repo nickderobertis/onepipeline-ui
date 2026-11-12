@@ -118,10 +118,12 @@
       "inputs": ["releaseMachinery", "platform"]
     },
     "prioritize": {
-      "//": "Gives `test-standalone` and `compile-release-server` another direct dependent each, so Nx starts these long tasks with the tiers instead of after them (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` names both for the broader tier.",
+      "//": "Gives `test-standalone`, `compile-release-server`, `rehearse` and `test-staged` another direct dependent each, so Nx starts the release chain with the tiers instead of after them (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` names them all for the broader tier.",
       "executor": "nx:noop",
       "dependsOn": [
         "test-standalone",
+        "test-staged",
+        "rehearse",
         {
           "projects": ["dag-ui-read-latency"],
           "target": "compile-release-server"
@@ -135,6 +137,7 @@
         "test",
         "rehearse",
         "test-standalone",
+        "test-staged",
         {
           "projects": ["dag-ui-read-latency"],
           "target": "compile-release-server"
