@@ -5973,7 +5973,11 @@ pub(crate) fn timeline_harnesses_over(
             }
             if let Some(node) = node {
                 span["node_id"] = json!(node);
-                span["dispatch_id"] = json!(dispatch_key(&view.paths.run, node));
+                // Optional on the wire: a run and node too long to form a key
+                // serve none, never a `null` the contract's schema refuses.
+                if let Some(key) = dispatch_key(&view.paths.run, node) {
+                    span["dispatch_id"] = json!(key);
+                }
             }
             spans.push(span);
         }
