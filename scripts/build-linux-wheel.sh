@@ -111,9 +111,11 @@ if [ -n "${WHEEL_BUILD_CPU_SHARES+set}" ]; then
     || fail_usage "WHEEL_BUILD_CPU_SHARES is '$WHEEL_BUILD_CPU_SHARES', not an integer from 2 to 262144"
   cpu_shares=(--cpu-shares "$WHEEL_BUILD_CPU_SHARES")
   # Whether that weight competes with the work beside it depends on where the
-  # caller's cgroup sits beside the container's, so the log says.
+  # caller's cgroup sits beside the container's, so the build's one success line
+  # says.
   caller_cgroup="$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null || true)"
-  echo "wheel build: --cpu-shares $WHEEL_BUILD_CPU_SHARES; the caller's cgroup is ${caller_cgroup:-unknown} (cpu.weight $(cat "/sys/fs/cgroup${caller_cgroup}/cpu.weight" 2>/dev/null || echo unknown))" >&2
+  caller_weight="$(cat "/sys/fs/cgroup${caller_cgroup}/cpu.weight" 2>/dev/null || echo unknown)"
+  weight_note=" at --cpu-shares $WHEEL_BUILD_CPU_SHARES, beside a caller in cgroup ${caller_cgroup:-unknown} (cpu.weight $caller_weight)"
 fi
 
 command -v docker >/dev/null \
@@ -252,4 +254,4 @@ docker run --rm --platform "$platform" ${cpu_shares[@]+"${cpu_shares[@]}"} \
   || fail "the $target wheel did not build in $image (docker exited $?)" \
     "follow the ACTION above; with none, docker itself failed: check 'docker info' answers and 'docker pull $image' succeeds, then re-run"
 
-echo "built the $target wheel into $out_rel/"
+echo "built the $target wheel into $out_rel/${weight_note:-}"

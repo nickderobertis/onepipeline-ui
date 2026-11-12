@@ -1041,11 +1041,13 @@ fn a_cpu_weight_reaches_the_container_and_its_absence_leaves_dockers_default() {
         "docker is given the weight; it got {args:?}"
     );
     // Where the caller's cgroup sits decides whether the weight competes with
-    // the work beside the build, so the log names it.
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    // the work beside the build, so its one success line names it.
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("wheel build: --cpu-shares 8192; the caller's cgroup is "),
-        "{stderr}"
+        stdout.contains(
+            "built the x86_64-unknown-linux-gnu wheel into dist/ at --cpu-shares 8192, beside a caller in cgroup "
+        ),
+        "{stdout}"
     );
 
     fs::remove_file(dir.join("docker.log")).expect("the first call's record");
@@ -1057,7 +1059,9 @@ fn a_cpu_weight_reaches_the_container_and_its_absence_leaves_dockers_default() {
         "an unset weight reaches docker: {invocation}"
     );
     assert!(
-        !String::from_utf8_lossy(&output.stderr).contains("--cpu-shares"),
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| line == "built the x86_64-unknown-linux-gnu wheel into dist/"),
         "an unset weight is logged"
     );
 }
