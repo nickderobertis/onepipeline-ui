@@ -182,7 +182,9 @@ onemessagebus = "0.11.1"
 # `scripts/semver-check.sh` refuses a release that moved this line while the
 # commits release-plz versions from announce no break. At `=0.110.0` this crate's
 # surface follows onepipeline 0.110's: `error::ApiError::from_engine` takes that
-# release's `onepipeline::Error`, which 0.109's is not.
+# release's `onepipeline::Error`, which 0.109's is not. 0.110 is also the release
+# whose records say whose words a ruling is (`onepipeline::provenance::Provenance`),
+# which the reply and human-item routes record as the user's.
 #
 # The engine pin also fixes the linked plan-store, onevcs, oneagentgraph and
 # onejudge families. A host holds its engine and this reader to one linked
