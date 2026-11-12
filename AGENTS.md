@@ -148,8 +148,11 @@ block) — and `.github/tests/ci-shape.test.mjs`
 resolves every workflow to hold that, and what a push to `main` and the release
 commit start. The fifth, `budgets`, is the released `onebudgetspec-github-action`
 under `needs` and `if: always()`, on every pull request and alone of `ci.yml` on
-every push to `main`: it builds and tests nothing and fails only on an ordinary budget
-verdict. `release-tail` and `host-variable` are report-only here
+every push to `main`: it builds nothing and fails only on an ordinary budget verdict or
+a failed read-latency timing. A pull request that reaches `dag-ui-read-latency` (every
+release pull request) has it run that project's timings, journeys and budgets first
+(`just ci-read-latency`), alone on its own runner: nothing may time beside them, and after
+test-linux's pool they ran past its cap. `release-tail` and `host-variable` are report-only here
 (`enforcement-exclude-labels`) because they measure elsewhere, and a budget a pull
 request cannot measure or move carries `not-measured-on-pr`, which takes it out of the
 table and changes nothing that checks it elsewhere, so a new budget's label says which

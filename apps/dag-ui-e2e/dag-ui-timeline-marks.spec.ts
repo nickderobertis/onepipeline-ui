@@ -61,6 +61,10 @@ async function ticksOf(timeline: Locator): Promise<Tick[]> {
 
 /** Hover a timeline's plot and hold what its crosshair reads to its markers. */
 async function crosshairAgrees(page: Page, timeline: Locator): Promise<void> {
+  // The first screen's region is replaced when the app takes over, so scrolling to
+  // it before then scrolls a removed element: wait for the app's own plot, as the
+  // zoom journeys below do.
+  await expect(appPlot(timeline)).toBeVisible();
   await timeline.scrollIntoViewIfNeeded();
   const ticks = await ticksOf(timeline);
   expect(ticks.length).toBeGreaterThanOrEqual(2);

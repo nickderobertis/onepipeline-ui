@@ -62,7 +62,7 @@
       "//api-server-end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]"
     },
     "test-large": {
-      "//": "One large run's first screens, the rest arriving, its history pages and its status read, at the workload large-run/budgets.yaml states: fresh timings on a release build, alone and never cached, as `test`'s are. Apart from `test` because the two together ran past test-linux's 36-minute cap beside the affected tier (run 42909548558); `check` reaches it, so the release pull request's sweep records and checks it. Writes through the real CLI, so it provisions the sibling.",
+      "//": "One large run's first screens, the rest arriving, its history pages and its status read, at the workload large-run/budgets.yaml states: fresh timings on a release build, alone and never cached, as `test`'s are. Its own target so its telemetry and `budgets-large` are apart from Action items'; ci.yml's `budgets` job runs it (`scripts/ci-job.sh read-latency`) on every pull request that reaches this project and on the release pull request's sweep. Writes through the real CLI, so it provisions the sibling.",
       "command": "npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts --project=large",
       "cache": false,
       "parallelism": false,
@@ -84,7 +84,7 @@
       ]
     },
     "test-journeys": {
-      "//": "The large-corpus journeys over the release server: first screens against their documents, the wire and its errors, a live run, and reaching everything by the page's own controls. Apart from `test` because they took longer than test-linux's affected tier had left inside its 36-minute cap beside every other task (run 42856794257). The release pull request's sweep reaches them through `check`, which the affected tier does not select. They time nothing, so they record no telemetry, and they never run beside a timing.",
+      "//": "The large-corpus journeys over the release server: first screens against their documents, the wire and its errors, a live run, and reaching everything by the page's own controls. ci.yml's `budgets` job runs them (`scripts/ci-job.sh read-latency`) on every pull request that reaches this project and on the release pull request's sweep. They time nothing, so they record no telemetry and may use several workers, and they never run beside a timing.",
       "command": "npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts --project=journeys",
       "cache": false,
       "parallelism": false,
@@ -137,7 +137,7 @@
       "inputs": ["manifestText"]
     },
     "check": {
-      "//": "The default check plus budgets, the large run's timings and the large-corpus journeys, so test-linux's broader tier reaches them by target name and its affected tier, which selects no `check`, does not.",
+      "//": "The default check plus budgets, the large run's timings and the large-corpus journeys: the `budgets` job's read-latency step runs it last on the release pull request's sweep, and names each target on every other pull request that reaches this project.",
       "executor": "nx:noop",
       "dependsOn": [
         "format-check",

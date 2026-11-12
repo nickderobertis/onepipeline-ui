@@ -80,6 +80,9 @@ export function useAnswerDrafts(
   // Drafted items found open though the list does not hold them, for this filter.
   const foundOpen = useRef(new Set<string>());
   const asking = useRef(new Set<string>());
+  // Which filter an answer was asked under: one asked under an earlier filter
+  // says nothing under this one.
+  const filterTurn = useRef(0);
 
   const change = useCallback((id: string, next: Draft | undefined) => {
     storeDraft(id, next);
@@ -199,6 +202,7 @@ export function useAnswerDrafts(
   // biome-ignore lint/correctness/useExhaustiveDependencies: `filterKey` is the trigger — a hidden item found open under one filter says nothing under the next.
   useEffect(() => {
     foundOpen.current.clear();
+    filterTurn.current += 1;
   }, [filterKey]);
 
   // The list moved or a draft was added: any drafted item it no longer holds open
@@ -214,8 +218,23 @@ export function useAnswerDrafts(
         continue;
       }
       if (foundOpen.current.has(id) || asking.current.has(id)) continue;
+      ask(id);
+    }
+    function ask(id: string) {
+      const turn = filterTurn.current;
       asking.current.add(id);
       void noLongerOpen(client, id).then((gone) => {
+        if (
+          gone === false &&
+          turn !== filterTurn.current &&
+          !sendingNow.current
+        ) {
+          // Open under the filter it was asked under, and the reader has filtered
+          // since: this filter's pass skipped the item while this ask was out, so
+          // it is asked again rather than held open on an answer about another.
+          ask(id);
+          return;
+        }
         asking.current.delete(id);
         if (sendingNow.current) return;
         if (gone === true) retire(id, ELSEWHERE);

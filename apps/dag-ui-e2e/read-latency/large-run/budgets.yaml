@@ -3,10 +3,9 @@ schema_version: 1
 # `dag-ui-read-latency:test-large` records over the workload each description
 # states; the one runner reports the figure and its breakdown and compares
 # nothing. No budget here carries a `host` label. They are recorded apart from
-# `../budgets.yaml`'s because, taken beside Action items' figures, they ran
-# test-linux's affected tier past its 36-minute cap (run 42909548558): `check`
-# reaches `test-large`, so the release pull request's sweep fails on a
-# regression and an ordinary pull request's affected tier does not run it.
+# `../budgets.yaml`'s, by a target of their own, and the `budgets` job runs that
+# target and `budgets-large` on every pull request that reaches this project and on
+# the release pull request's sweep, so a regression fails the change that made it.
 budgets:
   - id: dag-ui-run-first-view-seconds
     description: >-

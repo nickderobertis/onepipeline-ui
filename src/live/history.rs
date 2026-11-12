@@ -52,13 +52,16 @@ impl Hub {
                 }
             }
             None => {
-                let selected = read_share(&paths, &query.owner);
                 let node = match &query.owner {
                     PageOwner::Node(node) | PageOwner::RunNode(node) => Some(node),
                     PageOwner::Run => None,
                 };
+                // Opened for the node, the run's own reading holds every record of
+                // it, as a node's first answer does: a node's page is built from
+                // that one pass over the journal, and only a share it does not hold
+                // is read again.
                 let mut alone = LiveRun::open_selective(&shared.store, run, node)?;
-                from_selected(&mut alone, query, Some(&selected))?
+                from_selected(&mut alone, query, None)?
             }
         };
         Ok(RunStore::envelope(page))

@@ -175,8 +175,11 @@ export function copyWorld(world: World): World {
   return { workspace, runsRoot, env, facts: world.facts };
 }
 
-export const removeWorld = (world: World) =>
+export const removeWorld = (world: World) => {
+  for (const id of settledReads.keys())
+    if (id.startsWith(`${world.workspace}\0`)) settledReads.delete(id);
   rmSync(world.workspace, { recursive: true, force: true });
+};
 
 export function freePort(): Promise<number> {
   return new Promise((resolvePort, reject) => {
@@ -287,28 +290,110 @@ async function served200(url: string): Promise<unknown> {
   return response.json();
 }
 
+type CompleteDetail = z.infer<typeof completeDetailSchema>;
+type CompleteTimeline = z.infer<typeof completeTimelineSchema>;
+
+const runRoot = (served: Served, run: string) =>
+  `${served.origin}/api/v2/runs/${encodeURIComponent(run)}`;
+
+// Validated whole through the contract's own schemas, then handed on as served:
+// a parse puts the members it names first, and the journeys compare documents
+// member by member in the order served.
+async function detailOf(served: Served, run: string): Promise<CompleteDetail> {
+  const detail = await served200(runRoot(served, run));
+  liveRunDetailSchema.parse(detail);
+  completeDetailSchema.parse(detail);
+  return detail as CompleteDetail;
+}
+
+async function timelineOf(
+  served: Served,
+  run: string,
+  node: string | undefined,
+): Promise<CompleteTimeline> {
+  const timeline = await served200(
+    `${runRoot(served, run)}/timeline?scope=${node === undefined ? "run" : `node&node=${encodeURIComponent(node)}`}`,
+  );
+  runTimelineSchema.parse(timeline);
+  completeTimelineSchema.parse(timeline);
+  return timeline as CompleteTimeline;
+}
+
 /** The complete documents, read off `served`. */
 export async function completeDocuments(
   served: Served,
   run: string,
   node?: string,
 ) {
-  const root = `${served.origin}/api/v2/runs/${encodeURIComponent(run)}`;
-  const detail = await served200(root);
-  const timeline = await served200(
-    `${root}/timeline?scope=${node === undefined ? "run" : `node&node=${encodeURIComponent(node)}`}`,
+  const detail = await detailOf(served, run);
+  const timeline = await timelineOf(served, run, node);
+  return { detail, timeline };
+}
+
+/** Each settled run's complete documents, by world, run and scope. */
+const settledReads = new Map<string, Promise<unknown>>();
+
+/**
+ * A settled run's complete documents, read off `served` the first time a journey
+ * of this worker asks for them in `world` and handed to every later one.
+ *
+ * On the large corpus each complete read is tens of seconds of the server's work
+ * (a 45 MB detail, a 95 MB timeline), and a settled run's documents cannot change
+ * while its world stands: a journey asking again would be shown the same bytes.
+ * So the journeys over one world compare against one reading of each, and the
+ * documents are read-only to them. Refused for a run that is still live, whose
+ * documents a later read may extend.
+ */
+export async function settledDocuments(
+  world: World,
+  served: Served,
+  run: string,
+  node?: string,
+) {
+  const detail = await settledDetail(world, served, run);
+  const timeline = await settledTimeline(world, served, run, node);
+  return { detail, timeline };
+}
+
+/** A settled run's complete detail alone, read as `settledDocuments` reads it. */
+export const settledDetail = (world: World, served: Served, run: string) =>
+  settledOnce(world, run, "detail", () => detailOf(served, run));
+
+/**
+ * A settled run's complete timeline alone, read as `settledDocuments` reads it,
+ * for a journey that compares against nothing else: the detail is the larger
+ * read on the large corpus, and is not paid for where it is not compared.
+ */
+export const settledTimeline = (
+  world: World,
+  served: Served,
+  run: string,
+  node?: string,
+) =>
+  settledOnce(world, run, `timeline\0${node ?? ""}`, () =>
+    timelineOf(served, run, node),
   );
-  // Validated whole through the contract's own schemas, then handed on as
-  // served: a parse puts the members it names first, and the journeys compare
-  // documents member by member in the order served.
-  liveRunDetailSchema.parse(detail);
-  runTimelineSchema.parse(timeline);
-  completeDetailSchema.parse(detail);
-  completeTimelineSchema.parse(timeline);
-  return {
-    detail: detail as z.infer<typeof completeDetailSchema>,
-    timeline: timeline as z.infer<typeof completeTimelineSchema>,
-  };
+
+function settledOnce<T>(
+  world: World,
+  run: string,
+  key: string,
+  read: () => Promise<T>,
+): Promise<T> {
+  if (run === world.facts.openLiveRun && !world.facts.large.settled)
+    throw new Error(`${run} is live in this world; read its documents fresh`);
+  const id = [world.workspace, run, key].join("\0");
+  // A key names one read and so one result type: the two callers above key a
+  // run's detail as `detail` and its timeline as `timeline\0<node>`, so what
+  // is stored under an id is always the `T` its caller's read returns.
+  let held = settledReads.get(id) as Promise<T> | undefined;
+  if (held === undefined) {
+    held = read();
+    settledReads.set(id, held);
+    // A failed read is not kept: the next journey reads again and says why.
+    held.catch(() => settledReads.delete(id));
+  }
+  return held;
 }
 
 /** A run view's first answer, read through the contract's own parser. */

@@ -17,6 +17,7 @@ import {
   type Served,
   screenStates,
   serve,
+  settledDocuments,
   stop,
   visibleOf,
   type World,
@@ -99,8 +100,9 @@ async function checkView(
   view: FirstView,
   run: string,
   node: string | undefined,
+  documents: typeof completeDocuments = completeDocuments,
 ) {
-  const complete = await completeDocuments(served, run, node);
+  const complete = await documents(served, run, node);
   const marked = await reachMark(
     page,
     served,
@@ -466,6 +468,9 @@ test("the settled large run's first screens equal its complete documents", async
           view,
           large.facts.openLiveRun,
           view === "node" ? large.facts.large.busiestNode : undefined,
+          // A fresh server per view, as each first screen is a cold one; the
+          // settled run's documents are one reading, compared by all three.
+          (on, run, node) => settledDocuments(large, on, run, node),
         );
       } finally {
         await stop(served);

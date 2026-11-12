@@ -35,7 +35,8 @@
       "inputs": ["cacheContract", "platform"]
     },
     "test": {
-      "command": "node --test --test-concurrency=1 .github/tests/nx-cache/*.test.mjs",
+      "//concurrency": "Two files at once: each journey builds and reads its own fixture workspace, and the suite spends much of its time waiting on the nested Nx and Git processes it starts. Alone on four cores two at a time took 372 s of wall for 1062 CPU-seconds against 572 s for 1013 serially; beside five CPU-bound processes, 797 s against 1153 s.",
+      "command": "node --test --test-concurrency=2 .github/tests/nx-cache/*.test.mjs",
       "inputs": [
         "cacheContract",
         "platform",
@@ -70,14 +71,14 @@
       "outputs": []
     },
     "prioritize": {
-      "//": "A no-op that gives `test` a dependent: Nx starts the ready task with the most dependents first, and this whole-workspace suite otherwise started only after the crate tiers, holding up the timed journey that runs alone at the end (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` reaches it for the broader tier.",
+      "//": "A no-op that gives `test` and the `bootstrap` it waits on a dependent each: Nx starts the ready task with the most direct dependents first, so this long whole-workspace suite starts with the tiers rather than after them (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` reaches it, and names `bootstrap` too, for the broader tier.",
       "executor": "nx:noop",
-      "dependsOn": ["test"]
+      "dependsOn": ["bootstrap", "test"]
     },
     "check": {
       "//": "The default check's targets this project has, plus `prioritize`, so test-linux's affected targets stay `check`'s selection (tests/e2e/ci_jobs.rs).",
       "executor": "nx:noop",
-      "dependsOn": ["lint", "test", "prioritize"]
+      "dependsOn": ["lint", "bootstrap", "test", "prioritize"]
     }
   }
 }

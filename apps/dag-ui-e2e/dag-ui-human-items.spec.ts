@@ -4676,6 +4676,67 @@ test("an item that no longer reads retires its draft, a read that fails keeps it
   expect(await storedDraft(page, vanishing)).toBeNull();
 });
 
+test("an item still open under one filter is asked again under the next, so a draft whose item then vanished retires", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const vanishing = raiseQuestion(served, {
+    key: "vanishes-late",
+    title: "Vanishes late?",
+  });
+  await open(page, served);
+  await answerBox(page, "Vanishes late?").fill("Words outliving their item");
+
+  // The page asks whether the hidden item is still open; the server says it is,
+  // and that answer reaches the page only after the reader has moved on — as an
+  // answer does on a loaded host.
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let asked: () => void = () => undefined;
+  const answered = new Promise<void>((resolve) => {
+    asked = resolve;
+  });
+  let arrived: () => void = () => undefined;
+  const delivered = new Promise<void>((resolve) => {
+    arrived = resolve;
+  });
+  // Only the first ask is held. The page's later asks go to the server as they
+  // are, never through a route being removed under them: one caught by an
+  // unroute while its handler ran failed, and a failed ask is not asked again.
+  let held = false;
+  // llmlint: ignore[e2e_not_mocked] the server's real answer is fetched and passed through untouched; only when it arrives is held, which is the late arrival under test and nothing a real server can be made to do for one read.
+  await page.route(`**/api/human-items/${vanishing}`, async (route) => {
+    if (held) return route.fallback();
+    held = true;
+    const response = await route.fetch();
+    asked();
+    await released;
+    await route.fulfill({ response });
+    arrived();
+  });
+  const priority = page
+    .getByRole("group", { name: "Filter action items" })
+    .getByLabel("Priority", { exact: true });
+  await priority.selectOption("urgent");
+  await expect(card(page, "Vanishes late?")).toHaveCount(0);
+  await answered;
+
+  // Then the item goes from under the server, the reader filters again, and the
+  // answer from before arrives.
+  const dir = factsOf(served).journal;
+  renameSync(dir, `${dir}.gone`);
+  await priority.selectOption("low");
+  release();
+  await delivered;
+
+  const notices = page.getByRole("list", { name: "Not sent" });
+  await expect(notices).toContainText("Words outliving their item");
+  await expect(notices).toContainText("answered or dismissed elsewhere");
+  expect(await storedDraft(page, vanishing)).toBeNull();
+});
+
 test("choice buttons are reached by Tab and pressed from the keyboard, and resolved items state when", async ({
   page,
 }) => {

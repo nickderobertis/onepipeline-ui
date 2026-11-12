@@ -89,8 +89,11 @@ pub const DISCONNECTED_GRACE_ENV: &str = "ONEPIPELINE_UI_SUBSCRIPTION_GRACE_MS";
 pub const COMPLETE_READ_HOLD_ENV: &str = "ONEPIPELINE_UI_COMPLETE_READ_HOLD_MS";
 
 /// The environment variable that holds a refold off for this many milliseconds
-/// after the last one, for a journey that watches the fold fall overdue. Unset,
-/// nothing holds it.
+/// after the fold went stale — the first record it has not folded — for a
+/// journey that watches the fold fall overdue. Counted from that record rather
+/// than from the last fold, so the overdue state is drawn before the held refold
+/// lands however long a loaded host takes to see the record. Unset, nothing
+/// holds it.
 pub const FOLD_HOLD_ENV: &str = "ONEPIPELINE_UI_TELEMETRY_FOLD_HOLD_MS";
 
 /// How many refold intervals behind the fold may fall before its values draw as
@@ -793,7 +796,9 @@ struct Folded {
     document: Option<RunTelemetry>,
     served: Value,
     folded_at: Instant,
-    stale: bool,
+    /// When the first record this fold has not folded was seen: `None` while
+    /// the fold holds every record, so it is stale exactly when this is set.
+    stale_since: Option<Instant>,
 }
 
 impl Folded {
@@ -810,7 +815,7 @@ impl Folded {
             document,
             served,
             folded_at: Instant::now(),
-            stale: false,
+            stale_since: None,
         }
     }
 
@@ -821,8 +826,18 @@ impl Folded {
             document: None,
             served: Value::Null,
             folded_at: Instant::now(),
-            stale: false,
+            stale_since: None,
         }
+    }
+
+    /// Mark the fold behind the journal, from the first record it has not folded.
+    fn go_stale(&mut self) {
+        self.stale_since.get_or_insert_with(Instant::now);
+    }
+
+    /// Whether a record has been seen that this fold does not hold.
+    fn stale(&self) -> bool {
+        self.stale_since.is_some()
     }
 
     fn inputs<'a>(&'a self, agents: Option<usize>, activity: &'a ActivityFold) -> DetailInputs<'a> {
@@ -1880,7 +1895,7 @@ impl Hub {
         run.failing = false;
         if let Some(touched) = &touched {
             if touched.any() {
-                run.telemetry.stale = true;
+                run.telemetry.go_stale();
                 if run.complete() {
                     let at = run.view.events.len().saturating_sub(touched.records);
                     for event in &run.view.events[at..] {
@@ -1890,7 +1905,7 @@ impl Hub {
                 }
             }
         } else {
-            run.telemetry.stale = true;
+            run.telemetry.go_stale();
             if run.complete() {
                 run.activity = fold_activity(&run.view);
             }
@@ -1916,8 +1931,12 @@ impl Hub {
         if complete {
             let aged = run.telemetry.folded_at.elapsed();
             let quiet = touched.as_ref().is_some_and(|touched| !touched.any());
-            refold = run.telemetry.stale
-                && aged >= shared.fold_hold
+            let held = run
+                .telemetry
+                .stale_since
+                .is_some_and(|since| since.elapsed() < shared.fold_hold);
+            refold = run.telemetry.stale()
+                && !held
                 && ((quiet && aged >= shared.refold) || aged >= shared.refold * 2);
             if refold {
                 let folding = Instant::now();
@@ -1929,7 +1948,7 @@ impl Hub {
         // fact: past due with records since, or a fold that failed.
         let overdue = complete
             && (run.telemetry.document.is_none()
-                || (run.telemetry.stale
+                || (run.telemetry.stale()
                     && run.telemetry.folded_at.elapsed() >= shared.refold * OVERDUE_INTERVALS));
         let overdue_moved = overdue != run.overdue;
         run.overdue = overdue;

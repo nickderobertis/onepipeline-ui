@@ -500,6 +500,16 @@ jobs:
           path: target/budget-results/
           if-no-files-found: ignore
           retention-days: 7
+      # The release build the rehearsal compiled, which the `budgets` job's
+      # read-latency timings serve (`scripts/ci-job.sh read-latency`); absent when
+      # this change compiled none, and then that job's selection runs none either.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: read-latency-release-server
+          path: target/wheel-x86_64-unknown-linux-gnu/x86_64-unknown-linux-gnu/release/onepipeline-api
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: Report cache entries and task executions
         if: always()
@@ -747,9 +757,14 @@ jobs:
       - cancel: nx-cache
 
   # The released report action, once the four jobs have ended however they ended, on
-  # every pull request and every push to `main`. It builds and tests nothing: each
-  # budget whose command can run here runs once through ordinary `onebudgetspec
-  # check`, and only an ordinary budget verdict fails it. The release-tail and
+  # every pull request and every push to `main`. It builds nothing. On a pull
+  # request it first runs dag-ui-read-latency's timings, large-corpus journeys and
+  # their budgets (`just ci-read-latency`) when the change reaches that project, on
+  # this runner alone and on the release build test-linux compiled: test-linux is a
+  # CPU-bound pool on four cores, where they ran alone after it and, cold, past its
+  # cap. Then each budget whose command can run here runs once through ordinary
+  # `onebudgetspec check`, those timings' among them, and only an ordinary budget
+  # verdict or a failed timing or journey fails it. The release-tail and
   # host-variable budgets are report-only here, as they are everywhere they run
   # outside the tail and the gate. The full history lets local git prove each saved
   # base commit's ancestry, and the group serializes comment writers.
@@ -770,7 +785,49 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Read the pinned tool versions
+        id: tool-pins
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          tr -d '\r' < .github/ci-tool-versions | awk '
+            /^#/ || !NF { next }
+            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
+            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
+          ' >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        if: github.event_name == 'pull_request'
+        with:
+          node-version: ${{ steps.tool-pins.outputs.node }}
+      # A fork's run writes nothing to any cache: this action saves its own binary otherwise.
+      - uses: oven-sh/setup-bun@v2
+        if: github.event_name == 'pull_request'
+        with:
+          bun-version-file: package.json
+          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+      # `just`, which runs the recipe; the sibling CLI the timings write through is
+      # fetched by `ensure-sibling` as its pinned release's checksummed archive.
+      - uses: taiki-e/install-action@v2
+        if: github.event_name == 'pull_request'
+        with:
+          tool: just@${{ steps.tool-pins.outputs.just }}
+      # Absent when test-linux compiled no release build, which is when this
+      # change reaches no read-latency timing.
+      - uses: actions/download-artifact@v4
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        with:
+          name: read-latency-release-server
+          path: target/wheel-x86_64-unknown-linux-gnu/x86_64-unknown-linux-gnu/release
+      - name: Read-latency timings, journeys and budgets (when the change reaches them)
+        if: github.event_name == 'pull_request'
+        run: |
+          server=target/wheel-x86_64-unknown-linux-gnu/x86_64-unknown-linux-gnu/release/onepipeline-api
+          if [ -f "$server" ]; then chmod +x "$server"; fi
+          bash scripts/workspace-install.sh
+          just ci-read-latency --tier "$(bash scripts/ci-tier.sh)"
       - uses: nickderobertis/onebudgetspec-github-action@v0.3.0
+        if: ${{ !cancelled() }}
         with:
           token: ${{ github.token }}
           enforcement-exclude-labels: release-tail,host-variable

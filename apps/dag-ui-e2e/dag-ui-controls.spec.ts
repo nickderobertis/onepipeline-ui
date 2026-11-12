@@ -9,7 +9,13 @@ import {
   runTimelineSchema,
   runTranscriptSchema,
 } from "@onepipeline-ui/dag-model";
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import {
+  expect,
+  type Locator,
+  type Page,
+  type Response,
+  test,
+} from "@playwright/test";
 import { z } from "zod";
 import { fixture, runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
@@ -612,10 +618,16 @@ test("preserves Reads facts as structured fields in Overall and run details", as
       `/api/v2/runs/${runId}/telemetry`,
       runTelemetryDocumentSchema,
     );
-    const statusResponse = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === `/api/v2/runs/${runId}/status`,
-    );
+    const isStatus = (response: Response) =>
+      new URL(response.url()).pathname === `/api/v2/runs/${runId}/status`;
+    // Every status answer the page is given: the first screen and the app each
+    // read it, and the age in seconds it carries is the one the page shows last.
+    const answers: Promise<unknown>[] = [];
+    const record = (response: Response) => {
+      if (isStatus(response)) answers.push(response.json());
+    };
+    page.on("response", record);
+    const statusResponse = page.waitForResponse(isStatus);
     await page.goto(`/?run=${runId}&view=overall`);
     const status = runStatusSchema.parse(await (await statusResponse).json());
     await expect(
@@ -630,9 +642,22 @@ test("preserves Reads facts as structured fields in Overall and run details", as
     await expect(header).toContainText(
       `Unread surfaces${status.unread_surfaces.count}`,
     );
-    await expect(header).toContainText(
-      `Oldest unread (seconds)${status.unread_surfaces.oldest_seconds ?? "None"}`,
-    );
+    const oldest = async () =>
+      runStatusSchema.parse(await answers.at(-1)).unread_surfaces
+        .oldest_seconds ?? "None";
+    await expect
+      .poll(
+        async () =>
+          (await header.textContent())?.includes(
+            `Oldest unread (seconds)${await oldest()}`,
+          ),
+        {
+          message: `Oldest unread (seconds) as last answered`,
+          timeout: 15_000,
+        },
+      )
+      .toBe(true);
+    page.off("response", record);
     // How long the journal has been quiet — the age Status printed for a parked
     // driver — read off the run's own last write, or said to be unrecorded.
     const lastProgress = detail.run.last_progress_at;
@@ -857,13 +882,47 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
         await expect(identity).toContainText(repo);
     }
 
+    // Each node's transcript reading, asked first, so a node whose transcript the
+    // engine refuses is checked on the page opened for its results lines below
+    // rather than on a page opened for that alone.
+    const transcriptOf = new Map<string, string | undefined>();
+    for (const { id } of tasks) {
+      const response = await page.request.get(
+        `/api/v2/runs/${runId}/transcript?node=${encodeURIComponent(id)}`,
+      );
+      if (!response.ok()) {
+        // The engine refuses a node it recorded nothing for, and so does the
+        // view: that node's header counts no turns.
+        expect((await refusedBy(response, 422)).message).toContain(
+          `has recorded nothing for node '${id}'`,
+        );
+        transcriptOf.set(id, undefined);
+        continue;
+      }
+      transcriptOf.set(
+        id,
+        runTranscriptSchema.parse(await response.json()).rendered,
+      );
+    }
+    const countsNoTurns = new Set<string>();
+    const noTurns = async (id: string, view: Locator) => {
+      if (!transcriptOf.has(id) || transcriptOf.get(id) !== undefined) return;
+      await expect(view.getByText(/ node · 0 turns · /)).toBeVisible();
+      countsNoTurns.add(id);
+    };
+
     let current: string | undefined;
+    // The node a line is about stays open for the lines under it, which read its
+    // tabs: opening it again for each was a whole page load per line.
+    let open: Locator | undefined;
     for (const line of nodeLines) {
       const nodeLine = line.match(/^ {2}(\S+)\s+(\S+)(?: \(([^)]+)\))?(.*)$/);
       if (nodeLine !== null) {
         const [, id, , outcome, rest] = nodeLine;
         current = String(id);
         const view = await openNode(page, runId, String(id));
+        open = view;
+        await noTurns(String(id), view);
         const task = await nodeTab(view, "Task");
         if (outcome !== undefined)
           await expect(task).toContainText(`Settled as${outcome}`);
@@ -890,7 +949,7 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
         continue;
       }
       const [, term, value] = under;
-      const view = await openNode(page, runId, id);
+      const view = open ?? (await openNode(page, runId, id));
       if (term === "detail")
         await expect(await nodeTab(view, "Task")).toContainText(
           `Outcome${value}`,
@@ -919,23 +978,12 @@ test("shows every fact the removed Results, Goals and Transcript reads printed",
 
     const perNode: string[] = [];
     for (const { id } of tasks) {
-      const response = await page.request.get(
-        `/api/v2/runs/${runId}/transcript?node=${encodeURIComponent(id)}`,
-      );
-      if (!response.ok()) {
-        // The engine refuses a node it recorded nothing for, and so does the
-        // view: that node's header counts no turns.
-        expect((await refusedBy(response, 422)).message).toContain(
-          `has recorded nothing for node '${id}'`,
-        );
-        await expect(
-          (await openNode(page, runId, id)).getByText(/ node · 0 turns · /),
-        ).toBeVisible();
+      const rendered = transcriptOf.get(id);
+      if (rendered === undefined) {
+        if (!countsNoTurns.has(id))
+          await noTurns(id, await openNode(page, runId, id));
         continue;
       }
-      const rendered = runTranscriptSchema.parse(
-        await response.json(),
-      ).rendered;
       perNode.push(rendered);
       unmapped.push(
         ...(await expectTranscriptShown(

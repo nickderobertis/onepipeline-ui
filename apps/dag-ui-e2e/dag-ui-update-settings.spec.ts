@@ -85,6 +85,8 @@ interface Wire {
   mostOpen: number;
   /** Every frame received, and the id of the snapshot each subscription answered. */
   readonly frames: SubscriptionFrame[];
+  /** Each frame as it arrived, at the same index as `frames`. */
+  readonly raw: string[];
   readonly snapshots: string[];
 }
 
@@ -94,6 +96,7 @@ async function watch(page: Page): Promise<Wire> {
     open: 0,
     mostOpen: 0,
     frames: [],
+    raw: [],
     snapshots: [],
   };
   const isStream = (url: URL) => url.pathname === API_V2_PATHS.events;
@@ -131,7 +134,10 @@ async function watch(page: Page): Promise<Wire> {
   await cdp.send("Network.enable");
   cdp.on("Network.eventSourceMessageReceived", (event) => {
     const parsed = subscriptionFrameSchema.safeParse(JSON.parse(event.data));
-    if (parsed.success) wire.frames.push(parsed.data);
+    if (parsed.success) {
+      wire.frames.push(parsed.data);
+      wire.raw.push(event.data);
+    }
   });
   return wire;
 }
@@ -228,10 +234,15 @@ const activity = (page: Page, node: string, marker: string) =>
 async function serveLive(
   env: Readonly<Record<string, string>> = {},
 ): Promise<{ served: FixtureServer; facts: z.infer<typeof liveFactsSchema> }> {
+  // A record a journey writes stales the run's telemetry fold, whose refold
+  // lands one quiet refold interval later as a change of its own on whatever
+  // view is open. On a loaded host that is inside a journey, where Overall held
+  // it as its own change (a 1 s refold reproduces that on an idle host). No
+  // journey here reads a refold, so none lands while one runs.
   const served = await startFixtureServer(
     "update-settings",
     ["--live-updates-corpus"],
-    env,
+    { ONEPIPELINE_UI_TELEMETRY_REFOLD_MS: "600000", ...env },
   );
   server = served;
   return { served, facts: liveFactsSchema.parse(served.facts) };
@@ -414,6 +425,19 @@ test("the main area's setting holds its view: live as it arrives, an interval un
   recordActivity(served, run, node, "first held change");
   await expect(waiting(page, MAIN)).toBeVisible({ timeout: PUSH_PATIENCE });
   recordActivity(served, run, node, "second held change");
+  // The second change's own frame, not a count alone: on a loaded host another
+  // frame (the first record's own later patch) can arrive after the cursor and
+  // make the count while the second change is still to come, and it then
+  // arrives after the tick below and is held for the next.
+  await expect
+    .poll(
+      () =>
+        wire.raw
+          .slice(wire.frames.findIndex(({ id }) => id === cursor) + 1)
+          .some((frame) => frame.includes("second held change")),
+      { timeout: PUSH_PATIENCE },
+    )
+    .toBe(true);
   await expect
     .poll(
       () =>
