@@ -692,7 +692,7 @@ test("a compile the warmer drops, changes or invents is refused", () => {
     ],
     [
       without("linux", "just _crate-doc"),
-      /^test-linux compiles 'RUSTDOCFLAGS=-D warnings cargo doc/,
+      /^lint compiles 'RUSTDOCFLAGS=-D warnings cargo doc/,
     ],
     [
       edited(

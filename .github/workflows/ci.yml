@@ -54,7 +54,7 @@ jobs:
   # never a pull request's.
   # What does not depend on the platform it runs on: the PR title, the
   # suppressions comment, formatting, lints and type checks, the MSRV floor, the
-  # dependency audit, the judged lint and the visual docs — and the advisories
+  # dependency audit, the crate's docs, the judged lint and the visual docs — and the advisories
   # report, which posts a status of its own and never fails this job.
   lint:
     if: github.event_name == 'pull_request'
@@ -346,8 +346,8 @@ jobs:
         run: bash .github/scripts/report-disk.sh "End of job" || true
 
   # The deterministic gate on Linux: `check`'s tiers over the affected projects
-  # (every test tier, the Playwright browser tier, the coverage floor, docs —
-  # formatting, lints and type checks are `lint`'s), the documented install and
+  # (every test tier, the Playwright browser tier, the coverage floor —
+  # formatting, lints, type checks and docs are `lint`'s), the documented install and
   # the release's x86_64 wheel, in one Nx run so the packaging compiles beside
   # the tiers. On the release pull request (`scripts/ci-tier.sh`)
   # it is the sweep: every project, with the host-labelled budgets, and the
