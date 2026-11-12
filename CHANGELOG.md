@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.80.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.80.1...v0.80.2) - 2026-11-12
+
+### Fixed
+
+- *(dag-ui)* show loaded history, accept dispatch spans with no id, and open off-graph node links ([#748](https://github.com/nickderobertis/onepipeline-ui/pull/748))
+
 ## [0.80.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.80.0...v0.80.1) - 2026-11-12
 
 ### Performance
