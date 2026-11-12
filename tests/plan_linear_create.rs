@@ -341,27 +341,48 @@ impl Workspace {
             // holds, which in this workspace are none.
             q if q == graphql::ISSUE_REWRITE => {
                 let id = required(variables, "id")?;
-                let state = status_of(
-                    input,
-                    &[
-                        ("STATE-TODO", "Todo", "unstarted"),
-                        ("STATE-DONE", "Done", "completed"),
-                    ],
-                    "stateId",
-                )?;
+                let fields = input
+                    .as_object()
+                    .ok_or_else(|| format!("`input` must be an object, not {input}"))?;
+                let mut rewrite = Vec::new();
+                for (field, value) in fields {
+                    let value = match field.as_str() {
+                        "title" => json!(required(input, field)?),
+                        "description" => json!(optional(input, field)?),
+                        "priority" => json!(value.as_u64().ok_or_else(|| format!(
+                            "`priority` must be a whole number, not {value}"
+                        ))?),
+                        "stateId" => status_of(
+                            input,
+                            &[
+                                ("STATE-TODO", "Todo", "unstarted"),
+                                ("STATE-DONE", "Done", "completed"),
+                            ],
+                            field,
+                        )?,
+                        "projectId" => {
+                            let project = required(input, field)?;
+                            if !self.projects.iter().any(|held| held["id"] == project) {
+                                return Ok(not_found(MetadataRecord::Project));
+                            }
+                            json!({"id": project})
+                        }
+                        // What a whole rewrite also carries, which this workspace holds none of.
+                        "labelIds" if value.as_array().is_some_and(Vec::is_empty) => continue,
+                        other => return Err(format!("the stand-in does not rewrite `{other}`")),
+                    };
+                    let key = match field.as_str() {
+                        "stateId" => "state",
+                        "projectId" => "project",
+                        other => other,
+                    };
+                    rewrite.push((key, value));
+                }
                 let Some(issue) = self.issues.iter_mut().find(|issue| issue["id"] == id) else {
                     return Ok(not_found(MetadataRecord::Task));
                 };
-                for field in ["title", "description", "priority"] {
-                    if let Some(value) = input.get(field) {
-                        issue[field] = value.clone();
-                    }
-                }
-                if !state.is_null() {
-                    issue["state"] = state;
-                }
-                if let Some(project) = input.get("projectId") {
-                    issue["project"] = json!({"id": project});
+                for (key, value) in rewrite {
+                    issue[key] = value;
                 }
                 let mut issue = issue.clone();
                 issue["relations"] =
