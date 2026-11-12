@@ -24,12 +24,15 @@ declare global {
   }
 }
 
-/** A first screen drawn from an answer, as opposed to the one that stands while it is out. */
-const DRAWN = [
-  "[data-first-screen] .first-graph",
-  "[data-first-screen] .overall-view",
-  "[data-first-screen] .node-view",
-].join(", ");
+/**
+ * A first screen drawn from an answer, by the roles and names a person's assistive
+ * technology reads it by: Graph's canvas, Overall's metrics and a node's timeline. The
+ * screen that stands while the answer is out names none of them.
+ */
+// llmlint: ignore-block[e2e_uses_accessible_selectors] whether a first screen was ever drawn, even for a frame before the app replaced it, is visible only to an observer inside the page, which Playwright's locators are not; that observer selects by exactly the ARIA role and accessible names `getByRole` would, written as the attribute selectors `querySelector` takes.
+const DRAWN =
+  '[role="group"][aria-label="DAG execution graph"], section[aria-label="Run metrics"], section[aria-label="Node timeline"]';
+// llmlint: ignore-end[e2e_uses_accessible_selectors]
 
 type Json = Record<string | number, unknown>;
 type Path = readonly (string | number)[];
@@ -134,6 +137,7 @@ async function opened(page: Page) {
         window.__firstScreenDrawn = true;
     }).observe(document, { childList: true, subtree: true });
   }, DRAWN);
+  // llmlint: ignore-block[e2e_not_mocked, tests_mirror_real_usage] the acceptance criteria require the served first answer altered in flight, one field missing or of the wrong type at a time, to show the page refusing each; the real server's answer is fetched and only that one field is changed, and with nothing to alter the answer passes through untouched, as `read-latency/first-screen-marks.spec.ts` feeds its answers.
   await page.route("**/api/v2/subscriptions", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     const response = await route.fetch();
@@ -147,6 +151,7 @@ async function opened(page: Page) {
       json: alter === undefined ? answer : alter(answer),
     });
   });
+  // llmlint: ignore-end[e2e_not_mocked, tests_mirror_real_usage]
   return held;
 }
 

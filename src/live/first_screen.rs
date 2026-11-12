@@ -216,7 +216,9 @@ thread_local! {
     static SPLIT: Cell<Split> = Cell::new(Split::default());
 }
 
-/// Change this thread's split.
+/// Add to the split of the first answer this thread is building: one answer is built
+/// on one blocking thread, so each read records what it cost where it happens rather
+/// than passing it back through every call between it and the trace.
 pub(super) fn record(change: impl FnOnce(&mut Split)) {
     SPLIT.with(|split| {
         let mut held = split.get();

@@ -1,16 +1,20 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  liveRunDetailSchema,
   nodeStatusSchema,
+  runTimelineSchema,
   subscribedSchema,
   timelineReferenceKindSchema,
   timelineSpanKindSchema,
   transportRoleSchema,
 } from "@onepipeline-ui/dag-model";
 import { describe, expect, it } from "vitest";
+import type { z } from "zod";
 import {
   checkFirstAnswer,
   FirstAnswerContractError,
+  type FirstScreenField,
   firstScreenFields,
   NODE_STATUSES,
   namedPath,
@@ -149,4 +153,135 @@ it("holds the contract's own words for each enumerated field", () => {
   expect([...TRANSPORT_ROLES].sort()).toEqual(
     [...transportRoleSchema.options].sort(),
   );
+});
+
+/**
+ * The check's copy of the contract, held to the contract: each field it reads is found
+ * in `@onepipeline-ui/dag-model`'s own schema for it, of the type the check holds it to,
+ * taking `null` and leaving it out exactly where that schema does — but where the screen
+ * needs more than the schema promises, as named here.
+ */
+const STRICTER: Readonly<Record<string, string>> = {
+  // The full parse defaults it to `{}`; the screen reads `node_details[id]` before
+  // any parse, so an answer without it would throw rather than draw.
+  "answer.initial.snapshot.visible.detail.node_details":
+    "required where the schema defaults it",
+};
+
+/**
+ * Where the check takes less than the schema it is held to, because one check reads
+ * every view's answer: a detail view's carries no timeline, which the timeline view's
+ * schema requires.
+ */
+const LOOSER: Readonly<Record<string, string>> = {
+  "answer.initial.snapshot.visible.timeline":
+    "optional where only the timeline view's schema requires it",
+};
+
+/** A zod schema's own definition, as zod 4 holds it. */
+interface Definition {
+  readonly type: string;
+  readonly shape?: Record<string, z.ZodType>;
+  readonly element?: z.ZodType;
+  readonly valueType?: z.ZodType;
+  readonly innerType?: z.ZodType;
+  readonly in?: z.ZodType;
+  readonly getter?: () => z.ZodType;
+  readonly entries?: Record<string, string>;
+}
+
+const definition = (schema: z.ZodType): Definition =>
+  (schema as unknown as { _zod: { def: Definition } })._zod.def;
+
+/** `schema` with its wrappers taken off, and what they said. */
+function unwrapped(schema: z.ZodType): {
+  schema: z.ZodType;
+  optional: boolean;
+  nullable: boolean;
+} {
+  let at = schema;
+  let optional = false;
+  let nullable = false;
+  for (;;) {
+    const def = definition(at);
+    if (def.type === "optional" || def.type === "default") optional = true;
+    else if (def.type === "nullable") nullable = true;
+    else if (def.type === "pipe" && def.in !== undefined) {
+      at = def.in;
+      continue;
+    } else if (def.type === "lazy" && def.getter !== undefined) {
+      at = def.getter();
+      continue;
+    } else if (def.type !== "prefault" && def.type !== "readonly")
+      return { schema: at, optional, nullable };
+    at = def.innerType as z.ZodType;
+  }
+}
+
+/** The schema at `pattern`, from the root its first steps name. */
+function schemaAt(pattern: string): z.ZodType | undefined {
+  const root = `${VISIBLE}.`;
+  if (!pattern.startsWith(root)) return undefined;
+  const [part, ...steps] = pattern
+    .slice(root.length)
+    .replace(/\[0\]/gu, ".[0]")
+    .split(".");
+  let at: z.ZodType | undefined =
+    part === "detail"
+      ? liveRunDetailSchema
+      : part === "timeline"
+        ? runTimelineSchema
+        : undefined;
+  for (const step of steps) {
+    if (at === undefined) return undefined;
+    const def = definition(unwrapped(at).schema);
+    at =
+      step === "[0]"
+        ? def.element
+        : step === "*"
+          ? def.valueType
+          : def.shape?.[step];
+  }
+  return at;
+}
+
+/** The zod types each of the check's kinds is held to. */
+const ZOD_TYPES: Readonly<Record<FirstScreenField["kind"], readonly string[]>> =
+  {
+    string: ["string"],
+    timestamp: ["string"],
+    boolean: ["boolean"],
+    number: ["number"],
+    integer: ["number"],
+    enum: ["enum"],
+    true: ["literal"],
+    union: ["union"],
+    object: ["object"],
+    array: ["array"],
+    record: ["record"],
+    anything: [],
+  };
+
+it.each(
+  firstScreenFields(timelineAnswer)
+    .filter((field) => field.pattern.startsWith(`${VISIBLE}.`))
+    .map((field) => [field.pattern, field] as const),
+)("holds %s as the contract's schema declares it", (pattern, field) => {
+  const declared = schemaAt(pattern);
+  expect(declared, `the contract declares ${pattern}`).toBeDefined();
+  const { schema, optional, nullable } = unwrapped(declared as z.ZodType);
+  const type = definition(schema).type;
+  if (field.kind !== "anything") expect(ZOD_TYPES[field.kind]).toContain(type);
+  expect(field.nullable, `${pattern} takes null`).toBe(nullable);
+  // A record holds any key or none, so no entry of one is ever required.
+  if (pattern.endsWith(".*")) expect(field.required).toBe(false);
+  else if (STRICTER[pattern] !== undefined)
+    expect(field.required && optional).toBe(true);
+  else if (LOOSER[pattern] !== undefined)
+    expect(!field.required && !optional).toBe(true);
+  else expect(field.required, `${pattern} may be left out`).toBe(!optional);
+  if (field.kind === "enum")
+    expect([...(field.words ?? [])].sort()).toEqual(
+      Object.values(definition(schema).entries ?? {}).sort(),
+    );
 });

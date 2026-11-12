@@ -16,8 +16,33 @@
 
 import type { FirstAnswer } from "./FirstScreen";
 
+/** The type a check holds a value to. */
+export type Kind =
+  | "string"
+  | "boolean"
+  | "number"
+  | "integer"
+  | "timestamp"
+  | "enum"
+  | "true"
+  | "union"
+  | "object"
+  | "array"
+  | "record"
+  | "anything";
+
+/** What a check holds a value to, which its unit test holds to the contract's schema. */
+interface Holds {
+  /** The type. */
+  readonly kind: Kind;
+  /** Whether `null` is taken. */
+  readonly nullable: boolean;
+  /** The words an `enum` takes, and only those. */
+  readonly words?: readonly string[];
+}
+
 /** One field a check reads, in an answer it was asked to list them for. */
-export interface FirstScreenField {
+export interface FirstScreenField extends Holds {
   /** Where it is, from the answer, as keys and indices. */
   readonly path: readonly (string | number)[];
   /**
@@ -32,7 +57,7 @@ export interface FirstScreenField {
 }
 
 /** One value's check: why it fails at `path`, and the fields it reads in it. */
-interface Check {
+interface Check extends Holds {
   /** The reason `value` fails, or `undefined`. */
   readonly check: (value: unknown, path: string) => string | undefined;
   /**
@@ -61,29 +86,53 @@ const wrong = (path: string, wanted: string, value: unknown) =>
     ? `${path} is missing`
     : `${path} is ${shown(value)}, not ${wanted}`;
 
+/** What `check` holds, as a field of the object holding it lists it. */
+const held = (check: Check): Holds => ({
+  kind: check.kind,
+  nullable: check.nullable,
+  ...(check.words === undefined ? {} : { words: check.words }),
+});
+
 /** A check of a value with no fields of its own. */
 const leaf = (
+  kind: Kind,
   holds: (value: unknown) => boolean,
   wanted: string,
   refused: unknown,
+  words?: readonly string[],
 ): Check => ({
   check: (value, path) =>
     holds(value) ? undefined : wrong(path, wanted, value),
   fields: () => undefined,
   wrong: refused,
+  kind,
+  nullable: false,
+  ...(words === undefined ? {} : { words }),
 });
 
-const string = leaf((value) => typeof value === "string", "a string", 42);
+const string = leaf(
+  "string",
+  (value) => typeof value === "string",
+  "a string",
+  42,
+);
 
-const boolean = leaf((value) => typeof value === "boolean", "a boolean", "yes");
+const boolean = leaf(
+  "boolean",
+  (value) => typeof value === "boolean",
+  "a boolean",
+  "yes",
+);
 
 const number = leaf(
+  "number",
   (value) => typeof value === "number" && Number.isFinite(value) && value >= 0,
   "a non-negative number",
   "many",
 );
 
 const counter = leaf(
+  "integer",
   (value) => Number.isInteger(value) && (value as number) >= 0,
   "a non-negative integer",
   "many",
@@ -91,6 +140,7 @@ const counter = leaf(
 
 /** An instant `Date.parse` reads, which is how the screen places it. */
 const timestamp = leaf(
+  "timestamp",
   (value) => typeof value === "string" && !Number.isNaN(Date.parse(value)),
   "a timestamp",
   42,
@@ -98,15 +148,18 @@ const timestamp = leaf(
 
 const oneOf = (words: readonly string[]): Check =>
   leaf(
+    "enum",
     (value) => typeof value === "string" && words.includes(value),
     `one of ${words.join(", ")}`,
     42,
+    words,
   );
 
-const isTrue = leaf((value) => value === true, "true", "yes");
+const isTrue = leaf("true", (value) => value === true, "true", "yes");
 
 /** A field an answer may leave out, and which is checked where it is there. */
 const optional = (inner: Check): Check => ({
+  ...held(inner),
   check: (value, path) =>
     value === undefined ? undefined : inner.check(value, path),
   fields: inner.fields,
@@ -114,6 +167,8 @@ const optional = (inner: Check): Check => ({
 });
 
 const nullable = (inner: Check): Check => ({
+  ...held(inner),
+  nullable: true,
   check: (value, path) =>
     value === null ? undefined : inner.check(value, path),
   fields: (value, at, pattern, out) => {
@@ -130,6 +185,8 @@ const either = (first: Check, second: Check, wanted: string): Check => ({
       : wrong(path, wanted, value),
   fields: () => undefined,
   wrong: "some",
+  kind: "union",
+  nullable: false,
 });
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -154,6 +211,7 @@ const object = (members: Readonly<Record<string, Check>>): Check => ({
       const path = [...at, name];
       const named = `${pattern}.${name}`;
       out.push({
+        ...held(member),
         path,
         pattern: named,
         required: !optionalMembers.has(member),
@@ -164,6 +222,8 @@ const object = (members: Readonly<Record<string, Check>>): Check => ({
     }
   },
   wrong: "an object",
+  kind: "object",
+  nullable: false,
 });
 
 const array = (each: Check): Check => ({
@@ -180,6 +240,8 @@ const array = (each: Check): Check => ({
       each.fields(value[0], [...at, 0], `${pattern}[0]`, out);
   },
   wrong: "a list",
+  kind: "array",
+  nullable: false,
 });
 
 const record = (each: Check): Check => ({
@@ -199,10 +261,18 @@ const record = (each: Check): Check => ({
     const named = `${pattern}.*`;
     // A record may hold any key or none, so an entry is never missing.
     if (each !== anything)
-      out.push({ path, pattern: named, required: false, wrong: each.wrong });
+      out.push({
+        ...held(each),
+        path,
+        pattern: named,
+        required: false,
+        wrong: each.wrong,
+      });
     each.fields(first[1], path, named, out);
   },
   wrong: "an object",
+  kind: "record",
+  nullable: false,
 });
 
 /** A value the screen reads only the presence of. */
@@ -210,6 +280,8 @@ const anything: Check = {
   check: () => undefined,
   fields: () => undefined,
   wrong: undefined,
+  kind: "anything",
+  nullable: false,
 };
 
 /** {@link optional}, marked so the object holding it lists it as optional. */
@@ -277,7 +349,6 @@ const result = object({
 const task = object({
   id: string,
   kind: maybe(oneOf(["agent", "human"])),
-  name: maybe(string),
   deps: maybe(strings),
 });
 
@@ -307,7 +378,7 @@ const detail = object({
     object({
       plan: object({
         tasks: array(task),
-        goal: maybe(object({ text: maybe(string) })),
+        goal: maybe(object({ text: string })),
       }),
       node_status: record(oneOf(NODE_STATUSES)),
       node_results: record(result),
@@ -383,9 +454,7 @@ const answer = object({
     snapshot: object({
       visible: object({
         detail,
-        timeline: maybe(
-          object({ spans: array(span), observed_at: maybe(string) }),
-        ),
+        timeline: maybe(object({ spans: array(span), observed_at: string })),
       }),
     }),
   }),

@@ -25,10 +25,9 @@
     "answer.initial.snapshot.visible.detail.graph.plan.tasks",
     "answer.initial.snapshot.visible.detail.graph.plan.tasks[0].id",
     "answer.initial.snapshot.visible.detail.graph.plan.tasks[0].kind?",
-    "answer.initial.snapshot.visible.detail.graph.plan.tasks[0].name?",
     "answer.initial.snapshot.visible.detail.graph.plan.tasks[0].deps?",
     "answer.initial.snapshot.visible.detail.graph.plan.goal?",
-    "answer.initial.snapshot.visible.detail.graph.plan.goal.text?",
+    "answer.initial.snapshot.visible.detail.graph.plan.goal.text",
     "answer.initial.snapshot.visible.detail.graph.node_status",
     "answer.initial.snapshot.visible.detail.graph.node_status.*?",
     "answer.initial.snapshot.visible.detail.graph.node_results",
@@ -75,6 +74,6 @@
     "answer.initial.snapshot.visible.timeline.spans[0].dispatch_group?",
     "answer.initial.snapshot.visible.timeline.spans[0].reference?",
     "answer.initial.snapshot.visible.timeline.spans[0].reasons?",
-    "answer.initial.snapshot.visible.timeline.observed_at?"
+    "answer.initial.snapshot.visible.timeline.observed_at"
   ]
 }

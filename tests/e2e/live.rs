@@ -3449,6 +3449,11 @@ fn generated_stamp(offset_ms: u64) -> String {
 /// reviewer's, a few carrying evidence. Deterministic, so two roots written by it hold
 /// the same journal byte for byte.
 fn distinct_long_run(root: &Path, run: &str) {
+    distinct_long_run_then(root, run, &[]);
+}
+
+/// [`distinct_long_run`], then `after`: lines of the run's own, in the writers' form.
+fn distinct_long_run_then(root: &Path, run: &str, after: &[String]) {
     let dir = fixture_run::write(root, run);
     let journal = dir.join("events.jsonl");
     let worker = json!({
@@ -3510,12 +3515,101 @@ fn distinct_long_run(root: &Path, run: &str) {
         );
     }
     let mut text = fs::read_to_string(&journal).expect("a journal");
-    for line in &lines {
+    for line in lines.iter().chain(after) {
         text.push_str(line);
         text.push('\n');
     }
     fs::write(&journal, text).expect("the journal");
     live_journal::receipt_for(&journal);
+}
+
+/// A `turn-message` of the fixture node's, in the writers' form, whose payload no
+/// reader parses: its opening and its artifacts are a record's, and its middle is not.
+/// The engine heads it off its opening and answers a fetch of it as moved, and the
+/// complete read drops it.
+fn unreadable_message(run: &str, artifacts: &str) -> String {
+    format!(
+        concat!(
+            r#"{{"v":1,"ts":"2026-08-07T14:00:00.000Z","stream":"generated-d","seq":1,"#,
+            r#""source":"agentgraph","kind":"turn-message","labels":{{"run_id":"{run}","#,
+            r#""node":"{node}","member":"worker","persona":"worker","session":"{session}"}},"#,
+            r#""payload":{{"turn":9,"role":"worker","text":unquoted}},"artifacts":{artifacts}}}"#,
+        ),
+        run = run,
+        node = fixture_run::NODE_ID,
+        session = fixture_run::CONVERSATION_ID,
+        artifacts = artifacts,
+    )
+}
+
+/// Both servers' first answers to `view`, the long run read as its heads by one and
+/// whole by the other, each with the line `after` appended, and the first's trace of it.
+fn first_answers_over(after: &[String], view: &Value) -> (Value, Value, Value) {
+    let run = fixture_run::RUN_ID;
+    let hold = (onepipeline_ui::live::COMPLETE_READ_HOLD_ENV, "120000");
+    let whole_read = u64::MAX.to_string();
+    let headed = Live::start_with(|root| distinct_long_run_then(root, run, after), &[hold]);
+    let whole = Live::start_with(
+        |root| distinct_long_run_then(root, run, after),
+        &[hold, (onepipeline_ui::live::WHOLE_READ_ENV, &whole_read)],
+    );
+    let mine = first_screen_of(&headed.subscribe(&json!({ "view": view })));
+    let theirs = first_screen_of(&whole.subscribe(&json!({ "view": view })));
+    let traced = headed
+        .first_answers()
+        .last()
+        .cloned()
+        .expect("the first answer is traced");
+    (mine, theirs, traced)
+}
+
+/// Name what differs between two first answers rather than printing both whole.
+fn same_first_answer(mine: &Value, theirs: &Value, what: &str) {
+    if mine != theirs {
+        let mut ops = Vec::new();
+        patch::diff(mine, theirs, &mut ops).expect("both answers are objects");
+        let ops: Vec<Value> = ops.iter().map(Op::to_json).collect();
+        panic!("{what} differs from a whole read's by {ops:#?}");
+    }
+}
+
+/// A record a first screen reads whole that cannot be fetched — a line rewritten under
+/// the heads read, as the engine answers one it headed and cannot read — has the run
+/// read whole for that first answer instead, which is then the whole read's.
+#[test]
+fn a_first_answer_whose_records_cannot_be_fetched_is_read_whole_instead() {
+    let evidence = r#"[{"id":"artifact-unreadable","kind":"report","bytes":10}]"#;
+    let view = json!({ "type": "detail", "run_id": fixture_run::RUN_ID });
+    let (mine, theirs, traced) =
+        first_answers_over(&[unreadable_message(fixture_run::RUN_ID, evidence)], &view);
+    same_first_answer(
+        &mine,
+        &theirs,
+        "Graph's first answer over an unfetchable record",
+    );
+    // Read whole: no record was fetched, and none headed.
+    assert!(traced["fetched"].is_null(), "{traced}");
+    assert!(traced["records"].is_null(), "{traced}");
+}
+
+/// A node whose window holds a record that cannot be fetched has its every record read
+/// as its share instead, so its first answer is still the whole read's.
+#[test]
+fn a_nodes_window_that_cannot_be_fetched_is_read_as_its_share_instead() {
+    let view = json!({
+        "type": "timeline", "run_id": fixture_run::RUN_ID,
+        "scope": "node", "node": fixture_run::NODE_ID,
+    });
+    let (mine, theirs, traced) =
+        first_answers_over(&[unreadable_message(fixture_run::RUN_ID, "[]")], &view);
+    same_first_answer(
+        &mine["timeline"],
+        &theirs["timeline"],
+        "the node's timeline over an unfetchable record in its window",
+    );
+    // Its heads were read and their records fetched; the window's fetch was not made.
+    assert!(traced["heads_ms"].is_number(), "{traced}");
+    assert!(traced["fetched"].is_u64(), "{traced}");
 }
 
 /// A long run's first answers, Graph's, Overall's and a node's, fetch whole only the
