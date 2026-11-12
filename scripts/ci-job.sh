@@ -168,6 +168,17 @@ if [ "$job" = "read-latency" ]; then
   exit 0
 fi
 
+# The release's Linux build heads test-linux's longest chain: the rehearsal, the
+# journeys over what it staged and the release journeys after them wait on it,
+# about eleven minutes of work once it is done. It starts first (`prioritize`),
+# but compiles in a container whose CPU weight is Docker's default, while every
+# other tier of the job shares the same four cores, and it took 30 minutes there
+# against 9 on four idle cores. At this weight (cgroup v2's cpu.weight 312, about
+# three times the default) it takes most of the CPU while it compiles and the
+# shorter tiers fill the rest, then theirs once it is done
+# (scripts/build-linux-wheel.sh).
+if [ "$job" = "test-linux" ]; then export WHEEL_BUILD_CPU_SHARES=8192; fi
+
 # The selection, as Nx's own task graph rather than a reading of its output.
 # No arrays: macOS runs this under bash 3.2, where an empty one is unbound.
 nx_run() {

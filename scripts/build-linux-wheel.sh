@@ -32,6 +32,14 @@
 # DIR is relative to the repository root, which is what the container mounts,
 # and must resolve inside it. Exit 0: the wheel is in DIR. Exit 2: the arguments
 # were refused. Exit 1: the build or its environment failed, named on stderr.
+#
+# WHEEL_BUILD_CPU_SHARES, when set, is the container's `docker run --cpu-shares`:
+# its CPU weight against the host's other work when the two contend, and nothing
+# when they do not. `scripts/ci-job.sh` sets it in test-linux, where this build
+# heads the job's longest chain (the release rehearsal and the journeys over what
+# it staged follow it) and the tiers beside it otherwise take most of the CPU.
+# Unset, the container gets Docker's default weight. An integer from 2 to 262144,
+# Docker's range; anything else is refused before Docker is reached.
 set -euo pipefail
 
 usage="run 'build-linux-wheel.sh --target x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu [--out DIR]'"
@@ -95,6 +103,18 @@ case "$out_abs" in
   *) fail_usage "--out $out resolves to $out_abs, outside the repository at $root" ;;
 esac
 out_rel="${out_abs#"$root"/}"
+
+cpu_shares=()
+if [ -n "${WHEEL_BUILD_CPU_SHARES+set}" ]; then
+  [[ "$WHEEL_BUILD_CPU_SHARES" =~ ^[1-9][0-9]{0,5}$ ]] \
+    && [ "$WHEEL_BUILD_CPU_SHARES" -ge 2 ] && [ "$WHEEL_BUILD_CPU_SHARES" -le 262144 ] \
+    || fail_usage "WHEEL_BUILD_CPU_SHARES is '$WHEEL_BUILD_CPU_SHARES', not an integer from 2 to 262144"
+  cpu_shares=(--cpu-shares "$WHEEL_BUILD_CPU_SHARES")
+  # Whether that weight competes with the work beside it depends on where the
+  # caller's cgroup sits beside the container's, so the log says.
+  caller_cgroup="$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null || true)"
+  echo "wheel build: --cpu-shares $WHEEL_BUILD_CPU_SHARES; the caller's cgroup is ${caller_cgroup:-unknown} (cpu.weight $(cat "/sys/fs/cgroup${caller_cgroup}/cpu.weight" 2>/dev/null || echo unknown))" >&2
+fi
 
 command -v docker >/dev/null \
   || fail "docker not found: the wheel is built inside the release's manylinux image" \
@@ -220,7 +240,7 @@ python3.12 -m maturin build --release --locked --features bundled-ui \
   --target "$TARGET" --compatibility manylinux2014 --out "$OUT"
 SCRIPT
 
-docker run --rm --platform "$platform" \
+docker run --rm --platform "$platform" ${cpu_shares[@]+"${cpu_shares[@]}"} \
   -v "$root":/io:ro -v "$root/$cargo_target":"/io/$cargo_target" -v "$out_abs":"/io/$out_rel" -w /io \
   -v "$root/$container_home/cargo":/root/.cargo -v "$root/$container_home/rustup":/root/.rustup \
   -e TARGET="$target" -e OUT="$out_rel" -e CHANNEL="$channel" -e MATURIN_VERSION="$maturin_version" \
