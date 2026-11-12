@@ -183,10 +183,12 @@ test("a page the read went on to that fails says so, and Try again takes it", as
   await failed.getByRole("button", { name: "Try again" }).click();
   await expect.poll(() => rows.count()).toBeGreaterThan(shownBefore);
   await expect(failed).toHaveCount(0);
-  // The retry asked for the same wide page from the same place.
+  // The retry asked for the same wide page the read went on to, from the same
+  // place: the first page was an ordinary one.
+  expect(pages[0]?.limit).toBeNull();
   expect(retried).toHaveLength(1);
   const retry = new URL(retried[0] ?? "");
-  expect(retry.searchParams.get("limit")).toBe(pages[0]?.limit);
+  expect(retry.searchParams.get("limit")).toBe("500");
   expect(retry.searchParams.get("cursor")).not.toBeNull();
   expect(thrown).toStrictEqual([]);
 });

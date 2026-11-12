@@ -4267,15 +4267,15 @@ export const LARGE_RUN_VIEWS = {
   unkeyed: "harness-outlived-its-dispatch-key",
   offGraph: "replaced-before-the-graph-settled",
   /**
-   * The checks behind the history node's latest window: more than one wide page
-   * holds, so even a wide page read back lands wholly among them.
+   * The checks behind the history node's latest window: more than a page holds,
+   * so the page read back lands wholly among them.
    */
-  checks: 600,
+  checks: 400,
   /**
    * The varied rows before the checks: more than the rest of the page that
    * reaches past the checks, so the reading gains rows with history still left.
    */
-  earliest: 400,
+  earliest: 250,
   /** The varied rows after them, fewer than the latest window holds. */
   tail: 20,
   historyId: "01a00d0f-c094-7660-b26c-8a53baaf9e00",
