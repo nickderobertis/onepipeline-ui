@@ -58,8 +58,7 @@ for (const job of ["test-linux", "test-macos", "test-windows"]) {
   let reweighted = 0;
   for (const c of classes.values())
     reweighted +=
-      (c.before.length ? mean(c.before) : mean(c.after)) *
-      c.after.length;
+      (c.before.length ? mean(c.before) : mean(c.after)) * c.after.length;
   reweighted /= all("after").length;
   console.log(
     `== ${job}: mean wall ${f1(before)} (n=${all("before").length}, before #${CUT}) → ${f1(after)} (n=${all("after").length}), ${signed(after - before)} min = mix ${signed(reweighted - before)} + like for like ${signed(after - reweighted)}`,
