@@ -52,6 +52,12 @@ test("real Nx replays release edits except targets whose tests read the version"
     const intentionallyUncached = new Set([
       "onepipeline-ui-release:rehearse",
       ...[
+        "onepipeline-ui",
+        "onepipeline-ui-e2e",
+        "onepipeline-ui-repo-tooling",
+        "onepipeline-ui-npm-launcher",
+      ].map((project) => `${project}:test`),
+      ...[
         "dag-ui",
         "dag-layout",
         "dag-model",
@@ -63,11 +69,6 @@ test("real Nx replays release edits except targets whose tests read the version"
       ...Object.keys(taskHashes(base)).filter(
         (id) => !intentionallyUncached.has(id),
       ),
-      "onepipeline-ui:test",
-      "onepipeline-ui-e2e:test",
-      "onepipeline-ui-repo-tooling:test",
-      "onepipeline-ui-npm-launcher:test",
-      "onepipeline-ui-versions:test",
       "onepipeline-ui-versions:test-quick",
       "onepipeline-ui-nx-worker-startup:test",
       "onepipeline-ui-nx-worker-startup:test-quick",

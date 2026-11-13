@@ -22,8 +22,7 @@
         "actor": "browser:session:claude-code-supervising-session",
         "on_behalf_of": null,
         "text": null,
-        "reason": null,
-        "provenance": "user"
+        "reason": null
       },
       "tracker": {
         "task": "board:I_3",
@@ -41,5 +40,5 @@
       "reason": null
     }
   },
-  "event_id": "human-items:9"
+  "event_id": "human-items:8"
 }

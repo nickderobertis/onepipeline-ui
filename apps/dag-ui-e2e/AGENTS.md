@@ -33,11 +33,6 @@ no verdict of its is replayed. A new read budget extends its `workload.json`,
 sizes, run as a command rather than imported across the project line, so a change to the
 generator alone selects `dag-ui-e2e` and not this project.
 
-Its timings and journeys run on every pull request that reaches it, in ci.yml's `budgets`
-job (`just ci-read-latency`), alone on a runner rather than beside test-linux's pool. A new
-journey or budget makes room in that job's 30-minute cap by making existing work cheaper. A new
-large-run budget joins `large-run/budgets.yaml` and its telemetry document.
-
 ## Reaching the app
 
 Sibling dependencies here are `workspace:*`, as every one in this workspace is:

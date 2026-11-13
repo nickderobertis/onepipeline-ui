@@ -279,7 +279,7 @@ fn each_job_selects_the_changed_project_and_its_dependents_and_no_unreached_pack
 }
 
 /// `test-linux` lists its targets rather than reaching them through `check`,
-/// so that it leaves formatting, lints, type checks and docs to `lint`; this holds
+/// so that it leaves formatting, lints and type checks to `lint`; this holds
 /// the list to `check`'s own selection, so a target a project's `check` gains
 /// is not silently dropped from the job.
 #[test]
@@ -300,7 +300,7 @@ fn the_linux_job_runs_what_check_selects_less_what_lint_runs() {
     let text = plain(&output.stdout);
     let graph: serde_json::Value =
         serde_json::from_str(&text[text.find('{').expect("a graph")..]).expect("a JSON graph");
-    let lint_owned = [":format-check", ":lint", ":typecheck", ":doc", ":check"];
+    let lint_owned = [":format-check", ":lint", ":typecheck", ":check"];
     let owed: BTreeSet<String> = graph["tasks"]["tasks"]
         .as_object()
         .expect("a task map")
@@ -314,145 +314,9 @@ fn the_linux_job_runs_what_check_selects_less_what_lint_runs() {
         .into_iter()
         .filter(|task| !packaging.contains(&task.as_str()))
         .collect();
-    // dag-ui-read-latency's timings and journeys are the `budgets` job's
-    // (`ci-read-latency`), not test-linux's; the rehearsal still reaches its
-    // release compile. Held to that job's own selection, so a task `check`
-    // gains is still owed by exactly one of the two.
-    let read_latency = recipe(&workspace, "ci-read-latency", &["--plan"], false);
-    assert!(read_latency.output.status.success(), "{}", read_latency.log);
-    let elsewhere = read_latency.selected("read-latency");
-    for task in &elsewhere {
-        assert!(
-            !selected.contains(task),
-            "test-linux runs {task}, which the budgets job runs"
-        );
-    }
-    let owed: BTreeSet<String> = owed.difference(&elsewhere).cloned().collect();
-    // Only the project's dependencies remain of it in test-linux: none of its
-    // own checks is lost between the two jobs.
-    let leftover: Vec<&String> = owed
-        .iter()
-        .filter(|task| task.starts_with("dag-ui-read-latency:"))
-        .filter(|task| *task != "dag-ui-read-latency:compile-release-server")
-        .collect();
-    assert!(
-        leftover.is_empty(),
-        "check owes {leftover:?}, which neither job runs"
-    );
     assert_eq!(
         selected, owed,
-        "test-linux's targets and `check`'s selection less lint's and the budgets job's have parted"
-    );
-}
-
-/// dag-ui-read-latency's timings, its large-corpus journeys and the budgets over
-/// them, which a pull request owes wherever a slower first screen could come
-/// from: the project itself, the read API's live and first-screen server code,
-/// and the browser view's first-screen and timeline client code. The `budgets`
-/// job runs them (`ci-read-latency`), alone on its runner after the four jobs.
-const LARGE_RUN_TASKS: [&str; 5] = [
-    "dag-ui-read-latency:test",
-    "dag-ui-read-latency:budgets",
-    "dag-ui-read-latency:test-large",
-    "dag-ui-read-latency:test-journeys",
-    "dag-ui-read-latency:budgets-large",
-];
-
-/// The jobs ci.yml defines: the four a pull request's checks run in and the
-/// `budgets` report after them. A large-run tier is not a job of its own.
-const CI_JOBS: [&str; 5] = [
-    "lint",
-    "test-linux",
-    "test-windows",
-    "test-macos",
-    "budgets",
-];
-
-/// A change that slows a large run's first screen is caught on the pull request
-/// that makes it: the `budgets` job's read-latency step selects the timings,
-/// journeys and budgets for every change that reaches the read paths they
-/// measure, and on the release pull request's sweep, while test-linux leaves
-/// them to it — inside the jobs ci.yml already has, the step itself in `budgets`.
-#[test]
-fn the_large_run_timings_journeys_and_budgets_run_wherever_the_read_paths_change() {
-    let changes = [
-        "apps/dag-ui-e2e/read-latency/large-run-workload.json",
-        "src/live.rs",
-        "src/live/progressive.rs",
-        "apps/dag-ui/src/first-screen/FirstScreen.tsx",
-        "apps/dag-ui/src/features/timeline/NodeTimelineView.tsx",
-    ];
-    let leaves_them = |run: &Run, case: &str| {
-        let linux = run.selected("test-linux");
-        for task in LARGE_RUN_TASKS {
-            assert!(!linux.contains(task), "{case}: test-linux runs {task} too");
-        }
-        assert!(
-            linux.contains("dag-ui-read-latency:compile-release-server"),
-            "{case}: test-linux no longer compiles the release build the timings read: {linux:?}"
-        );
-    };
-    for change in changes {
-        let workspace = workspace(Some(change));
-        let run = recipe(&workspace, "ci-read-latency", &["--plan"], false);
-        assert!(run.output.status.success(), "{change}: {}", run.log);
-        let selected = run.selected("read-latency");
-        for task in LARGE_RUN_TASKS {
-            assert!(
-                selected.contains(task),
-                "a pull request changing {change} does not run {task}: {selected:?}"
-            );
-        }
-        let linux = recipe(&workspace, "ci-test-linux", &["--plan"], false);
-        assert!(linux.output.status.success(), "{change}: {}", linux.log);
-        leaves_them(&linux, change);
-    }
-
-    let swept = workspace(None);
-    let sweep = recipe(
-        &swept,
-        "ci-read-latency",
-        &["--tier", "broader", "--plan"],
-        false,
-    );
-    assert!(sweep.output.status.success(), "{}", sweep.log);
-    let selected = sweep.selected("read-latency");
-    for task in LARGE_RUN_TASKS {
-        assert!(
-            selected.contains(task),
-            "the release pull request's sweep does not run {task}: {selected:?}"
-        );
-    }
-    let linux = recipe(
-        &swept,
-        "ci-test-linux",
-        &["--tier", "broader", "--plan"],
-        false,
-    );
-    assert!(linux.output.status.success(), "{}", linux.log);
-    leaves_them(&linux, "the release pull request's sweep");
-    // A change that reaches no read path pays for none of it.
-    let unreached = workspace(Some("pool-maintenance/measure.sh"));
-    let none = recipe(&unreached, "ci-read-latency", &["--plan"], false);
-    assert!(none.output.status.success(), "{}", none.log);
-    assert!(
-        none.selected("read-latency").is_empty(),
-        "a change no read path reads runs the timings: {}",
-        none.log
-    );
-    let workflow =
-        fs::read_to_string(swept.root().join(".github/workflows/ci.yml")).expect("read ci.yml");
-    let workflow: serde_json::Value = serde_saphyr::from_str(&workflow).expect("ci.yml is YAML");
-    let jobs: BTreeSet<&str> = workflow["jobs"]
-        .as_object()
-        .expect("ci.yml names its jobs")
-        .keys()
-        .map(String::as_str)
-        .collect();
-    assert_eq!(
-        jobs,
-        CI_JOBS.into_iter().collect::<BTreeSet<_>>(),
-        "ci.yml defines a job beyond the four and the budgets report"
+        "test-linux's targets and `check`'s selection less lint's have parted"
     );
 }
 
@@ -510,16 +374,9 @@ fn the_jobs_platform_split_is_what_each_selects_for_a_crate_change() {
         "onepipeline-ui:msrv",
         "onepipeline-ui:deps-check",
         "onepipeline-ui:lint",
-        "onepipeline-ui:doc",
     ] {
         assert!(lint.contains(task), "lint does not select {task}: {lint:?}");
     }
-    // The docs' dependency graph is the check-mode one `lint`'s clippy compiles;
-    // test-linux would compile it again for `doc` alone.
-    assert!(
-        !linux.contains("onepipeline-ui:doc"),
-        "test-linux documents the crate, which lint does over clippy's graph: {linux:?}"
-    );
 }
 
 #[test]

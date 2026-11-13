@@ -73,10 +73,7 @@ async fn a_copied_project_document_keeps_its_budget_fragment_at_the_destination(
     let plan = engine
         .copy(&request(
             "authoring:plan",
-            CopyScope::Projects {
-                tasks: true,
-                documents: false,
-            },
+            CopyScope::Projects { tasks: true },
         ))
         .await
         .expect("copy the plan and its tasks first");

@@ -37,13 +37,11 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::api::RunApi;
 use crate::contract::{
-    routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId,
-    EventsPageLimit, EventsQuery, HumanItemAnswerRequest, HumanItemAnswersRequest,
-    HumanItemCompleteRequest, HumanItemDismissRequest, HumanItemId, HumanItemNoteRequest,
-    HumanItemReopenRequest, NextQuery, NodeId, PageCursor, PageLimit, PageOwner, ProjectId, RunId,
-    RunQuery, RunSelection, RunsPage, RunsQuery, ShutdownRequest, SpanId, StopRequest,
-    SubscribeRequest, SubscriptionId, SurfaceRequest, TimelineEventsQuery, TimelineQuery,
-    TimelineScope, TranscriptQuery,
+    routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId, EventsQuery,
+    HumanItemAnswerRequest, HumanItemCompleteRequest, HumanItemDismissRequest, HumanItemId,
+    HumanItemNoteRequest, HumanItemReopenRequest, NextQuery, NodeId, PageLimit, ProjectId, RunId,
+    RunQuery, RunSelection, RunsPage, RunsQuery, ShutdownRequest, StopRequest, SubscribeRequest,
+    SubscriptionId, SurfaceRequest, TimelineQuery, TimelineScope, TranscriptQuery,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
@@ -95,7 +93,6 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::RUNS, get(runs))
         .route(routes::RUN, get(run))
         .route(routes::RUN_TIMELINE, get(timeline))
-        .route(routes::RUN_TIMELINE_EVENTS, get(timeline_events))
         .route(routes::RUN_CONVERSATION, get(conversation))
         .route(routes::RUN_ARTIFACT, get(artifact))
         .route(routes::EVENTS, get(events))
@@ -123,7 +120,6 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::SUBSCRIPTION, delete(unsubscribe))
         .route(routes::HUMAN_ITEMS, get(human_items).post(raise_human_item))
         .route(routes::HUMAN_ITEM, get(human_item))
-        .route(routes::HUMAN_ITEM_ANSWERS, post(answer_human_items))
         .route(routes::HUMAN_ITEM_ANSWER, post(answer_human_item))
         .route(routes::HUMAN_ITEM_COMPLETE, post(complete_human_item))
         .route(routes::HUMAN_ITEM_DISMISS, post(dismiss_human_item))
@@ -595,75 +591,6 @@ fn runs_query(raw: &HashMap<String, String>) -> Result<RunsQuery, ApiError> {
     Ok(RunsQuery::Selected(RunSelection::parse(select)?))
 }
 
-async fn timeline_events(
-    State(serving): Store,
-    Path(run): Path<String>,
-    Query(raw): Query<HashMap<String, String>>,
-) -> Response {
-    let run = match RunId::try_from(run.as_str()) {
-        Ok(run) => run,
-        Err(error) => return error.into_response(),
-    };
-    let query = match timeline_events_query(&raw) {
-        Ok(query) => query,
-        Err(error) => return error.into_response(),
-    };
-    answer(move || serving.hub.timeline_events(&run, &query)).await
-}
-
-/// The query of a page of timeline rows, refused before any run is opened.
-fn timeline_events_query(raw: &HashMap<String, String>) -> Result<TimelineEventsQuery, ApiError> {
-    let node = raw
-        .get("node")
-        .map(|node| NodeId::try_from(node.as_str()))
-        .transpose()?;
-    let owner = match (raw.get("scope").map(String::as_str), node) {
-        (Some("run"), None) => PageOwner::Run,
-        (Some("run"), Some(node)) => PageOwner::RunNode(node),
-        (Some("node"), Some(node)) => PageOwner::Node(node),
-        (Some("node"), None) => {
-            return Err(ApiError::InvalidNodeId(
-                "scope=node needs the node it scopes to".to_owned(),
-            ))
-        }
-        (scope, _) => {
-            return Err(ApiError::InvalidRequest(format!(
-                "scope must be run or node, got {:?}",
-                scope.unwrap_or_default()
-            )))
-        }
-    };
-    let moment = |name: &str| -> Result<Option<i128>, ApiError> {
-        raw.get(name)
-            .map(|stamp| {
-                crate::payload::millis_of(stamp)
-                    .ok_or_else(|| ApiError::InvalidRequest(format!("{name} must be RFC 3339")))
-            })
-            .transpose()
-    };
-    let limit = match raw.get("limit") {
-        None => EventsPageLimit::default(),
-        Some(limit) => EventsPageLimit::try_from(limit.parse::<usize>().map_err(|_| {
-            ApiError::InvalidRequest(format!("limit must be a number, got {limit:?}"))
-        })?)?,
-    };
-    Ok(TimelineEventsQuery {
-        owner,
-        span: raw
-            .get("span")
-            .map(|span| SpanId::try_from(span.as_str()))
-            .transpose()?,
-        cursor: raw
-            .get("cursor")
-            .map(|cursor| PageCursor::try_from(cursor.as_str()))
-            .transpose()?,
-        from: moment("from")?,
-        to: moment("to")?,
-        filter: filter_spec(raw)?,
-        limit,
-    })
-}
-
 /// `?scope=run`, or `?scope=node&node=ID`. The pair is parsed into the variant
 /// it names, so `scope=node` with no node — and `scope=run` with one — are both
 /// refused here rather than served as something the caller did not ask for.
@@ -1036,24 +963,9 @@ async fn act_on_human_item(serving: Serving, id: &str, act: Result<Act, ApiError
 
 // llmlint: ignore[authorization_enforced_server_side] `docs/contract.md` deliberately permits host-wide resolutions, including approvals, without authentication or an acting session. `HumanItems::act` applies the engine’s validation and approval authority and supplies session:<id> or browser attribution; the body cannot supply actor or on_behalf_of.
 async fn answer_human_item(State(serving): Store, Path(id): Path<String>, raw: String) -> Response {
-    let act = body::<HumanItemAnswerRequest>("{choice?, text?}", &raw).map(|request| Act::Answer {
-        choice: request.choice,
-        text: request.text,
-    });
+    let act =
+        body::<HumanItemAnswerRequest>("{text}", &raw).map(|request| Act::Answer(request.text));
     act_on_human_item(serving, &id, act).await
-}
-
-// llmlint: ignore[authorization_enforced_server_side] `docs/contract.md` deliberately permits host-wide resolutions without authentication or an acting session. `HumanItems::answer_batch` validates the batch at this boundary, applies the engine's own rules per entry and supplies browser:session:<id> or browser attribution; the body cannot supply actor or on_behalf_of.
-async fn answer_human_items(State(serving): Store, raw: String) -> Response {
-    let request = match body::<HumanItemAnswersRequest>("{answers: [{id, choice?, text?}]}", &raw) {
-        Ok(request) => request,
-        Err(error) => return error.into_response(),
-    };
-    answer_record(move || {
-        let (items, session) = serving.store.human_items();
-        items.answer_batch(session, request.answers)
-    })
-    .await
 }
 
 // llmlint: ignore[authorization_enforced_server_side] `docs/contract.md` deliberately permits host-wide resolutions, including approvals, without authentication or an acting session. `HumanItems::act` applies the engine’s validation and approval authority and supplies session:<id> or browser attribution; the body cannot supply actor or on_behalf_of.

@@ -230,7 +230,6 @@ const NOT_THIS_TIER = [
 /** Specs whose every journey starts its own server (see `workers` below). */
 const OWN_SERVERS = [
   "**/dag-ui-human-items.spec.ts",
-  "**/dag-ui-ruling-provenance.spec.ts",
   "**/dag-ui-update-settings.spec.ts",
 ];
 

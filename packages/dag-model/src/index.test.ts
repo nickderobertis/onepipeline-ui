@@ -6,23 +6,17 @@ import {
   API_V2_PATHS,
   agentRoleSchema,
   agentSessionSchema,
-  channelSurfaceSchema,
   dagConversationSchema,
-  frameCarriesWholeEvents,
   graphPayloadSchema,
   graphResultItemSchema,
   graphStateSchema,
   hostShutdownScopeSchema,
-  isLoadingMark,
-  liveRunDetailSchema,
   nodeTelemetrySchema,
   parseRunList,
   parseRunTimeline,
   planTaskSchema,
   projectAgentsSchema,
   projectGroupSchema,
-  provenanceOf,
-  queuedCommandsSchema,
   REPLY_ENVELOPE_VERSION,
   REPLY_OPS,
   replyEnvelopeSchema,
@@ -36,15 +30,11 @@ import {
   shutdownReportSchema,
   TELEMETRY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
-  TIMELINE_WINDOW_EVENTS,
   timelineEventSchema,
   timelineReferenceSchema,
   timelineSpanSchema,
-  timelineViolations,
   timingSchema,
   unwatchedSchema,
-  type VisibleState,
-  visibleViolations,
 } from "./index.js";
 
 const timing = {
@@ -1427,7 +1417,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
       { op: "settle", id: "ship", outcome: "done", evidence: "landed as #12" },
     ],
   });
-  expect(edit.version).toBe(4);
+  expect(edit.version).toBe(3);
   expect(edit.commands).toHaveLength(3);
   // The field the engine retired is refused by name, as the engine refuses it,
   // and an op the engine does not declare never reaches the wire.
@@ -1445,14 +1435,14 @@ test("a reply envelope composed against the engine's grammar carries what the en
     }).success,
   ).toBe(false);
   // Commands under no version, or another, are what the engine refuses as "an
-  // edit envelope requires version 4"; an envelope carrying neither half is one
+  // edit envelope requires version 3"; an envelope carrying neither half is one
   // the engine answers, naming no verdict, so it parses.
   const unversioned = replyEnvelopeSchema.safeParse({
     commands: [{ op: "drop", id: "obsolete", dependents: "detach" }],
   });
   expect(unversioned.success).toBe(false);
   expect(unversioned.error?.issues[0]?.message).toBe(
-    "an edit envelope requires version 4",
+    "an edit envelope requires version 3",
   );
   expect(
     replyEnvelopeSchema.safeParse({
@@ -1461,79 +1451,6 @@ test("a reply envelope composed against the engine's grammar carries what the en
     }).success,
   ).toBe(false);
   expect(replyEnvelopeSchema.safeParse({}).success).toBe(true);
-});
-
-test("an envelope, a queued envelope and a surface read whose words a ruling is, as the engine writes it", () => {
-  // Version 4 states the party; versions 2 and 3, and any envelope saying
-  // nothing, are the manager's.
-  for (const stated of ["user", "manager"] as const)
-    expect(
-      replyEnvelopeSchema.parse({
-        version: REPLY_ENVELOPE_VERSION,
-        provenance: stated,
-        commands: [{ op: "note", id: "docs", addressee: "worker", text: "x" }],
-      }).provenance,
-    ).toBe(stated);
-  expect(
-    replyEnvelopeSchema.safeParse({ version: 4, provenance: "admin" }).success,
-  ).toBe(false);
-  expect(provenanceOf(undefined)).toBe("manager");
-  expect(provenanceOf("user")).toBe("user");
-  expect(
-    queuedCommandsSchema.parse({ id: 3, commands: [], provenance: "user" })
-      .provenance,
-  ).toBe("user");
-  expect(
-    provenanceOf(
-      queuedCommandsSchema.parse({ id: 2, commands: [] }).provenance,
-    ),
-  ).toBe("manager");
-
-  const surface = {
-    id: 4,
-    kind: "declined-ruling",
-    message: "node 'export' declined the manager's note.",
-    source: "proposal",
-    blocking: false,
-    queued_at: 1,
-    workstream: "export",
-  };
-  const declined = {
-    node: "export",
-    ruling: "c1.0",
-    provenance: "manager",
-    kind: "note",
-    reply: 1,
-    text: "Keep the export under fifty lines.",
-    reason: "The fixture already exceeds fifty lines.",
-  };
-  expect(
-    channelSurfaceSchema.parse({ ...surface, declined_ruling: declined })
-      .declined_ruling,
-  ).toEqual(declined);
-  // On every declined-ruling surface and on no other, closed, in the
-  // engine's vocabulary.
-  expect(channelSurfaceSchema.safeParse(surface).success).toBe(false);
-  expect(
-    channelSurfaceSchema.safeParse({
-      ...surface,
-      kind: "finding",
-      declined_ruling: declined,
-    }).success,
-  ).toBe(false);
-  for (const wrong of [
-    { ...declined, kind: "verdict" },
-    { ...declined, provenance: "admin" },
-    { ...declined, reply: -1 },
-    { ...declined, extra: true },
-  ])
-    expect(
-      channelSurfaceSchema.safeParse({ ...surface, declined_ruling: wrong })
-        .success,
-    ).toBe(false);
-  expect(
-    channelSurfaceSchema.safeParse({ ...surface, kind: "finding" }).success,
-  ).toBe(true);
 });
 
 test("a note's delivery deadline and its withdrawal are spelled as the engine declares them", () => {
@@ -1691,83 +1608,3 @@ test.each(["review", "readjust"])(
     );
   },
 );
-
-describe("what the subscription contract names", () => {
-  const firstDetail = () =>
-    liveRunDetailSchema.parse({
-      api_version: 2,
-      telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
-      observed_at: "2026-01-01T00:00:00Z",
-      progress: { complete: false, loading: ["run.turns"] },
-      run: {
-        run_id: "r",
-        state: "active",
-        phase: "running",
-        last_event: null,
-        timing: { wall_seconds: 5 },
-        nodes: [{ node: "a", status: "running" }],
-        turns: { loading: true },
-      },
-      graph: null,
-      node_details: {},
-    });
-
-  test("reads a first answer and names a member it does not list", () => {
-    const detail = firstDetail();
-    const visible = {
-      type: "detail" as const,
-      run_id: "r",
-      detail,
-    } satisfies VisibleState;
-    expect(visibleViolations(visible)).toStrictEqual([]);
-    expect(
-      visibleViolations({
-        ...visible,
-        detail: { ...detail, run: { ...detail.run, usage: {} } },
-      } as VisibleState),
-    ).toStrictEqual(["detail.run.usage"]);
-    expect(isLoadingMark(detail.run.turns)).toBe(true);
-  });
-
-  test("refuses a span's whole events on either scope", () => {
-    const span = (events: number) => ({
-      id: "s",
-      kind: "node",
-      label: "n",
-      started_at: "2026-01-01T00:00:00Z",
-      ended_at: null,
-      events: Array.from({ length: events }, (_, index) => ({
-        id: `e${index}`,
-      })),
-    });
-    expect(timelineViolations({ spans: [span(1)] }, "run", false)).toHaveLength(
-      1,
-    );
-    expect(
-      timelineViolations(
-        { spans: [span(TIMELINE_WINDOW_EVENTS + 1)] },
-        "node",
-        false,
-      ),
-    ).toHaveLength(1);
-    expect(
-      timelineViolations(
-        { spans: [span(TIMELINE_WINDOW_EVENTS)] },
-        "node",
-        true,
-      ),
-    ).toHaveLength(0);
-    expect(
-      frameCarriesWholeEvents(
-        { ops: [{ p: ["spans", 0, "events"], a: [{ id: "x" }] }] },
-        "run",
-      ),
-    ).toBe(true);
-    expect(
-      frameCarriesWholeEvents(
-        { ops: [{ p: ["spans", 0, "status"], v: "done" }] },
-        "run",
-      ),
-    ).toBe(false);
-  });
-});

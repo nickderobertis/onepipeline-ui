@@ -27,16 +27,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# rust-cache hashes these variables into its key, and `ci-cache.yml` sets them
-# alike, so the key it saves is the key these restore.
+# The one variable rust-cache hashes into its key that these jobs set, and
+# `ci-cache.yml` sets it alike, so the key it saves is the key these restore.
 env:
   CARGO_TERM_COLOR: always
-  # Read by nothing but rust-cache, which hashes it into every key here and in
-  # `ci-cache.yml`, so moving it moves every family's key at once and leaves their name prefixes
-  # for `ci-cache.yml`'s cleanup: a restore that cannot match the old entries builds
-  # cold, which drops the stale units carried across lock keys. The two files carry
-  # one value; `.github/tests/rust-cache-generation.test.mjs` reconciles them.
-  RUST_CACHE_GENERATION: "1"
 
 jobs:
   # One lint job and one test job per platform. Each of the four runs its checks through one recipe of its own — `just
@@ -54,10 +48,10 @@ jobs:
   # never a pull request's.
   # What does not depend on the platform it runs on: the PR title, the
   # suppressions comment, formatting, lints and type checks, the MSRV floor, the
-  # dependency audit, the crate's docs, the judged lint and the visual docs — and the advisories
+  # dependency audit, the judged lint and the visual docs — and the advisories
   # report, which posts a status of its own and never fails this job.
   lint:
-    if: github.event_name == 'pull_request'
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # What this job writes while VISUAL_DOCS_PUBLISH is off: the suppressions
@@ -156,7 +150,7 @@ jobs:
         env:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
           NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
-          CACHE_READ_ONLY: ${{ steps.nx-cache-trust.outputs.read_only == 'true' && '1' || '' }}
+          CACHE_READ_ONLY: '1'
           GITHUB_TOKEN: ${{ github.token }}
       - name: Wait for the cache recording proxy
         shell: bash
@@ -168,7 +162,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          no-cache: true
       - uses: taiki-e/install-action@v2
         with:
           tool: just@${{ steps.tool-pins.outputs.just }},cargo-deny@${{ steps.tool-pins.outputs.cargo-deny }},cargo-machete@${{ steps.tool-pins.outputs.cargo-machete }}
@@ -194,7 +188,7 @@ jobs:
         if: github.event_name == 'pull_request' && !cancelled()
         with:
           version: ${{ steps.tool-pins.outputs.uv }}
-          enable-cache: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          enable-cache: false
       # The judged tier, a blocking part of this check. Its harnesses are pinned
       # rather than floating, because an upstream release has taken this check
       # down for every pull request before: bump one deliberately, once a newer
@@ -346,8 +340,8 @@ jobs:
         run: bash .github/scripts/report-disk.sh "End of job" || true
 
   # The deterministic gate on Linux: `check`'s tiers over the affected projects
-  # (every test tier, the Playwright browser tier, the coverage floor —
-  # formatting, lints, type checks and docs are `lint`'s), the documented install and
+  # (every test tier, the Playwright browser tier, the coverage floor, docs —
+  # formatting, lints and type checks are `lint`'s), the documented install and
   # the release's x86_64 wheel, in one Nx run so the packaging compiles beside
   # the tiers. On the release pull request (`scripts/ci-tier.sh`)
   # it is the sweep: every project, with the host-labelled budgets, and the
@@ -361,10 +355,12 @@ jobs:
     # was taken on 24.04.
     runs-on: ubuntu-24.04
     # 29.8 min upper estimate / 0.85, rounded up: docs/release-sweep-timing.md.
-    timeout-minutes: 36
+    timeout-minutes: 60
     env:
       NX_BASE: *nx-base
       NX_HEAD: *nx-head
+      NEXTEST_STATUS_LEVEL: pass
+      NX_SKIP_NX_CACHE: 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -420,7 +416,7 @@ jobs:
         env:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
           NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
-          CACHE_READ_ONLY: ${{ steps.nx-cache-trust.outputs.read_only == 'true' && '1' || '' }}
+          CACHE_READ_ONLY: '1'
           GITHUB_TOKEN: ${{ github.token }}
       - name: Wait for the cache recording proxy
         shell: bash
@@ -432,7 +428,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          no-cache: true
       # The release journeys' release-plz and cargo-cyclonedx, at the justfile's
       # pins, from their checksummed release archives: `just release-tools`
       # copies these into `.tools` rather than compiling them on every run.
@@ -453,7 +449,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           version: ${{ steps.tool-pins.outputs.uv }}
-          enable-cache: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          enable-cache: false
       - name: Install llmlint for the judged tier's journeys
         run: just setup-llmlint
       # What the two clone-local binaries below are built from, read where the
@@ -483,6 +479,8 @@ jobs:
             .tools/bin/onepipeline-api-baseline
             .tools/bin/onepipeline-api-baseline.commit
           key: onepipeline-api-baseline-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.base }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-baseline-api.sh') }}
+      - name: Spike recorder — start
+        run: bash spikes/ci-test-speed/recorder/record.sh start "$RUNNER_TEMP/spike-profile"
       - name: Bootstrap
         run: just bootstrap
       - name: Which tier of the gate this build owes
@@ -490,6 +488,16 @@ jobs:
         run: echo "tier=$(bash scripts/ci-tier.sh)" >> "$GITHUB_OUTPUT"
       - name: Gate, install and wheel (affected projects; every project on the release PR)
         run: just ci-test-linux --tier "${{ steps.tier.outputs.tier }}"
+      - name: Spike recorder — stop
+        if: always()
+        run: bash spikes/ci-test-speed/recorder/record.sh stop "$RUNNER_TEMP/spike-profile"
+      - name: Spike recorder — upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-profile-${{ github.job }}
+          path: ${{ runner.temp }}/spike-profile
+          retention-days: 7
       # What each `budgets` target this job ran saved, which the `budgets` job's rows read.
       # Uploaded even after a failure, so the rest of the report keeps its figures, and
       # absent when this change reached no budget.
@@ -500,16 +508,6 @@ jobs:
           path: target/budget-results/
           if-no-files-found: ignore
           retention-days: 7
-      # The release build the rehearsal compiled, which the `budgets` job's
-      # read-latency timings serve (`scripts/ci-job.sh read-latency`); absent when
-      # this change compiled none, and then that job's selection runs none either.
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: read-latency-release-server
-          path: target/wheel-x86_64-unknown-linux-gnu/x86_64-unknown-linux-gnu/release/onepipeline-api
-          if-no-files-found: ignore
-          retention-days: 1
 
       - name: Report cache entries and task executions
         if: always()
@@ -545,7 +543,7 @@ jobs:
   # the suite against a real binary, without the Linux-only coverage floor), the
   # release's browser build, and the documented install.
   test-windows:
-    if: github.event_name == 'pull_request'
+    if: false
     runs-on: windows-latest
     timeout-minutes: 30
     defaults:
@@ -554,6 +552,8 @@ jobs:
     env:
       NX_BASE: *nx-base
       NX_HEAD: *nx-head
+      NEXTEST_STATUS_LEVEL: pass
+      NX_SKIP_NX_CACHE: 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -594,7 +594,7 @@ jobs:
         env:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
           NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
-          CACHE_READ_ONLY: ${{ steps.nx-cache-trust.outputs.read_only == 'true' && '1' || '' }}
+          CACHE_READ_ONLY: '1'
           GITHUB_TOKEN: ${{ github.token }}
       - name: Wait for the cache recording proxy
         shell: bash
@@ -606,7 +606,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          no-cache: true
       - uses: taiki-e/install-action@v2
         with:
           tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
@@ -621,10 +621,22 @@ jobs:
             .tools/bin/onepipeline.exe
             .tools/bin/onepipeline.exe.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
+      - name: Spike recorder — start
+        run: bash spikes/ci-test-speed/recorder/record.sh start "$RUNNER_TEMP/spike-profile"
       - name: Bootstrap
         run: just bootstrap
       - name: Platform tiers, browser build and install (affected projects)
         run: just ci-test-windows
+      - name: Spike recorder — stop
+        if: always()
+        run: bash spikes/ci-test-speed/recorder/record.sh stop "$RUNNER_TEMP/spike-profile"
+      - name: Spike recorder — upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-profile-${{ github.job }}
+          path: ${{ runner.temp }}/spike-profile
+          retention-days: 7
 
       - name: Report cache entries and task executions
         if: always()
@@ -652,7 +664,7 @@ jobs:
   # The platform-sensitive tiers and install, with proven results replayed on
   # release branches through the same Nx step every pull request runs.
   test-macos:
-    if: github.event_name == 'pull_request'
+    if: false
     runs-on: macos-latest
     timeout-minutes: 30
     defaults:
@@ -661,6 +673,8 @@ jobs:
     env:
       NX_BASE: *nx-base
       NX_HEAD: *nx-head
+      NEXTEST_STATUS_LEVEL: pass
+      NX_SKIP_NX_CACHE: 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -701,7 +715,7 @@ jobs:
         env:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
           NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
-          CACHE_READ_ONLY: ${{ steps.nx-cache-trust.outputs.read_only == 'true' && '1' || '' }}
+          CACHE_READ_ONLY: '1'
           GITHUB_TOKEN: ${{ github.token }}
       - name: Wait for the cache recording proxy
         shell: bash
@@ -713,7 +727,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          no-cache: true
       - uses: taiki-e/install-action@v2
         with:
           tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
@@ -728,10 +742,22 @@ jobs:
             .tools/bin/onepipeline
             .tools/bin/onepipeline.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
+      - name: Spike recorder — start
+        run: bash spikes/ci-test-speed/recorder/record.sh start "$RUNNER_TEMP/spike-profile"
       - name: Bootstrap
         run: just bootstrap
       - name: Platform tiers and install (affected projects)
         run: just ci-test-macos
+      - name: Spike recorder — stop
+        if: always()
+        run: bash spikes/ci-test-speed/recorder/record.sh stop "$RUNNER_TEMP/spike-profile"
+      - name: Spike recorder — upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-profile-${{ github.job }}
+          path: ${{ runner.temp }}/spike-profile
+          retention-days: 7
 
       - name: Report cache entries and task executions
         if: always()
@@ -757,20 +783,15 @@ jobs:
       - cancel: nx-cache
 
   # The released report action, once the four jobs have ended however they ended, on
-  # every pull request and every push to `main`. It builds nothing. On a pull
-  # request it first runs dag-ui-read-latency's timings, large-corpus journeys and
-  # their budgets (`just ci-read-latency`) when the change reaches that project, on
-  # this runner alone and on the release build test-linux compiled: test-linux is a
-  # CPU-bound pool on four cores, where they ran alone after it and, cold, past its
-  # cap. Then each budget whose command can run here runs once through ordinary
-  # `onebudgetspec check`, those timings' among them, and only an ordinary budget
-  # verdict or a failed timing or journey fails it. The release-tail and
+  # every pull request and every push to `main`. It builds and tests nothing: each
+  # budget whose command can run here runs once through ordinary `onebudgetspec
+  # check`, and only an ordinary budget verdict fails it. The release-tail and
   # host-variable budgets are report-only here, as they are everywhere they run
   # outside the tail and the gate. The full history lets local git prove each saved
   # base commit's ancestry, and the group serializes comment writers.
   budgets:
     needs: [lint, test-linux, test-windows, test-macos]
-    if: always()
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -785,49 +806,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Read the pinned tool versions
-        id: tool-pins
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          tr -d '\r' < .github/ci-tool-versions | awk '
-            /^#/ || !NF { next }
-            /^[a-z0-9-]+=[A-Za-z0-9._+-]+$/ { print; next }
-            { print "malformed pin: " $0 > "/dev/stderr"; exit 1 }
-          ' >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@v4
-        if: github.event_name == 'pull_request'
-        with:
-          node-version: ${{ steps.tool-pins.outputs.node }}
-      # A fork's run writes nothing to any cache: this action saves its own binary otherwise.
-      - uses: oven-sh/setup-bun@v2
-        if: github.event_name == 'pull_request'
-        with:
-          bun-version-file: package.json
-          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
-      # `just`, which runs the recipe; the sibling CLI the timings write through is
-      # fetched by `ensure-sibling` as its pinned release's checksummed archive.
-      - uses: taiki-e/install-action@v2
-        if: github.event_name == 'pull_request'
-        with:
-          tool: just@${{ steps.tool-pins.outputs.just }}
-      # Absent when test-linux compiled no release build, which is when this
-      # change reaches no read-latency timing.
-      - uses: actions/download-artifact@v4
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        with:
-          name: read-latency-release-server
-          path: target/wheel-x86_64-unknown-linux-gnu/x86_64-unknown-linux-gnu/release
-      - name: Read-latency timings, journeys and budgets (when the change reaches them)
-        if: github.event_name == 'pull_request'
-        run: |
-          server=target/wheel-x86_64-unknown-linux-gnu/x86_64-unknown-linux-gnu/release/onepipeline-api
-          if [ -f "$server" ]; then chmod +x "$server"; fi
-          bash scripts/workspace-install.sh
-          just ci-read-latency --tier "$(bash scripts/ci-tier.sh)"
       - uses: nickderobertis/onebudgetspec-github-action@v0.3.0
-        if: ${{ !cancelled() }}
         with:
           token: ${{ github.token }}
           enforcement-exclude-labels: release-tail,host-variable

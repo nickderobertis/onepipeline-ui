@@ -8,14 +8,11 @@
       "//": "Carries only file-based affected edges for semantic manifest inputs; CI never runs this uncached no-op.",
       "executor": "nx:noop",
       "cache": false,
-      "inputs": [
-        "cargoManifestSelection",
-        "npmManifestSelection",
-        "pythonManifestSelection"
-      ],
+      "inputs": ["cargoManifestSelection", "npmManifestSelection"],
       "outputs": []
     },
     "test": {
+      "cache": false,
       "command": "just _tier-test-covered npm-launcher",
       "dependsOn": [
         {
@@ -27,15 +24,10 @@
           "target": "build"
         }
       ],
-      "inputs": [
-        "npmLauncherJourneys",
-        "coverageTierNoMachinery",
-        {
-          "runtime": "node scripts/nx-version-free-inputs.mjs --ecosystem cargo --keep-version"
-        }
-      ],
-      "outputs": ["{workspaceRoot}/target/coverage-units/npm-launcher.lcov"],
-      "cache": true
+      "inputs": ["npmLauncherJourneys", "platform"],
+      "outputs": [
+        "{workspaceRoot}/target/llvm-cov-target/npm-launcher-*.profraw"
+      ]
     },
     "test-quick": {
       "command": "just _tier-test npm-launcher",

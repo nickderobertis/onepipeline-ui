@@ -1,10 +1,7 @@
-// Publication regression journeys over the rehearsal's wheel and real release
-// clients. They publish and install only through registry doubles, from a tree
-// of their own that this file packs from the wheel the rehearsal
-// (onepipeline-ui-release:rehearse) staged, which is the shipping build: a
-// native build of their own compiled the whole release graph a second time,
-// beside the manylinux one, for a wheel these journeys make no portability
-// assertion about.
+// Publication regression journeys use a native wheel and real release clients.
+// The separate manylinux rehearsal still proves the shipping build and its
+// glibc floor. These tests need no container or external registry: they compile
+// the current server locally and publish/install only through registry doubles.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -22,7 +19,6 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { plan } from "../../scripts/release.mjs";
 import { cmdRuns, windowsHost } from "./doubles/windows-host.mjs";
-import { staged as rehearsed, requireRehearsal } from "./rehearsal.mjs";
 import {
   githubDouble,
   platformSbom,
@@ -52,14 +48,34 @@ const staged = (artifact) =>
     artifact.file,
   );
 before(() => {
-  requireRehearsal();
   mkdirSync(join(ROOT, "target"), { recursive: true });
   OUT = mkdtempSync(join(ROOT, "target/publication-"));
-  // The rehearsal's wheel, under the release's planned carrier name, packed
-  // into this file's own tree: the journeys here upload from that tree, and the
-  // rehearsal's is read by the other journeys over it at the same time.
+  const wheels = join(OUT, "native-wheels");
+  execFileSync(
+    join(ROOT, ".tools/release-venv/bin/maturin"),
+    [
+      "build",
+      "--strip",
+      "--locked",
+      "--features",
+      "bundled-ui",
+      "--compatibility",
+      "linux",
+      "--out",
+      wheels,
+    ],
+    { cwd: ROOT, stdio: "pipe" },
+  );
+  // Keep the release's planned carrier names while using a host-native wheel.
+  // This fixture makes no portability assertion; the manylinux rehearsal does.
   const wheel = join(OUT, fileOf("wheel").file);
-  copyFileSync(rehearsed(fileOf("wheel")), wheel);
+  copyFileSync(
+    join(
+      wheels,
+      readdirSync(wheels).find((f) => f.endsWith(".whl")),
+    ),
+    wheel,
+  );
   execFileSync(
     "python3",
     [

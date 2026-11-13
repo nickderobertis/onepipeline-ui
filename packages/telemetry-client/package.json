@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./deadline": "./src/deadline.ts"
+    ".": "./src/index.ts"
   },
   "dependencies": {
     "@onepipeline-ui/dag-model": "workspace:*"

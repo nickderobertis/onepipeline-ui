@@ -55,17 +55,7 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "boundary-retried": "recovery",
   "edit-committed": "repository",
   "command-accepted": "planning",
-  // A `kind: command` node's command starting and ending: the node's own unit of
-  // work, opened, run and closed, the way a member's session is.
-  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, and it failed naming exactly these two kinds when the pin moved to 0.106.3.
-  "command-started": "session",
-  "command-exited": "session",
-  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   "planner-surface-queued": "planning",
-  // A surface a bus hook kept off the run's channel: the exchange with the
-  // planner, like the queueing it stands in for.
-  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns the kind and this package owns the category it reads under; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS` and refuses a declared kind with no entry here, so the row cannot live in the producer.
-  "planner-surface-dropped": "planning",
   "planner-surfaced": "planning",
   "planner-replied": "planning",
   "decision-pending": "planning",

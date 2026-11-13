@@ -65,10 +65,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
-        # `started` is when the job began, which the wait for the warm build
-        # below measures its room under `timeout-minutes` from.
         run: |
-          echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
           if [ -n "$TOKEN" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
@@ -183,26 +180,13 @@ jobs:
       # release only for a release that claims compatibility: what the commits
       # since that tag claim is what decides it. See `scripts/semver-check.sh`.
       #
-      # llmlint: ignore-block[changed_behavior_has_e2e] what this step's condition adds is one GitHub Actions evaluates, which no offline gate can run; the work behind it is `scripts/semver-check.sh`, which `tests/e2e/semver_check.rs` drives through every answer it can get.
+      # llmlint: ignore-block[changed_behavior_has_e2e] what these two lines add is a condition GitHub Actions evaluates and an environment it hands over, neither of which an offline gate can run; the work behind them is `scripts/semver-check.sh`, which `tests/e2e/semver_check.rs` drives through every answer it can get.
       #
       # llmlint: ignore-block[diagnostics_error_or_absent] a run that succeeds on a warning is one whose commits announce a break, whose version no verdict could change; every release claiming compatibility still fails here. Why, in `scripts/semver-check.sh`.
       - name: Read the public surface against the baseline
         if: "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.guard.outputs.enabled == 'true' && steps.baseline.outputs.root != '' && !startsWith(github.event.head_commit.message, 'chore: release') }}"
         run: just semver-check "${{ steps.baseline.outputs.root }}" "${{ steps.baseline.outputs.ref }}"
       # llmlint: ignore-end[diagnostics_error_or_absent]
-      # llmlint: ignore-end[changed_behavior_has_e2e]
-
-      # The update below starts the release PR's CI, whose test-linux restores the
-      # Rust build ci-cache.yml's warm-linux saves for this push. When warm-linux is
-      # building that cold, wait for its save, until 27 of this job's 30 minutes are
-      # gone; a late, failed or unreadable warm build warns and the update goes ahead.
-      - name: Wait for main's Linux Rust build when it is building cold
-        if: "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.guard.outputs.enabled == 'true' && !startsWith(github.event.head_commit.message, 'chore: release') }}"
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.sha }}
-          STARTED: ${{ steps.guard.outputs.started }}
-        run: node .github/scripts/await-warm-build.mjs --sha "$SHA" --until "$((STARTED + 27 * 60))"
 
       # Belt to the baseline fix: never open/merge a release PR on a push that is
       # itself a merged release commit.
@@ -215,7 +199,6 @@ jobs:
           # the baseline against today's registry and reports the failure as
           # compatible. Offline exactly when there was a baseline to fetch: with
           # no previous release there is nothing cached and nothing to compare.
-          # llmlint: ignore-block[changed_behavior_has_e2e] what this line adds is an environment GitHub Actions hands over, which no offline gate can run; the reading it resolves offline is `scripts/semver-check.sh`'s, which `tests/e2e/semver_check.rs` drives through every answer it can get.
           CARGO_NET_OFFLINE: ${{ steps.baseline.outputs.root != '' && 'true' || 'false' }}
           # llmlint: ignore-end[changed_behavior_has_e2e]
         run: |

@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   TELEMETRY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
@@ -320,80 +318,4 @@ test("validates SSE snapshots before notifying subscribers", () => {
   expect(errors).toHaveLength(1);
   subscription.close();
   expect(closed).toBe(true);
-});
-
-describe("the batch answer call", () => {
-  const golden: unknown = JSON.parse(
-    readFileSync(
-      join(
-        import.meta.dirname,
-        "../../../tests/fixtures/human-item-answers.json",
-      ),
-      "utf8",
-    ),
-  );
-
-  test("posts the entries to the batch route and parses the engine's receipt", async () => {
-    const seen: { url: string; body: unknown }[] = [];
-    const client = new TelemetryClient("http://telemetry.test", {
-      fetch: async (input, init) => {
-        seen.push({
-          url: String(input),
-          body: JSON.parse(String(init?.body)),
-        });
-        return Response.json(golden);
-      },
-    });
-    const answers = [{ id: "hi-a", choice: "eu" }];
-    const receipt = await client.answerHumanItems(answers);
-    expect(seen).toHaveLength(1);
-    expect(seen[0]?.url).toContain("/api/human-items/answers");
-    expect(seen[0]?.body).toEqual({ answers });
-    expect(receipt.answered).toHaveLength(1);
-    expect(receipt.refused).toEqual([]);
-  });
-
-  test("a single answer takes words, or a choice and words", async () => {
-    const bodies: unknown[] = [];
-    const answer = JSON.parse(
-      readFileSync(
-        join(
-          import.meta.dirname,
-          "../../../tests/fixtures/human-item-answer.json",
-        ),
-        "utf8",
-      ),
-    ) as unknown;
-    const client = new TelemetryClient("http://telemetry.test", {
-      fetch: async (_input, init) => {
-        bodies.push(JSON.parse(String(init?.body)));
-        return Response.json(answer);
-      },
-    });
-    await client.answerHumanItem("hi-a", "words");
-    await client.answerHumanItem("hi-a", { choice: "eu", text: "words" });
-    expect(bodies).toEqual([
-      { text: "words" },
-      { choice: "eu", text: "words" },
-    ]);
-  });
-
-  test("a refusal of the whole batch rejects with the server's code", async () => {
-    const client = new TelemetryClient("http://telemetry.test", {
-      fetch: async () =>
-        Response.json(
-          {
-            error: {
-              code: "invalid_request",
-              message: "empty",
-              retryable: false,
-            },
-          },
-          { status: 422 },
-        ),
-    });
-    await expect(client.answerHumanItems([])).rejects.toMatchObject({
-      status: 422,
-    });
-  });
 });

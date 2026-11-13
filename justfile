@@ -218,13 +218,6 @@ ci-test-linux *args:
 measure-cold-linux *args:
     @bash scripts/measure-cold-linux.sh "$@"
 
-# What the `budgets` job runs before its report: dag-ui-read-latency's timings,
-# journeys and budgets, alone, on test-linux's release build, when the change
-# reaches them (every one on the release pull request's sweep).
-[positional-arguments]
-ci-read-latency *args:
-    @bash scripts/ci-job.sh read-latency "$@"
-
 # The Windows job: the platform-sensitive tiers, the browser build, the install.
 [positional-arguments]
 ci-test-windows *args:
@@ -527,28 +520,32 @@ _crate-lint:
 # auditable`, an installed llmlint, a toolchain packed and installed through
 # rustup, and inputs that are the project graph rather than the crate.
 #
-# Each instrumented tier reduces its own profiles to one LCOV report,
-# `target/coverage-units/<tier>.lcov`, through `scripts/coverage-unit.sh`, and that
-# report is the Nx target's only output: a tier whose key did not move replays it
-# from the cache and runs nothing. `_crate-coverage` merges every tier's report and
-# holds the union to the floor. A tier replayed from the cache and one that just
-# ran are the same input to it, so its result does not depend on which were which.
-# One instrumented tier of the crate's suite, its LCOV report left for `coverage`.
+# Each instrumented tier leaves its raw profiles under `target/llvm-cov-target`
+# named for the tier, and reports nothing: `_crate-coverage` merges every tier's
+# into one report and holds that to the floor. The name is what lets them share
+# one instrumented build and still be told apart — `cargo llvm-cov` would
+# otherwise name every tier's files alike, and Nx restores a tier replayed from
+# its cache by exactly that glob (the `outputs` its `project.json` declares). A
+# tier's own earlier profiles are cleared first, because a report merges every
+# file it finds and a stale run's would count lines this run never reached.
+# `--no-report` is also what stops `cargo llvm-cov` from cleaning the directory,
+# which would delete the other tiers' profiles mid-sweep.
+# One instrumented tier of the crate's suite, profiles kept for `coverage`.
 [positional-arguments]
 _tier-test-covered profile:
-    @NEXTEST_PROFILE="$1" bash scripts/coverage-unit.sh "$1" -- nextest --locked \
+    @rm -f target/llvm-cov-target/"$1"-*.profraw
+    @LLVM_PROFILE_FILE_NAME="$1-%p-%m.profraw" NEXTEST_PROFILE="$1" cargo llvm-cov nextest --locked --no-report \
       || { echo "the $1 tier failed — the failing tests are listed above" >&2; exit 1; }
 
-# The floor reads the LCOV reports: today's former 95 on `cargo llvm-cov report`
-# plus that report's measured distance from LCOV on one commit (0.2831 points),
-# rounded up, so a commit the old floor would refuse this one refuses too. Lower it
-# only with a documented reason in AGENTS.md. Measured over the union of the five
-# instrumented tiers, excluding the baseline and cost journeys.
-# `scripts/coverage-tiers.mjs` names every tier the graph declares and refuses one
-# this target does not depend on, so a tier cannot leave the floor by being added.
-# Merge every instrumented tier's LCOV report and hold it to the coverage floor.
+# 95% line coverage is the gate; lower it only with a documented reason in
+# AGENTS.md. Measured over the union of the five instrumented tiers, excluding
+# baseline and cost journeys. Coverage producers and the aggregate stay uncached:
+# LLVM profiles cannot cross a Cargo package-version rebuild. The aggregate
+# depends on each producer's `test`, so every report uses fresh profiles.
+# Merge every instrumented tier's profiles and hold them to the coverage floor.
 _crate-coverage:
-    @units="$(node scripts/coverage-tiers.mjs)" && node scripts/coverage-merge.mjs --fail-under-lines 95.29 --dir target/coverage-units --unit $units
+    @cargo llvm-cov report --locked --fail-under-lines 95 \
+      || { echo "coverage fell below 95% — cover the lines the table above counts as missed" >&2; exit 1; }
 
 # A tier without instrumentation: the baseline comparison, the cost journeys and
 # the linked-report journeys, which ask what two binaries serve, what a read asks

@@ -48,21 +48,6 @@ export const metrics = (page: Page): Locator =>
   page.getByRole("region", { name: "Run metrics" }).getByRole("group");
 
 /**
- * The app's own timeline plot inside `region`, named for what it does.
- *
- * A run's address is first drawn by the first screen, whose plot is named
- * `Timeline plot <view>` and does nothing, and the app then replaces that screen,
- * every element of it, when its chunk arrives. A journey that finds a region or a
- * transcript before then acts on an element about to be removed, which a loaded host
- * makes likely: a focus lost with the screen, or a scroll on a node no longer
- * attached (CI run 43007707623). Waiting for this name to be visible is waiting for
- * the app, because only the app draws a plot a reader can zoom. Waiting for the first
- * screen's plot to be gone is not: it is also gone before the first screen is drawn.
- */
-export const appPlot = (region: Locator): Locator =>
-  region.getByLabel("Timeline plot. Scroll to zoom or drag to select a range.");
-
-/**
  * One named lane of an opened timeline row.
  *
  * A closed row is a single unnamed strip; opening it draws one lane per category and
@@ -72,7 +57,9 @@ export const appPlot = (region: Locator): Locator =>
  * or shut — and that legend is what a journey waiting on "Worker" would settle for.
  */
 export const timelineLane = (row: Locator, label: string): Locator =>
-  appPlot(row).getByText(label, { exact: true });
+  row
+    .getByLabel("Timeline plot. Scroll to zoom or drag to select a range.")
+    .getByText(label, { exact: true });
 
 /**
  * Open every collapsed project of the navigation, so a journey about runs can reach
@@ -98,45 +85,4 @@ export async function navigationTakesRowsLive(page: Page): Promise<void> {
   await page
     .getByRole("combobox", { name: "Navigation updates" })
     .selectOption({ label: "Live" });
-}
-
-/**
- * Read a node's whole transcript back through the page's own control. Its first
- * answer holds each span's latest rows, so what comes before them is asked for;
- * a page that fails on the way fails here, naming what failed.
- */
-export async function loadAllEarlierRows(page: Page): Promise<void> {
-  const more = page.getByRole("button", { name: /^Load(ing)? earlier rows/ });
-  // A short window: a transcript short enough to hold whole offers no control.
-  await more
-    .first()
-    .waitFor({ state: "attached", timeout: 3_000 })
-    .catch(() => undefined);
-  while ((await more.count()) > 0) {
-    await more
-      .first()
-      .click({ timeout: 15_000 })
-      .catch(() => undefined);
-    await page.waitForTimeout(50);
-  }
-  // A failed page replaces the control with its error, which ends the loop above
-  // with rows still missing: that is a failure, not the transcript's start.
-  const failed = page.getByRole("alert").filter({
-    hasText: "Earlier rows did not load",
-  });
-  if ((await failed.count()) > 0)
-    throw new Error(
-      `the transcript stopped short: ${await failed.first().innerText()}`,
-    );
-}
-
-/**
- * Open Overall's run-level records through the page's own control. Overall's spans
- * list no rows of their own (schema 28), so the records after execution, and the
- * run's other records, arrive when a person asks for them.
- */
-export async function loadRunRecords(page: Page): Promise<void> {
-  await page
-    .getByRole("button", { name: "Load the run's own records" })
-    .click();
 }

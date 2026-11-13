@@ -81,9 +81,6 @@ pub enum ApiError {
     /// A node scope naming a node the run's graph does not carry.
     #[error("no node {0} in this run")]
     NodeNotFound(NodeId),
-    /// A page named a span the timeline does not hold.
-    #[error("no such span: {0}")]
-    SpanNotFound(crate::contract::SpanId),
     /// `?correlation=` is not a token the bus's own parser accepts.
     #[error("invalid correlation: {0}")]
     InvalidCorrelation(String),
@@ -237,7 +234,6 @@ impl ApiError {
             Self::InvalidCorrelation(_) => "invalid_correlation",
             Self::InvalidSubscription(_) => "invalid_subscription",
             Self::NodeNotFound(_) => "node_not_found",
-            Self::SpanNotFound(_) => "span_not_found",
             Self::ProjectNotFound(_) => "project_not_found",
             Self::Refused(_) => "refused",
             Self::NotOwner { .. } => "not_owner",
@@ -279,7 +275,6 @@ impl ApiError {
             | Self::RunNotFound(_)
             | Self::ProjectNotFound(_)
             | Self::NodeNotFound(_)
-            | Self::SpanNotFound(_)
             | Self::ConversationNotFound(_)
             | Self::ArtifactNotFound(_)
             | Self::UnknownFilterProfile(_)

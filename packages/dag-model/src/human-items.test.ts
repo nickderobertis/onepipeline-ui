@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
-  humanItemBatchReceiptSchema,
   humanItemDetailSchema,
   humanItemFilterSchema,
   humanItemReceiptSchema,
@@ -128,7 +127,6 @@ describe("the browser's human-item parsers", () => {
     ["HumanItemView", humanItemViewSchema],
     ["HumanItemDetail", humanItemDetailSchema],
     ["HumanItemReceipt", humanItemReceiptSchema],
-    ["HumanItemBatchReceipt", humanItemBatchReceiptSchema],
     ["HumanItemFilter", humanItemFilterSchema],
   ] as const)("have the engine's %s shape", (name, parser) => {
     expect(parserShape(parser)).toEqual(engineShape(name));

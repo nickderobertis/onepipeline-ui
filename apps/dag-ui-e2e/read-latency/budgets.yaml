@@ -23,28 +23,16 @@ budgets:
     threshold: 0
   - id: dag-ui-human-items-update-lag-seconds
     description: >-
-      Time for an Action items change to reach every tab. Seconds a person waits
-      for a change to show on the open Action items page: the slowest of (a) the
-      95th-percentile seconds from a spaced write committing through the real CLI
-      to the open page rendering it, over the unfiltered and the filtered page,
-      and (b) for one 50-answer batch sent at once from the page, the seconds from
-      the press of the send bar to the moment the last of its 50 questions has
-      left the open list, taken in each of the two tabs open on the page, so the
-      request, the journal commit and the update all count. Detail reports each
-      page's spaced-write p50, p95 and maximum, the batch's lag in each tab, the
-      batch request's own response time, and frame arrival. Spaced writes: one
-      browser tab on Action items with no run view, unfiltered and then filtered,
-      a server over 850 run directories, a human-item journal starting at 71
-      events and 112 KB, and 40 raises, answers, completions and dismissals
-      through the real `onepipeline human-items` CLI, spaced 3 s apart, none from
-      this tab. Batch phase: one fresh server over the same corpus and grown
-      journal, 50 open high-priority questions raised through the real CLI before
-      the phase starts (25 offering 3 choices, 25 offering none), and two tabs
-      open on Action items, one unfiltered and one filtered to high priority; the
-      filtered tab drafts all 50 (25 by a choice press, 25 by typed text) and
-      sends them with one press of its send bar, one `POST
-      /api/human-items/answers` carrying 50 answers, and the unfiltered tab sends
-      nothing. Design bound; telemetry analysis only, approximately 2 seconds.
+      Time for an Action items change to reach the page. The 95th-percentile
+      seconds from a write committing through the real CLI to the open page
+      rendering that change, per write, over every write in the window, the
+      slowest of the unfiltered and the filtered page; detail reports each page's
+      p50, p95 and maximum, and frame arrival as a breakdown. One browser tab on
+      Action items with no run view, unfiltered and filtered, a server over 850
+      run directories, a human-item journal starting at 71 events and 112 KB, and
+      40 raises, answers, completions and dismissals through the real
+      `onepipeline human-items` CLI, spaced 3 s apart, none from this tab. Design
+      bound; telemetry analysis only, approximately 2 seconds.
     measure: reported
     command: [node, read-latency-budget.mjs, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, --metric, human-items-lag]
     unit: seconds

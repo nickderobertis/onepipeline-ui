@@ -13,13 +13,10 @@ import {
   dagConversationSchema,
   type HostShutdownScope,
   HUMAN_ITEM_PATHS,
-  type HumanItemBatchAnswer,
-  type HumanItemBatchReceipt,
   type HumanItemDetail,
   type HumanItemFilter,
   type HumanItemList,
   type HumanItemReceipt,
-  humanItemBatchReceiptSchema,
   humanItemDetailSchema,
   humanItemListSchema,
   humanItemReceiptSchema,
@@ -55,16 +52,12 @@ import {
   stoppedSchema,
   subscribedSchema,
   surfacedSchema,
-  type TimelineEventsPage,
-  timelineEventsPageSchema,
   type Unwatched,
   unwatchedSchema,
 } from "@onepipeline-ui/dag-model";
 
-import { READ_DEADLINE_MS, TelemetryDeadlineError } from "./deadline.js";
 import { LiveView, type LiveViewOptions } from "./subscription.js";
 
-export { READ_DEADLINE_MS, TelemetryDeadlineError } from "./deadline.js";
 export type {
   LiveCause,
   LiveState,
@@ -150,22 +143,6 @@ export interface RunDetailOptions {
 export interface TelemetryClientOptions {
   readonly fetch?: Fetch;
   readonly eventSource?: EventSourceFactory;
-}
-
-/** One page of a run's timeline rows, as `GET .../timeline/events` takes it. */
-export interface TimelineEventsQuery {
-  /** The node whose rows; absent for the run-level records. */
-  readonly node?: string;
-  /** The one span whose rows, answered with that span's whole fields. */
-  readonly span?: string;
-  readonly cursor?: string;
-  /** RFC 3339, inclusive: a stretch of the plot not yet held. */
-  readonly from?: string;
-  readonly to?: string;
-  readonly filter?: string;
-  readonly limit?: number;
-  /** `run` reads the Overall spans a span came from, `node` a node's own timeline. */
-  readonly scope?: "run" | "node";
 }
 
 // Owned by `RUNS_PAGE_LIMIT` in the crate's src/contract.rs; sending it explicitly
@@ -300,44 +277,6 @@ export class TelemetryClient {
     );
   }
 
-  /**
-   * One page of rows a span lists beyond what its payload holds, newest page first;
-   * the next page by `next_cursor`. The client's one deadline applies.
-   */
-  async getTimelineEvents(
-    runId: string,
-    query: TimelineEventsQuery,
-  ): Promise<TimelineEventsPage> {
-    requireOpaqueId(runId, "run ID");
-    if (query.node !== undefined) requireOpaqueId(query.node, "node ID");
-    const url = this.#url(API_V2_PATHS.timelineEvents(runId));
-    url.searchParams.set(
-      API_V2_QUERY.scope,
-      query.scope === "node" && query.node !== undefined
-        ? API_V2_TIMELINE_SCOPES.node
-        : API_V2_TIMELINE_SCOPES.run,
-    );
-    for (const [key, value] of [
-      [API_V2_QUERY.node, query.node],
-      [API_V2_QUERY.span, query.span],
-      [API_V2_QUERY.cursor, query.cursor],
-      [API_V2_QUERY.from, query.from],
-      [API_V2_QUERY.to, query.to],
-      [API_V2_QUERY.filter, query.filter],
-      [
-        API_V2_QUERY.limit,
-        query.limit === undefined ? undefined : String(query.limit),
-      ],
-    ] as const)
-      if (value !== undefined) url.searchParams.set(key, value);
-    return this.#request(
-      url,
-      timelineEventsPageSchema.parse,
-      undefined,
-      "This page of the run's history",
-    );
-  }
-
   subscribe(options: SubscribeOptions): TelemetrySubscription {
     if (options.runId !== undefined) requireOpaqueId(options.runId, "run ID");
     if (options.after !== undefined) requireOpaqueId(options.after, "cursor");
@@ -388,7 +327,6 @@ export class TelemetryClient {
           this.retireSubscription(subscription, keepalive),
         open: (url) => this.#open(url),
         url: (path) => this.#url(path),
-        parseSubscribed: (answer) => subscribedSchema.parse(answer),
       },
       options,
     );
@@ -404,10 +342,6 @@ export class TelemetryClient {
       this.#url(API_V2_PATHS.subscriptions),
       subscribedSchema.parse,
       json("POST", body),
-      // What a person is waiting on: a run's history, or the page's own listing.
-      body.view.type === "sidebar" || body.view.type === "human-items"
-        ? "The read of this page"
-        : "The read of this run's history",
     );
   }
 
@@ -565,34 +499,13 @@ export class TelemetryClient {
     );
   }
 
-  /**
-   * Answer an open question with a choice's id, the person's words, or both
-   * (a string is words alone); the engine's receipt, or its refusal.
-   */
-  async answerHumanItem(
-    id: string,
-    answer: string | Omit<HumanItemBatchAnswer, "id">,
-  ): Promise<HumanItemReceipt> {
+  /** Answer an open question; the engine's receipt, or its refusal. */
+  async answerHumanItem(id: string, text: string): Promise<HumanItemReceipt> {
     requireOpaqueId(id, "human-item ID");
     return this.#request(
       this.#url(HUMAN_ITEM_PATHS.answer(id)),
       humanItemReceiptSchema.parse,
-      json("POST", typeof answer === "string" ? { text: answer } : answer),
-    );
-  }
-
-  /**
-   * Answer several open questions as one batch. A well-formed batch is the
-   * engine's receipt even when it refused every entry; only a malformed batch
-   * or the server's own failure rejects.
-   */
-  async answerHumanItems(
-    answers: readonly HumanItemBatchAnswer[],
-  ): Promise<HumanItemBatchReceipt> {
-    return this.#request(
-      this.#url(HUMAN_ITEM_PATHS.answers),
-      humanItemBatchReceiptSchema.parse,
-      json("POST", { answers }),
+      json("POST", { text }),
     );
   }
 
@@ -739,38 +652,6 @@ export class TelemetryClient {
     url: URL,
     parse: (value: unknown) => T,
     init?: RequestInit,
-    /** What the read is called when it misses the client's deadline; none has none. */
-    deadline?: string,
-  ): Promise<T> {
-    const controller =
-      deadline === undefined ? undefined : new AbortController();
-    const timer =
-      controller === undefined
-        ? undefined
-        : setTimeout(() => controller.abort(), READ_DEADLINE_MS);
-    try {
-      return await this.#answered(url, parse, {
-        ...init,
-        ...(controller === undefined ? {} : { signal: controller.signal }),
-      });
-    } catch (error) {
-      if (controller?.signal.aborted === true && deadline !== undefined)
-        throw new TelemetryClientError(
-          new TelemetryDeadlineError(deadline).message,
-          undefined,
-          "deadline",
-          { cause: error },
-        );
-      throw error;
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
-    }
-  }
-
-  async #answered<T>(
-    url: URL,
-    parse: (value: unknown) => T,
-    init: RequestInit,
   ): Promise<T> {
     let response: Response;
     try {
@@ -786,14 +667,6 @@ export class TelemetryClient {
       );
     }
     const value: unknown = await response.json().catch((error: unknown) => {
-      // A proxy's failure page is no JSON, and what it says is its status.
-      if (!response.ok)
-        throw new TelemetryClientError(
-          `Telemetry request failed with status ${response.status}`,
-          response.status,
-          undefined,
-          { cause: error },
-        );
       throw new TelemetryClientError(
         "Telemetry server returned invalid JSON",
         response.status,

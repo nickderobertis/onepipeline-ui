@@ -65,13 +65,6 @@
           "reopen": {
             "description": "Whether it can be reopened.",
             "$ref": "#/$defs/HumanItemReopen"
-          },
-          "history": {
-            "description": "Every event the journal recorded for this item, oldest first: who took\neach action, when, and whose words it was. The engine's own reading of\nits journal; a reader never derives it again from `events.ndjson`. A live\nitem's always holds its raise; omitted only where it is empty, as a sample\nbundle written before the field existed holds it.",
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/HumanItemHistoryEntry"
-            }
           }
         },
         "additionalProperties": false,
@@ -111,14 +104,6 @@
             "type": "string",
             "minLength": 1,
             "pattern": "\\S"
-          },
-          "choices": {
-            "description": "The answers a question offers: at most six, ids unique, none on a task.",
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/HumanItemChoice"
-            },
-            "maxItems": 6
           },
           "priority": {
             "description": "Priority.",
@@ -260,7 +245,7 @@
                 "resolution": {
                   "properties": {
                     "text": {
-                      "type": ["string", "null"],
+                      "type": "string",
                       "minLength": 1,
                       "pattern": "\\S"
                     },
@@ -268,24 +253,7 @@
                       "type": "null"
                     }
                   },
-                  "anyOf": [
-                    {
-                      "properties": {
-                        "text": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["text"]
-                    },
-                    {
-                      "properties": {
-                        "choice": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["choice"]
-                    }
-                  ]
+                  "required": ["text"]
                 }
               }
             }
@@ -303,9 +271,6 @@
                 "resolution": {
                   "properties": {
                     "text": {
-                      "type": "null"
-                    },
-                    "choice": {
                       "type": "null"
                     }
                   }
@@ -330,29 +295,10 @@
                       "minLength": 1,
                       "pattern": "\\S"
                     },
-                    "choice": {
-                      "type": "null"
-                    },
                     "reason": {
                       "type": "null"
                     }
                   }
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "kind": {
-                  "const": "task"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "choices": {
-                  "maxItems": 0
                 }
               }
             }
@@ -373,32 +319,6 @@
             "const": "question"
           }
         ]
-      },
-      "HumanItemChoice": {
-        "description": "One answer a question offers.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "Unique within its item, lowercase letters, digits and hyphens.",
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
-          },
-          "title": {
-            "description": "One nonblank line.",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80,
-            "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$"
-          },
-          "description": {
-            "description": "Nonblank markdown.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["id", "title", "description"]
       },
       "HumanItemOwner": {
         "description": "The originating session and optional run and plan.",
@@ -542,36 +462,13 @@
             "description": "Text.",
             "type": ["string", "null"]
           },
-          "choice": {
-            "description": "The picked choice's id: only an answered question carries one, and it is omitted when null.",
-            "type": ["string", "null"]
-          },
           "reason": {
             "description": "Reason.",
             "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
-            "$ref": "#/$defs/Provenance"
           }
         },
         "additionalProperties": false,
         "required": ["actor", "on_behalf_of", "text", "reason"]
-      },
-      "Provenance": {
-        "description": "Whose words a ruling is. Serialized as the lowercase word; absent, `manager`.",
-        "oneOf": [
-          {
-            "description": "The manager's own ruling: a strong default a dispatch may decline with its\nreason. What every record written before this field existed reads as.",
-            "type": "string",
-            "const": "manager"
-          },
-          {
-            "description": "The user's words, relayed by the manager: binding.",
-            "type": "string",
-            "const": "user"
-          }
-        ]
       },
       "HumanItemTracker": {
         "description": "An associated tracker task.",
@@ -699,78 +596,6 @@
           }
         ]
       },
-      "HumanItemHistoryEntry": {
-        "description": "One event of an item's history, as [`HumanItemDetail::history`] lists it.",
-        "type": "object",
-        "properties": {
-          "action": {
-            "description": "What the event did.",
-            "$ref": "#/$defs/HumanItemEventAction"
-          },
-          "at": {
-            "description": "When it was recorded, as RFC 3339.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          },
-          "actor": {
-            "description": "Who took it: the resolver, the actor a reopen or a note names, the asker's\nsession for a raise, and `engine` for an auto-resolution.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          },
-          "on_behalf_of": {
-            "description": "The human a manager acted for, when one did.",
-            "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words it was. A raise is its asker's own and an auto-resolution\nthe engine's, both read as `manager`, as is every event of schema\nversion 1.",
-            "$ref": "#/$defs/Provenance"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["action", "at", "actor", "on_behalf_of", "provenance"]
-      },
-      "HumanItemEventAction": {
-        "description": "The closed action ids transported in human-item event payloads.",
-        "oneOf": [
-          {
-            "description": "human-item-raised",
-            "type": "string",
-            "const": "human-item-raised"
-          },
-          {
-            "description": "human-item-answered",
-            "type": "string",
-            "const": "human-item-answered"
-          },
-          {
-            "description": "human-item-completed",
-            "type": "string",
-            "const": "human-item-completed"
-          },
-          {
-            "description": "human-item-dismissed",
-            "type": "string",
-            "const": "human-item-dismissed"
-          },
-          {
-            "description": "human-item-auto-resolved",
-            "type": "string",
-            "const": "human-item-auto-resolved"
-          },
-          {
-            "description": "human-item-reopened",
-            "type": "string",
-            "const": "human-item-reopened"
-          },
-          {
-            "description": "human-item-noted",
-            "type": "string",
-            "const": "human-item-noted"
-          }
-        ]
-      },
       "HumanItemSampleApproval": {
         "description": "An approval written by the fixture authority, never a live design approval.",
         "type": "object",
@@ -864,14 +689,6 @@
         "type": "string",
         "minLength": 1,
         "pattern": "\\S"
-      },
-      "choices": {
-        "description": "The answers a question offers: at most six, ids unique, none on a task.",
-        "type": "array",
-        "items": {
-          "$ref": "#/$defs/HumanItemChoice"
-        },
-        "maxItems": 6
       },
       "priority": {
         "description": "Priority.",
@@ -1013,7 +830,7 @@
             "resolution": {
               "properties": {
                 "text": {
-                  "type": ["string", "null"],
+                  "type": "string",
                   "minLength": 1,
                   "pattern": "\\S"
                 },
@@ -1021,24 +838,7 @@
                   "type": "null"
                 }
               },
-              "anyOf": [
-                {
-                  "properties": {
-                    "text": {
-                      "type": "string"
-                    }
-                  },
-                  "required": ["text"]
-                },
-                {
-                  "properties": {
-                    "choice": {
-                      "type": "string"
-                    }
-                  },
-                  "required": ["choice"]
-                }
-              ]
+              "required": ["text"]
             }
           }
         }
@@ -1056,9 +856,6 @@
             "resolution": {
               "properties": {
                 "text": {
-                  "type": "null"
-                },
-                "choice": {
                   "type": "null"
                 }
               }
@@ -1083,29 +880,10 @@
                   "minLength": 1,
                   "pattern": "\\S"
                 },
-                "choice": {
-                  "type": "null"
-                },
                 "reason": {
                   "type": "null"
                 }
               }
-            }
-          }
-        }
-      },
-      {
-        "if": {
-          "properties": {
-            "kind": {
-              "const": "task"
-            }
-          }
-        },
-        "then": {
-          "properties": {
-            "choices": {
-              "maxItems": 0
             }
           }
         }
@@ -1126,32 +904,6 @@
             "const": "question"
           }
         ]
-      },
-      "HumanItemChoice": {
-        "description": "One answer a question offers.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "Unique within its item, lowercase letters, digits and hyphens.",
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
-          },
-          "title": {
-            "description": "One nonblank line.",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80,
-            "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$"
-          },
-          "description": {
-            "description": "Nonblank markdown.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["id", "title", "description"]
       },
       "HumanItemOwner": {
         "description": "The originating session and optional run and plan.",
@@ -1295,36 +1047,13 @@
             "description": "Text.",
             "type": ["string", "null"]
           },
-          "choice": {
-            "description": "The picked choice's id: only an answered question carries one, and it is omitted when null.",
-            "type": ["string", "null"]
-          },
           "reason": {
             "description": "Reason.",
             "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
-            "$ref": "#/$defs/Provenance"
           }
         },
         "additionalProperties": false,
         "required": ["actor", "on_behalf_of", "text", "reason"]
-      },
-      "Provenance": {
-        "description": "Whose words a ruling is. Serialized as the lowercase word; absent, `manager`.",
-        "oneOf": [
-          {
-            "description": "The manager's own ruling: a strong default a dispatch may decline with its\nreason. What every record written before this field existed reads as.",
-            "type": "string",
-            "const": "manager"
-          },
-          {
-            "description": "The user's words, relayed by the manager: binding.",
-            "type": "string",
-            "const": "user"
-          }
-        ]
       },
       "HumanItemTracker": {
         "description": "An associated tracker task.",
@@ -1376,14 +1105,6 @@
         "type": "string",
         "minLength": 1,
         "pattern": "\\S"
-      },
-      "choices": {
-        "description": "The answers a question offers: at most six, ids unique, none on a task.",
-        "type": "array",
-        "items": {
-          "$ref": "#/$defs/HumanItemChoice"
-        },
-        "maxItems": 6
       },
       "priority": {
         "description": "Priority.",
@@ -1438,22 +1159,6 @@
             }
           }
         }
-      },
-      {
-        "if": {
-          "properties": {
-            "kind": {
-              "const": "task"
-            }
-          }
-        },
-        "then": {
-          "properties": {
-            "choices": {
-              "maxItems": 0
-            }
-          }
-        }
       }
     ],
     "$defs": {
@@ -1471,32 +1176,6 @@
             "const": "question"
           }
         ]
-      },
-      "HumanItemChoice": {
-        "description": "One answer a question offers.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "Unique within its item, lowercase letters, digits and hyphens.",
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
-          },
-          "title": {
-            "description": "One nonblank line.",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80,
-            "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$"
-          },
-          "description": {
-            "description": "Nonblank markdown.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["id", "title", "description"]
       },
       "HumanItemOwner": {
         "description": "The originating session and optional run and plan.",
@@ -1637,14 +1316,6 @@
             "minLength": 1,
             "pattern": "\\S"
           },
-          "choices": {
-            "description": "The answers a question offers: at most six, ids unique, none on a task.",
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/HumanItemChoice"
-            },
-            "maxItems": 6
-          },
           "priority": {
             "description": "Priority.",
             "type": "string",
@@ -1703,22 +1374,6 @@
                 }
               }
             }
-          },
-          {
-            "if": {
-              "properties": {
-                "kind": {
-                  "const": "task"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "choices": {
-                  "maxItems": 0
-                }
-              }
-            }
           }
         ]
       },
@@ -1730,13 +1385,11 @@
             "description": "Id.",
             "type": "string"
           },
-          "choice": {
-            "description": "The picked choice's id.",
-            "type": ["string", "null"]
-          },
           "text": {
-            "description": "The person's own words.",
-            "type": ["string", "null"]
+            "description": "Text.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
           },
           "actor": {
             "description": "Actor.",
@@ -1745,10 +1398,6 @@
           "on_behalf_of": {
             "description": "On behalf of.",
             "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words the action is: `manager`, the default, or `user`.",
-            "$ref": "#/$defs/Provenance"
           },
           "action": {
             "type": "string",
@@ -1756,40 +1405,7 @@
           }
         },
         "additionalProperties": false,
-        "required": ["action", "id", "actor", "on_behalf_of"]
-      },
-      {
-        "description": "Answer several open questions as one batch, through `apply_batch`.",
-        "type": "object",
-        "properties": {
-          "answers": {
-            "description": "One to fifty answers with distinct ids.",
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/HumanItemBatchAnswer"
-            },
-            "minItems": 1,
-            "maxItems": 50
-          },
-          "actor": {
-            "description": "Actor.",
-            "type": "string"
-          },
-          "on_behalf_of": {
-            "description": "On behalf of.",
-            "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words the action is: `manager`, the default, or `user`.",
-            "$ref": "#/$defs/Provenance"
-          },
-          "action": {
-            "type": "string",
-            "const": "answer-batch"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["action", "answers", "actor", "on_behalf_of"]
+        "required": ["action", "id", "text", "actor", "on_behalf_of"]
       },
       {
         "description": "Complete an open item.",
@@ -1806,10 +1422,6 @@
           "on_behalf_of": {
             "description": "On behalf of.",
             "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words the action is: `manager`, the default, or `user`.",
-            "$ref": "#/$defs/Provenance"
           },
           "action": {
             "type": "string",
@@ -1839,10 +1451,6 @@
             "description": "On behalf of.",
             "type": ["string", "null"]
           },
-          "provenance": {
-            "description": "Whose words the action is: `manager`, the default, or `user`.",
-            "$ref": "#/$defs/Provenance"
-          },
           "action": {
             "type": "string",
             "const": "dismiss"
@@ -1866,10 +1474,6 @@
           "on_behalf_of": {
             "description": "On behalf of.",
             "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words the action is: `manager`, the default, or `user`.",
-            "$ref": "#/$defs/Provenance"
           },
           "action": {
             "type": "string",
@@ -1901,10 +1505,6 @@
             "description": "On behalf of.",
             "type": ["string", "null"]
           },
-          "provenance": {
-            "description": "Whose words the action is: `manager`, the default, or `user`.",
-            "$ref": "#/$defs/Provenance"
-          },
           "action": {
             "type": "string",
             "const": "note"
@@ -1929,32 +1529,6 @@
             "const": "question"
           }
         ]
-      },
-      "HumanItemChoice": {
-        "description": "One answer a question offers.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "Unique within its item, lowercase letters, digits and hyphens.",
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
-          },
-          "title": {
-            "description": "One nonblank line.",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80,
-            "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$"
-          },
-          "description": {
-            "description": "Nonblank markdown.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["id", "title", "description"]
       },
       "HumanItemOwner": {
         "description": "The originating session and optional run and plan.",
@@ -2056,41 +1630,6 @@
         },
         "additionalProperties": false,
         "required": ["board_copy", "key"]
-      },
-      "Provenance": {
-        "description": "Whose words a ruling is. Serialized as the lowercase word; absent, `manager`.",
-        "oneOf": [
-          {
-            "description": "The manager's own ruling: a strong default a dispatch may decline with its\nreason. What every record written before this field existed reads as.",
-            "type": "string",
-            "const": "manager"
-          },
-          {
-            "description": "The user's words, relayed by the manager: binding.",
-            "type": "string",
-            "const": "user"
-          }
-        ]
-      },
-      "HumanItemBatchAnswer": {
-        "description": "One entry of an `answer-batch`, held to the rules of a single answer.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "Id.",
-            "type": "string"
-          },
-          "choice": {
-            "description": "The picked choice's id.",
-            "type": ["string", "null"]
-          },
-          "text": {
-            "description": "The person's own words.",
-            "type": ["string", "null"]
-          }
-        },
-        "additionalProperties": false,
-        "required": ["id"]
       }
     }
   },
@@ -2249,14 +1788,6 @@
             "minLength": 1,
             "pattern": "\\S"
           },
-          "choices": {
-            "description": "The answers a question offers: at most six, ids unique, none on a task.",
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/HumanItemChoice"
-            },
-            "maxItems": 6
-          },
           "priority": {
             "description": "Priority.",
             "type": "string",
@@ -2397,7 +1928,7 @@
                 "resolution": {
                   "properties": {
                     "text": {
-                      "type": ["string", "null"],
+                      "type": "string",
                       "minLength": 1,
                       "pattern": "\\S"
                     },
@@ -2405,24 +1936,7 @@
                       "type": "null"
                     }
                   },
-                  "anyOf": [
-                    {
-                      "properties": {
-                        "text": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["text"]
-                    },
-                    {
-                      "properties": {
-                        "choice": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["choice"]
-                    }
-                  ]
+                  "required": ["text"]
                 }
               }
             }
@@ -2440,9 +1954,6 @@
                 "resolution": {
                   "properties": {
                     "text": {
-                      "type": "null"
-                    },
-                    "choice": {
                       "type": "null"
                     }
                   }
@@ -2467,29 +1978,10 @@
                       "minLength": 1,
                       "pattern": "\\S"
                     },
-                    "choice": {
-                      "type": "null"
-                    },
                     "reason": {
                       "type": "null"
                     }
                   }
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "kind": {
-                  "const": "task"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "choices": {
-                  "maxItems": 0
                 }
               }
             }
@@ -2510,32 +2002,6 @@
             "const": "question"
           }
         ]
-      },
-      "HumanItemChoice": {
-        "description": "One answer a question offers.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "Unique within its item, lowercase letters, digits and hyphens.",
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
-          },
-          "title": {
-            "description": "One nonblank line.",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80,
-            "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$"
-          },
-          "description": {
-            "description": "Nonblank markdown.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["id", "title", "description"]
       },
       "HumanItemOwner": {
         "description": "The originating session and optional run and plan.",
@@ -2679,36 +2145,13 @@
             "description": "Text.",
             "type": ["string", "null"]
           },
-          "choice": {
-            "description": "The picked choice's id: only an answered question carries one, and it is omitted when null.",
-            "type": ["string", "null"]
-          },
           "reason": {
             "description": "Reason.",
             "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
-            "$ref": "#/$defs/Provenance"
           }
         },
         "additionalProperties": false,
         "required": ["actor", "on_behalf_of", "text", "reason"]
-      },
-      "Provenance": {
-        "description": "Whose words a ruling is. Serialized as the lowercase word; absent, `manager`.",
-        "oneOf": [
-          {
-            "description": "The manager's own ruling: a strong default a dispatch may decline with its\nreason. What every record written before this field existed reads as.",
-            "type": "string",
-            "const": "manager"
-          },
-          {
-            "description": "The user's words, relayed by the manager: binding.",
-            "type": "string",
-            "const": "user"
-          }
-        ]
       },
       "HumanItemTracker": {
         "description": "An associated tracker task.",
@@ -2862,13 +2305,6 @@
       "reopen": {
         "description": "Whether it can be reopened.",
         "$ref": "#/$defs/HumanItemReopen"
-      },
-      "history": {
-        "description": "Every event the journal recorded for this item, oldest first: who took\neach action, when, and whose words it was. The engine's own reading of\nits journal; a reader never derives it again from `events.ndjson`. A live\nitem's always holds its raise; omitted only where it is empty, as a sample\nbundle written before the field existed holds it.",
-        "type": "array",
-        "items": {
-          "$ref": "#/$defs/HumanItemHistoryEntry"
-        }
       }
     },
     "additionalProperties": false,
@@ -2908,14 +2344,6 @@
             "type": "string",
             "minLength": 1,
             "pattern": "\\S"
-          },
-          "choices": {
-            "description": "The answers a question offers: at most six, ids unique, none on a task.",
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/HumanItemChoice"
-            },
-            "maxItems": 6
           },
           "priority": {
             "description": "Priority.",
@@ -3057,7 +2485,7 @@
                 "resolution": {
                   "properties": {
                     "text": {
-                      "type": ["string", "null"],
+                      "type": "string",
                       "minLength": 1,
                       "pattern": "\\S"
                     },
@@ -3065,24 +2493,7 @@
                       "type": "null"
                     }
                   },
-                  "anyOf": [
-                    {
-                      "properties": {
-                        "text": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["text"]
-                    },
-                    {
-                      "properties": {
-                        "choice": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["choice"]
-                    }
-                  ]
+                  "required": ["text"]
                 }
               }
             }
@@ -3100,9 +2511,6 @@
                 "resolution": {
                   "properties": {
                     "text": {
-                      "type": "null"
-                    },
-                    "choice": {
                       "type": "null"
                     }
                   }
@@ -3127,29 +2535,10 @@
                       "minLength": 1,
                       "pattern": "\\S"
                     },
-                    "choice": {
-                      "type": "null"
-                    },
                     "reason": {
                       "type": "null"
                     }
                   }
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "kind": {
-                  "const": "task"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "choices": {
-                  "maxItems": 0
                 }
               }
             }
@@ -3170,32 +2559,6 @@
             "const": "question"
           }
         ]
-      },
-      "HumanItemChoice": {
-        "description": "One answer a question offers.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "Unique within its item, lowercase letters, digits and hyphens.",
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
-          },
-          "title": {
-            "description": "One nonblank line.",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80,
-            "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$"
-          },
-          "description": {
-            "description": "Nonblank markdown.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["id", "title", "description"]
       },
       "HumanItemOwner": {
         "description": "The originating session and optional run and plan.",
@@ -3339,36 +2702,13 @@
             "description": "Text.",
             "type": ["string", "null"]
           },
-          "choice": {
-            "description": "The picked choice's id: only an answered question carries one, and it is omitted when null.",
-            "type": ["string", "null"]
-          },
           "reason": {
             "description": "Reason.",
             "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
-            "$ref": "#/$defs/Provenance"
           }
         },
         "additionalProperties": false,
         "required": ["actor", "on_behalf_of", "text", "reason"]
-      },
-      "Provenance": {
-        "description": "Whose words a ruling is. Serialized as the lowercase word; absent, `manager`.",
-        "oneOf": [
-          {
-            "description": "The manager's own ruling: a strong default a dispatch may decline with its\nreason. What every record written before this field existed reads as.",
-            "type": "string",
-            "const": "manager"
-          },
-          {
-            "description": "The user's words, relayed by the manager: binding.",
-            "type": "string",
-            "const": "user"
-          }
-        ]
       },
       "HumanItemTracker": {
         "description": "An associated tracker task.",
@@ -3493,78 +2833,6 @@
                 }
               }
             }
-          }
-        ]
-      },
-      "HumanItemHistoryEntry": {
-        "description": "One event of an item's history, as [`HumanItemDetail::history`] lists it.",
-        "type": "object",
-        "properties": {
-          "action": {
-            "description": "What the event did.",
-            "$ref": "#/$defs/HumanItemEventAction"
-          },
-          "at": {
-            "description": "When it was recorded, as RFC 3339.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          },
-          "actor": {
-            "description": "Who took it: the resolver, the actor a reopen or a note names, the asker's\nsession for a raise, and `engine` for an auto-resolution.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          },
-          "on_behalf_of": {
-            "description": "The human a manager acted for, when one did.",
-            "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words it was. A raise is its asker's own and an auto-resolution\nthe engine's, both read as `manager`, as is every event of schema\nversion 1.",
-            "$ref": "#/$defs/Provenance"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["action", "at", "actor", "on_behalf_of", "provenance"]
-      },
-      "HumanItemEventAction": {
-        "description": "The closed action ids transported in human-item event payloads.",
-        "oneOf": [
-          {
-            "description": "human-item-raised",
-            "type": "string",
-            "const": "human-item-raised"
-          },
-          {
-            "description": "human-item-answered",
-            "type": "string",
-            "const": "human-item-answered"
-          },
-          {
-            "description": "human-item-completed",
-            "type": "string",
-            "const": "human-item-completed"
-          },
-          {
-            "description": "human-item-dismissed",
-            "type": "string",
-            "const": "human-item-dismissed"
-          },
-          {
-            "description": "human-item-auto-resolved",
-            "type": "string",
-            "const": "human-item-auto-resolved"
-          },
-          {
-            "description": "human-item-reopened",
-            "type": "string",
-            "const": "human-item-reopened"
-          },
-          {
-            "description": "human-item-noted",
-            "type": "string",
-            "const": "human-item-noted"
           }
         ]
       }
@@ -3643,14 +2911,6 @@
             "minLength": 1,
             "pattern": "\\S"
           },
-          "choices": {
-            "description": "The answers a question offers: at most six, ids unique, none on a task.",
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/HumanItemChoice"
-            },
-            "maxItems": 6
-          },
           "priority": {
             "description": "Priority.",
             "type": "string",
@@ -3791,7 +3051,7 @@
                 "resolution": {
                   "properties": {
                     "text": {
-                      "type": ["string", "null"],
+                      "type": "string",
                       "minLength": 1,
                       "pattern": "\\S"
                     },
@@ -3799,24 +3059,7 @@
                       "type": "null"
                     }
                   },
-                  "anyOf": [
-                    {
-                      "properties": {
-                        "text": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["text"]
-                    },
-                    {
-                      "properties": {
-                        "choice": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["choice"]
-                    }
-                  ]
+                  "required": ["text"]
                 }
               }
             }
@@ -3834,9 +3077,6 @@
                 "resolution": {
                   "properties": {
                     "text": {
-                      "type": "null"
-                    },
-                    "choice": {
                       "type": "null"
                     }
                   }
@@ -3861,29 +3101,10 @@
                       "minLength": 1,
                       "pattern": "\\S"
                     },
-                    "choice": {
-                      "type": "null"
-                    },
                     "reason": {
                       "type": "null"
                     }
                   }
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "kind": {
-                  "const": "task"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "choices": {
-                  "maxItems": 0
                 }
               }
             }
@@ -3904,32 +3125,6 @@
             "const": "question"
           }
         ]
-      },
-      "HumanItemChoice": {
-        "description": "One answer a question offers.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "Unique within its item, lowercase letters, digits and hyphens.",
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
-          },
-          "title": {
-            "description": "One nonblank line.",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80,
-            "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$"
-          },
-          "description": {
-            "description": "Nonblank markdown.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["id", "title", "description"]
       },
       "HumanItemOwner": {
         "description": "The originating session and optional run and plan.",
@@ -4073,36 +3268,13 @@
             "description": "Text.",
             "type": ["string", "null"]
           },
-          "choice": {
-            "description": "The picked choice's id: only an answered question carries one, and it is omitted when null.",
-            "type": ["string", "null"]
-          },
           "reason": {
             "description": "Reason.",
             "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
-            "$ref": "#/$defs/Provenance"
           }
         },
         "additionalProperties": false,
         "required": ["actor", "on_behalf_of", "text", "reason"]
-      },
-      "Provenance": {
-        "description": "Whose words a ruling is. Serialized as the lowercase word; absent, `manager`.",
-        "oneOf": [
-          {
-            "description": "The manager's own ruling: a strong default a dispatch may decline with its\nreason. What every record written before this field existed reads as.",
-            "type": "string",
-            "const": "manager"
-          },
-          {
-            "description": "The user's words, relayed by the manager: binding.",
-            "type": "string",
-            "const": "user"
-          }
-        ]
       },
       "HumanItemTracker": {
         "description": "An associated tracker task.",
@@ -4227,743 +3399,6 @@
                 }
               }
             }
-          }
-        ]
-      }
-    }
-  },
-  "HumanItemBatchReceipt": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "title": "HumanItemBatchReceipt",
-    "description": "What an `answer-batch` did, each list in the batch's order.",
-    "type": "object",
-    "properties": {
-      "batch": {
-        "description": "The engine's opaque id for this batch: absent when no answer was accepted.",
-        "type": ["string", "null"]
-      },
-      "answered": {
-        "description": "The accepted entries' receipts, an identical repeat's being its recorded one.",
-        "type": "array",
-        "items": {
-          "$ref": "#/$defs/HumanItemReceipt"
-        }
-      },
-      "refused": {
-        "description": "The entries refused and not written.",
-        "type": "array",
-        "items": {
-          "$ref": "#/$defs/HumanItemBatchRefused"
-        }
-      }
-    },
-    "additionalProperties": false,
-    "required": ["answered", "refused"],
-    "$defs": {
-      "HumanItemReceipt": {
-        "description": "A successful mutation and its event identifier.",
-        "type": "object",
-        "properties": {
-          "item": {
-            "description": "Item.",
-            "$ref": "#/$defs/HumanItemView"
-          },
-          "event_id": {
-            "description": "Event id.",
-            "type": "string"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["item", "event_id"]
-      },
-      "HumanItemView": {
-        "description": "An item and its derived impact.",
-        "type": "object",
-        "properties": {
-          "item": {
-            "description": "Item.",
-            "$ref": "#/$defs/HumanItem"
-          },
-          "blocked": {
-            "description": "Blocked.",
-            "$ref": "#/$defs/HumanItemBlocked"
-          },
-          "reopen": {
-            "description": "Whether it can be reopened.",
-            "$ref": "#/$defs/HumanItemReopen"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["item", "blocked", "reopen"]
-      },
-      "HumanItem": {
-        "description": "A stable host-unique human item at schema version one.",
-        "type": "object",
-        "properties": {
-          "schema_version": {
-            "description": "Schema version.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 1,
-            "maximum": 1
-          },
-          "id": {
-            "description": "Id.",
-            "type": "string"
-          },
-          "dedup_key": {
-            "description": "Dedup key.",
-            "type": "string"
-          },
-          "kind": {
-            "description": "Kind.",
-            "$ref": "#/$defs/HumanItemKind"
-          },
-          "title": {
-            "description": "Title.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          },
-          "body": {
-            "description": "Body.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          },
-          "choices": {
-            "description": "The answers a question offers: at most six, ids unique, none on a task.",
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/HumanItemChoice"
-            },
-            "maxItems": 6
-          },
-          "priority": {
-            "description": "Priority.",
-            "type": "string",
-            "enum": ["urgent", "high", "medium", "low"]
-          },
-          "owner": {
-            "description": "Owner.",
-            "$ref": "#/$defs/HumanItemOwner"
-          },
-          "block": {
-            "description": "Block.",
-            "$ref": "#/$defs/HumanItemBlock"
-          },
-          "approval": {
-            "description": "Approval.",
-            "anyOf": [
-              {
-                "$ref": "#/$defs/HumanItemApproval"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "state": {
-            "description": "State.",
-            "$ref": "#/$defs/HumanItemState"
-          },
-          "resolution": {
-            "description": "Resolution.",
-            "anyOf": [
-              {
-                "$ref": "#/$defs/HumanItemResolution"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "tracker": {
-            "description": "Tracker.",
-            "anyOf": [
-              {
-                "$ref": "#/$defs/HumanItemTracker"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "created_at": {
-            "description": "Created at.",
-            "type": "string"
-          },
-          "updated_at": {
-            "description": "Updated at.",
-            "type": "string"
-          }
-        },
-        "additionalProperties": false,
-        "required": [
-          "schema_version",
-          "id",
-          "dedup_key",
-          "kind",
-          "title",
-          "body",
-          "priority",
-          "owner",
-          "block",
-          "approval",
-          "state",
-          "resolution",
-          "tracker",
-          "created_at",
-          "updated_at"
-        ],
-        "allOf": [
-          {
-            "if": {
-              "properties": {
-                "state": {
-                  "const": "open"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "resolution": {
-                  "type": "null"
-                }
-              }
-            },
-            "else": {
-              "properties": {
-                "resolution": {
-                  "type": "object"
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "kind": {
-                  "const": "task"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "state": {
-                  "enum": ["open", "completed", "dismissed"]
-                }
-              }
-            },
-            "else": {
-              "properties": {
-                "state": {
-                  "enum": ["open", "answered", "dismissed"]
-                },
-                "approval": {
-                  "type": "null"
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "state": {
-                  "const": "answered"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "resolution": {
-                  "properties": {
-                    "text": {
-                      "type": ["string", "null"],
-                      "minLength": 1,
-                      "pattern": "\\S"
-                    },
-                    "reason": {
-                      "type": "null"
-                    }
-                  },
-                  "anyOf": [
-                    {
-                      "properties": {
-                        "text": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["text"]
-                    },
-                    {
-                      "properties": {
-                        "choice": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["choice"]
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "state": {
-                  "const": "dismissed"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "resolution": {
-                  "properties": {
-                    "text": {
-                      "type": "null"
-                    },
-                    "choice": {
-                      "type": "null"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "state": {
-                  "const": "completed"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "resolution": {
-                  "properties": {
-                    "text": {
-                      "type": ["string", "null"],
-                      "minLength": 1,
-                      "pattern": "\\S"
-                    },
-                    "choice": {
-                      "type": "null"
-                    },
-                    "reason": {
-                      "type": "null"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "kind": {
-                  "const": "task"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "choices": {
-                  "maxItems": 0
-                }
-              }
-            }
-          }
-        ]
-      },
-      "HumanItemKind": {
-        "description": "The human item kind.",
-        "oneOf": [
-          {
-            "description": "Task.",
-            "type": "string",
-            "const": "task"
-          },
-          {
-            "description": "Question.",
-            "type": "string",
-            "const": "question"
-          }
-        ]
-      },
-      "HumanItemChoice": {
-        "description": "One answer a question offers.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "Unique within its item, lowercase letters, digits and hyphens.",
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
-          },
-          "title": {
-            "description": "One nonblank line.",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80,
-            "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$"
-          },
-          "description": {
-            "description": "Nonblank markdown.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["id", "title", "description"]
-      },
-      "HumanItemOwner": {
-        "description": "The originating session and optional run and plan.",
-        "type": "object",
-        "properties": {
-          "session": {
-            "description": "Session.",
-            "type": "string"
-          },
-          "run": {
-            "description": "Run.",
-            "type": ["string", "null"]
-          },
-          "plan": {
-            "description": "Plan.",
-            "type": ["string", "null"]
-          }
-        },
-        "additionalProperties": false,
-        "required": ["session", "run", "plan"]
-      },
-      "HumanItemBlock": {
-        "description": "The scope held by an open item; never a presentation filter.",
-        "oneOf": [
-          {
-            "description": "Holds nothing.",
-            "type": "object",
-            "properties": {
-              "scope": {
-                "type": "string",
-                "const": "nothing"
-              }
-            },
-            "required": ["scope"],
-            "additionalProperties": false
-          },
-          {
-            "description": "Holds work in a run.",
-            "type": "object",
-            "properties": {
-              "run": {
-                "description": "Run identifier.",
-                "type": "string"
-              },
-              "node": {
-                "description": "Node identifier.",
-                "type": "string"
-              },
-              "scope": {
-                "type": "string",
-                "const": "work"
-              }
-            },
-            "additionalProperties": false,
-            "required": ["scope", "run", "node"]
-          },
-          {
-            "description": "Holds a whole plan.",
-            "type": "object",
-            "properties": {
-              "plan": {
-                "description": "Plan identifier.",
-                "type": "string"
-              },
-              "scope": {
-                "type": "string",
-                "const": "plan"
-              }
-            },
-            "additionalProperties": false,
-            "required": ["scope", "plan"]
-          },
-          {
-            "description": "Holds all work on the host.",
-            "type": "object",
-            "properties": {
-              "scope": {
-                "type": "string",
-                "const": "host"
-              }
-            },
-            "required": ["scope"],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "HumanItemApproval": {
-        "description": "An opaque approval authority reference captured when raised.",
-        "type": "object",
-        "properties": {
-          "board_copy": {
-            "description": "Board copy.",
-            "type": "string"
-          },
-          "key": {
-            "description": "Key.",
-            "type": "string"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["board_copy", "key"]
-      },
-      "HumanItemState": {
-        "description": "The human item state.",
-        "oneOf": [
-          {
-            "description": "Open.",
-            "type": "string",
-            "const": "open"
-          },
-          {
-            "description": "Answered.",
-            "type": "string",
-            "const": "answered"
-          },
-          {
-            "description": "Completed.",
-            "type": "string",
-            "const": "completed"
-          },
-          {
-            "description": "Dismissed.",
-            "type": "string",
-            "const": "dismissed"
-          }
-        ]
-      },
-      "HumanItemResolution": {
-        "description": "Who resolved an item and what they said.",
-        "type": "object",
-        "properties": {
-          "actor": {
-            "description": "Actor.",
-            "type": "string"
-          },
-          "on_behalf_of": {
-            "description": "On behalf of.",
-            "type": ["string", "null"]
-          },
-          "text": {
-            "description": "Text.",
-            "type": ["string", "null"]
-          },
-          "choice": {
-            "description": "The picked choice's id: only an answered question carries one, and it is omitted when null.",
-            "type": ["string", "null"]
-          },
-          "reason": {
-            "description": "Reason.",
-            "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
-            "$ref": "#/$defs/Provenance"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["actor", "on_behalf_of", "text", "reason"]
-      },
-      "Provenance": {
-        "description": "Whose words a ruling is. Serialized as the lowercase word; absent, `manager`.",
-        "oneOf": [
-          {
-            "description": "The manager's own ruling: a strong default a dispatch may decline with its\nreason. What every record written before this field existed reads as.",
-            "type": "string",
-            "const": "manager"
-          },
-          {
-            "description": "The user's words, relayed by the manager: binding.",
-            "type": "string",
-            "const": "user"
-          }
-        ]
-      },
-      "HumanItemTracker": {
-        "description": "An associated tracker task.",
-        "type": "object",
-        "properties": {
-          "task": {
-            "description": "Task.",
-            "type": "string"
-          },
-          "url": {
-            "description": "Url.",
-            "type": "string"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["task", "url"]
-      },
-      "HumanItemBlocked": {
-        "description": "Affected node counts grouped by plan.",
-        "type": "object",
-        "properties": {
-          "total": {
-            "description": "Total.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "plans": {
-            "description": "Plans.",
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/HumanItemBlockedPlan"
-            }
-          }
-        },
-        "additionalProperties": false,
-        "required": ["total", "plans"]
-      },
-      "HumanItemBlockedPlan": {
-        "description": "A plan affected by an item; preview contains its first three nodes.",
-        "type": "object",
-        "properties": {
-          "plan": {
-            "description": "Plan.",
-            "type": "string"
-          },
-          "count": {
-            "description": "Count.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "preview": {
-            "description": "Preview.",
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/HumanItemNode"
-            },
-            "maxItems": 3
-          }
-        },
-        "additionalProperties": false,
-        "required": ["plan", "count", "preview"]
-      },
-      "HumanItemNode": {
-        "description": "An affected step.",
-        "type": "object",
-        "properties": {
-          "run": {
-            "description": "Run.",
-            "type": "string"
-          },
-          "node": {
-            "description": "Node.",
-            "type": "string"
-          },
-          "title": {
-            "description": "Title.",
-            "type": "string"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["run", "node", "title"]
-      },
-      "HumanItemReopen": {
-        "description": "Whether an item can be reopened, and why not when it cannot.",
-        "type": "object",
-        "properties": {
-          "available": {
-            "description": "Whether a reopen would be accepted, as far as the engine can tell without running a script.",
-            "type": "boolean"
-          },
-          "reason": {
-            "description": "What a reopen refuses with: null exactly when it is available.",
-            "type": ["string", "null"]
-          }
-        },
-        "additionalProperties": false,
-        "required": ["available", "reason"],
-        "allOf": [
-          {
-            "if": {
-              "properties": {
-                "available": {
-                  "const": true
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "reason": {
-                  "type": "null"
-                }
-              }
-            },
-            "else": {
-              "properties": {
-                "reason": {
-                  "type": "string",
-                  "minLength": 1,
-                  "pattern": "\\S"
-                }
-              }
-            }
-          }
-        ]
-      },
-      "HumanItemBatchRefused": {
-        "description": "One entry of a batch that was refused and not written.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "The item the entry named.",
-            "type": "string"
-          },
-          "refusal": {
-            "description": "Why it was refused.",
-            "$ref": "#/$defs/HumanItemRefusal"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["id", "refusal"]
-      },
-      "HumanItemRefusal": {
-        "description": "A typed refusal from a query or action adapter.",
-        "oneOf": [
-          {
-            "description": "Runtime integration is not installed.",
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "unavailable"
-              }
-            },
-            "required": ["kind"],
-            "additionalProperties": false
-          },
-          {
-            "description": "The requested transition conflicts with stored state.",
-            "type": "object",
-            "properties": {
-              "reason": {
-                "description": "Actionable refusal text.",
-                "type": "string"
-              },
-              "kind": {
-                "type": "string",
-                "const": "conflict"
-              }
-            },
-            "additionalProperties": false,
-            "required": ["kind", "reason"]
           }
         ]
       }
@@ -5020,15 +3455,15 @@
   "HumanItemEventPayload": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "HumanItemEventPayload",
-    "description": "The payload transported by a generic bus envelope: written at\n[`EVENT_SCHEMA_VERSION`], and read at version 1 too, whose every action reads\nas the manager's.",
+    "description": "Version-one payload transported by a generic bus envelope.",
     "type": "object",
     "properties": {
       "schema_version": {
-        "description": "Schema version: 2, or 1 for an event written before provenance existed.",
+        "description": "Schema version.",
         "type": "integer",
         "format": "uint32",
         "minimum": 1,
-        "maximum": 2
+        "maximum": 1
       },
       "item_id": {
         "description": "Item id.",
@@ -5067,17 +3502,6 @@
             "type": "null"
           }
         ]
-      },
-      "batch": {
-        "description": "The batch this answer arrived in: set on every answered event of one, absent otherwise.",
-        "anyOf": [
-          {
-            "$ref": "#/$defs/HumanItemEventBatch"
-          },
-          {
-            "type": "null"
-          }
-        ]
       }
     },
     "additionalProperties": false,
@@ -5111,9 +3535,6 @@
               "type": "null"
             },
             "by": {
-              "type": "null"
-            },
-            "batch": {
               "type": "null"
             }
           }
@@ -5167,9 +3588,6 @@
             },
             "by": {
               "type": "null"
-            },
-            "batch": {
-              "type": "null"
             }
           }
         }
@@ -5195,9 +3613,6 @@
               "type": "object"
             },
             "by": {
-              "type": "null"
-            },
-            "batch": {
               "type": "null"
             }
           }
@@ -5225,9 +3640,6 @@
             },
             "by": {
               "type": "null"
-            },
-            "batch": {
-              "type": "null"
             }
           }
         }
@@ -5254,9 +3666,6 @@
             },
             "by": {
               "type": "object"
-            },
-            "batch": {
-              "type": "null"
             }
           },
           "required": ["by"]
@@ -5284,9 +3693,6 @@
             },
             "by": {
               "type": "object"
-            },
-            "batch": {
-              "type": "null"
             }
           },
           "required": ["by"]
@@ -5389,14 +3795,6 @@
             "minLength": 1,
             "pattern": "\\S"
           },
-          "choices": {
-            "description": "The answers a question offers: at most six, ids unique, none on a task.",
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/HumanItemChoice"
-            },
-            "maxItems": 6
-          },
           "priority": {
             "description": "Priority.",
             "type": "string",
@@ -5537,7 +3935,7 @@
                 "resolution": {
                   "properties": {
                     "text": {
-                      "type": ["string", "null"],
+                      "type": "string",
                       "minLength": 1,
                       "pattern": "\\S"
                     },
@@ -5545,24 +3943,7 @@
                       "type": "null"
                     }
                   },
-                  "anyOf": [
-                    {
-                      "properties": {
-                        "text": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["text"]
-                    },
-                    {
-                      "properties": {
-                        "choice": {
-                          "type": "string"
-                        }
-                      },
-                      "required": ["choice"]
-                    }
-                  ]
+                  "required": ["text"]
                 }
               }
             }
@@ -5580,9 +3961,6 @@
                 "resolution": {
                   "properties": {
                     "text": {
-                      "type": "null"
-                    },
-                    "choice": {
                       "type": "null"
                     }
                   }
@@ -5607,29 +3985,10 @@
                       "minLength": 1,
                       "pattern": "\\S"
                     },
-                    "choice": {
-                      "type": "null"
-                    },
                     "reason": {
                       "type": "null"
                     }
                   }
-                }
-              }
-            }
-          },
-          {
-            "if": {
-              "properties": {
-                "kind": {
-                  "const": "task"
-                }
-              }
-            },
-            "then": {
-              "properties": {
-                "choices": {
-                  "maxItems": 0
                 }
               }
             }
@@ -5650,32 +4009,6 @@
             "const": "question"
           }
         ]
-      },
-      "HumanItemChoice": {
-        "description": "One answer a question offers.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "Unique within its item, lowercase letters, digits and hyphens.",
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
-          },
-          "title": {
-            "description": "One nonblank line.",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80,
-            "pattern": "^[^\\r\\n]*\\S[^\\r\\n]*$"
-          },
-          "description": {
-            "description": "Nonblank markdown.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          }
-        },
-        "additionalProperties": false,
-        "required": ["id", "title", "description"]
       },
       "HumanItemBlock": {
         "description": "The scope held by an open item; never a presentation filter.",
@@ -5799,36 +4132,13 @@
             "description": "Text.",
             "type": ["string", "null"]
           },
-          "choice": {
-            "description": "The picked choice's id: only an answered question carries one, and it is omitted when null.",
-            "type": ["string", "null"]
-          },
           "reason": {
             "description": "Reason.",
             "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
-            "$ref": "#/$defs/Provenance"
           }
         },
         "additionalProperties": false,
         "required": ["actor", "on_behalf_of", "text", "reason"]
-      },
-      "Provenance": {
-        "description": "Whose words a ruling is. Serialized as the lowercase word; absent, `manager`.",
-        "oneOf": [
-          {
-            "description": "The manager's own ruling: a strong default a dispatch may decline with its\nreason. What every record written before this field existed reads as.",
-            "type": "string",
-            "const": "manager"
-          },
-          {
-            "description": "The user's words, relayed by the manager: binding.",
-            "type": "string",
-            "const": "user"
-          }
-        ]
       },
       "HumanItemTracker": {
         "description": "An associated tracker task.",
@@ -5859,34 +4169,10 @@
           "on_behalf_of": {
             "description": "On behalf of.",
             "type": ["string", "null"]
-          },
-          "provenance": {
-            "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
-            "$ref": "#/$defs/Provenance"
           }
         },
         "additionalProperties": false,
         "required": ["actor", "on_behalf_of"]
-      },
-      "HumanItemEventBatch": {
-        "description": "The batch an answered event belongs to.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "The batch's opaque id.",
-            "type": "string",
-            "minLength": 1,
-            "pattern": "\\S"
-          },
-          "size": {
-            "description": "How many answers the batch recorded.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 1
-          }
-        },
-        "additionalProperties": false,
-        "required": ["id", "size"]
       }
     }
   },

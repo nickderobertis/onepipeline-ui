@@ -186,13 +186,12 @@ for (const width of [1440, 390]) {
     const followUp = `Follow-up answer ${"long preview ".repeat(30)}\nFollow-up final sentinel`;
     await page.goto(`/?run=${runs().history}&view=channel`);
     const surfaces = page.getByRole("listitem", { name: /^Surface \d+$/ });
-    // The three questions, and the declined ruling raised after them.
-    await expect(surfaces).toHaveCount(4);
+    await expect(surfaces).toHaveCount(3);
     expect(
       await surfaces.evaluateAll((elements) =>
         elements.map((element) => element.getAttribute("aria-label")),
       ),
-    ).toEqual(["Surface 3", "Surface 2", "Surface 1", "Surface 0"]);
+    ).toEqual(["Surface 2", "Surface 1", "Surface 0"]);
     for (const id of [0, 1, 2]) {
       const exchange = page.getByRole("listitem", {
         name: `Surface ${id}`,
@@ -232,29 +231,19 @@ for (const width of [1440, 390]) {
         const secondaryMetadata =
           index === 0
             ? [
-                // Where it came from and how old it is, as one muted line: a
-                // surface that holds nothing carries no badge saying so.
-                message.getByText(
-                  new RegExp(`^from proposal · surface ${id} · .+ old$`),
-                ),
+                message.getByText("from proposal", { exact: true }),
+                message.getByText("non-blocking", { exact: true }),
+                message.getByText(new RegExp(`^surface ${id} ·`)),
               ]
             : [message.getByRole("time")];
         await expect(
           message.getByText(
-            index === 0
-              ? "finding"
-              : index === 1
-                ? // A recorded reply naming no party is the manager's.
-                  `Reply ${1 - id} · from the manager`
-                : // The follow-up was sent from the browser: the user's.
-                  "Reply 3 · from you",
+            index === 0 ? "finding" : `reply ${index === 1 ? 1 - id : 3}`,
             {
               exact: true,
             },
           ),
         ).toBeVisible();
-        if (index === 0)
-          await expect(message).not.toContainText("non-blocking");
         for (const metadata of secondaryMetadata) {
           if (width === 390) await expect(metadata).toBeHidden();
           else await expect(metadata).toBeVisible();
@@ -273,13 +262,7 @@ for (const width of [1440, 390]) {
             name: /^Raw envelope for reply/,
           });
           const envelope = raw.getByText(
-            JSON.stringify(
-              index === 1
-                ? { completion: false, message: text }
-                : { provenance: "user", completion: false, message: text },
-              null,
-              2,
-            ),
+            JSON.stringify({ completion: false, message: text }, null, 2),
             { exact: true },
           );
           await expect(envelope).toBeHidden();

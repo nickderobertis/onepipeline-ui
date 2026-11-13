@@ -1112,8 +1112,8 @@ fn every_action_through_the_route_resolves_once_and_reaches_only_its_owners_watc
         assert_eq!(stored["state"], state);
         assert_eq!(
             stored["resolution"],
-            json!({"actor": format!("browser:session:{owner}"), "on_behalf_of": null, "text": text, "reason": reason, "provenance": "user"}),
-            "{verb} is a press in the browser through the acting session, on nobody's behalf, in the user's words"
+            json!({"actor": format!("browser:session:{owner}"), "on_behalf_of": null, "text": text, "reason": reason}),
+            "{verb} is a press in the browser through the acting session, on nobody's behalf"
         );
         assert_eq!(serde_json::to_value(&receipt.item.item).unwrap(), stored);
         let kind = match verb {
@@ -1248,19 +1248,7 @@ fn every_action_through_the_cli_is_served_by_the_route_and_reaches_only_its_owne
         assert_eq!(detail["item"]["state"], state);
         assert_eq!(
             detail["item"]["resolution"],
-            json!({"actor": format!("session:{owner}"), "on_behalf_of": format!("user:{USER}"), "text": text, "reason": reason}),
-            "a CLI resolution with no `--as` is the manager's, which writes no provenance key"
-        );
-        let history: Vec<(Value, Value)> = detail["history"]
-            .as_array()
-            .expect("the engine's history of the item")
-            .iter()
-            .map(|entry| (entry["action"].clone(), entry["provenance"].clone()))
-            .collect();
-        assert_eq!(
-            history.last(),
-            Some(&(json!(format!("human-item-{state}")), json!("manager"))),
-            "the route serves the CLI's resolution as the manager's: {history:?}"
+            json!({"actor": format!("session:{owner}"), "on_behalf_of": format!("user:{USER}"), "text": text, "reason": reason})
         );
     }
     assert_eq!(delivered(&world.watch(owner)).len(), 4);
@@ -1810,7 +1798,7 @@ fn reopen_and_note_through_the_routes_are_a_browser_press_and_run_the_adapters_u
         let stored = world.stored(&task);
         assert_eq!(
             stored["resolution"],
-            json!({"actor": actor, "on_behalf_of": null, "text": "Done by hand.", "reason": null, "provenance": "user"}),
+            json!({"actor": actor, "on_behalf_of": null, "text": "Done by hand.", "reason": null}),
             "a note is the comment; who resolved it stays who resolved it"
         );
         error(
@@ -1854,8 +1842,7 @@ fn reopen_and_note_through_the_routes_are_a_browser_press_and_run_the_adapters_u
             );
             assert_eq!(
                 event["payload"].get("by").cloned(),
-                after_the_fact
-                    .then(|| json!({"actor": actor, "on_behalf_of": null, "provenance": "user"})),
+                after_the_fact.then(|| json!({"actor": actor, "on_behalf_of": null})),
                 "{event}"
             );
         }
@@ -1892,186 +1879,6 @@ fn reopen_and_note_through_the_routes_are_a_browser_press_and_run_the_adapters_u
             "human_item_not_found",
         );
     }
-}
-
-/// The provenance each journal event about `id` records, oldest first: the
-/// event's `by` on a reopen or a note, a resolution's on an answer, a
-/// completion or a dismissal, and no entry where neither is (a raise). An absent key is
-/// what the engine writes for the manager's words, so it reads as `manager`.
-fn recorded_provenance(world: &World, id: &str) -> Vec<(String, String)> {
-    std::fs::read_to_string(world.root.join(onepipeline::human_items::JOURNAL_PATH))
-        .expect("the journal")
-        .lines()
-        .map(|line| serde_json::from_str::<Value>(line).expect("a journal line"))
-        .filter(|envelope| envelope["payload"]["item_id"] == id)
-        .filter_map(|envelope| {
-            let payload = &envelope["payload"];
-            let party = [&payload["by"], &payload["resolution"]]
-                .into_iter()
-                .find(|record| record.is_object())?;
-            Some((
-                payload["action"].as_str().expect("an action").to_owned(),
-                party["provenance"].as_str().unwrap_or("manager").to_owned(),
-            ))
-        })
-        .collect()
-}
-
-/// **Everything a person submits through the routes is the user's words.**
-/// Every action route — `answer`, the batch `answers`, `complete`, `dismiss`,
-/// `reopen` and `note` — reaches the engine with provenance `user`, which the
-/// engine writes on the item's event in `human-items/events.ndjson`. A body
-/// naming a `provenance` of its own, whichever party it claims, is refused
-/// `422 invalid_request` with the journal left byte for byte as it was: the
-/// party is the server's to state, as the actor is.
-#[test]
-fn every_action_through_the_routes_is_recorded_as_the_users_and_no_body_can_say_otherwise() {
-    let world = World::new();
-    let owner = "manager-provenance";
-    let raise = |dedup: &str, kind: &str| {
-        world.raise(
-            owner,
-            &input(owner, dedup, kind, "low", json!({"scope": "nothing"})),
-        )
-    };
-    let answered = raise("answered", "question");
-    let batched = raise("batched", "question");
-    let completed = raise("completed", "task");
-    let dismissed = raise("dismissed", "task");
-    let server = world.serve(Some(owner));
-    let post = |path: &str, body: &str| http::post(server.address, path, body);
-    let journal = || {
-        std::fs::read_to_string(world.root.join(onepipeline::human_items::JOURNAL_PATH))
-            .expect("the journal")
-    };
-
-    // Refused first, on every route and for either party, with nothing written.
-    let before = journal();
-    for party in ["manager", "user"] {
-        for (path, body) in [
-            (
-                format!("/api/human-items/{answered}/answer"),
-                json!({"text": "eu-west", "provenance": party}),
-            ),
-            (
-                "/api/human-items/answers".to_owned(),
-                json!({"answers": [{"id": batched, "text": "eu-west"}], "provenance": party}),
-            ),
-            (
-                "/api/human-items/answers".to_owned(),
-                json!({"answers": [{"id": batched, "text": "eu-west", "provenance": party}]}),
-            ),
-            (
-                format!("/api/human-items/{completed}/complete"),
-                json!({"provenance": party}),
-            ),
-            (
-                format!("/api/human-items/{dismissed}/dismiss"),
-                json!({"reason": "Superseded", "provenance": party}),
-            ),
-            (
-                format!("/api/human-items/{completed}/reopen"),
-                json!({"provenance": party}),
-            ),
-            (
-                format!("/api/human-items/{completed}/note"),
-                json!({"text": "Done by hand.", "provenance": party}),
-            ),
-        ] {
-            let message = error(&post(&path, &body.to_string()), 422, "invalid_request");
-            assert!(
-                message.contains("provenance"),
-                "{path} names the field it refused: {message}"
-            );
-        }
-    }
-    assert_eq!(journal(), before, "a refused body records nothing");
-
-    // Then each action through its route, recorded as the user's.
-    for (path, body) in [
-        (
-            format!("/api/human-items/{answered}/answer"),
-            json!({"text": "eu-west"}),
-        ),
-        (
-            "/api/human-items/answers".to_owned(),
-            json!({"answers": [{"id": batched, "text": "us-east"}]}),
-        ),
-        (format!("/api/human-items/{completed}/complete"), json!({})),
-        (
-            format!("/api/human-items/{dismissed}/dismiss"),
-            json!({"reason": "Superseded"}),
-        ),
-        (
-            format!("/api/human-items/{dismissed}/note"),
-            json!({"text": "Replaced by the new export."}),
-        ),
-        (format!("/api/human-items/{completed}/reopen"), json!({})),
-    ] {
-        let response = post(&path, &body.to_string());
-        assert_eq!(response.status, 200, "{path}: {}", response.body);
-    }
-    let user = |action: &str| (format!("human-item-{action}"), "user".to_owned());
-    assert_eq!(recorded_provenance(&world, &answered), [user("answered")]);
-    assert_eq!(recorded_provenance(&world, &batched), [user("answered")]);
-    assert_eq!(
-        recorded_provenance(&world, &completed),
-        [user("completed"), user("reopened")]
-    );
-    assert_eq!(
-        recorded_provenance(&world, &dismissed),
-        [user("dismissed"), user("noted")]
-    );
-    // The engine's own history, as the detail route serves it, says the same.
-    let history = http::get(server.address, &format!("/api/human-items/{completed}")).json()
-        ["history"]
-        .clone();
-    let parties: Vec<(Value, Value, Value)> = history
-        .as_array()
-        .expect("the history")
-        .iter()
-        .map(|entry| {
-            (
-                entry["action"].clone(),
-                entry["actor"].clone(),
-                entry["provenance"].clone(),
-            )
-        })
-        .collect();
-    // A raise is its asker's own, read as the manager's; the engine records a
-    // task's projection to its tracker as a raise of its own, so how many
-    // raises lead the history is the engine's to say.
-    let raises = parties
-        .iter()
-        .take_while(|(action, _, _)| action == "human-item-raised")
-        .count();
-    assert!(raises > 0, "the history opens with the raise: {parties:?}");
-    for raise in &parties[..raises] {
-        assert_eq!(
-            raise,
-            &(
-                json!("human-item-raised"),
-                json!(format!("session:{owner}")),
-                json!("manager")
-            )
-        );
-    }
-    assert_eq!(
-        parties[raises..],
-        [
-            (
-                json!("human-item-completed"),
-                json!(format!("browser:session:{owner}")),
-                json!("user")
-            ),
-            (
-                json!("human-item-reopened"),
-                json!(format!("browser:session:{owner}")),
-                json!("user")
-            ),
-        ],
-        "the detail serves the engine's history, oldest first"
-    );
 }
 
 /// A person's press in the browser and a manager's own CLI action over the
@@ -2408,17 +2215,6 @@ fn a_host_that_has_not_enabled_human_items_is_refused_on_every_route() {
         ),
         http::post(
             server.address,
-            "/api/human-items/answers",
-            r#"{"answers":[{"id":"hi-0000000000000000000a","text":"x"}]}"#,
-        ),
-        // Off is off before a batch's shape is judged.
-        http::post(
-            server.address,
-            "/api/human-items/answers",
-            r#"{"answers":[]}"#,
-        ),
-        http::post(
-            server.address,
             "/api/human-items",
             &input(
                 "manager-off",
@@ -2552,238 +2348,6 @@ fn a_server_started_in_a_removed_directory_refuses_human_items_naming_why() {
     child.wait().expect("reap the server");
 }
 
-/// A question offering `choices`, each `(id, title)`, otherwise as [`input`] raises one.
-fn question_offering(session: &str, dedup: &str, choices: &[(&str, &str)]) -> Value {
-    let mut raised = input(
-        session,
-        dedup,
-        "question",
-        "low",
-        json!({"scope": "nothing"}),
-    );
-    raised["choices"] = choices
-        .iter()
-        .map(|(id, title)| json!({"id": id, "title": title, "description": format!("Why *{title}*.")}))
-        .collect();
-    raised
-}
-
-/// One answer route takes a choice, words, or both, and refuses as it always has.
-#[test]
-fn a_single_answer_takes_a_choice_words_or_both_and_keeps_its_refusals() {
-    let world = World::new();
-    let owner = "manager";
-    let offered = [("eu", "Europe"), ("us", "United States")];
-    let [choice, words, both, stray] = ["choice", "words", "both", "stray"]
-        .map(|dedup| world.raise(owner, &question_offering(owner, dedup, &offered)));
-    let server = world.serve(Some(owner));
-    let answer = |id: &str, body: Value| {
-        http::post(
-            server.address,
-            &format!("/api/human-items/{id}/answer"),
-            &body.to_string(),
-        )
-    };
-
-    for (id, body, picked, text) in [
-        (&choice, json!({"choice": "eu"}), json!("eu"), Value::Null),
-        (
-            &words,
-            json!({"choice": null, "text": "Neither"}),
-            Value::Null,
-            json!("Neither"),
-        ),
-        (
-            &both,
-            json!({"choice": "us", "text": "For now"}),
-            json!("us"),
-            json!("For now"),
-        ),
-    ] {
-        let response = answer(id, body);
-        assert_eq!(response.status, 200, "{}", response.body);
-        assert!(response.json()["event_id"].is_string(), "{}", response.body);
-        let stored = world.stored(id);
-        assert_eq!(stored["state"], "answered");
-        assert_eq!(
-            stored["resolution"]["choice"],
-            if picked.is_null() {
-                Value::Null
-            } else {
-                picked
-            }
-        );
-        assert_eq!(stored["resolution"]["text"], text);
-        assert_eq!(
-            stored["resolution"]["actor"],
-            format!("browser:session:{owner}")
-        );
-    }
-
-    assert!(error(
-        &answer(&stray, json!({"choice": "mars"})),
-        409,
-        "human_item_conflict"
-    )
-    .contains("mars"));
-    error(
-        &answer(&stray, json!({"text": "   "})),
-        409,
-        "human_item_conflict",
-    );
-    error(&answer(&stray, json!({})), 409, "human_item_conflict");
-    error(
-        &answer(&choice, json!({"choice": "us"})),
-        409,
-        "human_item_conflict",
-    );
-    error(
-        &answer("hi-0000000000000000000a", json!({"choice": "eu"})),
-        404,
-        "human_item_not_found",
-    );
-    error(
-        &answer(&stray, json!({"text": "x", "actor": "someone"})),
-        422,
-        "invalid_request",
-    );
-    assert_eq!(world.stored(&stray)["state"], "open");
-}
-
-/// One request is the engine's one batch: a mixed one answers what it can, tells
-/// the rest why, and reaches the owner's watch as events carrying one batch id.
-#[test]
-fn a_batch_answers_what_it_can_and_reports_every_refusal_in_the_engines_receipt() {
-    let world = World::new();
-    let owner = "manager";
-    let offered = [("eu", "Europe"), ("us", "United States")];
-    let [choice, words, both, wrong, settled] = ["choice", "words", "both", "wrong", "settled"]
-        .map(|dedup| world.raise(owner, &question_offering(owner, dedup, &offered)));
-    world.ok(Some(owner), &["human-items", "dismiss", &settled]);
-    world.watch(owner);
-    let server = world.serve(None);
-    let batch = json!({"answers": [
-        {"id": choice, "choice": "eu"},
-        {"id": words, "choice": null, "text": "Neither"},
-        {"id": both, "choice": "us", "text": "For now"},
-        {"id": wrong, "choice": "mars"},
-        {"id": settled, "text": "Too late"},
-        {"id": "hi-0000000000000000000a", "text": "Nobody"},
-    ]});
-
-    let response = http::post(
-        server.address,
-        "/api/human-items/answers",
-        &batch.to_string(),
-    );
-    assert_eq!(response.status, 200, "{}", response.body);
-    let receipt = response.json();
-    let batch_id = receipt["batch"]
-        .as_str()
-        .expect("an accepted batch's id")
-        .to_owned();
-    assert_eq!(
-        receipt["answered"]
-            .as_array()
-            .expect("answered")
-            .iter()
-            .map(|r| id_of(&r["item"]))
-            .collect::<Vec<_>>(),
-        [choice.clone(), words.clone(), both.clone()]
-    );
-    let refused = receipt["refused"].as_array().expect("refused");
-    assert_eq!(
-        refused
-            .iter()
-            .map(|r| r["id"].as_str().expect("an id"))
-            .collect::<Vec<_>>(),
-        [wrong.as_str(), settled.as_str(), "hi-0000000000000000000a"]
-    );
-    assert!(refused[0]["refusal"]["reason"]
-        .as_str()
-        .expect("a reason")
-        .contains("mars"));
-    assert_eq!(world.stored(&wrong)["state"], "open");
-    assert_eq!(world.stored(&settled)["state"], "dismissed");
-    assert_eq!(world.stored(&choice)["resolution"]["actor"], "browser");
-    assert_eq!(world.stored(&choice)["resolution"]["choice"], "eu");
-    assert_eq!(world.stored(&both)["resolution"]["text"], "For now");
-
-    let delivered = world.watch(owner);
-    assert_eq!(delivered.len(), 3, "{delivered:?}");
-    for event in &delivered {
-        assert_eq!(
-            event["payload"]["batch"]["id"],
-            batch_id.as_str(),
-            "{event}"
-        );
-        assert_eq!(event["payload"]["batch"]["size"], 3, "{event}");
-    }
-
-    // Every entry refused is still a receipt, and it carries no batch id.
-    let response = http::post(
-        server.address,
-        "/api/human-items/answers",
-        &json!({"answers": [{"id": wrong, "choice": "mars"}]}).to_string(),
-    );
-    assert_eq!(response.status, 200, "{}", response.body);
-    let receipt = response.json();
-    assert!(receipt.get("batch").is_none(), "{receipt}");
-    assert_eq!(receipt["answered"], json!([]));
-    assert_eq!(receipt["refused"].as_array().expect("refused").len(), 1);
-}
-
-/// A batch malformed as a whole is the error contract, and writes nothing.
-#[test]
-fn a_malformed_batch_is_refused_whole_with_nothing_written() {
-    let world = World::new();
-    let owner = "manager";
-    let question = world.raise(
-        owner,
-        &question_offering(owner, "open", &[("eu", "Europe")]),
-    );
-    let journal = world
-        .base()
-        .join(fixture_run::RUNS_DIR)
-        .join(onepipeline::human_items::JOURNAL_PATH);
-    let before = std::fs::read(&journal).expect("the journal");
-    let server = world.serve(Some(owner));
-    let many: Vec<Value> = (0..51)
-        .map(|n| json!({"id": format!("hi-{n:020x}"), "text": "x"}))
-        .collect();
-    for body in [
-        json!({"answers": []}),
-        json!({"answers": many}),
-        json!({"answers": [{"id": question, "text": "a"}, {"id": question, "text": "b"}]}),
-        json!({"answers": [{"id": question}]}),
-        json!({"answers": [{"id": question, "choice": null, "text": null}]}),
-        json!({"answers": [{"id": question, "text": "   "}]}),
-        json!({"answers": [{"id": "not an id", "text": "x"}]}),
-        json!({"answers": [{"id": question, "text": "x", "actor": "someone"}]}),
-    ] {
-        error(
-            &http::post(
-                server.address,
-                "/api/human-items/answers",
-                &body.to_string(),
-            ),
-            422,
-            "invalid_request",
-        );
-    }
-    error(
-        &http::post(server.address, "/api/human-items/answers", "not json"),
-        422,
-        "invalid_request",
-    );
-    assert_eq!(
-        std::fs::read(&journal).expect("the journal"),
-        before,
-        "nothing was written"
-    );
-    assert_eq!(world.stored(&question)["state"], "open");
-}
-
 /// What each human-item route served from the live engine, held to the
 /// goldens `tests/contract.rs` maps to the route table and reconciles with the
 /// engine's own types. Timestamps are the clock's and are pinned before the
@@ -2841,14 +2405,6 @@ fn every_human_item_route_serves_the_payload_its_golden_pins() {
                 server.address,
                 &format!("/api/human-items/{canary}/answer"),
                 r#"{"text":"eu-west"}"#,
-            ),
-        ),
-        (
-            "human-item-answers.json",
-            http::post(
-                server.address,
-                "/api/human-items/answers",
-                &json!({"answers": [{"id": onepipeline::human_items::item_id_for("nightly"), "text": "Yes"}]}).to_string(),
             ),
         ),
         (
@@ -2964,13 +2520,8 @@ fn pin_clock(value: &mut Value) {
     match value {
         Value::Object(map) => {
             for (key, held) in map.iter_mut() {
-                // `at` is a history entry's instant, which the engine stamps
-                // when it journals the event.
-                if matches!(key.as_str(), "created_at" | "updated_at" | "at") && held.is_string() {
+                if matches!(key.as_str(), "created_at" | "updated_at") && held.is_string() {
                     *held = json!("2026-01-01T00:00:00.000Z");
-                } else if key == "batch" && held.is_string() {
-                    // Minted fresh per batch; a golden pins that one is there.
-                    *held = json!("golden-batch");
                 } else {
                     pin_clock(held);
                 }
@@ -3647,28 +3198,19 @@ fn an_open_view_rides_out_a_journal_it_cannot_read_and_catches_up_on_the_same_st
     let mut tab = HumanItemsTab::open(&server, json!({ "type": "human-items" }));
     let shown = tab.state["visible"].clone();
 
-    // A directory where the engine opens its index lock refuses every read for
-    // several polls. The items stay where they are throughout, so a poll landing
-    // while the lock is swapped reads what the tab already shows.
-    let lock = world.root.join("human-items").join("index.lock");
-    let deadline = Instant::now() + PATIENCE;
-    while std::fs::remove_file(&lock)
-        .and_then(|()| std::fs::create_dir(&lock))
-        .is_err()
-    {
-        assert!(Instant::now() < deadline, "a poll kept the index lock");
-    }
-    error(
-        &http::get(server.address, "/api/human-items"),
-        409,
-        "human_item_conflict",
-    );
+    // The directory moved aside and a plain file left where it was, so every
+    // read the engine makes of it is refused, for several polls.
+    let directory = world.root.join("human-items");
+    let away = world.root.join("human-items.away");
+    std::fs::rename(&directory, &away).expect("take the items away");
+    std::fs::write(&directory, "not a directory").expect("a file in their place");
     assert!(tab.drain().is_empty(), "a refused read sends nothing");
     assert_eq!(tab.state["visible"], shown);
 
     // Put back, with a change it has not read: a read that was refused was not
     // forgotten, so the same stream carries it with nothing asked of the tab.
-    std::fs::remove_dir(&lock).expect("give the lock back");
+    std::fs::remove_file(&directory).expect("remove the file");
+    std::fs::rename(&away, &directory).expect("put the items back");
     raised(&world, "after", "task");
     tab.until_current(&server);
     assert_eq!(

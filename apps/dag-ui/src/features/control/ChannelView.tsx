@@ -9,18 +9,14 @@ import {
   Skeleton,
   Textarea,
 } from "@oneharness/ui";
-import {
-  type ChannelQueue,
-  type ChannelSurface,
-  type Decision,
-  type DeclinedRuling,
-  type Provenance,
-  provenanceOf,
+import type {
+  ChannelQueue,
+  ChannelSurface,
+  Decision,
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { CheckCheck, Inbox, MessageSquarePlus } from "lucide-react";
 import { useCallback, useId, useState } from "react";
-import { LOADING_TEXT } from "../../lib/loading";
 import { Outcome } from "../../lib/Outcome";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDurationSeconds, isoOfMillis } from "../../lib/time";
@@ -57,8 +53,8 @@ export function ChannelView({
   readonly client: TelemetryClient;
   readonly runId: string;
   readonly filter: string;
-  /** The decision points the graph holds; absent until the rest of the run arrives. */
-  readonly decisions?: readonly Decision[];
+  /** The decision points the graph holds, for the human actions among them. */
+  readonly decisions: readonly Decision[];
   /** When the graph was read, so a surface's age is against the payload's clock. */
   readonly observedAt: string;
   /** The queue as the subscription holds it; absent until it arrives. */
@@ -176,15 +172,12 @@ function Queue({
                 <Card className="channel-card">
                   <CardContent>
                     <div className="channel-card-head">
-                      <strong className="channel-card-title">
-                        Envelope {envelope.id} · from{" "}
-                        {fromWords(provenanceOf(envelope.provenance))}
-                      </strong>
-                      <span className="channel-age">
-                        {envelope.commands.map(opOf).join(", ")}
-                      </span>
+                      <Badge variant="outline">envelope {envelope.id}</Badge>
+                      <Badge variant="secondary">
+                        {envelope.author ?? "planner"}
+                      </Badge>
+                      <span>{envelope.commands.map(opOf).join(", ")}</span>
                     </div>
-                    <EnvelopeNotes commands={envelope.commands} />
                   </CardContent>
                 </Card>
               </li>
@@ -205,9 +198,7 @@ function Queue({
                 <Card className="channel-card">
                   <CardContent>
                     <div className="channel-card-head">
-                      <strong className="channel-card-title">
-                        Envelope {outcome.id}
-                      </strong>
+                      <Badge variant="outline">envelope {outcome.id}</Badge>
                       <Badge
                         variant={outcome.applied ? "default" : "destructive"}
                       >
@@ -275,15 +266,8 @@ function ReplyCard({
           text={text}
           meta={
             <>
-              <strong className="channel-card-title">
-                Reply {reply.id} · from{" "}
-                {fromWords(provenanceOf(reply.reply.provenance))}
-              </strong>
-              <Timestamp
-                at={isoOfMillis(reply.at)}
-                className="channel-age"
-                relative
-              />
+              <Badge variant="outline">reply {reply.id}</Badge>
+              <Timestamp at={isoOfMillis(reply.at)} relative />
             </>
           }
         >
@@ -299,46 +283,7 @@ function ReplyCard({
   );
 }
 
-/**
- * Whose words a reply or an envelope was, folded into its heading: a person at
- * this view is the user, so the user's words are "you". A record that names no
- * party is the manager's, as the engine reads it, whatever its author.
- */
-function fromWords(provenance: Provenance): string {
-  return provenance === "user" ? "you" : "the manager";
-}
-
-/**
- * The notes an envelope carries, listed under it: each one's node and text,
- * with no party of its own — a note's party is its envelope's. Read from the
- * envelope's commands as recorded, which are open records, so a note is one
- * whose `op` and fields are strings.
- */
-function EnvelopeNotes({
-  commands,
-}: {
-  readonly commands: ChannelQueue["commands"][number]["commands"];
-}) {
-  const notes = commands.flatMap((command, index) =>
-    command.op === "note" &&
-    typeof command.id === "string" &&
-    typeof command.text === "string"
-      ? [{ index, node: command.id, text: command.text }]
-      : [],
-  );
-  if (notes.length === 0) return null;
-  return (
-    <ul aria-label="Notes" className="channel-envelope-notes">
-      {notes.map((note) => (
-        <li key={note.index}>
-          Note to {note.node}: {note.text}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** One surface: its kind, whether it blocks, where it came from and its age, then what it said. */
+/** One surface: its kind, source, blocking flag and age, then what it said. */
 function SurfaceCard({
   surface,
   observedAt,
@@ -350,68 +295,32 @@ function SurfaceCard({
     0,
     (Date.parse(observedAt) - surface.queued_at) / 1000,
   );
-  const head = (
-    <>
-      <Badge>{surface.kind}</Badge>
-      {surface.blocking && <Badge variant="destructive">blocking</Badge>}
-      <span className="channel-age">
-        from {surface.source}
-        {surface.workstream !== undefined && ` · node ${surface.workstream}`}
-        {` · surface ${surface.id} · ${formatDurationSeconds(ageSeconds)} old`}
-      </span>
-    </>
-  );
-  const declined = surface.declined_ruling;
   return (
     <Card className="channel-card py-2">
       <CardContent>
-        {declined === undefined ? (
-          <Message
-            label={`Surface ${surface.id} message`}
-            text={surface.message}
-            meta={head}
-          />
-        ) : (
-          <>
-            <div className="channel-card-head">{head}</div>
-            <DeclinedRulingMessage ruling={declined} source={surface.source} />
-          </>
-        )}
+        <Message
+          label={`Surface ${surface.id} message`}
+          text={surface.message}
+          meta={
+            <>
+              <Badge>{surface.kind}</Badge>
+              <Badge variant="secondary">from {surface.source}</Badge>
+              {surface.blocking ? (
+                <Badge variant="destructive">blocking</Badge>
+              ) : (
+                <Badge variant="outline">non-blocking</Badge>
+              )}
+              {surface.workstream !== undefined && (
+                <Badge variant="outline">node {surface.workstream}</Badge>
+              )}
+              <span className="channel-age">
+                surface {surface.id} · {formatDurationSeconds(ageSeconds)} old
+              </span>
+            </>
+          }
+        />
       </CardContent>
     </Card>
-  );
-}
-
-const RULING_KINDS: Record<DeclinedRuling["kind"], string> = {
-  note: "note",
-  amendment: "amendment",
-  answer: "answer",
-};
-
-/**
- * A declined ruling, read as one message from the engine's typed record and
- * the surface's own `source`: who declined what, the ruling's words, and why.
- * The surface's `message` is for people reading the CLI and is never read
- * here, so nothing on this card depends on how the engine worded it.
- */
-function DeclinedRulingMessage({
-  ruling,
-  source,
-}: {
-  readonly ruling: DeclinedRuling;
-  readonly source: string;
-}) {
-  // llmlint: ignore[changed_behavior_has_e2e] no record a real engine writes takes the "your" branch: `verbs::decline_ruling` refuses a user's ruling, which binds and cannot be declined, and every write of a surface holds its record to that, so no journey can raise one. The branch keeps the party read from the record rather than assumed, per the contract.
-  const whose = ruling.provenance === "user" ? "your" : "the manager's";
-  return (
-    <section aria-label="Declined ruling" className="declined-ruling">
-      <p>
-        The {source} on {ruling.node} declined {whose}{" "}
-        {RULING_KINDS[ruling.kind]} from reply {ruling.reply}
-      </p>
-      <blockquote>{ruling.text}</blockquote>
-      <p>Reason: {ruling.reason}</p>
-    </section>
   );
 }
 
@@ -431,7 +340,7 @@ function Attestations({
 }: {
   readonly client: TelemetryClient;
   readonly runId: string;
-  readonly decisions?: readonly Decision[];
+  readonly decisions: readonly Decision[];
   readonly onWrote: () => void;
 }) {
   const attest = useAttest(client, runId, onWrote);
@@ -440,9 +349,7 @@ function Attestations({
       <h3 id="attest-heading">
         <CheckCheck size={15} /> Ready human actions
       </h3>
-      {decisions === undefined ? (
-        <p className="channel-empty">{LOADING_TEXT}</p>
-      ) : decisions.length === 0 ? (
+      {decisions.length === 0 ? (
         <p className="channel-empty">No decision point is holding the graph.</p>
       ) : (
         <ul className="attest-list">

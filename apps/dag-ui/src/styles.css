@@ -882,10 +882,6 @@ p {
   border-left: 1px solid var(--border);
   background: var(--background);
   box-shadow: -12px 0 35px rgb(0 0 0 / 18%);
-  /* A column, so a failed read said under the item stays on screen: the detail
-     takes what the panel has left. */
-  display: flex;
-  flex-direction: column;
 }
 .drawer-close {
   position: absolute;
@@ -918,8 +914,7 @@ p {
 }
 
 .detail-drawer .timeline-detail {
-  flex: 1;
-  min-height: 0;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -1583,42 +1578,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-}
-
-/* A reply's, an envelope's or an outcome's heading: plain text, never a badge. */
-.channel-card-title {
-  font-weight: 600;
-}
-
-/* The notes an envelope carries, under it, with no party of their own. */
-.channel-envelope-notes {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 12.5px;
-  overflow-wrap: anywhere;
-}
-
-/* A declined ruling, read as one message: who declined what, the ruling, why. */
-.declined-ruling {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  font-size: 13px;
-  overflow-wrap: anywhere;
-}
-
-.declined-ruling p {
-  margin: 0;
-}
-
-.declined-ruling blockquote {
-  margin: 0;
-  padding-left: 10px;
-  border-left: 2px solid var(--border);
-  white-space: pre-wrap;
 }
 
 .channel-empty,
@@ -2651,10 +2610,9 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 .human-item-tracker {
   display: inline-flex;
   align-items: center;
-  box-sizing: border-box;
   gap: 4px;
-  height: 30px;
-  padding: 0 9px;
+  height: 22px;
+  padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--background);
@@ -2662,86 +2620,12 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   white-space: nowrap;
 }
 
-/* A long tracker reference is cut in its chip, whole in its `title` and in the
-   detail's metadata. An ellipsis needs a block container: a flex one has none. */
+/* A tracker id is short, but never allowed to push the card's actions out. */
 .human-item-tracker {
-  display: inline-block;
   max-width: 24ch;
   overflow: hidden;
   color: var(--primary);
-  line-height: 28px;
   text-overflow: ellipsis;
-}
-
-.human-item-tracker-full {
-  color: var(--primary);
-  overflow-wrap: anywhere;
-}
-
-.human-item-card .otg-card__actions {
-  gap: 8px;
-}
-
-/* A title is read in full, and a card's meta line keeps every name it carries. */
-.human-item-card .otg-card__title,
-.human-item-card .otg-card__meta {
-  overflow-wrap: anywhere;
-}
-.human-item-card .otg-card__title {
-  overflow: visible;
-  min-width: 0;
-  text-overflow: clip;
-  white-space: normal;
-}
-
-/* Choice buttons: one 30px line at every width, 8px apart, wrapping inside the
-   button only when a title needs it. The 46ch cap makes a title near the 80
-   character limit two lines on a wide card as well as a phone. */
-.human-item-choices {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  margin: 4px 0 2px;
-  padding: 0;
-  border: 0;
-}
-
-.human-item-choice {
-  box-sizing: border-box;
-  max-width: min(100%, 46ch);
-  padding: 5px 9px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--background);
-  font-size: 12px;
-  line-height: 18px;
-  text-align: left;
-  overflow-wrap: anywhere;
-}
-
-.human-item-choice[aria-pressed="true"] {
-  border-color: var(--primary);
-  background: color-mix(in oklab, var(--primary) 22%, var(--background));
-  color: var(--foreground);
-  font-weight: 600;
-}
-
-.human-item-choice:disabled {
-  opacity: 0.7;
-}
-
-.human-item-answered {
-  margin-top: 2px;
-  font-size: 12.5px;
-  line-height: 18px;
-  overflow-wrap: anywhere;
-}
-
-.human-item-answered-choice {
-  margin: 0;
-  font-weight: 600;
 }
 
 .human-item-card .otg-card__meta,
@@ -2810,13 +2694,8 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   gap: 8px;
   min-height: 0;
   padding: 12px 20px calc(12px + var(--toast-room));
-  overflow: auto;
+  overflow: hidden;
   border-left: 1px solid var(--border);
-}
-
-/* The detail reads top to bottom as one scroll, each part at its natural height. */
-.human-item-detail > * {
-  flex: none;
 }
 
 .human-item-detail-head {
@@ -2850,99 +2729,30 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   overflow-wrap: anywhere;
 }
 
-.human-item-detail-body {
-  font-size: 13px;
-  line-height: 19px;
-  overflow-wrap: anywhere;
-}
-
-.human-item-choice-list {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.human-item-choice-list legend {
-  margin-bottom: 4px;
-  color: var(--muted-foreground);
-  font-size: 11.5px;
-  font-weight: 600;
-}
-
-.human-item-choice-entry {
-  display: grid;
-  justify-items: start;
-  gap: 3px;
-  min-width: 0;
-}
-
-.human-item-choice-description,
-.human-item-choice-description .otg-markdown {
-  color: var(--muted-foreground);
-  font-size: 11.5px;
-  line-height: 16px;
-  overflow-wrap: anywhere;
-}
-
-.human-item-detail .human-item-answer {
-  min-height: 64px;
-}
-
-/* What is about the item, set apart from what is in it. */
-.human-item-metadata {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 3px 12px;
-  margin: 6px 0 0;
-  padding: 8px 10px;
-  border-top: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--muted);
-  color: var(--muted-foreground);
-  font-size: 11.5px;
-  line-height: 16px;
-}
-
-.human-item-metadata dt {
-  font-weight: 600;
+.human-item-steps {
+  flex: none;
+  max-height: 30%;
+  overflow: auto;
+  font-size: 12px;
 }
 
 .human-item-steps h3 {
-  margin: 0 0 2px;
-  font-size: 11.5px;
+  margin: 4px 0 2px;
+  font-size: 12px;
 }
 
 .human-item-steps ul {
   margin: 0;
-  padding-left: 14px;
+  padding-left: 16px;
 }
 
-.human-item-metadata dd {
-  min-width: 0;
-  margin: 0;
-  color: var(--foreground);
-  overflow-wrap: anywhere;
-}
-
-/* The engine's history of the item: plain rows, one style for every party. */
-.human-item-history h3 {
-  margin: 0 0 4px;
-  color: var(--muted-foreground);
-  font-size: 11.5px;
-  font-weight: 600;
-}
-
-.human-item-history ol {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 12.5px;
-  line-height: 18px;
+/* The whole body, scrolling within the pane when it is taller than the room left. */
+.human-item-detail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 19px;
 }
 
 .human-item-detail-actions {
@@ -2951,63 +2761,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-}
-
-/* A region of the layout under the list and the detail, not a sticky child of
-   either, so it shows with a detail open and is never scrolled away. Long
-   notices scroll here rather than taking the list's room. */
-.human-items-send {
-  display: grid;
-  flex: none;
-  gap: 6px;
-  max-height: 40vh;
-  padding: 8px 20px;
-  overflow: auto;
-  border-top: 1px solid var(--border);
-  background: var(--card);
-}
-
-.human-items-send-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.human-items-send-action {
-  box-sizing: border-box;
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--background);
-  font-size: 12px;
-}
-
-.human-items-send-action[data-primary="true"] {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-
-.human-items-send-more {
-  color: var(--muted-foreground);
-  font-size: 11.5px;
-}
-
-.human-items-not-sent {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 12px;
-  line-height: 17px;
-  overflow-wrap: anywhere;
-}
-
-.human-items-not-sent p {
-  margin: 0;
 }
 
 /*
@@ -3020,7 +2773,7 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   position: fixed;
   z-index: 40;
   right: 16px;
-  bottom: calc(16px + var(--send-room));
+  bottom: 16px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
@@ -3200,10 +2953,17 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     height: 36px;
   }
 
-  /* A card's actions take their own row, wrapping before they overlap. */
+  /* A card's actions take their own row, each tall enough for a thumb. */
   .human-item-card .otg-card__actions {
     flex-basis: 100%;
-    gap: 8px;
+    gap: 6px;
+  }
+
+  .human-item-action,
+  .human-item-tracker {
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 13px;
   }
 
   .human-items-page[data-detail-open="true"] .human-items-body {
@@ -3224,18 +2984,9 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     min-height: 44px;
   }
 
-  .human-items-send {
-    padding-right: 10px;
-    padding-left: 10px;
-  }
-
-  .human-items-send-action {
-    min-height: 44px;
-  }
-
   .human-items-toast {
     right: 0;
-    bottom: var(--send-room);
+    bottom: 0;
     left: 0;
     width: auto;
     border-width: 1px 0 0;
@@ -3276,144 +3027,4 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 }
 .remote-checks .check-failing td:nth-child(3)::after {
   content: " — failing";
-}
-
-/* A run still arriving: the quiet line, a stretch not held, and what stands in for it. */
-.history-loading {
-  position: fixed;
-  right: 24px;
-  bottom: 16px;
-  z-index: 40;
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  pointer-events: none;
-}
-
-.history-hatch {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  z-index: 40;
-  display: grid;
-  place-content: center;
-  pointer-events: none;
-  background: repeating-linear-gradient(
-    135deg,
-    var(--background) 0 6px,
-    color-mix(in srgb, var(--muted-foreground) 35%, var(--background)) 6px 12px
-  );
-}
-
-.history-hatch-label {
-  padding: 2px 4px;
-  border-radius: 4px;
-  background: var(--background);
-  color: var(--foreground);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-/* The frame is the app's plot's own classes; a bar sits where the app's span does. */
-.first-plot-bar {
-  position: absolute;
-  top: 0;
-  height: 20px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--primary) 70%, transparent);
-}
-
-.load-earlier {
-  display: block;
-  width: 100%;
-  min-height: 44px;
-  margin: 0 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--secondary);
-  color: var(--foreground);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-/* A finger needs the height above; a pointer does not, and a log wants its rows. */
-@media (min-width: 640px) {
-  .load-earlier {
-    min-height: 24px;
-    margin-bottom: 4px;
-    font-size: 12px;
-  }
-}
-
-/* Where the pages ran out: said once, quietly, above the node's first row. */
-.history-start {
-  margin: 0 0 12px;
-  color: var(--muted-foreground);
-  font-size: 13px;
-  text-align: center;
-}
-
-.read-failed {
-  display: grid;
-  gap: 12px;
-  justify-items: center;
-  max-width: 320px;
-  padding: 0 16px;
-  text-align: center;
-}
-
-.read-failed strong {
-  color: var(--destructive);
-  font-size: 16px;
-}
-
-.read-failed p {
-  margin: 0;
-  color: var(--foreground);
-  font-size: 14px;
-}
-
-.read-failed button {
-  min-height: 44px;
-  padding: 0 20px;
-  border-radius: 6px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.page-failed {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 12px;
-  color: var(--destructive);
-  font-size: 13px;
-}
-
-.loading-value {
-  color: var(--muted-foreground);
-  font-weight: 400;
-}
-
-/* The main column runs wider than a phone; its recovery control stays on screen. */
-.live-issue {
-  position: sticky;
-  left: 0;
-  max-width: calc(100vw - 96px);
-}
-
-/* At phone width the main column runs off the right edge, so the banner is held
-   to the screen; at its top, clear of the toasts that rise from its bottom. */
-@media (max-width: 640px) {
-  .live-issue {
-    position: fixed;
-    top: 0;
-    right: 0;
-    left: 0;
-    z-index: 50;
-    max-width: none;
-  }
 }

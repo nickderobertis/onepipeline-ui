@@ -17,10 +17,6 @@ const workflow = (name) =>
 // Version-free inputs: dero-skills 63e071b72420bd6737226a50cb8a7a7760cc73a4.
 // Figures, version 13: dero-skills afc6829981.
 const upstream = {
-  "scripts/coverage-unit.sh":
-    "0b22963921bc9e2c4d314ddb545ea847b1e59d74b5dec2af1b763db12e4d771d",
-  "scripts/coverage-merge.mjs":
-    "1fbe006859079d27738cefceddef22e1132c7932f1a6ee5cabc2f6eb265091ef",
   "scripts/nx-remote-cache.mjs":
     "21a6ba436f59d7bd21d1659bf928b0123a6ac0003d5993747e9f216b020d3526",
   "scripts/nx-version-free-inputs.mjs":
@@ -235,32 +231,42 @@ test("lint exclusions added for shared copies name only upstream-owned exact pat
     );
 });
 
-test("each coverage tier caches its one LCOV report and the aggregate re-merges every run", () => {
-  const nx = JSON.parse(readFileSync("nx.json", "utf8"));
-  const tiers = {
-    "project.json": "unit",
-    "tests/tiers/e2e/project.json": "e2e",
-    "tests/tiers/repo-tooling/project.json": "repo-tooling",
-    "tests/tiers/npm-launcher/project.json": "npm-launcher",
-    "tests/tiers/versions/project.json": "versions",
-  };
-  for (const [path, tier] of Object.entries(tiers)) {
-    const target = JSON.parse(readFileSync(path, "utf8")).targets.test;
-    assert.equal(target.command, `just _tier-test-covered ${tier}`, path);
-    assert.equal(target.cache, true, `${path} must cache its report`);
-    assert.deepEqual(
-      target.outputs,
-      [`{workspaceRoot}/target/coverage-units/${tier}.lcov`],
-      path,
-    );
-    assert.ok(
-      target.inputs.some((input) => String(input).startsWith("coverageTier")),
-      `${path} must key on the coverage-tier inputs`,
-    );
+test("coverage producers cannot replay profiles across Cargo package versions", () => {
+  const paths = execFileSync(
+    "git",
+    ["ls-files", "--", "project.json", "tests/tiers/*/project.json"],
+    { encoding: "utf8" },
+  )
+    .trim()
+    .split("\n");
+  const producers = [];
+  for (const path of paths) {
+    const project = JSON.parse(readFileSync(path, "utf8"));
+    for (const [name, target] of Object.entries(project.targets)) {
+      if (
+        !target.command?.includes("_tier-test-covered") &&
+        name !== "coverage"
+      )
+        continue;
+      assert.equal(
+        target.cache ??
+          JSON.parse(readFileSync("nx.json", "utf8")).targetDefaults[name]
+            ?.cache,
+        false,
+        `${project.name}:${name} must not reuse version-specific LLVM profiles`,
+      );
+      producers.push(`${project.name}:${name}`);
+    }
   }
-  assert.equal(nx.targetDefaults.coverage.cache, false);
-  assert.match(
-    readFileSync("justfile", "utf8"),
-    /--fail-under-lines 95\.29 --dir target\/coverage-units/,
+  assert.deepEqual(
+    producers.sort(),
+    [
+      "onepipeline-ui:test",
+      "onepipeline-ui-coverage:coverage",
+      "onepipeline-ui-e2e:test",
+      "onepipeline-ui-npm-launcher:test",
+      "onepipeline-ui-repo-tooling:test",
+      "onepipeline-ui-versions:test",
+    ].sort(),
   );
 });

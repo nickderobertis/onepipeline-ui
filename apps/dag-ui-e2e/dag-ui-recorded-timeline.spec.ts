@@ -5,11 +5,6 @@ import {
 } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import corpus from "./fixtures/timeline-recorded.json" with { type: "json" };
-import {
-  appPlot,
-  loadAllEarlierRows,
-  loadRunRecords,
-} from "./observatory-locators";
 import { SERVED_UI_URL } from "./playwright.config";
 
 const nodeUrl = `/?run=${corpus.run_id}&node=${corpus.node}`;
@@ -242,7 +237,6 @@ test("Overall ends at settlement and keeps the late completion as a marker", asy
       `End: ${expectedIdle[index]?.[1]}`,
     );
   }
-  await loadRunRecords(page);
   const late = page.getByRole("region", { name: "Records after execution" });
   await expect(late).toBeVisible();
   await late.getByRole("button", { name: /completion-requested/ }).click();
@@ -272,7 +266,6 @@ for (const terminal of corpus.terminations) {
     );
     expect(served.spans.every((span) => span.ended_at !== null)).toBe(true);
     await page.goto(`/?run=${run}&view=overall`);
-    await loadRunRecords(page);
     const late = page.getByRole("region", { name: "Records after execution" });
     for (const kind of [
       "completion-requested",
@@ -345,235 +338,6 @@ for (const terminal of corpus.terminations) {
   });
 }
 
-test("a node's unloaded history is hatched over exactly the rows its window left out, and goes once they are read", async ({
-  page,
-  request,
-}) => {
-  const replay = await import("./fixtures/timeline-retries.json", {
-    with: { type: "json" },
-  });
-  const fixture = replay.default;
-  const served = parseRunTimeline(
-    await (
-      await request.get(
-        `${SERVED_UI_URL}/api/v2/runs/${fixture.run_id}/timeline?scope=node&node=${fixture.node}`,
-      )
-    ).json(),
-  );
-  const answered = page.waitForResponse((response) => {
-    if (new URL(response.url()).pathname !== API_V2_PATHS.subscriptions)
-      return false;
-    return response.request().postDataJSON()?.view?.scope === "node";
-  });
-  await page.goto(`/?run=${fixture.run_id}&node=${fixture.node}`);
-  const subscribed = subscribedSchema.parse(await (await answered).json());
-  if (
-    subscribed.initial.type !== "snapshot" ||
-    subscribed.initial.snapshot.visible.type !== "timeline"
-  )
-    throw new Error("the node was not answered with a timeline snapshot");
-  const window = parseRunTimeline(subscribed.initial.snapshot.visible.timeline);
-  const held = new Set(
-    window.spans.flatMap((span) => span.events.map((event) => event.id)),
-  );
-  // What the window left out, as the complete document lists it.
-  const missing = served.spans
-    .flatMap((span) => span.events)
-    .filter((event) => !held.has(event.id))
-    .map((event) => Date.parse(event.at));
-  expect(missing.length).toBeGreaterThan(0);
-  // The app's own plot, once it has replaced the first screen's.
-  const plot = appPlot(page.getByRole("region", { name: "Node timeline" }));
-  await expect(plot).toBeVisible();
-  // llmlint: ignore-block[e2e_uses_accessible_selectors] a hatch is a drawn overlay with no role of its own; its words are read by text below, and its bounds are the data attributes the plot draws it from.
-  const hatches = page.locator(".history-hatch");
-  await expect(hatches.first()).toBeVisible();
-  const bounds = await hatches.evaluateAll((elements) =>
-    elements.map((element): [number, number] => [
-      Number(element.getAttribute("data-from")),
-      Number(element.getAttribute("data-to")),
-    ]),
-  );
-  // llmlint: ignore-end[e2e_uses_accessible_selectors]
-  for (const hatch of await hatches.all())
-    await expect(hatch).toContainText("Still loading");
-  // Every left-out row falls inside a hatch, so nothing unloaded reads as empty.
-  for (const at of missing)
-    expect(
-      bounds.some(([from, to]) => at >= from && at <= to),
-      `a row at ${new Date(at).toISOString()} outside every hatch ${JSON.stringify(bounds)}`,
-    ).toBe(true);
-  // Each hatch ends where the window's own rows begin, so nothing held is covered.
-  const heldStarts = new Set(
-    window.spans.flatMap((span) =>
-      span.events.length === 0 ? [] : [Date.parse(span.events[0]?.at ?? "")],
-    ),
-  );
-  for (const [, to] of bounds) expect(heldStarts.has(to)).toBe(true);
-  // And it is drawn on the plot, inside its width.
-  const area = await plot.boundingBox();
-  if (area === null) throw new Error("no plot");
-  for (const hatch of await hatches.all()) {
-    const box = await hatch.boundingBox();
-    if (box === null) throw new Error("a hatch with no box");
-    expect(box.width).toBeGreaterThan(0);
-    expect(box.x).toBeGreaterThanOrEqual(area.x - 1);
-    expect(box.x + box.width).toBeLessThanOrEqual(area.x + area.width + 1);
-  }
-  // Read back through the page's own control, nothing is left unloaded.
-  await loadAllEarlierRows(page);
-  await expect(hatches).toHaveCount(0);
-});
-
-/** Every page of a run's history the page asks for, as it asks. */
-function historyAsks(page: Page): URL[] {
-  const asked: URL[] = [];
-  page.on("request", (request) => {
-    const url = new URL(request.url());
-    if (url.pathname.endsWith("/timeline/events")) asked.push(url);
-  });
-  return asked;
-}
-
-/** The retries fixture's node, opened and drawn by the app itself. */
-async function openRetriesNode(page: Page) {
-  const replay = await import("./fixtures/timeline-retries.json", {
-    with: { type: "json" },
-  });
-  const fixture = replay.default;
-  await page.goto(`/?run=${fixture.run_id}&node=${fixture.node}`);
-  // The app's plot, so what follows acts on the app rather than on the first screen
-  // it replaces: a transcript focused before then loses its focus with the screen.
-  const plot = appPlot(page.getByRole("region", { name: "Node timeline" }));
-  await expect(plot).toBeVisible();
-  return { fixture, plot };
-}
-
-test("zooming a node's plot asks for that stretch of its rows, and a failed stretch recovers by Try again", async ({
-  page,
-}) => {
-  const asked = historyAsks(page);
-  let failed = 0;
-  // llmlint: ignore-block[e2e_not_mocked, tests_mirror_real_usage] the network boundary is the only doubled party: the first stretch read is answered 503 as a failing host answers it, and every other read reaches the real server.
-  await page.route("**/timeline/events?*", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.has("from") && failed === 0) {
-      failed += 1;
-      return route.fulfill({ status: 503, body: "unavailable" });
-    }
-    return route.continue();
-  });
-  // llmlint: ignore-end[e2e_not_mocked, tests_mirror_real_usage]
-  const { fixture, plot } = await openRetriesNode(page);
-  expect(asked.filter((url) => url.searchParams.has("from"))).toHaveLength(0);
-  // llmlint: ignore[e2e_uses_accessible_selectors] the plot's spans are positioned SVG geometry that no role or name carries; the journey only finds where one is drawn and then zooms there with the pointer, as a person does.
-  const shape = plot.locator('[data-timeline-shape="span"]').first();
-  const bounds = await shape.boundingBox();
-  if (bounds === null) throw new Error("the node's plot has no span drawn");
-  await page.mouse.move(
-    bounds.x + bounds.width / 2,
-    bounds.y + bounds.height / 2,
-  );
-  await page.keyboard.down("Control");
-  await page.mouse.wheel(0, -240);
-  await page.keyboard.up("Control");
-  await expect
-    .poll(() => asked.filter((url) => url.searchParams.has("from")).length)
-    .toBeGreaterThan(0);
-  const stretch = asked.find((url) => url.searchParams.has("from"));
-  expect(stretch?.searchParams.get("scope")).toBe("node");
-  expect(stretch?.searchParams.get("node")).toBe(fixture.node);
-  expect(Date.parse(stretch?.searchParams.get("from") ?? "")).toBeLessThan(
-    Date.parse(stretch?.searchParams.get("to") ?? ""),
-  );
-  // The failed read says so at the transcript's control, and Try again reads it.
-  const alert = page
-    .getByRole("region", { name: "Node transcript" })
-    .getByRole("alert");
-  await expect(alert).toContainText("Earlier rows did not load");
-  const before = asked.length;
-  await alert.getByRole("button", { name: "Try again" }).click();
-  await expect
-    .poll(() =>
-      asked
-        .slice(before)
-        .some(
-          (url) =>
-            url.searchParams.get("from") === stretch?.searchParams.get("from"),
-        ),
-    )
-    .toBe(true);
-  await expect(alert).toHaveCount(0);
-});
-
-test("scrolling a node's transcript up to its top asks for the rows before it and draws them", async ({
-  page,
-}) => {
-  const asked = historyAsks(page);
-  await openRetriesNode(page);
-  const transcript = page.getByRole("region", { name: "Node transcript" });
-  const rows = transcript.getByRole("article");
-  await expect(rows.first()).toBeVisible();
-  const shown = await rows.count();
-  const paged = () =>
-    asked.filter(
-      (url) =>
-        !url.searchParams.has("from") &&
-        !url.searchParams.has("span") &&
-        url.searchParams.get("scope") === "node",
-    ).length;
-  expect(paged()).toBe(0);
-  // Scrolled as a person scrolls, with the wheel over the transcript: down into
-  // the rows it opens on, then back up to its top.
-  await transcript.hover();
-  await expect(async () => {
-    await page.mouse.wheel(0, 600);
-    expect(
-      await transcript.evaluate((element) => element.scrollTop),
-    ).toBeGreaterThan(120);
-  }).toPass();
-  expect(paged()).toBe(0);
-  await expect(async () => {
-    await page.mouse.wheel(0, -2000);
-    expect(paged()).toBeGreaterThan(0);
-  }).toPass();
-  await expect.poll(() => rows.count()).toBeGreaterThan(shown);
-});
-
-// A transcript already at its top scrolls no further, so the browser reports no
-// scroll for a reader who wheels or keys up there again: the ask has to come from
-// that gesture itself, or a reader who reached the top while a page could not be
-// asked (CI run 42978308166) is left with no way to the rows before it.
-for (const [how, gesture] of [
-  ["wheels up", (page: Page) => page.mouse.wheel(0, -600)],
-  ["presses Home", (page: Page) => page.keyboard.press("Home")],
-] as const)
-  test(`a reader already at the transcript's top who ${how} is shown the rows before it`, async ({
-    page,
-  }) => {
-    const asked = historyAsks(page);
-    await openRetriesNode(page);
-    const transcript = page.getByRole("region", { name: "Node transcript" });
-    const rows = transcript.getByRole("article");
-    await expect(rows.first()).toBeVisible();
-    const shown = await rows.count();
-    const paged = () =>
-      asked.filter(
-        (url) =>
-          !url.searchParams.has("from") &&
-          !url.searchParams.has("span") &&
-          url.searchParams.get("scope") === "node",
-      ).length;
-    // Opened at its top, with nothing asked yet.
-    expect(await transcript.evaluate((element) => element.scrollTop)).toBe(0);
-    expect(paged()).toBe(0);
-    await transcript.hover();
-    await transcript.focus();
-    await gesture(page);
-    await expect.poll(paged).toBeGreaterThan(0);
-    await expect.poll(() => rows.count()).toBeGreaterThan(shown);
-  });
-
 test("retries, equal timestamps and repeated relays keep every record under its served identity", async ({
   page,
   request,
@@ -602,9 +366,6 @@ test("retries, equal timestamps and repeated relays keep every record under its 
   await expect(
     page.getByRole("region", { name: "Dispatch 3", exact: true }),
   ).toHaveCount(0);
-  // A node's first answer holds each span's latest rows, so the ones before them
-  // are read through the page's own control before every record is counted.
-  await loadAllEarlierRows(page);
   for (const button of await page
     .getByRole("button", { name: /more .* events/ })
     .all())
@@ -825,7 +586,6 @@ test("late edit panels show populated edit facts without adding work", async ({
     "Operation kinds": ["task-amended"],
   });
   await page.goto(`/?run=${run}&view=overall`);
-  await loadRunRecords(page);
   await page
     .getByRole("region", { name: "Records after execution" })
     .getByRole("button", { name: /edit-committed/ })
@@ -994,8 +754,6 @@ test("filtering every dispatch boundary and graph record preserves served groups
     .getByRole("group", { name: "Level of detail" })
     .getByRole("button", { name: "Detailed activity" })
     .click();
-  // Back on the detailed reading, the records before its window are asked for again.
-  await loadAllEarlierRows(page);
   await expect(
     page.getByRole("button", { name: "Open node-dispatched", exact: true }),
   ).toHaveCount(2);
@@ -1054,9 +812,6 @@ test("keeps the reading cursor when an open event's timeline is expanded", async
   });
   const cursor = timeline.getByLabel("Timeline cursor", { exact: true });
   await expect(cursor).toBeVisible();
-  // Scrolling to the top reads earlier rows, which move the reading: this journey is
-  // about the cursor over a transcript already held, so it holds it first.
-  await loadAllEarlierRows(page);
   const initialReading = await cursor.getAttribute("style");
   await worker
     .getByRole("button", { name: "Open gate-run", exact: true })

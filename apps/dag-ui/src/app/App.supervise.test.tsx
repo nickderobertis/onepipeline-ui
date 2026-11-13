@@ -93,8 +93,7 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
       name: /^Surface 2 message$/,
     });
     expect(checkIn).toHaveTextContent("check-in");
-    // A surface that holds nothing says only its kind: no badge says so.
-    expect(checkIn).not.toHaveTextContent("blocking");
+    expect(checkIn).toHaveTextContent("non-blocking");
     const gateQuestion = within(conversation).getByRole("group", {
       name: /^Surface 0 message$/,
     });
@@ -167,7 +166,7 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
     );
     const editor = within(composer).getByLabelText("Envelope (sent as typed)");
     const composedEnvelope = {
-      version: 4,
+      version: 3,
       commands: [
         {
           op: "note",
@@ -229,7 +228,7 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
     expect(offered).toContain("retitle");
     expect(offered).not.toContain("decline");
     const decline = {
-      version: 4,
+      version: 3,
       commands: [
         {
           op: "decline",
@@ -316,7 +315,7 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
     );
     await compose();
     const nodeEdit = {
-      version: 4,
+      version: 3,
       commands: [
         {
           op: "set-node-sets",
@@ -354,7 +353,7 @@ describe("supervising a run", JOURNEY_TIMEOUT, () => {
     expect(runList).toHaveTextContent("No overrides: sends an empty list.");
     await compose();
     const cleared = {
-      version: 4,
+      version: 3,
       commands: [{ op: "set-run-node-sets", sets: [] }],
     };
     expect(editor).toHaveValue(JSON.stringify(cleared, null, 2));

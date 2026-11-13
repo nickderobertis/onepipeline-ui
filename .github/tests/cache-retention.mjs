@@ -36,8 +36,6 @@ export const COPIES = [
     "scripts/actions-budget-figures.versions",
   ],
   ["scripts/nx-remote-cache.mjs", "scripts/nx-remote-cache.versions"],
-  ["scripts/coverage-unit.sh", "scripts/coverage-unit.versions"],
-  ["scripts/coverage-merge.mjs", "scripts/coverage-merge.versions"],
 ];
 const CLEANUP = "actions-cache-prune.mjs";
 const expression = (body) => `$${"{{"} ${body} }}`;

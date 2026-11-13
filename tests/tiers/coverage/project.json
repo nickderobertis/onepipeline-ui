@@ -36,8 +36,6 @@
         }
       ],
       "inputs": [
-        "{workspaceRoot}/project.json",
-        "{workspaceRoot}/tests/tiers/*/project.json",
         "apiServerSurface",
         "testTiers",
         "{workspaceRoot}/tests/**/*.rs",

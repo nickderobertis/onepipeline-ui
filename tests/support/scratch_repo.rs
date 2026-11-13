@@ -40,8 +40,6 @@ pub struct ScratchRepo {
     pub alias: String,
     /// The bare origin the checkout publishes to, which a kept branch is put on.
     pub origin: PathBuf,
-    /// The registered checkout itself: the lender every session's clone is cut from.
-    pub checkout: PathBuf,
     /// The git config every git call against it reads instead of this host's, and
     /// which a server driving a session in it is handed too: a host config that
     /// signs commits or installs hooks would otherwise decide what the engine's
@@ -248,39 +246,8 @@ fn seed_one(
     ScratchRepo {
         alias: registration.alias,
         origin,
-        checkout,
         gitconfig: gitconfig.to_path_buf(),
     }
-}
-
-/// Commit `script` as the repository's `.githooks/post-checkout` and publish it
-/// onto [`BASE_BRANCH`], as a repository that provisions its worktrees does.
-///
-/// `onevcs` gives a session's clone the `core.hooksPath` the lender's content
-/// expects — `.githooks`, where the lender carries one — so git runs this hook
-/// at the checkout of every session worktree cut afterwards, and `onevcs`
-/// records what it came to on that session's stream.
-#[cfg(unix)]
-pub fn commit_post_checkout(repo: &ScratchRepo, script: &str) {
-    use std::os::unix::fs::PermissionsExt;
-
-    let hooks = repo.checkout.join(".githooks");
-    std::fs::create_dir_all(&hooks).expect("the hooks directory");
-    let hook = hooks.join("post-checkout");
-    std::fs::write(&hook, script).expect("the post-checkout hook");
-    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))
-        .expect("chmod the post-checkout hook");
-    git(&repo.gitconfig, &repo.checkout, &["add", "-A"]);
-    git(
-        &repo.gitconfig,
-        &repo.checkout,
-        &["commit", "-m", "build: provision each worktree on checkout"],
-    );
-    git(
-        &repo.gitconfig,
-        &repo.checkout,
-        &["push", "origin", BASE_BRANCH],
-    );
 }
 
 /// Run git in `dir` under `gitconfig`, failing the journey on a refusal.
