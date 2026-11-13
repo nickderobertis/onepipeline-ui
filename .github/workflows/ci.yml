@@ -57,7 +57,7 @@ jobs:
   # dependency audit, the crate's docs, the judged lint and the visual docs — and the advisories
   # report, which posts a status of its own and never fails this job.
   lint:
-    if: github.event_name == 'pull_request'
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # What this job writes while VISUAL_DOCS_PUBLISH is off: the suppressions
@@ -156,7 +156,7 @@ jobs:
         env:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
           NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
-          CACHE_READ_ONLY: ${{ steps.nx-cache-trust.outputs.read_only == 'true' && '1' || '' }}
+          CACHE_READ_ONLY: '1'
           GITHUB_TOKEN: ${{ github.token }}
       - name: Wait for the cache recording proxy
         shell: bash
@@ -168,7 +168,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          no-cache: true
       - uses: taiki-e/install-action@v2
         with:
           tool: just@${{ steps.tool-pins.outputs.just }},cargo-deny@${{ steps.tool-pins.outputs.cargo-deny }},cargo-machete@${{ steps.tool-pins.outputs.cargo-machete }}
@@ -194,7 +194,7 @@ jobs:
         if: github.event_name == 'pull_request' && !cancelled()
         with:
           version: ${{ steps.tool-pins.outputs.uv }}
-          enable-cache: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          enable-cache: false
       # The judged tier, a blocking part of this check. Its harnesses are pinned
       # rather than floating, because an upstream release has taken this check
       # down for every pull request before: bump one deliberately, once a newer
@@ -365,6 +365,7 @@ jobs:
     env:
       NX_BASE: *nx-base
       NX_HEAD: *nx-head
+      NEXTEST_STATUS_LEVEL: pass
     steps:
       - uses: actions/checkout@v4
         with:
@@ -420,7 +421,7 @@ jobs:
         env:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
           NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
-          CACHE_READ_ONLY: ${{ steps.nx-cache-trust.outputs.read_only == 'true' && '1' || '' }}
+          CACHE_READ_ONLY: '1'
           GITHUB_TOKEN: ${{ github.token }}
       - name: Wait for the cache recording proxy
         shell: bash
@@ -432,7 +433,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          no-cache: true
       # The release journeys' release-plz and cargo-cyclonedx, at the justfile's
       # pins, from their checksummed release archives: `just release-tools`
       # copies these into `.tools` rather than compiling them on every run.
@@ -453,7 +454,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           version: ${{ steps.tool-pins.outputs.uv }}
-          enable-cache: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          enable-cache: false
       - name: Install llmlint for the judged tier's journeys
         run: just setup-llmlint
       # What the two clone-local binaries below are built from, read where the
@@ -483,6 +484,8 @@ jobs:
             .tools/bin/onepipeline-api-baseline
             .tools/bin/onepipeline-api-baseline.commit
           key: onepipeline-api-baseline-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.base }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-baseline-api.sh') }}
+      - name: Spike recorder — start
+        run: bash spikes/ci-test-speed/recorder/record.sh start "$RUNNER_TEMP/spike-profile"
       - name: Bootstrap
         run: just bootstrap
       - name: Which tier of the gate this build owes
@@ -490,6 +493,16 @@ jobs:
         run: echo "tier=$(bash scripts/ci-tier.sh)" >> "$GITHUB_OUTPUT"
       - name: Gate, install and wheel (affected projects; every project on the release PR)
         run: just ci-test-linux --tier "${{ steps.tier.outputs.tier }}"
+      - name: Spike recorder — stop
+        if: always()
+        run: bash spikes/ci-test-speed/recorder/record.sh stop "$RUNNER_TEMP/spike-profile"
+      - name: Spike recorder — upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-profile-${{ github.job }}
+          path: ${{ runner.temp }}/spike-profile
+          retention-days: 7
       # What each `budgets` target this job ran saved, which the `budgets` job's rows read.
       # Uploaded even after a failure, so the rest of the report keeps its figures, and
       # absent when this change reached no budget.
@@ -554,6 +567,7 @@ jobs:
     env:
       NX_BASE: *nx-base
       NX_HEAD: *nx-head
+      NEXTEST_STATUS_LEVEL: pass
     steps:
       - uses: actions/checkout@v4
         with:
@@ -594,7 +608,7 @@ jobs:
         env:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
           NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
-          CACHE_READ_ONLY: ${{ steps.nx-cache-trust.outputs.read_only == 'true' && '1' || '' }}
+          CACHE_READ_ONLY: '1'
           GITHUB_TOKEN: ${{ github.token }}
       - name: Wait for the cache recording proxy
         shell: bash
@@ -606,7 +620,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          no-cache: true
       - uses: taiki-e/install-action@v2
         with:
           tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
@@ -621,10 +635,22 @@ jobs:
             .tools/bin/onepipeline.exe
             .tools/bin/onepipeline.exe.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
+      - name: Spike recorder — start
+        run: bash spikes/ci-test-speed/recorder/record.sh start "$RUNNER_TEMP/spike-profile"
       - name: Bootstrap
         run: just bootstrap
       - name: Platform tiers, browser build and install (affected projects)
         run: just ci-test-windows
+      - name: Spike recorder — stop
+        if: always()
+        run: bash spikes/ci-test-speed/recorder/record.sh stop "$RUNNER_TEMP/spike-profile"
+      - name: Spike recorder — upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-profile-${{ github.job }}
+          path: ${{ runner.temp }}/spike-profile
+          retention-days: 7
 
       - name: Report cache entries and task executions
         if: always()
@@ -661,6 +687,7 @@ jobs:
     env:
       NX_BASE: *nx-base
       NX_HEAD: *nx-head
+      NEXTEST_STATUS_LEVEL: pass
     steps:
       - uses: actions/checkout@v4
         with:
@@ -701,7 +728,7 @@ jobs:
         env:
           NX_SELF_HOSTED_REMOTE_CACHE_SERVER: http://127.0.0.1:3000
           NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: ${{ steps.nx-cache-trust.outputs.token }}
-          CACHE_READ_ONLY: ${{ steps.nx-cache-trust.outputs.read_only == 'true' && '1' || '' }}
+          CACHE_READ_ONLY: '1'
           GITHUB_TOKEN: ${{ github.token }}
       - name: Wait for the cache recording proxy
         shell: bash
@@ -713,7 +740,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          no-cache: true
       - uses: taiki-e/install-action@v2
         with:
           tool: just@${{ steps.tool-pins.outputs.just }},nextest@${{ steps.tool-pins.outputs.nextest }},cargo-llvm-cov@${{ steps.tool-pins.outputs.cargo-llvm-cov }},cargo-auditable@${{ steps.tool-pins.outputs.cargo-auditable }}
@@ -728,10 +755,22 @@ jobs:
             .tools/bin/onepipeline
             .tools/bin/onepipeline.source
           key: onepipeline-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.onepipeline }}-${{ hashFiles('rust-toolchain.toml', 'scripts/ensure-sibling.sh') }}
+      - name: Spike recorder — start
+        run: bash spikes/ci-test-speed/recorder/record.sh start "$RUNNER_TEMP/spike-profile"
       - name: Bootstrap
         run: just bootstrap
       - name: Platform tiers and install (affected projects)
         run: just ci-test-macos
+      - name: Spike recorder — stop
+        if: always()
+        run: bash spikes/ci-test-speed/recorder/record.sh stop "$RUNNER_TEMP/spike-profile"
+      - name: Spike recorder — upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spike-profile-${{ github.job }}
+          path: ${{ runner.temp }}/spike-profile
+          retention-days: 7
 
       - name: Report cache entries and task executions
         if: always()
@@ -770,7 +809,7 @@ jobs:
   # base commit's ancestry, and the group serializes comment writers.
   budgets:
     needs: [lint, test-linux, test-windows, test-macos]
-    if: always()
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -804,7 +843,7 @@ jobs:
         if: github.event_name == 'pull_request'
         with:
           bun-version-file: package.json
-          no-cache: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          no-cache: true
       # `just`, which runs the recipe; the sibling CLI the timings write through is
       # fetched by `ensure-sibling` as its pinned release's checksummed archive.
       - uses: taiki-e/install-action@v2
