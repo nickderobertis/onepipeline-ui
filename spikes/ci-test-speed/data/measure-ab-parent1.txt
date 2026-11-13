@@ -1,0 +1,100 @@
+
+== test-linux (run 43399808950 attempt 1, job 131799559319, failure) wall 48.2 min
+   head 012661893cd1c0f540fc07761868c07dc31c5330  GITHUB_SHA 5d1df50ec7a38f7004c044422397ec9b7140a319  selection 59 task(s)  recorder linux, 86089 processes, 12 task roots
+   restore MISS Run Swatinem/rust-cache@v2.9.2 19 s
+   restore MISS Restore the sibling CLI 0 s
+   restore HIT  Restore the base commit's server 41 MB 2 s
+   Nx remote cache stored 0 bytes
+   minutes  share  category
+     12.3  25.5%  JavaScript tests and tooling (node)
+      7.5  15.6%  compile (plain)
+      6.3  13.0%  polls and timeouts (waits that ended by timing out)
+      4.5   9.3%  spawns: browsers
+      4.4   9.1%  compile (instrumented)
+      3.8   7.8%  other processes
+      2.2   4.6%  container (manylinux wheel build)
+      2.1   4.3%  sleeps
+      0.8   1.6%  server under test (onepipeline-api)
+      0.6   1.3%  setup
+      0.6   1.2%  spawns: Python (python, pip, uv, llmlint)
+      0.5   1.0%  recorder (measurement-only)
+      0.4   0.8%  bootstrap: polls and timeouts (waits that ended by timing out)
+      0.4   0.7%  bootstrap: compile (plain)
+      0.3   0.7%  cache restore
+      0.3   0.7%  shell, just and archive glue
+      0.3   0.6%  spawns: git
+      0.2   0.3%  bootstrap: JavaScript tests and tooling (node)
+      0.1   0.3%  Rust tests running (instrumented)
+      0.1   0.2%  spawns: onepipeline engine CLI
+     0.08   0.2%  Nx orchestration
+     0.08   0.2%  unattributed (runner time between steps)
+     0.07   0.1%  link (plain)
+     0.07   0.1%  report and upload
+     0.05   0.1%  link (instrumented)
+     0.05   0.1%  Rust tests running (plain)
+     0.04   0.1%  spawns: npm
+     0.03   0.1%  bootstrap: spawns: bun
+     0.02   0.1%  fixtures (fixture-building scripts)
+     0.02   0.0%  spawns: network clients (curl, gh)
+     0.01   0.0%  bootstrap: spawns: network clients (curl, gh)
+     0.01   0.0%  bootstrap: other processes
+     0.01   0.0%  bootstrap: shell, just and archive glue
+     0.01   0.0%  bootstrap: spawns: git
+     0.01   0.0%  bootstrap: unattributed (no recorded work running)
+     0.01   0.0%  unattributed (no recorded work running)
+     0.01   0.0%  coverage overhead (profdata, llvm-cov, merge)
+     0.01   0.0%  spawns: bun
+     0.00   0.0%  bootstrap: link (plain)
+     0.00   0.0%  bootstrap: sleeps
+     0.00   0.0%  bootstrap: spawns: Python (python, pip, uv, llmlint)
+     0.00   0.0%  bootstrap: spawns: onepipeline engine CLI
+      0.0   0.0%  cache save (post steps)
+     48.2 total (wall 48.2)
+   Nx tasks: inclusive / exclusive minutes
+     30.0    5.0  executed   dag-ui-read-latency:compile-release-server
+     23.0    3.8  failed     github-workflows-nx-cache:test
+     20.0    4.1  executed   onepipeline-ui-release:test-standalone
+     18.3    3.4  executed   dag-ui-e2e:test
+     17.8    3.0  executed   onepipeline-ui-repo-tooling:test
+     17.5    2.9  executed   onepipeline-ui:test
+     17.0    2.8  executed   onepipeline-ui-e2e:test
+     16.5    2.8  executed   dag-ui:build-api-server
+     11.0    1.8  executed   onepipeline-ui-npm-launcher:test
+      7.5    1.2  failed     report-job:test
+      5.1    0.8  failed     github-workflows:test
+      4.5    0.7  executed   onepipeline-ui:doc
+      4.4    1.6  executed   onepipeline-ui-release:test-staged
+      4.3    0.8  executed   onepipeline-ui-release:rehearse
+      4.3    4.3  executed   dag-ui-read-latency:test
+      3.8    0.8  executed   onepipeline-ui-ci-jobs:test
+      3.3    0.6  executed   onepipeline-ui:install-smoke
+      2.5    2.5  executed   onepipeline-ui-release:test
+      1.9    0.3  executed   onepipeline-ui:wheel-smoke
+      1.8    0.3  executed   dag-ui:test
+      1.2    0.2  executed   onepipeline-ui-judged-tier:test
+      1.2    0.2  executed   onepipeline-ui-release:tools
+      1.1    0.2  executed   github-workflows-installs:test
+      1.0    0.2  executed   onepipeline-ui-versions:test
+      0.8    0.1  executed   dag-ui-build-cache:test
+   critical chain: github-workflows:bootstrap 0.0 -> onepipeline-ui:ensure-sibling 0.0 -> onepipeline-ui:ensure-node-without-execve 0.0 -> github-workflows-judge-install:bootstrap 0.0 -> github-workflows-installs:bootstrap 0.0 -> dag-model:test 0.1 -> dag-ui-read-latency:compile-release-server 30.0 -> onepipeline-ui-release:rehearse 4.3 -> onepipeline-ui-release:test-staged 4.4 -> onepipeline-ui-release:test 2.5 -> dag-ui-read-latency:test 4.3 -> dag-ui-read-latency:budgets 0.0
+   slowest tests:
+    784.1 s  nextest onepipeline-ui::e2e linux_wheel::a_container_step_that_fails_is_named_with_its_action_and_its_files_are_still_handed_back
+    682.8 s  nextest onepipeline-ui::e2e linux_wheel::a_hand_back_that_fails_fails_a_build_that_compiled
+    680.8 s  nextest onepipeline-ui::e2e linux_wheel::docker_that_cannot_run_the_image_exits_one_naming_it
+    678.3 s  nextest onepipeline-ui::e2e linux_wheel::every_linux_target_the_release_builds_is_handed_to_its_own_manylinux_image
+    603.8 s  node  a whole release against registry doubles
+    404.6 s  node  from nothing published, it ends with every artifact it builds published
+    277.7 s  node  the split tiers run exactly the tests the original targets ran
+    270.2 s  node  the warmer compiles what each OS's pull-request jobs compile, and nothing else
+    260.6 s  node  publication against registry doubles
+    252.0 s  playwright  apps/dag-ui-e2e/read-latency/read-latency.spec.ts:543:1 › Action items follows the CLI's writes on the stream it already holds, filtered or not
+    244.9 s  node  the build-linux recipe, with publication in its dry-run mode
+    227.4 s  node  each declared file input rule moves every task that reads its probe
+    222.4 s  nextest onepipeline-ui::e2e ci_jobs::a_job_runs_what_it_selects_and_a_failing_target_fails_it
+    136.8 s  node  over v0.40.0's wheels and npm platform package, it ends with every artifact it builds published
+    129.8 s  node  semantic manifest inputs retain the recorded base's real Nx affected selections
+    110.0 s  nextest onepipeline-ui::e2e nx_affected::every_change_selects_the_judged_diff_lint_and_it_selects_nothing_else
+     99.8 s  node  manifest text checks invalidate on whitespace and package-version bytes while semantic consumers replay
+     98.3 s  nextest onepipeline-ui::e2e live::every_appended_record_patches_each_view_into_what_a_fresh_read_serves
+     97.0 s  node  the build-linux recipe, over staged files that do not install
+     96.6 s  nextest onepipeline-ui::e2e nx_affected::a_change_to_what_the_toolchain_journeys_read_selects_them_and_nothing_else_does
