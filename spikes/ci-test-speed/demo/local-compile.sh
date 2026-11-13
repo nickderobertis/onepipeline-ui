@@ -20,6 +20,9 @@ plain | instrumented) ;;
   ;;
 esac
 cd "$checkout"
+# Cold means no compile cache either: an empty wrapper overrides any
+# `build.rustc-wrapper` (such as a host-wide sccache) a cargo config sets.
+export RUSTC_WRAPPER="" CARGO_BUILD_RUSTC_WRAPPER=""
 rm -rf "$target"
 mkdir -p "$target"
 if [ "$mode" = instrumented ]; then
