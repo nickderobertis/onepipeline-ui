@@ -55,7 +55,9 @@ function watchFailures(page: Page): {
 test("draws each command step with its kind and outcome, and shows the edit the plan-edit hook refused", async ({
   page,
 }) => {
-  server = await startFixtureServer("command-steps", ["--command-steps-corpus"]);
+  server = await startFixtureServer("command-steps", [
+    "--command-steps-corpus",
+  ]);
   const { origin } = server;
   const { run, hook } = factsSchema.parse(server.facts);
   const { thrown, unanswered } = watchFailures(page);
@@ -99,7 +101,9 @@ test("draws each command step with its kind and outcome, and shows the edit the 
 test("opens a command step to what it ran, how it ended and the end of its log", async ({
   page,
 }) => {
-  server = await startFixtureServer("command-steps", ["--command-steps-corpus"]);
+  server = await startFixtureServer("command-steps", [
+    "--command-steps-corpus",
+  ]);
   const { origin } = server;
   const { run, logs } = factsSchema.parse(server.facts);
   const { thrown, unanswered } = watchFailures(page);
@@ -114,10 +118,13 @@ test("opens a command step to what it ran, how it ended and the end of its log",
     await expect(command).toContainText(outcome ?? state);
     await expect(command).toContainText(`commands/${node}.log`);
     const log = logs[node];
-    if (log === undefined) throw new Error(`the corpus wrote no log for ${node}`);
+    if (log === undefined)
+      throw new Error(`the corpus wrote no log for ${node}`);
     // The log's last line, as the command wrote it.
     const lastLine = log.trimEnd().split("\n").at(-1) ?? "";
-    await expect(command.getByLabel("Command log")).toContainText(lastLine);
+    await expect(
+      command.getByRole("figure", { name: "Command log" }),
+    ).toContainText(lastLine);
   }
 
   // The failed step's view leads with its outcome before the command's own words.

@@ -3476,3 +3476,12 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.node-command-log-figure {
+  margin: 8px 0 0;
+}
+
+.node-command-log-figure figcaption {
+  font-size: 12px;
+  font-weight: 600;
+}

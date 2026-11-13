@@ -16,7 +16,9 @@ export function RejectedEdits({
   return (
     <section aria-labelledby="rejected-edits-title" className="rejected-edits">
       <h2 id="rejected-edits-title">
-        {edits.length === 1 ? "1 refused edit" : `${edits.length} refused edits`}
+        {edits.length === 1
+          ? "1 refused edit"
+          : `${edits.length} refused edits`}
       </h2>
       <ol>
         {edits.map((edit) => (

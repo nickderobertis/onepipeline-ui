@@ -1179,9 +1179,12 @@ function NodeCommandPanel({ node }: { readonly node: NodeView }) {
         </div>
       </dl>
       {log?.content !== undefined ? (
-        <pre aria-label="Command log" className="node-command-log">
-          {log.truncated === true ? `…${log.content}` : log.content}
-        </pre>
+        <figure className="node-command-log-figure">
+          <figcaption>Command log</figcaption>
+          <pre className="node-command-log">
+            {log.truncated === true ? `…${log.content}` : log.content}
+          </pre>
+        </figure>
       ) : (
         log !== undefined && (
           <p className="node-command-log-missing">
