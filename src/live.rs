@@ -1041,9 +1041,6 @@ impl LiveRun {
                 .any(|event| event.labels.node.as_deref() == Some(node.as_str()))
     }
 
-    /// Hold every record `node`'s timeline under `filter` draws whole: what a heads
-    /// read's node screen reads of it, fetched, and otherwise the node's every record,
-    /// for a reading that holds only some of them.
     /// Hold every record of the node `owner` names whole, for a page of its history
     /// before the complete read ends, by fetching what a heads reading holds as heads;
     /// whether the reading now holds them. `false` for any other owner, and for a
@@ -1070,6 +1067,9 @@ impl LiveRun {
         }
     }
 
+    /// Hold every record `node`'s timeline under `filter` draws whole: what a heads
+    /// read's node screen reads of it, fetched, and otherwise the node's every record,
+    /// for a reading that holds only some of them.
     fn hold_node_share(&mut self, node: &NodeId, filter: &EventFilter) {
         if self.complete() || self.indexed.holds_share(node.as_str()) {
             return;

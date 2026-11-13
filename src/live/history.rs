@@ -103,8 +103,9 @@ fn scope_of(owner: &PageOwner) -> TimelineScope {
 
 fn check_node(run: &LiveRun, owner: &PageOwner) -> Result<(), ApiError> {
     if let PageOwner::Node(node) | PageOwner::RunNode(node) = owner {
-        let plan = payload::first_detail(&run.view)["graph"]["plan"].clone();
-        if !run.knows_node(node, &plan) {
+        // The plan's tasks read off the plan itself rather than the detail built
+        // from it, which a page has no other use for.
+        if !(payload::plan_names(&run.view, node.as_str()) || run.knows_node(node, &Value::Null)) {
             return Err(ApiError::NodeNotFound(node.clone()));
         }
     }
@@ -149,8 +150,10 @@ fn from_selected(
             limit: query.limit.get(),
         },
     };
-    let built = LiveTimeline::build(
-        &run.view,
+    // A page's records are lent to its build rather than copied, as a first
+    // answer's are.
+    let built = LiveTimeline::build_lending(
+        &mut run.view,
         indexed,
         &run.declared,
         scope,
