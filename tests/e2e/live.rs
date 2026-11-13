@@ -2990,6 +2990,86 @@ fn a_page_starts_its_runs_opening_and_its_subscription_answers_as_ever() {
     );
 }
 
+/// Pages naming runs open each run once however often they are asked for, and at most
+/// two runs ahead of their subscriptions at once; an opening nobody took is let go after
+/// its hold, which makes room for another, and the subscription that comes after it
+/// opens the run itself.
+#[test]
+fn pages_open_each_run_once_two_at_a_time_and_an_untaken_opening_is_let_go() {
+    let runs = [
+        "run-20260807-prep01",
+        "run-20260807-prep02",
+        "run-20260807-prep03",
+    ];
+    let hold = (onepipeline_ui::live::PREPARED_HOLD_ENV, "1500");
+    let live = Live::start_with_args(
+        |root| {
+            for run in runs {
+                growing_run(root, run);
+            }
+        },
+        &[hold],
+        &["--ui"],
+    );
+    let page = |run: &str| {
+        let page = http::get_raw(live.address(), &format!("/?run={run}&view=overall"));
+        assert_eq!(page.status, 200, "{run}");
+    };
+    let prepared = || -> Vec<Value> {
+        live.traced()
+            .into_iter()
+            .filter_map(|line| line.get("prepared").cloned())
+            .collect()
+    };
+    let until = |what: &str, done: &dyn Fn(&[Value]) -> bool| -> Vec<Value> {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let seen = prepared();
+            if done(&seen) {
+                return seen;
+            }
+            assert!(Instant::now() < deadline, "{what}: {seen:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+
+    // The first run asked for twice, then a second and a third, all at once.
+    page(runs[0]);
+    page(runs[0]);
+    page(runs[1]);
+    page(runs[2]);
+    until("the first two runs opened", &|seen| seen.len() >= 2);
+    std::thread::sleep(Duration::from_millis(300));
+    // The two open beside each other, so either may finish first.
+    let mut first = prepared();
+    first.sort_by_key(ToString::to_string);
+    assert_eq!(
+        first,
+        [json!(runs[0]), json!(runs[1])],
+        "each run once, and no third while two are held"
+    );
+
+    // Once the hold lets the untaken openings go, a third run's page opens it.
+    let seen = until(
+        "the third run opened once the others were let go",
+        &|seen| {
+            page(runs[2]);
+            seen.contains(&json!(runs[2]))
+        },
+    );
+    assert_eq!(seen.len(), 3, "{seen:?}");
+    assert_eq!(seen[2], json!(runs[2]));
+    // The first run's opening was let go, so its subscription opens it itself.
+    let answer = live.subscribe(&json!({ "view": { "type": "detail", "run_id": runs[0] } }));
+    assert_eq!(answer["initial"]["snapshot"]["visible"]["type"], "detail");
+    let unprepared: Vec<Value> = live
+        .traced()
+        .into_iter()
+        .filter_map(|line| line.get("unprepared").cloned())
+        .collect();
+    assert_eq!(unprepared, [json!(runs[0])]);
+}
+
 /// Copy a directory, so two servers read the same records.
 fn copy_run(from: &Path, to: &Path) {
     fs::create_dir_all(to).expect("a run directory");
@@ -3904,6 +3984,58 @@ fn a_nodes_window_that_cannot_be_fetched_is_read_as_its_share_instead() {
     // Its heads were read and their records fetched; the window's fetch was not made.
     assert!(traced["heads_ms"].is_number(), "{traced}");
     assert!(traced["fetched"].is_u64(), "{traced}");
+}
+
+/// A page of a node's history asked for before the rest, from a reading opened as the
+/// run's heads, whose records include one that cannot be fetched — a line rewritten
+/// under the heads read — reads the node's share apart instead, so the page, and the
+/// one after it, are the pages a server reading the journal whole serves.
+#[test]
+fn a_page_before_the_rest_whose_records_cannot_be_fetched_reads_its_share_instead() {
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::NODE_ID;
+    let hold = (onepipeline_ui::live::COMPLETE_READ_HOLD_ENV, "120000");
+    let whole_read = u64::MAX.to_string();
+    let after = [unreadable_message(run, "[]")];
+    let headed = Live::start_with(|root| distinct_long_run_then(root, run, &after), &[hold]);
+    let whole = Live::start_with(
+        |root| distinct_long_run_then(root, run, &after),
+        &[hold, (onepipeline_ui::live::WHOLE_READ_ENV, &whole_read)],
+    );
+    // Overall reads a turn's message as its head, so this first answer fetches none
+    // of the unreadable record.
+    let overall = json!({ "view": { "type": "timeline", "run_id": run, "scope": "run" } });
+    headed.subscribe(&overall);
+    whole.subscribe(&overall);
+    let traced = headed
+        .first_answers()
+        .last()
+        .cloned()
+        .expect("a first answer");
+    assert!(
+        traced["heads_ms"].is_number(),
+        "read as its heads: {traced}"
+    );
+
+    let page = |live: &Live, cursor: Option<&str>| -> Value {
+        let mut path = format!("/api/v2/runs/{run}/timeline/events?scope=node&node={node}&limit=3");
+        if let Some(cursor) = cursor {
+            path.push_str(&format!("&cursor={cursor}"));
+        }
+        let answer = http::get(live.address(), &path);
+        assert_eq!(answer.status, 200, "{path}: {}", answer.body);
+        unstamped(answer.json())
+    };
+    let mine = page(&headed, None);
+    let theirs = page(&whole, None);
+    same_first_answer(&mine, &theirs, "the node's page over an unfetchable record");
+    assert!(!mine["rows"].as_array().expect("rows").is_empty(), "{mine}");
+    let next = mine["next_cursor"].as_str().expect("an older page");
+    same_first_answer(
+        &page(&headed, Some(next)),
+        &page(&whole, Some(next)),
+        "the node's next page",
+    );
 }
 
 /// A long run's first answers, Graph's, Overall's and a node's, fetch whole only the

@@ -114,7 +114,11 @@ pub const TRACE_ENV: &str = "ONEPIPELINE_UI_LIVE_TRACE";
 
 /// How long a run opened for a page's document is kept for the subscription that
 /// page makes: a page that never subscribes lets it go then.
-const PREPARED_HOLD: Duration = Duration::from_secs(30);
+pub const PREPARED_HOLD: Duration = Duration::from_secs(30);
+
+/// The environment variable that sets [`PREPARED_HOLD`] in milliseconds, for a
+/// journey that watches an opening nobody took be let go.
+pub const PREPARED_HOLD_ENV: &str = "ONEPIPELINE_UI_PREPARED_HOLD_MS";
 
 /// The most runs opened ahead of their subscriptions at once: a document is cheap
 /// to ask for and a long run's opening is not, so asking for many does not open many.
@@ -144,6 +148,8 @@ struct Shared {
     /// that page makes ([`Hub::prepare`]). Held only to look one up, and never with
     /// another lock.
     prepared: Mutex<HashMap<RunId, Arc<Prepared>>>,
+    /// How long a run opened ahead is kept for its subscription.
+    prepared_hold: Duration,
     /// The human-item views subscriptions show. Taken where a run is — after the
     /// sidebar and before the state — and held across the engine's reads of it,
     /// so two looks never send one change twice.
@@ -1446,6 +1452,10 @@ impl Hub {
             looking: Mutex::new(()),
             runs: Mutex::new(HashMap::new()),
             prepared: Mutex::new(HashMap::new()),
+            prepared_hold: std::env::var(PREPARED_HOLD_ENV)
+                .ok()
+                .and_then(|ms| ms.parse().ok())
+                .map_or(PREPARED_HOLD, Duration::from_millis),
             human_items: Mutex::new(HumanItemsReading::default()),
             polling: AtomicBool::new(false),
             trace: std::env::var_os(TRACE_ENV).map(PathBuf::from),
@@ -1882,7 +1892,7 @@ impl Hub {
             .name("prepare-run".to_owned())
             .spawn(move || {
                 let _ = hub.open_prepared(&opening, &run, node.as_ref());
-                std::thread::sleep(PREPARED_HOLD);
+                std::thread::sleep(hub.0.prepared_hold);
                 lock(&hub.0.prepared).retain(|_, held| !Arc::ptr_eq(held, &opening));
             });
         if spawned.is_err() {
