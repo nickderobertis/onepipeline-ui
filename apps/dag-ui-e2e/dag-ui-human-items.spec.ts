@@ -512,9 +512,50 @@ function recordRequests(page: Page) {
   };
   page.on("requestfinished", ended);
   page.on("requestfailed", ended);
+  // The subscriptions the page created, in order, and how many creations are
+  // still unanswered: a replaced view closes its stream, creates, then opens the
+  // new one, and the browser's word that the old stream ended can come after
+  // the creation, so one stream open is not yet the stream the page stands on.
+  const isCreation = (request: Request) =>
+    request.method() === "POST" &&
+    new URL(request.url()).pathname === "/api/v2/subscriptions";
+  const created: string[] = [];
+  let creating = 0;
+  page.on("request", (request) => {
+    if (isCreation(request)) creating += 1;
+  });
+  page.on("requestfinished", async (request) => {
+    if (!isCreation(request)) return;
+    try {
+      const answer = await request.response();
+      const body = z
+        .object({ subscription: z.string() })
+        .safeParse(await answer?.json());
+      if (body.success) created.push(body.data.subscription);
+    } finally {
+      creating -= 1;
+    }
+  });
+  page.on("requestfailed", (request) => {
+    if (isCreation(request)) creating -= 1;
+  });
   return {
     requests,
     streams,
+    /**
+     * Whether the page holds one stream, and it is the stream of the last
+     * subscription it created, with no creation still out: the point after
+     * which every request it sends is one a journey caused.
+     */
+    standing: () => {
+      const [open, ...more] = streams;
+      return (
+        creating === 0 &&
+        open !== undefined &&
+        more.length === 0 &&
+        new URL(open.url()).searchParams.get("subscription") === created.at(-1)
+      );
+    },
     /** Every `GET` the page sent to a human-item route. */
     humanItemReads: () =>
       requests.filter(
@@ -1815,43 +1856,53 @@ test("ending its run retires the items holding that run's work, and leaves host 
   ).toHaveText(/^Resolved by the manager · \d+ \w+ ago$/u);
 });
 
-test("ten sessions see the host queue, and each answer reaches only its owner's watch", async ({
-  page,
-}) => {
-  const served = await serveWorld("sessions");
-  const facts = factsOf(served);
-  const sessions = facts.sessions ?? [];
-  expect(sessions).toHaveLength(10);
-  for (const session of sessions) watch(served, session);
-  for (const session of sessions) {
-    await actAs(served, session);
-    const list = await open(page, served);
-    const own = listed(served, ["--session", session]).map(
-      ({ item }) => item.title,
-    );
-    expect(own).toHaveLength(2);
-    await expect
-      .poll(() => titles(list))
-      .toEqual(listed(served).map(({ item }) => item.title));
-    const question = `Which day should ${session} ship?`;
-    await answerBox(page, question).fill("Thursday");
-    await sendAnswers(page);
-    await expect(card(page, question)).toHaveCount(0);
-    const id = idOf(served, `${session}-question`);
-    expect(stored(served, id).resolution).toEqual({
-      actor: `browser:session:${session}`,
-      on_behalf_of: null,
-      text: "Thursday",
-      reason: null,
-      // A person at the page is the user, whichever session the server acts as.
-      provenance: "user",
-    });
-    for (const other of sessions)
-      expect(watch(served, other)).toEqual(
-        other === session ? [["human-item-answered", id]] : [],
+/**
+ * Ten sessions, each answering its own question from the host queue.
+ *
+ * Five journeys of two answering sessions each, over the same ten-session
+ * world, the five together answering as every session: each answer is still
+ * held against all ten watches. Ten answers in one journey — a server restart,
+ * a page and a dozen CLI reads apiece — ran past its time limit on a loaded CI
+ * runner.
+ */
+for (const first of [0, 2, 4, 6, 8])
+  test(`ten sessions see the host queue, and each answer reaches only its owner's watch: sessions ${first} and ${first + 1} answer`, async ({
+    page,
+  }) => {
+    const served = await serveWorld("sessions");
+    const facts = factsOf(served);
+    const sessions = facts.sessions ?? [];
+    expect(sessions).toHaveLength(10);
+    for (const session of sessions) watch(served, session);
+    for (const session of sessions.slice(first, first + 2)) {
+      await actAs(served, session);
+      const list = await open(page, served);
+      const own = listed(served, ["--session", session]).map(
+        ({ item }) => item.title,
       );
-  }
-});
+      expect(own).toHaveLength(2);
+      await expect
+        .poll(() => titles(list))
+        .toEqual(listed(served).map(({ item }) => item.title));
+      const question = `Which day should ${session} ship?`;
+      await answerBox(page, question).fill("Thursday");
+      await sendAnswers(page);
+      await expect(card(page, question)).toHaveCount(0);
+      const id = idOf(served, `${session}-question`);
+      expect(stored(served, id).resolution).toEqual({
+        actor: `browser:session:${session}`,
+        on_behalf_of: null,
+        text: "Thursday",
+        reason: null,
+        // A person at the page is the user, whichever session the server acts as.
+        provenance: "user",
+      });
+      for (const other of sessions)
+        expect(watch(served, other)).toEqual(
+          other === session ? [["human-item-answered", id]] : [],
+        );
+    }
+  });
 
 test("an item whose body is longer than four lines shows four on its card and all of it in a pane that scrolls on its own", async ({
   page,
@@ -2140,7 +2191,7 @@ test("an open page follows what the CLI writes, reads nothing to do it, and hold
   const list = await open(page, served);
   const filters = page.getByRole("group", { name: "Filter action items" });
   // The opening: what the page asked for once it stood on its stream.
-  await expect.poll(() => seen.streams.size).toBe(1);
+  await expect.poll(() => seen.standing()).toBe(true);
   const opening = seen.requests.length;
 
   // Unfiltered: raised, answered, completed and dismissed elsewhere, each seen
@@ -2169,7 +2220,7 @@ test("an open page follows what the CLI writes, reads nothing to do it, and hold
   await filters.getByLabel("Kind", { exact: true }).selectOption("question");
   await replaced;
   await expect.poll(() => titles(list)).toEqual(QUESTIONS);
-  await expect.poll(() => seen.streams.size).toBe(1);
+  await expect.poll(() => seen.standing()).toBe(true);
   const filtered = seen.requests.length;
   const excluded = "A task this filter excludes";
   const excludedId = raise(served, excluded, "task");
@@ -2193,7 +2244,7 @@ test("an open page follows what the CLI writes, reads nothing to do it, and hold
   await expect(pane.getByRole("heading", { level: 2 })).toHaveText(
     resolvedElsewhere,
   );
-  await expect.poll(() => seen.streams.size).toBe(1);
+  await expect.poll(() => seen.standing()).toBe(true);
   const detailed = seen.requests.length;
   cli(served, ["human-items", "answer", resolvedId, "--text", "Handled"]);
   await expect(metadataOf(pane, "State")).toHaveText("Answered");
@@ -2206,7 +2257,7 @@ test("an open page follows what the CLI writes, reads nothing to do it, and hold
   await expect(pane).toHaveCount(0);
 
   // A write from this page: its one POST, and its result arrives on the stream.
-  await expect.poll(() => seen.streams.size).toBe(1);
+  await expect.poll(() => seen.standing()).toBe(true);
   const beforeWrite = seen.requests.length;
   await answerBox(page, LAST_QUESTION).fill("Reuse it");
   await sendAnswers(page);
@@ -2224,7 +2275,7 @@ test("an open page follows what the CLI writes, reads nothing to do it, and hold
   const recreated = subscribedTo(page, { kind: "question" });
   await page.getByRole("button", { name: "Refresh" }).click();
   await recreated;
-  await expect.poll(() => seen.streams.size).toBe(1);
+  await expect.poll(() => seen.standing()).toBe(true);
   await expect
     .poll(() => seen.requests.slice(beforeRefresh).map(({ method }) => method))
     .toEqual(expect.arrayContaining(["POST", "GET"]));
