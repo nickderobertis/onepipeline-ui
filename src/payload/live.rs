@@ -87,7 +87,12 @@ pub(crate) struct Indexed {
     /// Each record's position in the canonical store — the store with every
     /// repeated producer identity counted once — or `None` for a repetition.
     canonical: Vec<Option<usize>>,
-    identities: HashSet<(String, u64)>,
+    /// Each producer identity met, as its stream's number in `streams` and its
+    /// `seq`: a long run's records are of a few thousand streams, so a record
+    /// already met, or one of a stream already met, is checked without a copy of
+    /// its stream's name.
+    identities: HashSet<(usize, u64)>,
+    streams: HashMap<String, usize>,
     canonical_len: usize,
     /// The records that name no node, by merged-store index.
     run: Vec<usize>,
@@ -203,8 +208,15 @@ impl Indexed {
         let mut touched = Touched::default();
         for (index, event) in view.events.iter().enumerate().skip(first) {
             touched.records += 1;
-            let identity = (event.stream.clone(), event.seq);
-            if self.identities.insert(identity) {
+            let stream = match self.streams.get(event.stream.as_str()) {
+                Some(&stream) => stream,
+                None => {
+                    let stream = self.streams.len();
+                    self.streams.insert(event.stream.clone(), stream);
+                    stream
+                }
+            };
+            if self.identities.insert((stream, event.seq)) {
                 self.canonical.push(Some(self.canonical_len));
                 self.canonical_len += 1;
             } else {
@@ -251,7 +263,9 @@ impl Indexed {
                         }
                     };
                     self.nodes[at].1.push(index);
-                    touched.nodes.insert(node.to_owned());
+                    if !touched.nodes.contains(node) {
+                        touched.nodes.insert(node.to_owned());
+                    }
                 }
             }
         }
@@ -487,8 +501,14 @@ impl LiveTimeline {
                 )
                 .collect(),
         };
+        // A node's share, read once for its spans and its harness sessions both.
+        let mut held = None;
         for owner in owners {
-            let pre = self.share(view, indexed, declared, &owner);
+            let share = indexed.canonical_share(view, &owner);
+            let pre = self.share_of(view, declared, &owner, &share);
+            if matches!(self.scope, TimelineScope::Node(_)) {
+                held = Some(share);
+            }
             let start = spans.len();
             self.slots.push(Slot {
                 owner,
@@ -511,7 +531,7 @@ impl LiveTimeline {
             ("spans".to_owned(), Value::Array(spans)),
         ]));
         let owned = payload["spans"].as_array().map_or(0, Vec::len);
-        payload = self.harnessed(view, indexed, payload, agents);
+        payload = self.harnessed_over(view, indexed, payload, agents, held);
         self.harness = payload["spans"].as_array().map_or(0, Vec::len) - owned;
         payload
     }
@@ -562,8 +582,19 @@ impl LiveTimeline {
         declared: &DeclaredMembers,
         owner: &Owner,
     ) -> Vec<Value> {
-        let (events, positions) = indexed.canonical_share(view, owner);
-        let run = Run::of(view).share(&events, &positions);
+        self.share_of(view, declared, owner, &indexed.canonical_share(view, owner))
+    }
+
+    /// [`Self::share`] over `owner`'s records as [`Indexed::canonical_share`] read
+    /// them.
+    fn share_of(
+        &self,
+        view: &RunView,
+        declared: &DeclaredMembers,
+        owner: &Owner,
+        (events, positions): &(Vec<Envelope>, Vec<usize>),
+    ) -> Vec<Value> {
+        let run = Run::of(view).share(events, positions);
         let node;
         let share = match (&self.scope, owner) {
             (TimelineScope::Node(scope), _) => Share::NodeScope(scope),
@@ -603,6 +634,18 @@ impl LiveTimeline {
         payload: Value,
         agents: Option<&onepipeline::agents::Agents>,
     ) -> Value {
+        self.harnessed_over(view, indexed, payload, agents, None)
+    }
+
+    /// [`Self::harnessed`], over the node's share where the caller already read it.
+    fn harnessed_over(
+        &self,
+        view: &RunView,
+        indexed: &Indexed,
+        payload: Value,
+        agents: Option<&onepipeline::agents::Agents>,
+        held: Option<(Vec<Envelope>, Vec<usize>)>,
+    ) -> Value {
         let Some(agents) = agents else {
             return payload;
         };
@@ -612,8 +655,9 @@ impl LiveTimeline {
             }
             TimelineScope::RunShare | TimelineScope::NodeShare(_) => payload,
             TimelineScope::Node(node) => {
-                let (events, positions) =
-                    indexed.canonical_share(view, &Owner::Node(node.as_str().to_owned()));
+                let (events, positions) = held.unwrap_or_else(|| {
+                    indexed.canonical_share(view, &Owner::Node(node.as_str().to_owned()))
+                });
                 timeline_harnesses_over(
                     payload,
                     &Run::of(view).share(&events, &positions),

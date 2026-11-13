@@ -6224,18 +6224,21 @@ fn stamp_dispatch_groups(view: &Run<'_>, node: &str, payload: &mut Value) {
                 group = *owners.first().expect("one owner");
             }
         }
-        record_groups.insert(
-            format!("{}.{}", event.stream, event.seq),
-            presentation(group, role),
-        );
+        record_groups.insert(format!("{}.{}", event.stream, event.seq), (group, role));
     }
+    // Each group's presentation is built once, the first time a span's event
+    // names it: a long node holds thousands of records in a handful of groups.
+    let mut presented: BTreeMap<(usize, DispatchRole), Value> = BTreeMap::new();
     for span in spans {
         for event in span["events"].as_array_mut().into_iter().flatten() {
-            if let Some(group) = event["record_id"]
+            if let Some(&(group, role)) = event["record_id"]
                 .as_str()
                 .and_then(|id| record_groups.get(id))
             {
-                event["dispatch_group"] = group.clone();
+                event["dispatch_group"] = presented
+                    .entry((group, role))
+                    .or_insert_with(|| presentation(group, role))
+                    .clone();
             }
         }
         if span["kind"] == "node" {
@@ -7289,15 +7292,17 @@ fn relayed_sessions<'a>(
                     .flatten()
                 })
             });
-        let Some(session) = session.filter(|s| ConversationId::try_from(*s).is_ok()) else {
+        let Some(session) = session else {
             continue;
         };
         match placed.get(session) {
             Some(&at) => sessions[at].1.push((*index, event)),
-            None => {
+            // Checked the first time it is met; one already placed was checked.
+            None if ConversationId::try_from(session).is_ok() => {
                 placed.insert(session, sessions.len());
                 sessions.push((session, vec![(*index, event)]));
             }
+            None => {}
         }
     }
     sessions
@@ -7395,8 +7400,16 @@ impl<'a> SessionIndex<'a> {
             (Some(held), Some(at)) => Some(held.max(at)),
             (held, at) => held.or(at),
         };
+        // Each `{stream}.{member}` spelled once per session rather than once per
+        // record: a long run relays a hundred thousand records of a few thousand.
+        let mut spelled: HashMap<(&'a str, &'a str), String> = HashMap::new();
         for &(position, event) in events {
-            let key = member_label(event).map(|member| format!("{}.{member}", event.stream));
+            let key = member_label(event).map(|member| {
+                spelled
+                    .entry((event.stream.as_str(), member))
+                    .or_insert_with(|| format!("{}.{member}", event.stream))
+                    .as_str()
+            });
             let kind = event.kind.0.as_str();
             if event.source == Source::Pipeline
                 && matches!(kind, "node-settled" | "node-dispatched")
@@ -7415,18 +7428,23 @@ impl<'a> SessionIndex<'a> {
                     }
                 }
                 if [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&kind) {
-                    if let (Some(key), Some(at)) = (&key, millis_of(&event.ts)) {
-                        let held = index.member_closers.entry(key.clone()).or_insert(at);
-                        *held = (*held).max(at);
+                    if let (Some(key), Some(at)) = (key, millis_of(&event.ts)) {
+                        match index.member_closers.get_mut(key) {
+                            Some(held) => *held = (*held).max(at),
+                            None => {
+                                index.member_closers.insert(key.to_owned(), at);
+                            }
+                        }
                     }
                 }
             }
             if let Some(key) = key {
-                index
-                    .members
-                    .entry(key)
-                    .or_default()
-                    .push((position, event));
+                match index.members.get_mut(key) {
+                    Some(records) => records.push((position, event)),
+                    None => {
+                        index.members.insert(key.to_owned(), vec![(position, event)]);
+                    }
+                }
             }
         }
         index
