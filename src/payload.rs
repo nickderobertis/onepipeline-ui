@@ -2363,10 +2363,15 @@ fn graph_state(view: &Run<'_>) -> Option<Value> {
         .collect();
 
     let engine = engine_words(view);
+    let settled = settlements(view);
+    let by_node = records_by_node(view);
     let node_results: Map<String, Value> = plan
         .tasks
         .iter()
-        .filter_map(|node| node_result(view, &engine, node, result.as_ref()))
+        .filter_map(|node| {
+            let mine = by_node.get(node.id.as_str()).map_or(&[][..], Vec::as_slice);
+            node_result(view, &engine, &settled, mine, node, result.as_ref())
+        })
         .collect();
 
     // Only work in flight has a turn to redirect, so this is one entry per node
@@ -2479,20 +2484,37 @@ const RESULT_FIELDS: &[&str] = &[
     "ok",
 ];
 
-/// The payload of the settlement the run last recorded for `node`.
+/// The payload of the settlement the run last recorded for each node, by node.
 ///
 /// The last one wins: a node that settled more than once is a node that was
-/// retried or replaced, and the latest settlement is what happened.
-fn settlement(view: &Run<'_>, node: &str) -> Option<Map<String, Value>> {
-    view.events
-        .iter()
-        .rev()
-        .find(|event| {
-            event.source == Source::Pipeline
-                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
-                && event.labels.node.as_deref() == Some(node)
-        })
-        .map(|event| event.payload.clone())
+/// retried or replaced, and the latest settlement is what happened. Read in one
+/// pass for every node rather than once per node, because a long run's records
+/// are counted in the hundred thousands.
+fn settlements<'a>(view: &Run<'a>) -> HashMap<&'a str, &'a Map<String, Value>> {
+    let mut settled = HashMap::new();
+    for event in view.events {
+        if event.source != Source::Pipeline
+            || PipelineKind::from_wire(&event.kind) != Some(PipelineKind::NodeSettled)
+        {
+            continue;
+        }
+        if let Some(node) = event.labels.node.as_deref() {
+            settled.insert(node, &event.payload);
+        }
+    }
+    settled
+}
+
+/// Each node's own records, in the order the run holds them, by node: one pass
+/// for every node rather than one per node.
+fn records_by_node<'a>(view: &Run<'a>) -> HashMap<&'a str, Vec<&'a Envelope>> {
+    let mut by_node: HashMap<&str, Vec<&Envelope>> = HashMap::new();
+    for event in view.events {
+        if let Some(node) = event.labels.node.as_deref() {
+            by_node.entry(node).or_default().push(event);
+        }
+    }
+    by_node
 }
 
 /// A node's status as the engine's `statuses()` words it.
@@ -2521,9 +2543,14 @@ fn engine_words(view: &Run<'_>) -> BTreeMap<String, EngineWord> {
 /// account; the recorded document is what a run whose journal this host cannot
 /// fold still has, and it holds words no settlement carried. A node in neither is
 /// a node the run has nothing to say about, and it is served no entry at all.
+///
+/// `settled` is every node's last settlement ([`settlements`]) and `mine` this
+/// node's own records ([`records_by_node`]), each read once for all of a run's nodes.
 fn node_result(
     view: &Run<'_>,
     engine: &BTreeMap<String, EngineWord>,
+    settled: &HashMap<&str, &Map<String, Value>>,
+    mine: &[&Envelope],
     node: &Node,
     result: Option<&Value>,
 ) -> Option<(String, Value)> {
@@ -2537,7 +2564,7 @@ fn node_result(
         // status, outcome and branch but not the prose beside them, and a node
         // that stopped without them is a card that says only "failed" — which
         // tells a reader less than the run already knows.
-        if let Some(settled) = settlement(view, &node.id) {
+        if let Some(&settled) = settled.get(node.id.as_str()) {
             for field in RESULT_FIELDS {
                 if item.contains_key(*field) {
                     continue;
@@ -2546,7 +2573,7 @@ fn node_result(
                     item.insert((*field).to_owned(), value.clone());
                 }
             }
-            if let Some(awaiting) = settled_awaiting(&settled) {
+            if let Some(awaiting) = settled_awaiting(settled) {
                 item.insert("awaiting".into(), awaiting);
             }
         }
@@ -2611,12 +2638,7 @@ fn node_result(
     // for, exactly as `pr` is absent for a node that opened no change request.
     // Joined through the commit the work landed as, which is the only thing a
     // `release-observed` and a node have in common; see [`release_of`].
-    let mine: Vec<&Envelope> = view
-        .events
-        .iter()
-        .filter(|event| event.labels.node.as_deref() == Some(node.id.as_str()))
-        .collect();
-    if let Some(release) = landing_commit(&mine).and_then(|commit| release_of(view, commit)) {
+    if let Some(release) = landing_commit(mine).and_then(|commit| release_of(view, commit)) {
         item.insert("release".into(), release);
     }
     if let Some(finished) = view.whole.state.completed_steps.get(&node.id) {
@@ -7239,6 +7261,10 @@ fn relayed_sessions<'a>(
     events: &[(usize, &'a Envelope)],
 ) -> Vec<(&'a str, Vec<(usize, &'a Envelope)>)> {
     let mut sessions: Vec<(&str, Vec<(usize, &Envelope)>)> = Vec::new();
+    // Where each session sits in `sessions`: a long run relays thousands of them,
+    // and a search of the list per record would compare every record's session
+    // with every one before it.
+    let mut placed: HashMap<&str, usize> = HashMap::new();
     for (index, event) in events {
         if event.source != Source::Agentgraph {
             continue;
@@ -7266,9 +7292,12 @@ fn relayed_sessions<'a>(
         let Some(session) = session.filter(|s| ConversationId::try_from(*s).is_ok()) else {
             continue;
         };
-        match sessions.iter_mut().find(|(name, _)| *name == session) {
-            Some((_, relayed)) => relayed.push((*index, event)),
-            None => sessions.push((session, vec![(*index, event)])),
+        match placed.get(session) {
+            Some(&at) => sessions[at].1.push((*index, event)),
+            None => {
+                placed.insert(session, sessions.len());
+                sessions.push((session, vec![(*index, event)]));
+            }
         }
     }
     sessions
