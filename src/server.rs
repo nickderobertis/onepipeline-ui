@@ -306,7 +306,8 @@ async fn fallback(State(serving): Store, uri: Uri) -> Response {
 /// Start opening the run a page's address names — `?run=`, with the node of
 /// `?node=` — so that its reading is under way while the browser loads the page
 /// and before the page's subscription asks for it ([`Hub::prepare`]). An address
-/// naming no run, or a run or node that is not a valid identifier, starts nothing;
+/// naming no run, or a run that is not a valid identifier, starts nothing, and a
+/// node that is not one is left out, the run opened as for a page naming no node;
 /// the page is served the same either way, and whatever the subscription is then
 /// refused is its own refusal. Only a document is asked for with an address: the
 /// bundle's hashed files are not.
