@@ -1779,8 +1779,9 @@ dependencies = [
 
 [[package]]
 name = "onepipeline"
-version = "0.110.1"
-source = "git+https://github.com/nickderobertis/onepipeline?rev=5f7f4611e1a88685dd8846b50d77d06eb50d2f89#5f7f4611e1a88685dd8846b50d77d06eb50d2f89"
+version = "0.110.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a3dbaf3a307825363c098872cb2af214f38f6c8aff9a19dd95821aa459e05a1"
 dependencies = [
  "async-trait",
  "clap",
@@ -2575,7 +2576,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8050abb251097357e24aff63ba2c52a6309ecb7d23a5474023df960a02694d8"
 dependencies = [
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.23.1",
  "encoding_rs_io",
  "granit-parser",
  "nohash-hasher",
