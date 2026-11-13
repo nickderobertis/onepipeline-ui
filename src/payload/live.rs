@@ -93,6 +93,10 @@ pub(crate) struct Indexed {
     /// its stream's name.
     identities: HashSet<(usize, u64)>,
     streams: HashMap<String, usize>,
+    /// How many of the view's leading records `identities` holds: all of them, but
+    /// for a reading indexed from a heads read, whose places the engine gave and
+    /// whose identities are first needed by the refresh after it.
+    identified: usize,
     canonical_len: usize,
     /// The records that name no node, by merged-store index.
     run: Vec<usize>,
@@ -175,7 +179,12 @@ impl Indexed {
         store_len: usize,
         last_seq: u64,
     ) -> Self {
-        let mut indexed = Self::of(view);
+        let mut indexed = Self::default();
+        let mut touched = Touched::default();
+        for (index, event) in view.events.iter().enumerate() {
+            let place = places.get(index).copied().flatten();
+            indexed.index_record(index, event, place, &mut touched);
+        }
         indexed.canonical = places;
         indexed.canonical_len = store_len;
         indexed.last_seq = last_seq;
@@ -243,71 +252,100 @@ impl Indexed {
     /// Index the records from `first` on, which a refresh appended, and say
     /// which owners they touched.
     pub(crate) fn extend(&mut self, view: &RunView, first: usize) -> Touched {
+        // A heads reading's records are identified only now, as the first refresh
+        // after it needs them to tell an appended record from a repeated one.
+        for event in view
+            .events
+            .get(self.identified..first)
+            .into_iter()
+            .flatten()
+        {
+            let stream = self.stream_of(event);
+            self.identities.insert((stream, event.seq));
+        }
         let mut touched = Touched::default();
         for (index, event) in view.events.iter().enumerate().skip(first) {
-            touched.records += 1;
-            let stream = match self.streams.get(event.stream.as_str()) {
-                Some(&stream) => stream,
-                None => {
-                    let stream = self.streams.len();
-                    self.streams.insert(event.stream.clone(), stream);
-                    stream
-                }
-            };
-            if self.identities.insert((stream, event.seq)) {
-                self.canonical.push(Some(self.canonical_len));
+            let stream = self.stream_of(event);
+            let place = if self.identities.insert((stream, event.seq)) {
                 self.canonical_len += 1;
+                Some(self.canonical_len - 1)
             } else {
-                self.canonical.push(None);
+                None
+            };
+            self.canonical.push(place);
+            self.identified = index + 1;
+            self.index_record(index, event, place, &mut touched);
+        }
+        touched
+    }
+
+    /// The number `event`'s stream is identified by.
+    fn stream_of(&mut self, event: &Envelope) -> usize {
+        match self.streams.get(event.stream.as_str()) {
+            Some(&stream) => stream,
+            None => {
+                let stream = self.streams.len();
+                self.streams.insert(event.stream.clone(), stream);
+                stream
             }
-            let place = self.canonical[self.canonical.len() - 1];
-            if let (Some(node), Some(place)) = (event.labels.node.as_deref(), place) {
-                if let Some((events, positions)) = self.held_shares.get_mut(node) {
-                    events.push(event.clone());
-                    positions.push(place);
-                }
+        }
+    }
+
+    /// Index the record at `index` of the view, at `place` in the canonical store,
+    /// or none for a repetition, saying in `touched` which owner it touched.
+    fn index_record(
+        &mut self,
+        index: usize,
+        event: &Envelope,
+        place: Option<usize>,
+        touched: &mut Touched,
+    ) {
+        touched.records += 1;
+        if let (Some(node), Some(place)) = (event.labels.node.as_deref(), place) {
+            if let Some((events, positions)) = self.held_shares.get_mut(node) {
+                events.push(event.clone());
+                positions.push(place);
             }
-            self.last_seq = self.last_seq.max(event.seq);
-            self.lint += measured(std::iter::once(event)).lint_records;
-            if is_settlement(event) {
-                if let Some(at) = moment_of(event) {
-                    if self
-                        .latest_settlement
-                        .is_none_or(|(latest, _)| at >= latest)
-                    {
-                        self.latest_settlement = Some((at, index));
-                    }
-                }
-            }
-            if is_end_boundary(event) {
-                self.last_boundary = Some(index);
-            }
-            match event.labels.node.as_deref() {
-                None => {
-                    self.run.push(index);
-                    touched.run = true;
-                    touched.every_node |= event.kind.0 == super::vcs::RELEASE_OBSERVED;
-                }
-                Some(node) => {
-                    // Looked up before it is keyed, so a node already met costs no
-                    // allocation: a long run's records are nearly all of a few nodes.
-                    let at = match self.node_at.get(node) {
-                        Some(at) => *at,
-                        None => {
-                            self.nodes.push((node.to_owned(), Vec::new()));
-                            let at = self.nodes.len() - 1;
-                            self.node_at.insert(node.to_owned(), at);
-                            at
-                        }
-                    };
-                    self.nodes[at].1.push(index);
-                    if !touched.nodes.contains(node) {
-                        touched.nodes.insert(node.to_owned());
-                    }
+        }
+        self.last_seq = self.last_seq.max(event.seq);
+        self.lint += measured(std::iter::once(event)).lint_records;
+        if is_settlement(event) {
+            if let Some(at) = moment_of(event) {
+                if self
+                    .latest_settlement
+                    .is_none_or(|(latest, _)| at >= latest)
+                {
+                    self.latest_settlement = Some((at, index));
                 }
             }
         }
-        touched
+        if is_end_boundary(event) {
+            self.last_boundary = Some(index);
+        }
+        match event.labels.node.as_deref() {
+            None => {
+                self.run.push(index);
+                touched.run = true;
+                touched.every_node |= event.kind.0 == super::vcs::RELEASE_OBSERVED;
+            }
+            Some(node) => {
+                // Looked up before it is keyed, so a node already met costs no
+                // allocation: a long run's records are nearly all of a few nodes.
+                let at = match self.node_at.get(node) {
+                    Some(at) => *at,
+                    None => {
+                        self.nodes.push((node.to_owned(), Vec::new()));
+                        let at = self.nodes.len() - 1;
+                        self.node_at.insert(node.to_owned(), at);
+                        at
+                    }
+                };
+                self.nodes[at].1.push(index);
+                if !touched.nodes.contains(node) {
+                    touched.nodes.insert(node.to_owned());
+                }
+            }
+        }
     }
 
     /// The nodes, in the order they first appeared.

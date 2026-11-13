@@ -3608,6 +3608,122 @@ fn same_first_answer(mine: &Value, theirs: &Value, what: &str) {
     }
 }
 
+/// What a refresh appends to the long run, in order after what it holds: a
+/// repetition of its latest record, as a producer that re-relays one writes it, and
+/// a record new to it a second later.
+fn appended_to(journal: &Path) -> [String; 2] {
+    let text = fs::read_to_string(journal).expect("a journal");
+    let held = text.lines().last().expect("a latest record").to_owned();
+    let mut fresh: Value = serde_json::from_str(&held).expect("a record");
+    let at = time::OffsetDateTime::parse(
+        fresh["ts"].as_str().expect("a stamp"),
+        &time::format_description::well_known::Rfc3339,
+    )
+    .expect("an RFC 3339 stamp");
+    fresh["ts"] = json!((at + time::Duration::seconds(1))
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("a stamp"));
+    let last_seq = text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| record["stream"] == fresh["stream"])
+        .filter_map(|record| record["seq"].as_u64())
+        .max()
+        .expect("the stream's sequence");
+    fresh["seq"] = json!(last_seq + 1);
+    [held, fresh.to_string()]
+}
+
+/// A long run opened from its heads tells what a refresh appends as a whole read
+/// tells it: a repetition of a record it holds counts once, and a new record once
+/// and at its place in the journal, though the heads read gave the records' places
+/// and none of their identities. Overall and the appended records' node are held to
+/// a whole read of the same journal; the node's rows carry each record's place.
+#[test]
+fn after_a_heads_read_an_appended_repetition_counts_once_as_a_whole_read_counts_it() {
+    let run = fixture_run::RUN_ID;
+    let hold = (onepipeline_ui::live::COMPLETE_READ_HOLD_ENV, "120000");
+    let headed = Live::start_with(|root| distinct_long_run(root, run), &[hold]);
+    let journal = headed.journal(run);
+    let after = appended_to(&journal);
+    let latest: Value = serde_json::from_str(&after[0]).expect("a record");
+    let node = latest["labels"]["node"]
+        .as_str()
+        .expect("the latest record's node");
+    let views = [
+        json!({ "view": { "type": "timeline", "run_id": run, "scope": "run" } }),
+        json!({ "view": { "type": "timeline", "run_id": run, "scope": "node", "node": node } }),
+    ];
+    for view in &views {
+        headed.subscribe(view);
+    }
+    assert!(
+        headed
+            .first_answers()
+            .iter()
+            .any(|traced| traced["heads_ms"].is_number()),
+        "the run was not opened from its heads: {:#?}",
+        headed.first_answers()
+    );
+    let mut seen = headed.refreshes().len();
+    live_journal::append_lines(&journal, &after);
+    let refreshed = headed.next_refresh(run, &mut seen);
+    assert_eq!(refreshed["refresh"], "appended", "{refreshed}");
+    assert_eq!(refreshed["records"], 2, "{refreshed}");
+
+    let whole_read = u64::MAX.to_string();
+    let whole = Live::start_with(
+        |root| distinct_long_run_then(root, run, &after),
+        &[hold, (onepipeline_ui::live::WHOLE_READ_ENV, &whole_read)],
+    );
+    // Overall whole; the node by the appended records' rows, since a node's view
+    // kept live renders every row and a whole read's first answer its window.
+    let [overall, node_view] = &views;
+    same_first_answer(
+        &first_screen_of(&headed.subscribe(overall))["timeline"],
+        &first_screen_of(&whole.subscribe(overall))["timeline"],
+        "Overall after a refresh appended a repetition and a new record",
+    );
+    let fresh: Value = serde_json::from_str(&after[1]).expect("a record");
+    let ids = [&latest, &fresh].map(|record| {
+        format!(
+            "{}.{}",
+            record["stream"].as_str().expect("a stream"),
+            record["seq"]
+        )
+    });
+    let rows_of = |answer: &Value| -> Vec<(String, Value)> {
+        first_screen_of(answer)["timeline"]["spans"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|span| span["events"].as_array().into_iter().flatten())
+            .filter_map(|event| {
+                let id = event["record_id"].as_str()?;
+                ids.iter()
+                    .any(|wanted| wanted == id)
+                    .then(|| (id.to_owned(), event["journal_order"].clone()))
+            })
+            .collect()
+    };
+    let mine = rows_of(&headed.subscribe(node_view));
+    // Each record is a row of every span it falls in, and at one place in all of them.
+    let places: BTreeMap<&String, std::collections::BTreeSet<String>> =
+        mine.iter().fold(BTreeMap::new(), |mut places, (id, at)| {
+            places.entry(id).or_default().insert(at.to_string());
+            places
+        });
+    assert!(
+        places.len() == 2 && places.values().all(|at| at.len() == 1),
+        "each appended record is a row of {node} at one place: {mine:?}"
+    );
+    assert_eq!(
+        mine,
+        rows_of(&whole.subscribe(node_view)),
+        "{node}'s appended rows"
+    );
+}
+
 /// A record a first screen reads whole that cannot be fetched — a line rewritten under
 /// the heads read, as the engine answers one it headed and cannot read — has the run
 /// read whole for that first answer instead, which is then the whole read's.
