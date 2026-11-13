@@ -562,6 +562,30 @@ test("the replay analysis prices each option over the 30 latest PRs of the commi
   assert.equal(node("analyse.mjs", []).status, 2);
 });
 
+test("a run with no task records counts in the wall clock and never as zero task-minutes", () => {
+  const f = (n) => join(data, `measure-${n}.json`);
+  const r = node("compare.mjs", [
+    "--a",
+    `${f("control2-1")},${f("control2-2")}`,
+    "--b",
+    `${f("pyramid-fake1")},${f("pyramid-fake2")}`,
+  ]);
+  assert.equal(r.status, 0, r.stderr);
+  const windows = r.stdout.split("== test-windows")[1];
+  assert.match(
+    windows,
+    /A {10}run 43426834616#1 {2}wall {2}14\.3 min {2}executed task-min {3}- {4}failed tasks -/,
+  );
+  assert.match(
+    windows,
+    /wall {25}A mean +14\.3 \| B mean +14\.5 \| B−A \+0\.2 min \(spread 3\.7; inside the runs' spread\)/,
+  );
+  assert.match(
+    windows,
+    /executed task-minutes {8}A mean +38\.5 \| B mean +38\.7 \| B−A \+0\.2 min \(spread 25\.4; one run on a side: no spread\)/,
+  );
+});
+
 test("a comparison says whether a difference is inside the runs' spread", () => {
   const f = (n) => join(data, `measure-${n}.json`);
   const r = node("compare.mjs", [

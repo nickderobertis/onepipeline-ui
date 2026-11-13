@@ -37,14 +37,22 @@ for (const job of ["test-linux", "test-macos", "test-windows"]) {
         if (!j) return null;
         const t = (name) =>
           j.tasks.find((x) => x.task === name)?.minutes ?? null;
-        const busy = j.tasks
-          .filter((x) => x.result === "executed" || x.result === "failed")
-          .reduce((s, x) => s + x.minutes, 0);
+        // A job whose executions document was not read (a re-run replaces
+        // an earlier attempt's artifacts) has no task figures at all, which
+        // is unmeasured rather than zero.
+        const recorded = j.tasks.length > 0;
+        const busy = recorded
+          ? j.tasks
+              .filter((x) => x.result === "executed" || x.result === "failed")
+              .reduce((s, x) => s + x.minutes, 0)
+          : null;
         return {
           run: `${r.run}#${r.attempt}`,
           wall: j.wall_minutes,
           busy,
-          failed: j.tasks.filter((x) => x.result === "failed").length,
+          failed: recorded
+            ? j.tasks.filter((x) => x.result === "failed").length
+            : "-",
           tasks: tasks.map(t),
         };
       })
