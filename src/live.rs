@@ -1148,18 +1148,19 @@ impl LiveRun {
                         }
                         None => {
                             let building = Instant::now();
+                            let render = self.render_window(scope);
                             let agents = match scope {
                                 TimelineScope::Run if !self.complete() => None,
                                 _ => self.agents.as_ref(),
                             };
-                            let built = LiveTimeline::build(
-                                &self.view,
+                            let built = LiveTimeline::build_lending(
+                                &mut self.view,
                                 &self.indexed,
                                 &self.declared,
                                 scope.clone(),
                                 filter.clone(),
                                 agents,
-                                self.render_window(scope),
+                                render,
                             );
                             let window = wire_window(scope);
                             let since = progressive::window_start(built.payload(), window);

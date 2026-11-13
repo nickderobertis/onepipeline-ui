@@ -26,7 +26,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use onepipeline::event::Envelope;
+use onepipeline::event::{Envelope, EventKind, ENVELOPE_VERSION};
 use onepipeline::views::RunView;
 use serde_json::{json, Map, Value};
 
@@ -119,6 +119,44 @@ pub(crate) struct Indexed {
     held_run: Option<(Vec<Envelope>, Vec<usize>)>,
 }
 // llmlint: ignore-end[invalid_states_unrepresentable]
+
+/// One owner's records lent to a build by [`Indexed::lend_share`].
+pub(crate) enum Lent<'a> {
+    /// A share read apart from the view, by reference.
+    Held(&'a (Vec<Envelope>, Vec<usize>)),
+    /// Records moved out of the view, with the index in its events each came from.
+    Moved {
+        share: (Vec<Envelope>, Vec<usize>),
+        places: Vec<usize>,
+    },
+}
+
+impl Lent<'_> {
+    /// The share: its records, and where each sits in the canonical store.
+    pub(crate) fn share(&self) -> &(Vec<Envelope>, Vec<usize>) {
+        match self {
+            Self::Held(share) => share,
+            Self::Moved { share, .. } => share,
+        }
+    }
+}
+
+/// What stands in a view's place for a record lent out of it: empty, and costing
+/// no allocation.
+fn vacant() -> Envelope {
+    Envelope {
+        v: ENVELOPE_VERSION,
+        ts: String::new(),
+        stream: String::new(),
+        seq: 0,
+        source: onepipeline::event::Source::Pipeline,
+        kind: EventKind(String::new()),
+        dimensions: Default::default(),
+        labels: Default::default(),
+        payload: Map::new(),
+        artifacts: Vec::new(),
+    }
+}
 
 impl Indexed {
     /// Index every record `view` holds.
@@ -311,6 +349,49 @@ impl Indexed {
         (events, positions)
     }
 
+    /// One owner's records as [`Self::canonical_share`] gives them, moved out of
+    /// `view` rather than copied, with the place each came from; a share held
+    /// apart is lent by reference. [`Self::give_back`] puts moved records back,
+    /// and until it does `view` holds a [`vacant`] record in each of their places,
+    /// so nothing may read `view`'s own records in between: a share's build reads
+    /// its share's, and of the view only its fold.
+    pub(crate) fn lend_share<'a>(&'a self, view: &mut RunView, owner: &Owner) -> Lent<'a> {
+        let held = match owner {
+            Owner::Node(node) => self.held_shares.get(node),
+            Owner::Run => self.held_run.as_ref(),
+        };
+        if let Some(held) = held {
+            return Lent::Held(held);
+        }
+        let mut events = Vec::new();
+        let mut positions = Vec::new();
+        let mut places = Vec::new();
+        for &index in self.indices(owner) {
+            if let Some(position) = self.canonical[index] {
+                events.push(std::mem::replace(&mut view.events[index], vacant()));
+                positions.push(position);
+                places.push(index);
+            }
+        }
+        Lent::Moved {
+            share: (events, positions),
+            places,
+        }
+    }
+
+    /// Put the records [`Self::lend_share`] moved out of `view` back in their places.
+    pub(crate) fn give_back(view: &mut RunView, lent: Lent<'_>) {
+        if let Lent::Moved {
+            share: (events, _),
+            places,
+        } = lent
+        {
+            for (index, event) in places.into_iter().zip(events) {
+                view.events[index] = event;
+            }
+        }
+    }
+
     /// The records of several owners together, in merge order, as the detail
     /// reads them — repetitions kept, as the detail keeps them.
     fn merged_share(&self, view: &RunView, owners: &[Owner]) -> Vec<Envelope> {
@@ -425,7 +506,39 @@ impl LiveTimeline {
         agents: Option<&onepipeline::agents::Agents>,
         window: ItemsWindow,
     ) -> Self {
-        let mut timeline = Self {
+        let mut timeline = Self::unbuilt(view, indexed, scope, filter, window);
+        timeline.payload = timeline.whole(view, indexed, declared, agents);
+        timeline
+    }
+
+    /// [`Self::build`] for a first answer, which may borrow `view`'s records rather
+    /// than copy them: each owner's are moved out for its share's build and back
+    /// before the next one's ([`Indexed::lend_share`]). Copying a long run's every
+    /// record was most of what its first timeline cost. Every record is back in its
+    /// place when this returns, and when it unwinds.
+    pub(crate) fn build_lending(
+        view: &mut RunView,
+        indexed: &Indexed,
+        declared: &DeclaredMembers,
+        scope: TimelineScope,
+        filter: EventFilter,
+        agents: Option<&onepipeline::agents::Agents>,
+        window: ItemsWindow,
+    ) -> Self {
+        let mut timeline = Self::unbuilt(view, indexed, scope, filter, window);
+        timeline.payload = timeline.whole_lending(view, indexed, declared, agents);
+        timeline
+    }
+
+    /// A timeline with nothing built yet.
+    fn unbuilt(
+        view: &RunView,
+        indexed: &Indexed,
+        scope: TimelineScope,
+        filter: EventFilter,
+        window: ItemsWindow,
+    ) -> Self {
+        Self {
             scope,
             filter,
             payload: Value::Null,
@@ -435,9 +548,7 @@ impl LiveTimeline {
             rendered: RefCell::new(Rendered::default()),
             seeded: BTreeSet::new(),
             window,
-        };
-        timeline.payload = timeline.whole(view, indexed, declared, agents);
-        timeline
+        }
     }
 
     /// The timeline as the subscriber holds it.
@@ -486,7 +597,61 @@ impl LiveTimeline {
         self.ends = indexed.ends(view);
         self.slots.clear();
         let mut spans: Vec<Value> = Vec::new();
-        let owners: Vec<Owner> = match &self.scope {
+        // A node's share, read once for its spans and its harness sessions both.
+        let mut held = None;
+        for owner in self.owners(view, indexed) {
+            let share = indexed.canonical_share(view, &owner);
+            let pre = self.share_of(view, view.events.first(), declared, &owner, &share);
+            self.place(owner, pre, &mut spans);
+            if matches!(self.scope, TimelineScope::Node(_)) {
+                held = Some(share);
+            }
+        }
+        self.assembled(view, indexed, spans, agents, held.as_ref())
+    }
+
+    /// [`Self::whole`], each owner's records lent out of `view` for its share's
+    /// build rather than copied ([`Self::build_lending`]).
+    fn whole_lending(
+        &mut self,
+        view: &mut RunView,
+        indexed: &Indexed,
+        declared: &DeclaredMembers,
+        agents: Option<&onepipeline::agents::Agents>,
+    ) -> Value {
+        self.ends = indexed.ends(view);
+        self.slots.clear();
+        let mut spans: Vec<Value> = Vec::new();
+        // The run's first record, which a run-level span opens at, kept apart: the
+        // owner it belongs to is lent out while its share is built.
+        let first = view.events.first().cloned();
+        // A node's share stays lent until its harness sessions are laid too.
+        let mut kept = None;
+        for owner in self.owners(view, indexed) {
+            let lent = indexed.lend_share(view, &owner);
+            let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.share_of(view, first.as_ref(), declared, &owner, lent.share())
+            }));
+            if built.is_ok() && matches!(self.scope, TimelineScope::Node(_)) {
+                kept = Some(lent);
+            } else {
+                Indexed::give_back(view, lent);
+            }
+            let pre = built.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+            self.place(owner, pre, &mut spans);
+        }
+        let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.assembled(view, indexed, spans, agents, kept.as_ref().map(Lent::share))
+        }));
+        if let Some(lent) = kept {
+            Indexed::give_back(view, lent);
+        }
+        assembled.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    }
+
+    /// The owners a build reads, in the order their spans are laid.
+    fn owners(&self, view: &RunView, indexed: &Indexed) -> Vec<Owner> {
+        match &self.scope {
             TimelineScope::Node(node) | TimelineScope::NodeShare(node) => {
                 vec![Owner::Node(node.as_str().to_owned())]
             }
@@ -500,26 +665,33 @@ impl LiveTimeline {
                         .map(|node| Owner::Node(node.to_owned())),
                 )
                 .collect(),
-        };
-        // A node's share, read once for its spans and its harness sessions both.
-        let mut held = None;
-        for owner in owners {
-            let share = indexed.canonical_share(view, &owner);
-            let pre = self.share_of(view, declared, &owner, &share);
-            if matches!(self.scope, TimelineScope::Node(_)) {
-                held = Some(share);
-            }
-            let start = spans.len();
-            self.slots.push(Slot {
-                owner,
-                start,
-                openings: pre.iter().map(Opening::of).collect(),
-            });
-            spans.extend(pre.into_iter().map(|mut span| {
-                self.ends.close(&mut span);
-                span
-            }));
         }
+    }
+
+    /// Lay `owner`'s spans after those already laid, closed at the run's ends.
+    fn place(&mut self, owner: Owner, pre: Vec<Value>, spans: &mut Vec<Value>) {
+        let start = spans.len();
+        self.slots.push(Slot {
+            owner,
+            start,
+            openings: pre.iter().map(Opening::of).collect(),
+        });
+        spans.extend(pre.into_iter().map(|mut span| {
+            self.ends.close(&mut span);
+            span
+        }));
+    }
+
+    /// The payload over `spans`, with the run's harness sessions laid after them:
+    /// at node scope over `held`, the node's share where the caller read it.
+    fn assembled(
+        &mut self,
+        view: &RunView,
+        indexed: &Indexed,
+        spans: Vec<Value>,
+        agents: Option<&onepipeline::agents::Agents>,
+        held: Option<&(Vec<Envelope>, Vec<usize>)>,
+    ) -> Value {
         // The spans moved in rather than interpolated, which would serialize a
         // copy of every one.
         let mut payload = Value::Object(Map::from_iter([
@@ -582,14 +754,16 @@ impl LiveTimeline {
         declared: &DeclaredMembers,
         owner: &Owner,
     ) -> Vec<Value> {
-        self.share_of(view, declared, owner, &indexed.canonical_share(view, owner))
+        let share = indexed.canonical_share(view, owner);
+        self.share_of(view, view.events.first(), declared, owner, &share)
     }
 
     /// [`Self::share`] over `owner`'s records as [`Indexed::canonical_share`] read
-    /// them.
+    /// them, `first` being the run's first record.
     fn share_of(
         &self,
         view: &RunView,
+        first: Option<&Envelope>,
         declared: &DeclaredMembers,
         owner: &Owner,
         (events, positions): &(Vec<Envelope>, Vec<usize>),
@@ -598,12 +772,10 @@ impl LiveTimeline {
         let node;
         let share = match (&self.scope, owner) {
             (TimelineScope::Node(scope), _) => Share::NodeScope(scope),
-            (TimelineScope::Run | TimelineScope::RunShare, Owner::Run) => {
-                match view.events.first() {
-                    Some(first) => Share::RunLevel { first },
-                    None => return Vec::new(),
-                }
-            }
+            (TimelineScope::Run | TimelineScope::RunShare, Owner::Run) => match first {
+                Some(first) => Share::RunLevel { first },
+                None => return Vec::new(),
+            },
             (
                 TimelineScope::Run | TimelineScope::RunShare | TimelineScope::NodeShare(_),
                 Owner::Node(name),
@@ -644,7 +816,7 @@ impl LiveTimeline {
         indexed: &Indexed,
         payload: Value,
         agents: Option<&onepipeline::agents::Agents>,
-        held: Option<(Vec<Envelope>, Vec<usize>)>,
+        held: Option<&(Vec<Envelope>, Vec<usize>)>,
     ) -> Value {
         let Some(agents) = agents else {
             return payload;
@@ -655,12 +827,18 @@ impl LiveTimeline {
             }
             TimelineScope::RunShare | TimelineScope::NodeShare(_) => payload,
             TimelineScope::Node(node) => {
-                let (events, positions) = held.unwrap_or_else(|| {
-                    indexed.canonical_share(view, &Owner::Node(node.as_str().to_owned()))
-                });
+                let read;
+                let (events, positions) = match held {
+                    Some(held) => held,
+                    None => {
+                        read =
+                            indexed.canonical_share(view, &Owner::Node(node.as_str().to_owned()));
+                        &read
+                    }
+                };
                 timeline_harnesses_over(
                     payload,
-                    &Run::of(view).share(&events, &positions),
+                    &Run::of(view).share(events, positions),
                     &Scope::Node(node),
                     agents,
                 )
