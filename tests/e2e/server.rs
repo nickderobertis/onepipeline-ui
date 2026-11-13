@@ -16512,6 +16512,7 @@ fn create_store_task(
         assets: Vec::new(),
         body,
         status: None,
+        assignee: None,
         labels: Vec::new(),
         repositories: Vec::new(),
         depends_on: depends_on.iter().map(|&id| id.clone()).collect(),

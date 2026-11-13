@@ -765,6 +765,11 @@ run's first screen be answered from its heads and one `journal::fetch` inside
 the first view's one-second line. Only the `onepipeline` line and its lock entry
 move; its other requirements are the ones 0.110.0 resolved, and no route,
 payload, public type or MSRV changes beyond the release `/healthz` reports.
+0.110.2 is the patch that links the released store, judge, graph and onevcs
+crates: the exact onetaskgraph family requirements move to 0.14.14, which that
+engine pins, and the test-only onevcs to 0.66.0 (^0.66.0). Its heads read is
+0.110.1's; no route, payload, public type or MSRV changes beyond the release
+`/healthz` reports.
 
 The test-only `onevcs` requirement, which the `EventKind` drift gate in
 `tests/contract.rs` reads, has followed the release each linked engine resolves:
