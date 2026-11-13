@@ -367,6 +367,7 @@ function scratchTree() {
   for (const f of [
     ".config/nextest.toml",
     ".github/tests/nx-cache/project.json",
+    "tests/packaging.rs",
   ]) {
     mkdirSync(join(dir, dirname(f)), { recursive: true });
     copyFileSync(join(root, f), join(dir, f));
@@ -395,6 +396,29 @@ test("each prototype makes its one change and leaves the other file alone", () =
   assert.match(
     readFileSync(join(dir, ".github/tests/nx-cache/project.json"), "utf8"),
     /--test-concurrency=4/,
+  );
+});
+
+test("the pyramid fake swaps the journey for the tarball test in the versions tier", () => {
+  const dir = scratchTree();
+  assert.equal(proto(dir, "pyramid-fake").status, 0);
+  const nextest = readFileSync(join(dir, ".config/nextest.toml"), "utf8");
+  const versions = nextest.split("[profile.versions]")[1].split("\n")[1];
+  assert.doesNotMatch(versions, /a_build_without_the_bundle/);
+  assert.match(
+    versions,
+    /test\(=the_crate_tarball_carries_the_view_sources_and_no_built_view\)/,
+  );
+  assert.match(versions, /test\(=cli::version_reports_the_crate_version\)/);
+  const packaging = readFileSync(join(dir, "tests/packaging.rs"), "utf8");
+  assert.match(
+    packaging,
+    /\nfn the_crate_tarball_carries_the_view_sources_and_no_built_view\(\) \{\n {4}let packaged = packaged_files\(\);/,
+  );
+  assert.ok(
+    packaging.startsWith(
+      readFileSync(join(root, "tests/packaging.rs"), "utf8"),
+    ),
   );
 });
 

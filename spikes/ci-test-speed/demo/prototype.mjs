@@ -12,7 +12,37 @@
 //                         ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing,
 //                         standing in for a faked test of the same refusal
 //                         (whose own cost is a few milliseconds).
-import { readFileSync, writeFileSync } from "node:fs";
+//   pyramid-fake          the pyramid sample with its fakes in place: the
+//                         journey leaves the versions tier as above, and in
+//                         its place that tier runs a packaging test holding
+//                         that the crate tarball carries the frontend sources
+//                         and no built view. Beside it the e2e tier already
+//                         runs ui::resolve_refuses_ui_for_a_build_that_embedded_nothing,
+//                         the refusal driven in-process with no bundle.
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+
+// The fake that stands in for the packaged-crate half of the journey: what
+// `cargo package --list` would upload carries the frontend's sources (so a
+// build from it is this crate) and nothing under apps/dag-ui/dist (so it is a
+// build without the bundle). It does not build the tarball.
+const TARBALL_FAKE = `
+/// The pyramid sample's fake for the no-bundle journey's packaged half: the
+/// crate as crates.io serves it carries the view's sources and no built view.
+#[test]
+fn the_crate_tarball_carries_the_view_sources_and_no_built_view() {
+    let packaged = packaged_files();
+    assert!(packaged.iter().any(|path| path == "build.rs"), "{packaged:?}");
+    assert!(
+        packaged.iter().any(|path| path.starts_with("apps/dag-ui/src/")),
+        "{packaged:?}"
+    );
+    let built: Vec<&String> = packaged
+        .iter()
+        .filter(|path| path.starts_with("apps/dag-ui/dist/"))
+        .collect();
+    assert!(built.is_empty(), "the crate tarball carries a built view: {built:?}");
+}
+`;
 
 const name = process.argv[2];
 const edit = (file, from, to) => {
@@ -38,9 +68,17 @@ switch (name) {
       ")) or (binary(=packaging)",
     );
     break;
+  case "pyramid-fake":
+    edit(
+      ".config/nextest.toml",
+      " or test(=ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing))) or (binary(=packaging) and test(=the_assembled_launcher_pins_every_platform_package_to_the_crate_version))",
+      ")) or (binary(=packaging) and (test(=the_assembled_launcher_pins_every_platform_package_to_the_crate_version) or test(=the_crate_tarball_carries_the_view_sources_and_no_built_view)))",
+    );
+    appendFileSync("tests/packaging.rs", TARBALL_FAKE);
+    break;
   default:
     console.error(
-      "usage: prototype.mjs nx-cache-concurrency|pyramid-no-bundle",
+      "usage: prototype.mjs nx-cache-concurrency|pyramid-no-bundle|pyramid-fake",
     );
     process.exit(2);
 }
