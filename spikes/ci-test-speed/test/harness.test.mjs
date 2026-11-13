@@ -201,3 +201,24 @@ test("the A/B patch skips Nx cache reads in every test job and widens only Linux
     /Spike measurement/,
   );
 });
+
+test("with the job's selection, records of tasks it never selected are dropped", () => {
+  const doc = JSON.parse(
+    readFileSync(
+      join(fixtures, "executions-43257411385-test-linux.json"),
+      "utf8",
+    ),
+  );
+  const kept = outer(doc.tasks, ["onepipeline-ui:test"]);
+  const names = new Set(kept.map((t) => t.task));
+  assert.ok(names.has("onepipeline-ui:test"));
+  assert.ok(
+    !names.has("onepipeline-ui-e2e:test"),
+    "an unselected tier's nested records survived",
+  );
+  assert.ok(
+    [...names].every(
+      (n) => n === "onepipeline-ui:test" || n.endsWith(":bootstrap"),
+    ),
+  );
+});

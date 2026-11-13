@@ -22,6 +22,7 @@ import {
 import { join, resolve } from "node:path";
 import { outer } from "./executions.mjs";
 import { Cache, REPO } from "./gh.mjs";
+import { facts, lines } from "./logs.mjs";
 
 const argv = process.argv.slice(2);
 const opt = (n, d = null) =>
@@ -133,7 +134,16 @@ for (const pr of prs) {
         readFileSync(join(unpack(art.id), "executions.json"), "utf8"),
       );
       base ??= doc.selection?.base_sha ?? doc.base_sha;
-      entry.tasks = outer(doc.tasks).map((t) => ({
+      // The job's own selection, from its log, separates its tasks from the nested
+      // fixture runs that report under the same names.
+      let selection = null;
+      try {
+        selection = job ? facts(lines(cache.log(job.id))).selection : null;
+      } catch (error) {
+        if (!cache.offline && !/quota/.test(error.message)) throw error;
+      }
+      entry.selection = selection;
+      entry.tasks = outer(doc.tasks, selection?.tasks ?? null).map((t) => ({
         task: t.task,
         result: t.result,
         cacheable: t.cacheable,

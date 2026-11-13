@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONTAINERS, classify, group } from "./classify.mjs";
+import { outer } from "./executions.mjs";
 import { Cache, REPO } from "./gh.mjs";
 import { facts, lines, tasks as taskBlocks } from "./logs.mjs";
 import { recorded } from "./procs.mjs";
@@ -346,7 +347,8 @@ for (const name of wanted) {
           }),
         )
       : null;
-  const executions = execDoc?.tasks ?? [];
+  const executions = outer(execDoc?.tasks ?? [], f.selection?.tasks ?? null);
+  const nestedRecords = (execDoc?.tasks.length ?? 0) - executions.length;
   const recArt = artifactFor(`spike-profile-${name}`, job);
   const rec = recArt ? recorded(unpack(recArt)) : null;
 
@@ -424,6 +426,7 @@ for (const name of wanted) {
         return st ? (st.e - st.s) / 1000 : null;
       })(),
     })),
+    nested_fixture_records: nestedRecords,
     nx_cache_stored_bytes: manifestDoc?.stored_bytes ?? null,
     nx_store_attempts: execDoc?.store_attempts?.map((s) => s.status) ?? null,
     recorder: rec
