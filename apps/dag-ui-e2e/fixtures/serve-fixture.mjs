@@ -19,7 +19,8 @@
  *                                                  took, and the corpus links to M)
  *                     [--shutdown-corpus [--live-dispatch-pid PID]
  *                      | --preserved-corpus | --review-corpus
- *                      | --review-loop-corpus | --transcripts-corpus
+ *                      | --review-loop-corpus | --command-steps-corpus
+ *                      | --transcripts-corpus
  *                      | --held-turn-corpus | --large-run-views-corpus
  *                      | --human-items-world NAME]
  *                                                  build the fixture and serve it,
@@ -29,7 +30,9 @@
  *                                                  kept-branch journey's with
  *                                                  --preserved-corpus, and the
  *                                                  reworked stack's with
- *                                                  --review-loop-corpus, and the
+ *                                                  --review-loop-corpus, the
+ *                                                  command steps' with
+ *                                                  --command-steps-corpus, and the
  *                                                  held turn's with
  *                                                  --held-turn-corpus, and the
  *                                                  large-run views' with
@@ -77,6 +80,7 @@ import {
 import harnessBinaries from "./harness-binaries.json" with { type: "json" };
 import { humanItemsWorld } from "./human-items-world.mjs";
 import {
+  buildCommandStepsRuns,
   buildHeldTurnRuns,
   buildLargeRunViews,
   buildPreservedRuns,
@@ -86,6 +90,7 @@ import {
   buildShutdownRuns,
   buildTranscriptRuns,
   churnLive,
+  commandStepsFacts,
   facts,
   graphRecordsFor,
   growTranscript,
@@ -461,6 +466,7 @@ function parseArgs(argv) {
     "--transcripts-corpus",
     "--review-corpus",
     "--review-loop-corpus",
+    "--command-steps-corpus",
     "--held-turn-corpus",
     "--large-run-views-corpus",
   ]);
@@ -819,6 +825,8 @@ if (args.stall) {
         corpus = { build: buildPreservedRuns, facts: preservedFacts };
       } else if (args["review-loop-corpus"]) {
         corpus = { build: buildReviewLoopRuns, facts: reviewLoopFacts };
+      } else if (args["command-steps-corpus"]) {
+        corpus = { build: buildCommandStepsRuns, facts: commandStepsFacts };
       } else if (args["large-run-views-corpus"]) {
         corpus = { build: buildLargeRunViews, facts: largeRunViewsFacts };
       } else if (args["held-turn-corpus"]) {

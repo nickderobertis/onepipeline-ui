@@ -3417,3 +3417,62 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     max-width: none;
   }
 }
+
+/* The run's refused live edits, over the graph's top-left corner: a correction that
+   never landed changes nothing the canvas draws, so it is stated beside it. */
+.rejected-edits {
+  position: absolute;
+  z-index: 5;
+  top: 10px;
+  left: 10px;
+  max-width: min(420px, calc(100% - 20px));
+  max-height: 40%;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--destructive);
+  border-radius: 6px;
+  background: var(--popover);
+  font-size: 12px;
+}
+
+.rejected-edits h2 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rejected-edits ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rejected-edits li {
+  display: grid;
+  gap: 2px;
+}
+
+.rejected-edit-what {
+  font-weight: 600;
+}
+
+.rejected-edit-reason {
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+
+/* A command node's log tail, scrolled in place rather than stretching the view. */
+.node-command-log {
+  max-height: 320px;
+  margin-top: 8px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

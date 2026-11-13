@@ -9,7 +9,7 @@ export interface DagLayoutInput {
 export interface DagNode {
   readonly id: string;
   readonly label: string;
-  readonly kind: "agent" | "human" | "lifecycle";
+  readonly kind: "agent" | "human" | "command" | "lifecycle";
   readonly state: DagNodeState;
   /**
    * Lines of text the card carries beneath its status word, each of which it grows

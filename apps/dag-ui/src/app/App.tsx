@@ -617,6 +617,7 @@ export function App({
                     <DagGraph
                       journalSeq={graph?.last_seq}
                       nodes={nodes}
+                      rejectedEdits={graph?.rejected_edits}
                       selectedNodeId={selection.nodeId}
                       onSelectNode={selection.selectNode}
                     />

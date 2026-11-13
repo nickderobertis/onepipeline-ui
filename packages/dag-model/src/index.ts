@@ -732,9 +732,14 @@ export const runListSchema = openObject({
   provider_health: providerHealthSchema.optional(),
 });
 
+/**
+ * A node's kind: work an agent's dispatch performs, an action only a person takes,
+ * or (schema 29) a `command` the engine runs itself and settles on its exit status.
+ */
+export const nodeKindSchema = z.enum(["agent", "human", "command"]);
 const planStepSchema = openObject({
   id: z.string().min(1),
-  kind: z.enum(["agent", "human"]).optional(),
+  kind: nodeKindSchema.optional(),
   persona: z.string().min(1).optional(),
   task: z.string().min(1),
   deps: z.array(z.string().min(1)).optional(),
@@ -820,6 +825,13 @@ const planTaskFields = planStepSchema.extend({
    * written, which is how an `add` or a `retry` says the node carries none.
    */
   sets: nodeSetsSchema.optional(),
+  /**
+   * A `kind: command` node's argv as the plan states it (schema 29): the program
+   * and its arguments, run with no shell. Absent on every other kind.
+   */
+  command: z.array(z.string()).min(1).optional(),
+  /** How long a command node's command may run, in whole seconds; absent is no deadline. */
+  timeout_seconds: counter.positive().optional(),
 });
 export const planTaskSchema = planTaskFields.superRefine((task, context) => {
   if (task.steps === undefined && task.task === undefined) {
@@ -888,8 +900,20 @@ export const awaitedReleaseSchema = openObject({
   producer: z.string().min(1),
   target: z.string().min(1),
 });
+/**
+ * What a command node's command wrote (schema 29): the log its last
+ * `command-started` named, and that file's end where the run holds it. `content`
+ * and `truncated` are absent together when the log is gone or lies outside the run.
+ */
+export const commandLogSchema = openObject({
+  path: z.string().min(1),
+  content: z.string().optional(),
+  truncated: z.boolean().optional(),
+});
+export type CommandLog = z.infer<typeof commandLogSchema>;
 export const graphResultItemSchema = openObject({
   kind: z.string().optional(),
+  log: commandLogSchema.optional(),
   status: z.string().optional(),
   task: z.string().optional(),
   unblocks: z.array(z.string()).optional(),
@@ -1028,6 +1052,23 @@ export const decisionSchema = openObject({
 });
 
 /**
+ * A live edit the run refused (schema 29), as its `edit-rejected` record carried
+ * it: who sent it, the command as sent, and why — a plan-edit hook's refusal names
+ * the hook. `command` is the sender's own object, which this view shows and never
+ * interprets, so it is held to being an object and no further.
+ */
+export const rejectedEditSchema = openObject({
+  at: z.string().min(1),
+  author: z.string().min(1),
+  command: arbitraryRecord,
+  reason: z.string(),
+  envelope: counter.optional(),
+  index: counter.optional(),
+  refusal: arbitraryRecord.optional(),
+});
+export type RejectedEdit = z.infer<typeof rejectedEditSchema>;
+
+/**
  * The run's whole graph state, as one object.
  *
  * There is exactly one of these per run. Under telemetry schema 12 this was one
@@ -1073,6 +1114,8 @@ const graphStateFields = openObject({
    * Absent is `[]` — a cleared list and one nobody set read the same.
    */
   run_node_sets: nodeSetsSchema.optional(),
+  /** Every live edit the run refused, oldest first; absent when it refused none. */
+  rejected_edits: z.array(rejectedEditSchema).min(1).optional(),
 });
 export const graphStateSchema = graphStateFields.superRefine(checkGraph);
 

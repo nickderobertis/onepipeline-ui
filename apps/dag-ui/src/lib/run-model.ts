@@ -20,7 +20,7 @@ export type LauncherName = "Claude" | "Codex" | "Unattributed";
 export interface NodeView {
   readonly id: string;
   readonly label: string;
-  readonly kind: "agent" | "human" | "lifecycle";
+  readonly kind: "agent" | "human" | "command" | "lifecycle";
   /** The authoritative `GraphState.node_status`, rendered without client-side defaults. */
   readonly status: NodeStatus;
   /**
@@ -94,8 +94,8 @@ export function nodeViews(detail: LiveRunDetail): NodeView[] {
   return graph.plan.tasks.flatMap((task) => {
     const rawKind = readString(task, "kind");
     const kind =
-      rawKind === "human"
-        ? "human"
+      rawKind === "human" || rawKind === "command"
+        ? rawKind
         : hasLifecycleShape(task)
           ? "lifecycle"
           : "agent";
@@ -299,6 +299,14 @@ export function awaitedLine(node: NodeView): string | undefined {
  * would let a card and the view it opens explain the same failure differently.
  */
 export function recordedReason(node: NodeView): string | undefined {
+  // A command's outcome word says which of its two ways it failed — it exited
+  // non-zero, or it outlived its deadline — which its detail sentence leaves to
+  // the reader to infer, so it leads.
+  const outcome = node.result?.outcome?.trim();
+  if (node.kind === "command" && outcome) {
+    const detail = (node.failure?.detail || node.result?.detail)?.trim();
+    return detail ? `${outcome}: ${detail}` : outcome;
+  }
   const recorded =
     node.failure?.detail ||
     node.result?.detail ||

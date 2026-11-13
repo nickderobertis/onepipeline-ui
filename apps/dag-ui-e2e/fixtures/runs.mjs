@@ -4310,6 +4310,65 @@ export function reviewLoopFacts() {
 }
 
 /**
+ * The command-steps corpus: three `kind: command` nodes the engine ran itself —
+ * one `done`, one `failed` with `command-failed`, one `failed` with
+ * `command-timed-out` — and a live edit the run's plan-edit hook refused.
+ *
+ * The records are one document, `command-steps.json`, which `tests/e2e/server.rs`
+ * writes through the engine's own envelope and serves from the same file, so the
+ * run the view renders here is the run that journey holds the read API to.
+ */
+const COMMAND_STEPS = JSON.parse(
+  readFileSync(join(import.meta.dirname, "command-steps.json"), "utf8"),
+);
+
+/**
+ * Write the command-steps corpus under `root`: its launch record, its plan, each
+ * command's log under the run, and its records a second apart, each
+ * `command-started` naming its log by its absolute path under the run as the
+ * engine writes it.
+ */
+export function buildCommandStepsRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const runId = COMMAND_STEPS.run_id;
+  const dir = runDir(root, runId);
+  const [started] = COMMAND_STEPS.records;
+  writeJson(join(dir, "plan.json"), started.payload.plan);
+  writeJson(join(dir, "launch.json"), {
+    ...COMMAND_STEPS.launch,
+    started_at: stamp(HISTORIC),
+  });
+  mkdirSync(join(dir, "commands"), { recursive: true });
+  for (const [node, said] of Object.entries(COMMAND_STEPS.logs)) {
+    writeFileSync(join(dir, "commands", `${node}.log`), said);
+  }
+  const journal = new Journal(dir, COMMAND_STEPS.stream, HISTORIC);
+  for (const [index, record] of COMMAND_STEPS.records.entries()) {
+    const labels = {
+      run_id: runId,
+      ...(record.node === undefined ? {} : { node: record.node }),
+    };
+    const payload =
+      typeof record.payload.log === "string"
+        ? { ...record.payload, log: join(dir, record.payload.log) }
+        : record.payload;
+    journal
+      .advance(index === 0 ? 0 : 1)
+      .emit(record.source, record.kind, labels, payload);
+  }
+  journal.write();
+}
+
+/** What the command-steps corpus wrote, for the journey that reads it. */
+export function commandStepsFacts() {
+  return {
+    run: COMMAND_STEPS.run_id,
+    hook: COMMAND_STEPS.hook,
+    logs: COMMAND_STEPS.logs,
+  };
+}
+
+/**
  * A run shaped like the large ones a measurement on a real host found three views
  * failing on, at the size a journey can afford.
  *
