@@ -1,0 +1,32 @@
+// The Linux half of the spike's recorder: every process start (with its first
+// arguments), fork, exit, sleep and timed-out wait, with CLOCK_MONOTONIC
+// nanoseconds. Lines are `<kind> <ns> <pid> ...`; `measure.mjs` reads them.
+// A sleep or wait under 1 ms is summed per process and printed at the end
+// rather than one line each.
+BEGIN { printf("READY %llu\n", nsecs); }
+tracepoint:sched:sched_process_fork { printf("F %llu %d %d\n", nsecs, args->parent_pid, args->child_pid); }
+tracepoint:syscalls:sys_enter_execve { printf("X %llu %d ", nsecs, pid); join(args->argv); }
+tracepoint:sched:sched_process_exit /pid == tid/ { printf("Q %llu %d %s\n", nsecs, pid, comm); }
+tracepoint:syscalls:sys_enter_nanosleep,
+tracepoint:syscalls:sys_enter_clock_nanosleep { @s[tid] = nsecs; }
+tracepoint:syscalls:sys_exit_nanosleep,
+tracepoint:syscalls:sys_exit_clock_nanosleep /@s[tid]/ {
+  $d = nsecs - @s[tid]; delete(@s[tid]);
+  if ($d >= 1000000) { printf("S %llu %d %d %llu\n", nsecs, pid, tid, $d); } else { @short_sleep_ns[pid] = sum($d); }
+}
+tracepoint:syscalls:sys_enter_epoll_wait,
+tracepoint:syscalls:sys_enter_epoll_pwait,
+tracepoint:syscalls:sys_enter_poll,
+tracepoint:syscalls:sys_enter_ppoll,
+tracepoint:syscalls:sys_enter_pselect6 { @w[tid] = nsecs; }
+tracepoint:syscalls:sys_exit_epoll_wait,
+tracepoint:syscalls:sys_exit_epoll_pwait,
+tracepoint:syscalls:sys_exit_poll,
+tracepoint:syscalls:sys_exit_ppoll,
+tracepoint:syscalls:sys_exit_pselect6 /@w[tid]/ {
+  $d = nsecs - @w[tid]; delete(@w[tid]);
+  if (args->ret == 0) {
+    if ($d >= 1000000) { printf("T %llu %d %d %llu\n", nsecs, pid, tid, $d); } else { @short_timeout_ns[pid] = sum($d); }
+  }
+}
+END { printf("END %llu\n", nsecs); clear(@s); clear(@w); }
