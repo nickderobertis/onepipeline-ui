@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // What the reuse replay (replay.mjs --json) says, computed rather than read off:
-//   node spikes/ci-test-speed/analyse.mjs <replay.json> [--population 30] [--cut-pr 711]
+//   node spikes/ci-test-speed/analyse.mjs <replay.json[.gz]> [--population 30] [--cut-pr 711]
 // prints, per platform job: the tasks each PR's cited run executed and
 // replayed, each re-run's diff-matched inputs or its cause; the median of each
 // executed task before and after the caching change (#711); each run's
@@ -8,6 +8,7 @@
 // and, for each key or modularization option, the PRs and minutes it would have
 // replayed over the same population. Options are defined in OPTIONS below.
 import { readFileSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
 
 const argv = process.argv.slice(2);
 const file = argv[0];
@@ -15,11 +16,15 @@ const opt = (n, d) =>
   argv.includes(`--${n}`) ? argv[argv.indexOf(`--${n}`) + 1] : d;
 if (!file) {
   console.error(
-    "usage: analyse.mjs <replay.json> [--population 30] [--cut-pr 711]",
+    "usage: analyse.mjs <replay.json[.gz]> [--population 30] [--cut-pr 711]",
   );
   process.exit(2);
 }
-const rows = JSON.parse(readFileSync(file, "utf8"));
+// The committed replay is gzipped: uncompressed it is 1.9 MB of JSON.
+const raw = readFileSync(file);
+const rows = JSON.parse(
+  (file.endsWith(".gz") ? gunzipSync(raw) : raw).toString("utf8"),
+);
 const N = Number(opt("population", 30));
 const CUT = Number(opt("cut-pr", 711));
 const JOBS = ["test-linux", "test-macos", "test-windows"];

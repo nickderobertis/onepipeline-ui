@@ -396,7 +396,7 @@ const node = (script, args) =>
   });
 
 test("the replay analysis prices each option over the 30 latest PRs of the committed replay", () => {
-  const r = node("analyse.mjs", [join(data, "replay-45.json")]);
+  const r = node("analyse.mjs", [join(data, "replay-45.json.gz")]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(
     r.stdout,

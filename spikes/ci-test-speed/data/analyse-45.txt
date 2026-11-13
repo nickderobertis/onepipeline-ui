@@ -47,7 +47,7 @@ population: 30 merged non-release PRs (#675–#767), each with its cited run
     onepipeline-ui:test                              1.4 (n=12) → 3.2 (n=15)
     dag-ui-build-cache:test                          1.5 (n=6) → 3.1 (n=6)
   options replayed over the population (task-minutes skipped; wall minutes by the fit's slope, an estimate):
-    A: script-only e2e tiers in a crate of their own: 3/30 PRs, 16.2 task-min, 0.54 per PR → ~0.07 wall min per PR
+    A: the script-testing e2e tiers in a crate of their own: 3/30 PRs, 16.2 task-min, 0.54 per PR → ~0.07 wall min per PR
     B: github-workflows-nx-cache:test keyed on what it reads, not the whole workspace and the merge base: 6/30 PRs, 94.3 task-min, 3.14 per PR → ~0.40 wall min per PR
     C: coverage tiers keyed on audited reads, not the whole checkout less a deny-list: 2/30 PRs, 3.5 task-min, 0.12 per PR → ~0.01 wall min per PR
 
@@ -97,7 +97,7 @@ population: 30 merged non-release PRs (#675–#767), each with its cited run
     onepipeline-ui:bootstrap                         - (n=0) → 0.4 (n=2)
     dag-ui-e2e:bootstrap                             0.3 (n=3) → 0.3 (n=1)
   options replayed over the population (task-minutes skipped; wall minutes by the fit's slope, an estimate):
-    A: script-only e2e tiers in a crate of their own: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
+    A: the script-testing e2e tiers in a crate of their own: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
     B: github-workflows-nx-cache:test keyed on what it reads, not the whole workspace and the merge base: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
     C: coverage tiers keyed on audited reads, not the whole checkout less a deny-list: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
 
@@ -148,6 +148,6 @@ population: 30 merged non-release PRs (#675–#767), each with its cited run
     dag-ui-e2e:lint                                  0.4 (n=3) → 0.3 (n=1)
     timeline-categories:lint                         0.3 (n=1) → 0.3 (n=1)
   options replayed over the population (task-minutes skipped; wall minutes by the fit's slope, an estimate):
-    A: script-only e2e tiers in a crate of their own: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
+    A: the script-testing e2e tiers in a crate of their own: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
     B: github-workflows-nx-cache:test keyed on what it reads, not the whole workspace and the merge base: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
     C: coverage tiers keyed on audited reads, not the whole checkout less a deny-list: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
