@@ -7945,9 +7945,10 @@ pub fn command_steps_log(corpus: &Value, node: &str, said: &Value) -> String {
 /// Write the command-steps corpus under `root` as the engine records a run: its
 /// launch record, the plan its `run-started` carried, each command's log under
 /// the run, and its journal — every line the engine's own [`Envelope`] as it
-/// serializes, every kind one the engine declares, the plan read as the engine's
-/// `Plan` and the refused edit's command as its channel `Command`, so a record the
-/// linked engine could not have written is refused here before anything serves it.
+/// serializes, every kind one the engine declares and every payload held to the
+/// schema the engine publishes for that kind, the plan read as the engine's `Plan`
+/// and a refused edit's command as its channel `Command`, so a record the linked
+/// engine could not have written is refused here before anything serves it.
 /// A `command-started` naming its log relative to the run names it by its path
 /// under the run, as the engine writes it, absolute; one naming an absolute path —
 /// a start recorded on another host — names that path as written.
@@ -7970,18 +7971,23 @@ pub fn write_command_steps(root: &Path) -> PathBuf {
     let start = time::OffsetDateTime::parse(START, &time::format_description::well_known::Rfc3339)
         .expect("the fixture's start");
     let mut lines = String::new();
+    let registry = onepipeline::payload::registry();
     for (seq, record) in (0_i64..).zip(records) {
         let kind = record["kind"].as_str().expect("a record's kind");
-        assert!(
-            onepipeline::event::PipelineKind::from_wire(&onepipeline::event::EventKind(
-                kind.to_owned()
-            ))
-            .is_some(),
-            "`{kind}` is a kind the linked engine journals"
-        );
+        let declared = onepipeline::event::PipelineKind::from_wire(&onepipeline::event::EventKind(
+            kind.to_owned(),
+        ))
+        .unwrap_or_else(|| panic!("`{kind}` is not a kind the linked engine journals"));
         let mut payload = record["payload"].clone();
         if let Some(log) = payload.get("log").and_then(Value::as_str) {
             payload["log"] = json!(dir.join(log).display().to_string());
+        }
+        // Each payload is held, as it is written, to the schema the linked engine
+        // publishes for its kind — the document that engine's own writer
+        // serializes — so a corpus record whose fields the engine renamed, retyped or
+        // made required is refused here rather than served as if it were current.
+        if let Err(refused) = registry.check(&onepipeline::payload::schema_of(declared), &payload) {
+            panic!("the corpus's `{kind}` record departs from the engine's schema: {refused}");
         }
         if let Some(command) = payload.get("command").filter(|_| kind == "edit-rejected") {
             let _: onepipeline::channel::Command = serde_json::from_value(command.clone())
