@@ -220,6 +220,11 @@ interface Definition {
   readonly entries?: Record<string, string>;
   readonly values?: readonly unknown[];
   readonly options?: readonly z.ZodType[];
+  readonly checks?: readonly z.ZodType[];
+  readonly check?: string;
+  readonly format?: string;
+  readonly value?: unknown;
+  readonly inclusive?: boolean;
 }
 
 const definition = (schema: z.ZodType): Definition =>
@@ -284,6 +289,35 @@ function schemaAt(pattern: string): z.ZodType | undefined {
   return at;
 }
 
+/** zod's formats of a number that hold it to whole numbers. */
+const INTEGER_FORMATS = ["safeint", "int32", "uint32", "int64", "uint64"];
+
+/**
+ * What a number schema holds its value to: whether only whole numbers, and the least
+ * value it takes, if it takes one — from zod's own checks of it, whichever way the
+ * schema was written (`z.int()` is a format of its own; `.int()` and `.nonnegative()`
+ * are checks on a number).
+ */
+function numbered(def: Definition): { integer: boolean; least?: number } {
+  const checks = [def, ...(def.checks ?? []).map((check) => definition(check))];
+  const integer = checks.some(
+    (check) =>
+      check.check === "number_format" &&
+      INTEGER_FORMATS.includes(check.format ?? ""),
+  );
+  const least = checks
+    .filter(
+      (check) =>
+        check.check === "greater_than" &&
+        check.inclusive === true &&
+        typeof check.value === "number",
+    )
+    .map((check) => check.value as number);
+  return least.length === 0
+    ? { integer }
+    : { integer, least: Math.max(...least) };
+}
+
 /** The zod types each of the check's kinds is held to. */
 const ZOD_TYPES: Readonly<Record<DeclaredField["kind"], readonly string[]>> = {
   string: ["string"],
@@ -312,8 +346,10 @@ it.each(
   if (field.kind !== "anything")
     expect(ZOD_TYPES[field.kind]).toContain(def.type);
   expect(field.nullable, `${pattern} takes null`).toBe(nullable);
-  // A record holds any key or none, so no entry of one is ever required.
-  if (pattern.endsWith(".*")) expect(field.required).toBe(false);
+  // A record holds any key or none, and a list any items or none, so no entry or
+  // item of one is ever required.
+  if (pattern.endsWith(".*") || pattern.endsWith("[0]"))
+    expect(field.required).toBe(false);
   else if (STRICTER[pattern] !== undefined)
     expect(field.required && optional).toBe(true);
   else if (LOOSER[pattern] !== undefined)
@@ -324,6 +360,14 @@ it.each(
       Object.values(def.entries ?? {}).sort(),
     );
   if (field.kind === "true") expect(def.values).toEqual([true]);
+  // A number is held to the schema's own bound and to whole numbers exactly where the
+  // schema is: a check stricter would refuse an answer the contract takes, and one
+  // looser would draw a value it refuses.
+  if (field.kind === "integer" || field.kind === "number")
+    expect(numbered(def), `${pattern}'s number`).toEqual({
+      integer: field.kind === "integer",
+      ...(field.least === undefined ? {} : { least: field.least }),
+    });
   if (field.kind === "union")
     expect(
       (def.options ?? [])

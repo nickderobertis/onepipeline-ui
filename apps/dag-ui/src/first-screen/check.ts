@@ -41,6 +41,8 @@ interface Holds {
   readonly words?: readonly string[];
   /** The types a `union` takes, one per alternative. */
   readonly alternatives?: readonly Kind[];
+  /** The least value a `number` or `integer` takes, which it takes. */
+  readonly least?: number;
 }
 
 /**
@@ -104,6 +106,7 @@ const held = (check: Check): Holds => ({
   ...(check.alternatives === undefined
     ? {}
     : { alternatives: check.alternatives }),
+  ...(check.least === undefined ? {} : { least: check.least }),
 });
 
 const nothingUnder: Check["declare"] = () => undefined;
@@ -115,6 +118,7 @@ const leaf = (
   wanted: string,
   values: { exemplar: unknown; wrong: unknown; unfit?: unknown },
   words?: readonly string[],
+  least?: number,
 ): Check => ({
   check: (value, path) =>
     holds(value) ? undefined : wrong(path, wanted, value),
@@ -125,6 +129,7 @@ const leaf = (
   kind,
   nullable: false,
   ...(words === undefined ? {} : { words }),
+  ...(least === undefined ? {} : { least }),
 });
 
 const string = leaf(
@@ -149,6 +154,8 @@ const number = leaf(
   (value) => typeof value === "number" && Number.isFinite(value) && value >= 0,
   "a non-negative number",
   { exemplar: 1, wrong: "many", unfit: -1 },
+  undefined,
+  0,
 );
 
 const counter = leaf(
@@ -156,6 +163,8 @@ const counter = leaf(
   (value) => Number.isInteger(value) && (value as number) >= 0,
   "a non-negative integer",
   { exemplar: 1, wrong: "many", unfit: 1.5 },
+  undefined,
+  0,
 );
 
 /** An instant `Date.parse` reads, which is how the screen places it. */
@@ -280,7 +289,11 @@ const array = (each: Check): Check => ({
     }
     return undefined;
   },
-  declare: (pattern, out, names) => each.declare(`${pattern}[0]`, out, names),
+  // Any item of a list is a field of its own, which a list may hold none of.
+  declare: (pattern, out, names) => {
+    if (each.kind !== "anything")
+      declared(each, `${pattern}[0]`, false, out, names);
+  },
   exemplar: () => [each.exemplar()],
   wrong: "a list",
   kind: "array",
