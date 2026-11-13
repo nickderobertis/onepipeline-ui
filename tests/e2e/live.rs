@@ -3951,6 +3951,71 @@ fn after_a_heads_read_an_appended_repetition_counts_once_as_a_whole_read_counts_
     );
 }
 
+/// Every kind outside [`HEADED_KINDS`] is fetched whole by a long run's first answers,
+/// a kind no list in this crate names included, as a newer producer would write one:
+/// each view's first answer is the whole read's, the unnamed record is among those
+/// fetched, and a drawn kind the list leaves out is drawn with its payload.
+#[test]
+fn a_kind_the_first_screen_does_not_name_is_fetched_whole_and_drawn_with_its_payload() {
+    let run = fixture_run::RUN_ID;
+    let marker = "payload-of-a-kind-the-list-leaves-out";
+    let record = |kind: &str, seq: u64| {
+        json!({
+            "v": 1, "ts": "2026-08-07T14:00:00.000Z", "stream": "generated-unnamed", "seq": seq,
+            "source": "agentgraph", "kind": kind,
+            "labels": {
+                "run_id": run, "node": fixture_run::NODE_ID, "member": "worker",
+                "persona": "worker", "session": fixture_run::CONVERSATION_ID,
+            },
+            "payload": { "detail": marker, "cause": marker },
+            "artifacts": [],
+        })
+        .to_string()
+    };
+    let drawn = record("member-died", 1);
+    let unnamed = record("a-kind-named-nowhere", 2);
+    let node_view = json!({
+        "type": "timeline", "run_id": run,
+        "scope": "node", "node": fixture_run::NODE_ID,
+    });
+    let graph = json!({ "type": "detail", "run_id": run });
+    // Graph's answer fetches the records of the kinds a first screen reads and no window,
+    // so one more record of such a kind is one more fetched.
+    let (_, _, without) = first_answers_over(std::slice::from_ref(&drawn), &graph);
+    for view in [
+        graph.clone(),
+        json!({ "type": "timeline", "run_id": run, "scope": "run" }),
+        node_view.clone(),
+    ] {
+        let (mine, theirs, traced) = first_answers_over(&[drawn.clone(), unnamed.clone()], &view);
+        assert!(
+            traced["heads_ms"].is_number(),
+            "read as its heads: {traced}"
+        );
+        same_first_answer(&mine, &theirs, &format!("{view}'s first answer"));
+        if view == graph {
+            assert_eq!(
+                traced["fetched"].as_u64(),
+                without["fetched"].as_u64().map(|fetched| fetched + 1),
+                "the unnamed record is fetched whole: {traced} against {without}"
+            );
+        }
+        if view == node_view {
+            let rows: Vec<Value> = mine["timeline"]["spans"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+                .filter(|row| row["kind"] == "member-died")
+                .collect();
+            assert!(
+                rows.iter().any(|row| row.to_string().contains(marker)),
+                "a drawn kind the list leaves out is drawn with its payload: {rows:#?}"
+            );
+        }
+    }
+}
+
 /// A record a first screen reads whole that cannot be fetched — a line rewritten under
 /// the heads read, as the engine answers one it headed and cannot read — has the run
 /// read whole for that first answer instead, which is then the whole read's.
