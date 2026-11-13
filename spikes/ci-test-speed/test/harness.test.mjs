@@ -342,3 +342,48 @@ test("offline, a run whose log was never fetched is refused naming the log", () 
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /offline and log-131703598302\.txt is not cached/);
 });
+
+function scratchTree() {
+  const dir = scratchCi();
+  for (const f of [
+    ".config/nextest.toml",
+    ".github/tests/nx-cache/project.json",
+  ]) {
+    mkdirSync(join(dir, dirname(f)), { recursive: true });
+    copyFileSync(join(root, f), join(dir, f));
+  }
+  return dir;
+}
+const proto = (dir, name) =>
+  spawnSync(
+    "node",
+    [join(root, "spikes/ci-test-speed/demo/prototype.mjs"), name],
+    { cwd: dir, encoding: "utf8" },
+  );
+
+test("each prototype makes its one change and leaves the other file alone", () => {
+  const dir = scratchTree();
+  assert.equal(proto(dir, "pyramid-no-bundle").status, 0);
+  const nextest = readFileSync(join(dir, ".config/nextest.toml"), "utf8");
+  const versions = nextest.split("[profile.versions]")[1].split("\n")[1];
+  assert.doesNotMatch(versions, /a_build_without_the_bundle/);
+  assert.match(versions, /test\(=cli::version_reports_the_crate_version\)/);
+  assert.equal(
+    readFileSync(join(dir, ".github/tests/nx-cache/project.json"), "utf8"),
+    readFileSync(join(root, ".github/tests/nx-cache/project.json"), "utf8"),
+  );
+  assert.equal(proto(dir, "nx-cache-concurrency").status, 0);
+  assert.match(
+    readFileSync(join(dir, ".github/tests/nx-cache/project.json"), "utf8"),
+    /--test-concurrency=4/,
+  );
+});
+
+test("a prototype whose edit site moved is refused, and an unknown one is a usage error", () => {
+  const dir = scratchTree();
+  assert.equal(proto(dir, "pyramid-no-bundle").status, 0);
+  const again = proto(dir, "pyramid-no-bundle");
+  assert.equal(again.status, 1);
+  assert.match(again.stderr, /\.config\/nextest\.toml no longer holds/);
+  assert.equal(proto(dir, "faster").status, 2);
+});
