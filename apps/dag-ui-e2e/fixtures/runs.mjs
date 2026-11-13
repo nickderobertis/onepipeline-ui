@@ -4413,7 +4413,6 @@ export function buildCommandStepsRuns(root) {
   journal.write();
 }
 
-/** What the command-steps corpus wrote, for the journey that reads it. */
 export function commandStepsFacts() {
   return {
     run: COMMAND_STEPS.run_id,

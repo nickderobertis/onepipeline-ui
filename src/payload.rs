@@ -6936,8 +6936,6 @@ pub const TIMELINE_RECORD_FIELDS: &[(&str, &[(&str, &str)])] = &[
             ("duration_ms", "Duration (ms)"),
         ],
     ),
-    // A live edit refused, the plan-edit hook's refusal among them: who sent it
-    // and why it was refused, which names the hook that refused it.
     (
         "edit-rejected",
         &[("author", "Author"), ("reason", "Reason")],
