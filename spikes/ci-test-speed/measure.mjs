@@ -454,11 +454,16 @@ for (const name of wanted) {
             ? /base commit/
             : /^v\d+-rust-/.test(r.key ?? "")
               ? /rust-cache/
-              : /./;
+              : /^bun-/.test(r.key ?? "")
+                ? /setup-bun/
+                : /setup-uv|uv-/.test(r.key ?? "")
+                  ? /setup-uv/
+                  : /./;
         const st = job.steps.find(
           (x) =>
             x.started_at &&
-            stepCategory(x.name) === "cache restore" &&
+            (stepCategory(x.name) === "cache restore" ||
+              /setup-bun|setup-uv/.test(x.name)) &&
             family.test(x.name) &&
             Date.parse(x.started_at) <= t + 1000 &&
             Date.parse(x.completed_at) >= t - 1000,
@@ -533,7 +538,7 @@ for (const j of result.jobs) {
   );
   for (const r of j.restores)
     console.log(
-      `   restore ${r.hit ? "HIT " : "MISS"} ${r.step} ${r.size_mb ? `${r.size_mb} MB ` : ""}${r.step_seconds ?? "?"} s`,
+      `   restore ${r.hit ? (r.partial ? "HIT (restore key, partial)" : "HIT ") : "MISS"} ${r.step} ${r.size_mb ? `${r.size_mb} MB ` : ""}${r.step_seconds ?? "?"} s`,
     );
   console.log(
     `   Nx remote cache stored ${j.nx_cache_stored_bytes ?? "?"} bytes`,

@@ -54,7 +54,7 @@ export function facts(log) {
       };
     // actions/cache prints `Cache hit for: <key>`, then the size, then a
     // `restored from key` line: one restore opens on the hit (or the miss).
-    const hit = /^Cache hit for:\s*(\S+)/.exec(s);
+    const hit = /^Cache hit for( restore-key)?:\s*(\S+)/.exec(s);
     const miss =
       /^(No cache found\.|Cache not found for input keys: (.*))$/.exec(s);
     const size = /Cache Size: ~?(\d+) MB/.exec(s);
@@ -62,7 +62,9 @@ export function facts(log) {
       out.restores.push({
         step: group?.name ?? null,
         hit: Boolean(hit),
-        key: hit ? hit[1] : (miss[2] ?? null),
+        // A restore-key hit restores an older entry of the family: a partial match.
+        partial: Boolean(hit?.[1]),
+        key: hit ? hit[2] : (miss[2] ?? null),
         at: new Date(t).toISOString(),
       });
     else if (size && out.restores.length && out.restores.at(-1).size_mb == null)
