@@ -14,6 +14,7 @@
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
+import { z } from "zod";
 import { appendLines } from "../load/journal.ts";
 import { thisHost } from "./this-host.mjs";
 
@@ -4319,9 +4320,57 @@ export function reviewLoopFacts() {
  * writes through the engine's own envelope and serves from the same file, so the
  * run the view renders here is the run that journey holds the read API to.
  */
-const COMMAND_STEPS = JSON.parse(
-  readFileSync(join(import.meta.dirname, "command-steps.json"), "utf8"),
-);
+/**
+ * A command node's id names its log file (`commands/<id>.log`), so the engine
+ * holds it to one portable file name; the corpus is held to the same.
+ */
+const commandId = z
+  .string()
+  .regex(/^[A-Za-z0-9._-]+$/u)
+  .refine((id) => id !== "." && id !== "..");
+const COMMAND_STEPS = z
+  .object({
+    run_id: z.string().regex(/^[A-Za-z0-9._-]+$/u),
+    stream: z.string().min(1),
+    hook: z.string().min(1),
+    launch: z.record(z.string(), z.unknown()),
+    logs: z.record(commandId, z.string()),
+    log_padding: z.record(
+      commandId,
+      z.object({
+        text: z.string().min(1),
+        repeat: z.number().int().positive().max(1_000_000),
+      }),
+    ),
+    records: z
+      .array(
+        z.object({
+          source: z.literal("pipeline"),
+          kind: z.string().min(1),
+          node: commandId.optional(),
+          // A log named relative to the run is one of the run's command logs;
+          // an absolute one is another host's, and is never written here.
+          payload: z
+            .object({
+              log: z
+                .string()
+                .refine(
+                  (log) =>
+                    isAbsolute(log) ||
+                    /^commands\/[A-Za-z0-9._-]+\.log$/u.test(log),
+                )
+                .optional(),
+            })
+            .catchall(z.unknown()),
+        }),
+      )
+      .min(1),
+  })
+  .parse(
+    JSON.parse(
+      readFileSync(join(import.meta.dirname, "command-steps.json"), "utf8"),
+    ),
+  );
 
 /**
  * Write the command-steps corpus under `root`: its launch record, its plan, each

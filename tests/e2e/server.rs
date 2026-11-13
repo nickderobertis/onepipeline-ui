@@ -22661,7 +22661,6 @@ fn node_record_fields(serving: &Serving, run: &str, node: &str, kind: &str) -> V
         .collect()
 }
 
-/// The served run detail of the command-steps corpus, read through `query`.
 fn command_steps_detail(serving: &Serving, run: &str, query: &str) -> Value {
     let detail = http::get(serving.address, &format!("/api/v2/runs/{run}{query}"));
     assert_eq!(detail.status, 200, "{}", detail.body);
