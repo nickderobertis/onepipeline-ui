@@ -8,7 +8,9 @@ import {
   type LiveRunDetail,
   type NodeControl,
   type NodeDetail,
+  type NodeKind,
   type NodeStatus,
+  nodeKindSchema,
   nodeStatusSchema,
   type PlanTask,
   type RunLaunch,
@@ -20,7 +22,8 @@ export type LauncherName = "Claude" | "Codex" | "Unattributed";
 export interface NodeView {
   readonly id: string;
   readonly label: string;
-  readonly kind: "agent" | "human" | "command" | "lifecycle";
+  /** The plan's node kind, or `lifecycle` for an agent node that runs steps. */
+  readonly kind: NodeKind | "lifecycle";
   /** The authoritative `GraphState.node_status`, rendered without client-side defaults. */
   readonly status: NodeStatus;
   /**
@@ -92,10 +95,10 @@ export function nodeViews(detail: LiveRunDetail): NodeView[] {
   if (!graph) return [];
   const telemetry = new Map(detail.run.nodes.map((node) => [node.node, node]));
   return graph.plan.tasks.flatMap((task) => {
-    const rawKind = readString(task, "kind");
+    const declared = nodeKindSchema.safeParse(readString(task, "kind"));
     const kind =
-      rawKind === "human" || rawKind === "command"
-        ? rawKind
+      declared.success && declared.data !== "agent"
+        ? declared.data
         : hasLifecycleShape(task)
           ? "lifecycle"
           : "agent";

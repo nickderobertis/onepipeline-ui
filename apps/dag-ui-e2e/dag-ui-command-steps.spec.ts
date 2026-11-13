@@ -110,12 +110,12 @@ test("draws each command step with its kind and outcome, and shows the edits the
     page.getByRole("article", { name: "build: done", exact: true }),
   ).not.toContainText("command-");
 
-  const refused = page.getByRole("region", { name: "2 refused edits" });
+  const refused = page.getByRole("region", { name: "Refused edits" });
   await expect(refused).toBeVisible();
   await expect(refused.getByRole("listitem")).toHaveText([
-    /^planner: decline.*the reason cannot be blank/u,
+    /^planner\s*refused: decline: node 'lint': the reason cannot be blank$/u,
     new RegExp(
-      `^planner: add.*the plan-edit hook \`${facts.hook}\` refused node 'deploy'`,
+      `^planner\\s*refused: add: the plan-edit hook \`${facts.hook}\` refused node 'deploy'`,
       "u",
     ),
   ]);
@@ -147,7 +147,7 @@ test("opens a command step to what it ran, how it ended and the end of its log",
   // served, so it says the start is cut.
   await page.goto(`${origin}/?run=${facts.run}&node=integration`);
   await expect(command).toContainText("30 seconds");
-  await expect(log.locator("pre")).toHaveText(/^…/u);
+  await expect(log).toHaveText(/^Command log…/u);
 
   await page.goto(`${origin}/?run=${facts.run}&node=lint`);
   await expect(page.getByRole("alert")).toContainText(

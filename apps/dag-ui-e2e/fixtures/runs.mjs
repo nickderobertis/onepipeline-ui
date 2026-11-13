@@ -4310,9 +4310,10 @@ export function reviewLoopFacts() {
 }
 
 /**
- * The command-steps corpus: three `kind: command` nodes the engine ran itself —
- * one `done`, one `failed` with `command-failed`, one `failed` with
- * `command-timed-out` — and a live edit the run's plan-edit hook refused.
+ * The command-steps corpus: five `kind: command` nodes the engine ran itself —
+ * two `done`, one `failed` with `command-failed`, one `failed` with
+ * `command-timed-out` and one never started — and two refused live edits, one of
+ * them the run's plan-edit hook's.
  *
  * The records are one document, `command-steps.json`, which `tests/e2e/server.rs`
  * writes through the engine's own envelope and serves from the same file, so the

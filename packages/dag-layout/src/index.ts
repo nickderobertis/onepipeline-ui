@@ -9,7 +9,12 @@ export interface DagLayoutInput {
 export interface DagNode {
   readonly id: string;
   readonly label: string;
-  readonly kind: "agent" | "human" | "command" | "lifecycle";
+  /**
+   * The card's kind word, passed through to the laid-out node unread: layout
+   * sizes and places a card the same whatever kind it is, so the vocabulary is the
+   * caller's (`@onepipeline-ui/dag-model`'s) and not restated here.
+   */
+  readonly kind: string;
   readonly state: DagNodeState;
   /**
    * Lines of text the card carries beneath its status word, each of which it grows

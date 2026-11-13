@@ -737,6 +737,7 @@ export const runListSchema = openObject({
  * or (schema 29) a `command` the engine runs itself and settles on its exit status.
  */
 export const nodeKindSchema = z.enum(["agent", "human", "command"]);
+export type NodeKind = z.infer<typeof nodeKindSchema>;
 const planStepSchema = openObject({
   id: z.string().min(1),
   kind: nodeKindSchema.optional(),
