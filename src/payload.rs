@@ -2814,17 +2814,17 @@ fn detail_document(
     Value::Object(payload)
 }
 
-/// What a first screen draws of a detail, from the run's state alone: no fold of
-/// its transcripts or its telemetry. The caller keeps what the contract names
-/// of it; the wall clock is the one the telemetry fold would make it, a run's
-/// first record's stamp to its last's, so a selective read serves the same
-/// figure a complete one does.
 /// Whether `node` is a task of the run's plan, as the detail's `graph.plan` lists
 /// them, read without building the detail.
 pub(crate) fn plan_names(view: &RunView, node: &str) -> bool {
     plan_of(&Run::of(view)).is_some_and(|plan| plan.tasks.iter().any(|task| task.id == node))
 }
 
+/// What a first screen draws of a detail, from the run's state alone: no fold of
+/// its transcripts or its telemetry. The caller keeps what the contract names
+/// of it; the wall clock is the one the telemetry fold would make it, a run's
+/// first record's stamp to its last's, so a selective read serves the same
+/// figure a complete one does.
 pub(crate) fn first_detail(view: &RunView) -> Value {
     let run = Run::of(view);
     let nodes: Vec<Value> = node_statuses(&run)
