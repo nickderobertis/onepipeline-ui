@@ -537,6 +537,32 @@ for (const name of wanted) {
           tasks_matched: matched,
         }
       : null,
+    // Inclusive, beside the exclusive table: per category, how many of the job's
+    // processes ran, their summed elapsed minutes and (where recorded) CPU minutes.
+    process_totals: rec
+      ? Object.entries(
+          rec.procs
+            .filter((p) => !p.system && p.end > p.start)
+            .reduce((m, p) => {
+              const inst =
+                /llvm-cov|instrument-coverage/.test(p.argv ?? "") ||
+                underCoverage(p);
+              const k = group(classify(p), inst);
+              const v = m[k] ?? {
+                processes: 0,
+                elapsed_minutes: 0,
+                cpu_minutes: 0,
+              };
+              v.processes += 1;
+              v.elapsed_minutes += (p.end - p.start) / 60000;
+              v.cpu_minutes += (p.cpu ?? 0) / 60000;
+              m[k] = v;
+              return m;
+            }, {}),
+        )
+          .map(([category, v]) => ({ category, ...v }))
+          .sort((x, y) => y.elapsed_minutes - x.elapsed_minutes)
+      : null,
     // Every linker invocation, longest first, with the crate it links where
     // the process tree names it (rustc's --crate-name): the cost a new test
     // binary or crate adds is one more of these per build.
