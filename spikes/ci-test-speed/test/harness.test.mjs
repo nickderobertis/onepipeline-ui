@@ -2,6 +2,10 @@
 // recorded data (a recorder capture from an ubuntu:24.04 container, run
 // 43257411385's executions document), with a `gh` stand-in on PATH only where
 // the boundary under test is the quota guard in front of GitHub.
+//
+// Run: node --test spikes/ci-test-speed/test/*.test.mjs
+// Name the files, not the directory: Node 24, the floor engines.node allows,
+// treats a directory argument as a module and fails it before any test runs.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
