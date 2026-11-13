@@ -446,10 +446,20 @@ for (const name of wanted) {
     restores: f.restores
       .map((r) => {
         const t = Date.parse(r.at);
+        // A key names its family's step; step times are whole seconds, so two
+        // restores a second apart are told apart by key, then by time.
+        const family = /^onepipeline-cli-/.test(r.key ?? "")
+          ? /sibling/
+          : /^onepipeline-api-baseline-/.test(r.key ?? "")
+            ? /base commit/
+            : /^v\d+-rust-/.test(r.key ?? "")
+              ? /rust-cache/
+              : /./;
         const st = job.steps.find(
           (x) =>
             x.started_at &&
             stepCategory(x.name) === "cache restore" &&
+            family.test(x.name) &&
             Date.parse(x.started_at) <= t + 1000 &&
             Date.parse(x.completed_at) >= t - 1000,
         );
