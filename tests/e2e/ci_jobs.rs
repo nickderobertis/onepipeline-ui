@@ -409,15 +409,19 @@ fn the_large_run_timings_journeys_and_budgets_run_wherever_the_read_paths_change
         leaves_them(&linux, change);
     }
     // A pull request changing only a first screen's read — the server's heads read
-    // and node share, and the page's first answer and its check — runs the timings
-    // and the tests that read holds itself to: the Rust journeys over a long run's
-    // first answers, and the unit test and browser journey of the page's check.
+    // and node share, the payloads it builds a first answer from, and the page's
+    // first answer and its check — runs the timings and the tests that read holds
+    // itself to: the Rust journeys over a long run's first answers, and the unit
+    // test and browser journey of the page's check.
     let first_screen = Workspace::new();
     first_screen.git(&["update-ref", "refs/remotes/origin/main", &first_screen.base]);
     for path in [
         "src/live.rs",
         "src/live/history.rs",
         "src/live/first_screen.rs",
+        "src/payload.rs",
+        "src/payload/live.rs",
+        "src/store.rs",
         "apps/dag-ui/src/main.tsx",
         "apps/dag-ui/src/first-screen/check.ts",
     ] {
