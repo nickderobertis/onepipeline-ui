@@ -129,6 +129,18 @@ function linux(dir) {
     }
   }
   const procs = [];
+  // A fork record names the forking *thread*: a linker that rustc starts from
+  // a worker thread has that thread's id as its parent. Threads are the fork
+  // records that never exec'd or exited as a process; each maps to whoever
+  // created it, so a parent id is followed up to the process that owns it.
+  const threadOf = new Map();
+  for (const list of byPid.values())
+    for (const p of list)
+      if (!p.exec && !p.exited && p.ppid != null) threadOf.set(p.pid, p.ppid);
+  const owner = (pid) => {
+    for (let n = 0; threadOf.has(pid) && n < 8; n += 1) pid = threadOf.get(pid);
+    return pid;
+  };
   for (const list of byPid.values())
     for (const p of list) {
       // A thread is forked like a process but never execs or exits as a
@@ -136,6 +148,7 @@ function linux(dir) {
       if (!p.exec && !p.exited) continue;
       p.start ??= begin;
       p.end ??= end;
+      if (p.ppid != null) p.ppid = owner(p.ppid);
       procs.push(p);
     }
   const acctBuf = existsSync(join(dir, "pacct"))

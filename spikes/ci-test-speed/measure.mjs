@@ -537,6 +537,29 @@ for (const name of wanted) {
           tasks_matched: matched,
         }
       : null,
+    // Every linker invocation, longest first, with the crate it links where
+    // the process tree names it (rustc's --crate-name): the cost a new test
+    // binary or crate adds is one more of these per build.
+    links: rec
+      ? rec.procs
+          .filter(
+            (p) =>
+              !p.system &&
+              (rec.tree
+                ? /^rustc/.test(p.parent?.comm ?? "") &&
+                  /^(cc|gcc|clang|link|lld-link|rust-lld|ld)$/.test(
+                    p.comm ?? "",
+                  )
+                : p.comm === "ld"),
+          )
+          .map((p) => ({
+            linker: p.comm,
+            crate:
+              / --crate-name (\S+)/.exec(p.parent?.argv ?? "")?.[1] ?? null,
+            seconds: (p.end - p.start) / 1000,
+          }))
+          .sort((x, y) => y.seconds - x.seconds)
+      : null,
     // Off Linux: of each category's minutes, how many its processes spent
     // beyond their CPU time (sleeps, polls, timeouts and I/O, inseparable).
     elapsed_beyond_cpu: Object.fromEntries(
@@ -573,7 +596,7 @@ for (const name of wanted) {
   });
 }
 
-const fmt = (n) => n.toFixed(1).padStart(6);
+const fmt = (n) => (n > 0 && n < 0.1 ? n.toFixed(2) : n.toFixed(1)).padStart(6);
 for (const j of result.jobs) {
   console.log(
     `\n== ${j.job} (run ${result.run} attempt ${result.attempt}, job ${j.job_id}, ${j.conclusion}) wall ${j.wall_minutes.toFixed(1)} min`,
@@ -593,7 +616,7 @@ for (const j of result.jobs) {
     `   minutes  share  ${beyond ? "of which beyond CPU  " : ""}category`,
   );
   for (const c of j.categories)
-    if (c.minutes >= 0.05 || c.minutes === 0)
+    if (c.minutes >= 0)
       console.log(
         `   ${fmt(c.minutes)} ${(c.share * 100).toFixed(1).padStart(5)}%  ${beyond ? `${fmt(j.elapsed_beyond_cpu[c.category] ?? 0)}               ` : ""}${c.category}`,
       );
