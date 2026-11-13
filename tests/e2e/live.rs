@@ -3028,7 +3028,11 @@ fn pages_open_each_run_once_two_at_a_time_and_an_untaken_opening_is_let_go() {
             if done(&seen) {
                 return seen;
             }
-            assert!(Instant::now() < deadline, "{what}: {seen:?}");
+            assert!(
+                Instant::now() < deadline,
+                "{what}: {seen:?}; the server traced {:#?}",
+                live.traced()
+            );
             std::thread::sleep(Duration::from_millis(20));
         }
     };

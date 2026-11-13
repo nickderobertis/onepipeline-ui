@@ -219,7 +219,6 @@ test("an answer missing or mistyping any field the first screen draws shows its 
   );
   expect(names).toContain("answer.initial.snapshot.visible.detail.run.state");
 
-  // Each lane a page of its own, taking every LANES-th alteration in turn.
   const lanes = [
     { page, held },
     ...(await Promise.all(

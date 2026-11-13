@@ -33,7 +33,6 @@ export type Kind =
 
 /** What a check holds a value to, which its unit test holds to the contract's schema. */
 interface Holds {
-  /** The type. */
   readonly kind: Kind;
   /** Whether `null` is taken. */
   readonly nullable: boolean;
