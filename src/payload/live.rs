@@ -571,7 +571,6 @@ impl LiveTimeline {
         timeline
     }
 
-    /// A timeline with nothing built yet.
     fn unbuilt(
         view: &RunView,
         indexed: &Indexed,
@@ -690,7 +689,6 @@ impl LiveTimeline {
         assembled.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
     }
 
-    /// The owners a build reads, in the order their spans are laid.
     fn owners(&self, view: &RunView, indexed: &Indexed) -> Vec<Owner> {
         match &self.scope {
             TimelineScope::Node(node) | TimelineScope::NodeShare(node) => {

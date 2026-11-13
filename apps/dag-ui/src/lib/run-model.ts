@@ -153,7 +153,6 @@ function isNodeStatus(value: unknown): value is NodeStatus {
  */
 export const NODE_KINDS: readonly NodeKind[] = ["agent", "human", "command"];
 
-/** Whether `value` is one of the plan's node kinds. */
 function isNodeKind(value: unknown): value is NodeKind {
   const known: readonly string[] = NODE_KINDS;
   return typeof value === "string" && known.includes(value);

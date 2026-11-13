@@ -85,7 +85,6 @@ interface Check extends Holds {
   readonly unfit?: unknown;
 }
 
-/** How a value that is there reads in a reason. */
 function shown(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "an array";
@@ -97,7 +96,6 @@ const wrong = (path: string, wanted: string, value: unknown) =>
     ? `${path} is missing`
     : `${path} is ${shown(value)}, not ${wanted}`;
 
-/** What `check` holds, as the field holding it lists it. */
 const held = (check: Check): Holds => ({
   kind: check.kind,
   nullable: check.nullable,
@@ -225,7 +223,6 @@ const either = (first: Check, second: Check, wanted: string): Check => ({
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Whether a member's check lets it be left out. */
 const optionalMembers = new WeakSet<Check>();
 
 /** One field, as the object or record holding it lists it, and every field under it. */
