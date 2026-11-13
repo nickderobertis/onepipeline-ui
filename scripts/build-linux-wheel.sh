@@ -32,14 +32,6 @@
 # DIR is relative to the repository root, which is what the container mounts,
 # and must resolve inside it. Exit 0: the wheel is in DIR. Exit 2: the arguments
 # were refused. Exit 1: the build or its environment failed, named on stderr.
-#
-# WHEEL_BUILD_CPU_SHARES, when set, is the container's `docker run --cpu-shares`:
-# its CPU weight against the host's other work when the two contend, and nothing
-# when they do not. `scripts/ci-job.sh` sets it in test-linux, where this build
-# heads the job's longest chain (the release rehearsal and the journeys over what
-# it staged follow it) and the tiers beside it otherwise take most of the CPU.
-# Unset, the container gets Docker's default weight. An integer from 2 to 262144,
-# Docker's range; anything else is refused before Docker is reached.
 set -euo pipefail
 
 usage="run 'build-linux-wheel.sh --target x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu [--out DIR]'"
@@ -104,20 +96,6 @@ case "$out_abs" in
 esac
 out_rel="${out_abs#"$root"/}"
 
-cpu_shares=()
-if [ -n "${WHEEL_BUILD_CPU_SHARES+set}" ]; then
-  [[ "$WHEEL_BUILD_CPU_SHARES" =~ ^[1-9][0-9]{0,5}$ ]] \
-    && [ "$WHEEL_BUILD_CPU_SHARES" -ge 2 ] && [ "$WHEEL_BUILD_CPU_SHARES" -le 262144 ] \
-    || fail_usage "WHEEL_BUILD_CPU_SHARES is '$WHEEL_BUILD_CPU_SHARES', not an integer from 2 to 262144"
-  cpu_shares=(--cpu-shares "$WHEEL_BUILD_CPU_SHARES")
-  # Whether that weight competes with the work beside it depends on where the
-  # caller's cgroup sits beside the container's, so the build's one success line
-  # says.
-  caller_cgroup="$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null || true)"
-  caller_weight="$(cat "/sys/fs/cgroup${caller_cgroup}/cpu.weight" 2>/dev/null || echo unknown)"
-  weight_note=" at --cpu-shares $WHEEL_BUILD_CPU_SHARES, beside a caller in cgroup ${caller_cgroup:-unknown} (cpu.weight $caller_weight)"
-fi
-
 command -v docker >/dev/null \
   || fail "docker not found: the wheel is built inside the release's manylinux image" \
     "install Docker, then re-run"
@@ -149,18 +127,6 @@ cargo_target="target/wheel-$target"
 mkdir -p -- "$out_abs" "$root/$cargo_target" \
   || fail "could not create $out_abs and $root/$cargo_target (mkdir's reason is above)" \
     "remove whatever file stands on either path, or make its parent writable by $(id -un)"
-# The image's Rust toolchain and the crates cargo downloads, kept for the next
-# build of this target in this checkout rather than fetched again in each fresh
-# container: test-linux builds the target three times, once compiling and twice
-# behind the wheel lock, and each fetched both (about a minute of each build's
-# setup). Mounted where the image's root keeps them, so every path the compiler
-# sees — and the source locations it writes into the binary — is the one a fresh
-# container uses. Under .tools, which no cache saves, and handed back with the
-# rest of the build's files.
-container_home=".tools/wheel-container-$target"
-mkdir -p -- "$root/$container_home/cargo" "$root/$container_home/rustup" \
-  || fail "could not create $root/$container_home, where the image's toolchain and crates are kept (mkdir's reason is above)" \
-    "remove whatever file stands on that path, or make $root/.tools writable by $(id -un)"
 
 # One build of a target at a time. `ci-test-linux` runs `wheel-smoke` beside the
 # release journeys, which build the same target through this script, and two
@@ -197,11 +163,6 @@ give_back() {
   if ! chown -R "$HOST_OWNER" "$CARGO_TARGET_DIR" "$OUT"; then
     echo "could not return $CARGO_TARGET_DIR and $OUT to $HOST_OWNER" >&2
     echo "ACTION: chown -R $HOST_OWNER them from a root container, as this build does, before building here again" >&2
-    [ "$status" -ne 0 ] || status=1
-  fi
-  if ! chown -R "$HOST_OWNER" "$HOME/.cargo" "$HOME/.rustup"; then
-    echo "could not return $HOME/.cargo and $HOME/.rustup, the checkout's .tools/wheel-container-$TARGET, to $HOST_OWNER" >&2
-    echo "ACTION: chown -R $HOST_OWNER .tools/wheel-container-$TARGET from a root container, or remove it, before building here again" >&2
     [ "$status" -ne 0 ] || status=1
   fi
   exit "$status"
@@ -242,9 +203,8 @@ python3.12 -m maturin build --release --locked --features bundled-ui \
   --target "$TARGET" --compatibility manylinux2014 --out "$OUT"
 SCRIPT
 
-docker run --rm --platform "$platform" ${cpu_shares[@]+"${cpu_shares[@]}"} \
+docker run --rm --platform "$platform" \
   -v "$root":/io:ro -v "$root/$cargo_target":"/io/$cargo_target" -v "$out_abs":"/io/$out_rel" -w /io \
-  -v "$root/$container_home/cargo":/root/.cargo -v "$root/$container_home/rustup":/root/.rustup \
   -e TARGET="$target" -e OUT="$out_rel" -e CHANNEL="$channel" -e MATURIN_VERSION="$maturin_version" \
   -e RUSTUP_VERSION="$rustup_version" -e RUSTUP_SHA256="$rustup_sha256" \
   -e HOST_OWNER="$(id -u):$(id -g)" \
@@ -254,4 +214,4 @@ docker run --rm --platform "$platform" ${cpu_shares[@]+"${cpu_shares[@]}"} \
   || fail "the $target wheel did not build in $image (docker exited $?)" \
     "follow the ACTION above; with none, docker itself failed: check 'docker info' answers and 'docker pull $image' succeeds, then re-run"
 
-echo "built the $target wheel into $out_rel/${weight_note:-}"
+echo "built the $target wheel into $out_rel/"

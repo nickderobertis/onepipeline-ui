@@ -15,15 +15,12 @@
 //! A host whose effective configuration does not enable human items is served
 //! the engine's own `unavailable` refusal on every route.
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use onepipeline::human_items::{
-    Actor, HumanItemAction, HumanItemBatchAnswer, HumanItemBatchReceipt, HumanItemDetail,
-    HumanItemFilter, HumanItemInput, HumanItemReceipt, HumanItemRefusal, HumanItemState,
-    HumanItemView, HumanItems as Engine, MAX_BATCH_ANSWERS,
+    HumanItemAction, HumanItemDetail, HumanItemFilter, HumanItemInput, HumanItemReceipt,
+    HumanItemRefusal, HumanItemState, HumanItemView, HumanItems as Engine,
 };
-use onepipeline::provenance::Provenance;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::SessionId;
@@ -60,14 +57,8 @@ pub(crate) struct HumanItems {
 /// here: the server attributes the write when it is made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Act {
-    /// Answer a question with a choice's id, the person's words, or both.
-    // llmlint: ignore[invalid_states_unrepresentable] this carries the route's body straight to the engine's flat `HumanItemAction::Answer`, whose `apply` is the one place that refuses an answer naming neither, in its own words and as the 409 the contract states; an enum here would refuse first and restate that rule in this crate.
-    Answer {
-        /// The picked choice's id.
-        choice: Option<String>,
-        /// The person's own words.
-        text: Option<String>,
-    },
+    /// Answer a question.
+    Answer(String),
     /// Complete a task, with the approval reference it stored.
     Complete,
     /// Dismiss an item, with an optional reason.
@@ -163,105 +154,42 @@ impl HumanItems {
         let engine = self.engine()?;
         readable(&engine, id)?;
         // Over HTTP a write is a person's press in the browser, recorded so
-        // it reads apart from a manager's own CLI action; nobody is acted for,
-        // and the words are the user's own (`docs/contract.md`, "Human items").
+        // it reads apart from a manager's own CLI action; nobody is acted for
+        // (`docs/contract.md`, "Human items").
         let actor = actor(session);
         let id = id.as_str().to_owned();
         let action = match act {
-            Act::Answer { choice, text } => HumanItemAction::Answer {
+            Act::Answer(text) => HumanItemAction::Answer {
                 id,
-                choice,
                 text,
                 actor,
                 on_behalf_of: None,
-                provenance: Provenance::User,
             },
             Act::Complete => HumanItemAction::Complete {
                 id,
                 actor,
                 on_behalf_of: None,
-                provenance: Provenance::User,
             },
             Act::Dismiss(reason) => HumanItemAction::Dismiss {
                 id,
                 reason,
                 actor,
                 on_behalf_of: None,
-                provenance: Provenance::User,
             },
             Act::Reopen => HumanItemAction::Reopen {
                 id,
                 actor,
                 on_behalf_of: None,
-                provenance: Provenance::User,
             },
             Act::Note(text) => HumanItemAction::Note {
                 id,
                 text,
                 actor,
                 on_behalf_of: None,
-                provenance: Provenance::User,
             },
         };
         engine.apply(action).map_err(refusal)
     }
-
-    /// Answer several questions as the engine's one batch, attributed as every
-    /// other write through this server is. A batch that is malformed as a whole
-    /// is `invalid_request` with nothing written; whether each well-formed entry
-    /// is accepted is the receipt's to say.
-    pub(crate) fn answer_batch(
-        &self,
-        session: Option<&SessionId>,
-        answers: Vec<HumanItemBatchAnswer>,
-    ) -> Result<HumanItemBatchReceipt, ApiError> {
-        let engine = self.engine()?;
-        malformed_batch(&answers).map_or(Ok(()), |why| Err(ApiError::InvalidRequest(why)))?;
-        engine
-            .apply_batch(
-                answers,
-                Actor {
-                    actor: actor(session),
-                    on_behalf_of: None,
-                    provenance: Provenance::User,
-                },
-            )
-            .map_err(refusal)
-    }
-}
-
-/// Why `answers` cannot be a batch at all, if it cannot: the shape the route
-/// refuses whole, before anything reaches the journal.
-fn malformed_batch(answers: &[HumanItemBatchAnswer]) -> Option<String> {
-    if answers.is_empty() {
-        return Some("a batch carries at least one answer".to_owned());
-    }
-    if answers.len() > MAX_BATCH_ANSWERS {
-        return Some(format!(
-            "a batch carries at most {MAX_BATCH_ANSWERS} answers, and this one has {}",
-            answers.len()
-        ));
-    }
-    let mut seen = BTreeSet::new();
-    for answer in answers {
-        if let Err(error) = HumanItemId::try_from(answer.id.as_str()) {
-            return Some(format!("{:?} is not a human-item id: {error}", answer.id));
-        }
-        if !seen.insert(answer.id.as_str()) {
-            return Some(format!(
-                "a batch answers each item once, and {} repeats",
-                answer.id
-            ));
-        }
-        let names = |value: &Option<String>| value.as_deref().is_some_and(|v| !v.trim().is_empty());
-        if !names(&answer.choice) && !names(&answer.text) {
-            return Some(format!(
-                "the answer to {} names neither a choice nor text",
-                answer.id
-            ));
-        }
-    }
-    None
 }
 
 /// Who a write through this server is recorded as: a press in the browser,

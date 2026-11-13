@@ -163,40 +163,33 @@ fn release_plz_names_its_branch_the_way_the_script_expects() {
 }
 
 /// The sweep, as `test-linux`'s recipe plans it on the tier the script answers
-/// for a release pull request, with the `budgets` job's `read-latency` plan,
-/// which holds dag-ui-read-latency's timings: `scripts/ci-job.sh --plan` reads
-/// Nx's own task graph and runs none of it. Every project's `check` is in one of
-/// the two, which is the whole gate over every project. How ci.yml hands the
-/// answer to the recipe is resolved from the workflow itself by
-/// `.github/tests/ci-shape.test.mjs`.
+/// for a release pull request: `scripts/ci-job.sh --plan` reads Nx's own task
+/// graph and runs none of it. Every project's `check` is in it, which is the
+/// whole gate over every project. How ci.yml hands the answer to the recipe is
+/// resolved from the workflow itself by `.github/tests/ci-shape.test.mjs`.
 #[test]
 fn the_release_pull_request_tier_plans_every_projects_check() {
     let tier = answer(&[
         ("GITHUB_EVENT_NAME", "pull_request"),
         ("GITHUB_HEAD_REF", RELEASE_PR_BRANCH),
     ]);
-    let mut planned: Vec<String> = Vec::new();
-    for job in ["test-linux", "read-latency"] {
-        let output = Command::new("bash")
-            .args(["scripts/ci-job.sh", job, "--tier", &tier, "--plan"])
-            .current_dir(repo_root())
-            .output()
-            .expect("bash is on PATH");
-        assert!(
-            output.status.success(),
-            "ci-job.sh could not plan {job}'s sweep:\n{}",
-            stderr(&output)
-        );
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        planned.extend(
-            stdout
-                .lines()
-                .find_map(|line| line.split_once(" task(s): ").map(|(_, tasks)| tasks))
-                .expect("ci-job.sh names the tasks it planned")
-                .split_whitespace()
-                .map(str::to_owned),
-        );
-    }
+    let output = Command::new("bash")
+        .args(["scripts/ci-job.sh", "test-linux", "--tier", &tier, "--plan"])
+        .current_dir(repo_root())
+        .output()
+        .expect("bash is on PATH");
+    assert!(
+        output.status.success(),
+        "ci-job.sh could not plan the sweep:\n{}",
+        stderr(&output)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let planned: Vec<&str> = stdout
+        .lines()
+        .find_map(|line| line.split_once(" task(s): ").map(|(_, tasks)| tasks))
+        .expect("ci-job.sh names the tasks it planned")
+        .split_whitespace()
+        .collect();
     let listed = Command::new("bash")
         .args([
             "scripts/nx.sh",
@@ -216,7 +209,7 @@ fn the_release_pull_request_tier_plans_every_projects_check() {
     for project in &projects {
         let task = format!("{project}:check");
         assert!(
-            planned.contains(&task),
+            planned.contains(&task.as_str()),
             "the release pull request's sweep does not run {task}: {planned:?}"
         );
     }

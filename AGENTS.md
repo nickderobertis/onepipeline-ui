@@ -148,11 +148,8 @@ block) — and `.github/tests/ci-shape.test.mjs`
 resolves every workflow to hold that, and what a push to `main` and the release
 commit start. The fifth, `budgets`, is the released `onebudgetspec-github-action`
 under `needs` and `if: always()`, on every pull request and alone of `ci.yml` on
-every push to `main`: it builds nothing and fails only on an ordinary budget verdict or
-a failed read-latency timing. A pull request that reaches `dag-ui-read-latency` (every
-release pull request) has it run that project's timings, journeys and budgets first
-(`just ci-read-latency`), alone on its own runner: nothing may time beside them, and after
-test-linux's pool they ran past its cap. `release-tail` and `host-variable` are report-only here
+every push to `main`: it builds and tests nothing and fails only on an ordinary budget
+verdict. `release-tail` and `host-variable` are report-only here
 (`enforcement-exclude-labels`) because they measure elsewhere, and a budget a pull
 request cannot measure or move carries `not-measured-on-pr`, which takes it out of the
 table and changes nothing that checks it elsewhere, so a new budget's label says which
@@ -202,10 +199,6 @@ server. Its compile list is held to the tasks the four jobs reach in the real Nx
 graph (`.github/tests/ci-warm.test.mjs`), so a recipe whose cargo arguments or
 target directory change must change its warm line too. Its macOS job is the one
 Mac run a merge adds, which the macOS runs-per-change budget accounts for.
-A release PR updated before that save restores the previous lock's build and
-compiles cold past test-linux's cap, so release-plz waits for a `warm-linux` that
-is building cold (`.github/scripts/await-warm-build.mjs`, which reads that from the
-leg's drop-an-inexact-restore step) before it updates the release PR.
 
 **Room for a warm run's saves is what keeps proven results.** GitHub evicts by last
 read once a save crosses 10 GiB, so a results entry goes the moment a Rust save lands

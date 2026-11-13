@@ -1,9 +1,5 @@
 import { Button } from "@oneharness/ui";
-import type {
-  HumanItemChoice,
-  HumanItemDetail,
-  HumanItemView,
-} from "@onepipeline-ui/dag-model";
+import type { HumanItemDetail, HumanItemView } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { TaskCard, TaskMarkdown, TaskSourceLink } from "@onetaskgraph/ui";
 import { SlidersHorizontal, X } from "lucide-react";
@@ -18,12 +14,11 @@ import {
   useState,
 } from "react";
 import type { LiveHumanItems } from "../../lib/live-human-items";
-import { Timestamp } from "../../lib/Timestamp";
 import { HumanItemToast } from "./HumanItemToast";
-import type { Draft } from "./human-item-drafts";
 import {
   BLOCKING_CHOICES,
   blockedGroups,
+  blockedPhrases,
   blockedSummary,
   changedFilters,
   DEFAULT_GROUP_BY,
@@ -32,11 +27,9 @@ import {
   GROUP_OPTIONS,
   type GroupBy,
   groupItems,
-  historyWords,
   isBlocking,
   KIND_CHOICES,
   kindLabel,
-  metadataFields,
   oneOf,
   PRIORITY_CHOICES,
   PRIORITY_OPTIONS,
@@ -47,7 +40,6 @@ import {
   sourceWords,
   stateLabel,
 } from "./human-items-model";
-import { SendBar } from "./SendBar";
 import { useGroupBy } from "./useGroupBy";
 import {
   type HumanItemWrite,
@@ -63,26 +55,14 @@ const CARD_BODY_LINES = 4;
 
 type Write = (view: HumanItemView, change: HumanItemWrite) => void;
 
-/** What every answer control needs: one item's draft, and how to change it. */
-interface Answering {
-  readonly drafts: Readonly<Record<string, Draft>>;
-  readonly refusals: Readonly<Record<string, string>>;
-  readonly sending: boolean;
-  readonly pressChoice: (view: HumanItemView, choice: HumanItemChoice) => void;
-  readonly setText: (view: HumanItemView, text: string) => void;
-}
-
 /**
  * The host-wide action items: tasks and questions the operator's attention is
  * asked for, under a heading per value of the field they are grouped by, with
- * the open questions answerable in place: an answer is drafted, by a choice,
- * the person's words or both, and the send bar sends every draft as one batch.
- * Complete and Dismiss act at once and leave a toast that can take the write
- * back or say why.
+ * the open questions answerable in place. Complete and Dismiss act at once and
+ * leave a toast that can take the write back or say why.
  *
- * Keyboard: Tab moves from one open question's answer controls straight to the
- * next: its choice buttons, or its answer box where it offers none, and nothing
- * else on a card is in that sequence. After the last of them
+ * Keyboard: Tab moves from one open question's answer box straight to the next,
+ * and nothing else on a card is in that sequence. After the last answer box
  * comes the card-action group — tracker links, Details, Complete and Dismiss —
  * which the arrow keys move through; Enter follows a focused link, and Enter
  * or Space presses a focused button.
@@ -112,7 +92,6 @@ export function HumanItemsPage({
   );
   const { groupBy, setGroupBy } = useGroupBy();
   const [room, setRoom] = useState(0);
-  const [sendRoom, setSendRoom] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const selected =
     items.items?.find(({ item }) => item.id === selectedId) ?? items.detail;
@@ -125,7 +104,8 @@ export function HumanItemsPage({
   const write: Write = (view, change) => {
     // The item is resolved as far as this page is concerned: its detail closes
     // with its card, rather than lingering on something no one is to act on.
-    if (view.item.id === selectedId) setSelectedId(undefined);
+    if (change.action !== "answer" && view.item.id === selectedId)
+      setSelectedId(undefined);
     items.write(view, change);
   };
 
@@ -144,7 +124,7 @@ export function HumanItemsPage({
       aria-label="Action items"
       className="human-items-page"
       data-detail-open={selectedId !== undefined}
-      style={pageRoom(room, sendRoom)}
+      style={toastRoom(room)}
     >
       <Filters
         choice={choice}
@@ -169,10 +149,11 @@ export function HumanItemsPage({
           >
             {groups.map((group) => (
               <ItemGroupList
-                answering={items.answers}
+                draftOf={(id) => items.drafts[id] ?? ""}
                 group={group}
                 groupBy={groupBy}
                 key={group.key}
+                onDraft={items.setDraft}
                 onSelect={setSelectedId}
                 onWrite={write}
                 selectedId={selectedId}
@@ -196,19 +177,19 @@ export function HumanItemsPage({
         </section>
         {selectedId !== undefined && (
           <DetailPane
-            answering={items.answers}
+            draft={items.drafts[selectedId] ?? ""}
             error={items.detailError}
             detail={items.detail}
             gone={items.gone}
             lastShown={lastShown.current}
             onClose={() => setSelectedId(undefined)}
+            onDraft={(text) => items.setDraft(selectedId, text)}
             onWrite={write}
             state={items.writes[selectedId]}
             view={selected}
           />
         )}
       </div>
-      <SendBar answers={items.answers} onRoom={setSendRoom} />
       {items.toast && (
         <HumanItemToast
           onClose={items.closeToast}
@@ -223,18 +204,13 @@ export function HumanItemsPage({
 }
 
 /**
- * The room the list keeps below its last card while a toast shows, and how far
- * up the toast sits to clear the send bar: custom properties, which
- * `CSSProperties` does not name, so they are declared beside it.
+ * The room the list keeps below its last card while a toast shows: a custom
+ * property, which `CSSProperties` does not name, so it is declared beside it.
  */
-function pageRoom(
-  toast: number,
-  send: number,
-): CSSProperties & {
-  readonly "--toast-room": string;
-  readonly "--send-room": string;
-} {
-  return { "--toast-room": `${toast}px`, "--send-room": `${send}px` };
+function toastRoom(
+  height: number,
+): CSSProperties & { readonly "--toast-room": string } {
+  return { "--toast-room": `${height}px` };
 }
 
 /** One heading's cards, or the whole list when nothing groups it. */
@@ -243,7 +219,8 @@ function ItemGroupList({
   groupBy,
   selectedId,
   writes,
-  answering,
+  draftOf,
+  onDraft,
   onSelect,
   onWrite,
 }: {
@@ -251,7 +228,8 @@ function ItemGroupList({
   readonly groupBy: GroupBy;
   readonly selectedId: string | undefined;
   readonly writes: Readonly<Record<string, WriteState>>;
-  readonly answering: Answering;
+  readonly draftOf: (id: string) => string;
+  readonly onDraft: (id: string, text: string) => void;
   readonly onSelect: (id: string) => void;
   readonly onWrite: Write;
 }) {
@@ -259,8 +237,9 @@ function ItemGroupList({
   const cards = group.items.map((view) => (
     <li key={view.item.id}>
       <HumanItemCard
-        answering={answering}
+        draft={draftOf(view.item.id)}
         groupBy={groupBy}
+        onDraft={(text) => onDraft(view.item.id, text)}
         onSelect={() => onSelect(view.item.id)}
         onWrite={onWrite}
         selected={view.item.id === selectedId}
@@ -488,7 +467,8 @@ function HumanItemCard({
   groupBy,
   selected,
   state,
-  answering,
+  draft,
+  onDraft,
   onSelect,
   onWrite,
 }: {
@@ -496,7 +476,8 @@ function HumanItemCard({
   readonly groupBy: GroupBy;
   readonly selected: boolean;
   readonly state?: WriteState;
-  readonly answering: Answering;
+  readonly draft: string;
+  readonly onDraft: (text: string) => void;
   readonly onSelect: () => void;
   readonly onWrite: Write;
 }) {
@@ -508,7 +489,6 @@ function HumanItemCard({
     ...(blocked ? [blocked] : []),
     ...(groupBy === "source" ? [] : [`Source: ${sourceWords(item)}`]),
   ];
-  const offers = (item.choices?.length ?? 0) > 0;
   return (
     <TaskCard
       actions={
@@ -536,28 +516,15 @@ function HumanItemCard({
       }}
       title={item.title}
     >
-      {item.kind === "question" && open && offers && (
-        <fieldset className="human-item-choices">
-          <legend className="sr-only">Choices: {item.title}</legend>
-          {item.choices?.map((choice) => (
-            <ChoiceButton
-              answering={answering}
-              choice={choice}
-              key={choice.id}
-              view={view}
-            />
-          ))}
-        </fieldset>
-      )}
-      {item.kind === "question" && open && !offers && (
+      {item.kind === "question" && open && (
         <AnswerBox
-          answering={answering}
+          draft={draft}
           label={`Answer: ${item.title}`}
-          view={view}
+          onDraft={onDraft}
+          onSubmit={(text) => onWrite(view, { action: "answer", text })}
+          pending={state?.pending ?? false}
         />
       )}
-      <AnsweredBlock view={view} />
-      <RefusalNote reason={answering.refusals[item.id]} />
       <WriteStatus state={state} />
     </TaskCard>
   );
@@ -585,7 +552,6 @@ function CardActions({
           className="human-item-tracker"
           data-card-action=""
           label={item.tracker.task}
-          title={item.tracker.task}
           // On a card the link is one of the card-action group's, and following
           // it never selects the card.
           onClick={(event) => event.stopPropagation()}
@@ -631,87 +597,50 @@ function CardActions({
   );
 }
 
-/** One choice as a press: pressed once it is the draft's, and again to clear it. */
-function ChoiceButton({
-  view,
-  choice,
-  answering,
-}: {
-  readonly view: HumanItemView;
-  readonly choice: HumanItemChoice;
-  readonly answering: Answering;
-}) {
-  const pressed = answering.drafts[view.item.id]?.choice === choice.id;
-  return (
-    <button
-      aria-pressed={pressed}
-      className="human-item-choice"
-      disabled={answering.sending}
-      onClick={() => answering.pressChoice(view, choice)}
-      type="button"
-    >
-      {choice.title}
-    </button>
-  );
-}
-
 /**
- * An open question's own words, written in place and held as its draft. Enter
- * keeps the draft and never sends it: the send bar is the one way out. Shift+Enter
- * is a new line. It rests one line tall and grows with what is written.
+ * An open question's answer, written in place. Enter sends it; Shift+Enter is a
+ * new line. It rests one line tall and grows with what is written.
  */
 function AnswerBox({
-  view,
   label,
-  answering,
+  draft,
+  pending,
+  onDraft,
+  onSubmit,
 }: {
-  readonly view: HumanItemView;
   readonly label: string;
-  readonly answering: Answering;
+  readonly draft: string;
+  readonly pending: boolean;
+  readonly onDraft: (text: string) => void;
+  readonly onSubmit: (text: string) => void;
 }) {
   return (
     <textarea
-      aria-busy={answering.sending}
+      aria-busy={pending}
       aria-label={label}
       className="human-item-answer"
-      onChange={(event) => answering.setText(view, event.target.value)}
+      onChange={(event) => onDraft(event.target.value)}
       onKeyDown={(event) => {
         if (event.key !== "Enter" || event.shiftKey) return;
         if (event.nativeEvent.isComposing) return;
         event.preventDefault();
+        if (!pending && draft.trim() !== "") onSubmit(draft);
       }}
-      placeholder="Write an answer"
-      readOnly={answering.sending}
+      placeholder="Answer, then press Enter"
+      readOnly={pending}
       rows={1}
-      value={answering.drafts[view.item.id]?.text ?? ""}
+      value={draft}
     />
   );
 }
 
-/** What an answered question was answered with: untrusted, as a body is. */
-function AnsweredBlock({ view }: { readonly view: HumanItemView }) {
-  const { item } = view;
-  if (item.state !== "answered" || item.resolution === null) return null;
-  const { choice, text } = item.resolution;
-  const picked = item.choices?.find(({ id }) => id === choice);
-  return (
-    <section aria-label="Answer" className="human-item-answered">
-      {picked && <p className="human-item-answered-choice">{picked.title}</p>}
-      {text !== null && <TaskMarkdown source={text} />}
-    </section>
-  );
-}
-
-function RefusalNote({ reason }: { readonly reason: string | undefined }) {
-  if (reason === undefined) return null;
-  return (
-    <p className="human-item-status" data-failed="true" role="alert">
-      Not sent: {reason}
-    </p>
-  );
-}
-
 function WriteStatus({ state }: { readonly state?: WriteState }) {
+  if (state?.pending)
+    return (
+      <p className="human-item-status" role="status">
+        Sending…
+      </p>
+    );
   if (state?.error)
     return (
       <p className="human-item-status" data-failed="true" role="alert">
@@ -728,7 +657,8 @@ function DetailPane({
   lastShown,
   error,
   state,
-  answering,
+  draft,
+  onDraft,
   onWrite,
   onClose,
 }: {
@@ -739,7 +669,8 @@ function DetailPane({
   readonly lastShown?: HumanItemView;
   readonly error?: string;
   readonly state?: WriteState;
-  readonly answering: Answering;
+  readonly draft: string;
+  readonly onDraft: (text: string) => void;
   readonly onWrite: Write;
   readonly onClose: () => void;
 }) {
@@ -779,16 +710,16 @@ function DetailPane({
     );
   const { item } = shown;
   const open = item.state === "open";
-  const choices = item.choices ?? [];
-  const asking = item.kind === "question" && open;
+  const phrases = blockedPhrases(shown);
   return (
-    <aside
-      aria-label="Action item detail"
-      className="human-item-detail"
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: the detail scrolls as a whole, and a region that scrolls has to be reachable by keyboard to be scrolled by one.
-      tabIndex={0}
-    >
+    <aside aria-label="Action item detail" className="human-item-detail">
       <header className="human-item-detail-head">
+        <p className="human-item-meta">
+          <span className="human-item-priority" data-priority={item.priority}>
+            {priorityLabel(item)}
+          </span>{" "}
+          {kindLabel(item)} · {stateLabel(item)}
+        </p>
         <h2>{item.title}</h2>
         <Button
           aria-label="Close detail"
@@ -800,37 +731,54 @@ function DetailPane({
           <X size={14} />
         </Button>
       </header>
+      <p className="human-item-meta">Source: {sourceWords(item)}</p>
+      {phrases.length > 0 && (
+        <p className="human-item-meta human-item-blocks">
+          {phrases.join("; ")}
+        </p>
+      )}
       {error && <p role="alert">{error}</p>}
-      <section aria-label="Full body" className="human-item-detail-body">
-        <TaskMarkdown source={item.body} />
-      </section>
-      {asking && choices.length > 0 && (
-        <fieldset className="human-item-choice-list">
-          <legend>Choices</legend>
-          {choices.map((choice) => (
-            <div className="human-item-choice-entry" key={choice.id}>
-              <ChoiceButton
-                answering={answering}
-                choice={choice}
-                view={shown}
-              />
-              <div className="human-item-choice-description">
-                <TaskMarkdown source={choice.description} />
-              </div>
+      {detail && detail.nodes.length > 0 && (
+        <section aria-label="Blocked steps" className="human-item-steps">
+          {blockedGroups(detail).map(({ phrase, nodes }) => (
+            <div key={phrase}>
+              <h3>{phrase}</h3>
+              <ul>
+                {nodes.map((node) => (
+                  <li key={`${node.run}/${node.node}`}>
+                    {node.run} / {node.node}: {node.title}
+                  </li>
+                ))}
+              </ul>
             </div>
           ))}
-        </fieldset>
+        </section>
       )}
-      {asking && (
-        <AnswerBox
-          answering={answering}
-          label={`Answer in detail: ${item.title}`}
-          view={shown}
-        />
-      )}
-      <AnsweredBlock view={shown} />
-      <RefusalNote reason={answering.refusals[item.id]} />
+      <section
+        aria-label="Full body"
+        className="human-item-detail-body"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the body scrolls within the pane, and a region that scrolls has to be reachable by keyboard to be scrolled by one.
+        tabIndex={0}
+      >
+        <TaskMarkdown source={item.body} />
+      </section>
       <div className="human-item-detail-actions">
+        {item.kind === "question" && open && (
+          <AnswerBox
+            draft={draft}
+            label={`Answer in detail: ${item.title}`}
+            onDraft={onDraft}
+            onSubmit={(text) => onWrite(shown, { action: "answer", text })}
+            pending={state?.pending ?? false}
+          />
+        )}
+        {item.tracker && (
+          <TaskSourceLink
+            className="human-item-tracker"
+            label={item.tracker.task}
+            url={item.tracker.url}
+          />
+        )}
         {open && item.kind === "task" && (
           <Button
             onClick={() => onWrite(shown, { action: "complete" })}
@@ -852,89 +800,6 @@ function DetailPane({
         )}
         <WriteStatus state={state} />
       </div>
-      {detail?.history !== undefined && detail.history.length > 0 && (
-        <History history={detail.history} />
-      )}
-      <dl className="human-item-metadata">
-        {metadataFields(shown).map((field) => (
-          <Fragment key={field.label}>
-            <dt>{field.label}</dt>
-            <dd>
-              {"value" in field ? (
-                field.value
-              ) : (
-                <>
-                  {field.party !== undefined && `By ${field.party} · `}
-                  <Timestamp at={field.at} relative />
-                </>
-              )}
-            </dd>
-          </Fragment>
-        ))}
-        {detail && detail.nodes.length > 0 && (
-          <>
-            <dt>Blocked steps</dt>
-            <dd>
-              <section aria-label="Blocked steps" className="human-item-steps">
-                {blockedGroups(detail).map(({ phrase, nodes }) => (
-                  <div key={phrase}>
-                    <h3>{phrase}</h3>
-                    <ul>
-                      {nodes.map((node) => (
-                        <li key={`${node.run}/${node.node}`}>
-                          {node.run} / {node.node}: {node.title}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </section>
-            </dd>
-          </>
-        )}
-        {item.tracker && (
-          <>
-            <dt>Tracker</dt>
-            <dd>
-              <TaskSourceLink
-                className="human-item-tracker-full"
-                label={item.tracker.task}
-                url={item.tracker.url}
-              />
-            </dd>
-          </>
-        )}
-      </dl>
     </aside>
-  );
-}
-
-/**
- * The engine's history of the item, as the detail route served it, oldest
- * first: one row per entry, its action and party in the pane's own words and
- * its moment as an age. Who made each ruling is context a reader reaches for,
- * so it is plain text in the pane's one style, never a badge or a colour.
- */
-function History({
-  history,
-}: {
-  readonly history: NonNullable<HumanItemDetail["history"]>;
-}) {
-  return (
-    <section aria-label="History" className="human-item-history">
-      <h3>History</h3>
-      <ol>
-        {history.map((entry, index) => (
-          // The engine's order is the entry's identity: two raises can share
-          // an instant, and nothing else tells them apart.
-          // biome-ignore lint/suspicious/noArrayIndexKey: the served list is append-only and oldest first, so an entry's position is stable.
-          <li key={index}>
-            {historyWords(entry)}
-            {" · "}
-            <Timestamp at={entry.at} relative />
-          </li>
-        ))}
-      </ol>
-    </section>
   );
 }

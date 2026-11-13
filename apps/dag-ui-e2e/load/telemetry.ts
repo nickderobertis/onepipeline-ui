@@ -16,7 +16,6 @@ export const KINDS = [
   "stopped",
   "live",
   "host",
-  "action-items",
 ] as const;
 
 export interface Variant {
@@ -25,9 +24,6 @@ export interface Variant {
   readonly view?: (typeof VIEWS)[number] | "channel";
   readonly tabs: number;
 }
-
-/** Each Action items window's external writes through the real CLI. */
-export const ACTION_ITEM_CHANGES = 40;
 
 /** Every page state measured, and every live view at one tab and at two. */
 export const VARIANTS: readonly Variant[] = [
@@ -53,8 +49,6 @@ export const VARIANTS: readonly Variant[] = [
     })),
   ),
   { name: "host", kind: "host", tabs: 1 },
-  { name: "action-items", kind: "action-items", tabs: 1 },
-  { name: "action-items-2-tabs", kind: "action-items", tabs: 2 },
 ];
 
 /** A measured figure: finite and never negative. */
@@ -179,28 +173,6 @@ export const telemetrySchema = z.object({
               variant.lag.never_shown === 0,
           ),
       "every one-tab live variant shows every record it was appended",
-    )
-    .refine(
-      (variants) =>
-        Object.entries(variants)
-          .filter(([, variant]) => variant.kind === "action-items")
-          .every(([, variant]) => {
-            const frames = variant.frames_by_type["human-items.patch"];
-            const reread = Object.keys(variant.requests_per_min_by_route).some(
-              (route) =>
-                route.startsWith("GET /api/human-items") &&
-                (variant.requests_per_min_by_route[route] ?? 0) > 0,
-            );
-            return (
-              frames !== undefined &&
-              frames.frames_per_min > 0 &&
-              !reread &&
-              !Object.keys(variant.requests_per_min_by_route).some((route) =>
-                route.startsWith("GET /api/v2/events"),
-              )
-            );
-          }),
-      "every Action items variant shows the external changes arrived as frames on its one stream, with no human-item GET",
     ),
 });
 export type Telemetry = z.infer<typeof telemetrySchema>;

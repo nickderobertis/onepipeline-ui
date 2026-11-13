@@ -31,14 +31,7 @@ const proxy = {
 export default defineConfig({
   root: import.meta.dirname,
   plugins: [react(), tailwindcss()],
-  build: {
-    outDir: "dist",
-    emptyOutDir: true,
-    // Everything the first screen does not draw arrives in the app's own chunk,
-    // fetched after the mark. Its first-load preload would put it back on the mark's
-    // path, so the entry names none.
-    modulePreload: { resolveDependencies: () => [] },
-  },
+  build: { outDir: "dist", emptyOutDir: true },
   server: {
     port: 4173,
     proxy,

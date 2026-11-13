@@ -13,7 +13,7 @@
 //! Everything here is a pure function of a [`RunView`], the run directory, and
 //! that document, so a payload can be built and asserted without a server.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -2718,17 +2718,13 @@ pub(crate) fn run_detail_over(
     agents: Option<usize>,
     filter: &EventFilter,
 ) -> Value {
-    let sdk_telemetry = json!(onepipeline::telemetry::of_run(view.paths, view.events));
     detail_document(
         view,
         declared,
         include_conversations,
-        &live::DetailInputs {
-            telemetry,
-            sdk_telemetry: &sdk_telemetry,
-            agents,
-            activity: None,
-        },
+        telemetry,
+        json!(onepipeline::telemetry::of_run(view.paths, view.events)),
+        agents,
         filter,
     )
 }
@@ -2740,16 +2736,11 @@ fn detail_document(
     view: &Run<'_>,
     declared: &DeclaredMembers,
     include_conversations: bool,
-    inputs: &live::DetailInputs<'_>,
+    telemetry: Option<&RunTelemetry>,
+    sdk_telemetry: Value,
+    agents: Option<usize>,
     filter: &EventFilter,
 ) -> Value {
-    let live::DetailInputs {
-        telemetry,
-        sdk_telemetry,
-        agents,
-        activity,
-    } = *inputs;
-    let sdk_telemetry = sdk_telemetry.clone();
     let mut payload = Map::new();
     // One fold of the run's transcripts, read before anything that counts,
     // numbers or lists a turn: the count beside a node and the transcript a
@@ -2772,10 +2763,7 @@ fn detail_document(
     }
     // What each node was last seen doing, over the whole journal whatever the
     // filter said: it is a fact about the run, which a filter never shapes.
-    run["live_activity"] = activity.map_or_else(
-        || json!(live_activity_over(view, &EventFilter::default())),
-        |fold| json!(fold.entries()),
-    );
+    run["live_activity"] = json!(live_activity_over(view, &EventFilter::default()));
     payload.insert("run".into(), run);
     payload.insert("telemetry".into(), sdk_telemetry);
     payload.insert("graph".into(), graph_state(view).unwrap_or(Value::Null));
@@ -2790,63 +2778,6 @@ fn detail_document(
     payload.insert("node_details".into(), node_details(view));
     payload.insert("launch".into(), launch(view));
     Value::Object(payload)
-}
-
-/// What a first screen draws of a detail, from the run's state alone: no fold of
-/// its transcripts or its telemetry. The caller keeps what the contract names
-/// of it; the wall clock is the one the telemetry fold would make it, a run's
-/// first record's stamp to its last's, so a selective read serves the same
-/// figure a complete one does.
-pub(crate) fn first_detail(view: &RunView) -> Value {
-    let run = Run::of(view);
-    let nodes: Vec<Value> = node_statuses(&run)
-        .iter()
-        .map(|(node, recorded)| {
-            let mut row = Map::new();
-            row.insert("node".into(), json!(node));
-            row.insert("status".into(), json!(status_word(&recorded.status)));
-            if let Some(outcome) = &recorded.outcome {
-                row.insert("outcome".into(), json!(outcome));
-            }
-            if let Some(class) = failure_class(&run, node, recorded) {
-                row.insert("failure".into(), json!({ "class": class }));
-            }
-            Value::Object(row)
-        })
-        .collect();
-    let mut detail = Map::new();
-    detail.insert(
-        "run".into(),
-        json!({
-            "run_id": view.paths.run,
-            "state": state_word(&run),
-            "phase": phase_word(&run),
-            "last_event": last_event(&run),
-            "timing": { "wall_seconds": wall_seconds(view) },
-            "nodes": nodes,
-        }),
-    );
-    detail.insert("graph".into(), graph_state(&run).unwrap_or(Value::Null));
-    Value::Object(detail)
-}
-
-/// A run's wall clock from its records, first stamp to last, in the whole
-/// seconds the fold reports; `None` where neither can be read.
-pub(crate) fn wall_seconds(view: &RunView) -> Option<u64> {
-    let first = view.events.first().and_then(|event| millis_of(&event.ts))?;
-    let last = view.events.last().and_then(|event| millis_of(&event.ts))?;
-    u64::try_from(last.saturating_sub(first))
-        .ok()
-        .map(|ms| ms / 1_000)
-}
-
-/// The rows a span lists, and where each ordered record is, `(stamp, place)`
-/// — the order every list of one is in.
-pub(crate) fn row_order(row: &Value) -> Option<(i128, u64)> {
-    Some((
-        millis_of(row["at"].as_str()?)?,
-        row["journal_order"].as_u64()?,
-    ))
 }
 
 /// `run_detail`, over everything `view` read: the whole merged store.
@@ -5408,43 +5339,6 @@ struct Lens<'a> {
     /// position: a record is rendered into an entry once, when it arrives, and
     /// again only when the turn it belongs to is renumbered.
     rendered: Option<&'a std::cell::RefCell<Rendered>>,
-    /// How much of each span's list is rendered; the rest is left out here so
-    /// a window's cost follows the window, not the span.
-    window: ItemsWindow,
-    /// Under [`ItemsWindow::Latest`], the earliest row the share's window holds,
-    /// as rows are ordered: every span lists its own rows from here on.
-    since: Option<(Option<i128>, usize)>,
-}
-
-/// How much of a span's event list a reading renders.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ItemsWindow {
-    /// Every event, as the complete documents hold them.
-    All,
-    /// The latest `n` events the filter admits across every span of the share,
-    /// each span listing those of them that are its own, in order, and how many
-    /// it admits in all.
-    Latest(usize),
-    /// None at all: a span's bounds and status are read off the records, not
-    /// its list.
-    Nothing,
-    /// None listed, and how many the filter admits counted: Overall once its
-    /// rest has arrived, whose spans carry `events_total` and no rows.
-    Counted,
-    /// One history page's rows and those just older, across every span: rows
-    /// strictly older than `before`, within `from` and `to`, the latest `limit`
-    /// and one more of them. Every row the bounds admit is counted, rendered or
-    /// not, into the reading's [`Rendered::counted`].
-    Page {
-        /// Older than this row's `(at, journal order)`.
-        before: Option<(i128, u64)>,
-        /// At or after this instant.
-        from: Option<i128>,
-        /// At or before this instant.
-        to: Option<i128>,
-        /// How many rows the page holds.
-        limit: usize,
-    },
 }
 
 /// Timeline entries a live reading has rendered, by merged-store position,
@@ -5452,111 +5346,16 @@ pub(crate) enum ItemsWindow {
 #[derive(Debug, Default)]
 pub(crate) struct Rendered {
     pub(crate) entries: std::collections::HashMap<usize, (Option<String>, Value)>,
-    /// Under [`ItemsWindow::Page`], the id of every row its bounds admit but
-    /// the cursor: what its `total` counts.
-    pub(crate) counted: HashSet<String>,
-    /// Under [`ItemsWindow::Page`], the id of every row older than its cursor:
-    /// the page and every page after it.
-    pub(crate) older: HashSet<String>,
     /// How many entries were rendered rather than reused, since this was made.
     pub(crate) fresh: usize,
 }
 
 impl Lens<'_> {
-    /// Where a record stands among history rows: its stamp, and its place in the
-    /// journal, as a cursor names it.
-    fn page_key(&self, index: usize, event: &Envelope) -> Option<(i128, u64)> {
-        let position = self
-            .positions
-            .and_then(|positions| positions.get(index).copied())
-            .unwrap_or(index);
-        Some((millis_of(&event.ts)?, u64::try_from(position).ok()?))
-    }
-
-    /// The id a record's row is served under, without rendering it.
-    fn row_id(&self, index: usize) -> String {
-        let position = self
-            .positions
-            .and_then(|positions| positions.get(index).copied())
-            .unwrap_or(index);
-        self.turns
-            .get(index)
-            .and_then(Option::as_ref)
-            .filter(|turn| turn.held == Held::Describes)
-            .map_or_else(|| format!("e{position}"), |turn| turn.id.clone())
-    }
-
-    /// The events of one span, as the reader asked for them, into `span`:
-    /// its `events`, and `events_total` where the list is a window of them.
-    fn fill(&self, span: &mut Map<String, Value>, events: &[(usize, &Envelope)]) {
-        let (items, total) = self.listing(events);
-        span.insert("events".into(), Value::Array(items));
-        if let Some(total) = total {
-            span.insert("events_total".into(), json!(total));
-        }
-    }
-
-    /// The window's rows of one span, and how many it holds when that is not
-    /// all of them.
-    fn listing(&self, events: &[(usize, &Envelope)]) -> (Vec<Value>, Option<usize>) {
-        if self.window == ItemsWindow::Nothing {
-            return (Vec::new(), None);
-        }
-        if self.window == ItemsWindow::Counted {
-            let total = events
-                .iter()
-                .filter(|(_, event)| self.filter.allows(event))
-                .count();
-            return (Vec::new(), Some(total));
-        }
+    /// The events of one span, as the reader asked for them.
+    fn items(&self, events: &[(usize, &Envelope)]) -> Vec<Value> {
         let mut ordered = events.to_vec();
         ordered.sort_by_key(|(index, event)| (millis_of(&event.ts), *index));
-        let mut total = None;
-        if let ItemsWindow::Page {
-            before, from, to, ..
-        } = self.window
-        {
-            ordered.retain(|(index, event)| {
-                self.filter.allows(event)
-                    && self.page_key(*index, event).is_some_and(|(at, _)| {
-                        from.is_none_or(|from| at >= from) && to.is_none_or(|to| at <= to)
-                    })
-            });
-            if let Some(rendered) = self.rendered {
-                let mut rendered = rendered.borrow_mut();
-                for (index, _) in &ordered {
-                    let id = self.row_id(*index);
-                    rendered.counted.insert(id);
-                }
-            }
-            ordered.retain(|(index, event)| {
-                self.page_key(*index, event)
-                    .is_some_and(|key| before.is_none_or(|before| key < before))
-            });
-            if let Some(rendered) = self.rendered {
-                let mut rendered = rendered.borrow_mut();
-                for (index, _) in &ordered {
-                    let id = self.row_id(*index);
-                    rendered.older.insert(id);
-                }
-            }
-            if let Some(since) = self.since {
-                ordered.retain(|(index, event)| (millis_of(&event.ts), *index) >= since);
-            }
-        }
-        if let ItemsWindow::Latest(latest) = self.window {
-            ordered.retain(|(_, event)| self.filter.allows(event));
-            total = Some(ordered.len());
-            match self.since {
-                Some(since) => {
-                    ordered.retain(|(index, event)| (millis_of(&event.ts), *index) >= since);
-                }
-                None => {
-                    ordered.drain(..ordered.len().saturating_sub(latest));
-                }
-            }
-        }
-        let items = ordered
+        ordered
             .iter()
             .filter(|(_, event)| self.filter.allows(event))
             .map(|(index, event)| {
@@ -5583,8 +5382,7 @@ impl Lens<'_> {
                 rendered.entries.insert(position, (turn, entry.clone()));
                 entry
             })
-            .collect();
-        (items, total)
+            .collect()
     }
 }
 
@@ -5648,8 +5446,6 @@ fn timeline_spans(
         transcripts: &transcripts,
         positions: view.positions,
         rendered: None,
-        window: ItemsWindow::All,
-        since: None,
     };
     match scope {
         Scope::Run => run_spans(view, &lens, ends),
@@ -5680,75 +5476,15 @@ pub(crate) fn share_spans(
     filter: &EventFilter,
     ends: &Ends,
     rendered: &std::cell::RefCell<Rendered>,
-    window: ItemsWindow,
 ) -> Vec<Value> {
-    // A span's own fields read no transcript, so a reading that renders no list
-    // does not fold one.
-    let no_records = matches!(window, ItemsWindow::Nothing | ItemsWindow::Counted);
-    let transcripts = if no_records {
-        Transcripts::of(&(*view).over(&[]), declared)
-    } else {
-        Transcripts::of(view, declared)
-    };
-    let turns = if no_records {
-        Vec::new()
-    } else {
-        turn_ids(view, &transcripts)
-    };
-    let since = match window {
-        ItemsWindow::Page {
-            before,
-            from,
-            to,
-            limit,
-        } => {
-            let mut keys: Vec<(Option<i128>, usize)> = view
-                .events
-                .iter()
-                .enumerate()
-                .filter(|(index, event)| {
-                    let position = view
-                        .positions
-                        .and_then(|positions| positions.get(*index).copied())
-                        .unwrap_or(*index);
-                    filter.allows(event)
-                        && millis_of(&event.ts).is_some_and(|at| {
-                            before.is_none_or(|before| {
-                                (at, u64::try_from(position).unwrap_or(u64::MAX)) < before
-                            }) && from.is_none_or(|from| at >= from)
-                                && to.is_none_or(|to| at <= to)
-                        })
-                })
-                .map(|(index, event)| (millis_of(&event.ts), index))
-                .collect();
-            keys.sort_unstable();
-            keys.len()
-                .checked_sub(limit + 1)
-                .and_then(|from| keys.get(from).copied())
-        }
-        ItemsWindow::Latest(latest) => {
-            let mut keys: Vec<(Option<i128>, usize)> = view
-                .events
-                .iter()
-                .enumerate()
-                .filter(|(_, event)| filter.allows(event))
-                .map(|(index, event)| (millis_of(&event.ts), index))
-                .collect();
-            keys.sort_unstable();
-            keys.len()
-                .checked_sub(latest)
-                .and_then(|from| keys.get(from).copied())
-        }
-        _ => None,
-    };
+    let transcripts = Transcripts::of(view, declared);
+    let turns = turn_ids(view, &transcripts);
     let lens = Lens {
         turns: &turns,
         filter,
         transcripts: &transcripts,
         positions: view.positions,
         rendered: Some(rendered),
-        window,
-        since,
     };
     match share {
         Share::RunLevel { first } => run_level_spans(view, &lens, first, ends),
@@ -5885,25 +5621,6 @@ pub(crate) fn timeline_harnesses_over(
     let Some(spans) = payload["spans"].as_array_mut() else {
         return payload;
     };
-    // Each node's dispatches, read once: a run's thousands of sessions each find
-    // their parent among them, and a scan of every span per session was most of
-    // what a large run's Overall cost.
-    let mut dispatches: HashMap<String, Vec<(String, Value, String)>> = HashMap::new();
-    for span in spans.iter() {
-        if span["kind"] == "dispatch" && span.get("harness_scope").is_none() {
-            if let (Some(node), Some(started), Some(id)) = (
-                span["node_id"].as_str(),
-                span["started_at"].as_str(),
-                span["id"].as_str(),
-            ) {
-                dispatches.entry(node.to_owned()).or_default().push((
-                    started.to_owned(),
-                    span["agent_role"].clone(),
-                    id.to_owned(),
-                ));
-            }
-        }
-    }
     for session in &agents.sessions {
         let labels = session.labels.as_map();
         let node = labels.get(NODE_LABEL);
@@ -5945,19 +5662,26 @@ pub(crate) fn timeline_harnesses_over(
             let parent = node.map_or_else(
                 || format!("run.{}", view.paths.run),
                 |node| {
-                    dispatches
-                        .get(node.as_str())
-                        .into_iter()
-                        .flatten()
-                        .filter(|(began, role, _)| {
-                            Some(began.as_str()) <= started.as_str()
+                    spans
+                        .iter()
+                        .filter(|span| {
+                            span["node_id"] == *node
+                                && span["kind"] == "dispatch"
+                                && span.get("harness_scope").is_none()
+                                && span["started_at"].as_str() <= started.as_str()
                                 && match launch_scope {
-                                    "pr-author" | "review-reply" => *role == launch_scope,
-                                    _ => *role != "pr-author" && *role != "review-reply",
+                                    "pr-author" | "review-reply" => {
+                                        span["agent_role"] == launch_scope
+                                    }
+                                    _ => {
+                                        span["agent_role"] != "pr-author"
+                                            && span["agent_role"] != "review-reply"
+                                    }
                                 }
                         })
-                        .max_by_key(|(began, ..)| began.as_str())
-                        .map_or_else(|| format!("node.{node}"), |(.., id)| id.clone())
+                        .max_by_key(|span| span["started_at"].as_str())
+                        .and_then(|span| span["id"].as_str())
+                        .map_or_else(|| format!("node.{node}"), str::to_owned)
                 },
             );
             let mut span = json!({
@@ -5973,11 +5697,7 @@ pub(crate) fn timeline_harnesses_over(
             }
             if let Some(node) = node {
                 span["node_id"] = json!(node);
-                // Optional on the wire: a run and node too long to form a key
-                // serve none, never a `null` the contract's schema refuses.
-                if let Some(key) = dispatch_key(&view.paths.run, node) {
-                    span["dispatch_id"] = json!(key);
-                }
+                span["dispatch_id"] = json!(dispatch_key(&view.paths.run, node));
             }
             spans.push(span);
         }
@@ -7089,16 +6809,16 @@ fn run_level_spans(view: &Run<'_>, lens: &Lens<'_>, first: &Envelope, ends: &End
         // What the run itself recorded: the relayed turns belong to the
         // sessions below, and carrying them here too would draw every one
         // of them on the run's row twice.
-        "events": [],
+        "events": lens.items(
+            &events
+                .iter()
+                .filter(|(_, event)| {
+                    event.labels.node.is_none() && event.source != Source::Agentgraph
+                })
+                .copied()
+                .collect::<Vec<_>>(),
+        ),
     }));
-    let own: Vec<(usize, &Envelope)> = events
-        .iter()
-        .filter(|(_, event)| event.labels.node.is_none() && event.source != Source::Agentgraph)
-        .copied()
-        .collect();
-    if let Some(Value::Object(run_span)) = spans.first_mut() {
-        lens.fill(run_span, &own);
-    }
     // The sessions relayed at no node: the run's own driving conversations,
     // which belong to the run rather than to any of its work. Left open until
     // the run closes, because a session that has stopped talking has not
@@ -7152,7 +6872,7 @@ fn run_level_spans(view: &Run<'_>, lens: &Lens<'_>, first: &Envelope, ends: &End
             "reference".into(),
             json!({ "kind": "conversation", "value": session }),
         );
-        lens.fill(&mut span, &relayed);
+        span.insert("events".into(), json!(lens.items(&relayed)));
         spans.push(Value::Object(span));
     }
     spans
@@ -7177,7 +6897,7 @@ fn node_level_spans(view: &Run<'_>, node: &str, run_id: &str, lens: &Lens<'_>) -
             && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
     });
     spans.extend(waiting_span(view, settled, &node_id, node));
-    spans.extend(queued_spans(&mine, &node_id, node, lens.positions));
+    spans.extend(queued_spans(&mine, &node_id, node));
     spans.extend(role_rollups(
         &mine,
         &node_id,
@@ -7225,7 +6945,7 @@ fn node_span(view: &Run<'_>, node: &str, parent: Option<&str>, lens: &Lens<'_>) 
     {
         span.insert("status".into(), json!(status_word(status)));
     }
-    lens.fill(&mut span, &events);
+    span.insert("events".into(), json!(lens.items(&events)));
     Value::Object(span)
 }
 
@@ -7301,107 +7021,53 @@ fn moment_at(ts: &str) -> Option<Moment> {
     })
 }
 
+/// Whether one record is a session's own.
+///
+/// A session id is `{stream}.{member}`, so the records that spell it are its own
+/// — which is the one join this contract allows, because `oneagentgraph` stamps
+/// no `session` label on the records that open and close a member.
+fn belongs_to(event: &Envelope, session: &str) -> bool {
+    member_label(event).is_some_and(|member| format!("{}.{member}", event.stream) == session)
+}
+
+fn ordered(events: &[(usize, &Envelope)], matching: &dyn Fn(&Envelope) -> bool) -> Vec<Moment> {
+    let mut found: Vec<Moment> = events
+        .iter()
+        .filter(|(_, event)| matching(event))
+        .filter_map(|(_, event)| Moment::of(event))
+        .collect();
+    found.sort_by_key(|moment| moment.at);
+    found
+}
+
 /// A session's own first and last records bound its lane. External closure
 /// proves it ended, but does not add the time another session spent to its work.
 fn session_interval(
-    index: &SessionIndex<'_>,
+    events: &[(usize, &Envelope)],
     session: &str,
     relayed: &[(usize, &Envelope)],
 ) -> (Moment, Option<Moment>) {
-    let mut seen: HashSet<*const Envelope> = HashSet::new();
-    let mut held: Vec<(usize, &Envelope)> = index
-        .members
-        .get(session)
-        .into_iter()
-        .flatten()
-        .copied()
-        .chain(relayed.iter().copied())
-        .filter(|(_, event)| seen.insert(std::ptr::from_ref::<Envelope>(*event)))
-        .collect();
-    // In the node's own order first, so records stamped alike keep it.
-    held.sort_by_key(|(position, _)| *position);
-    let mut own: Vec<Moment> = held
-        .into_iter()
-        .filter_map(|(_, event)| Moment::of(event))
-        .collect();
-    own.sort_by_key(|moment| moment.at);
+    let own = ordered(events, &|event| {
+        belongs_to(event, session) || relayed.iter().any(|(_, own)| std::ptr::eq(*own, event))
+    });
     let started = own.first().cloned().unwrap_or_else(|| Moment {
         at: 0,
         ts: now_rfc3339(),
     });
     let last = own.last().cloned().unwrap_or_else(|| started.clone());
-    let reaches = |at: Option<i128>| at.is_some_and(|at| at >= last.at);
-    let closed = reaches(index.closers)
-        || reaches(index.member_closers.get(session).copied())
-        || relayed
-            .iter()
-            .any(|(_, own)| reaches(index.graph_settled.get(own.stream.as_str()).copied()));
+    let closed = events.iter().any(|(_, event)| {
+        millis_of(&event.ts).is_some_and(|at| at >= last.at)
+            && (event.source == Source::Pipeline
+                && matches!(event.kind.0.as_str(), "node-settled" | "node-dispatched")
+                || event.source == Source::Vcs && event.kind.0 == vcs::SESSION_CLOSED
+                || event.source == Source::Agentgraph
+                    && belongs_to(event, session)
+                    && [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&event.kind.0.as_str())
+                || event.source == Source::Agentgraph
+                    && relayed.iter().any(|(_, own)| own.stream == event.stream)
+                    && event.kind.0 == "graph-settled")
+    });
     (started, closed.then_some(last))
-}
-
-/// One pass over a node's records for what [`session_interval`] asks of each of
-/// its sessions: a node runs hundreds of sessions over thousands of records, and
-/// asking every record about every session was seconds of a node's timeline.
-struct SessionIndex<'a> {
-    /// Each session's own records, by `{stream}.{member}`.
-    members: HashMap<String, Vec<(usize, &'a Envelope)>>,
-    /// The latest record that closes every session: a settlement, a dispatch, or
-    /// a session the forge closed.
-    closers: Option<i128>,
-    /// The latest record that closes one session: its member settling or dying.
-    member_closers: HashMap<String, i128>,
-    /// The latest graph settlement on each stream.
-    graph_settled: HashMap<&'a str, i128>,
-}
-
-impl<'a> SessionIndex<'a> {
-    fn of(events: &[(usize, &'a Envelope)]) -> Self {
-        let mut index = Self {
-            members: HashMap::new(),
-            closers: None,
-            member_closers: HashMap::new(),
-            graph_settled: HashMap::new(),
-        };
-        let later = |held: Option<i128>, at: Option<i128>| match (held, at) {
-            (Some(held), Some(at)) => Some(held.max(at)),
-            (held, at) => held.or(at),
-        };
-        for &(position, event) in events {
-            let key = member_label(event).map(|member| format!("{}.{member}", event.stream));
-            let kind = event.kind.0.as_str();
-            if event.source == Source::Pipeline
-                && matches!(kind, "node-settled" | "node-dispatched")
-                || event.source == Source::Vcs && kind == vcs::SESSION_CLOSED
-            {
-                index.closers = later(index.closers, millis_of(&event.ts));
-            }
-            if event.source == Source::Agentgraph {
-                if kind == "graph-settled" {
-                    if let Some(at) = millis_of(&event.ts) {
-                        let held = index
-                            .graph_settled
-                            .entry(event.stream.as_str())
-                            .or_insert(at);
-                        *held = (*held).max(at);
-                    }
-                }
-                if [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&kind) {
-                    if let (Some(key), Some(at)) = (&key, millis_of(&event.ts)) {
-                        let held = index.member_closers.entry(key.clone()).or_insert(at);
-                        *held = (*held).max(at);
-                    }
-                }
-            }
-            if let Some(key) = key {
-                index
-                    .members
-                    .entry(key)
-                    .or_default()
-                    .push((position, event));
-            }
-        }
-        index
-    }
 }
 
 /// The branch a node opened and what became of it, from the records `onevcs`
@@ -7601,12 +7267,7 @@ enum HoldMark {
 /// this serves no queued span at all**: the gap it shows today is the gap it goes
 /// on showing, because a span inferred from a dispatch that came late would be
 /// indistinguishable from one the run actually recorded.
-fn queued_spans(
-    events: &[(usize, &Envelope)],
-    parent: &str,
-    node: &str,
-    positions: Option<&[usize]>,
-) -> Vec<Value> {
+fn queued_spans(events: &[(usize, &Envelope)], parent: &str, node: &str) -> Vec<Value> {
     let marks: Vec<(usize, &Envelope, HoldMark)> = events
         .iter()
         .filter_map(|(index, event)| {
@@ -7635,15 +7296,7 @@ fn queued_spans(
         let mut span = Map::new();
         // Keyed by the record that opened it, because a node is held several
         // times over and the *hold* is what each span identifies.
-        span.insert(
-            "id".into(),
-            json!(format!(
-                "queued.{node}.{}",
-                positions
-                    .and_then(|positions| positions.get(*index).copied())
-                    .unwrap_or(*index)
-            )),
-        );
+        span.insert("id".into(), json!(format!("queued.{node}.{index}")));
         span.insert("kind".into(), json!("queued"));
         span.insert("label".into(), json!(node));
         span.insert("started_at".into(), json!(event.ts));
@@ -7788,7 +7441,6 @@ fn role_rollups(
             && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
     });
     let mut counted: Vec<Category> = Vec::new();
-    let index = SessionIndex::of(events);
     for (session, relayed) in relayed_sessions(events) {
         let Some(role) = declared.role_of_dispatched(
             relayed
@@ -7808,7 +7460,7 @@ fn role_rollups(
         // long as the node that ran them: a drafting turn inside a node that
         // worked for four hours took a minute, and a lane drawn over the node's
         // window says the drafting was what the node was doing all along.
-        let (began, over) = session_interval(&index, session, &relayed);
+        let (began, over) = session_interval(events, session, &relayed);
         match counted.iter_mut().find(|category| category.pair == pair) {
             Some(category) => category.fold(began, over),
             None => counted.push(Category::of(pair, began, over)),
@@ -7937,7 +7589,7 @@ fn node_spans(view: &Run<'_>, node: &str, lens: &Lens<'_>) -> Vec<Value> {
     });
 
     spans.extend(waiting_span(view, settled, &node_id, node));
-    spans.extend(queued_spans(&events, &node_id, node, lens.positions));
+    spans.extend(queued_spans(&events, &node_id, node));
 
     // The evidence the node kept and the branch it published: both sit inside
     // the dispatch they were recorded during, so both are appended after it.
@@ -7983,7 +7635,6 @@ fn node_spans(view: &Run<'_>, node: &str, lens: &Lens<'_>) -> Vec<Value> {
     // is three transcripts an operator has to be able to tell apart. A
     // dispatch that relayed no session at all is still one span, because the
     // node was dispatched and that is a fact of its own.
-    let index = SessionIndex::of(&events);
     let mut sessions = relayed_sessions(&events);
     if sessions.is_empty() {
         sessions.push((node, Vec::new()));
@@ -8012,7 +7663,7 @@ fn node_spans(view: &Run<'_>, node: &str, lens: &Lens<'_>) -> Vec<Value> {
                     .flatten(),
             )
         } else {
-            let (began, over) = session_interval(&index, session, &relayed);
+            let (began, over) = session_interval(&events, session, &relayed);
             (Some(began), over)
         };
         span.insert(
@@ -8066,7 +7717,7 @@ fn node_spans(view: &Run<'_>, node: &str, lens: &Lens<'_>) -> Vec<Value> {
                 json!({ "kind": "conversation", "value": session }),
             );
         }
-        lens.fill(&mut span, &relayed);
+        span.insert("events".into(), json!(lens.items(&relayed)));
         let sibling = judge_span(lens.transcripts, session, &span);
         spans.push(Value::Object(span));
         // Pushed straight after the dispatch it supervised, and as its sibling
@@ -8138,7 +7789,6 @@ pub(crate) fn live_activity_over(view: &Run<'_>, filter: &EventFilter) -> Vec<Va
     for event in view.events {
         fold.absorb(event, filter);
     }
-    fold.settle();
     fold.entries()
 }
 
@@ -8149,10 +7799,6 @@ pub(crate) struct ActivityFold {
     order: Vec<String>,
     latest: BTreeMap<String, (i128, Value)>,
     identities: HashSet<(String, u64)>,
-    /// Each node's latest record, its description read only when the entries
-    /// are: a fold over a run's whole journal resolves one transcript per node
-    /// rather than one per record.
-    unresolved: HashMap<String, Envelope>,
 }
 
 impl ActivityFold {
@@ -8205,9 +7851,13 @@ impl ActivityFold {
             entry.insert("step".into(), json!(step));
         }
         entry.insert("at".into(), json!(stamp));
-        // The call in one line, as the engine's resolver describes it; read
-        // for the record that stays latest, in `settle`.
-        entry.insert("description".into(), json!(""));
+        // The call in one line, as the engine's resolver describes it.
+        entry.insert(
+            "description".into(),
+            json!(transcript::read(event, None)
+                .map(|read| read.description())
+                .unwrap_or_default()),
+        );
         for field in ["kind", "name", "detail"] {
             entry.insert(
                 field.into(),
@@ -8219,25 +7869,12 @@ impl ActivityFold {
             );
         }
         entry.insert("events".into(), json!(counted + 1));
-        self.unresolved.insert(node.clone(), event.clone());
         if self
             .latest
             .insert(node.clone(), (at, Value::Object(entry)))
             .is_none()
         {
             self.order.push(node);
-        }
-    }
-
-    /// Read the description of each node's latest record, once, however many
-    /// records came before it.
-    pub(crate) fn settle(&mut self) {
-        for (node, event) in std::mem::take(&mut self.unresolved) {
-            if let Some((_, entry)) = self.latest.get_mut(&node) {
-                entry["description"] = json!(transcript::read(&event, None)
-                    .map(|read| read.description())
-                    .unwrap_or_default());
-            }
         }
     }
 

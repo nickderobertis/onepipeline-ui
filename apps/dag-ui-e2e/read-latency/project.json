@@ -35,7 +35,7 @@
     },
     "test": {
       "//": "Fresh timings on a release build, with nothing beside them and its telemetry what `budgets` reads, so never cached: apiServerSurface is among its inputs because that is what it measures. Writes through the real CLI, so it provisions the sibling.",
-      "command": "npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts --project=budgets",
+      "command": "npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts",
       "cache": false,
       "parallelism": false,
       "inputs": [
@@ -61,49 +61,6 @@
       ],
       "//api-server-end": "llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]"
     },
-    "test-large": {
-      "//": "One large run's first screens, the rest arriving, its history pages and its status read, at the workload large-run/budgets.yaml states: fresh timings on a release build, alone and never cached, as `test`'s are. Its own target so its telemetry and `budgets-large` are apart from Action items'; ci.yml's `budgets` job runs it (`scripts/ci-job.sh read-latency`) on every pull request that reaches this project and on the release pull request's sweep. Writes through the real CLI, so it provisions the sibling.",
-      "command": "npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts --project=large",
-      "cache": false,
-      "parallelism": false,
-      "inputs": [
-        "default",
-        "apiServerSurface",
-        "{workspaceRoot}/apps/dag-ui-e2e/load/corpus.mjs",
-        "{workspaceRoot}/apps/dag-ui-e2e/load/journal.ts",
-        "{workspaceRoot}/apps/dag-ui-e2e/load/output.mjs",
-        "platform"
-      ],
-      "outputs": ["{projectRoot}/telemetry/read-latency-large.json"],
-      "dependsOn": [
-        "compile-release-server",
-        {
-          "projects": ["onepipeline-ui"],
-          "target": "ensure-sibling"
-        }
-      ]
-    },
-    "test-journeys": {
-      "//": "The large-corpus journeys over the release server: first screens against their documents, the wire and its errors, a live run, and reaching everything by the page's own controls. ci.yml's `budgets` job runs them (`scripts/ci-job.sh read-latency`) on every pull request that reaches this project and on the release pull request's sweep. They time nothing, so they record no telemetry and may use several workers, and they never run beside a timing.",
-      "command": "npx playwright test --config apps/dag-ui-e2e/read-latency/read-latency.config.ts --project=journeys",
-      "cache": false,
-      "parallelism": false,
-      "inputs": [
-        "default",
-        "apiServerSurface",
-        "{workspaceRoot}/apps/dag-ui-e2e/load/corpus.mjs",
-        "{workspaceRoot}/apps/dag-ui-e2e/load/journal.ts",
-        "{workspaceRoot}/apps/dag-ui-e2e/load/output.mjs",
-        "platform"
-      ],
-      "dependsOn": [
-        "compile-release-server",
-        {
-          "projects": ["onepipeline-ui"],
-          "target": "ensure-sibling"
-        }
-      ]
-    },
     "budgets": {
       "//": "Telemetry-only: the budgets read what `test` just recorded and measure nothing themselves.",
       "command": "node_modules/.bin/onebudgetspec check apps/dag-ui-e2e/read-latency/budgets.yaml --save-results target/budget-results/dag-ui-read-latency.json",
@@ -112,15 +69,6 @@
       ],
       "cache": false,
       "dependsOn": ["test"]
-    },
-    "budgets-large": {
-      "//": "Telemetry-only: the large run's budgets read what `test-large` just recorded and measure nothing themselves.",
-      "command": "node_modules/.bin/onebudgetspec check apps/dag-ui-e2e/read-latency/large-run/budgets.yaml --save-results target/budget-results/dag-ui-read-latency-large.json",
-      "outputs": [
-        "{workspaceRoot}/target/budget-results/dag-ui-read-latency-large.json"
-      ],
-      "cache": false,
-      "dependsOn": ["test-large"]
     },
     "lint": {
       "command": "node node_modules/@biomejs/biome/bin/biome check apps/dag-ui-e2e/read-latency && npx eslint --max-warnings 0 apps/dag-ui-e2e/read-latency",
@@ -137,18 +85,9 @@
       "inputs": ["manifestText"]
     },
     "check": {
-      "//": "The default check plus budgets, the large run's timings and the large-corpus journeys: the `budgets` job's read-latency step runs it last on the release pull request's sweep, and names each target on every other pull request that reaches this project.",
+      "//": "The default check plus budgets, so test-linux's tier reaches both by target name.",
       "executor": "nx:noop",
-      "dependsOn": [
-        "format-check",
-        "lint",
-        "typecheck",
-        "test",
-        "test-large",
-        "test-journeys",
-        "budgets",
-        "budgets-large"
-      ]
+      "dependsOn": ["format-check", "lint", "typecheck", "test", "budgets"]
     }
   }
 }

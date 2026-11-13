@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Copied from dero-skills' create-repo skill; edit only the source.
 # source: github.com/nickderobertis/dero-skills/skills/bootstrap/create-repo/assets/ci/coverage-unit.sh
-# version: 4
-# sha256: 935210b1daf5374936c908edbd4c89ecbbc48b1cd2b5d00778f4d89fd9ac492a
+# version: 3
+# sha256: 9512ddce254386450d066aa55ed30a4e1af187bef307fad11442ee816d959968
 #
 # One coverage unit: one crate's tests, or one test tier's, run under cargo-llvm-cov and
 # reduced to one LCOV report Nx can cache.
@@ -24,18 +24,8 @@
 # <unit> is the Nx project name, or <project>-<tier> where a project owns several units:
 # letters, digits, `-` and `_`, not starting with `-`.
 #
-# Builds: in the workspace's own build directory (cargo's `build.build-dir`, as `cargo
-#   metadata` reports it), so every dependency unit is the one the ordinary debug build
-#   compiled there rather than a second copy of the whole graph. The workspace's own units,
-#   which carry the instrumentation, are kept apart from the ordinary build's by a
-#   forwarding `RUSTC_WORKSPACE_WRAPPER` (target/llvm-cov-target/coverage-rustc), which
-#   cargo salts their names with and which it never applies to a dependency. Both reach
-#   cargo as CARGO_BUILD_BUILD_DIR and RUSTC_WORKSPACE_WRAPPER, and so reach the tests the
-#   way llvm-cov's own CARGO_TARGET_DIR and RUSTC_WRAPPER do: a test that spawns a build of
-#   its own clears or overrides them with the rest of that family.
-# Reads: the instrumented binaries the run built, under target/llvm-cov-target and the
-#   build directory's <profile>/deps, and this unit's own raw profiles,
-#   target/llvm-cov-target/<unit>.*.profraw.
+# Reads: the instrumented binaries the run built under target/llvm-cov-target, and this
+#   unit's own raw profiles there, target/llvm-cov-target/<unit>.*.profraw.
 # Writes: target/coverage-units/<unit>.lcov, one LCOV report whose every SF: path is
 #   relative to the workspace root, and target/llvm-cov-target/<unit>.profdata. Removes only
 #   that report and this unit's raw profiles. No other unit's output is read or deleted.
@@ -82,56 +72,6 @@ cov_tool() { llvm_tool llvm-cov "${LLVM_COV:-}"; }
 readobj_tool() { llvm_tool llvm-readobj ""; }
 
 on_linux() { [ "$(uname -s)" = Linux ]; }
-
-# The build directory the workspace's ordinary builds use, read before anything here points
-# cargo elsewhere: cargo's own answer, so a `build.build-dir` or `target-dir` set anywhere
-# cargo reads it is the one shared. A cargo that reports no build directory builds in its
-# target directory.
-shared_build_dir() {
-  local metadata dir
-  metadata="$(cargo metadata --no-deps --format-version 1 --offline)" || {
-    echo "coverage-unit.sh: 'cargo metadata' could not read the workspace. ACTION: fix what cargo printed above, then re-run" >&2
-    exit 1
-  }
-  dir="$(printf '%s' "$metadata" | sed -n 's/.*"build_directory":"\([^"]*\)".*/\1/p')"
-  [ -n "$dir" ] || dir="$(printf '%s' "$metadata" | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
-  if [ -z "$dir" ]; then
-    echo "coverage-unit.sh: 'cargo metadata' named no build or target directory. ACTION: check the cargo on PATH against the pin in .github/ci-tool-versions" >&2
-    exit 1
-  fi
-  printf '%s\n' "$dir"
-}
-
-# Points this run's cargo at the shared build directory, with the workspace's units salted
-# apart by a forwarder that runs the compiler it is handed. Native, because cargo execs it.
-# Its path is the salt, so it is one fixed path: every unit builds the same instrumented
-# workspace units, and a run never rebuilds another's. Written whole and then renamed, so a
-# unit starting beside another never runs a half-written one.
-share_dependencies() {
-  shared="$(shared_build_dir)"
-  local forwarder="$coverage_target/coverage-rustc" source partial
-  mkdir -p "$coverage_target"
-  if [ ! -x "$forwarder" ]; then
-    source="$(mktemp "$coverage_target/coverage-rustc.XXXXXX.rs")"
-    partial="${source%.rs}"
-    cat >"$source" <<'RUST'
-fn main() {
-    let mut args = std::env::args_os().skip(1);
-    let compiler = args.next().expect("cargo passes the compiler");
-    let status = std::process::Command::new(compiler).args(args).status().expect("run the compiler");
-    std::process::exit(status.code().unwrap_or(1));
-}
-RUST
-    if ! env -u RUSTC_WRAPPER rustc --crate-name coverage_rustc --edition=2021 -D warnings "$source" -o "$partial"; then
-      rm -f "$source" "$partial"
-      echo "coverage-unit.sh: could not compile the workspace forwarder. ACTION: check the Rust toolchain is installed and $coverage_target is writable" >&2
-      exit 1
-    fi
-    rm -f "$source"
-    mv -f "$partial" "$forwarder"
-  fi
-  export CARGO_BUILD_BUILD_DIR="$shared" RUSTC_WORKSPACE_WRAPPER="$forwarder"
-}
 
 # Applies `cargo llvm-cov show-env --sh`, refusing the whole of it unless every line is one
 # `export NAME=value` whose value is a bare word or single-quoted, so nothing evaluated here
@@ -192,7 +132,6 @@ case "$1" in
   if ! on_linux; then
     exec cargo "$@"
   fi
-  share_dependencies
   apply_show_env
   unset LLVM_PROFILE_FILE
   CARGO_TARGET_DIR="$coverage_target" exec cargo "$@"
@@ -240,11 +179,6 @@ mkdir -p "$report_dir" "$coverage_target"
 rm -f "$report" "$indexed"
 find "$coverage_target" -maxdepth 1 -type f -name "$unit.*.profraw" -delete
 
-share_dependencies
-# llvm-cov otherwise builds in a directory of its own under the build directory, whatever
-# CARGO_BUILD_BUILD_DIR says; named, it builds where it is told. `--no-report` already keeps
-# it from cleaning the workspace's artifacts there, which other builds are using.
-export CARGO_LLVM_COV_TARGET_DIR="$coverage_target" CARGO_LLVM_COV_BUILD_DIR="$shared"
 status=0
 LLVM_PROFILE_FILE_NAME="$unit.%p-%14m.profraw" cargo llvm-cov --no-report "$@" || status=$?
 [ "$status" -eq 0 ] || exit "$status"
@@ -275,19 +209,14 @@ if ! "$(profdata_tool)" show --binary-ids "$indexed" >"$work/show" 2>"$work/show
 fi
 sed -n '/^Binary IDs:/,$p' "$work/show" | sed 1d | tr -d ' ' | tr '[:upper:]' '[:lower:]' | sort -u >"$work/ids"
 readobj="$(readobj_tool)"
-# Other units compile into these directories at the same time, so a file vanishing mid-scan
-# is routine; any other find error loses objects silently and must stop the report. The
-# build directory holds the test binaries, and its every other build's too, which the build
-# ids above leave out; only its profiles' deps directories hold a linked binary.
-shopt -s nullglob
-scanned=("$coverage_target" "$shared"/*/deps)
-shopt -u nullglob
-if ! find "${scanned[@]}" -type f -perm -u+x \
+# Other units compile into this directory at the same time, so a file vanishing mid-scan is
+# routine; any other find error loses objects silently and must stop the report.
+if ! find "$coverage_target" -type f -perm -u+x \
   -not -path '*/build/*' -not -path '*/incremental/*' -not -path '*/.fingerprint/*' -print0 \
   >"$work/objects" 2>"$work/find.err"; then
   if grep -qvF 'No such file or directory' "$work/find.err"; then
     cat "$work/find.err" >&2
-    echo "coverage-unit.sh: could not list ${scanned[*]} for $unit. ACTION: check those directories' permissions" >&2
+    echo "coverage-unit.sh: could not list $coverage_target for $unit. ACTION: check the target directory's permissions" >&2
     exit 1
   fi
 fi
@@ -299,7 +228,7 @@ while IFS= read -r -d '' candidate; do
   [ -n "$id" ] && grep -qxF "$id" "$work/ids" && objects+=(-object "$candidate")
 done <"$work/objects"
 if [ "${#objects[@]}" -eq 0 ]; then
-  echo "coverage-unit.sh: no object under ${scanned[*]} ran for $unit. ACTION: check that the linker writes a build id and the unit's binaries were built" >&2
+  echo "coverage-unit.sh: no object under $coverage_target ran for $unit. ACTION: check that the linker writes a build id and the unit's binaries were built" >&2
   exit 1
 fi
 
@@ -313,7 +242,6 @@ ignore="/rustc/([0-9a-f]+|[0-9]+\.[0-9]+\.[0-9]+)/"
 ignore+="|^$root_re(/.*)?/(tests|examples|benches)/"
 ignore+="|^$root_re(/.*)?/(tests\.rs|[0-9a-zA-Z_-]+[_-]tests\.rs)\$"
 ignore+="|^$root_re/target/llvm-cov-target(\$|/)"
-ignore+="|^$(escape "$shared")(\$|/)"
 ignore+="|^$(escape "$cargo_home")/(registry|git)/"
 ignore+="|^$(escape "$rustup_home")/toolchains(\$|/)"
 [ -z "$ignore_fragment" ] || ignore+="|$ignore_fragment"

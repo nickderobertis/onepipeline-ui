@@ -188,17 +188,6 @@ const SETTLED_SAMPLES = 4;
 const SETTLE_POLL_MS = 250;
 
 /**
- * Open `url` and wait for the app itself: a run view first draws a lighter first
- * screen, which the app replaces, and an action on the first screen's element is lost
- * when it is replaced. Every capture is of the app.
- */
-async function visit(page: Page, url: string): Promise<void> {
-  await page.goto(url);
-  // llmlint: ignore[e2e_uses_accessible_selectors] the first screen marks its root for the swap; that attribute is the only thing telling it from the app.
-  await expect(page.locator("[data-first-screen]")).toHaveCount(0);
-}
-
-/**
  * Wait until nothing about the rendered page is still changing.
  *
  * The print compared across samples is the body's markup together with every
@@ -355,7 +344,7 @@ async function openActionItems(page: Page, world: string): Promise<Locator> {
     },
     { samePath: true },
   );
-  await visit(page, `${actionItems.origin}/human-items`);
+  await page.goto(`${actionItems.origin}/human-items`);
   const list = page.getByRole("region", { name: "Action item list" });
   await expect(list.getByRole("article").first()).toBeVisible();
   await settleReads(page);
@@ -378,7 +367,7 @@ const SURFACES: readonly Surface[] = [
     name: "01-run-list-overall",
     title: "Run list and the overall view",
     open: async (page) => {
-      await visit(page, `/?list=runs&run=${runs().live}&view=overall`);
+      await page.goto(`/?list=runs&run=${runs().live}&view=overall`);
       await settleReads(page);
       await expect(page.getByRole("main")).toBeVisible();
       await expect(metrics(page)).toHaveCount(4);
@@ -391,7 +380,7 @@ const SURFACES: readonly Surface[] = [
     name: "02-graph-rows",
     title: "Overall view: one row per node, plus the run's own",
     open: async (page) => {
-      await visit(page, `/?run=${runs().live}&view=overall`);
+      await page.goto(`/?run=${runs().live}&view=overall`);
       await settleReads(page);
       await page
         .getByRole("region", { name: "Graph timeline" })
@@ -412,7 +401,7 @@ const SURFACES: readonly Surface[] = [
     name: "03-run-level-session",
     title: "Overall view with a run-level session open over it",
     open: async (page) => {
-      await visit(page, `/?run=${runs().live}&view=overall`);
+      await page.goto(`/?run=${runs().live}&view=overall`);
       await settleReads(page);
       await page
         .getByRole("region", { name: "Graph timeline" })
@@ -435,7 +424,7 @@ const SURFACES: readonly Surface[] = [
     title: "Graph view",
     open: async (page) => {
       await delayGraphMeasurements(page);
-      await visit(page, `/?run=${runs().live}&view=graph`);
+      await page.goto(`/?run=${runs().live}&view=graph`);
       await settleReads(page);
       await expect(graphNodes(page, "running")).toHaveAccessibleName(
         "dashboard: running",
@@ -467,7 +456,7 @@ const SURFACES: readonly Surface[] = [
     name: "05-node-collapsed",
     title: "Node view: the collapsed line over its transcript",
     open: async (page) => {
-      await visit(page, `/?run=${runs().live}&node=dashboard`);
+      await page.goto(`/?run=${runs().live}&node=dashboard`);
       await settleReads(page);
       await expect(
         page.getByRole("region", { name: "Timeline for dashboard" }),
@@ -489,7 +478,7 @@ const SURFACES: readonly Surface[] = [
     name: "06-node-expanded",
     title: "Node view: one row per category",
     open: async (page) => {
-      await visit(page, `/?run=${runs().live}&node=dashboard`);
+      await page.goto(`/?run=${runs().live}&node=dashboard`);
       await settleReads(page);
       const plot = page.getByRole("region", { name: "Node timeline" });
       await plot.getByRole("button", { name: "Expand timeline" }).click();
@@ -503,7 +492,7 @@ const SURFACES: readonly Surface[] = [
     name: "07-node-item-detail",
     title: "Node view with a verification open over the reading",
     open: async (page) => {
-      await visit(page, `/?run=${runs().live}&node=foundation`);
+      await page.goto(`/?run=${runs().live}&node=foundation`);
       await settleReads(page);
       const plot = page.getByRole("region", { name: "Node timeline" });
       await plot.getByRole("button", { name: "Expand timeline" }).click();
@@ -519,7 +508,7 @@ const SURFACES: readonly Surface[] = [
     name: "08-conversation",
     title: "A conversation in the right panel",
     open: async (page) => {
-      await visit(page, `/?run=${runs().live}&node=dashboard`);
+      await page.goto(`/?run=${runs().live}&node=dashboard`);
       await settleReads(page);
       await page
         .getByRole("region", { name: "Node transcript" })
@@ -537,7 +526,7 @@ const SURFACES: readonly Surface[] = [
     name: "09-node-redirected",
     title: "A node whose running turn a planner redirected",
     open: async (page) => {
-      await visit(page, `/?run=${runs().live}&node=dashboard`);
+      await page.goto(`/?run=${runs().live}&node=dashboard`);
       await settleReads(page);
       // The header's reading of whether this node can be corrected, and the record
       // of the correction that already reached it, in one frame: the badge is what a
@@ -557,7 +546,7 @@ const SURFACES: readonly Surface[] = [
     name: "10-node-no-turn-to-reach",
     title: "A node with no lever, and the note that could only be deferred",
     open: async (page) => {
-      await visit(page, `/?run=${runs().unattributed}&node=orphan`);
+      await page.goto(`/?run=${runs().unattributed}&node=orphan`);
       await settleReads(page);
       await expect(page.getByLabel(/^No turn to reach: /)).toBeVisible();
       await page
@@ -574,7 +563,7 @@ const SURFACES: readonly Surface[] = [
     name: "11-project-list",
     title: "Projects and their runs in one sidebar",
     open: async (page) => {
-      await visit(page, `/?run=${runs().live}`);
+      await page.goto(`/?run=${runs().live}`);
       await settleReads(page);
       // On a phone the list is a drawer, shown open here.
       if ((page.viewportSize()?.width ?? 0) <= 640) {
@@ -594,7 +583,7 @@ const SURFACES: readonly Surface[] = [
     title: "Host resources, unwatched runs and host shutdown",
     open: async (page) => {
       await fixHostReading(page);
-      await visit(page, "/?page=host");
+      await page.goto("/?page=host");
       await settleReads(page);
       await expect(
         page.getByRole("status", { name: "Host name", exact: true }),
@@ -611,7 +600,7 @@ const SURFACES: readonly Surface[] = [
     name: "21-remote",
     title: "Remote: publication, release and each check's evidence",
     open: async (page) => {
-      await visit(page, `/?run=${runs().live}&node=remote-open`);
+      await page.goto(`/?run=${runs().live}&node=remote-open`);
       await settleReads(page);
       await page.getByRole("tab", { name: "Remote", exact: true }).click();
       await expect(
@@ -624,7 +613,7 @@ const SURFACES: readonly Surface[] = [
     name: "13-channel",
     title: "The channel: the queue, the composer and the surface form",
     open: async (page) => {
-      await visit(page, `/?run=${runs().history}&view=channel`);
+      await page.goto(`/?run=${runs().history}&view=channel`);
       await settleReads(page);
       await expect(
         page.getByRole("region", { name: "Channel queue" }),
@@ -636,7 +625,7 @@ const SURFACES: readonly Surface[] = [
     name: "14-channel-graph-overrides",
     title: "The composer editing a node's graph overrides as an ordered list",
     open: async (page) => {
-      await visit(page, `/?run=${runs().supervised}&view=channel`);
+      await page.goto(`/?run=${runs().supervised}&view=channel`);
       await settleReads(page);
       const composer = page.getByRole("region", { name: "Reply" });
       await composer.getByLabel("Shortcut").selectOption("set-node-sets");
@@ -664,7 +653,7 @@ const SURFACES: readonly Surface[] = [
     name: "15-recorded-node-collapsed",
     title: "Recorded worker and change request drafter, collapsed",
     open: async (page) => {
-      await visit(page, `/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
       await page
         .getByRole("region", { name: "Change request drafter", exact: true })
         .waitFor();
@@ -686,7 +675,7 @@ const SURFACES: readonly Surface[] = [
     name: "16-recorded-node-expanded",
     title: "Recorded worker and change request drafter, expanded",
     open: async (page) => {
-      await visit(page, `/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
       await page
         .getByRole("region", { name: "Change request drafter", exact: true })
         .waitFor();
@@ -712,7 +701,7 @@ const SURFACES: readonly Surface[] = [
     name: "17-recorded-gate-run",
     title: "Recorded gate-run fields",
     open: async (page) => {
-      await visit(page, `/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
       await page
         .getByRole("region", { name: "Dispatch 1", exact: true })
         .getByRole("button", { name: "Open gate-run", exact: true })
@@ -735,7 +724,7 @@ const SURFACES: readonly Surface[] = [
     name: "18-recorded-session-closed",
     title: "Recorded session-closed fields",
     open: async (page) => {
-      await visit(page, `/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
       await page
         .getByRole("region", { name: "Dispatch 1", exact: true })
         .getByRole("button", { name: "Open session-closed", exact: true })
@@ -758,7 +747,7 @@ const SURFACES: readonly Surface[] = [
     name: "19-recorded-node-dispatched",
     title: "Recorded node-dispatched fields",
     open: async (page) => {
-      await visit(page, `/?run=${recorded.run_id}&node=${recorded.node}`);
+      await page.goto(`/?run=${recorded.run_id}&node=${recorded.node}`);
       await page
         .getByRole("region", { name: "Dispatch 1", exact: true })
         .getByRole("button", { name: "Open node-dispatched", exact: true })
@@ -781,11 +770,7 @@ const SURFACES: readonly Surface[] = [
     name: "20-recorded-overall",
     title: "Recorded settled execution and the late completion marker",
     open: async (page) => {
-      await visit(page, `/?run=${recorded.run_id}&view=overall`);
-      // The run's own records are read when asked for, by the page's own control.
-      await page
-        .getByRole("button", { name: "Load the run's own records" })
-        .click();
+      await page.goto(`/?run=${recorded.run_id}&view=overall`);
       await page
         .getByRole("region", { name: "Records after execution" })
         .waitFor();
@@ -803,7 +788,7 @@ const SURFACES: readonly Surface[] = [
     name: "22-node-timeline-crosshair",
     title: "Node timeline: axis markers and the crosshair under the pointer",
     open: async (page) => {
-      await visit(page, `/?run=${runs().live}&node=dashboard`);
+      await page.goto(`/?run=${runs().live}&node=dashboard`);
       await settleReads(page);
       await expect(
         page
@@ -820,7 +805,7 @@ const SURFACES: readonly Surface[] = [
     name: "23-overall-timeline-crosshair",
     title: "Overall timeline: axis markers and the crosshair under the pointer",
     open: async (page) => {
-      await visit(page, `/?run=${runs().live}&view=overall`);
+      await page.goto(`/?run=${runs().live}&view=overall`);
       await settleReads(page);
       await expect(
         page
@@ -838,7 +823,7 @@ const SURFACES: readonly Surface[] = [
     title: "Graph view: finished work held for releases",
     open: async (page) => {
       await delayGraphMeasurements(page);
-      await visit(page, `/?run=${runs().awaiting}&view=graph`);
+      await page.goto(`/?run=${runs().awaiting}&view=graph`);
       await settleReads(page);
       await expect(
         graphNodes(page, "complete-but-held").getByText(/^awaits /),
@@ -852,8 +837,7 @@ const SURFACES: readonly Surface[] = [
     name: "25-held-node",
     title: "Node view: a draft node naming every release it awaits",
     open: async (page) => {
-      await visit(
-        page,
+      await page.goto(
         `/?run=${runs().awaiting}&node=${fixture().awaiting.draft}`,
       );
       await settleReads(page);
@@ -972,48 +956,6 @@ const SURFACES: readonly Surface[] = [
       await expect(toast.getByRole("tooltip")).toBeVisible();
     },
     point: holdToast,
-  },
-  {
-    name: "33-channel-declined-ruling",
-    title:
-      "The channel: a declined ruling, and replies and envelopes from each party",
-    open: async (page) => {
-      await visit(page, `/?run=${runs().history}&view=channel`);
-      await settleReads(page);
-      const declined = page.getByRole("region", { name: "Declined ruling" });
-      await declined.scrollIntoViewIfNeeded();
-      await expect(declined).toBeVisible();
-      await expect(
-        page
-          .getByRole("region", { name: "Queued commands" })
-          .getByText(/^Envelope \d+ · from you$/u),
-      ).toHaveCount(1);
-    },
-  },
-  {
-    name: "34-action-items-history",
-    title:
-      "Action items: an item's history, the user's rulings and the manager's",
-    open: async (page) => {
-      const list = await openActionItems(page, "provenance-gallery");
-      const folded = page.getByRole("button", { name: /^Filters/u });
-      if (await folded.isVisible()) await folded.click();
-      await page
-        .getByRole("group", { name: "Filter action items" })
-        .getByLabel("State", { exact: true })
-        .selectOption("completed");
-      if (await folded.isVisible()) await folded.click();
-      await expect(list.getByRole("article")).toHaveCount(1);
-      await page
-        .getByRole("button", { name: "Details: File the flaky-runner report" })
-        .click();
-      const history = page
-        .getByRole("complementary", { name: "Action item detail" })
-        .getByRole("region", { name: "History" });
-      await expect(history.getByText(/^Note by you · /u)).toBeVisible();
-      await history.scrollIntoViewIfNeeded();
-      await settleReads(page);
-    },
   },
 ];
 

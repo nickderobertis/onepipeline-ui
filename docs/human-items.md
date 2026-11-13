@@ -34,24 +34,9 @@ spike's six realistic items are taken, as the journeys' long-content fixture.
   are untrusted: raw HTML shows as text, only `http`, `https` and `mailto` links keep a
   target, every link opens in a new tab with `rel="noopener noreferrer"`, and an image
   is shown as a link to its source and never fetched.
-- **The detail pane** leads with the item itself: its title, its body, for a question
-  its choices (each with its description) and answer box, then its actions. Everything
-  about the item, priority, kind, state, source, plan and run, what it blocks, tracker
-  and times, the blocked steps listed under their plan, is a labelled block at the
-  bottom, wrapping long values rather than cutting them. A detail taller than the pane scrolls as a whole. It
+- **The detail pane** shows the complete body, scrolling within the pane when it is
+  taller than the room left, so the list and the rest of the detail stay in place. It
   enumerates every blocked step, grouped under its plan.
-- **Who made each ruling is named quietly, in the detail alone.** No card names a
-  party, under any filter. The detail's **History** lists the engine's own `history`
-  as the detail route serves it, oldest first, one row per entry, in the pane's
-  normal text: its action and its party in words — "Raised by the manager",
-  "Answered by you", "Completed by the manager", "Note by you" — where "you" is
-  `user` (a person at this page is the user) and "the manager" is `manager`, or a
-  record with no `provenance`. The block's Answered, Completed or Dismissed row reads
-  the same way. A party is never a badge, pill or colour: the user's rows and the
-  manager's share one text style. Every time in the pane — each history row, the
-  Raised row and the resolution's row — is a relative phrase ("2 hours ago") drawn by
-  the page's one `Timestamp`, with the exact local time on hover and the served
-  instant as its `datetime`; no RFC 3339 string or absolute date-time is shown.
 - **Grouping.** The list is grouped by **Priority** by default, under a heading per
   value with its count — Critical, High, Medium, Low — and can be grouped by Kind,
   Source or Blocking instead, or by none. The choice is remembered per browser. The
@@ -78,28 +63,9 @@ spike's six realistic items are taken, as the journeys' long-content fixture.
 
 ## Acting on an item
 
-- **A question's choices are compact buttons on its card**, 28 to 32 CSS pixels tall on
-  one line, side by side and at least 8 apart; a press makes that choice the card's
-  draft answer, a second press clears it and a press on another replaces it. A title
-  wraps inside its button, capped at 46ch at every width. A question offering no
-  choices keeps its answer box on its card, resting one line tall and growing with
-  what is written: Enter keeps the draft and never sends it, and Shift+Enter writes
-  a new line. The detail offers the answer box on every question, so a draft may be a
-  choice, words, or both.
-- **The send bar is how an answer leaves.** A fixed region below the list reads "Send N
-  answers" with a Discard control while any draft is sendable, and sends every draft as
-  one `POST /api/human-items/answers`, so a queue is answered once and each manager
-  woken once. It shows with a detail open too. A failed request keeps every draft
-  and says why.
-- **A draft is stored per browser** in `localStorage`, keyed by item id, until it is sent
-  or discarded, so it survives a reload. A refused draft whose item is still open stays
-  stored and counted, its card marked with the engine's reason. Once its item is no
-  longer open, whether a send was refused or the list stopped holding it open, the
-  draft leaves storage and a "Not sent" notice under the bar names the item, the reason
-  and what was drafted, until cleared or reloaded. An item a filter merely hides is
-  still open: the server is asked once per filter before its draft is touched. Other
-  tabs are not followed live; each shows the drafts it has loaded, and a send re-reads
-  storage so another tab's sent or discarded draft does not go out again.
+- **Every open question has an answer box on its card**, resting one line tall and
+  growing with what is written. Enter sends the focused answer without opening
+  detail; Shift+Enter writes a new line.
 - **Tasks complete with Complete**, design reviews included: the engine completes a
   design review with the approval reference the task stored when it was raised.
   There is no Approve action, approval checkbox, board-copy input or key input. A
@@ -132,20 +98,14 @@ spike's six realistic items are taken, as the journeys' long-content fixture.
   The engine records `browser:session:<id>` for the server’s acting session or
   `browser` without one, and `on_behalf_of: null`; the page sends neither. The
   `browser` prefix is what tells a person's press here from a manager's own CLI
-  action over the same journal, which records `session:<id>`. **What is sent here is
-  recorded with provenance `user`**: every answer, completion, dismissal, reopen and
-  note through the routes is the user's ruling, binding the dispatches that read it,
-  while a manager's CLI action with no `--as` is the manager's. A body naming its own
-  `provenance`, and a body claiming `manager` above all, is refused with nothing
-  recorded. The toast names no party: what the page sends is the user's by
-  construction. Owners and
+  action over the same journal, which records `session:<id>`. Owners and
   delivery to their watches stay unchanged. Raising still requires the server
   to act as the owner. A manager
   completing a task on a user's behalf, after that user approved in the manager's
   chat, does so through the CLI and engine runtime, which record `on_behalf_of` —
   never through this page or its routes.
-- **A batch in flight shows on the send bar**, which reads Sending… and is disabled, so
-  a repeated press sends nothing more; each question stays until its receipt.
+- **An answer in flight keeps its question open**, marked as sending, and repeated
+  Enter sends nothing more.
 - **A failed write leaves the item as it was.** A failed Complete or Dismiss — the
   server unreachable or the engine refusing — leaves the item open: its card returns
   where it was with the reason in the engine's words, brought into view above the
@@ -160,22 +120,20 @@ spike's six realistic items are taken, as the journeys' long-content fixture.
 At `max-width: 640px` the navigation is a drawer, so a card has the main area's whole
 width. *Group by* and the filters fold behind one **Filters** button, closed by
 default, which counts how many of them differ from their defaults, so the list keeps
-the screen. A card's actions take a row of their own. A card's actions and choice buttons are the
-compact 28 to 32 CSS pixels tall and at least 8 apart, toast actions at least 44, and
-none overlaps, and the question mark on a greyed
+the screen. A card's actions take a row of their own. Card and toast actions are at
+least 44 CSS pixels tall and overlap nothing, and the question mark on a greyed
 Reopen has a hit area at least 24 pixels square inside that control, clear of the
 action beside it. The detail pane takes the main area while it is open.
 
 ## Keyboard
 
-Tab moves from one open question's answer controls **straight to the next**: its choice
-buttons, or its answer box where it offers none, and nothing else on a card is in
-that sequence. After the last of them, Tab enters the
+Tab moves from one open question's answer box **straight to the next**; nothing else
+on a card is in that sequence. After the last answer box, Tab enters the
 **card-action group** — every card's tracker link, Details, Complete and Dismiss — at
 its first action. The toast's actions follow in the ordinary Tab order. Arrow keys
 move through the group, holding at either end, and Home
 and End reach its ends; Enter follows a focused tracker link, and Enter or Space
-presses a focused button, as links and buttons natively do. The detail pane is a focusable
+presses a focused button, as links and buttons natively do. The detail pane's body is a focusable
 region, so a keyboard can scroll it.
 
 ## Density target

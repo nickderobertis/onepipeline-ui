@@ -1004,7 +1004,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
       { op: "settle", id: "ship", outcome: "done", evidence: "landed as #12" },
     ],
   });
-  expect(edit.version).toBe(4);
+  expect(edit.version).toBe(3);
   expect(edit.commands).toHaveLength(3);
   // The field the engine retired is refused by name, as the engine refuses it,
   // and an op the engine does not declare never reaches the wire.
@@ -1022,14 +1022,14 @@ test("a reply envelope composed against the engine's grammar carries what the en
     }).success,
   ).toBe(false);
   // Commands under no version, or another, are what the engine refuses as "an
-  // edit envelope requires version 4"; an envelope carrying neither half is one
+  // edit envelope requires version 3"; an envelope carrying neither half is one
   // the engine answers, naming no verdict, so it parses.
   const unversioned = replyEnvelopeSchema.safeParse({
     commands: [{ op: "drop", id: "obsolete", dependents: "detach" }],
   });
   expect(unversioned.success).toBe(false);
   expect(unversioned.error?.issues[0]?.message).toBe(
-    "an edit envelope requires version 4",
+    "an edit envelope requires version 3",
   );
   expect(
     replyEnvelopeSchema.safeParse({
@@ -1208,8 +1208,11 @@ test("the subscription and every frame type the server served parse through the 
   expect(subscribed.initial.type).toBe("snapshot");
   if (subscribed.initial.type !== "snapshot") return;
   const { snapshot } = subscribed.initial;
-  // A run view's rows are its stream's first frame, not its snapshot.
-  expect(snapshot.sidebar).toBeNull();
+  // Every sidebar row carries exactly the fields the contract lists for one.
+  for (const row of snapshot.sidebar)
+    expect(
+      Object.keys(row).filter((key) => key !== "started_at"),
+    ).toStrictEqual(SIDEBAR_ROW_FIELDS.filter((key) => key !== "started_at"));
   expect(snapshot.visible.type).toBe("detail");
   const humanItems = z
     .object({
@@ -1226,24 +1229,13 @@ test("the subscription and every frame type the server served parse through the 
   expect(new Set(frames.map((frame) => frame.type))).toStrictEqual(
     new Set(SUBSCRIPTION_FRAME_TYPES),
   );
-  // Every sidebar row carries exactly the fields the contract lists for one.
-  for (const frame of frames)
-    if (frame.type === "sidebar.snapshot")
-      for (const row of frame.rows)
-        expect(
-          Object.keys(row).filter((key) => key !== "started_at"),
-        ).toStrictEqual(
-          SIDEBAR_ROW_FIELDS.filter((key) => key !== "started_at"),
-        );
-  // The detail patch the served stream carried leaves a detail still a detail.
+  // The detail patch the served stream carried applies to the detail the
+  // served snapshot holds, and the result is still a detail.
   const patch = frames.find((frame) => frame.type === "detail.patch");
   if (patch?.type !== "detail.patch" || snapshot.visible.type !== "detail")
     throw new Error("no detail patch was served");
-  // This frame was sent once the rest had arrived, so it patches the complete
-  // document rather than the first answer's fewer members.
-  const complete = await served("run.json");
   expect(() =>
-    runDetailSchema.parse(applyPatch(complete, patch.ops)),
+    runDetailSchema.parse(applyPatch(snapshot.visible.detail, patch.ops)),
   ).not.toThrow();
   for (const frame of frames)
     if (frame.type !== "reset") expect(frame.base < frame.id).toBe(true);

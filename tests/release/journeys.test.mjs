@@ -9,8 +9,9 @@
 // of build-linux and publish against local doubles of PyPI, npm, the crate
 // registry and the GitHub Release (./doubles), which serve exactly what was
 // uploaded to them, so the real clients — gh, twine, pip, npm, cargo and the
-// release probe — are what publish and install. ./publication.test.mjs, beside
-// them, packs a tree of its own from the wheel staged here.
+// release probe — are what publish and install. ./publication.test.mjs builds a
+// native wheel instead, so its registry journeys run without a manylinux image
+// or its external mirrors, beside this file rather than after it.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {

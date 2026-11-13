@@ -1,6 +1,6 @@
 [package]
 name = "onepipeline-ui"
-version = "0.81.1"
+version = "0.73.0"
 edition = "2021"
 # The floor is the engine's: a consumer cannot build this crate under a rustc
 # `onepipeline` refuses, so this moves with the `onepipeline = "=..."` line
@@ -150,23 +150,17 @@ oneharness-core = "0.29.1"
 # major `onepipeline` itself resolves — the record this reads was written by the
 # release the engine links — and never moved on its own: `tests/packaging.rs`
 # reconciles the two edges the lockfile records.
-# Its patch releases can move its own `onejudge` across 0.x, which is why a
-# release here can stop building: 0.11.4 moved it from 0.22 to 0.23, and
-# v0.77.0's engine 0.106.0 (`oneagentgraph ^0.11.2`, `onejudge ^0.22.4`) then
-# resolves two copies of `onejudge` outside its lock and fails to compile.
-# Tightening this line cannot fix that, because the requirement that drifted is
-# the engine's. `scripts/semver-check.sh` says what lets a release past it.
-oneagentgraph = "0.13.0"
+oneagentgraph = "0.9.0"
 # The document a settled member's report *is*, linked rather than copied — why,
 # and why it is unpinned, is in `src/AGENTS.md`.
-onejudge = "0.23.1"
+onejudge = "0.22.0"
 # The correlation a channel reply is answered under is that library's own
 # token, parsed by its own parser: `POST .../channel/reply?correlation=C` hands
 # the query through `onemessagebus::Correlation` rather than a copy of its
 # grammar. Held at the version the SDK's own requirement resolves to, so one
 # copy of this library is linked rather than two; `tests/packaging.rs`
 # reconciles the edges the lockfile records.
-onemessagebus = "0.11.1"
+onemessagebus = "0.9.1"
 # This crate's own public surface is made of this library's types:
 # `error::ApiError::from_engine` and `from_engine_unscoped` take an
 # `onepipeline::Error`,
@@ -180,11 +174,9 @@ onemessagebus = "0.11.1"
 # it cannot notice, because both sides' rustdoc still spells the path
 # `onepipeline::Error` while the type behind it changed identity, so
 # `scripts/semver-check.sh` refuses a release that moved this line while the
-# commits release-plz versions from announce no break. At `=0.110.0` this crate's
-# surface follows onepipeline 0.110's: `error::ApiError::from_engine` takes that
-# release's `onepipeline::Error`, which 0.109's is not. 0.110 is also the release
-# whose records say whose words a ruling is (`onepipeline::provenance::Provenance`),
-# which the reply and human-item routes record as the user's.
+# commits release-plz versions from announce no break. At `=0.103.0` this crate's
+# surface follows onepipeline 0.103's: `error::ApiError::from_engine` takes that
+# release's `onepipeline::Error`, which 0.102's is not.
 #
 # The engine pin also fixes the linked plan-store, onevcs, oneagentgraph and
 # onejudge families. A host holds its engine and this reader to one linked
@@ -193,7 +185,7 @@ onemessagebus = "0.11.1"
 # The test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.110.0"
+onepipeline = "=0.103.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -230,9 +222,9 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right. Exact, at the
-# release the linked engine's lock resolves (0.110.0 requires ^0.65.2); earlier
+# release the linked engine's lock resolves (0.103.0 requires ^0.62.0); earlier
 # moves are in docs/engine-dependency-history.md.
-onevcs = "=0.65.2"
+onevcs = "=0.62.1"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
@@ -256,9 +248,9 @@ predicates = "3"
 # journey in `tests/plan_linear_create.rs` that copies a plan into a loopback
 # Linear: the stand-in answers exactly the documents the linked plugin sends,
 # by the plugin's own constants rather than a second spelling of them.
-onetaskgraph-core = { version = "=0.14.12", features = ["linear"] }
-onetaskgraph-linear = "=0.14.12"
-onetaskgraph-plugin-api = "=0.14.12"
+onetaskgraph-core = { version = "=0.14.9", features = ["linear"] }
+onetaskgraph-linear = "=0.14.9"
+onetaskgraph-plugin-api = "=0.14.9"
 schemars = "1"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # engine-driven journey over a panel-judged member reads the provider block it was
@@ -291,13 +283,3 @@ test = false
 strip = true
 lto = "thin"
 codegen-units = 1
-
-# Dependencies split their code generation across 16 units, which thin LTO still
-# optimizes across; this crate keeps one. With one unit everywhere the engine
-# family (onevcs, onetaskgraph-core, onepipeline) compiled one rustc at a time at
-# the end of every release build: a cold `-j4` build profiled 1043 s wall and
-# 2009 s of CPU, against 530 s and 1040 s like this, for a stripped binary of
-# 69.3 MB rather than 61.5 MB. On a pull request that moves the lock, that serial
-# tail was most of test-linux's release chain (docs/linux-cold-cache-timing.md).
-[profile.release.package."*"]
-codegen-units = 16

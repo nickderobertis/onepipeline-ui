@@ -11,15 +11,17 @@ import type {
   LiveHumanItems,
 } from "../../lib/live-human-items";
 import { type FilterChoice, NO_FILTER, toFilter } from "./human-items-model";
-import { useAnswerDrafts } from "./useAnswerDrafts";
 
 /** A write a reader can make on an item, as the route names it. */
 export type HumanItemWrite =
+  | { readonly action: "answer"; readonly text: string }
   | { readonly action: "complete" }
   | { readonly action: "dismiss"; readonly reason?: string };
 
 /** Where one item's last write stands. */
 export interface WriteState {
+  /** The receipt has not arrived: an answered question stays open meanwhile. */
+  readonly pending: boolean;
   /** The engine's refusal of the last write, in its own words. */
   readonly error?: string;
 }
@@ -60,7 +62,7 @@ interface Settled {
 }
 
 /** A write out, and where its item stood in the list when it was sent. */
-interface Hidden {
+interface Sending {
   readonly view: HumanItemView;
   readonly at: number;
 }
@@ -96,12 +98,12 @@ export function useHumanItemsSelection(active: boolean) {
  * Nothing here reads: every change, this page's own among them, arrives on the
  * stream. Complete and Dismiss act at once: the card leaves as the write is sent
  * and a toast says so; a failure puts the card back where it was, with the
- * reason. Answers are drafted and go out together ({@link useAnswerDrafts}),
- * each question staying until its receipt. A second
+ * reason. An answer keeps its question in place until the receipt. A second
  * write to an item already being written is refused here, so a repeated press
  * sends nothing. What a toast offers afterwards — taking the write back, or a
  * reason or comment — is sent only once the write's own receipt is in, in the
- * order it was asked for.
+ * order it was asked for. Drafts are held apart from what is pushed, so a
+ * refusal or a patch never takes a reader's words away.
  */
 export function useHumanItems(
   client: TelemetryClient,
@@ -115,13 +117,12 @@ export function useHumanItems(
   const [writes, setWrites] = useState<Readonly<Record<string, WriteState>>>(
     {},
   );
+  const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
   const [toast, setToast] = useState<Toast>();
+  const [sending, setSending] = useState<readonly Sending[]>([]);
   // Completed or dismissed here, receipt or not: gone from the list until a
   // failure brings it back.
-  // Questions a batch is out for: each holds its place until its receipt, even
-  // if the stream says it was answered first.
-  const [sending, setSending] = useState<readonly Hidden[]>([]);
-  const [hidden, setHidden] = useState<Readonly<Record<string, Hidden>>>({});
+  const [hidden, setHidden] = useState<Readonly<Record<string, Sending>>>({});
   // What each accepted write's receipt says its item now is, until what the page
   // is shown of the server has caught up with it.
   const [settled, setSettled] = useState<Readonly<Record<string, Settled>>>({});
@@ -195,44 +196,6 @@ export function useHumanItems(
   const listed = useRef(pushed);
   listed.current = pushed;
 
-  const writing = useCallback((id: string) => inFlight.current.has(id), []);
-  const onAnswered = useCallback((receipts: readonly HumanItemReceipt[]) => {
-    const filter = currentFilter.current;
-    setSettled((all) => {
-      const next = { ...all };
-      for (const { item: view } of receipts) {
-        const at = Math.max(
-          0,
-          listed.current?.findIndex(({ item }) => item.id === view.item.id) ??
-            0,
-        );
-        next[view.item.id] = { view, at, filter };
-      }
-      return next;
-    });
-    const answered = new Set(receipts.map(({ item }) => item.item.id));
-    setSending((all) => all.filter(({ view }) => !answered.has(view.item.id)));
-  }, []);
-  const onSending = useCallback((ids: readonly string[]) => {
-    const held = listed.current ?? [];
-    setSending(
-      ids.flatMap((id) => {
-        const at = held.findIndex(({ item }) => item.id === id);
-        const view = held[at];
-        return view === undefined ? [] : [{ view, at }];
-      }),
-    );
-  }, []);
-  const answers = useAnswerDrafts(
-    client,
-    pushed,
-    filterKey,
-    writing,
-    onAnswered,
-    onSending,
-  );
-  const { retire } = answers;
-
   const onToast = useCallback(
     (key: number, change: (held: Toast) => Toast) =>
       setToast((held) => (held?.key === key ? change(held) : held)),
@@ -250,13 +213,17 @@ export function useHumanItems(
         0,
         listed.current?.findIndex(({ item }) => item.id === id) ?? 0,
       );
-      setWrites((all) => ({ ...all, [id]: {} }));
-      setHidden((all) => ({ ...all, [id]: { view, at } }));
+      const answering = change.action === "answer";
+      setWrites((all) => ({ ...all, [id]: { pending: answering } }));
+      if (answering) setSending((all) => [...all, { view, at }]);
+      else setHidden((all) => ({ ...all, [id]: { view, at } }));
       setToast({ key, id, title, action: change.action, phase: "sending" });
       const sent: Promise<HumanItemReceipt> =
-        change.action === "complete"
-          ? client.completeHumanItem(id)
-          : client.dismissHumanItem(id, change.reason);
+        change.action === "answer"
+          ? client.answerHumanItem(id, change.text)
+          : change.action === "complete"
+            ? client.completeHumanItem(id)
+            : client.dismissHumanItem(id, change.reason);
       resolutions.current.set(key, sent);
       sent
         .then(
@@ -265,8 +232,12 @@ export function useHumanItems(
               ...all,
               [id]: { view: receipt.item, at, filter },
             }));
-            setWrites((all) => ({ ...all, [id]: {} }));
-            retire(id, "dismissed here");
+            setWrites((all) => ({ ...all, [id]: { pending: false } }));
+            setDrafts((all) =>
+              Object.fromEntries(
+                Object.entries(all).filter(([held]) => held !== id),
+              ),
+            );
             onToast(key, (held) => ({
               ...held,
               phase: "done",
@@ -277,22 +248,23 @@ export function useHumanItems(
             const refusal = message(error);
             setWrites((all) => ({
               ...all,
-              [id]: { error: refusal },
+              [id]: { pending: false, error: refusal },
             }));
             onToast(key, (held) => ({
               ...held,
               phase: "failed",
               error: refusal,
             }));
-            setReturned({ id });
+            if (!answering) setReturned({ id });
           },
         )
         .finally(() => {
           inFlight.current.delete(id);
+          setSending((all) => all.filter(({ view }) => view.item.id !== id));
           setHidden(forget(id));
         });
     },
-    [client, onToast, retire],
+    [client, onToast],
   );
 
   /**
@@ -358,6 +330,10 @@ export function useHumanItems(
   );
   const closeToast = useCallback(() => setToast(undefined), []);
 
+  const setDraft = useCallback((id: string, text: string) => {
+    setDrafts((all) => ({ ...all, [id]: text }));
+  }, []);
+
   return {
     items,
     listError:
@@ -367,7 +343,8 @@ export function useHumanItems(
     gone: selectedId !== undefined && served === null,
     detailError: selectedId === undefined ? undefined : live.error,
     writes,
-    answers,
+    drafts,
+    setDraft,
     write,
     toast,
     undo,
@@ -382,7 +359,7 @@ export function useHumanItems(
  * nothing to forget leaves the state unchanged and React skips the re-render.
  */
 function forget(id: string) {
-  return (all: Readonly<Record<string, Hidden>>) => {
+  return (all: Readonly<Record<string, Sending>>) => {
     if (all[id] === undefined) return all;
     return Object.fromEntries(
       Object.entries(all).filter(([held]) => held !== id),

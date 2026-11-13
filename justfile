@@ -218,13 +218,6 @@ ci-test-linux *args:
 measure-cold-linux *args:
     @bash scripts/measure-cold-linux.sh "$@"
 
-# What the `budgets` job runs before its report: dag-ui-read-latency's timings,
-# journeys and budgets, alone, on test-linux's release build, when the change
-# reaches them (every one on the release pull request's sweep).
-[positional-arguments]
-ci-read-latency *args:
-    @bash scripts/ci-job.sh read-latency "$@"
-
 # The Windows job: the platform-sensitive tiers, the browser build, the install.
 [positional-arguments]
 ci-test-windows *args:

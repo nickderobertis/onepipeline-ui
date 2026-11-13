@@ -1,16 +1,12 @@
 /**
- * `telemetry/read-latency.json` and `telemetry/read-latency-large.json`, declared
- * once: the documents `read-latency.spec.ts` parses through this before writing
- * them, and which `read-latency-budget.mjs` parses through this before reading a
- * figure off one. The first holds Action items' figures, which
- * `dag-ui-read-latency:test` records; the second a large run's, which
- * `dag-ui-read-latency:test-large` records. The workload is held here too, so
- * telemetry recorded over anything smaller than what the budgets state is
- * refused rather than read as a pass.
+ * `telemetry/read-latency.json`, declared once: the document
+ * `read-latency.spec.ts` parses through this before writing it, and which
+ * `read-latency-budget.mjs` parses through this before reading a figure off it.
+ * The workload is held here too, so telemetry recorded over anything smaller than
+ * what the budgets state is refused rather than read as a pass.
  */
 
 import { z } from "zod";
-import large from "./large-run-workload.json" with { type: "json" };
 import workload from "./workload.json" with { type: "json" };
 
 /** Each page the human-item budgets are the slowest of, as the page sets it. */
@@ -89,188 +85,14 @@ const pageSchema = z
       refuse("a page's request rate is its requests over its window");
   });
 
-/** A tab open on Action items while the page batch-answered: when its list emptied. */
-const batchTab = z.object({
-  /** Seconds from the send bar's press to the last of the batch leaving this list. */
-  lag_s: figure,
-  left_at_ms: figure,
-  /** Requests this tab sent during the phase. */
-  requests: count,
-  /** How many of the batch's titles this tab still lists when the phase ends. */
-  still_listed: count,
-});
-
-/**
- * One batch of answers sent with one press of the send bar, watched from the tab
- * that sent it (filtered) and one that only reads (unfiltered).
- */
-const batchSchema = z
-  .object({
-    questions: z.literal(workload.batch_questions),
-    with_choices: z.literal(workload.batch_with_choices),
-    choices_each: z.literal(workload.batch_choices_each),
-    requests: z.literal(1),
-    answers_in_request: z.literal(workload.batch_questions),
-    answered: z.literal(workload.batch_questions),
-    pressed_at_ms: figure,
-    committed_at_ms: figure,
-    response_s: figure,
-    tabs: z.object({ unfiltered: batchTab, filtered: batchTab }),
-    host_load: z.object({ start: hostLoad, end: hostLoad }),
-  })
-  .superRefine((batch, context) => {
-    const refuse = (message: string) =>
-      context.addIssue({ code: "custom", message });
-    if (batch.committed_at_ms < batch.pressed_at_ms)
-      refuse("a batch commits after its press");
-    for (const name of PAGES) {
-      const tab = batch.tabs[name];
-      if (tab.still_listed !== 0)
-        refuse(`every question of the batch leaves the ${name} tab's list`);
-      if (Math.abs(tab.left_at_ms - batch.pressed_at_ms - tab.lag_s * 1000) > 5)
-        refuse(`the ${name} tab's lag is from the press to its list emptying`);
-    }
-    if (batch.tabs.unfiltered.requests !== 0)
-      refuse("the tab that sends nothing sends nothing");
-  });
-
 /** What each page's filter selects: the page's whole point. */
 const selecting = (selected: (filter: Record<string, unknown>) => boolean) =>
   pageSchema.refine(({ filter }) => selected(filter), {
     message: "a page measures the filter it is named for",
   });
 
-/** The three first-useful-screen views, the slowest of which is the budget. */
-export const FIRST_VIEWS = ["graph", "overall", "node"] as const;
-
-/** A wall-clock reading with the bytes and host load beside it. */
-const readingSchema = z.object({
-  /** Navigation start to the view's mark, or `null` where no mark was reached. */
-  seconds: seconds,
-  navigation_to_post_s: seconds,
-  post_s: seconds,
-  answer_to_mark_s: seconds,
-  first_answer_bytes: count,
-  first_answer_gzipped: count,
-  checked: z.object({
-    screen_against_answer: z.boolean(),
-    answer_against_complete: z.boolean(),
-  }),
-  host_load: hostLoad,
-});
-export type Reading = z.infer<typeof readingSchema>;
-
-/**
- * Every driver the budgets name, measured off the corpus that was read. A missing
- * or undersized driver is a workload the budgets were not stated over, and is
- * refused naming it rather than read as a pass.
- */
-export const DRIVERS = {
-  records: large.large.records,
-  journal_bytes: large.large.journal_bytes,
-  streams: large.large.streams,
-  checkpoint_bytes: large.large.checkpoint_bytes,
-  ordinary_spans: large.large.ordinary_spans,
-  harness_spans: large.large.harness_spans,
-  busiest_node_records: large.large.busiest_node_records,
-  off_graph_node_records: large.large.off_graph_node_records,
-  run_directories: large.runs,
-  other_live_runs: large.other_live_runs,
-  overall_first_answer_bytes: 1_000_000,
-  session_references: 1,
-  spans_resting_on_dropped_records: 1,
-  reasons: 1,
-  awaits: 1,
-  cross_run_settled_consumers: 1,
-  stand_in_provider: 1,
-} as const;
-export type Driver = keyof typeof DRIVERS;
-/** The least fraction of a driver's stated figure a corpus must reach to stand for that workload. */
-const DRIVER_TOLERANCE = 0.95;
-
-const corpusSchema = z
-  .record(z.string(), figure)
-  .superRefine((corpus, context) => {
-    for (const [name, floor] of Object.entries(DRIVERS)) {
-      const held = corpus[name];
-      if (held === undefined || held < floor * DRIVER_TOLERANCE)
-        context.addIssue({
-          code: "custom",
-          path: [name],
-          message: `the corpus's ${name} driver is ${held ?? "missing"}, and the budgets state ${floor}`,
-        });
-    }
-  });
-
-const viewSchema = z
-  .object({
-    readings: z.array(readingSchema).length(3),
-    median_s: seconds,
-    cold_cache: readingSchema,
-    fresh_server: readingSchema,
-    small_run_s: seconds,
-  })
-  .superRefine((view, context) => {
-    for (const reading of view.readings) {
-      if (reading.seconds === null)
-        context.addIssue({
-          code: "custom",
-          path: ["readings"],
-          message: "a reading reached no first-useful-screen mark",
-        });
-      if (
-        !reading.checked.screen_against_answer ||
-        !reading.checked.answer_against_complete
-      )
-        context.addIssue({
-          code: "custom",
-          path: ["readings"],
-          message:
-            "a reading's screen did not hold the answer it received, or that answer the complete document",
-        });
-    }
-  });
-
-/** A run's first views: each reached its mark, and held to its answer and the complete document. */
-export const firstViewSchema = z.object({
-  graph: viewSchema,
-  overall: viewSchema,
-  node: viewSchema,
-  slowest_view: z.enum(FIRST_VIEWS),
-  slowest_s: figure,
-});
-
-const largeRunSchema = z.object({
-  corpus: corpusSchema,
-  first_view: firstViewSchema,
-  rest_arrived: z.object({
-    overall_s: figure,
-    graph_s: seconds,
-    node_s: seconds,
-    patch_frame_bytes: count,
-    server_peak_rss_mb: figure,
-    complete: z.literal(true),
-  }),
-  history_page: z.object({
-    node_before_rest_s: figure,
-    node_after_rest_s: figure,
-    overall_span_page_s: seconds,
-    slowest_s: figure,
-    rows_shown_after: count,
-  }),
-  status: z.object({
-    small_s: figure,
-    large_s: figure,
-    slowest_s: figure,
-    checkpoint_bytes: count,
-    stand_in_starts: count,
-  }),
-  host_load: z.object({ start: hostLoad, end: hostLoad }),
-});
-export type LargeRun = z.infer<typeof largeRunSchema>;
-
 export const telemetrySchema = z.object({
-  schema_version: z.literal(2),
+  schema_version: z.literal(1),
   recorded_at: z.iso.datetime(),
   commit: z.string().regex(/^[0-9a-f]{40}$/u),
   dirty: z.boolean(),
@@ -282,16 +104,5 @@ export const telemetrySchema = z.object({
     unfiltered: selecting((filter) => Object.keys(filter).length === 0),
     filtered: selecting((filter) => Object.keys(filter).length > 0),
   }),
-  batch: batchSchema,
 });
 export type Telemetry = z.infer<typeof telemetrySchema>;
-
-/** `telemetry/read-latency-large.json`: one large run's first screens and the rest. */
-export const largeTelemetrySchema = z.object({
-  schema_version: z.literal(1),
-  recorded_at: z.iso.datetime(),
-  commit: z.string().regex(/^[0-9a-f]{40}$/u),
-  dirty: z.boolean(),
-  large_run: largeRunSchema,
-});
-export type LargeTelemetry = z.infer<typeof largeTelemetrySchema>;

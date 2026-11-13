@@ -19,7 +19,7 @@ import {
   Timeline,
   useTimelineScrollSync,
 } from "@oneharness/ui";
-import type { PlanTask, RunTimeline } from "@onepipeline-ui/dag-model";
+import type { RunTimeline } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { TaskMarkdown } from "@onetaskgraph/ui";
 import {
@@ -29,30 +29,13 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import {
-  Fragment,
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { LOADING_TEXT } from "../../lib/loading";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   awaitedReleases,
   isUnhealthy,
   type NodeView,
-  nodeKindWord,
   recordedReason,
 } from "../../lib/run-model";
-
-const HISTORY_START_TEXT = "No earlier history remains";
-
-const OFF_GRAPH_TASK =
-  "This node is not on the run's graph, so the plan holds no task for it.";
-
 import { StateBadge } from "../../lib/StateBadge";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration } from "../../lib/time";
@@ -65,13 +48,13 @@ import { boundedZoom, TIMELINE_TIME_MARKS } from "./axis";
 import { CheckRuntime } from "./CheckRuntime";
 import { ControlBadge } from "./ControlBadge";
 import { EventCategoryIcon } from "./event-category";
-import { LoadEarlier, PlotHatches } from "./history-controls";
 import { NodeRelease } from "./release";
 import { TimelineItemDetail } from "./TimelineItemDetail";
 import {
   collapseLabel,
   compactTimelineItems,
   compactTimelineMarkers,
+  type DispatchGroup,
   findRow,
   nodeTimeline,
   nodeTimelineV2,
@@ -79,9 +62,7 @@ import {
   type TimelineRow,
   type TranscriptEntry,
   transcriptEntries,
-  transcriptRuns,
 } from "./timeline-model";
-import { useTimelineHistory } from "./useTimelineHistory";
 
 /**
  * One node, read as what it did rather than as a column of stacked blocks.
@@ -100,9 +81,6 @@ export function NodeTimelineView({
   nodes,
   timeline,
   timelineError,
-  filter,
-  runLoaded = true,
-  onRetry,
   selectedItemId,
   onSelectItem,
   onBack,
@@ -116,11 +94,6 @@ export function NodeTimelineView({
   readonly nodes: readonly NodeView[];
   readonly timeline?: RunTimeline;
   readonly timelineError?: Error;
-  readonly filter?: string;
-  /** Whether the members a first answer leaves out have arrived. */
-  readonly runLoaded?: boolean;
-  /** Subscribe again, from a failed read. */
-  readonly onRetry?: () => void;
   readonly selectedItemId?: string;
   readonly onSelectItem: (id?: string) => void;
   readonly onBack: () => void;
@@ -170,10 +143,8 @@ export function NodeTimelineView({
           <StateBadge className="node-view-state" state={node.status} />
           <ControlBadge control={node.control} />
           <span className="node-view-meta">
-            {nodeKindWord(node)} node ·{" "}
-            {runLoaded
-              ? `${node.telemetry?.turns ?? 0} turns · ${node.telemetry?.lint ?? 0} lint turns`
-              : `turns ${LOADING_TEXT}`}
+            {node.kind} node · {node.telemetry?.turns ?? 0} turns ·{" "}
+            {node.telemetry?.lint ?? 0} lint turns
           </span>
           {prUrl !== undefined && (
             <a
@@ -208,13 +179,7 @@ export function NodeTimelineView({
         <TabsContent className="node-tab-panel" value="task">
           {/* The task is untrusted markdown: the shared package renders it
               safely, as every other place this app shows a task. */}
-          {node.task === undefined ? (
-            <p>{OFF_GRAPH_TASK}</p>
-          ) : runLoaded ? (
-            <TaskMarkdown source={taskProse(node.task)} />
-          ) : (
-            <p className="loading-value">{LOADING_TEXT}</p>
-          )}
+          <TaskMarkdown source={taskProse(node.task)} />
           <dl className="facts">
             {/* The settlement's own word — `merged`, `published`, `shipped` —
                 which the status badge does not carry: `done` is the same for a
@@ -232,13 +197,11 @@ export function NodeTimelineView({
             <div>
               <dt>Graph overrides</dt>
               <dd>
-                {!runLoaded ? (
-                  LOADING_TEXT
-                ) : (node.task?.sets ?? []).length === 0 ? (
+                {(node.task.sets ?? []).length === 0 ? (
                   "None"
                 ) : (
                   <ol aria-label="Graph overrides" className="sets-served">
-                    {node.task?.sets?.map((entry, index) => (
+                    {node.task.sets?.map((entry, index) => (
                       // biome-ignore lint/suspicious/noArrayIndexKey: an override's identity is its position in the ordered list.
                       <li key={index}>
                         <code>{entry}</code>
@@ -251,20 +214,14 @@ export function NodeTimelineView({
           </dl>
         </TabsContent>
         <TabsContent className="node-tab-panel" value="criteria">
-          {node.task === undefined ? (
-            <p>{OFF_GRAPH_TASK}</p>
-          ) : runLoaded ? (
-            <TaskMarkdown source={acceptanceCriteria(node.task)} />
-          ) : (
-            <p className="loading-value">{LOADING_TEXT}</p>
-          )}
+          <TaskMarkdown source={acceptanceCriteria(node.task)} />
         </TabsContent>
         <TabsContent className="node-tab-panel" value="dependencies">
           <dl className="facts">
             <div>
               <dt>Dependencies</dt>
               <dd>
-                {(node.task?.deps ?? [])
+                {(node.task.deps ?? [])
                   .map((dep) => {
                     const status = nodes.find(
                       (other) => other.id === dep,
@@ -281,8 +238,7 @@ export function NodeTimelineView({
           </dl>
         </TabsContent>
         <TabsContent className="node-tab-panel" value="remote">
-          {!runLoaded && <p className="loading-value">{LOADING_TEXT}</p>}
-          <dl className="facts" hidden={!runLoaded}>
+          <dl className="facts">
             <div>
               <dt>Publication</dt>
               <dd>
@@ -440,14 +396,7 @@ export function NodeTimelineView({
             <Alert className="m-5 w-auto" variant="destructive">
               <TriangleAlert />
               <AlertTitle>Timeline unavailable</AlertTitle>
-              <AlertDescription>
-                {timelineError.message}{" "}
-                {onRetry !== undefined && (
-                  <Button onClick={onRetry} size="sm" variant="outline">
-                    Try again
-                  </Button>
-                )}
-              </AlertDescription>
+              <AlertDescription>{timelineError.message}</AlertDescription>
             </Alert>
           ) : timeline === undefined ? (
             <div aria-live="polite" className="loading-state">
@@ -463,7 +412,6 @@ export function NodeTimelineView({
           ) : (
             <NodeExecution
               client={client}
-              {...(filter === undefined ? {} : { filter })}
               node={node}
               onSelectItem={onSelectItem}
               runId={runId}
@@ -479,30 +427,19 @@ export function NodeTimelineView({
 
 function NodeExecution({
   client,
-  filter,
   node,
   onSelectItem,
   runId,
   selectedItemId,
-  timeline: served,
+  timeline,
 }: {
   readonly client: TelemetryClient;
-  readonly filter?: string;
   readonly node: NodeView;
   readonly onSelectItem: (id?: string) => void;
   readonly runId: string;
   readonly selectedItemId?: string;
   readonly timeline: RunTimeline;
 }) {
-  const history = useTimelineHistory({
-    client,
-    runId,
-    scope: "node",
-    nodeId: node.id,
-    timeline: served,
-    ...(filter === undefined ? {} : { filter }),
-  });
-  const timeline = history.timeline ?? served;
   const projection = useMemo(
     () => nodeTimelineV2(timeline, node.id),
     [timeline, node.id],
@@ -592,125 +529,16 @@ function NodeExecution({
     selectedItemId === undefined
       ? undefined
       : findRow(projection.rows, selectedItemId);
-  // A scroll the page made itself, to a selected row, asks for no page.
-  const ownScrollUntil = useRef(0);
   const select = (id: string) => {
-    ownScrollUntil.current = Date.now() + 500;
     onSelectItem(id);
     sync.scrollTo(id);
   };
-  // The transcript's rows take one opener across renders, so a page of earlier
-  // rows renders the rows it brought rather than every row already shown.
-  const selectNow = useRef(select);
-  selectNow.current = select;
-  const openRow = useCallback((id: string) => selectNow.current(id), []);
-  const transcript = useRef<HTMLElement | null>(null);
-  // One ref across renders, as the hook's own is: a new one would have the sync
-  // attach and detach its scroll listener on every render.
-  const { containerRef } = sync;
-  const transcriptRef = useCallback(
-    (element: HTMLElement | null) => {
-      transcript.current = element;
-      containerRef(element);
-    },
-    [containerRef],
-  );
-  const plotArea = useRef<HTMLElement | null>(null);
-  // Rows added above the reader keep what they were reading where it was. A page
-  // can add rows at more than one place, so this anchors on the first row already
-  // shown that new rows arrived directly above, not on the total growth.
-  const placesBeforeLoad = useRef<Map<string, number> | undefined>(undefined);
-  const { loadEarlier, loadSpan, loadStretch } = history;
-  // How many rows the reading showed when the reader asked for earlier ones. A
-  // page whose rows all join a collapsed run shows nothing new — the run still
-  // stands as its first row, one control and its last — so the read carries on
-  // until the reading gains a row or nothing earlier is left, rather than
-  // leaving a control that appears to do nothing.
-  const shownBeforeAsk = useRef<number | undefined>(undefined);
-  const askEarlier = () => {
-    placesBeforeLoad.current = transcriptPlaces(transcript.current);
-    shownBeforeAsk.current = entries.length;
-    loadEarlier();
-  };
-  /** Near the transcript's top, a reader's move upward asks for the page before. */
-  const askEarlierIfOpen = () => {
-    if (
-      history.canLoadEarlier &&
-      !history.loadingEarlier &&
-      history.failure === undefined
-    )
-      askEarlier();
-  };
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the rows the merged timeline brought are what moved the row being kept in place.
-  useLayoutEffect(() => {
-    const element = transcript.current;
-    const before = placesBeforeLoad.current;
-    if (element === null || before === undefined || history.loadingEarlier)
-      return;
-    placesBeforeLoad.current = undefined;
-    let arrived = false;
-    for (const [id, top] of transcriptPlaces(element)) {
-      const was = before.get(id);
-      if (was === undefined) arrived = true;
-      else if (arrived) {
-        element.scrollTop += top - was;
-        return;
-      }
-    }
-  }, [timeline, history.loadingEarlier]);
-  // An address naming a row before the window is a person asking for it: read back
-  // until it is held or there is nothing earlier.
-  const { canLoadEarlier, loadingEarlier } = history;
-  const shownNow = entries.length;
-  useEffect(() => {
-    const before = shownBeforeAsk.current;
-    if (before === undefined || loadingEarlier) return;
-    if (shownNow > before || !canLoadEarlier || history.failure !== undefined) {
-      shownBeforeAsk.current = undefined;
-      return;
-    }
-    placesBeforeLoad.current = transcriptPlaces(transcript.current);
-    loadEarlier(true);
-  }, [shownNow, canLoadEarlier, loadingEarlier, loadEarlier, history.failure]);
-  useEffect(() => {
-    if (
-      selectedItemId !== undefined &&
-      selected === undefined &&
-      canLoadEarlier &&
-      !loadingEarlier &&
-      history.failure === undefined
-    )
-      loadEarlier();
-  }, [
-    selectedItemId,
-    selected,
-    canLoadEarlier,
-    loadingEarlier,
-    loadEarlier,
-    history.failure,
-  ]);
-  const openedSpan =
-    selected?.rowKind === "span" ? selected.span.id : undefined;
-  useEffect(() => {
-    if (openedSpan !== undefined) loadSpan(openedSpan);
-  }, [openedSpan, loadSpan]);
-  useEffect(() => {
-    if (zoom === undefined) return;
-    const asking = setTimeout(
-      () => loadStretch(zoom[0], zoom[1], node.id),
-      250,
-    );
-    return () => clearTimeout(asking);
-  }, [zoom, loadStretch, node.id]);
   // The hook returns a new object on each render, including a cursor update
   // from scrolling. Only a changed selection should scroll again; depending on
   // that object makes the selected stamp race the scroll-derived reading cursor.
   const { scrollTo } = sync;
   useEffect(() => {
-    if (selectedItemId !== undefined) {
-      ownScrollUntil.current = Date.now() + 500;
-      scrollTo(selectedItemId);
-    }
+    if (selectedItemId !== undefined) scrollTo(selectedItemId);
   }, [selectedItemId, scrollTo]);
   return (
     <div className="node-execution" data-expanded={expanded}>
@@ -718,13 +546,7 @@ function NodeExecution({
         aria-label="Node timeline"
         className="node-timeline-sticky"
         data-testid="node-timeline"
-        ref={plotArea}
       >
-        <PlotHatches
-          container={plotArea}
-          range={zoom ?? shown}
-          stretches={history.unheld}
-        />
         <Timeline
           {...TIMELINE_TIME_MARKS}
           axis={{ origin: plotted[0] }}
@@ -756,47 +578,14 @@ function NodeExecution({
       <section
         aria-label="Node transcript"
         className="node-transcript"
-        onKeyDown={(event) => {
-          if (UPWARD_KEYS.has(event.key) && nearTop(event.currentTarget))
-            askEarlierIfOpen();
-        }}
-        onScroll={(event) => {
-          if (
-            nearTop(event.currentTarget) &&
-            Date.now() > ownScrollUntil.current
-          )
-            askEarlierIfOpen();
-        }}
-        // A transcript already at its top scrolls no further, so the browser
-        // reports no scroll for a reader who wheels or keys up there again; the
-        // gesture itself asks, and being the reader's own it is never the page's
-        // own scroll.
-        onWheel={(event) => {
-          if (event.deltaY < 0 && nearTop(event.currentTarget))
-            askEarlierIfOpen();
-        }}
-        ref={transcriptRef}
+        ref={sync.containerRef}
       >
-        {history.readToStart && history.failure === undefined && (
-          <p className="history-start" role="status">
-            {HISTORY_START_TEXT}
-          </p>
-        )}
-        {(history.canLoadEarlier || history.failure !== undefined) && (
-          <LoadEarlier
-            {...(history.failure === undefined
-              ? {}
-              : { failure: history.failure })}
-            loading={history.loadingEarlier}
-            onLoad={askEarlier}
-          />
-        )}
         {transcriptRuns(reading).map((run) => {
           const items = run.entries.map((entry) =>
             entry.entryKind === "row" ? (
               <TranscriptItem
                 key={entry.row.id}
-                onOpen={openRow}
+                onOpen={select}
                 register={sync.register}
                 row={entry.row}
                 selected={entry.row.id === selectedItemId}
@@ -868,24 +657,42 @@ function timeRange(
   return [first, last > first ? last : first + 1];
 }
 
-/** Within this many pixels of its top, the transcript reads earlier rows. */
-const NEAR_TOP_PX = 120;
-
-/** Keys that move a focused transcript upward. */
-const UPWARD_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
-
-function nearTop(transcript: HTMLElement): boolean {
-  return transcript.scrollTop < NEAR_TOP_PX;
-}
-
-/** Where each transcript row stands on screen, by row id, in the order shown. */
-function transcriptPlaces(transcript: HTMLElement | null): Map<string, number> {
-  const places = new Map<string, number>();
-  for (const row of transcript?.querySelectorAll<HTMLElement>(
-    "article.transcript-item[data-row-id]",
-  ) ?? [])
-    places.set(row.dataset.rowId ?? "", row.getBoundingClientRect().top);
-  return places;
+/**
+ * The transcript in the order it is read: one entry per item, except that the
+ * sessions of one dispatch travel together so they can be nested under its name.
+ *
+ * The rows of a dispatch arrive consecutively — the projection lists an agent session
+ * and then the sessions recorded inside it — so a run of them is a group, and every
+ * other row is a group of one. A collapse control travels with the run it stands
+ * for, so opening one inside a dispatch does not tear the dispatch in two.
+ */
+function transcriptRuns(reading: readonly TranscriptEntry[]): readonly {
+  readonly id: string;
+  readonly dispatch?: DispatchGroup;
+  readonly entries: readonly TranscriptEntry[];
+}[] {
+  const runs: {
+    id: string;
+    dispatch?: DispatchGroup;
+    entries: TranscriptEntry[];
+  }[] = [];
+  for (const entry of reading) {
+    const subject = entry.entryKind === "row" ? entry.row : entry.group;
+    const open = runs.at(-1);
+    if (
+      subject.dispatch !== undefined &&
+      open?.dispatch !== undefined &&
+      open.dispatch.id === subject.dispatch.id
+    )
+      open.entries.push(entry);
+    else
+      runs.push({
+        id: subject.id,
+        dispatch: subject.dispatch,
+        entries: [entry],
+      });
+  }
+  return runs;
 }
 
 /**
@@ -914,61 +721,25 @@ function CollapsedRun({
   );
 }
 
-interface TranscriptItemProps {
-  readonly row: TimelineRow;
-  readonly selected: boolean;
-  readonly register: (id: string, element: HTMLElement | null) => void;
-  readonly onOpen: (id: string) => void;
-}
-
-/**
- * Whether two renderings of a transcript row draw the same thing: every field the
- * row shows, compared by value, because each page of earlier rows projects the
- * node's timeline again and hands every row back as a new object. Reading back a
- * long transcript otherwise re-rendered every row already shown on every page,
- * which grew each page's cost with the history behind it.
- */
-function drawsTheSame(was: TranscriptItemProps, now: TranscriptItemProps) {
-  const [a, b] = [was.row, now.row];
-  return (
-    was.selected === now.selected &&
-    was.register === now.register &&
-    was.onOpen === now.onOpen &&
-    a.id === b.id &&
-    a.rowKind === b.rowKind &&
-    a.displayLabel === b.displayLabel &&
-    a.displayKind === b.displayKind &&
-    a.startedAt === b.startedAt &&
-    a.durationMs === b.durationMs &&
-    a.status === b.status &&
-    a.sessionName === b.sessionName &&
-    a.dispatch?.label === b.dispatch?.label &&
-    (a.rowKind === "event" && b.rowKind === "event"
-      ? a.category === b.category && a.event.seq === b.event.seq
-      : a.rowKind !== "event" && b.rowKind !== "event")
-  );
-}
-
-const TranscriptItem = memo(function TranscriptItem({
+function TranscriptItem({
   row,
   selected,
   register,
   onOpen,
-}: TranscriptItemProps) {
-  const { id } = row;
-  const registered = useCallback(
-    (element: HTMLElement | null) => register(id, element),
-    [register, id],
-  );
+}: {
+  readonly row: TimelineRow;
+  readonly selected: boolean;
+  readonly register: (id: string, element: HTMLElement | null) => void;
+  readonly onOpen: (id: string) => void;
+}) {
   return (
     <article
       aria-label={row.displayLabel}
       className="transcript-item"
       data-dispatch-group={row.dispatch?.label}
       data-journal-seq={row.rowKind === "event" ? row.event.seq : undefined}
-      data-row-id={row.id}
       data-selected={selected}
-      ref={registered}
+      ref={(element) => register(row.id, element)}
     >
       <button
         aria-label={`Open ${row.displayLabel}`}
@@ -994,7 +765,7 @@ const TranscriptItem = memo(function TranscriptItem({
       </button>
     </article>
   );
-}, drawsTheSame);
+}
 
 /**
  * The prose for a node's Task tab, wherever the plan put it.
@@ -1003,7 +774,7 @@ const TranscriptItem = memo(function TranscriptItem({
  * is described once per step — so reading `task.task` alone left the tab blank for
  * exactly the nodes whose description is longest.
  */
-function taskProse(task: PlanTask): string {
+function taskProse(task: NodeView["task"]): string {
   if (task.task !== undefined) return task.task;
   const steps = task.steps ?? [];
   if (steps.length === 0) return "No task prose recorded.";
@@ -1020,7 +791,7 @@ function taskProse(task: PlanTask): string {
  * given — so this shows the reader exactly the text the judge was handed, and says
  * so when the task names no bar at all.
  */
-function acceptanceCriteria(task: PlanTask): string {
+function acceptanceCriteria(task: NodeView["task"]): string {
   const prose = taskProse(task);
   // Any `##` heading whose words are "acceptance criteria", however it was cased
   // or spaced, up to the next heading of the same level or the end of the prose.

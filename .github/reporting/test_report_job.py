@@ -43,7 +43,7 @@ TARGETS = {('Linux', 'x86_64'): 'x86_64-unknown-linux-gnu', ('Linux', 'aarch64')
 
 # The workload of the job's own budget: this repository's catalog, one rolling file, and one
 # results artifact of a size real runs produced.
-ROWS = 25
+ROWS = 21
 COMMITS = 20
 SAVED_ARTIFACT_BYTES = (2619, 11350)
 PROVISIONAL_REQUESTS = 20
@@ -62,9 +62,6 @@ SAVED = ('onepipeline-ui-macos-jobs-per-run', 'onepipeline-ui-macos-runs-per-cha
 POOL = 'onepipeline-ui-pool-maintenance-seconds'
 # Saved only when the affected tier selects their project, so here, as nothing selects it, none is.
 READ_LATENCY = ('dag-ui-human-items-requests-per-minute', 'dag-ui-human-items-update-lag-seconds')
-# Recorded only where the budgets job runs `test-large`, so here, as nothing runs it, none is.
-LARGE_RUN = ('dag-ui-run-first-view-seconds', 'dag-ui-run-rest-arrived-seconds',
-             'dag-ui-run-history-page-seconds', 'dag-ui-run-status-read-seconds')
 # Its command runs in this job: nothing saves it, and a pull request's job measures the live listing.
 HEADROOM = 'onepipeline-ui-cache-headroom'
 # A push reads no saved results, so a row its merged run holds no figure for keeps its catalog reason.
@@ -73,8 +70,6 @@ PUSH_REASON = {
     POOL: 'its command reads ../apps/dag-ui/dist/index.html, which is not available in this job',
     **{budget: 'its command reads apps/dag-ui-e2e/read-latency/telemetry/read-latency.json, which is not available in this job'
        for budget in READ_LATENCY},
-    **{budget: 'its command reads apps/dag-ui-e2e/read-latency/telemetry/read-latency-large.json, which is not available in this job'
-       for budget in LARGE_RUN},
 }
 OMITTED = {
     'onepipeline-ui-cd-job-time': 'actions-budget-figures.sh longest-job --stage cd',
@@ -92,7 +87,7 @@ OMITTED = {
 }
 OMITTED_LINE = (f'{len(OMITTED)} budgets are left out because a pull request cannot measure them '
                 '(label not-measured-on-pr).')
-SHOWN = {OWN_BUDGET, *CI_TIME, *SAVED, *READ_LATENCY, *LARGE_RUN, POOL, HEADROOM}
+SHOWN = {OWN_BUDGET, *CI_TIME, *SAVED, *READ_LATENCY, POOL, HEADROOM}
 CI_TIME_ID = 'onepipeline-ui-ci-check-time'
 # The targets the tier selects for these journeys' changes, and the one only a release pull request adds.
 SAVING_TARGETS = {'.github/project.json': 'budgets', '.github/reporting/project.json': 'budgets'}
@@ -526,7 +521,7 @@ class ProductionCatalog(unittest.TestCase):
         self.assertEqual(job.exit_code, 0, job.stdout)
         self.assertEqual(sorted(rows), sorted(SHOWN))
         self.assertEqual([r['id'] for r in verdicts(job).values() if r['verdict'] == 'error'], [])
-        for budget in (*SAVED, *READ_LATENCY, *LARGE_RUN, POOL):
+        for budget in (*SAVED, *READ_LATENCY, POOL):
             self.assertEqual(unavailable(job)[budget], reason(budget), budget)
             self.assertNotIn('verdict', rows[budget], budget)
         self.assertIn(rows[OWN_BUDGET].get('verdict'), (None, 'within', 'over'))
@@ -982,27 +977,13 @@ class ReplayedHostFigures(unittest.TestCase):
         self.assertNotIn('run-jobs --run 203', result.get('detail', ''))
 
 
-# The classes that write or read TELEMETRY / 'tools', which run in one process; every other
-# class runs beside them in a second (see the end of this file).
-TELEMETRY_CLASSES = ('SavedResults', 'ReportJob', 'ReplayedHostFigures')
-SHARD = 'REPORT_JOB_TEST_SHARD'
-
-
-def shared_tools():
-    """TELEMETRY / 'tools', which only the process running TELEMETRY_CLASSES may touch."""
-    if os.environ.get(SHARD) == 'rest':
-        raise AssertionError(f"this class touches {TELEMETRY / 'tools'}: add it to TELEMETRY_CLASSES")
-    return TELEMETRY / 'tools'
-
-
 def keep_tools(job):
     """The released tools as that job installed them, which `report-job:budgets` runs."""
-    shared_tools()
     shutil.copytree(job.temp / 'onebudgetspec-action/tools', TELEMETRY / 'tools', dirs_exist_ok=True)
 
 
 def check(arguments, cwd, environment=None):
-    tools = shared_tools()
+    tools = TELEMETRY / 'tools'
     if not (tools / 'onebudgetspec').exists():
         journey_tools()
     env = {**os.environ, 'PATH': f'{tools}{os.pathsep}{os.environ["PATH"]}', **(environment or {})}
@@ -1052,31 +1033,5 @@ def zip_of(name, content):
     return buffer.getvalue()
 
 
-def run_shards():
-    """The suite as two processes at once: TELEMETRY_CLASSES in one, every other class in the
-    other. Each journey waits on the processes it starts, so the two share a runner's cores
-    rather than one taking turns on a single one. Each process's output follows, whole."""
-    classes = [name for name, value in sorted(globals().items())
-               if isinstance(value, type) and issubclass(value, unittest.TestCase) and value.__module__ == '__main__']
-    unknown = sorted(set(TELEMETRY_CLASSES) - set(classes))
-    assert not unknown, f'TELEMETRY_CLASSES names no test class {unknown}'
-    shards = {'telemetry': list(TELEMETRY_CLASSES), 'rest': [name for name in classes if name not in TELEMETRY_CLASSES]}
-    running = {name: subprocess.Popen([sys.executable, __file__, *members], env={**os.environ, SHARD: name},
-                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-               for name, members in shards.items() if members}
-    failed = []
-    for name, process in running.items():
-        output, _ = process.communicate()
-        print(f'--- {name}: {" ".join(shards[name])}\n{output}', end='', flush=True)
-        if process.returncode != 0:
-            failed.append(name)
-    if failed:
-        print(f'report-job tests failed in: {", ".join(failed)}', file=sys.stderr)
-        sys.exit(1)
-
-
 if __name__ == '__main__':
-    if SHARD in os.environ or len(sys.argv) > 1:
-        unittest.main(verbosity=2)
-    else:
-        run_shards()
+    unittest.main(verbosity=2)

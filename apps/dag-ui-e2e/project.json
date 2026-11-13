@@ -24,7 +24,6 @@
         "default",
         "apiServerSurface",
         "{workspaceRoot}/tests/fixtures/history/**",
-        "{workspaceRoot}/tests/fixtures/released-rulings/**",
         "{workspaceRoot}/tests/support/github_board.py",
         "{workspaceRoot}/tests/support/approval_authority.py",
         "platform"
@@ -72,10 +71,6 @@
         {
           "projects": ["dag-ui"],
           "target": "build"
-        },
-        {
-          "projects": ["onepipeline-ui"],
-          "target": "ensure-sibling"
         }
       ]
     },
@@ -108,11 +103,6 @@
       "//": "Provision only the browser here. test and test-isolation build the API through dag-ui:build-api-server, so compilation can overlap the other test tiers.",
       "command": "npx playwright install chromium"
     },
-    "prioritize": {
-      "//": "A no-op that gives the browser suite another dependent: Nx starts the ready task with the most direct dependents first, so the suite starts with the tiers rather than after them (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` reaches it for the broader tier.",
-      "executor": "nx:noop",
-      "dependsOn": ["test"]
-    },
     "check": {
       "//": "The default check plus budgets, as github-workflows:check reaches its own: budgets read committed telemetry and are cached on it.",
       "executor": "nx:noop",
@@ -127,8 +117,7 @@
         "test-isolation",
         "doc",
         "coverage",
-        "budgets",
-        "prioritize"
+        "budgets"
       ]
     }
   }

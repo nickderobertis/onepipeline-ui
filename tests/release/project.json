@@ -78,8 +78,8 @@
       "cache": false
     },
     "test-staged": {
-      "//": "The journeys over the rehearsal\u2019s staged files, all three at once: each reads that tree and writes only its own, and one target starts them together in the slot the rehearsal frees. publication.test.mjs packs its tree from the rehearsal\u2019s wheel rather than compiling the release graph natively a second time.",
-      "command": "node --test --test-concurrency=3 tests/release/rehearsal-failures.test.mjs tests/release/registries.test.mjs tests/release/publication.test.mjs",
+      "//": "The journeys over the rehearsal\u2019s staged files, both at once: each reads that tree and writes only its own, and one target starts them together in the slot the rehearsal frees.",
+      "command": "node --test --test-concurrency=2 tests/release/rehearsal-failures.test.mjs tests/release/registries.test.mjs",
       "dependsOn": [
         {
           "projects": ["dag-ui"],
@@ -92,7 +92,7 @@
     },
     "test-standalone": {
       "//": "The release journeys that read none of the rehearsal\u2019s files, beside it. Each stages into its own tree and serves its doubles on system-picked ports. Not check.test.mjs, which times waits and failed under the compiles running here.",
-      "command": "node --test --test-concurrency=1 tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/staging.test.mjs tests/release/sbom.test.mjs",
+      "command": "node --test --test-concurrency=1 tests/release/doubles.test.mjs tests/release/plan.test.mjs tests/release/release-plz.test.mjs tests/release/probe.test.mjs tests/release/staging.test.mjs tests/release/publication.test.mjs tests/release/sbom.test.mjs",
       "dependsOn": [
         {
           "projects": ["dag-ui"],
@@ -117,33 +117,9 @@
       ],
       "inputs": ["releaseMachinery", "platform"]
     },
-    "prioritize": {
-      "//": "Gives `test-standalone`, `compile-release-server`, `rehearse` and `test-staged` another direct dependent each, so Nx starts the release chain with the tiers instead of after them (docs/linux-cold-cache-timing.md). test-linux's affected targets name it; `check` names them all for the broader tier.",
-      "executor": "nx:noop",
-      "dependsOn": [
-        "test-standalone",
-        "test-staged",
-        "rehearse",
-        {
-          "projects": ["dag-ui-read-latency"],
-          "target": "compile-release-server"
-        }
-      ]
-    },
     "check": {
       "executor": "nx:noop",
-      "dependsOn": [
-        "lint",
-        "test",
-        "rehearse",
-        "test-standalone",
-        "test-staged",
-        {
-          "projects": ["dag-ui-read-latency"],
-          "target": "compile-release-server"
-        },
-        "prioritize"
-      ]
+      "dependsOn": ["lint", "test", "rehearse"]
     }
   }
 }

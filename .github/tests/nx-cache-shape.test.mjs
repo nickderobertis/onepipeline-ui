@@ -18,7 +18,7 @@ const workflow = (name) =>
 // Figures, version 13: dero-skills afc6829981.
 const upstream = {
   "scripts/coverage-unit.sh":
-    "0b22963921bc9e2c4d314ddb545ea847b1e59d74b5dec2af1b763db12e4d771d",
+    "e94bd694c2313f24017ac01375c37a3de7ff8fb83d301cacd9acb6b1f76f1d36",
   "scripts/coverage-merge.mjs":
     "1fbe006859079d27738cefceddef22e1132c7932f1a6ee5cabc2f6eb265091ef",
   "scripts/nx-remote-cache.mjs":

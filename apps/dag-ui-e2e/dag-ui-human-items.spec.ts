@@ -59,8 +59,6 @@ const factsSchema = z.object({
 });
 type Facts = z.infer<typeof factsSchema>;
 
-/** Whose words an action was; a record naming none is the manager's. */
-const provenanceSchema = z.enum(["manager", "user"]);
 const storedSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -75,18 +73,9 @@ const storedSchema = z.object({
       actor: z.string(),
       on_behalf_of: z.string().nullable(),
       text: z.string().nullable(),
-      choice: z.string().nullable().optional(),
       reason: z.string().nullable(),
-      provenance: provenanceSchema.optional(),
     })
     .nullable(),
-});
-/** One entry of the engine's history of an item, as `show --json` prints it. */
-const historyEntrySchema = z.object({
-  action: z.string(),
-  at: z.string(),
-  actor: z.string(),
-  provenance: provenanceSchema,
 });
 const viewSchema = z.object({
   item: storedSchema,
@@ -97,14 +86,10 @@ const detailSchema = z.object({
   nodes: z.array(
     z.object({ run: z.string(), node: z.string(), title: z.string() }),
   ),
-  history: z.array(historyEntrySchema).optional(),
 });
 const deliveredSchema = z.object({
   kind: z.string(),
-  payload: z.object({
-    item_id: z.string(),
-    by: z.object({ provenance: provenanceSchema.optional() }).nullish(),
-  }),
+  payload: z.object({ item_id: z.string() }),
 });
 const approvalSchema = z.object({
   board_copy: z.string(),
@@ -266,13 +251,6 @@ function listed(served: FixtureServer, args: string[] = []) {
 
 /** The item events delivered to `session` that its watch had not printed. */
 function watch(served: FixtureServer, session: string) {
-  return delivered(served, session).map(
-    ({ kind, payload }) => [kind, payload.item_id] as const,
-  );
-}
-
-/** The same events, whole, as `human-items watch` printed them. */
-function delivered(served: FixtureServer, session: string) {
   let printed: string;
   try {
     printed = cli(served, ["human-items", "watch", "--session", session]);
@@ -284,7 +262,10 @@ function delivered(served: FixtureServer, session: string) {
   return printed
     .split("\n")
     .filter((line) => line.trim() !== "")
-    .map((line) => deliveredSchema.parse(JSON.parse(line)));
+    .map((line) => {
+      const { kind, payload } = deliveredSchema.parse(JSON.parse(line));
+      return [kind, payload.item_id] as const;
+    });
 }
 
 /** Every approval record the approval authority wrote. */
@@ -409,20 +390,6 @@ function answerBox(page: Page, title: string): Locator {
   return page.getByRole("textbox", { name: `Answer: ${title}`, exact: true });
 }
 
-/** The region holding the send bar and its "Not sent" notices. */
-function sendRegion(page: Page): Locator {
-  return page.getByRole("region", { name: "Drafted answers" });
-}
-
-function sendButton(page: Page): Locator {
-  return sendRegion(page).getByRole("button", { name: /^Send \d+ answers?$/u });
-}
-
-/** Press the send bar, whatever it counts. */
-async function sendAnswers(page: Page): Promise<void> {
-  await sendButton(page).click();
-}
-
 /** The toast the last write leaves. */
 function toast(page: Page): Locator {
   return page.getByRole("region", { name: "Action result" });
@@ -431,17 +398,6 @@ function toast(page: Page): Locator {
 /** What the toast says, whether it went through or failed. */
 function outcome(page: Page): Locator {
   return toast(page).getByRole("status").or(toast(page).getByRole("alert"));
-}
-
-/** The value of one labelled field in a detail's metadata block. */
-function metadataOf(pane: Locator, label: string): Locator {
-  return (
-    pane
-      .getByRole("term")
-      .filter({ hasText: new RegExp(`^${label}$`, "u") })
-      // llmlint: ignore[e2e_uses_accessible_selectors] a `dd` belongs to its `dt` only by position in the list: the accessibility tree offers no name or relation from a term to its definition, so the label is found by role and its value by that adjacency.
-      .locator("+ dd")
-  );
 }
 
 function detailPane(page: Page): Locator {
@@ -905,9 +861,11 @@ test("the detail enumerates every blocked step the engine derived, and an open h
     .click();
   // The detail says it twice by design: once in the item's meta line, and once
   // as the heading over the steps that hold enumerates.
-  await expect(metadataOf(detailPane(page), "Blocks")).toHaveText(
-    "blocks all work on this host",
-  );
+  await expect(
+    detailPane(page)
+      .getByRole("paragraph")
+      .filter({ hasText: /^blocks all work on this host$/ }),
+  ).toBeVisible();
   await expect(
     steps.getByRole("heading", {
       name: "blocks all work on this host",
@@ -1025,7 +983,7 @@ test("every filter narrows the list on its own, on the wire's vocabulary", async
   }
 });
 
-test("Tab moves straight between answer boxes, Enter only keeps a draft, Shift+Enter is a new line", async ({
+test("Tab moves straight between answer boxes, Enter answers in place, Shift+Enter is a new line", async ({
   page,
   context,
 }) => {
@@ -1046,9 +1004,8 @@ test("Tab moves straight between answer boxes, Enter only keeps a draft, Shift+E
     await expect(answerBox(page, title)).toBeFocused();
   }
 
-  // Enter on an empty box drafts nothing.
+  // Enter on an empty box sends nothing.
   await page.keyboard.press("Enter");
-  await expect(sendButton(page)).toHaveCount(0);
   // Shift+Enter writes a new line and sends nothing; the box grows with it.
   const resting = await answerBox(page, LAST_QUESTION).evaluate(heights);
   await page.keyboard.type("Reuse it");
@@ -1063,20 +1020,37 @@ test("Tab moves straight between answer boxes, Enter only keeps a draft, Shift+E
   expect(grown.height).toBeGreaterThan(resting.height + resting.oneLine);
   expect(sent).toHaveLength(0);
 
-  // Enter keeps the focused question's draft, sends nothing and opens nothing.
+  // Enter answers the focused question, without opening detail — and the
+  // answer is the journal's, delivered to the owning session's watch alone.
   const first = QUESTIONS[0] ?? "";
   await answerBox(page, first).focus();
   await page.keyboard.type("eu-west, matching the incident report");
   await page.keyboard.press("Enter");
-  await expect(answerBox(page, first)).toHaveValue(
-    "eu-west, matching the incident report",
-  );
-  await expect(sendButton(page)).toHaveText("Send 2 answers");
+  await expect(outcome(page)).toHaveText(`Answered: ${first}`);
+  await expect(card(page, first)).toHaveCount(0);
   await expect(detailPane(page)).toHaveCount(0);
-  expect(sent).toHaveLength(0);
+  expect(sent.map((request) => request.postData())).toEqual([
+    JSON.stringify({ text: "eu-west, matching the incident report" }),
+  ]);
+  const region = idOf(served, "region");
+  expect(stored(served, region)).toMatchObject({
+    state: "answered",
+    resolution: {
+      actor: `browser:session:${SUPERVISOR}`,
+      on_behalf_of: null,
+      text: "eu-west, matching the incident report",
+    },
+  });
+  expect(watch(served, SUPERVISOR)).toEqual([["human-item-answered", region]]);
+  expect(watch(served, OTHER)).toEqual([]);
+  // The other draft is still there, unsent.
+  await expect(answerBox(page, LAST_QUESTION)).toHaveValue(
+    "Reuse it\nfor one more release\nthen start cold",
+  );
 
   // An input method's composition, through the browser's own input layer:
-  // Enter while the words are still being composed is the composition's.
+  // Enter while the words are still being composed sends nothing, and Enter
+  // once they are committed sends the answer.
   const composing = "Keep the legacy export format?";
   await answerBox(page, composing).click();
   await page.keyboard.type("Keep it ");
@@ -1087,39 +1061,18 @@ test("Tab moves straight between answer boxes, Enter only keeps a draft, Shift+E
     selectionEnd: 3,
   });
   await page.keyboard.press("Enter");
+  await expect(card(page, composing).getByRole("status")).toHaveCount(0);
+  expect(sent).toHaveLength(1);
   await ime.send("Input.insertText", { text: "にほん" });
   await page.keyboard.press("Enter");
-  await expect(sendButton(page)).toHaveText("Send 3 answers");
-  expect(sent).toHaveLength(0);
-
-  // The bar is the way out: one request, and each answer the journal's,
-  // delivered to its owning session's watch alone.
-  await sendAnswers(page);
-  await expect(card(page, first)).toHaveCount(0);
-  await expect(card(page, composing)).toHaveCount(0);
-  await expect(card(page, LAST_QUESTION)).toHaveCount(0);
-  expect(sent).toHaveLength(1);
-  expect(new URL(sent[0]?.url() ?? "").pathname).toBe(
-    "/api/human-items/answers",
-  );
-  const region = idOf(served, "region");
-  expect(stored(served, region)).toMatchObject({
-    state: "answered",
-    resolution: {
-      actor: `browser:session:${SUPERVISOR}`,
-      on_behalf_of: null,
-      text: "eu-west, matching the incident report",
-    },
-  });
+  await expect(outcome(page)).toHaveText(`Answered: ${composing}`);
+  expect(sent).toHaveLength(2);
   expect(stored(served, idOf(served, "export")).resolution?.text).toContain(
     "Keep it にほん",
   );
-  expect(
-    watch(served, SUPERVISOR)
-      .map(([, id]) => id)
-      .sort(),
-  ).toEqual([region, idOf(served, "export"), idOf(served, "cache")].sort());
-  expect(watch(served, OTHER)).toEqual([]);
+  expect(watch(served, SUPERVISOR)).toEqual([
+    ["human-item-answered", idOf(served, "export")],
+  ]);
 });
 
 test("card actions are a focus group of their own after the answer boxes, operable by keyboard", async ({
@@ -1376,9 +1329,11 @@ test("the detail pane answers, completes, dismisses and follows the tracker as t
   });
   await answer.fill("Reuse it, and check the artifact digest");
   await answer.press("Enter");
-  await sendAnswers(page);
+  await expect(outcome(page)).toHaveText(
+    "Answered: Should retries reuse the warm cache?",
+  );
   // An answer leaves the pane on the item, now answered.
-  await expect(metadataOf(pane, "State")).toHaveText("Answered");
+  await expect(pane.getByText("Question · Answered")).toBeVisible();
   expect(stored(served, idOf(served, "cache")).resolution?.text).toBe(
     "Reuse it, and check the artifact digest",
   );
@@ -1434,21 +1389,23 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  await page.route("**/api/human-items/answers", async (route) => {
+  await page.route("**/api/human-items/*/answer", async (route) => {
     await held;
     await route.continue();
   });
   await answerBox(page, title).fill("Reuse it, and check the artifact digest");
-  await sendAnswers(page);
-  const out = sendRegion(page).getByRole("button", { name: "Sending…" });
-  await expect(out).toBeDisabled();
+  await answerBox(page, title).press("Enter");
+  await expect(card(page, title).getByRole("status")).toHaveText("Sending…");
+  await answerBox(page, title).press("Enter");
+  await answerBox(page, title).press("Enter");
   await expect(card(page, title)).toBeVisible();
   await expect(answerBox(page, title)).toHaveAttribute("readonly", "");
   expect(sent).toHaveLength(1);
   release();
+  await expect(outcome(page)).toHaveText(`Answered: ${title}`);
   await expect(card(page, title)).toHaveCount(0);
   expect(sent).toHaveLength(1);
-  await page.unroute("**/api/human-items/answers");
+  await page.unroute("**/api/human-items/*/answer");
   // One durable write: the journal records the answer once.
   expect(
     journal(served)
@@ -1487,8 +1444,8 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
   const question = "Keep the legacy export format?";
   const restore = breakJournal(served);
   await answerBox(page, question).fill("Keep it one more release");
-  await sendAnswers(page);
-  await expect(sendRegion(page).getByRole("alert")).toContainText(
+  await answerBox(page, question).press("Enter");
+  await expect(card(page, question).getByRole("alert")).toContainText(
     "human-items",
   );
   await expect(answerBox(page, question)).toHaveValue(
@@ -1497,8 +1454,8 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
   await expect(card(page, question)).toBeVisible();
   restore();
   expect(stored(served, idOf(served, "export")).state).toBe("open");
-  await sendAnswers(page);
-  await expect(card(page, question)).toHaveCount(0);
+  await answerBox(page, question).press("Enter");
+  await expect(outcome(page)).toHaveText(`Answered: ${question}`);
   expect(stored(served, idOf(served, "export")).resolution?.text).toBe(
     "Keep it one more release",
   );
@@ -1587,15 +1544,16 @@ for (const acting of ["browser-owns-nothing", SUPERVISOR, ""]) {
       ).toBeVisible();
       if (verb === "answer") {
         await pane.getByRole("textbox", { name: /answer/i }).fill("Reuse it");
-        await sendAnswers(page);
+        await pane.getByRole("textbox", { name: /answer/i }).press("Enter");
       } else if (verb === "dismiss") {
         await pane.getByRole("button", { name: /^Dismiss/ }).click();
       } else {
         await pane.getByRole("button", { name: /^Complete/ }).click();
       }
       await expect(card(page, before.title)).toHaveCount(0);
-      if (verb !== "answer")
-        await expect(outcome(page)).toHaveText(/^(Completed|Dismissed): /u);
+      await expect(outcome(page)).toHaveText(
+        /^(Answered|Completed|Dismissed): /u,
+      );
       const after = stored(served, id);
       expect(after.owner).toEqual(before.owner);
       expect(after.resolution).toMatchObject({ actor, on_behalf_of: null });
@@ -1746,8 +1704,8 @@ test("ending its run retires the items holding that run's work, and leaves host 
   // The question raised outside any run waits for its answer, which reaches
   // that session's next watch.
   await answerBox(page, LAST_QUESTION).fill("Reuse it");
-  await sendAnswers(page);
-  await expect(card(page, LAST_QUESTION)).toHaveCount(0);
+  await answerBox(page, LAST_QUESTION).press("Enter");
+  await expect(outcome(page)).toHaveText(`Answered: ${LAST_QUESTION}`);
   expect(watch(served, SUPERVISOR)).toEqual([
     ["human-item-answered", idOf(served, "cache")],
   ]);
@@ -1759,19 +1717,6 @@ test("ending its run retires the items holding that run's work, and leaves host 
   await expect(
     card(page, "Which region should the canary run in?"),
   ).toBeVisible();
-  // Its history says the engine retired it, in the manager's words, as every
-  // auto-resolution reads.
-  await page
-    .getByRole("button", {
-      name: "Details: Which region should the canary run in?",
-    })
-    .click();
-  await expect(
-    detailPane(page)
-      .getByRole("region", { name: "History" })
-      .getByRole("listitem")
-      .last(),
-  ).toHaveText(/^Resolved by the manager · \d+ \w+ ago$/u);
 });
 
 test("ten sessions see the host queue, and each answer reaches only its owner's watch", async ({
@@ -1794,16 +1739,14 @@ test("ten sessions see the host queue, and each answer reaches only its owner's 
       .toEqual(listed(served).map(({ item }) => item.title));
     const question = `Which day should ${session} ship?`;
     await answerBox(page, question).fill("Thursday");
-    await sendAnswers(page);
-    await expect(card(page, question)).toHaveCount(0);
+    await answerBox(page, question).press("Enter");
+    await expect(outcome(page)).toHaveText(`Answered: ${question}`);
     const id = idOf(served, `${session}-question`);
     expect(stored(served, id).resolution).toEqual({
       actor: `browser:session:${session}`,
       on_behalf_of: null,
       text: "Thursday",
       reason: null,
-      // A person at the page is the user, whichever session the server acts as.
-      provenance: "user",
     });
     for (const other of sessions)
       expect(watch(served, other)).toEqual(
@@ -1895,31 +1838,26 @@ test("an item whose body is longer than four lines shows four on its card and al
   const before = {
     list: await region.evaluate((element) => element.scrollTop),
     cards: await positions(),
+    heading: (await pane.getByRole("heading", { level: 2 }).boundingBox())?.y,
   };
   expect(
-    await pane.evaluate(
+    await full.evaluate(
       (element) => element.scrollHeight > element.clientHeight,
     ),
   ).toBe(true);
-  // The pane first paints from the list's summary, and the blocked steps only
-  // the served detail carries then land at its foot: End waits for them, or it
-  // stops at a bottom that has since moved.
-  await expect(
-    pane.getByRole("region", { name: "Blocked steps" }),
-  ).toBeVisible();
-  // A reader scrolls the detail from the keyboard: focus it, press End.
-  await pane.focus();
+  // A reader scrolls the body from the keyboard: focus it, press End.
+  await full.focus();
   await page.keyboard.press("End");
   await expect
     .poll(() =>
-      pane.evaluate(
+      full.evaluate(
         (element) =>
           element.scrollTop + element.clientHeight >= element.scrollHeight - 1,
       ),
     )
     .toBe(true);
   // The final words are in view inside the pane, and nothing else moved.
-  const fullBox = await pane.boundingBox();
+  const fullBox = await full.boundingBox();
   if (fullBox === null) throw new Error("the full body has no box");
   const shown = await full
     .getByRole("paragraph")
@@ -1940,6 +1878,9 @@ test("an item whose body is longer than four lines shows four on its card and al
     before.list,
   );
   expect(await positions()).toEqual(before.cards);
+  expect((await pane.getByRole("heading", { level: 2 }).boundingBox())?.y).toBe(
+    before.heading,
+  );
   // The CLI's list and report give a brief line by default and print the same
   // body whole under `--full`.
   for (const verb of ["list", "report"]) {
@@ -2155,7 +2096,7 @@ test("an open page follows what the CLI writes, reads nothing to do it, and hold
   await expect.poll(() => seen.streams.size).toBe(1);
   const detailed = seen.requests.length;
   cli(served, ["human-items", "answer", resolvedId, "--text", "Handled"]);
-  await expect(metadataOf(pane, "State")).toHaveText("Answered");
+  await expect(pane).toContainText("Question · Answered");
   await expect(card(page, resolvedElsewhere)).toHaveCount(0);
   await expect(pane.getByRole("alert")).toHaveCount(0);
   await expect(pane.getByRole("textbox")).toHaveCount(0);
@@ -2168,12 +2109,13 @@ test("an open page follows what the CLI writes, reads nothing to do it, and hold
   await expect.poll(() => seen.streams.size).toBe(1);
   const beforeWrite = seen.requests.length;
   await answerBox(page, LAST_QUESTION).fill("Reuse it");
-  await sendAnswers(page);
+  await answerBox(page, LAST_QUESTION).press("Enter");
+  await expect(outcome(page)).toHaveText(`Answered: ${LAST_QUESTION}`);
   await expect(card(page, LAST_QUESTION)).toHaveCount(0);
   expect(seen.requests.slice(beforeWrite)).toEqual([
     {
       method: "POST",
-      path: "/api/human-items/answers",
+      path: `/api/human-items/${idOf(served, "cache")}/answer`,
     },
   ]);
 
@@ -2209,31 +2151,30 @@ test("an item whose patch beats its receipt stays where it was until the receipt
   const made = new Promise<void>((resolve) => {
     committed = resolve;
   });
-  await page.route("**/api/human-items/answers", async (route) => {
+  await page.route("**/api/human-items/*/answer", async (route) => {
     const response = await route.fetch();
     committed();
     await held;
     await route.fulfill({ response });
   });
   await answerBox(page, LAST_QUESTION).fill("Reuse it");
-  await sendAnswers(page);
+  await answerBox(page, LAST_QUESTION).press("Enter");
   await made;
   expect(stored(served, idOf(served, "cache")).state).toBe("answered");
   // A later change reaching the page proves the stream got past the commit,
-  // and the answered card holds its place while the bar says the receipt is out.
+  // and the answered card holds its place, still sending, beside it.
   const later = "Raised after the answer was committed";
   raise(served, later, "task");
   await expect(card(page, later)).toBeVisible();
-  await expect(
-    sendRegion(page).getByRole("button", { name: "Sending…" }),
-  ).toBeDisabled();
+  await expect(card(page, LAST_QUESTION).getByRole("status")).toHaveText(
+    "Sending…",
+  );
   expect((await titles(list)).filter((title) => title !== later)).toEqual(
     order,
   );
   release();
+  await expect(outcome(page)).toHaveText(`Answered: ${LAST_QUESTION}`);
   await expect(card(page, LAST_QUESTION)).toHaveCount(0);
-  await expect(sendRegion(page)).toHaveCount(0);
-  await expect(page.getByRole("list", { name: "Not sent" })).toHaveCount(0);
   await expect(card(page, later)).toBeVisible();
 });
 
@@ -2623,38 +2564,6 @@ for (const { from, verb, key, title } of [
     expect(await alerts()).toEqual([]);
   });
 
-/**
- * The toast has left, or the failure says what was still in front of it.
- *
- * Nothing records a failed journey's page on CI, and a toast that stays has
- * one of a few holds on it — pointed at, focus inside, a reason open, a write
- * still out — or a duration that started late. The page as it stood when the
- * wait gave up is the only evidence of which, so it goes into the message.
- */
-async function expectToastGone(page: Page): Promise<void> {
-  try {
-    await expect(toast(page)).toHaveCount(0);
-  } catch (error) {
-    const state = await toast(page)
-      .evaluate((shown) => ({
-        phase: shown.getAttribute("data-phase"),
-        text: shown.textContent,
-        pointedAt: shown.matches(":hover"),
-        focusInside: shown.contains(document.activeElement),
-        focused: document.activeElement?.tagName,
-      }))
-      .then(async (shown) => ({
-        ...shown,
-        writing: await toast(page).getByRole("textbox").count(),
-      }))
-      .catch((unread: unknown) => `unreadable: ${String(unread)}`);
-    throw new Error(
-      `${error instanceof Error ? error.message : String(error)}\nThe toast as it stood: ${JSON.stringify(state)}`,
-      { cause: error },
-    );
-  }
-}
-
 test("the toast leaves after its duration, stays while hovered or focused, and leaves once that ends", async ({
   page,
 }) => {
@@ -2674,7 +2583,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
   await expect(toast(page)).toBeVisible();
   await page.clock.runFor(1_500);
-  await expectToastGone(page);
+  await expect(toast(page)).toHaveCount(0);
 
   // Hovered, it stays past its duration, and leaves when the pointer does.
   await complete("Rotate the deploy credentials");
@@ -2682,7 +2591,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.runFor((TOAST_SECONDS + 5) * 1_000);
   await expect(toast(page)).toBeVisible();
   await page.mouse.move(1, 1);
-  await expectToastGone(page);
+  await expect(toast(page)).toHaveCount(0);
 
   // Focused, the same, and it leaves when focus does.
   await complete("Review the action-items design");
@@ -2690,7 +2599,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.runFor((TOAST_SECONDS + 5) * 1_000);
   await expect(toast(page)).toBeVisible();
   await answerBox(page, LAST_QUESTION).focus();
-  await expectToastGone(page);
+  await expect(toast(page)).toHaveCount(0);
 
   // Nothing pointing at it and nothing focused in it, it still stays while what
   // it was asked to do is on its way, and leaves its duration after that lands.
@@ -2717,7 +2626,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
   await expect(toast(page)).toBeVisible();
   await page.clock.runFor(1_500);
-  await expectToastGone(page);
+  await expect(toast(page)).toHaveCount(0);
   await page.unroute(`**/api/human-items/${cache}/reopen`);
 
   // A reason being written holds it too, focus or no, until it is sent.
@@ -2734,7 +2643,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await expect(outcome(page)).toHaveText(`Reason saved: ${LAST_QUESTION}`);
   await letGo();
   await page.clock.runFor((TOAST_SECONDS + 1) * 1_000);
-  await expectToastGone(page);
+  await expect(toast(page)).toHaveCount(0);
 
   // A receipt slow to come: what it says is shown for the whole duration from
   // when it lands, however long the toast had already been up.
@@ -2752,7 +2661,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
   await expect(toast(page)).toBeVisible();
   await page.clock.runFor(1_500);
-  await expectToastGone(page);
+  await expect(toast(page)).toHaveCount(0);
   await page.unroute(`**/api/human-items/${dashboard}/dismiss`);
 
   // A refusal slow to come, the same: red for the whole duration once it lands.
@@ -2770,7 +2679,7 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
   await expect(toast(page)).toBeVisible();
   await page.clock.runFor(1_500);
-  await expectToastGone(page);
+  await expect(toast(page)).toHaveCount(0);
 });
 
 for (const width of [1440, 390] as const)
@@ -3655,8 +3564,7 @@ for (const [width, height] of [
         for (const other of actions.slice(index + 1))
           expect(overlap(action, other)).toBe(false);
         for (const badge of badges) expect(overlap(action, badge)).toBe(false);
-        expect(action.height).toBeGreaterThanOrEqual(28);
-        expect(action.height).toBeLessThanOrEqual(32);
+        if (width === 390) expect(action.height).toBeGreaterThanOrEqual(44);
       }
       const last = actions.at(-1);
       if (last)
@@ -4159,1570 +4067,4 @@ test("a filter chosen while the page is ahead of the stream shows only what the 
   expect(stored(served, certificateId).state).toBe("open");
   await page.waitForTimeout(500);
   await expect(card(page, certificate)).toHaveCount(0);
-});
-
-interface Offered {
-  readonly id: string;
-  readonly title: string;
-  readonly description: string;
-}
-
-const REGIONS: readonly Offered[] = [
-  { id: "eu", title: "Europe", description: "Closest to the incident." },
-  { id: "us", title: "United States", description: "Most of the traffic." },
-  { id: "ap", title: "Asia Pacific", description: "The quietest region." },
-];
-
-/** A question raised through the real CLI, offering `choices`. */
-function raiseQuestion(
-  served: FixtureServer,
-  fields: {
-    readonly key: string;
-    readonly title?: string;
-    readonly body?: string;
-    readonly choices?: readonly Offered[];
-    readonly owner?: {
-      readonly session?: string;
-      readonly run?: string;
-      readonly plan?: string;
-    };
-  },
-): string {
-  const facts = factsOf(served);
-  const input = join(facts.cwd, `raise-${fields.key}.json`);
-  const session = fields.owner?.session ?? SUPERVISOR;
-  writeFileSync(
-    input,
-    JSON.stringify({
-      schema_version: 1,
-      dedup_key: fields.key,
-      kind: "question",
-      title: fields.title ?? `Question ${fields.key}?`,
-      body: fields.body ?? `What ${fields.key} needs from a person.`,
-      ...(fields.choices === undefined ? {} : { choices: fields.choices }),
-      priority: "medium",
-      owner: {
-        session,
-        run: fields.owner?.run ?? null,
-        plan: fields.owner?.plan ?? null,
-      },
-      block: { scope: "nothing" },
-      approval: null,
-    }),
-  );
-  return receiptSchema.parse(
-    JSON.parse(
-      cli(served, ["human-items", "raise", "--input", input], session),
-    ),
-  ).item.item.id;
-}
-
-function choiceButton(root: Page | Locator, title: string): Locator {
-  return root.getByRole("button", { name: title, exact: true });
-}
-
-/** Details for `title`, opened from its card. */
-async function openDetail(page: Page, title: string): Promise<Locator> {
-  await page.getByRole("button", { name: `Details: ${title}` }).click();
-  const pane = detailPane(page);
-  await expect(pane.getByRole("heading", { name: title })).toBeVisible();
-  return pane;
-}
-
-const DRAFT_KEY = (id: string) => `onepipeline-ui.human-items.draft.${id}`;
-
-function storedDraft(page: Page, id: string) {
-  return page.evaluate((key) => localStorage.getItem(key), DRAFT_KEY(id));
-}
-
-/** The whole batch requests this page made, as what each carried. */
-function batchesOf(sent: readonly Request[]) {
-  return sent
-    .filter((r) => new URL(r.url()).pathname === "/api/human-items/answers")
-    .map((r) =>
-      z.object({ answers: z.array(z.unknown()) }).parse(r.postDataJSON()),
-    );
-}
-
-function setUpdates(page: Page, label: "Off" | "Live") {
-  return page
-    .getByRole("combobox", { name: "Main area updates" })
-    .selectOption({ label });
-}
-
-test("one press and Send answers a question, and a typed answer on a question with choices stores no choice", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const pick = raiseQuestion(served, {
-    key: "pick-one",
-    title: "Which region first?",
-    choices: REGIONS,
-  });
-  const typed = raiseQuestion(served, {
-    key: "type-one",
-    title: "Which region second?",
-    choices: REGIONS,
-  });
-  await open(page, served);
-  const sent = writes(page);
-
-  await choiceButton(
-    card(page, "Which region first?"),
-    "United States",
-  ).click();
-  await expect(
-    choiceButton(card(page, "Which region first?"), "United States"),
-  ).toHaveAttribute("aria-pressed", "true");
-  expect(sent).toHaveLength(0);
-  await expect(sendButton(page)).toHaveText("Send 1 answer");
-  await sendAnswers(page);
-  await expect(card(page, "Which region first?")).toHaveCount(0);
-  expect(stored(served, pick).resolution).toMatchObject({
-    choice: "us",
-    text: null,
-  });
-  expect(stored(served, pick).state).toBe("answered");
-
-  const pane = await openDetail(page, "Which region second?");
-  await pane
-    .getByRole("textbox", { name: "Answer in detail: Which region second?" })
-    .fill("None of these: use the staging region");
-  await sendAnswers(page);
-  await expect(card(page, "Which region second?")).toHaveCount(0);
-  const answered = stored(served, typed);
-  expect(answered.state).toBe("answered");
-  expect(answered.resolution?.text).toBe(
-    "None of these: use the staging region",
-  );
-  expect(answered.resolution?.choice ?? null).toBeNull();
-});
-
-test("a press clears and replaces the draft, and four drafts survive a reload and go as one batch", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const ids = [
-    raiseQuestion(served, {
-      key: "draft-a",
-      title: "Draft A?",
-      choices: REGIONS,
-    }),
-    raiseQuestion(served, {
-      key: "draft-b",
-      title: "Draft B?",
-      choices: REGIONS,
-    }),
-    raiseQuestion(served, { key: "draft-c", title: "Draft C?" }),
-    raiseQuestion(served, {
-      key: "draft-d",
-      title: "Draft D?",
-      choices: REGIONS,
-    }),
-  ] as const;
-  await open(page, served);
-  watch(served, SUPERVISOR);
-
-  const europe = choiceButton(card(page, "Draft A?"), "Europe");
-  await europe.click();
-  await europe.click();
-  await expect(europe).toHaveAttribute("aria-pressed", "false");
-  await expect(sendButton(page)).toHaveCount(0);
-  await europe.click();
-  await choiceButton(card(page, "Draft A?"), "Asia Pacific").click();
-  await expect(europe).toHaveAttribute("aria-pressed", "false");
-  await choiceButton(card(page, "Draft B?"), "United States").click();
-  await answerBox(page, "Draft C?").fill("Words only");
-  const pane = await openDetail(page, "Draft D?");
-  await choiceButton(pane, "Europe").click();
-  await pane
-    .getByRole("textbox", { name: "Answer in detail: Draft D?" })
-    .fill("And the words too");
-  await expect(sendButton(page)).toHaveText("Send 4 answers");
-
-  await page.reload();
-  await expect(card(page, "Draft A?")).toBeVisible();
-  await expect(
-    choiceButton(card(page, "Draft A?"), "Asia Pacific"),
-  ).toHaveAttribute("aria-pressed", "true");
-  await expect(
-    choiceButton(card(page, "Draft B?"), "United States"),
-  ).toHaveAttribute("aria-pressed", "true");
-  await expect(answerBox(page, "Draft C?")).toHaveValue("Words only");
-  await expect(choiceButton(card(page, "Draft D?"), "Europe")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await expect(sendButton(page)).toHaveText("Send 4 answers");
-
-  const sent = writes(page);
-  await sendAnswers(page);
-  await expect(card(page, "Draft A?")).toHaveCount(0);
-  await expect(card(page, "Draft D?")).toHaveCount(0);
-  await expect(sendRegion(page)).toHaveCount(0);
-  expect(batchesOf(sent)).toHaveLength(1);
-  expect(batchesOf(sent)[0]?.answers).toHaveLength(4);
-  expect(sent).toHaveLength(1);
-  expect(stored(served, ids[0]).resolution?.choice).toBe("ap");
-  expect(stored(served, ids[1]).resolution?.choice).toBe("us");
-  expect(stored(served, ids[2]).resolution?.text).toBe("Words only");
-  expect(stored(served, ids[3]).resolution).toMatchObject({
-    choice: "eu",
-    text: "And the words too",
-  });
-  for (const id of ids) expect(await storedDraft(page, id)).toBeNull();
-
-  // One watch prints every answer of the batch, under one id.
-  const printed = cli(served, ["human-items", "watch", "--session", SUPERVISOR])
-    .split("\n")
-    .filter((line) => line.trim() !== "")
-    .map((line) =>
-      z
-        .object({
-          kind: z.string(),
-          payload: z.object({
-            item_id: z.string(),
-            batch: z.object({ id: z.string(), size: z.number() }),
-          }),
-        })
-        .parse(JSON.parse(line)),
-    );
-  expect(printed.map(({ payload }) => payload.item_id).sort()).toEqual(
-    [...ids].sort(),
-  );
-  expect(new Set(printed.map(({ payload }) => payload.batch.id)).size).toBe(1);
-  expect(printed[0]?.payload.batch.size).toBe(4);
-});
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
-const LONG_CHOICE = `${"Roll the release back to the previous tag and ".repeat(2).slice(0, 80)}`;
-
-test("at phone width a choice is picked and sent with the detail open, an 80-character title wraps inside its button, and Enter never sends", async ({
-  browser,
-}) => {
-  const context = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    hasTouch: true,
-  });
-  const page = await context.newPage();
-  const served = await serveWorld("queue");
-  const body = `The whole of this question. ${"Read on, there is more. ".repeat(60)}The last words of the body.`;
-  const title = "Roll back or roll forward?";
-  const id = raiseQuestion(served, {
-    key: "long-choice",
-    title,
-    body,
-    choices: [
-      { id: "roll", title: LONG_CHOICE, description: "The long one." },
-      { id: "keep", title: "Keep going", description: "The short one." },
-    ],
-  });
-  raiseQuestion(served, { key: "plain", title: "Plain question?" });
-  await open(page, served);
-
-  expect([...LONG_CHOICE].length).toBeGreaterThanOrEqual(78);
-  const long = card(page, title).getByRole("button", { name: LONG_CHOICE });
-  await long.scrollIntoViewIfNeeded();
-  const longBox = await box(long);
-  const shortBox = await box(choiceButton(card(page, title), "Keep going"));
-  // Two lines of the card's small text, inside the button.
-  expect(longBox.height).toBeGreaterThan(40);
-  expect(longBox.height).toBeLessThanOrEqual(66);
-  expect(overlap(longBox, shortBox)).toBe(false);
-  expect(inside(longBox, await box(card(page, title)))).toBe(true);
-
-  // Enter keeps the draft, and only the bar records it.
-  const sent = writes(page);
-  await answerBox(page, "Plain question?").fill("Typed then Enter");
-  await answerBox(page, "Plain question?").press("Enter");
-  await expect(sendButton(page)).toHaveText("Send 1 answer");
-  expect(sent).toHaveLength(0);
-  const plain = idOf2(served, "Plain question?");
-  expect(stored(served, plain).state).toBe("open");
-  await sendAnswers(page);
-  await expect(card(page, "Plain question?")).toHaveCount(0);
-  expect(stored(served, plain).resolution?.text).toBe("Typed then Enter");
-
-  const pane = await openDetail(page, title);
-  await choiceButton(pane, "Keep going").click();
-  const bar = await box(sendButton(page));
-  expect(bar.y + bar.height).toBeLessThanOrEqual(844);
-  expect(bar.y).toBeGreaterThanOrEqual(0);
-  const paragraph = pane
-    .getByRole("region", { name: "Full body" })
-    .getByText(/The last words/u);
-  await paragraph.scrollIntoViewIfNeeded();
-  await expect(paragraph).toBeInViewport();
-  expect(
-    await pane
-      .getByRole("region", { name: "Full body" })
-      .evaluate((element) => element.scrollHeight <= element.clientHeight + 1),
-  ).toBe(true);
-  await sendAnswers(page);
-  await expect(metadataOf(pane, "State")).toHaveText("Answered");
-  expect(stored(served, id).resolution?.choice).toBe("keep");
-  await context.close();
-});
-
-/** The id of the open question titled `title`, as the CLI lists it. */
-function idOf2(served: FixtureServer, title: string): string {
-  const view = listed(served).find(({ item }) => item.title === title);
-  if (view === undefined) throw new Error(`no open item titled ${title}`);
-  return view.item.id;
-}
-
-test("a refused draft follows the policy: gone with a notice once its item closed, kept with its reason while open, and a dead server keeps everything", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const policy = (key: string) =>
-    raiseQuestion(served, {
-      key: `policy-${key}`,
-      title: `Policy ${key}?`,
-      choices: REGIONS,
-    });
-  const one = policy("one");
-  const two = policy("two");
-  const three = policy("three");
-  await open(page, served);
-
-  // (a) The page hears of nothing: a dismissal only the send can find out about.
-  await setUpdates(page, "Off");
-  await choiceButton(card(page, "Policy one?"), "Europe").click();
-  await choiceButton(card(page, "Policy two?"), "Europe").click();
-  const pane = await openDetail(page, "Policy three?");
-  await choiceButton(pane, "Europe").click();
-  await pane
-    .getByRole("textbox", { name: "Answer in detail: Policy three?" })
-    .fill("Words that must survive");
-  await pane.getByRole("button", { name: "Close detail" }).click();
-  cli(
-    served,
-    ["human-items", "dismiss", three, "--reason", "no longer needed"],
-    SUPERVISOR,
-  );
-  await expect(sendButton(page)).toHaveText("Send 3 answers");
-  const sent = writes(page);
-  await sendAnswers(page);
-
-  const notices = page.getByRole("list", { name: "Not sent" });
-  await expect(notices.getByRole("listitem")).toHaveCount(1);
-  await expect(notices).toContainText("Policy three?");
-  await expect(notices).toContainText("Words that must survive");
-  await expect(notices).toContainText("Europe");
-  await expect(notices).toContainText(/already|resolved/iu);
-  expect(batchesOf(sent)).toHaveLength(1);
-  expect(stored(served, one).state).toBe("answered");
-  expect(stored(served, two).state).toBe("answered");
-  expect(stored(served, three).state).toBe("dismissed");
-  expect(await storedDraft(page, three)).toBeNull();
-  await expect(sendButton(page)).toHaveCount(0);
-  await notices.getByRole("button", { name: "Clear" }).click();
-  await expect(notices).toHaveCount(0);
-
-  // (b) The asker re-raised it without the drafted choice; the item stays open.
-  const again = raiseQuestion(served, {
-    key: "policy-again",
-    title: "Policy again?",
-    choices: REGIONS,
-  });
-  await page.reload();
-  await expect(card(page, "Policy again?")).toBeVisible();
-  await setUpdates(page, "Off");
-  await choiceButton(card(page, "Policy again?"), "Asia Pacific").click();
-  raiseQuestion(served, {
-    key: "policy-again",
-    title: "Policy again?",
-    choices: REGIONS.filter(({ id }) => id !== "ap"),
-  });
-  await sendAnswers(page);
-  const refused = card(page, "Policy again?").getByRole("alert");
-  await expect(refused).toContainText("offers no choice ap");
-  expect(stored(served, again).state).toBe("open");
-  expect(await storedDraft(page, again)).not.toBeNull();
-  await expect(sendButton(page)).toHaveText("Send 1 answer");
-
-  // (c) Live: answered elsewhere, seen arriving, and the draft is retired.
-  await setUpdates(page, "Live");
-  await expect(card(page, "Policy again?")).toBeVisible();
-  cli(
-    served,
-    ["human-items", "answer", again, "--text", "From the CLI"],
-    SUPERVISOR,
-  );
-  await expect(card(page, "Policy again?")).toHaveCount(0);
-  await expect(notices).toContainText("answered or dismissed elsewhere");
-  await expect(notices).toContainText("Policy again?");
-  await expect(sendButton(page)).toHaveCount(0);
-  expect(await storedDraft(page, again)).toBeNull();
-
-  // A dead server keeps every draft and says so.
-  const last = raiseQuestion(served, {
-    key: "policy-last",
-    title: "Policy last?",
-  });
-  await expect(answerBox(page, "Policy last?")).toBeVisible();
-  await answerBox(page, "Policy last?").fill("Kept through an outage");
-  await served.stopServing();
-  await sendAnswers(page);
-  await expect(sendRegion(page).getByRole("alert")).toContainText("kept");
-  await expect(sendButton(page)).toHaveText("Send 1 answer");
-  expect(await storedDraft(page, last)).not.toBeNull();
-});
-
-test("a refused draft whose item cannot then be read stays stored and sendable beside its reason", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const id = raiseQuestion(served, {
-    key: "refused-unread",
-    title: "Refused then unread?",
-    choices: REGIONS,
-  });
-  await open(page, served);
-  await setUpdates(page, "Off");
-  await choiceButton(
-    card(page, "Refused then unread?"),
-    "Asia Pacific",
-  ).click();
-  raiseQuestion(served, {
-    key: "refused-unread",
-    title: "Refused then unread?",
-    choices: REGIONS.filter(({ id: offered }) => offered !== "ap"),
-  });
-  const looked: string[] = [];
-  // llmlint: ignore[e2e_not_mocked] the transport failing for the one read that follows a refusal, while the send and every other request stay up, is the state under test, and no real server can fail a single GET; the bundle, the engine's refusal and all other routes are real.
-  await page.route(`**/api/human-items/${id}`, (route) => {
-    looked.push(route.request().url());
-    return route.abort();
-  });
-  const sent = writes(page);
-  await sendAnswers(page);
-
-  const refused = card(page, "Refused then unread?").getByRole("alert");
-  await expect(refused).toContainText("offers no choice ap");
-  expect(looked.length).toBeGreaterThan(0);
-  expect(batchesOf(sent)).toHaveLength(1);
-  expect(stored(served, id).state).toBe("open");
-  expect(await storedDraft(page, id)).not.toBeNull();
-  await expect(sendButton(page)).toHaveText("Send 1 answer");
-  await expect(page.getByRole("list", { name: "Not sent" })).toHaveCount(0);
-  await page.unroute(`**/api/human-items/${id}`);
-});
-
-test("a filter hiding a drafted item does not retire its draft", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const id = raiseQuestion(served, {
-    key: "hidden-by-filter",
-    title: "Hidden by a filter?",
-    choices: REGIONS,
-  });
-  await open(page, served);
-  await choiceButton(card(page, "Hidden by a filter?"), "Europe").click();
-  await page
-    .getByRole("group", { name: "Filter action items" })
-    .getByLabel("Priority", { exact: true })
-    .selectOption("urgent");
-  await expect(card(page, "Hidden by a filter?")).toHaveCount(0);
-  await expect(sendButton(page)).toHaveText("Send 1 answer");
-  await expect(page.getByRole("list", { name: "Not sent" })).toHaveCount(0);
-  expect(await storedDraft(page, id)).not.toBeNull();
-
-  // A later filter asks again: answered meanwhile, the draft is retired.
-  cli(served, ["human-items", "answer", id, "--text", "Elsewhere"], SUPERVISOR);
-  await page
-    .getByRole("group", { name: "Filter action items" })
-    .getByLabel("Priority", { exact: true })
-    .selectOption("high");
-  await expect(page.getByRole("list", { name: "Not sent" })).toContainText(
-    "answered or dismissed elsewhere",
-  );
-  await expect(sendButton(page)).toHaveCount(0);
-  expect(await storedDraft(page, id)).toBeNull();
-});
-
-test("an item that no longer reads retires its draft, a read that fails keeps it, and blank words are no answer", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const kept = raiseQuestion(served, {
-    key: "read-fails",
-    title: "Read fails?",
-    choices: REGIONS,
-  });
-  const blank = raiseQuestion(served, {
-    key: "blank-words",
-    title: "Blank words?",
-    choices: REGIONS,
-  });
-  raiseQuestion(served, { key: "only-spaces", title: "Only spaces?" });
-  const vanishing = raiseQuestion(served, {
-    key: "vanishes",
-    title: "Vanishes?",
-  });
-  await open(page, served);
-
-  // Whitespace alone is nothing to send; beside a choice it is left out.
-  await answerBox(page, "Only spaces?").fill("   ");
-  await expect(sendButton(page)).toHaveCount(0);
-  const pane = await openDetail(page, "Blank words?");
-  await choiceButton(pane, "Europe").click();
-  await pane
-    .getByRole("textbox", { name: "Answer in detail: Blank words?" })
-    .fill("   ");
-  await pane.getByRole("button", { name: "Close detail" }).click();
-  const sent = writes(page);
-  await sendAnswers(page);
-  await expect(card(page, "Blank words?")).toHaveCount(0);
-  expect(batchesOf(sent)[0]?.answers).toEqual([{ id: blank, choice: "eu" }]);
-
-  // A hidden item whose read fails stays drafted: unknown is not gone.
-  await choiceButton(card(page, "Read fails?"), "Europe").click();
-  await answerBox(page, "Vanishes?").fill("Words for a vanished item");
-  // llmlint: ignore[e2e_not_mocked] the transport failing for this one read while the page and every other request stay up is the state under test, and no real server can fail a single GET; the bundle, the engine and all other routes are real.
-  await page.route(`**/api/human-items/${kept}`, (route) => route.abort());
-  await page
-    .getByRole("group", { name: "Filter action items" })
-    .getByLabel("Priority", { exact: true })
-    .selectOption("urgent");
-  await expect(card(page, "Read fails?")).toHaveCount(0);
-  await expect(sendButton(page)).toHaveText("Send 2 answers");
-  await expect(page.getByRole("list", { name: "Not sent" })).toHaveCount(0);
-  expect(await storedDraft(page, kept)).not.toBeNull();
-  await page.unroute(`**/api/human-items/${kept}`);
-
-  // Every item goes from under the server, which then answers 404 for it.
-  const dir = factsOf(served).journal;
-  renameSync(dir, `${dir}.gone`);
-  await page
-    .getByRole("group", { name: "Filter action items" })
-    .getByLabel("Priority", { exact: true })
-    .selectOption("low");
-  const notices = page.getByRole("list", { name: "Not sent" });
-  await expect(notices).toContainText("Words for a vanished item");
-  await expect(notices).toContainText("answered or dismissed elsewhere");
-  expect(await storedDraft(page, vanishing)).toBeNull();
-});
-
-test("an item still open under one filter is asked again under the next, so a draft whose item then vanished retires", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const vanishing = raiseQuestion(served, {
-    key: "vanishes-late",
-    title: "Vanishes late?",
-  });
-  await open(page, served);
-  await answerBox(page, "Vanishes late?").fill("Words outliving their item");
-
-  // The page asks whether the hidden item is still open; the server says it is,
-  // and that answer reaches the page only after the reader has moved on — as an
-  // answer does on a loaded host.
-  let release: () => void = () => undefined;
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let asked: () => void = () => undefined;
-  const answered = new Promise<void>((resolve) => {
-    asked = resolve;
-  });
-  let arrived: () => void = () => undefined;
-  const delivered = new Promise<void>((resolve) => {
-    arrived = resolve;
-  });
-  // Only the first ask is held. The page's later asks go to the server as they
-  // are, never through a route being removed under them: one caught by an
-  // unroute while its handler ran failed, and a failed ask is not asked again.
-  let held = false;
-  // llmlint: ignore[e2e_not_mocked] the server's real answer is fetched and passed through untouched; only when it arrives is held, which is the late arrival under test and nothing a real server can be made to do for one read.
-  await page.route(`**/api/human-items/${vanishing}`, async (route) => {
-    if (held) return route.fallback();
-    held = true;
-    const response = await route.fetch();
-    asked();
-    await released;
-    await route.fulfill({ response });
-    arrived();
-  });
-  const priority = page
-    .getByRole("group", { name: "Filter action items" })
-    .getByLabel("Priority", { exact: true });
-  await priority.selectOption("urgent");
-  await expect(card(page, "Vanishes late?")).toHaveCount(0);
-  await answered;
-
-  // Then the item goes from under the server, the reader filters again, and the
-  // answer from before arrives.
-  const dir = factsOf(served).journal;
-  renameSync(dir, `${dir}.gone`);
-  await priority.selectOption("low");
-  release();
-  await delivered;
-
-  const notices = page.getByRole("list", { name: "Not sent" });
-  await expect(notices).toContainText("Words outliving their item");
-  await expect(notices).toContainText("answered or dismissed elsewhere");
-  expect(await storedDraft(page, vanishing)).toBeNull();
-});
-
-test("choice buttons are reached by Tab and pressed from the keyboard, and resolved items state when", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const title = "Pick by keyboard?";
-  const id = raiseQuestion(served, {
-    key: "keyboard",
-    title,
-    choices: REGIONS,
-  });
-  await open(page, served);
-  const shown = card(page, title);
-  const first = choiceButton(shown, "Europe");
-  await first.focus();
-  await page.keyboard.press("Tab");
-  await expect(choiceButton(shown, "United States")).toBeFocused();
-  await page.keyboard.press("Shift+Tab");
-  await expect(first).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(first).toHaveAttribute("aria-pressed", "true");
-  await page.keyboard.press("Space");
-  await expect(first).toHaveAttribute("aria-pressed", "false");
-  await page.keyboard.press("Space");
-  await expect(sendButton(page)).toHaveText("Send 1 answer");
-  const pane = await openDetail(page, title);
-  // When, as an age; who answered it, in words.
-  await expect(metadataOf(pane, "Raised")).toHaveText(RELATIVE);
-  await expect(pane.getByRole("term")).not.toContainText(["Answered"]);
-  await sendAnswers(page);
-  await expect(metadataOf(pane, "State")).toHaveText("Answered");
-  await expect(metadataOf(pane, "Answered")).toHaveText(
-    /^By you · \d+ \w+ ago$/u,
-  );
-  expect(stored(served, id).resolution?.choice).toBe("eu");
-  await pane.getByRole("button", { name: "Close detail" }).click();
-
-  // A completed task and a dismissed one say when, under their own labels.
-  for (const [state, verb, label] of [
-    ["completed", "complete", "Completed"],
-    ["dismissed", "dismiss", "Dismissed"],
-  ] as const) {
-    const taskTitle = `Done by ${verb}`;
-    const taskId = raise(served, taskTitle, "task");
-    cli(served, ["human-items", verb, taskId], SUPERVISOR);
-    await page
-      .getByRole("group", { name: "Filter action items" })
-      .getByLabel("State", { exact: true })
-      .selectOption(state);
-    const resolved = await openDetail(page, taskTitle);
-    await expect(metadataOf(resolved, label)).toHaveText(
-      /^By the manager · \d+ \w+ ago$/u,
-    );
-    await resolved.getByRole("button", { name: "Close detail" }).click();
-  }
-});
-
-test("editing a draft keeps its other half, clearing the last half drops it, and an edit clears a refusal and resends", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const title = "Edit a draft?";
-  const id = raiseQuestion(served, {
-    key: "edits",
-    title,
-    choices: REGIONS,
-  });
-  raiseQuestion(served, { key: "edits-text", title: "Text only?" });
-  await open(page, served);
-
-  // Clearing a text-only draft's words leaves nothing to send.
-  await answerBox(page, "Text only?").fill("Second thoughts");
-  await expect(sendButton(page)).toHaveText("Send 1 answer");
-  await answerBox(page, "Text only?").fill("");
-  await expect(sendButton(page)).toHaveCount(0);
-
-  // Words survive a choice's press, replacement and clearing; a choice survives
-  // the words being cleared.
-  const pane = await openDetail(page, title);
-  const words = pane.getByRole("textbox", {
-    name: `Answer in detail: ${title}`,
-  });
-  await words.fill("My own words");
-  await choiceButton(pane, "Europe").click();
-  await choiceButton(pane, "Asia Pacific").click();
-  await expect(words).toHaveValue("My own words");
-  await choiceButton(pane, "Asia Pacific").click();
-  await expect(words).toHaveValue("My own words");
-  await expect(sendButton(page)).toHaveText("Send 1 answer");
-  await choiceButton(pane, "Asia Pacific").click();
-  await words.fill("");
-  await expect(choiceButton(pane, "Asia Pacific")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await expect(sendButton(page)).toHaveText("Send 1 answer");
-  await pane.getByRole("button", { name: "Close detail" }).click();
-
-  // Refused while open, then edited: the reason goes, and the resend lands.
-  await setUpdates(page, "Off");
-  raiseQuestion(served, {
-    key: "edits",
-    title,
-    choices: REGIONS.filter((choice) => choice.id !== "ap"),
-  });
-  await sendAnswers(page);
-  const reason = card(page, title).getByRole("alert");
-  await expect(reason).toContainText("offers no choice ap");
-  await choiceButton(card(page, title), "Europe").click();
-  await expect(reason).toHaveCount(0);
-  await sendAnswers(page);
-  await expect(card(page, title)).toHaveCount(0);
-  expect(stored(served, id).resolution?.choice).toBe("eu");
-});
-
-test("Discard removes every draft for good and writes nothing", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const id = raiseQuestion(served, {
-    key: "discarded",
-    title: "Discarded?",
-    choices: REGIONS,
-  });
-  await open(page, served);
-  const sent = writes(page);
-  await choiceButton(card(page, "Discarded?"), "Europe").click();
-  await sendRegion(page).getByRole("button", { name: "Discard" }).click();
-  await expect(sendRegion(page)).toHaveCount(0);
-  await expect(
-    choiceButton(card(page, "Discarded?"), "Europe"),
-  ).toHaveAttribute("aria-pressed", "false");
-  expect(await storedDraft(page, id)).toBeNull();
-  await page.reload();
-  await expect(card(page, "Discarded?")).toBeVisible();
-  await expect(sendButton(page)).toHaveCount(0);
-  expect(sent).toHaveLength(0);
-  expect(stored(served, id).state).toBe("open");
-});
-
-test("dismissing a drafted question here keeps its words as a notice", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const id = raiseQuestion(served, { key: "dismissed", title: "Dismissed?" });
-  await open(page, served);
-  await answerBox(page, "Dismissed?").fill("Words kept after dismissing");
-  await page.getByRole("button", { name: "Dismiss: Dismissed?" }).click();
-  const notices = page.getByRole("list", { name: "Not sent" });
-  await expect(notices).toContainText("dismissed here");
-  await expect(notices).toContainText("Words kept after dismissing");
-  expect(await storedDraft(page, id)).toBeNull();
-  await expect(sendButton(page)).toHaveCount(0);
-});
-
-test("what storage holds is only used if valid, and a browser that keeps nothing can still draft and send", async ({
-  page,
-  context,
-}) => {
-  const served = await serveWorld("queue");
-  const good = raiseQuestion(served, {
-    key: "stored-good",
-    title: "Stored good?",
-    choices: REGIONS,
-  });
-  await open(page, served);
-  await choiceButton(card(page, "Stored good?"), "Europe").click();
-  // llmlint: ignore-block[tests_mirror_real_usage] the state under test is storage holding bytes no press on this page can write (an older build's or another writer's draft, a key that is no item id), so they can only be put there directly; the page reads them back through the real reload, server and engine.
-  await page.evaluate(() => {
-    localStorage.setItem(
-      "onepipeline-ui.human-items.draft.hi-notjson",
-      "{not json",
-    );
-    localStorage.setItem(
-      "onepipeline-ui.human-items.draft.hi-badshape",
-      JSON.stringify({ title: 7 }),
-    );
-    localStorage.setItem(
-      "onepipeline-ui.human-items.draft.bad id",
-      JSON.stringify({ title: "Bad key", text: "Never sent" }),
-    );
-  });
-  // llmlint: ignore-end[tests_mirror_real_usage]
-  await page.reload();
-  await expect(sendButton(page)).toHaveText("Send 1 answer");
-  expect(await storedDraft(page, good)).not.toBeNull();
-
-  const denied = await context.newPage();
-  // llmlint: ignore-block[e2e_not_mocked] a browser that refuses storage (a blocked-cookies profile, an opaque origin) throws exactly these SecurityErrors, and Playwright can neither launch nor toggle that setting per page; the server and every other layer here are real.
-  // llmlint: ignore-block[tests_mirror_real_usage] as above: the throw a denied browser produces, which no user action can induce from this page.
-  await denied.addInitScript(() => {
-    const refuse = () => {
-      throw new DOMException("denied", "SecurityError");
-    };
-    Storage.prototype.getItem = refuse;
-    Storage.prototype.setItem = refuse;
-    Storage.prototype.removeItem = refuse;
-    Storage.prototype.key = refuse;
-  });
-  // llmlint: ignore-end[tests_mirror_real_usage]
-  // llmlint: ignore-end[e2e_not_mocked]
-  const typed = raiseQuestion(served, {
-    key: "stored-denied",
-    title: "Storage denied?",
-  });
-  await denied.goto(page.url());
-  await expect(answerBox(denied, "Storage denied?")).toBeVisible();
-  await answerBox(denied, "Storage denied?").fill("Kept for this visit");
-  await sendAnswers(denied);
-  await expect(card(denied, "Storage denied?")).toHaveCount(0);
-  expect(stored(served, typed).resolution?.text).toBe("Kept for this visit");
-});
-
-test("a draft another tab discarded is not sent from a tab still showing it", async ({
-  page,
-  context,
-}) => {
-  const served = await serveWorld("queue");
-  const id = raiseQuestion(served, {
-    key: "two-tabs",
-    title: "Two tabs?",
-    choices: REGIONS,
-  });
-  await open(page, served);
-  await choiceButton(card(page, "Two tabs?"), "Europe").click();
-  const other = await context.newPage();
-  await other.goto(page.url());
-  await expect(sendButton(other)).toHaveText("Send 1 answer");
-  const sent = writes(other);
-  await sendRegion(page).getByRole("button", { name: "Discard" }).click();
-  await sendAnswers(other);
-  await expect(sendRegion(other)).toHaveCount(0);
-  expect(sent).toHaveLength(0);
-  expect(stored(served, id).state).toBe("open");
-});
-
-test("more drafts than one batch takes go out fifty at a time, and the rest wait", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const ids = Array.from({ length: 51 }, (_, at) =>
-    raiseQuestion(served, { key: `cap-${at}`, title: `Capped ${at}?` }),
-  );
-  await open(page, served);
-  for (let at = 0; at < 51; at += 1)
-    await answerBox(page, `Capped ${at}?`).fill("Capped");
-  await expect(sendButton(page)).toHaveText("Send 50 answers");
-  await expect(sendRegion(page)).toContainText("1 more after this");
-  const sent = writes(page);
-  await sendAnswers(page);
-  await expect(sendButton(page)).toHaveText("Send 1 answer");
-  expect(batchesOf(sent)[0]?.answers).toHaveLength(50);
-  await sendAnswers(page);
-  await expect(sendRegion(page)).toHaveCount(0);
-  expect(batchesOf(sent)).toHaveLength(2);
-  for (const id of ids) expect(stored(served, id).state).toBe("answered");
-});
-
-const HOSTILE = [
-  "<script>window.__pwn='script'</script>",
-  "<img src=x onerror=\"window.__pwn='img'\">",
-  "[the link](javascript:window.__pwn='link')",
-  "![remote](https://evil.example.org/pixel.png)",
-].join("\n\n");
-
-test("choices and answers carrying hostile markup are shown as readable text and do nothing", async ({
-  page,
-}) => {
-  const served = await serveWorld("queue");
-  const images: string[] = [];
-  page.on("request", (request) => {
-    if (request.url().includes("evil.example.org")) images.push(request.url());
-  });
-  const asked = raiseQuestion(served, {
-    key: "hostile-choices",
-    title: "Hostile choices?",
-    choices: [
-      {
-        id: "tag",
-        title: "<script>window.__pwn='title'</script>",
-        description: HOSTILE,
-      },
-      { id: "safe", title: "Plain", description: "A plain description." },
-    ],
-  });
-  const viaPage = raiseQuestion(served, {
-    key: "hostile-page",
-    title: "Hostile page answer?",
-    choices: REGIONS,
-  });
-  const viaCli = raiseQuestion(served, {
-    key: "hostile-cli",
-    title: "Hostile CLI answer?",
-  });
-  const noticed = raiseQuestion(served, {
-    key: "hostile-notice",
-    title: "Hostile notice?",
-  });
-  cli(served, ["human-items", "answer", viaCli, "--text", HOSTILE], SUPERVISOR);
-  await open(page, served);
-  const assertHarmless = async () => {
-    expect(
-      await page.evaluate(() => Reflect.get(window, "__pwn")),
-    ).toBeUndefined();
-    expect(images).toEqual([]);
-    // llmlint: ignore[e2e_uses_accessible_selectors] what is asserted is that no such attribute reached the DOM, which no role or name can express.
-    expect(await page.locator("[onerror]").count()).toBe(0);
-    // llmlint: ignore[e2e_uses_accessible_selectors] as above: the assertion is about an href value no link's accessible name carries.
-    expect(await page.locator('a[href^="javascript:"]').count()).toBe(0);
-  };
-
-  const hostile = card(page, "Hostile choices?");
-  await expect(
-    hostile.getByRole("button", {
-      name: "<script>window.__pwn='title'</script>",
-    }),
-  ).toBeVisible();
-  const pane = await openDetail(page, "Hostile choices?");
-  await expect(pane).toContainText("<script>window.__pwn='script'</script>");
-  await expect(pane).toContainText("the link");
-  await assertHarmless();
-  await pane.getByRole("button", { name: "Close detail" }).click();
-
-  // A choice plus hostile words, sent through the page.
-  const answeringPane = await openDetail(page, "Hostile page answer?");
-  await choiceButton(answeringPane, "Europe").click();
-  await answeringPane
-    .getByRole("textbox", { name: "Answer in detail: Hostile page answer?" })
-    .fill(HOSTILE);
-  await answerBox(page, "Hostile notice?").fill(HOSTILE);
-  await setUpdates(page, "Off");
-  cli(served, ["human-items", "dismiss", noticed], SUPERVISOR);
-  await sendAnswers(page);
-  const notices = page.getByRole("list", { name: "Not sent" });
-  await expect(notices).toContainText("Hostile notice?");
-  await expect(notices).toContainText("<script>window.__pwn='script'</script>");
-  await assertHarmless();
-  expect(stored(served, viaPage).resolution?.text).toBe(HOSTILE);
-  expect(asked).toBeTruthy();
-
-  // After a reload, under the answered filter, the stored words are read back.
-  await page.reload();
-  await page
-    .getByRole("group", { name: "Filter action items" })
-    .getByLabel("State", { exact: true })
-    .selectOption("answered");
-  for (const title of ["Hostile page answer?", "Hostile CLI answer?"]) {
-    const answered = card(page, title);
-    await expect(answered).toContainText(
-      "<script>window.__pwn='script'</script>",
-    );
-    await expect(answered).toContainText("the link");
-  }
-  await expect(card(page, "Hostile page answer?")).toContainText("Europe");
-  const detail = await openDetail(page, "Hostile page answer?");
-  await expect(detail).toContainText("<img src=x");
-  await assertHarmless();
-
-  // The link's text is shown, and pressing it goes nowhere.
-  const url = page.url();
-  await detail.getByText("the link", { exact: true }).click();
-  expect(page.url()).toBe(url);
-  await assertHarmless();
-});
-
-for (const [width, height] of [
-  [390, 844],
-  [1440, 900],
-] as const) {
-  test(`at ${width} wide choice buttons and card actions are compact, and the bar clears the toast and every card action`, async ({
-    browser,
-  }) => {
-    const context = await browser.newContext({
-      viewport: { width, height },
-      hasTouch: width === 390,
-    });
-    const page = await context.newPage();
-    const served = await serveWorld("queue");
-    const title = "Compact choices?";
-    raiseQuestion(served, { key: "compact", title, choices: REGIONS });
-    await open(page, served);
-    const shown = card(page, title);
-    await shown.scrollIntoViewIfNeeded();
-    const buttons = await Promise.all(
-      REGIONS.map((choice) => box(choiceButton(shown, choice.title))),
-    );
-    const cardBox = await box(shown);
-    for (const button of buttons) {
-      expect(button.height).toBeGreaterThanOrEqual(28);
-      expect(button.height).toBeLessThanOrEqual(32);
-      expect(inside(button, cardBox)).toBe(true);
-    }
-    expect(new Set(buttons.map(({ y }) => Math.round(y))).size).toBe(1);
-    for (const [left, right] of [
-      [buttons[0], buttons[1]],
-      [buttons[1], buttons[2]],
-    ] as const) {
-      if (left === undefined || right === undefined)
-        throw new Error("a button");
-      expect(right.x - (left.x + left.width)).toBeGreaterThanOrEqual(8 - 0.5);
-    }
-
-    // A card's own controls, one line and clear of one another.
-    const task = card(page, "Restore the build service");
-    await task.scrollIntoViewIfNeeded();
-    const controls = await Promise.all(
-      ["Details", "Complete", "Dismiss"].map((verb) =>
-        box(
-          task.getByRole("button", {
-            name: `${verb}: Restore the build service`,
-          }),
-        ),
-      ),
-    );
-    for (const control of controls) {
-      expect(control.height).toBeGreaterThanOrEqual(28);
-      expect(control.height).toBeLessThanOrEqual(32);
-    }
-    for (const [index, control] of controls.entries()) {
-      const next = controls[index + 1];
-      if (next === undefined) continue;
-      const apart =
-        Math.round(control.y) === Math.round(next.y)
-          ? next.x - (control.x + control.width)
-          : next.y - (control.y + control.height);
-      expect(apart).toBeGreaterThanOrEqual(8 - 0.5);
-    }
-
-    // At the expanded view each title button is as compact, description beneath.
-    const pane = await openDetail(page, title);
-    for (const choice of REGIONS) {
-      const button = await box(choiceButton(pane, choice.title));
-      expect(button.height).toBeGreaterThanOrEqual(28);
-      expect(button.height).toBeLessThanOrEqual(32);
-      const description = await box(pane.getByText(choice.description));
-      expect(description.y).toBeGreaterThanOrEqual(
-        button.y + button.height - 1,
-      );
-      expect(description.y).toBeLessThanOrEqual(button.y + button.height + 8);
-    }
-    await pane.getByRole("button", { name: "Close detail" }).click();
-
-    if (width === 390) {
-      await choiceButton(shown, "Europe").tap();
-      await expect(choiceButton(shown, "Europe")).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-      await choiceButton(shown, "Europe").tap();
-      await expect(sendButton(page)).toHaveCount(0);
-      await task
-        .getByRole("button", { name: "Details: Restore the build service" })
-        .tap();
-      await expect(
-        detailPane(page).getByRole("heading", {
-          name: "Restore the build service",
-        }),
-      ).toBeVisible();
-      await detailPane(page)
-        .getByRole("button", { name: "Close detail" })
-        .click();
-    }
-
-    // A draft out, a notice under the bar and a toast at once: none overlaps.
-    const vanishing = raiseQuestion(served, {
-      key: "compact-gone",
-      title: "Gone soon?",
-    });
-    await expect(answerBox(page, "Gone soon?")).toBeVisible();
-    await answerBox(page, "Gone soon?").fill("Words for the notice");
-    cli(served, ["human-items", "dismiss", vanishing], SUPERVISOR);
-    await expect(page.getByRole("list", { name: "Not sent" })).toBeVisible();
-    await choiceButton(shown, "Europe").click();
-    await task
-      .getByRole("button", { name: "Complete: Restore the build service" })
-      .click();
-    await expect(toast(page)).toBeVisible();
-    await expect(sendButton(page)).toBeVisible();
-    const region = await box(sendRegion(page));
-    const toasted = await box(toast(page));
-    expect(overlap(region, toasted)).toBe(false);
-    // The list ends where the bar starts, so what scrolls past is clipped by it.
-    const listed = await box(listRegion(page));
-    expect(listed.y + listed.height).toBeLessThanOrEqual(region.y + 1);
-    for (const action of await page
-      .getByRole("article")
-      .getByRole("button")
-      .all()) {
-      if (!(await action.isVisible()) || !(await action.isEnabled())) continue;
-      const button = await box(action);
-      if (button.y + button.height <= listed.y) continue;
-      if (button.y >= listed.y + listed.height) continue;
-      expect(overlap(button, region), "a card action under the bar").toBe(
-        button.y + button.height > listed.y + listed.height,
-      );
-    }
-    await context.close();
-  });
-
-  test(`at ${width} wide a detail leads with the item and ends in a labelled metadata block`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width, height });
-    const served = await serveWorld("queue");
-    const question = "Which region for the metadata test?";
-    raiseQuestion(served, {
-      key: "metadata",
-      title: question,
-      choices: REGIONS,
-    });
-    await open(page, served);
-    const checks: [string, boolean][] = [
-      [question, true],
-      ["Restore the build service", false],
-    ];
-    for (const [title, asks] of checks) {
-      const pane = await openDetail(page, title);
-      const heading = await box(pane.getByRole("heading", { name: title }));
-      const bodyRegion = pane.getByRole("region", { name: "Full body" });
-      const body = await box(bodyRegion);
-      expect(body.y).toBeGreaterThanOrEqual(heading.y);
-      let last = body.y + body.height;
-      if (asks) {
-        const answer = await box(pane.getByRole("textbox"));
-        const list = await box(pane.getByRole("group", { name: "Choices" }));
-        expect(list.y).toBeGreaterThanOrEqual(body.y + body.height - 1);
-        expect(answer.y).toBeGreaterThanOrEqual(list.y);
-        last = answer.y + answer.height;
-      }
-      // llmlint: ignore[e2e_uses_accessible_selectors] the criterion is that the block is a `<dl>`, an element ARIA has no role for as a whole; its fields are read by role just below.
-      const block = pane.locator("dl");
-      await expect(block).toHaveCount(1);
-      const blockBox = await box(block);
-      expect(blockBox.y).toBeGreaterThanOrEqual(last - 1);
-      const labels = await pane.getByRole("term").allTextContents();
-      for (const label of [
-        "Priority",
-        "Kind",
-        "State",
-        "Source",
-        "Blocks",
-        "Raised",
-      ])
-        expect(labels).toContain(label);
-      // None of those values reads above the body.
-      for (const label of ["Priority", "Kind", "State", "Raised"]) {
-        const value = (await metadataOf(pane, label).textContent()) ?? "";
-        const above = await pane.evaluate(
-          (element, [text, stop]) => {
-            const walker = document.createTreeWalker(
-              element,
-              NodeFilter.SHOW_TEXT,
-            );
-            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-              if (node.parentElement?.closest("dl")) continue;
-              if (node.textContent !== text) continue;
-              const range = document.createRange();
-              range.selectNodeContents(node);
-              if (range.getBoundingClientRect().y < Number(stop)) return true;
-            }
-            return false;
-          },
-          [value, String(body.y)] as const,
-        );
-        expect(above).toBe(false);
-      }
-      await pane.getByRole("button", { name: "Close detail" }).click();
-    }
-  });
-
-  test(`at ${width} wide long text wraps or clamps predictably and never scrolls the page sideways`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width, height });
-    const served = await serveWorld("long-tracker");
-    const longTitle = `Should the very long question title that keeps going ${"and going ".repeat(12)}finally end here?`;
-    const longBody = `${"This body is long enough to clamp on a card. ".repeat(60)}Final words.`;
-    const longDescription = `${"This choice's description is long and wraps in full. ".repeat(20)}End of description.`;
-    const longName = `plan-${"x".repeat(70)}`;
-    const longRun = `run-${"y".repeat(70)}`;
-    const nearLimit =
-      "A choice title that sits right at the engine's limit of eighty characters total";
-    expect([...nearLimit].length).toBeGreaterThanOrEqual(78);
-    expect([...nearLimit].length).toBeLessThanOrEqual(80);
-    const id = raiseQuestion(served, {
-      key: "long-text",
-      title: longTitle,
-      body: longBody,
-      choices: [
-        { id: "near", title: nearLimit, description: longDescription },
-        { id: "short", title: "Short", description: "Brief." },
-      ],
-      owner: {
-        session: `session-${"z".repeat(70)}`,
-        run: longRun,
-        plan: longName,
-      },
-    });
-    await open(page, served);
-    const shown = card(page, longTitle);
-    await shown.scrollIntoViewIfNeeded();
-
-    const heading = shown.getByRole("heading", { level: 3 });
-    await expect(heading).toHaveText(longTitle);
-    const headingBox = await box(heading);
-    if (width === 390) expect(headingBox.height).toBeGreaterThan(40);
-    expect(
-      await heading.evaluate(
-        (element) => element.scrollWidth <= element.clientWidth + 1,
-      ),
-    ).toBe(true);
-
-    // llmlint: ignore[e2e_uses_accessible_selectors] what is asserted is the shared package's own clamped box, which only its `otg-` class names.
-    const clamp = shown.locator(".otg-markdown--clamped");
-    const clamped = await clamp.evaluate((element) => {
-      const style = getComputedStyle(element);
-      return {
-        lines: style.webkitLineClamp,
-        overflows: element.scrollHeight > element.clientHeight,
-      };
-    });
-    expect(clamped.lines).toBe("4");
-    expect(clamped.overflows).toBe(true);
-
-    const near = await box(choiceButton(shown, nearLimit));
-    const short = await box(choiceButton(shown, "Short"));
-    const cardBox = await box(shown);
-    expect(near.height).toBeGreaterThan(40);
-    expect(short.height).toBeLessThanOrEqual(32);
-    expect(inside(near, cardBox)).toBe(true);
-    await expect(shown).toContainText(longRun);
-    await expect(shown).toContainText(longName);
-
-    const pane = await openDetail(page, longTitle);
-    await expect(pane.getByRole("region", { name: "Full body" })).toContainText(
-      "Final words.",
-    );
-    await expect(pane).toContainText("End of description.");
-    const nearInDetail = await box(choiceButton(pane, nearLimit));
-    expect(nearInDetail.height).toBeGreaterThan(40);
-    expect(nearInDetail.height).toBeLessThanOrEqual(66);
-    const source = metadataOf(pane, "Source");
-    await expect(source).toContainText(longRun);
-    await expect(metadataOf(pane, "Plan")).toHaveText(longName);
-    await expect(metadataOf(pane, "Run")).toHaveText(longRun);
-    expect(
-      await pane.evaluate(
-        (element) => element.scrollWidth <= element.clientWidth + 1,
-      ),
-    ).toBe(true);
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= window.innerWidth + 1,
-      ),
-    ).toBe(true);
-    expect(id).toBeTruthy();
-    await pane.getByRole("button", { name: "Close detail" }).click();
-
-    // A long tracker reference is cut in its chip and whole in its metadata.
-    const tracked = "Carry a very long tracker reference";
-    const reference =
-      stored(served, idOf(served, "tracked")).tracker?.task ?? "";
-    expect(reference.length).toBeGreaterThan(60);
-    const chip = card(page, tracked).getByRole("link", {
-      name: new RegExp(escapeRegExp(reference), "u"),
-    });
-    await expect(chip).toHaveAttribute("title", reference);
-    expect(
-      await chip.evaluate((element) => ({
-        cut: element.scrollWidth > element.clientWidth,
-        ellipsis: getComputedStyle(element).textOverflow,
-      })),
-    ).toEqual({ cut: true, ellipsis: "ellipsis" });
-    const trackedPane = await openDetail(page, tracked);
-    await expect(metadataOf(trackedPane, "Tracker")).toHaveText(reference);
-  });
-}
-
-/** Every badge inside `scope`: what a party must never be shown as. */
-function badgesIn(scope: Locator): Locator {
-  // llmlint: ignore[e2e_uses_accessible_selectors] a badge is a styled span with no role or name of its own, so what the page must not render as one can only be found by the slot `@oneharness/ui` marks it with.
-  return scope.locator('[data-slot="badge"]');
-}
-
-/** The words a party is shown in: a person at this page is the user. */
-const PARTY = { user: "you", manager: "the manager" } as const;
-/** The words a history row opens with, per action the engine records. */
-const ACTION_WORDS: Record<string, string> = {
-  "human-item-raised": "Raised",
-  "human-item-answered": "Answered",
-  "human-item-completed": "Completed",
-  "human-item-dismissed": "Dismissed",
-  "human-item-reopened": "Reopened",
-  "human-item-noted": "Note",
-};
-/** An instant as the read contract serves it, which a reader is never shown. */
-const RFC_3339 = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/u;
-/** A calendar date, as an absolute reading would show it. */
-const ABSOLUTE_DATE = /\b[A-Z][a-z]{2} \d{1,2}, \d{4}\b/u;
-/** An age, as `Timestamp` reads one. */
-const RELATIVE = /^\d+ (second|minute|hour|day|month|year)s? ago$/u;
-
-/**
- * `time` is a moment shown as an age: its `datetime` the instant `at` names,
- * its title the exact local time of that instant, and its visible text a
- * relative phrase — never the served string.
- */
-async function expectAge(time: Locator, at: string): Promise<void> {
-  await expect(time).toHaveAttribute("datetime", new Date(at).toISOString());
-  await expect(time).toHaveText(RELATIVE);
-  const title = await time.getAttribute("title");
-  expect(title).not.toMatch(RFC_3339);
-  // The title is the local time to the second, with its zone spelled out.
-  const local = await time.evaluate((element, instant) => {
-    const shown = element.getAttribute("title") ?? "";
-    const clock = shown.replace(/(?<=[AP]M) .+$/u, "");
-    return Math.abs(Date.parse(clock) - Date.parse(instant));
-  }, at);
-  expect(local).toBeLessThan(1_000);
-}
-
-/** The engine's history of `id`, as the detail route serves it to the page. */
-async function servedHistory(page: Page, served: FixtureServer, id: string) {
-  const response = await page.request.get(
-    `${served.origin}/api/human-items/${id}`,
-  );
-  expect(response.ok()).toBe(true);
-  return detailSchema.parse(await response.json()).history ?? [];
-}
-
-/** Choose `state` in the page's State filter, as a reader would. */
-async function showState(page: Page, state: string): Promise<void> {
-  const asked = subscribedTo(page, state === "open" ? {} : { state });
-  await page
-    .getByRole("group", { name: "Filter action items" })
-    .getByLabel("State", { exact: true })
-    .selectOption(state);
-  await asked;
-}
-
-test("an answer and a completion sent from Action items are the user's, and what the manager or a released engine recorded still lists and resolves", async ({
-  page,
-}) => {
-  const served = await serveWorld("provenance");
-  const list = await open(page, served);
-  const answered = idOf(served, "answer");
-  const legacy = idOf(served, "legacy");
-  const legacyTitle = "Rotate the staging certificate";
-
-  // An answer through the page's send bar, recorded as the user's words.
-  await answerBox(page, "Which region should the canary run in?").fill(
-    "eu-west",
-  );
-  await sendAnswers(page);
-  await expect(
-    card(page, "Which region should the canary run in?"),
-  ).toHaveCount(0);
-  expect(stored(served, answered).resolution).toMatchObject({
-    actor: `browser:session:${SUPERVISOR}`,
-    text: "eu-west",
-    provenance: "user",
-  });
-
-  // An item whose records predate the field lists, opens and resolves: its
-  // raise reads as the manager's, its completion through the page the user's.
-  const journalled = journal(served)
-    .trimEnd()
-    .split("\n")
-    .map((line) =>
-      z
-        .object({
-          payload: z.object({
-            item_id: z.string(),
-            schema_version: z.number(),
-          }),
-        })
-        .parse(JSON.parse(line)),
-    )
-    .filter(({ payload }) => payload.item_id === legacy);
-  expect(journalled.map(({ payload }) => payload.schema_version)).toEqual(
-    journalled.map(() => 1),
-  );
-  await expect(card(page, legacyTitle)).toBeVisible();
-  await page.getByRole("button", { name: `Complete: ${legacyTitle}` }).click();
-  // The toast names no party: what the page sends is the user's by construction.
-  await expect(outcome(page)).toHaveText(`Completed: ${legacyTitle}`);
-  await expect(toast(page)).not.toContainText(/\byou\b|manager/u);
-  expect(stored(served, legacy)).toMatchObject({
-    state: "completed",
-    resolution: { provenance: "user" },
-  });
-  expect(
-    (await servedHistory(page, served, legacy)).map(
-      ({ action, provenance }) => [action, provenance],
-    ),
-  ).toEqual([
-    ...journalled.map(() => ["human-item-raised", "manager"]),
-    ["human-item-completed", "user"],
-  ]);
-
-  // No card names a party, in the default list or under any resolved state.
-  const party = /\byou\b|\bmanager\b|\buser\b/iu;
-  await expect(list).not.toContainText(party);
-  for (const [state, expected] of [
-    [
-      "answered",
-      [
-        "Which region should the canary run in?",
-        "Keep the legacy export format?",
-        "Should retries reuse the warm cache?",
-      ],
-    ],
-    ["completed", ["Restore the build service", legacyTitle]],
-    ["dismissed", ["Re-run the flaky screenshot job"]],
-  ] as const) {
-    await showState(page, state);
-    await expect
-      .poll(async () => [...(await titles(list))].sort())
-      .toEqual([...expected].sort());
-    await expect(list).not.toContainText(party);
-  }
-
-  // The manager's CLI dismissal reads as the manager's in the detail; the list
-  // stands on Dismissed from the loop above.
-  await page
-    .getByRole("button", { name: "Details: Re-run the flaky screenshot job" })
-    .click();
-  await expect(metadataOf(detailPane(page), "Dismissed")).toHaveText(
-    /^By the manager · \d+ \w+ ago$/u,
-  );
-  await expect(
-    detailPane(page)
-      .getByRole("region", { name: "History" })
-      .getByRole("listitem")
-      .last(),
-  ).toHaveText(/^Dismissed by the manager · \d+ \w+ ago$/u);
-
-  // The manager's CLI answer, and one a released engine wrote, are the
-  // manager's in the detail, which the user's answer is not.
-  await showState(page, "answered");
-  const pane = detailPane(page);
-  for (const [title, by] of [
-    ["Should retries reuse the warm cache?", "the manager"],
-    ["Keep the legacy export format?", "the manager"],
-    ["Which region should the canary run in?", "you"],
-  ] as const) {
-    await page.getByRole("button", { name: `Details: ${title}` }).click();
-    await expect(pane.getByRole("heading", { level: 2 })).toHaveText(title);
-    await expect(metadataOf(pane, "Answered")).toHaveText(
-      new RegExp(`^By ${by} · \\d+ \\w+ ago$`, "u"),
-    );
-    await expect(
-      pane.getByRole("region", { name: "History" }).getByRole("listitem"),
-    ).toHaveText([
-      /^Raised by the manager · /u,
-      new RegExp(`^Answered by ${by} · `, "u"),
-    ]);
-  }
-});
-
-test("the detail lists the engine's history oldest first, each row's party in words and its time as an age", async ({
-  page,
-}) => {
-  const served = await serveWorld("provenance");
-  await open(page, served);
-  const id = idOf(served, "history");
-  const title = "File the flaky-runner report";
-
-  // Completed and noted through the page, then reopened and completed again by
-  // the manager's own CLI, with no `--as`.
-  await page.getByRole("button", { name: `Complete: ${title}` }).click();
-  await expect(outcome(page)).toHaveText(`Completed: ${title}`);
-  await toast(page).getByRole("button", { name: "Add comment" }).click();
-  await toast(page)
-    .getByRole("textbox", { name: "Comment" })
-    .fill("Filed as INFRA-212");
-  await toast(page).getByRole("button", { name: "Send" }).click();
-  await expect(outcome(page)).toHaveText(`Comment saved: ${title}`);
-  await expect(toast(page)).not.toContainText(/\byou\b|manager/u);
-  // The page's note is the user's, on the event's `by`, as the owner's watch
-  // is told it.
-  const noted = delivered(served, SUPERVISOR).filter(
-    ({ kind, payload }) =>
-      kind === "human-item-noted" && payload.item_id === id,
-  );
-  expect(noted.map(({ payload }) => payload.by?.provenance)).toEqual(["user"]);
-  cli(served, ["human-items", "reopen", id], SUPERVISOR);
-  cli(served, ["human-items", "complete", id], SUPERVISOR);
-  expect(stored(served, id).resolution).not.toHaveProperty("provenance");
-
-  await showState(page, "completed");
-  await page.getByRole("button", { name: `Details: ${title}` }).click();
-  const pane = detailPane(page);
-  await expect(pane.getByRole("heading", { level: 2 })).toHaveText(title);
-  const history = await servedHistory(page, served, id);
-  expect(
-    history.map(({ action, provenance }) => [action, provenance]).slice(-4),
-  ).toEqual([
-    ["human-item-completed", "user"],
-    ["human-item-noted", "user"],
-    ["human-item-reopened", "manager"],
-    ["human-item-completed", "manager"],
-  ]);
-  const rows = pane
-    .getByRole("region", { name: "History" })
-    .getByRole("listitem");
-  await expect(rows).toHaveText(
-    history.map(
-      ({ action, provenance }) =>
-        new RegExp(
-          `^${ACTION_WORDS[action]} by ${PARTY[provenance]} · \\d+ \\w+ ago$`,
-          "u",
-        ),
-    ),
-  );
-  for (const [index, entry] of history.entries()) {
-    const row = rows.nth(index);
-    await expect(badgesIn(row)).toHaveCount(0);
-    await expectAge(row.getByRole("time"), entry.at);
-  }
-  // The user's row and the manager's read in one style and one colour.
-  const colour = (row: Locator) =>
-    row.evaluate((element) => getComputedStyle(element).color);
-  const userRow = history.findIndex(({ provenance }) => provenance === "user");
-  const managerRow = history.findIndex(
-    ({ provenance }) => provenance === "manager",
-  );
-  expect(await colour(rows.nth(userRow))).toBe(
-    await colour(rows.nth(managerRow)),
-  );
-
-  // The field table's times read the same way, and the resolution's party in
-  // words: no RFC 3339 string or absolute date-time anywhere in the pane.
-  const created = detailSchema
-    .extend({
-      item: storedSchema.extend({
-        created_at: z.string(),
-        updated_at: z.string(),
-      }),
-    })
-    .parse(JSON.parse(cli(served, ["human-items", "show", id, "--json"]))).item;
-  await expectAge(
-    metadataOf(pane, "Raised").getByRole("time"),
-    created.created_at,
-  );
-  await expectAge(
-    metadataOf(pane, "Completed").getByRole("time"),
-    created.updated_at,
-  );
-  await expect(metadataOf(pane, "Completed")).toHaveText(
-    /^By the manager · \d+ \w+ ago$/u,
-  );
-  expect(created.state).toBe("completed");
-  const text = await pane.innerText();
-  expect(text).not.toMatch(RFC_3339);
-  expect(text).not.toMatch(ABSOLUTE_DATE);
 });

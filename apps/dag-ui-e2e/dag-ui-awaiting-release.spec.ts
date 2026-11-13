@@ -70,12 +70,6 @@ test("a held and a draft node show their own words and the releases each awaits 
   const { held, draft, producer } = awaiting();
   const engine = lastSegment(producer);
   await page.goto(`${SERVED_UI_URL}/?run=${runs().awaiting}&view=graph`);
-  // The cards are measured below, and the first screen's are replaced when the
-  // app takes over. The first screen draws a node list too, so once one is drawn
-  // the journey waits for the first screen to be gone before it measures.
-  await expect(graphNodeList(page).getByRole("listitem").first()).toBeVisible();
-  // llmlint: ignore[e2e_uses_accessible_selectors] the app replaces the first screen with no visible jump by design, so nothing a person can perceive says which of the two is drawn; this marker is the one difference, and only waiting for the app to have taken over is read from it.
-  await expect(page.locator("[data-first-screen]")).toHaveCount(0);
 
   const heldCard = card(page, held, "complete-but-held");
   const draftCard = card(page, draft, "complete-but-draft");

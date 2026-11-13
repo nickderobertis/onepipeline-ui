@@ -8,7 +8,6 @@
       "{workspaceRoot}/scripts/actions-cache-prune.mjs",
       "{workspaceRoot}/scripts/nx-version-free-inputs.mjs",
       "{workspaceRoot}/scripts/ci-job.sh",
-      "{workspaceRoot}/scripts/ci-compile-env.sh",
       "sharedGlobals",
       "{projectRoot}/**/*",
       "{workspaceRoot}/screencomp.toml",

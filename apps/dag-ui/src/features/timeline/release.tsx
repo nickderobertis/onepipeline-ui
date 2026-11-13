@@ -220,8 +220,7 @@ export function NodeRelease({ node }: { readonly node: NodeView }) {
   const release: NodeReleaseRecord | undefined =
     node.result?.release ?? undefined;
   if (release === undefined) return <>Not recorded</>;
-  // llmlint: ignore[changed_behavior_has_e2e] the optional chain is the type of an off-graph view's absent task, not a state a browser can reach: the server folds `node_results` and the graph's result over the graph, so it serves no result — and so no release — for a node the graph does not hold, and an off-graph node always returns at "Not recorded" above, which the large-run views journey asserts.
-  const elsewhere = release.identity !== node.task?.repo;
+  const elsewhere = release.identity !== node.task.repo;
   return (
     <>
       {[
