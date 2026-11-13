@@ -222,3 +222,123 @@ test("with the job's selection, records of tasks it never selected are dropped",
     ),
   );
 });
+
+// fixtures/log-131703598302-excerpt.txt: lines of run 43370095836's test-windows
+// log, verbatim (colour codes included); fixtures/run-43370095836-windows: that
+// run's cached responses, its executions document, and a 20-second slice of its
+// Windows recorder (05:15:00Z–05:15:20Z).
+test("a hosted log's run identity, selection, restores and test durations read back", async () => {
+  const { facts, lines, tasks } = await import("../logs.mjs");
+  const log = lines(
+    readFileSync(join(fixtures, "log-131703598302-excerpt.txt"), "utf8"),
+  );
+  const f = facts(log);
+  assert.equal(f.github_sha, "90bc9a098d423b4aeb62e864be5047f7713b0c25");
+  assert.equal(f.selection.count, 23);
+  assert.ok(f.selection.tasks.includes("onepipeline-ui:test-quick"));
+  assert.deepEqual(f.restores[0], {
+    ...f.restores[0],
+    hit: true,
+    size_mb: 527,
+  });
+  const quick = tasks(log).find((b) => b.task === "onepipeline-ui:test-quick");
+  assert.equal(quick.outcome, "passed");
+  assert.equal(quick.tests.length, 60);
+  assert.ok(
+    quick.tests.every(
+      (t) => t.runner === "nextest" && t.seconds >= 0 && t.binary,
+    ),
+  );
+});
+
+test("a log with no selection line leaves the selection unknown", async () => {
+  const { facts, lines } = await import("../logs.mjs");
+  const f = facts(
+    lines(
+      "2026-11-13T05:09:22.0Z hello\n2026-11-13T05:09:23.0Z No cache found.\n",
+    ),
+  );
+  assert.equal(f.selection, null);
+  assert.deepEqual(
+    f.restores.map((r) => r.hit),
+    [false],
+  );
+});
+
+function fixtureCache() {
+  const dir = mkdtempSync(join(tmpdir(), "spike-run-"));
+  spawnSync("cp", [
+    "-R",
+    `${join(fixtures, "run-43370095836-windows")}/.`,
+    dir,
+  ]);
+  return dir;
+}
+
+test("one measurement of a cached run divides the Windows job's wall clock exactly", () => {
+  const cache = fixtureCache();
+  const json = join(cache, "out.json");
+  const r = spawnSync(
+    "node",
+    [
+      join(root, "spikes/ci-test-speed/measure.mjs"),
+      "--run",
+      "43370095836",
+      "--jobs",
+      "test-windows",
+      "--offline",
+      "--cache",
+      cache,
+      "--json",
+      json,
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(
+    r.stdout,
+    /== test-windows \(run 43370095836 attempt 1, job 131703598302, success\) wall 13\.1 min/,
+  );
+  assert.match(
+    r.stdout,
+    /restore HIT {2}Run Swatinem\/rust-cache@v2\.9\.2 527 MB 42 s/,
+  );
+  const [job] = JSON.parse(readFileSync(json, "utf8")).jobs;
+  const total = job.categories.reduce((s, c) => s + c.minutes, 0);
+  assert.ok(
+    Math.abs(total - job.wall_minutes) < 0.01,
+    `categories sum to ${total}, wall ${job.wall_minutes}`,
+  );
+  assert.equal(job.recorder.platform, "windows");
+  assert.ok(
+    job.categories.some(
+      (c) => c.category === "compile (plain)" && c.minutes > 0,
+    ),
+  );
+  assert.equal(job.nx_cache_stored_bytes, 0);
+  assert.ok(job.test_binaries.length > 0);
+  assert.ok(
+    job.test_binaries.every((b) => /^onepipeline-ui(::|$)/.test(b.binary)),
+  );
+});
+
+test("offline, a run whose log was never fetched is refused naming the log", () => {
+  const cache = fixtureCache();
+  spawnSync("rm", [join(cache, "log-131703598302.txt")]);
+  const r = spawnSync(
+    "node",
+    [
+      join(root, "spikes/ci-test-speed/measure.mjs"),
+      "--run",
+      "43370095836",
+      "--jobs",
+      "test-windows",
+      "--offline",
+      "--cache",
+      cache,
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /offline and log-131703598302\.txt is not cached/);
+});
