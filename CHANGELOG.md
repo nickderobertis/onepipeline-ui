@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.81.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.81.1...v0.81.2) - 2026-11-13
+
+### Added
+
+- *(deps)* link the engine and plan store that run command steps ([#778](https://github.com/nickderobertis/onepipeline-ui/pull/778))
+
 ## [0.81.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.81.0...v0.81.1) - 2026-11-13
 
 ### Fixed
