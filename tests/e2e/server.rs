@@ -47,7 +47,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(28), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(29), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -16529,6 +16529,8 @@ fn create_store_task(
         // Who may read it: a public task, as every task was before the store
         // classified them.
         classification: onetaskgraph_plugin_api::Classification::Public,
+        // Nobody: a local-md source has not opted in to assignees.
+        assignee: None,
     };
     tokio::runtime::Runtime::new()
         .expect("a runtime")
@@ -22625,4 +22627,155 @@ fn check_visibility_records_reach_every_event_reading_and_the_node_checks() {
         ),
     );
     assert_eq!(refused.status, 422, "{}", refused.body);
+}
+
+/// The command-steps corpus, served: three `kind: command` nodes and a live edit
+/// the run's plan-edit hook refused.
+fn command_steps() -> (Serving, String) {
+    let corpus = fixture_run::command_steps();
+    let run = corpus["run_id"].as_str().expect("the corpus's run").to_owned();
+    let serving = Serving::start(|root| {
+        fixture_run::write_command_steps(root);
+    });
+    (serving, run)
+}
+
+/// The record `fields` a node's own timeline lists for `kind`, in order.
+fn node_record_fields(serving: &Serving, run: &str, node: &str, kind: &str) -> Vec<Value> {
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=node&node={node}"),
+    );
+    assert_eq!(timeline.status, 200, "{}", timeline.body);
+    let timeline = timeline.json();
+    timeline["spans"]
+        .as_array()
+        .expect("the node's spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter(|event| event["kind"] == kind)
+        .map(|event| event["fields"].clone())
+        .collect()
+}
+
+/// A plan of command steps, as the engine journals one: every command node is
+/// served as a `command` — never folded into an agent — with its argv, its
+/// outcome and the log its command wrote, on the run route and on each node's
+/// own timeline, and the live edit the run's plan-edit hook refused is answered
+/// on the run route naming that hook.
+#[test]
+fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
+    let corpus = fixture_run::command_steps();
+    let (serving, run) = command_steps();
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}"));
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    let detail = detail.json();
+    let graph = &detail["graph"];
+
+    let tasks: BTreeMap<String, Value> = graph["plan"]["tasks"]
+        .as_array()
+        .expect("the plan's tasks")
+        .iter()
+        .map(|task| (task["id"].as_str().expect("an id").to_owned(), task.clone()))
+        .collect();
+    assert_eq!(tasks["build"]["kind"], json!("command"));
+    assert_eq!(tasks["build"]["command"], json!(["cargo", "build", "--release"]));
+    assert!(tasks["build"].get("timeout_seconds").is_none(), "{}", tasks["build"]);
+    assert_eq!(tasks["integration"]["kind"], json!("command"));
+    assert_eq!(tasks["integration"]["timeout_seconds"], json!(30));
+
+    let expected = [
+        ("build", "done", None),
+        ("lint", "failed", Some("command-failed")),
+        ("integration", "failed", Some("command-timed-out")),
+    ];
+    for (node, status, outcome) in expected {
+        let result = &graph["node_results"][node];
+        assert_eq!(result["kind"], json!("command"), "{node}: {result}");
+        assert_eq!(result["status"], json!(status), "{node}: {result}");
+        assert_eq!(graph["node_status"][node], json!(status), "{node}");
+        assert_eq!(result.get("outcome").cloned(), outcome.map(|word| json!(word)), "{node}");
+        let log = &result["log"];
+        let path = log["path"].as_str().expect("the log's path");
+        assert!(
+            Path::new(path).ends_with(Path::new("commands").join(format!("{node}.log"))),
+            "{node}: {path}"
+        );
+        assert_eq!(log["content"], corpus["logs"][node], "{node}");
+        assert_eq!(log["truncated"], json!(false), "{node}");
+
+        // The node's own route: what it ran and where its output is, and how it
+        // ended.
+        let started = node_record_fields(&serving, &run, node, "command-started");
+        assert_eq!(started.len(), 1, "{node}: {started:?}");
+        assert_eq!(started[0]["Command"], tasks[node]["command"], "{node}");
+        assert_eq!(started[0]["Log"], json!(path), "{node}");
+        let settled = node_record_fields(&serving, &run, node, "node-settled");
+        assert_eq!(settled.len(), 1, "{node}: {settled:?}");
+        assert_eq!(settled[0].get("Outcome").cloned(), outcome.map(|word| json!(word)), "{node}");
+    }
+    let ended = node_record_fields(&serving, &run, "integration", "command-exited");
+    assert_eq!(ended[0]["Ending"], json!("timed-out"), "{ended:?}");
+    let ended = node_record_fields(&serving, &run, "lint", "command-exited");
+    assert_eq!(ended[0]["Exit code"], json!(101), "{ended:?}");
+
+    let hook = corpus["hook"].as_str().expect("the corpus's hook");
+    let rejected = graph["rejected_edits"].as_array().expect("the refused edits");
+    assert_eq!(rejected.len(), 1, "{rejected:?}");
+    let edit = &rejected[0];
+    assert_eq!(edit["author"], json!("planner"));
+    assert_eq!(edit["command"]["op"], json!("add"));
+    assert_eq!(edit["command"]["node"]["id"], json!("deploy"));
+    assert_eq!(edit["envelope"], json!(4));
+    assert_eq!(edit["index"], json!(0));
+    let reason = edit["reason"].as_str().expect("the refusal's reason");
+    assert!(
+        reason.contains(&format!("the plan-edit hook `{hook}` refused node 'deploy'")),
+        "{reason}"
+    );
+    assert!(edit["at"].is_string(), "{edit}");
+}
+
+/// A run that refused nothing is served no `rejected_edits` at all, and a
+/// command log that is gone, or that a record names outside the run, is served
+/// as its name alone: the route never reads a file a record points it at
+/// elsewhere on the host.
+#[test]
+fn a_command_log_outside_the_run_or_gone_is_served_as_its_name_alone() {
+    let corpus = fixture_run::command_steps();
+    let run = corpus["run_id"].as_str().expect("the corpus's run").to_owned();
+    let outside = std::sync::Mutex::new(String::new());
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_command_steps(root);
+        fs::remove_file(dir.join("commands").join("lint.log")).expect("remove a log");
+        let elsewhere = root.parent().expect("the root's parent").join("elsewhere.log");
+        fs::write(&elsewhere, "a file the run never wrote\n").expect("a file elsewhere");
+        let journal = dir.join("events.jsonl");
+        let named = dir.join("commands").join("build.log").display().to_string();
+        let text = fs::read_to_string(&journal).expect("the journal");
+        let rewritten: String = text
+            .lines()
+            .filter(|line| !line.contains("\"edit-rejected\""))
+            .map(|line| {
+                format!(
+                    "{}\n",
+                    line.replace(
+                        &serde_json::to_string(&named).expect("a path"),
+                        &serde_json::to_string(&elsewhere.display().to_string()).expect("a path"),
+                    )
+                )
+            })
+            .collect();
+        fs::write(&journal, rewritten).expect("the edited journal");
+        *outside.lock().expect("the path") = elsewhere.display().to_string();
+    });
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
+    let results = &detail["graph"]["node_results"];
+    let outside = outside.lock().expect("the path").clone();
+    assert_eq!(results["build"]["log"], json!({ "path": outside }));
+    let lint = results["lint"]["log"].as_object().expect("lint's log");
+    assert_eq!(lint.keys().collect::<Vec<_>>(), vec!["path"], "{lint:?}");
+    assert_eq!(results["lint"]["outcome"], json!("command-failed"));
+    assert!(detail["graph"].get("rejected_edits").is_none(), "{}", detail["graph"]);
+    assert_eq!(results["integration"]["log"]["content"], corpus["logs"]["integration"]);
 }

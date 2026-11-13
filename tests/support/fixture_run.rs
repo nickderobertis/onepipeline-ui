@@ -7909,3 +7909,90 @@ pub fn recorded_termination(kind: &str) -> Value {
     }
     corpus
 }
+
+/// The run the command-steps corpus records: three `kind: command` nodes the
+/// engine ran itself — one settled `done`, one `failed` with `command-failed` and
+/// one `failed` with `command-timed-out` — and a planner's live edit adding a
+/// fourth that the run's plan-edit hook refused, journalled `edit-rejected`.
+///
+/// The corpus is one document, `apps/dag-ui-e2e/fixtures/command-steps.json`,
+/// which the browser tier writes into its own runs root as well, so the run a
+/// journey here serves and the run the view renders are the same records.
+pub const COMMAND_STEPS_CORPUS: &str =
+    include_str!("../../apps/dag-ui-e2e/fixtures/command-steps.json");
+
+pub fn command_steps() -> Value {
+    serde_json::from_str(COMMAND_STEPS_CORPUS).expect("the command-steps corpus is JSON")
+}
+
+/// Write the command-steps corpus under `root` as the engine records a run: its
+/// launch record, the plan its `run-started` carried, each command's log under
+/// the run, and its journal — every line the engine's own [`Envelope`] as it
+/// serializes, every kind one the engine declares, the plan read as the engine's
+/// `Plan` and the refused edit's command as its channel `Command`, so a record the
+/// linked engine could not have written is refused here before anything serves it.
+/// Each `command-started` names its log by the path under the run, as the engine
+/// writes it, absolute.
+pub fn write_command_steps(root: &Path) -> PathBuf {
+    let corpus = command_steps();
+    let run = corpus["run_id"].as_str().expect("the corpus names its run");
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(dir.join("launch.json"), pretty(&corpus["launch"])).expect("the launch record");
+    let records = corpus["records"].as_array().expect("the corpus's records");
+    let plan = &records[0]["payload"]["plan"];
+    let _: onepipeline::plan::Plan =
+        serde_json::from_value(plan.clone()).expect("the corpus's plan is the engine's");
+    fs::write(dir.join("plan.json"), pretty(plan)).expect("the plan");
+    for (node, said) in corpus["logs"].as_object().expect("the corpus's logs") {
+        let log = dir.join("commands").join(format!("{node}.log"));
+        fs::create_dir_all(log.parent().expect("the log's directory")).expect("the log directory");
+        fs::write(&log, said.as_str().expect("a log's text")).expect("the log");
+    }
+    let start = time::OffsetDateTime::parse(START, &time::format_description::well_known::Rfc3339)
+        .expect("the fixture's start");
+    let mut lines = String::new();
+    for (seq, record) in (0_i64..).zip(records) {
+        let kind = record["kind"].as_str().expect("a record's kind");
+        assert!(
+            onepipeline::event::PipelineKind::from_wire(&onepipeline::event::EventKind(
+                kind.to_owned()
+            ))
+            .is_some(),
+            "`{kind}` is a kind the linked engine journals"
+        );
+        let mut payload = record["payload"].clone();
+        if let Some(log) = payload.get("log").and_then(Value::as_str) {
+            payload["log"] = json!(dir.join(log).display().to_string());
+        }
+        if let Some(command) = payload.get("command").filter(|_| kind == "edit-rejected") {
+            let _: onepipeline::channel::Command = serde_json::from_value(command.clone())
+                .expect("the refused command is the engine's");
+        }
+        let mut labels = json!({ "run_id": run });
+        if let Some(node) = record.get("node") {
+            labels["node"] = node.clone();
+        }
+        let at = (start + time::Duration::seconds(seq))
+            .format(&time::macros::format_description!(
+                "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+            ))
+            .expect("a stamp");
+        let envelope: Envelope = serde_json::from_value(json!({
+            "v": 1,
+            "ts": at,
+            "stream": corpus["stream"],
+            "seq": seq,
+            "source": record["source"],
+            "kind": kind,
+            "labels": labels,
+            "payload": payload,
+            "artifacts": [],
+        }))
+        .expect("a record the engine's envelope reads");
+        lines.push_str(&serde_json::to_string(&envelope).expect("the envelope serializes"));
+        lines.push('\n');
+    }
+    fs::write(dir.join("events.jsonl"), lines).expect("the journal");
+    dir
+}

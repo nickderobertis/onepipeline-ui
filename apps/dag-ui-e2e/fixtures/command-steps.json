@@ -1,0 +1,125 @@
+{
+  "run_id": "dag-ui-command-steps",
+  "stream": "a-recording-host-dag-ui-command-steps",
+  "hook": "scripts/plan-edit-hook.sh",
+  "launch": {
+    "run_id": "dag-ui-command-steps",
+    "plan": "plan.json",
+    "graph": "graphs/dag-scope.yaml",
+    "launcher": "claude-code",
+    "session": "claude-code-top-session",
+    "pid": 4263,
+    "host": "a-recording-host",
+    "started_at": "2026-08-07T12:00:00.000Z",
+    "heartbeat_interval": 1800,
+    "adoptions": 0
+  },
+  "logs": {
+    "build": "   Compiling widgets v0.4.0\n    Finished `release` profile [optimized] target(s) in 41.2s\n",
+    "lint": "error: unused variable: `scratch`\n --> src/lib.rs:12:9\nerror: could not compile `widgets` (lib) due to 1 previous error\n",
+    "integration": "running 14 tests\ntest checkout::round_trip ... ok\ntest checkout::slow_mirror ... "
+  },
+  "records": [
+    {
+      "source": "pipeline",
+      "kind": "run-started",
+      "payload": {
+        "plan": {
+          "schema_version": 3,
+          "goal": { "text": "Gate the widgets release on its build, lint and integration commands" },
+          "name": "dag-ui-command-steps",
+          "concurrency": 3,
+          "tasks": [
+            { "id": "build", "kind": "command", "command": ["cargo", "build", "--release"] },
+            { "id": "lint", "kind": "command", "command": ["cargo", "clippy", "--", "-D", "warnings"], "deps": ["build"] },
+            {
+              "id": "integration",
+              "kind": "command",
+              "command": ["cargo", "test", "--test", "integration"],
+              "timeout_seconds": 30,
+              "deps": ["build"]
+            }
+          ]
+        },
+        "graph": null,
+        "dir": "/a-recording-host/workspace",
+        "heartbeat_interval": 1800
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-started",
+      "node": "build",
+      "payload": { "command": ["cargo", "build", "--release"], "log": "commands/build.log" }
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-exited",
+      "node": "build",
+      "payload": { "ending": "exited", "exit_code": 0, "duration_ms": 41230 }
+    },
+    { "source": "pipeline", "kind": "node-settled", "node": "build", "payload": { "status": "done" } },
+    {
+      "source": "pipeline",
+      "kind": "command-started",
+      "node": "lint",
+      "payload": { "command": ["cargo", "clippy", "--", "-D", "warnings"], "log": "commands/lint.log" }
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-started",
+      "node": "integration",
+      "payload": {
+        "command": ["cargo", "test", "--test", "integration"],
+        "log": "commands/integration.log",
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-exited",
+      "node": "lint",
+      "payload": { "ending": "exited", "exit_code": 101, "duration_ms": 8120 }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "lint",
+      "payload": {
+        "status": "failed",
+        "outcome": "command-failed",
+        "detail": "the command exited with status 101; stderr (last 4096 bytes at most):\nerror: could not compile `widgets` (lib) due to 1 previous error"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-exited",
+      "node": "integration",
+      "payload": { "ending": "timed-out", "duration_ms": 30004 }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "integration",
+      "payload": {
+        "status": "failed",
+        "outcome": "command-timed-out",
+        "detail": "the command was still running after its 30-second timeout, so its process tree was stopped"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "edit-rejected",
+      "payload": {
+        "author": "planner",
+        "command": {
+          "op": "add",
+          "node": { "id": "deploy", "kind": "command", "command": ["just", "deploy"], "deps": ["lint", "integration"] }
+        },
+        "reason": "refused: add: the plan-edit hook `scripts/plan-edit-hook.sh` refused node 'deploy', so none of this reply's edits were applied: deploy may not follow a failed gate",
+        "envelope": 4,
+        "index": 0
+      }
+    }
+  ]
+}

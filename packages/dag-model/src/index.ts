@@ -288,7 +288,7 @@ export const API_V2_FILTER_PROFILES = {
  * served with the same meaning; the literal moves because a client written against
  * `26` switches on a vocabulary that holds neither word.
  */
-export const TELEMETRY_SCHEMA_VERSION = 28;
+export const TELEMETRY_SCHEMA_VERSION = 29;
 
 /**
  * The timeline payload's own version, which moves independently.
