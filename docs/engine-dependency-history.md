@@ -759,6 +759,12 @@ announced as a break: the re-exported engine types change, and the reply route
 refuses a body claiming the manager's words. Its oneagentgraph, onejudge,
 onemessagebus and onetaskgraph requirements are the ones 0.109.0 resolved; the
 test-only onevcs moves to 0.65.2 (^0.65.2).
+0.110.1 is the patch of that engine whose `RunView::heads` reads a long
+journal's heads without parsing each record whole, which is what lets a large
+run's first screen be answered from its heads and one `journal::fetch` inside
+the first view's one-second line. Only the `onepipeline` line and its lock entry
+move; its other requirements are the ones 0.110.0 resolved, and no route,
+payload, public type or MSRV changes beyond the release `/healthz` reports.
 
 The test-only `onevcs` requirement, which the `EventKind` drift gate in
 `tests/contract.rs` reads, has followed the release each linked engine resolves:
