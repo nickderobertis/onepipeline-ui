@@ -8,7 +8,9 @@ import {
   type LiveRunDetail,
   type NodeControl,
   type NodeDetail,
+  type NodeKind,
   type NodeStatus,
+  nodeKindSchema,
   nodeStatusSchema,
   type PlanTask,
   type RunLaunch,
@@ -20,7 +22,8 @@ export type LauncherName = "Claude" | "Codex" | "Unattributed";
 export interface NodeView {
   readonly id: string;
   readonly label: string;
-  readonly kind: "agent" | "human" | "lifecycle";
+  /** The plan's node kind, or `lifecycle` for an agent node that runs steps. */
+  readonly kind: NodeKind | "lifecycle";
   /** The authoritative `GraphState.node_status`, rendered without client-side defaults. */
   readonly status: NodeStatus;
   /**
@@ -92,10 +95,10 @@ export function nodeViews(detail: LiveRunDetail): NodeView[] {
   if (!graph) return [];
   const telemetry = new Map(detail.run.nodes.map((node) => [node.node, node]));
   return graph.plan.tasks.flatMap((task) => {
-    const rawKind = readString(task, "kind");
+    const declared = nodeKindSchema.safeParse(readString(task, "kind"));
     const kind =
-      rawKind === "human"
-        ? "human"
+      declared.success && declared.data !== "agent"
+        ? declared.data
         : hasLifecycleShape(task)
           ? "lifecycle"
           : "agent";
@@ -299,6 +302,15 @@ export function awaitedLine(node: NodeView): string | undefined {
  * would let a card and the view it opens explain the same failure differently.
  */
 export function recordedReason(node: NodeView): string | undefined {
+  // A command's outcome word says which of its two ways it failed — it exited
+  // non-zero, or it outlived its deadline — which its detail sentence leaves to
+  // the reader to infer, so it leads.
+  const outcome = node.result?.outcome?.trim();
+  if (node.kind === "command" && outcome) {
+    return [outcome, (node.failure?.detail || node.result?.detail)?.trim()]
+      .filter(Boolean)
+      .join(": ");
+  }
   const recorded =
     node.failure?.detail ||
     node.result?.detail ||

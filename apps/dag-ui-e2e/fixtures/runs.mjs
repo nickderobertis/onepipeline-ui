@@ -13,7 +13,8 @@
  */
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
+import { z } from "zod";
 import { appendLines } from "../load/journal.ts";
 import { thisHost } from "./this-host.mjs";
 
@@ -4307,6 +4308,117 @@ const REVIEW_LOOP_NODE = "docs";
 /** What the review-loop corpus wrote, published beside it as `facts()` is beside the main one. */
 export function reviewLoopFacts() {
   return { run: REVIEW_LOOP.run_id, replied_node: REVIEW_LOOP_NODE };
+}
+
+/**
+ * The command-steps corpus: five `kind: command` nodes the engine ran itself —
+ * two `done`, one `failed` with `command-failed`, one `failed` with
+ * `command-timed-out` and one never started — and two refused live edits, one of
+ * them the run's plan-edit hook's.
+ *
+ * The records are one document, `command-steps.json`, which `tests/e2e/server.rs`
+ * writes through the engine's own envelope and serves from the same file, so the
+ * run the view renders here is the run that journey holds the read API to.
+ */
+/**
+ * A command node's id names its log file (`commands/<id>.log`), so the engine
+ * holds it to one portable file name; the corpus is held to the same.
+ */
+const commandId = z
+  .string()
+  .regex(/^[A-Za-z0-9._-]+$/u)
+  .refine((id) => id !== "." && id !== "..");
+const COMMAND_STEPS = z
+  .object({
+    run_id: z.string().regex(/^[A-Za-z0-9._-]+$/u),
+    stream: z.string().min(1),
+    hook: z.string().min(1),
+    launch: z.record(z.string(), z.unknown()),
+    logs: z.record(commandId, z.string()),
+    log_padding: z.record(
+      commandId,
+      z.object({
+        text: z.string().min(1),
+        repeat: z.number().int().positive().max(1_000_000),
+      }),
+    ),
+    records: z
+      .array(
+        z.object({
+          source: z.literal("pipeline"),
+          kind: z.string().min(1),
+          node: commandId.optional(),
+          // A log named relative to the run is one of the run's command logs;
+          // an absolute one is another host's, and is never written here.
+          payload: z
+            .object({
+              log: z
+                .string()
+                .refine(
+                  (log) =>
+                    isAbsolute(log) ||
+                    /^commands\/[A-Za-z0-9._-]+\.log$/u.test(log),
+                )
+                .optional(),
+            })
+            .catchall(z.unknown()),
+        }),
+      )
+      .min(1),
+  })
+  .parse(
+    JSON.parse(
+      readFileSync(join(import.meta.dirname, "command-steps.json"), "utf8"),
+    ),
+  );
+
+/**
+ * Write the command-steps corpus under `root`: its launch record, its plan, each
+ * command's log under the run (after any `log_padding` the corpus names for it),
+ * and its records a second apart.
+ */
+export function buildCommandStepsRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const runId = COMMAND_STEPS.run_id;
+  const dir = runDir(root, runId);
+  const [started] = COMMAND_STEPS.records;
+  writeJson(join(dir, "plan.json"), started.payload.plan);
+  writeJson(join(dir, "launch.json"), {
+    ...COMMAND_STEPS.launch,
+    started_at: stamp(HISTORIC),
+  });
+  mkdirSync(join(dir, "commands"), { recursive: true });
+  for (const [node, said] of Object.entries(COMMAND_STEPS.logs)) {
+    const padding = COMMAND_STEPS.log_padding[node];
+    const before =
+      padding === undefined ? "" : padding.text.repeat(padding.repeat);
+    writeFileSync(join(dir, "commands", `${node}.log`), `${before}${said}`);
+  }
+  const journal = new Journal(dir, COMMAND_STEPS.stream, HISTORIC);
+  for (const [index, record] of COMMAND_STEPS.records.entries()) {
+    const labels = {
+      run_id: runId,
+      ...(record.node === undefined ? {} : { node: record.node }),
+    };
+    // A log named relative to the run is named by its path under the run, as the
+    // engine writes it; an absolute one — a start on another host — as written.
+    const payload =
+      typeof record.payload.log === "string" && !isAbsolute(record.payload.log)
+        ? { ...record.payload, log: join(dir, record.payload.log) }
+        : record.payload;
+    journal
+      .advance(index === 0 ? 0 : 1)
+      .emit(record.source, record.kind, labels, payload);
+  }
+  journal.write();
+}
+
+export function commandStepsFacts() {
+  return {
+    run: COMMAND_STEPS.run_id,
+    hook: COMMAND_STEPS.hook,
+    logs: COMMAND_STEPS.logs,
+  };
 }
 
 /**

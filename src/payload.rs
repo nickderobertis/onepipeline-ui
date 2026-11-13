@@ -29,7 +29,7 @@ use onepipeline::agents::{
 use onejudge as judge;
 use onepipeline::event::{Envelope, PipelineKind, Source};
 use onepipeline::note::NoteTurn;
-use onepipeline::plan::{Node, Plan};
+use onepipeline::plan::{Node, NodeKind, Plan};
 use onepipeline::views::{liveness_word, DriverLiveness, RunPaths, RunSummary, RunView};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -2024,6 +2024,14 @@ fn plan_task(node: &Node) -> Value {
     let mut task = Map::new();
     task.insert("id".into(), json!(node.id));
     task.insert("kind".into(), json!(kind_word(node)));
+    // A command node's argv and deadline, as the plan states them: what it runs
+    // is the whole of what such a node is, and it carries no prose of its own.
+    if let Some(command) = node.command.as_ref().filter(|argv| !argv.is_empty()) {
+        task.insert("command".into(), json!(command));
+    }
+    if let Some(timeout) = node.timeout_seconds {
+        task.insert("timeout_seconds".into(), json!(timeout));
+    }
     if let Some(persona) = &node.persona {
         task.insert("persona".into(), json!(persona));
     }
@@ -2125,14 +2133,16 @@ fn plan_task(node: &Node) -> Value {
     Value::Object(task)
 }
 
+/// The node's kind in the wire's vocabulary: `human`, `command` or `agent`.
+///
+/// Matched on the engine's own enum rather than on its serialized spelling, so a
+/// kind a later engine adds stops this compiling here instead of being served as
+/// an agent — which is how a `kind: command` node was once drawn as one.
 fn kind_word(node: &Node) -> &'static str {
-    match serde_json::to_value(node.kind)
-        .ok()
-        .as_ref()
-        .and_then(Value::as_str)
-    {
-        Some("human") => "human",
-        _ => "agent",
+    match node.kind {
+        NodeKind::Human => "human",
+        NodeKind::Command => "command",
+        NodeKind::Agent => "agent",
     }
 }
 
@@ -2387,6 +2397,11 @@ fn graph_state(view: &Run<'_>) -> Option<Value> {
     out.insert("node_control".into(), Value::Object(node_control));
     out.insert("node_results".into(), Value::Object(node_results));
     out.insert("decisions".into(), Value::Array(decisions(view)));
+    // Absent rather than empty on a run that refused nothing, as `run_node_sets`.
+    let rejected = rejected_edits(view);
+    if !rejected.is_empty() {
+        out.insert("rejected_edits".into(), Value::Array(rejected));
+    }
     out.insert(
         "attestations".into(),
         json!(view.whole.state.attestations.iter().collect::<Vec<_>>()),
@@ -2478,6 +2493,82 @@ const RESULT_FIELDS: &[&str] = &[
     "exit_code",
     "ok",
 ];
+
+/// A `kind: command` node's log: `{path, content?, truncated?}`.
+///
+/// `path` is what the node's last `command-started` record names — the engine's
+/// own account of where it kept the command's stdout and stderr, never a name
+/// this crate derives — and `content` the end of that file, bounded as a log
+/// artifact is, because a command promises no size for its output. The file is
+/// read only where it lies inside the run's own directory: the path is a field
+/// of a record, and a record naming somewhere else on the host is served the
+/// name alone rather than having this route read whatever it names. A log that
+/// is not there yet, or no longer, is likewise its name alone. A node whose
+/// command never started has no record to name one, and is served no `log`.
+fn command_log(view: &Run<'_>, node: &str) -> Option<Value> {
+    let started = view.whole.events.iter().rev().find(|event| {
+        event.source == Source::Pipeline
+            && event.labels.node.as_deref() == Some(node)
+            && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::CommandStarted)
+    })?;
+    let path = started.payload.get("log").and_then(Value::as_str)?;
+    let mut log = Map::new();
+    log.insert("path".into(), json!(path));
+    if let Some((content, truncated)) = log_tail(&view.paths.dir, Path::new(path)) {
+        log.insert("content".into(), json!(content));
+        log.insert("truncated".into(), json!(truncated));
+    }
+    Some(Value::Object(log))
+}
+
+/// The last [`ARTIFACT_TAIL_BYTES`] of `path`, and whether that left anything
+/// out — `None` unless `path` resolves to a file inside `run_dir`.
+fn log_tail(run_dir: &Path, path: &Path) -> Option<(String, bool)> {
+    use std::io::{Read, Seek, SeekFrom};
+    let inside = fs::canonicalize(run_dir).ok()?;
+    let resolved = fs::canonicalize(path).ok()?;
+    if !resolved.starts_with(&inside) {
+        return None;
+    }
+    let mut file = fs::File::open(&resolved).ok()?;
+    let length = file.metadata().ok()?.len();
+    let bound = u64::try_from(ARTIFACT_TAIL_BYTES).unwrap_or(u64::MAX);
+    let skipped = length.saturating_sub(bound);
+    file.seek(SeekFrom::Start(skipped)).ok()?;
+    let mut bytes = Vec::new();
+    file.take(bound).read_to_end(&mut bytes).ok()?;
+    Some((String::from_utf8_lossy(&bytes).into_owned(), skipped > 0))
+}
+
+/// Every plan edit the run refused, in the order the journal recorded them.
+///
+/// Each is the `edit-rejected` record's own fields — `author`, the `command` as
+/// submitted, the `reason` (which names the plan-edit hook where one refused
+/// it), and the `envelope`, `index` and `refusal` where the record carried them
+/// — beside `at`, its stamp. Read over the whole journal: a refused correction
+/// is a fact about the run, and a filter narrows events, never the run.
+fn rejected_edits(view: &Run<'_>) -> Vec<Value> {
+    view.whole
+        .events
+        .iter()
+        .filter(|event| {
+            event.source == Source::Pipeline
+                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::EditRejected)
+        })
+        .map(|event| {
+            let mut edit = Map::new();
+            edit.insert("at".into(), json!(event.ts));
+            for field in [
+                "author", "command", "reason", "envelope", "index", "refusal",
+            ] {
+                if let Some(value) = event.payload.get(field) {
+                    edit.insert(field.into(), value.clone());
+                }
+            }
+            Value::Object(edit)
+        })
+        .collect()
+}
 
 /// The payload of the settlement the run last recorded for `node`.
 ///
@@ -2618,6 +2709,12 @@ fn node_result(
         .collect();
     if let Some(release) = landing_commit(&mine).and_then(|commit| release_of(view, commit)) {
         item.insert("release".into(), release);
+    }
+    // What a command node's command wrote, where its last start recorded it.
+    if node.kind == NodeKind::Command {
+        if let Some(log) = command_log(view, &node.id) {
+            item.insert("log".into(), log);
+        }
     }
     if let Some(finished) = view.whole.state.completed_steps.get(&node.id) {
         let steps: Vec<Value> = node
@@ -6819,6 +6916,29 @@ pub const TIMELINE_RECORD_FIELDS: &[(&str, &[(&str, &str)])] = &[
             ("outcome", "Outcome"),
             ("detail", "Detail"),
         ],
+    ),
+    // A `kind: command` node's own records: what it ran and where its output is
+    // kept, then how the command ended. Its settlement's outcome is the row
+    // above, so a node's timeline answers what the step was and how it ended.
+    (
+        "command-started",
+        &[
+            ("command", "Command"),
+            ("log", "Log"),
+            ("timeout_seconds", "Timeout (seconds)"),
+        ],
+    ),
+    (
+        "command-exited",
+        &[
+            ("ending", "Ending"),
+            ("exit_code", "Exit code"),
+            ("duration_ms", "Duration (ms)"),
+        ],
+    ),
+    (
+        "edit-rejected",
+        &[("author", "Author"), ("reason", "Reason")],
     ),
     ("completion-requested", &[("reason", "Reason")]),
     (

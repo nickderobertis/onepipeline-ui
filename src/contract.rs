@@ -199,7 +199,13 @@ pub const API_VERSION: u32 = 2;
 /// `run.turns` may be `{"loading": true}`; a timeline span carries no whole
 /// `events`; `telemetry` carries `as_of`; `GET .../timeline/events` serves the
 /// rows a span's list leaves out. `docs/contract.md` states what each view holds.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 28;
+///
+/// **Schema 29 is a run's command steps and refused edits.** A plan task's and a
+/// node result's `kind` may be `command` — a node the engine runs itself, served
+/// with the plan's `command` argv and `timeout_seconds` — whose result carries the
+/// `log` its last `command-started` named; `graph.rejected_edits` lists each
+/// `edit-rejected` record. A client written against 28 refuses the new kind.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 29;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
