@@ -279,6 +279,7 @@
       "process_totals": null,
       "links": null,
       "elapsed_beyond_cpu": {},
+      "unobserved": [],
       "categories": [
         {
           "category": "Rust tests running (nextest Summary)",
@@ -1449,6 +1450,7 @@
       "process_totals": null,
       "links": null,
       "elapsed_beyond_cpu": {},
+      "unobserved": [],
       "categories": [
         {
           "category": "rest of onepipeline-ui:install-smoke",
@@ -2204,6 +2206,7 @@
       "process_totals": null,
       "links": null,
       "elapsed_beyond_cpu": {},
+      "unobserved": [],
       "categories": [
         {
           "category": "rest of onepipeline-ui:install-smoke",

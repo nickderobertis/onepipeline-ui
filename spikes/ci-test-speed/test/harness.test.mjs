@@ -320,6 +320,21 @@ test("one measurement of a cached run divides the Windows job's wall clock exact
     ),
   );
   assert.equal(job.nx_cache_stored_bytes, 0);
+  // Windows has no syscall tracer: its sleeps and polls are not observed,
+  // which is reported as such and never as a measured zero.
+  assert.deepEqual(
+    job.unobserved.map((u) => u.category),
+    ["sleeps", "polls and timeouts (waits that ended by timing out)"],
+  );
+  assert.ok(
+    !job.categories.some((c) =>
+      /^(sleeps|polls and timeouts)/.test(c.category),
+    ),
+  );
+  assert.match(
+    r.stdout,
+    /not observed {2}sleeps \(no syscall tracer on windows: counted inside each category's elapsed time beyond CPU\)/,
+  );
   assert.ok(job.test_binaries.length > 0);
   assert.ok(
     job.test_binaries.every((b) => /^onepipeline-ui(::|$)/.test(b.binary)),

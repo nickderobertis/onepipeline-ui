@@ -457,6 +457,14 @@ await cli(async () => {
     );
     // Every category the brief names is reported, a measured zero included: on a
     // run with the recorder a category absent here is one no process fell in.
+    // Sleeps and polls are seen only by Linux's syscall tracer: elsewhere they
+    // are not observed, never zero, and their time sits inside each category's
+    // elapsed time beyond CPU.
+    const WAITS = [
+      "sleeps",
+      "polls and timeouts (waits that ended by timing out)",
+    ];
+    const unobserved = rec && rec.platform !== "linux" ? WAITS : [];
     if (rec)
       for (const name of [
         "compile (plain)",
@@ -472,8 +480,7 @@ await cli(async () => {
         "spawns: browsers",
         "spawns: network clients (curl, gh)",
         "fixtures (fixture-building scripts)",
-        "sleeps",
-        "polls and timeouts (waits that ended by timing out)",
+        ...WAITS.filter((w) => !unobserved.includes(w)),
         "setup",
         "cache restore",
         "cache save (post steps)",
@@ -615,6 +622,10 @@ await cli(async () => {
       elapsed_beyond_cpu: Object.fromEntries(
         [...idleOf].map(([k, v]) => [k, v / 60000]),
       ),
+      unobserved: unobserved.map((category) => ({
+        category,
+        reason: `no syscall tracer on ${rec.platform}: counted inside each category's elapsed time beyond CPU`,
+      })),
       categories: [...cats]
         .map(([k, v]) => ({ category: k, minutes: v / 60000, share: v / wall }))
         .sort((x, y) => y.minutes - x.minutes),
@@ -672,6 +683,8 @@ await cli(async () => {
         console.log(
           `   ${fmt(c.minutes)} ${(c.share * 100).toFixed(1).padStart(5)}%  ${beyond ? `${fmt(j.elapsed_beyond_cpu[c.category] ?? 0)}               ` : ""}${c.category}`,
         );
+    for (const u of j.unobserved ?? [])
+      console.log(`   not observed  ${u.category} (${u.reason})`);
     console.log(
       `   ${fmt(j.categories.reduce((s, c) => s + c.minutes, 0))} total (wall ${j.wall_minutes.toFixed(1)})`,
     );

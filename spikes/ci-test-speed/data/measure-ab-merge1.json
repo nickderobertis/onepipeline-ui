@@ -1797,6 +1797,7 @@
         }
       ],
       "elapsed_beyond_cpu": {},
+      "unobserved": [],
       "categories": [
         {
           "category": "JavaScript tests and tooling (node)",

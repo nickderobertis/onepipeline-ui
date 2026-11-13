@@ -137,9 +137,9 @@
       0.0   0.0%     0.0               spawns: npm
       0.0   0.0%     0.0               spawns: browsers
       0.0   0.0%     0.0               fixtures (fixture-building scripts)
-      0.0   0.0%     0.0               sleeps
-      0.0   0.0%     0.0               polls and timeouts (waits that ended by timing out)
       0.0   0.0%     0.0               cache save (post steps)
+   not observed  sleeps (no syscall tracer on macos: counted inside each category's elapsed time beyond CPU)
+   not observed  polls and timeouts (waits that ended by timing out) (no syscall tracer on macos: counted inside each category's elapsed time beyond CPU)
      11.4 total (wall 11.4)
    Nx tasks: inclusive / exclusive minutes
       9.3    3.5  executed   onepipeline-ui:install-smoke
@@ -234,8 +234,8 @@
       0.0   0.0%     0.0               spawns: bun
       0.0   0.0%     0.0               spawns: Python (python, pip, uv, llmlint)
       0.0   0.0%     0.0               spawns: network clients (curl, gh)
-      0.0   0.0%     0.0               sleeps
-      0.0   0.0%     0.0               polls and timeouts (waits that ended by timing out)
+   not observed  sleeps (no syscall tracer on windows: counted inside each category's elapsed time beyond CPU)
+   not observed  polls and timeouts (waits that ended by timing out) (no syscall tracer on windows: counted inside each category's elapsed time beyond CPU)
      10.5 total (wall 10.5)
    Nx tasks: inclusive / exclusive minutes
       7.4    3.4  executed   onepipeline-ui:install-smoke

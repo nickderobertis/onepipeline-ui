@@ -646,6 +646,7 @@
         }
       ],
       "elapsed_beyond_cpu": {},
+      "unobserved": [],
       "categories": [
         {
           "category": "polls and timeouts (waits that ended by timing out)",
@@ -2200,6 +2201,16 @@
         "spawns: Python (python, pip, uv, llmlint)": 0.00022071639932792487,
         "spawns: bun": 0.0021256865746710836
       },
+      "unobserved": [
+        {
+          "category": "sleeps",
+          "reason": "no syscall tracer on macos: counted inside each category's elapsed time beyond CPU"
+        },
+        {
+          "category": "polls and timeouts (waits that ended by timing out)",
+          "reason": "no syscall tracer on macos: counted inside each category's elapsed time beyond CPU"
+        }
+      ],
       "categories": [
         {
           "category": "JavaScript tests and tooling (node)",
@@ -2363,16 +2374,6 @@
         },
         {
           "category": "fixtures (fixture-building scripts)",
-          "minutes": 0,
-          "share": 0
-        },
-        {
-          "category": "sleeps",
-          "minutes": 0,
-          "share": 0
-        },
-        {
-          "category": "polls and timeouts (waits that ended by timing out)",
           "minutes": 0,
           "share": 0
         },
@@ -3612,6 +3613,16 @@
         "server under test (onepipeline-api)": 0.30183842775008,
         "spawns: browsers": 0.01139775146497432
       },
+      "unobserved": [
+        {
+          "category": "sleeps",
+          "reason": "no syscall tracer on windows: counted inside each category's elapsed time beyond CPU"
+        },
+        {
+          "category": "polls and timeouts (waits that ended by timing out)",
+          "reason": "no syscall tracer on windows: counted inside each category's elapsed time beyond CPU"
+        }
+      ],
       "categories": [
         {
           "category": "compile (plain)",
@@ -3800,16 +3811,6 @@
         },
         {
           "category": "spawns: network clients (curl, gh)",
-          "minutes": 0,
-          "share": 0
-        },
-        {
-          "category": "sleeps",
-          "minutes": 0,
-          "share": 0
-        },
-        {
-          "category": "polls and timeouts (waits that ended by timing out)",
           "minutes": 0,
           "share": 0
         }
