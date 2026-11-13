@@ -194,6 +194,31 @@ impl Headed {
     }
 }
 
+impl Headed {
+    /// Fetch every record of `node` the view holds as a head: what a page of its
+    /// history lists before the complete read ends. By the heads' handles, so only
+    /// the node's records are read rather than the journal scanned for its share.
+    ///
+    /// # Errors
+    ///
+    /// A fetch's refusal: the journal was rewritten since its heads were read.
+    pub(super) fn hold_whole(
+        &mut self,
+        view: &mut RunView,
+        node: &str,
+    ) -> Result<(), onepipeline::Error> {
+        let wanted: Vec<usize> = view
+            .events
+            .iter()
+            .enumerate()
+            .filter_map(|(index, event)| {
+                (event.labels.node.as_deref() == Some(node)).then_some(index)
+            })
+            .collect();
+        self.fetch(view, &wanted)
+    }
+}
+
 /// The indices of `node`'s latest [`NODE_WINDOW_EVENTS`] records `filter` admits,
 /// ordered as a node's timeline orders its window: by stamp, then by place, a record
 /// repeating one already held left out as the timeline leaves it out.

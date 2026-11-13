@@ -45,9 +45,10 @@ impl Hub {
                 } else {
                     // A reading holding every record of the node whole, a short
                     // journal's, builds its page; one that holds some of them as
-                    // their heads has the share read afresh, since a page lists rows
-                    // a first screen did not fetch.
-                    let held = holds_owner(&lock(&live), &query.owner);
+                    // their heads fetches the rest by their handles, since a page
+                    // lists rows a first screen did not fetch; any other share, or
+                    // one whose fetch is refused, is read afresh.
+                    let held = lock(&live).hold_page_owner(&query.owner);
                     let selected = (!held).then(|| read_share(&paths, &query.owner));
                     let mut guard = lock(&live);
                     from_selected(&mut guard, query, selected.as_ref())?

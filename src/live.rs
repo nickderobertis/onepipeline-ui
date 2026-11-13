@@ -1044,6 +1044,32 @@ impl LiveRun {
     /// Hold every record `node`'s timeline under `filter` draws whole: what a heads
     /// read's node screen reads of it, fetched, and otherwise the node's every record,
     /// for a reading that holds only some of them.
+    /// Hold every record of the node `owner` names whole, for a page of its history
+    /// before the complete read ends, by fetching what a heads reading holds as heads;
+    /// whether the reading now holds them. `false` for any other owner, and for a
+    /// reading whose fetch was refused, which then has the share read apart instead.
+    fn hold_page_owner(&mut self, owner: &crate::contract::PageOwner) -> bool {
+        let crate::contract::PageOwner::Node(node) = owner else {
+            return false;
+        };
+        if self.indexed.holds_share(node.as_str()) {
+            return true;
+        }
+        let Some(headed) = &mut self.headed else {
+            return false;
+        };
+        match headed.hold_whole(&mut self.view, node.as_str()) {
+            Ok(()) => {
+                self.indexed.holds_whole(Some(node.as_str()));
+                true
+            }
+            Err(_) => {
+                self.headed = None;
+                false
+            }
+        }
+    }
+
     fn hold_node_share(&mut self, node: &NodeId, filter: &EventFilter) {
         if self.complete() || self.indexed.holds_share(node.as_str()) {
             return;
