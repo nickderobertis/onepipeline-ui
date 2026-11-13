@@ -688,6 +688,8 @@ pub mod graph {
     pub const MEMBER_DIED: &str = "member-died";
     /// A member settled, which ends its turns.
     pub const MEMBER_SETTLED: &str = "member-settled";
+    /// A member's periodic proof it is alive, which says nothing of what it is doing.
+    pub const MEMBER_HEARTBEAT: &str = "member-heartbeat";
     /// The member a record is about, on a [`TURN_INTERRUPTED`] payload as well as
     /// in the labels.
     pub const MEMBER: &str = "member";

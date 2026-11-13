@@ -28,7 +28,7 @@ use onepipeline::views::{RunHeads, RunPaths, RunView};
 use crate::contract::NODE_WINDOW_EVENTS;
 use crate::filter::EventFilter;
 use crate::payload::live::Indexed;
-use crate::payload::millis_of;
+use crate::payload::{graph, millis_of};
 
 /// The kinds whose payload no first screen reads, but in the node it is opened on;
 /// a first screen reads the payload of every record of every other kind, so those
@@ -44,11 +44,11 @@ use crate::payload::millis_of;
 /// kind the engine adds is read whole until a first screen is shown not to need it,
 /// rather than drawn from a payload nobody fetched.
 pub(crate) const HEADED_KINDS: [&str; 5] = [
-    "member-heartbeat",
-    "turn-activity",
-    "turn-message",
-    "turn-started",
-    "turn-completed",
+    graph::MEMBER_HEARTBEAT,
+    graph::TURN_ACTIVITY,
+    graph::TURN_MESSAGE,
+    graph::TURN_STARTED,
+    graph::TURN_COMPLETED,
 ];
 
 /// The kinds of an opened node's own records whose payload its first screen reads
@@ -58,7 +58,7 @@ pub(crate) const HEADED_KINDS: [&str; 5] = [
 /// messages and closes wherever they lie, so a row in the window can be numbered by a
 /// turn opened long before it: of [`HEADED_KINDS`], only a heartbeat and a tool call
 /// outside the window are drawn from their heads alone.
-pub(crate) const NODE_HEADED_KINDS: [&str; 2] = ["member-heartbeat", "turn-activity"];
+pub(crate) const NODE_HEADED_KINDS: [&str; 2] = [graph::MEMBER_HEARTBEAT, graph::TURN_ACTIVITY];
 
 /// Whether a first screen reads `head`'s record whole: one whose kind it reads the
 /// payload of, or one carrying evidence, which the screen links to by its artifacts.

@@ -2652,6 +2652,14 @@ fn the_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares(
         wire(oneagentgraph::event::EventKind::MemberSettled),
         graph::MEMBER_SETTLED
     );
+    // A first screen reads the payload of none of a long run's heartbeats, turns'
+    // openings, messages, activity and closes outside an opened node: the kinds it
+    // holds as heads are these names, so a rename there reads them whole again
+    // rather than leaving a renamed kind's records unread.
+    assert_eq!(
+        wire(oneagentgraph::event::EventKind::MemberHeartbeat),
+        graph::MEMBER_HEARTBEAT
+    );
 
     // The number a `turn-started` carries, which that library builds inline
     // rather than from a struct. Its own renderer is the declaration reachable
