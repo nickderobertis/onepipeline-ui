@@ -77,14 +77,24 @@ export const SCREEN_OBSERVER = `
   const states = [];
   window.__firstScreen = states;
   // The first answer as the page received it: a tee, read beside the page's own use.
+  // Its POST is timed here too, on the clock the states below are, so the gap from
+  // the answer to the mark is one clock's difference: timed from the runner instead,
+  // the response reached it after the page had already drawn the answer, and the
+  // gap came out negative.
   const original = window.fetch.bind(window);
   window.fetch = async (...args) => {
+    const started = performance.now();
     const response = await original(...args);
+    const done = performance.now();
     const input = args[0];
     const url = String(input?.url ?? input);
     const method = (args[1]?.method ?? input?.method ?? "GET").toUpperCase();
     if (method === "POST" && url.includes("/api/v2/subscriptions") && window.__firstAnswer === undefined) {
-      response.clone().text().then((text) => { window.__firstAnswer = text; }, () => {});
+      response.clone().text().then((text) => {
+        if (window.__firstAnswer !== undefined) return;
+        window.__firstPost = { at: started, done };
+        window.__firstAnswer = text;
+      }, () => {});
     }
     return response;
   };

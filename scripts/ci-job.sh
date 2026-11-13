@@ -34,6 +34,10 @@ cd "$ROOT" || {
   exit 1
 }
 
+# The compile environment the jobs and the warm build share (scripts/ci-compile-env.sh).
+# shellcheck source=scripts/ci-compile-env.sh
+source scripts/ci-compile-env.sh
+
 usage() {
   echo "ci-job: $1" >&2
   echo "ACTION: run 'scripts/ci-job.sh lint|test-linux|test-windows|test-macos|read-latency [--tier affected|broader] [--plan]'" >&2
@@ -64,16 +68,19 @@ esac
 # What each job owes, as Nx targets. One list per job and no other copy: the
 # workflow names the recipe, never these.
 #   lint          what does not depend on the platform it runs on: formatting,
-#                 lints, type checks, the MSRV floor and the dependency audit.
-#   test-linux    the deterministic gate (`check`: every tier, the coverage floor,
-#                 docs), the documented install and the release's Linux wheel.
+#                 lints, type checks, the MSRV floor, the dependency audit and the
+#                 crate's docs, whose dependencies' check-mode units are the ones
+#                 its clippy run compiles (test-linux built that graph for `doc`
+#                 alone: 293 CPU-seconds cold on four cores, 76 after clippy).
+#   test-linux    the deterministic gate (`check`: every tier and the coverage
+#                 floor), the documented install and the release's Linux wheel.
 #   test-windows  the platform-sensitive tiers (`check-cross`), the release's
 #                 browser build, and the documented install.
 #   test-macos    the platform-sensitive tiers and the documented install.
 #   read-latency  dag-ui-read-latency's timings, large-corpus journeys and the
 #                 budgets over them, which the `budgets` job runs (below).
 case "$job" in
-  lint) targets="format-check,lint,typecheck,msrv,deps-check" ;;
+  lint) targets="format-check,lint,typecheck,msrv,deps-check,doc" ;;
   test-linux)
     if [ "$tier" = "broader" ]; then
       # `just check`'s tiers and its aggregate, then `just budgets`: the sweep.
@@ -85,14 +92,14 @@ case "$job" in
       # container and installed the wheel again.
       targets="format-check,lint,typecheck,build,test,test-baseline,test-cost,doc,check,budgets,budgets-host,install-smoke"
     else
-      # `check`'s own tiers, less the formatting, lint and type-check targets
+      # `check`'s own tiers, less the formatting, lint, type-check and doc targets
       # `lint` runs over the same affected set, so this job does not compile the
-      # crate a second time to lint it. Listed rather than reached through
+      # crate a second time to lint or document it. Listed rather than reached through
       # `check`, which would pull them back in; `tests/e2e/ci_jobs.rs` holds the
       # list to `check`'s selection. Browser-bundle tests run here too, so their
       # result is proven before the broader release tier needs it. `prioritize`
       # runs nothing: it is the edge that has Nx start a long suite with the tiers.
-      targets="build,test,test-baseline,test-cost,test-isolation,doc,coverage,budgets,test-ci-jobs,install-smoke,wheel-smoke,prioritize"
+      targets="build,test,test-baseline,test-cost,test-isolation,coverage,budgets,test-ci-jobs,install-smoke,wheel-smoke,prioritize"
     fi
     ;;
   test-windows) targets="format-check,lint,test-quick,build,install-smoke" ;;
@@ -160,6 +167,17 @@ if [ "$job" = "read-latency" ]; then
   done
   exit 0
 fi
+
+# The release's Linux build heads test-linux's longest chain: the rehearsal, the
+# journeys over what it staged and the release journeys after them wait on it,
+# about eleven minutes of work once it is done. It starts first (`prioritize`),
+# but compiles in a container whose CPU weight is Docker's default, while every
+# other tier of the job shares the same four cores, and it took 30 minutes there
+# against 9 on four idle cores. At this weight (cgroup v2's cpu.weight 312, about
+# three times the default) it takes most of the CPU while it compiles and the
+# shorter tiers fill the rest, then theirs once it is done
+# (scripts/build-linux-wheel.sh).
+if [ "$job" = "test-linux" ]; then export WHEEL_BUILD_CPU_SHARES=8192; fi
 
 # The selection, as Nx's own task graph rather than a reading of its output.
 # No arrays: macOS runs this under bash 3.2, where an empty one is unbound.

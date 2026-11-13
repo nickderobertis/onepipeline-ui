@@ -33,7 +33,7 @@ const NOT_READ_BY_THE_PRODUCT_TIERS = [
 ];
 const NOT_READ_BY_THE_SERVER_TIERS = [
   /^\.github\/workflows\//,
-  /^scripts\/(actions-budget-figures\.|actions-cache-prune\.|ci-job|ci-tier\.sh$|ci-warm\.sh$|deps-audit\.mjs$|ensure-baseline-api\.sh$|gate-time|measure-cold-linux|nx-affected\.sh$|nx-remote-cache\.|nx\.sh$|publish-npm\.sh$|release-probe\.sh$|release-status\.sh$|retry-install\.sh$|semver-check\.sh$|session-setup\.sh$|setup-llmlint\.sh$|smoke-published\.sh$|verify-staged-release\.mjs$|visual-capture\.sh$|workspace-install\.sh$)/,
+  /^scripts\/(actions-budget-figures\.|actions-cache-prune\.|ci-compile-env\.sh$|ci-job|ci-tier\.sh$|ci-warm\.sh$|deps-audit\.mjs$|ensure-baseline-api\.sh$|gate-time|measure-cold-linux|nx-affected\.sh$|nx-remote-cache\.|nx\.sh$|publish-npm\.sh$|release-probe\.sh$|release-status\.sh$|retry-install\.sh$|semver-check\.sh$|session-setup\.sh$|setup-llmlint\.sh$|smoke-published\.sh$|verify-staged-release\.mjs$|visual-capture\.sh$|workspace-install\.sh$)/,
 ];
 const GROUPS = {
   base: NEVER_READ,
