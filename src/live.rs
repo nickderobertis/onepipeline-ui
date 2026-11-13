@@ -33,7 +33,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 use axum::response::sse::Event;
@@ -44,10 +44,9 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use crate::contract::{
-    Envelope, EventId, HumanItemId, NodeId, RunId, SubscribeOrigin, SubscribeRequest,
-    SubscriptionId, SubscriptionView, ViewScope, API_VERSION, DETAIL_FIRST_LOADING,
-    DISCONNECTED_GRACE, NODE_WINDOW_EVENTS, RETAINED_FRAMES, SPANS_HARNESS_LOADING,
-    TELEMETRY_SCHEMA_VERSION,
+    EventId, HumanItemId, NodeId, RunId, SubscribeOrigin, SubscribeRequest, SubscriptionId,
+    SubscriptionView, ViewScope, API_VERSION, DETAIL_FIRST_LOADING, DISCONNECTED_GRACE,
+    NODE_WINDOW_EVENTS, RETAINED_FRAMES, SPANS_HARNESS_LOADING, TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
 use crate::filter::EventFilter;
@@ -59,6 +58,7 @@ use crate::payload::{self, ActivityFold, DeclaredMembers, ItemsWindow};
 use crate::store::RunStore;
 use crate::telemetry::RunTelemetry;
 
+mod first_screen;
 mod history;
 mod progressive;
 
@@ -88,6 +88,12 @@ pub const DISCONNECTED_GRACE_ENV: &str = "ONEPIPELINE_UI_SUBSCRIPTION_GRACE_MS";
 /// outstanding. Unset, it starts at once.
 pub const COMPLETE_READ_HOLD_ENV: &str = "ONEPIPELINE_UI_COMPLETE_READ_HOLD_MS";
 
+/// The environment variable that sets the length in bytes up to which a run's
+/// journal is read whole for its first answer, rather than as its heads, for a
+/// journey that holds a long run's first answer to the one a whole read gives.
+/// Unset, [`WHOLE_READ_BYTES`] holds.
+pub const WHOLE_READ_ENV: &str = "ONEPIPELINE_UI_WHOLE_READ_BYTES";
+
 /// The environment variable that holds a refold off for this many milliseconds
 /// after the fold went stale — the first record it has not folded — for a
 /// journey that watches the fold fall overdue. Counted from that record rather
@@ -105,6 +111,18 @@ const OVERDUE_INTERVALS: u32 = 4;
 /// rebuilt, and what that cost. Passive: nothing reads it back, and unset it
 /// costs nothing.
 pub const TRACE_ENV: &str = "ONEPIPELINE_UI_LIVE_TRACE";
+
+/// How long a run opened for a page's document is kept for the subscription that
+/// page makes: a page that never subscribes lets it go then.
+pub const PREPARED_HOLD: Duration = Duration::from_secs(30);
+
+/// The environment variable that sets [`PREPARED_HOLD`] in milliseconds, for a
+/// journey that watches an opening nobody took be let go.
+pub const PREPARED_HOLD_ENV: &str = "ONEPIPELINE_UI_PREPARED_HOLD_MS";
+
+/// The most runs opened ahead of their subscriptions at once: a document is cheap
+/// to ask for and a long run's opening is not, so asking for many does not open many.
+const PREPARED_RUNS: usize = 2;
 
 /// Every subscription this process holds, and the poller that keeps them
 /// current.
@@ -126,6 +144,12 @@ struct Shared {
     looking: Mutex<()>,
     /// Each subscribed run's reading. The map is held only to look one up.
     runs: Mutex<HashMap<RunId, Arc<Mutex<LiveRun>>>>,
+    /// Runs a page's document named, opening or opened ahead of the subscription
+    /// that page makes ([`Hub::prepare`]). Held only to look one up, and never with
+    /// another lock.
+    prepared: Mutex<HashMap<RunId, Arc<Prepared>>>,
+    /// How long a run opened ahead is kept for its subscription.
+    prepared_hold: Duration,
     /// The human-item views subscriptions show. Taken where a run is — after the
     /// sidebar and before the state — and held across the engine's reads of it,
     /// so two looks never send one change twice.
@@ -137,6 +161,8 @@ struct Shared {
     fold_hold: Duration,
     /// How long a complete read waits before it starts.
     complete_hold: Duration,
+    /// The longest journal a first answer reads whole.
+    whole_read: u64,
     /// How long a disconnected subscription keeps recording before it expires.
     grace: Duration,
 }
@@ -708,6 +734,9 @@ struct LiveRun {
     reading: Reading,
     /// Whether the telemetry fold is overdue, so its values draw as loading.
     overdue: bool,
+    /// Where each record a heads read holds as its head can be read whole: `None`
+    /// once the view holds every record whole, a whole read's or the complete one's.
+    headed: Option<first_screen::Headed>,
 }
 
 /// How far a held run's reading has come.
@@ -850,23 +879,24 @@ impl Folded {
     }
 }
 
-/// A journal this small is read whole for its first answer. Selection drops
-/// heartbeats and activity except at a stream's ends, so on a run writing one
-/// stream a span resting on such a record would end early; reading it all costs
-/// less than a first screen can notice.
-const WHOLE_READ_BYTES: u64 = 1024 * 1024;
+/// A journal this small is read whole for its first answer: reading every record
+/// of it costs less than a first screen can notice. [`WHOLE_READ_ENV`] sets another.
+pub const WHOLE_READ_BYTES: u64 = 1024 * 1024;
 
 fn agents_of(paths: &RunPaths) -> Option<Agents> {
     onepipeline::verbs::agents(paths, AgentScope::Run).ok()
 }
 
 impl LiveRun {
-    /// A first reading of `run`, selective, holding all of `node`'s records when
-    /// one is named.
+    /// A first reading of `run`: a short journal whole, and a longer one as every
+    /// record's head with only the records a first screen reads whole fetched. What
+    /// a node's screen reads of it is fetched once its timeline's filter is known, by
+    /// [`hold_node_share`](Self::hold_node_share).
     fn open_selective(
         store: &RunStore,
         run: &RunId,
         node: Option<&NodeId>,
+        whole_read: u64,
     ) -> Result<Self, ApiError> {
         let paths = store.present(run)?;
         // A node's session rows come off the pointer file, and its agent count and
@@ -876,28 +906,28 @@ impl LiveRun {
             let paths = paths.clone();
             std::thread::spawn(move || agents_of(&paths))
         });
-        let (view, indexed) = if std::fs::metadata(paths.journal())
-            .is_ok_and(|about| about.len() <= WHOLE_READ_BYTES)
-        {
+        let whole = |store: &RunStore| -> Result<(RunView, Indexed), ApiError> {
             let view = store.view(run)?;
             let mut indexed = Indexed::of(&view);
             indexed.holds_whole(None);
-            (view, indexed)
-        } else {
-            let selection = onepipeline::journal::Selection::FirstScreen {
-                node: node.map(NodeId::as_str),
-            };
-            let mut selected = onepipeline::journal::read_selected(&paths.journal(), &selection);
-            let events = std::mem::take(&mut selected.events);
-            let view = RunView::over_selected(&paths, events)
-                .map_err(|error| ApiError::Engine(error.to_string()))?;
-            let mut indexed = Indexed::selective(&view, selected);
-            // The selection kept every record of the node it was taken for.
-            if let Some(node) = node {
-                indexed.holds_whole(Some(node.as_str()));
-            }
-            (view, indexed)
+            Ok((view, indexed))
         };
+        let (view, indexed, headed) =
+            if std::fs::metadata(paths.journal()).is_ok_and(|about| about.len() <= whole_read) {
+                let (view, indexed) = whole(store)?;
+                (view, indexed, None)
+            } else {
+                match first_screen::read(&paths) {
+                    Ok(read) => (read.view, read.indexed, Some(read.headed)),
+                    // A journal rewritten under its heads read, rather than appended to,
+                    // is read whole.
+                    Err(onepipeline::Error::RecordMoved { .. }) => {
+                        let (view, indexed) = whole(store)?;
+                        (view, indexed, None)
+                    }
+                    Err(error) => return Err(ApiError::from_engine(run, error)),
+                }
+            };
         let declared = store.declared(&view);
         let agents = pointer.and_then(|read| read.join().ok().flatten());
         Ok(Self {
@@ -918,6 +948,7 @@ impl LiveRun {
             view,
             reading: Reading::Selective,
             overdue: false,
+            headed,
         })
     }
 
@@ -1028,11 +1059,46 @@ impl LiveRun {
                 .any(|event| event.labels.node.as_deref() == Some(node.as_str()))
     }
 
-    /// Hold every record of `node`, for a selective reading opened for something
-    /// else.
-    fn hold_node_share(&mut self, node: &NodeId) {
+    /// Hold every record of the node `owner` names whole, for a page of its history
+    /// before the complete read ends, by fetching what a heads reading holds as heads;
+    /// whether the reading now holds them. `false` for any other owner, and for a
+    /// reading whose fetch was refused, which then has the share read apart instead.
+    fn hold_page_owner(&mut self, owner: &crate::contract::PageOwner) -> bool {
+        let crate::contract::PageOwner::Node(node) = owner else {
+            return false;
+        };
+        if self.indexed.holds_share(node.as_str()) {
+            return true;
+        }
+        let Some(headed) = &mut self.headed else {
+            return false;
+        };
+        match headed.hold_whole(&mut self.view, node.as_str()) {
+            Ok(()) => {
+                self.indexed.holds_whole(Some(node.as_str()));
+                true
+            }
+            Err(_) => {
+                self.headed = None;
+                false
+            }
+        }
+    }
+
+    /// Hold every record `node`'s timeline under `filter` draws whole: what a heads
+    /// read's node screen reads of it, fetched, and otherwise the node's every record,
+    /// for a reading that holds only some of them.
+    fn hold_node_share(&mut self, node: &NodeId, filter: &EventFilter) {
         if self.complete() || self.indexed.holds_share(node.as_str()) {
             return;
+        }
+        if let Some(headed) = &mut self.headed {
+            match headed.hold_node(&mut self.view, &self.indexed, node.as_str(), filter) {
+                Ok(()) => return,
+                // A journal rewritten under the heads read: the node's records are
+                // read whole instead, as its share.
+                Err(_) => self.headed = None,
+            }
         }
         let selected = onepipeline::journal::read_selected(
             &self.view.paths.journal(),
@@ -1049,6 +1115,19 @@ impl LiveRun {
         visible: &Visible,
         spec: Option<&crate::filter::FilterSpec>,
     ) -> Result<Value, ApiError> {
+        let at = self.hold(store, visible, spec)?;
+        Ok(self.answer(visible, at))
+    }
+
+    /// Make sure the payloads `visible` shows are being kept, building any that
+    /// are not, and say where a timeline's is held: [`answer`](Self::answer) then
+    /// reads them.
+    fn hold(
+        &mut self,
+        store: &RunStore,
+        visible: &Visible,
+        spec: Option<&crate::filter::FilterSpec>,
+    ) -> Result<Option<usize>, ApiError> {
         let filter = RunStore::resolve(&self.view, spec)?;
         let detail_key = visible.detail_filter();
         if !self.details.contains_key(&detail_key) {
@@ -1057,6 +1136,7 @@ impl LiveRun {
             } else {
                 filter.clone()
             };
+            let building = Instant::now();
             let body = if self.complete() {
                 let agents = self.agent_count();
                 DetailBody::Live(LiveDetail::build(
@@ -1071,6 +1151,8 @@ impl LiveRun {
                     &self.view,
                 )))
             };
+            let took = building.elapsed().as_secs_f64();
+            first_screen::record(|split| split.detail_s = Some(took));
             let held = HeldDetail {
                 body,
                 filter: detail_filter,
@@ -1079,29 +1161,23 @@ impl LiveRun {
             };
             self.details.insert(detail_key.clone(), held);
         }
-        let detail = enveloped(
-            &self.details[&detail_key].wire(),
-            &self.details[&detail_key].observed_at,
-        );
-        let run = self.run.as_str().to_owned();
-        let run = run.as_str();
         match visible {
-            // Views of no run, which no run is ever asked for.
-            Visible::Sidebar | Visible::HumanItems(_) => Ok(json!({ "type": "sidebar" })),
-            Visible::Detail { .. } => {
-                Ok(json!({ "type": "detail", "run_id": run, "detail": detail }))
-            }
+            Visible::Sidebar | Visible::HumanItems(_) | Visible::Detail { .. } => Ok(None),
             Visible::Timeline {
                 scope, filter: key, ..
             } => {
                 if let TimelineScope::Node(node) = scope {
                     // A node of the plan, recorded or not, or one a record names.
-                    if !self.knows_node(node, &detail["graph"]["plan"]) {
+                    let plan = match &self.details[&detail_key].body {
+                        DetailBody::First(detail) => &detail["graph"]["plan"],
+                        DetailBody::Live(detail) => &detail.payload()["graph"]["plan"],
+                    };
+                    if !self.knows_node(node, plan) {
                         return Err(ApiError::NodeNotFound(node.clone()));
                     }
                     // Selective: every record of the node, and its session rows,
                     // whatever view this run was opened for.
-                    self.hold_node_share(node);
+                    self.hold_node_share(node, &filter);
                     if self.agents.is_none() {
                         self.agents = agents_of(&self.view.paths);
                     }
@@ -1115,18 +1191,20 @@ impl LiveRun {
                             at
                         }
                         None => {
+                            let building = Instant::now();
+                            let render = self.render_window(scope);
                             let agents = match scope {
                                 TimelineScope::Run if !self.complete() => None,
                                 _ => self.agents.as_ref(),
                             };
-                            let built = LiveTimeline::build(
-                                &self.view,
+                            let built = LiveTimeline::build_lending(
+                                &mut self.view,
                                 &self.indexed,
                                 &self.declared,
                                 scope.clone(),
                                 filter.clone(),
                                 agents,
-                                self.render_window(scope),
+                                render,
                             );
                             let window = wire_window(scope);
                             let since = progressive::window_start(built.payload(), window);
@@ -1137,6 +1215,8 @@ impl LiveRun {
                                 since.clone(),
                             );
                             wire["progress"] = self.timeline_progress(scope);
+                            let took = building.elapsed().as_secs_f64();
+                            first_screen::record(|split| split.timeline_s = Some(took));
                             self.timelines.push((
                                 scope.clone(),
                                 key.clone(),
@@ -1153,31 +1233,69 @@ impl LiveRun {
                             self.timelines.len() - 1
                         }
                     };
-                let (_, _, timeline) = &self.timelines[at];
-                let timeline = enveloped(&timeline.wire, &timeline.observed_at);
-                Ok(match scope {
-                    TimelineScope::Node(node) => json!({
-                        "type": "timeline", "run_id": run, "scope": "node", "node": node,
-                        "detail": detail, "timeline": timeline,
-                    }),
-                    _ => json!({
-                        "type": "timeline", "run_id": run, "scope": "run",
-                        "detail": detail, "timeline": timeline,
-                    }),
-                })
+                Ok(Some(at))
             }
             Visible::Channel { .. } => {
                 if self.channel.is_none() {
                     let channel = channel_payload(store, &self.run)?;
                     self.channel = Some(held(channel));
                 }
-                let channel = self
-                    .channel
-                    .as_ref()
-                    .map(|held| enveloped(&held.payload, &held.observed_at));
-                Ok(
-                    json!({ "type": "channel", "run_id": run, "detail": detail, "channel": channel }),
-                )
+                Ok(None)
+            }
+        }
+    }
+
+    /// The snapshot of what `visible` shows, from the payloads [`hold`](Self::hold)
+    /// keeps, `at` the timeline it said: one copy of each held payload, moved into
+    /// the answer from there.
+    fn answer(&self, visible: &Visible, at: Option<usize>) -> Value {
+        let run = Value::from(self.run.as_str());
+        let detail = || {
+            let held = &self.details[&visible.detail_filter()];
+            enveloped(held.wire(), &held.observed_at)
+        };
+        match (visible, at) {
+            // Views of no run, which no run is ever asked for.
+            (Visible::Sidebar | Visible::HumanItems(_), _) => {
+                object_of([("type", Value::from("sidebar"))])
+            }
+            (Visible::Detail { .. }, _) => object_of([
+                ("type", Value::from("detail")),
+                ("run_id", run),
+                ("detail", detail()),
+            ]),
+            (Visible::Timeline { scope, .. }, Some(at)) => {
+                let (_, _, held) = &self.timelines[at];
+                let timeline = enveloped(held.wire.clone(), &held.observed_at);
+                match scope {
+                    TimelineScope::Node(node) => object_of([
+                        ("type", Value::from("timeline")),
+                        ("run_id", run),
+                        ("scope", Value::from("node")),
+                        ("node", Value::from(node.as_str())),
+                        ("detail", detail()),
+                        ("timeline", timeline),
+                    ]),
+                    _ => object_of([
+                        ("type", Value::from("timeline")),
+                        ("run_id", run),
+                        ("scope", Value::from("run")),
+                        ("detail", detail()),
+                        ("timeline", timeline),
+                    ]),
+                }
+            }
+            (Visible::Timeline { .. }, None) => Value::Null,
+            (Visible::Channel { .. }, _) => {
+                let channel = self.channel.as_ref().map_or(Value::Null, |held| {
+                    enveloped(held.payload.clone(), &held.observed_at)
+                });
+                object_of([
+                    ("type", Value::from("channel")),
+                    ("run_id", run),
+                    ("detail", detail()),
+                    ("channel", channel),
+                ])
             }
         }
     }
@@ -1200,15 +1318,38 @@ fn held<T>(payload: T) -> Held<T> {
     }
 }
 
-/// A payload in the schema-version envelope every route serves it in.
-fn enveloped(payload: &Value, observed_at: &str) -> Value {
-    serde_json::to_value(Envelope {
-        api_version: API_VERSION,
-        telemetry_schema_version: TELEMETRY_SCHEMA_VERSION,
-        observed_at: observed_at.to_owned(),
-        payload,
-    })
-    .unwrap_or(Value::Null)
+/// A payload in the schema-version envelope every route serves it in: the
+/// [`Envelope`](crate::contract::Envelope) the routes serialize, with `payload`'s members moved in after the
+/// envelope's own rather than serialized into a copy of each.
+///
+/// A payload that is not an object has no members to flatten, which is the
+/// serialization's refusal too, and reads as `null`.
+fn enveloped(payload: Value, observed_at: &str) -> Value {
+    let Value::Object(members) = payload else {
+        return Value::Null;
+    };
+    let mut object = serde_json::Map::with_capacity(members.len() + 3);
+    object.insert("api_version".to_owned(), Value::from(API_VERSION));
+    object.insert(
+        "telemetry_schema_version".to_owned(),
+        Value::from(TELEMETRY_SCHEMA_VERSION),
+    );
+    object.insert("observed_at".to_owned(), Value::from(observed_at));
+    for (key, value) in members {
+        object.insert(key, value);
+    }
+    Value::Object(object)
+}
+
+/// An object of `members`, in their order, each moved in: what `json!` builds,
+/// without the copy it serializes of every value it interpolates.
+fn object_of<const N: usize>(members: [(&str, Value); N]) -> Value {
+    Value::Object(
+        members
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
+    )
 }
 
 /// The channel route's payload, without its envelope.
@@ -1284,6 +1425,16 @@ pub struct Stream {
 /// reconnect and replay — never more than the subscription retains.
 const CONNECTION_BUFFER: usize = RETAINED_FRAMES;
 
+/// A run opened for a page's document ahead of its subscription ([`Hub::prepare`]):
+/// its reading once made, with what making it cost, or the refusal.
+#[derive(Default)]
+struct Prepared {
+    opened: OnceLock<Opened>,
+}
+
+/// A run's reading as [`Hub::open_prepared`] made it, and where its time went.
+type Opened = Result<(Arc<Mutex<LiveRun>>, first_screen::Split), ApiError>;
+
 impl Hub {
     /// A hub over `store`, ending its streams once `stopping` is set.
     #[must_use]
@@ -1300,6 +1451,11 @@ impl Hub {
             sidebar: Mutex::new(Sidebar::default()),
             looking: Mutex::new(()),
             runs: Mutex::new(HashMap::new()),
+            prepared: Mutex::new(HashMap::new()),
+            prepared_hold: std::env::var(PREPARED_HOLD_ENV)
+                .ok()
+                .and_then(|ms| ms.parse().ok())
+                .map_or(PREPARED_HOLD, Duration::from_millis),
             human_items: Mutex::new(HumanItemsReading::default()),
             polling: AtomicBool::new(false),
             trace: std::env::var_os(TRACE_ENV).map(PathBuf::from),
@@ -1315,6 +1471,10 @@ impl Hub {
                 .ok()
                 .and_then(|ms| ms.parse().ok())
                 .map_or(Duration::ZERO, Duration::from_millis),
+            whole_read: std::env::var(WHOLE_READ_ENV)
+                .ok()
+                .and_then(|bytes| bytes.parse().ok())
+                .unwrap_or(WHOLE_READ_BYTES),
             grace: std::env::var(DISCONNECTED_GRACE_ENV)
                 .ok()
                 .and_then(|ms| ms.parse().ok())
@@ -1361,7 +1521,7 @@ impl Hub {
                     _ => None,
                 };
                 let live = self.live_run(&run, node)?;
-                lock(&live).ensure(&shared.store, &visible, spec)?;
+                lock(&live).hold(&shared.store, &visible, spec)?;
                 Some(live)
             }
         };
@@ -1436,11 +1596,18 @@ impl Hub {
                 self.spawn_complete(live);
             }
         }
-        let id = self.id(seq);
-        let snapshot = json!({ "id": id, "sidebar": rows, "visible": visible_state });
+        // Every value is moved into the answer rather than interpolated, which
+        // would serialize a copy of each: Overall's is about a megabyte.
+        let id = Value::from(self.id(seq));
+        let subscribed = Value::from(subscription.to_string());
+        let snapshot = object_of([
+            ("id", id.clone()),
+            ("sidebar", rows),
+            ("visible", visible_state),
+        ]);
         let initial = match request.origin {
             SubscribeOrigin::Fresh | SubscribeOrigin::Replaces(_) => {
-                json!({ "type": "snapshot", "snapshot": snapshot })
+                object_of([("type", Value::from("snapshot")), ("snapshot", snapshot)])
             }
             SubscribeOrigin::Resume(resume) => {
                 let reason = if resume.epoch == shared.epoch {
@@ -1449,17 +1616,58 @@ impl Hub {
                     ResetReason::ServerRestarted
                 }
                 .as_str();
-                json!({
-                    "type": "reset", "id": id, "base": resume.to_string(),
-                    "subscription": subscription, "reason": reason, "snapshot": snapshot,
-                })
+                object_of([
+                    ("type", Value::from("reset")),
+                    ("id", id),
+                    ("base", Value::from(resume.to_string())),
+                    ("subscription", subscribed.clone()),
+                    ("reason", Value::from(reason)),
+                    ("snapshot", snapshot),
+                ])
             }
         };
-        Ok(json!({
-            "subscription": subscription,
-            "view": request.view.to_json(),
-            "initial": initial,
-        }))
+        Ok(object_of([
+            ("subscription", subscribed),
+            ("view", request.view.to_json()),
+            ("initial", initial),
+        ]))
+    }
+
+    /// [`subscribe`](Self::subscribe)'s answer, serialized as the route serves it.
+    ///
+    /// Where [`TRACE_ENV`] names a file, one line of it says where the answer's time
+    /// went: the engine's heads read and the fetches a long run's first answer
+    /// makes, holding and indexing the heads, the detail and timeline it builds, and
+    /// the serialization.
+    ///
+    /// # Errors
+    ///
+    /// [`subscribe`](Self::subscribe)'s.
+    pub fn subscribe_serialized(&self, request: &SubscribeRequest) -> Result<Vec<u8>, ApiError> {
+        let started = Instant::now();
+        first_screen::take();
+        let answer = self.subscribe(request)?;
+        let answered = Instant::now();
+        let bytes = serde_json::to_vec(&answer)
+            .map_err(|error| ApiError::Read(format!("the answer did not serialize: {error}")))?;
+        if self.0.trace.is_some() {
+            let split = first_screen::take();
+            let ms = |seconds: Option<f64>| seconds.map(|seconds| seconds * 1000.0);
+            self.trace(&json!({
+                "subscribe": request.view.to_json(),
+                "heads_ms": ms(split.heads_s),
+                "fetch_ms": ms(split.fetch_s),
+                "fetched": split.fetched,
+                "records": split.records,
+                "index_ms": ms(split.index_s),
+                "detail_ms": ms(split.detail_s),
+                "timeline_ms": ms(split.timeline_s),
+                "answer_ms": (answered - started).as_secs_f64() * 1000.0,
+                "serialize_ms": answered.elapsed().as_secs_f64() * 1000.0,
+                "bytes": bytes.len(),
+            }));
+        }
+        Ok(bytes)
     }
 
     /// `DELETE /api/v2/subscriptions/{subscription}`: retire it, whether or not
@@ -1634,14 +1842,77 @@ impl Hub {
         if let Some(live) = lock(&self.0.runs).get(run) {
             return Ok(Arc::clone(live));
         }
-        let opened = Arc::new(Mutex::new(LiveRun::open_selective(
-            &self.0.store,
-            run,
-            node,
-        )?));
+        // A run a page's document named is taken as that opening left it, waiting
+        // for it while it is still being made; one that failed is opened again, so
+        // the answer is this request's own.
+        let prepared = lock(&self.0.prepared).get(run).map(Arc::clone);
+        let taken = prepared.and_then(|prepared| {
+            let opened = self.open_prepared(&prepared, run, node);
+            lock(&self.0.prepared).retain(|_, held| !Arc::ptr_eq(held, &prepared));
+            let (live, split) = opened.ok()?;
+            first_screen::record(|own| own.adopt(split));
+            Some(live)
+        });
+        let opened = match taken {
+            Some(live) => live,
+            None => {
+                let live = LiveRun::open_selective(&self.0.store, run, node, self.0.whole_read)?;
+                self.trace(&json!({ "unprepared": run.as_str() }));
+                Arc::new(Mutex::new(live))
+            }
+        };
         Ok(Arc::clone(
             lock(&self.0.runs).entry(run.clone()).or_insert(opened),
         ))
+    }
+
+    /// Open `run` for the subscription a page whose document named it is about to
+    /// make, on a thread of its own, so the run's reading is under way while the
+    /// browser loads and runs the page. Nothing else changes: the subscription takes
+    /// the reading as any other subscription would have made it, or waits for
+    /// it to be made, and a run nobody subscribes to is let go after
+    /// [`PREPARED_HOLD`]. A run already held, already being opened, or beyond
+    /// the few runs that may be opened this way at once is left alone.
+    pub fn prepare(&self, run: RunId, node: Option<NodeId>) {
+        if lock(&self.0.runs).contains_key(&run) {
+            return;
+        }
+        let prepared = {
+            let mut held = lock(&self.0.prepared);
+            if held.contains_key(&run) || held.len() >= PREPARED_RUNS {
+                return;
+            }
+            let prepared = Arc::new(Prepared::default());
+            held.insert(run.clone(), Arc::clone(&prepared));
+            prepared
+        };
+        let hub = self.clone();
+        let opening = Arc::clone(&prepared);
+        let spawned = std::thread::Builder::new()
+            .name("prepare-run".to_owned())
+            .spawn(move || {
+                let _ = hub.open_prepared(&opening, &run, node.as_ref());
+                std::thread::sleep(hub.0.prepared_hold);
+                lock(&hub.0.prepared).retain(|_, held| !Arc::ptr_eq(held, &opening));
+            });
+        if spawned.is_err() {
+            lock(&self.0.prepared).retain(|_, held| !Arc::ptr_eq(held, &prepared));
+        }
+    }
+
+    /// `prepared`'s reading of `run`, made here if nothing has made it yet and
+    /// waited for if something is making it.
+    fn open_prepared(&self, prepared: &Prepared, run: &RunId, node: Option<&NodeId>) -> Opened {
+        prepared
+            .opened
+            .get_or_init(|| {
+                let opened = LiveRun::open_selective(&self.0.store, run, node, self.0.whole_read);
+                // What the opening cost goes with it, to the answer that takes it.
+                let split = first_screen::take();
+                self.trace(&json!({ "prepared": run.as_str(), "opened": opened.is_ok() }));
+                opened.map(|live| (Arc::new(Mutex::new(live)), split))
+            })
+            .clone()
     }
 
     fn start_polling(&self) {
@@ -1875,6 +2146,7 @@ impl Hub {
                 // A reread reads the store whole, selective or not.
                 run.indexed = Indexed::of(&run.view);
                 run.indexed.holds_whole(None);
+                run.headed = None;
                 run.declared = shared.store.declared(&run.view);
                 None
             }

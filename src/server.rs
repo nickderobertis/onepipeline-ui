@@ -295,9 +295,37 @@ async fn fallback(State(serving): Store, uri: Uri) -> Response {
         return ApiError::RemovedRoute(uri.path().to_owned()).into_response();
     }
     match &serving.view {
-        Some(view) if !crate::ui::is_api_path(uri.path()) => view.answer(uri.path()).await,
+        Some(view) if !crate::ui::is_api_path(uri.path()) => {
+            prepare_named_run(&serving.hub, &uri);
+            view.answer(uri.path()).await
+        }
         _ => ApiError::NoSuchRoute.into_response(),
     }
+}
+
+/// Start opening the run a page's address names — `?run=`, with the node of
+/// `?node=` — so that its reading is under way while the browser loads the page
+/// and before the page's subscription asks for it ([`Hub::prepare`]). An address
+/// naming no run, or a run that is not a valid identifier, starts nothing, and a
+/// node that is not one is left out, the run opened as for a page naming no node;
+/// the page is served the same either way, and whatever the subscription is then
+/// refused is its own refusal. Only a document is asked for with an address: the
+/// bundle's hashed files are not.
+fn prepare_named_run(hub: &Hub, uri: &Uri) {
+    if uri.path().starts_with("/assets/") {
+        return;
+    }
+    let Ok(Query(address)) = Query::<HashMap<String, String>>::try_from_uri(uri) else {
+        return;
+    };
+    let Some(Ok(run)) = address.get("run").cloned().map(RunId::try_from) else {
+        return;
+    };
+    let node = address
+        .get("node")
+        .cloned()
+        .and_then(|node| NodeId::try_from(node).ok());
+    hub.prepare(run, node);
 }
 
 async fn healthz(State(serving): Store) -> Json<crate::contract::Health> {
@@ -524,8 +552,17 @@ async fn subscribe(State(serving): Store, raw: String) -> Response {
         Err(error) => return error.into_response(),
     };
     let hub = serving.hub.clone();
-    match tokio::task::spawn_blocking(move || hub.subscribe(&request)).await {
-        Ok(Ok(subscribed)) => (axum::http::StatusCode::CREATED, Json(subscribed)).into_response(),
+    // Serialized on the blocking thread that built it, rather than on the runtime.
+    match tokio::task::spawn_blocking(move || hub.subscribe_serialized(&request)).await {
+        Ok(Ok(subscribed)) => (
+            axum::http::StatusCode::CREATED,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("application/json"),
+            )],
+            subscribed,
+        )
+            .into_response(),
         Ok(Err(error)) => error.into_response(),
         Err(_) => ApiError::Read("unexpected read failure".to_owned()).into_response(),
     }

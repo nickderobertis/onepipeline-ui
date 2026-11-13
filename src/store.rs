@@ -40,7 +40,7 @@
 //! response carries and never what the run is: every status, settlement,
 //! decision, count and timing is folded from the whole journal whatever it said.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -254,7 +254,10 @@ impl RunStore {
     /// record for declares nothing, so a session on it is served no role rather
     /// than one guessed at.
     pub(crate) fn declared(&self, view: &RunView) -> DeclaredMembers {
-        let mut graph_runs: Vec<&str> = view
+        // Deduplicated by hash before they are ordered: a long run relays a hundred
+        // thousand records over a few thousand streams, and sorting every record's
+        // stream to drop the repeats cost more than the rest of this read.
+        let mut graph_runs: HashSet<&str> = view
             .launch
             .observer_runs
             .iter()

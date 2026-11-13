@@ -8,11 +8,8 @@ import {
 } from "@onepipeline-ui/telemetry-client/deadline";
 import { createRoot } from "react-dom/client";
 import { type FirstAddress, firstAddress } from "./first-screen/address";
-import {
-  type FirstAnswer,
-  FirstScreen,
-  FirstScreenLoading,
-} from "./first-screen/FirstScreen";
+import { checkFirstAnswer } from "./first-screen/check";
+import { FirstScreen, FirstScreenLoading } from "./first-screen/FirstScreen";
 
 /** How the first read went, handed to the app that takes it over. */
 export interface FirstRead {
@@ -100,13 +97,15 @@ async function start(): Promise<void> {
   }
   const drawn = createRoot(element);
   drawn.render(<FirstScreenLoading address={address} />);
-  const read = await firstRead(address);
-  // llmlint: ignore-block[boundary_inputs_validated] the contract parser refuses this same answer when the app adopts it (`LiveView`'s `initial`, through `parseSubscribed`) and replaces the screen with the failure; parsing it here too puts zod and every schema in the first-screen chunk and 25-70 ms of parse on the first view's critical path, against 0.13 s of headroom under its 1.5 s line. Validating it before this render without that cost is a drafted follow-up, by the manager's ruling.
-  if (read.answer !== undefined)
-    drawn.render(
-      <FirstScreen address={address} answer={read.answer as FirstAnswer} />,
-    );
-  // llmlint: ignore-end[boundary_inputs_validated]
+  let read = await firstRead(address);
+  // Every field the first screen draws is checked before it is drawn; the app holds
+  // the same answer to the full contract when it takes it over. One that fails is
+  // the app's to show, as the contract failure it is, and no screen is drawn from it.
+  if (read.answer !== undefined) {
+    const checked = checkFirstAnswer(read.answer);
+    if (checked instanceof Error) read = { address, error: checked };
+    else drawn.render(<FirstScreen address={address} answer={checked} />);
+  }
   const { mountApp } = await import("./app/mount");
   mountApp(element, read, drawn);
 }

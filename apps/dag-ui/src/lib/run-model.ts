@@ -1,19 +1,17 @@
 import { DAG_NODE_STATES } from "@onepipeline-ui/dag-layout";
-import {
-  type AwaitedRelease,
-  type Failure,
-  type GraphResultItem,
-  type LiveGraphState,
-  type LiveNodeTelemetry,
-  type LiveRunDetail,
-  type NodeControl,
-  type NodeDetail,
-  type NodeKind,
-  type NodeStatus,
-  nodeKindSchema,
-  nodeStatusSchema,
-  type PlanTask,
-  type RunLaunch,
+import type {
+  AwaitedRelease,
+  Failure,
+  GraphResultItem,
+  LiveGraphState,
+  LiveNodeTelemetry,
+  LiveRunDetail,
+  NodeControl,
+  NodeDetail,
+  NodeKind,
+  NodeStatus,
+  PlanTask,
+  RunLaunch,
 } from "@onepipeline-ui/dag-model";
 
 /** How a launching harness is named wherever this app names one. */
@@ -95,10 +93,10 @@ export function nodeViews(detail: LiveRunDetail): NodeView[] {
   if (!graph) return [];
   const telemetry = new Map(detail.run.nodes.map((node) => [node.node, node]));
   return graph.plan.tasks.flatMap((task) => {
-    const declared = nodeKindSchema.safeParse(readString(task, "kind"));
+    const declared = readString(task, "kind");
     const kind =
-      declared.success && declared.data !== "agent"
-        ? declared.data
+      isNodeKind(declared) && declared !== "agent"
+        ? declared
         : hasLifecycleShape(task)
           ? "lifecycle"
           : "agent";
@@ -138,6 +136,29 @@ export function nodeViews(detail: LiveRunDetail): NodeView[] {
 }
 
 /**
+ * Whether `value` is a node status. `DAG_NODE_STATES` is the contract's own list,
+ * held equal to `nodeStatusSchema` by `node-state-contract.test.ts`; reading it
+ * rather than the schema keeps the contract's schemas, and zod, out of the first
+ * screen's chunk, whose evaluation the page waits on before it asks for anything.
+ */
+function isNodeStatus(value: unknown): value is NodeStatus {
+  const known: readonly string[] = DAG_NODE_STATES;
+  return typeof value === "string" && known.includes(value);
+}
+
+/**
+ * The plan's node kinds: a copy of `nodeKindSchema`'s, held equal to it by
+ * `node-state-contract.test.ts`, kept here for the reason {@link isNodeStatus}
+ * reads `DAG_NODE_STATES` rather than its schema.
+ */
+export const NODE_KINDS: readonly NodeKind[] = ["agent", "human", "command"];
+
+function isNodeKind(value: unknown): value is NodeKind {
+  const known: readonly string[] = NODE_KINDS;
+  return typeof value === "string" && known.includes(value);
+}
+
+/**
  * The node an address names: the graph's own view of it, or — for a node the
  * graph does not hold — a view of what the run recorded for it, so a link to a
  * node a live edit replaced opens that node's timeline rather than the graph.
@@ -160,7 +181,7 @@ export function openedNode(
   if (onGraph !== undefined) return onGraph;
   if (graph.plan.tasks.some((task) => task.id === nodeId)) return undefined;
   const telemetry = detail.run.nodes.find(({ node }) => node === nodeId);
-  const status = nodeStatusSchema.safeParse(telemetry?.status);
+  const status = telemetry?.status;
   const result = graph.node_results[nodeId] ?? graph.result?.results?.[nodeId];
   return {
     id: nodeId,
@@ -169,7 +190,7 @@ export function openedNode(
     // instead, and nothing else reads an off-graph node's kind.
     kind: "agent",
     offGraph: true,
-    status: status.success ? status.data : "unknown",
+    status: isNodeStatus(status) ? status : "unknown",
     telemetry,
     result,
     detail: detail.node_details[nodeId],

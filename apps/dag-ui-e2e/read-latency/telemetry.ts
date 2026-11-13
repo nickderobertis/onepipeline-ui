@@ -143,6 +143,27 @@ const selecting = (selected: (filter: Record<string, unknown>) => boolean) =>
 /** The three first-useful-screen views, the slowest of which is the budget. */
 export const FIRST_VIEWS = ["graph", "overall", "node"] as const;
 
+/**
+ * Where the server spent a first answer's `POST`, off its own trace
+ * (`ONEPIPELINE_UI_LIVE_TRACE`'s `subscribe` line): the engine's heads read and
+ * the fetches of what the first screen draws, which a run read whole makes none
+ * of, holding and indexing the heads, the detail and timeline the answer holds, the
+ * whole answer, and its serialization. `null` where the server did no such step.
+ */
+const serverSplitSchema = z.object({
+  heads_s: seconds,
+  fetch_s: seconds,
+  fetched_records: count.nullable(),
+  records: count.nullable(),
+  index_s: seconds,
+  detail_s: seconds,
+  timeline_s: seconds,
+  answer_s: figure,
+  serialize_s: figure,
+  bytes: count,
+});
+export type ServerSplit = z.infer<typeof serverSplitSchema>;
+
 /** A wall-clock reading with the bytes and host load beside it. */
 const readingSchema = z.object({
   /** Navigation start to the view's mark, or `null` where no mark was reached. */
@@ -150,6 +171,8 @@ const readingSchema = z.object({
   navigation_to_post_s: seconds,
   post_s: seconds,
   answer_to_mark_s: seconds,
+  /** Inside the `POST`, as the server traced it. */
+  server: serverSplitSchema,
   first_answer_bytes: count,
   first_answer_gzipped: count,
   checked: z.object({
@@ -288,7 +311,8 @@ export type Telemetry = z.infer<typeof telemetrySchema>;
 
 /** `telemetry/read-latency-large.json`: one large run's first screens and the rest. */
 export const largeTelemetrySchema = z.object({
-  schema_version: z.literal(1),
+  /** 2 since each reading carries the server's split of its `POST`. */
+  schema_version: z.literal(2),
   recorded_at: z.iso.datetime(),
   commit: z.string().regex(/^[0-9a-f]{40}$/u),
   dirty: z.boolean(),

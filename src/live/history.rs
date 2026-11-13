@@ -43,9 +43,12 @@ impl Hub {
                     let mut guard = lock(&live);
                     from_kept(&mut guard, query, selected.as_ref())?
                 } else {
-                    // A node's first answer read every record of that node: its page
-                    // is built from that reading rather than from the journal again.
-                    let held = holds_owner(&lock(&live), &query.owner);
+                    // A reading holding every record of the node whole, a short
+                    // journal's, builds its page; one that holds some of them as
+                    // their heads fetches the rest by their handles, since a page
+                    // lists rows a first screen did not fetch; any other share, or
+                    // one whose fetch is refused, is read afresh.
+                    let held = lock(&live).hold_page_owner(&query.owner);
                     let selected = (!held).then(|| read_share(&paths, &query.owner));
                     let mut guard = lock(&live);
                     from_selected(&mut guard, query, selected.as_ref())?
@@ -56,11 +59,11 @@ impl Hub {
                     PageOwner::Node(node) | PageOwner::RunNode(node) => Some(node),
                     PageOwner::Run => None,
                 };
-                // Opened for the node, the run's own reading holds every record of
-                // it, as a node's first answer does: a node's page is built from
-                // that one pass over the journal, and only a share it does not hold
-                // is read again.
-                let mut alone = LiveRun::open_selective(&shared.store, run, node)?;
+                // The run's first reading, for its state and plan: a short journal's
+                // holds every record whole and builds the page, and a longer one's
+                // heads have the page's share read beside them.
+                let mut alone =
+                    LiveRun::open_selective(&shared.store, run, node, shared.whole_read)?;
                 from_selected(&mut alone, query, None)?
             }
         };
@@ -79,9 +82,10 @@ fn read_share(
     journal::read_selected(&paths.journal(), &selection)
 }
 
-/// Whether `run`'s own reading holds every record a page of `owner` lists: a
-/// node's, where the run was opened for that node's timeline. A run-level share
-/// and a run's node share are read apart, as their scopes are built over them.
+/// Whether `run`'s own reading holds every record a page of `owner` lists whole: a
+/// node's, where the reading read the journal whole. A heads read holds only a
+/// first screen's records whole, and a run-level share and a run's node share are
+/// read apart, as their scopes are built over them.
 fn holds_owner(run: &LiveRun, owner: &PageOwner) -> bool {
     match owner {
         PageOwner::Node(node) => run.indexed.holds_share(node.as_str()),
@@ -99,8 +103,9 @@ fn scope_of(owner: &PageOwner) -> TimelineScope {
 
 fn check_node(run: &LiveRun, owner: &PageOwner) -> Result<(), ApiError> {
     if let PageOwner::Node(node) | PageOwner::RunNode(node) = owner {
-        let plan = payload::first_detail(&run.view)["graph"]["plan"].clone();
-        if !run.knows_node(node, &plan) {
+        // The plan's tasks read off the plan itself rather than the detail built
+        // from it, which a page has no other use for.
+        if !(payload::plan_names(&run.view, node.as_str()) || run.knows_node(node, &Value::Null)) {
             return Err(ApiError::NodeNotFound(node.clone()));
         }
     }
@@ -145,8 +150,10 @@ fn from_selected(
             limit: query.limit.get(),
         },
     };
-    let built = LiveTimeline::build(
-        &run.view,
+    // A page's records are lent to its build rather than copied, as a first
+    // answer's are.
+    let built = LiveTimeline::build_lending(
+        &mut run.view,
         indexed,
         &run.declared,
         scope,

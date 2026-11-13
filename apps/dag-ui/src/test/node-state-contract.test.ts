@@ -1,6 +1,7 @@
 import { DAG_NODE_STATES } from "@onepipeline-ui/dag-layout";
-import { nodeStatusSchema } from "@onepipeline-ui/dag-model";
+import { nodeKindSchema, nodeStatusSchema } from "@onepipeline-ui/dag-model";
 import { expect, it } from "vitest";
+import { NODE_KINDS } from "../lib/run-model";
 
 /**
  * The drift gate between the node-status vocabulary and the states the graph draws.
@@ -18,4 +19,12 @@ import { expect, it } from "vitest";
  */
 it("draws exactly the node statuses the model defines, in the same order", () => {
   expect([...DAG_NODE_STATES]).toEqual([...nodeStatusSchema.options]);
+});
+
+/**
+ * The same gate for the plan's node kinds: `run-model`'s `NODE_KINDS` restates
+ * `nodeKindSchema`'s so the first screen's chunk carries no schema, and is held to it.
+ */
+it("reads exactly the node kinds the model defines", () => {
+  expect([...NODE_KINDS].sort()).toEqual([...nodeKindSchema.options].sort());
 });

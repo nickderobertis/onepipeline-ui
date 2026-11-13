@@ -81,6 +81,7 @@ import {
   type LargeRun,
   largeTelemetrySchema,
   type Reading,
+  type ServerSplit,
   telemetrySchema,
 } from "./telemetry";
 import workload from "./workload.json" with { type: "json" };
@@ -846,7 +847,7 @@ function buildLargeWorld(): LargeWorld {
 }
 
 /** One fresh release server over `world`, on `port`, that has answered one sidebar read. */
-async function serveLarge(world: LargeWorld, port: number) {
+async function serveLarge(world: LargeWorld, port: number, trace?: string) {
   const server: ChildProcess = spawn(
     releaseBinary(),
     [
@@ -859,7 +860,14 @@ async function serveLarge(world: LargeWorld, port: number) {
       OWNER,
       "--ui",
     ],
-    { stdio: "ignore", env: world.env, cwd: world.workspace },
+    {
+      stdio: "ignore",
+      env:
+        trace === undefined
+          ? world.env
+          : { ...world.env, ONEPIPELINE_UI_LIVE_TRACE: trace },
+      cwd: world.workspace,
+    },
   );
   const origin = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + NEVER;
@@ -920,7 +928,12 @@ async function firstViewReading(
   page: Page;
   server: ChildProcess;
 }> {
-  const { origin, server } = await serveLarge(world, port);
+  // The server's own split of the `POST`, off a trace of its own.
+  const trace = join(
+    world.workspace,
+    `first-view-${view}-${Date.now()}-${process.hrtime.bigint()}.jsonl`,
+  );
+  const { origin, server } = await serveLarge(world, port, trace);
   const context =
     cachedContext ??
     (await browser.newContext({ viewport: { width: 1440, height: 900 } }));
@@ -972,6 +985,7 @@ async function firstViewReading(
       mark === undefined || posted2 === undefined
         ? null
         : (mark.at - posted2.done) / 1000,
+    server: serverSplitOf(trace),
     first_answer_bytes: Buffer.byteLength(body),
     first_answer_gzipped: gzipSync(body).length,
     checked: {
@@ -989,6 +1003,43 @@ async function firstViewReading(
     host_load: load,
   };
   return { reading, state: mark, context, page, server };
+}
+
+/** The first `subscribe` line a server's trace holds: its first answer's split. */
+const subscribeTraceSchema = z.object({
+  subscribe: z.unknown(),
+  heads_ms: z.number().nullable(),
+  fetch_ms: z.number().nullable(),
+  fetched: z.number().int().nullable(),
+  records: z.number().int().nullable(),
+  index_ms: z.number().nullable(),
+  detail_ms: z.number().nullable(),
+  timeline_ms: z.number().nullable(),
+  answer_ms: z.number(),
+  serialize_ms: z.number(),
+  bytes: z.number().int(),
+});
+
+function serverSplitOf(trace: string): ServerSplit {
+  const line = readFileSync(trace, "utf8")
+    .split("\n")
+    .filter((text) => text.includes('"subscribe"'))
+    .map((text) => subscribeTraceSchema.parse(JSON.parse(text)))[0];
+  if (line === undefined)
+    throw new Error(`the server traced no first answer to ${trace}`);
+  const s = (ms: number | null) => (ms === null ? null : ms / 1000);
+  return {
+    heads_s: s(line.heads_ms),
+    fetch_s: s(line.fetch_ms),
+    fetched_records: line.fetched,
+    records: line.records,
+    index_s: s(line.index_ms),
+    detail_s: s(line.detail_ms),
+    timeline_s: s(line.timeline_ms),
+    answer_s: line.answer_ms / 1000,
+    serialize_s: line.serialize_ms / 1000,
+    bytes: line.bytes,
+  };
 }
 
 const median = (values: number[]): number => {
@@ -1651,7 +1702,7 @@ test("a large run's first screens, the rest, its history and its status, at real
   const git = (args: string[]) =>
     execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
   const telemetry = largeTelemetrySchema.parse({
-    schema_version: 1,
+    schema_version: 2,
     recorded_at: new Date().toISOString(),
     commit: git(["rev-parse", "HEAD"]),
     dirty: git(["status", "--porcelain"]) !== "",

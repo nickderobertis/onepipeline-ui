@@ -688,6 +688,8 @@ pub mod graph {
     pub const MEMBER_DIED: &str = "member-died";
     /// A member settled, which ends its turns.
     pub const MEMBER_SETTLED: &str = "member-settled";
+    /// A member's periodic proof it is alive, which says nothing of what it is doing.
+    pub const MEMBER_HEARTBEAT: &str = "member-heartbeat";
     /// The member a record is about, on a [`TURN_INTERRUPTED`] payload as well as
     /// in the labels.
     pub const MEMBER: &str = "member";
@@ -2373,10 +2375,15 @@ fn graph_state(view: &Run<'_>) -> Option<Value> {
         .collect();
 
     let engine = engine_words(view);
+    let settled = settlements(view);
+    let by_node = records_by_node(view);
     let node_results: Map<String, Value> = plan
         .tasks
         .iter()
-        .filter_map(|node| node_result(view, &engine, node, result.as_ref()))
+        .filter_map(|node| {
+            let mine = by_node.get(node.id.as_str()).map_or(&[][..], Vec::as_slice);
+            node_result(view, &engine, &settled, mine, node, result.as_ref())
+        })
         .collect();
 
     // Only work in flight has a turn to redirect, so this is one entry per node
@@ -2570,20 +2577,37 @@ fn rejected_edits(view: &Run<'_>) -> Vec<Value> {
         .collect()
 }
 
-/// The payload of the settlement the run last recorded for `node`.
+/// The payload of the settlement the run last recorded for each node, by node.
 ///
 /// The last one wins: a node that settled more than once is a node that was
-/// retried or replaced, and the latest settlement is what happened.
-fn settlement(view: &Run<'_>, node: &str) -> Option<Map<String, Value>> {
-    view.events
-        .iter()
-        .rev()
-        .find(|event| {
-            event.source == Source::Pipeline
-                && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::NodeSettled)
-                && event.labels.node.as_deref() == Some(node)
-        })
-        .map(|event| event.payload.clone())
+/// retried or replaced, and the latest settlement is what happened. Read in one
+/// pass for every node rather than once per node, because a long run's records
+/// are counted in the hundred thousands.
+fn settlements<'a>(view: &Run<'a>) -> HashMap<&'a str, &'a Map<String, Value>> {
+    let mut settled = HashMap::new();
+    for event in view.events {
+        if event.source != Source::Pipeline
+            || PipelineKind::from_wire(&event.kind) != Some(PipelineKind::NodeSettled)
+        {
+            continue;
+        }
+        if let Some(node) = event.labels.node.as_deref() {
+            settled.insert(node, &event.payload);
+        }
+    }
+    settled
+}
+
+/// Each node's own records, in the order the run holds them, by node: one pass
+/// for every node rather than one per node.
+fn records_by_node<'a>(view: &Run<'a>) -> HashMap<&'a str, Vec<&'a Envelope>> {
+    let mut by_node: HashMap<&str, Vec<&Envelope>> = HashMap::new();
+    for event in view.events {
+        if let Some(node) = event.labels.node.as_deref() {
+            by_node.entry(node).or_default().push(event);
+        }
+    }
+    by_node
 }
 
 /// A node's status as the engine's `statuses()` words it.
@@ -2612,9 +2636,14 @@ fn engine_words(view: &Run<'_>) -> BTreeMap<String, EngineWord> {
 /// account; the recorded document is what a run whose journal this host cannot
 /// fold still has, and it holds words no settlement carried. A node in neither is
 /// a node the run has nothing to say about, and it is served no entry at all.
+///
+/// `settled` is every node's last settlement ([`settlements`]) and `mine` this
+/// node's own records ([`records_by_node`]), each read once for all of a run's nodes.
 fn node_result(
     view: &Run<'_>,
     engine: &BTreeMap<String, EngineWord>,
+    settled: &HashMap<&str, &Map<String, Value>>,
+    mine: &[&Envelope],
     node: &Node,
     result: Option<&Value>,
 ) -> Option<(String, Value)> {
@@ -2628,7 +2657,7 @@ fn node_result(
         // status, outcome and branch but not the prose beside them, and a node
         // that stopped without them is a card that says only "failed" — which
         // tells a reader less than the run already knows.
-        if let Some(settled) = settlement(view, &node.id) {
+        if let Some(&settled) = settled.get(node.id.as_str()) {
             for field in RESULT_FIELDS {
                 if item.contains_key(*field) {
                     continue;
@@ -2637,7 +2666,7 @@ fn node_result(
                     item.insert((*field).to_owned(), value.clone());
                 }
             }
-            if let Some(awaiting) = settled_awaiting(&settled) {
+            if let Some(awaiting) = settled_awaiting(settled) {
                 item.insert("awaiting".into(), awaiting);
             }
         }
@@ -2702,12 +2731,7 @@ fn node_result(
     // for, exactly as `pr` is absent for a node that opened no change request.
     // Joined through the commit the work landed as, which is the only thing a
     // `release-observed` and a node have in common; see [`release_of`].
-    let mine: Vec<&Envelope> = view
-        .events
-        .iter()
-        .filter(|event| event.labels.node.as_deref() == Some(node.id.as_str()))
-        .collect();
-    if let Some(release) = landing_commit(&mine).and_then(|commit| release_of(view, commit)) {
+    if let Some(release) = landing_commit(mine).and_then(|commit| release_of(view, commit)) {
         item.insert("release".into(), release);
     }
     // What a command node's command wrote, where its last start recorded it.
@@ -2887,6 +2911,12 @@ fn detail_document(
     payload.insert("node_details".into(), node_details(view));
     payload.insert("launch".into(), launch(view));
     Value::Object(payload)
+}
+
+/// Whether `node` is a task of the run's plan, as the detail's `graph.plan` lists
+/// them, read without building the detail.
+pub(crate) fn plan_names(view: &RunView, node: &str) -> bool {
+    plan_of(&Run::of(view)).is_some_and(|plan| plan.tasks.iter().any(|task| task.id == node))
 }
 
 /// What a first screen draws of a detail, from the run's state alone: no fold of
@@ -6299,18 +6329,21 @@ fn stamp_dispatch_groups(view: &Run<'_>, node: &str, payload: &mut Value) {
                 group = *owners.first().expect("one owner");
             }
         }
-        record_groups.insert(
-            format!("{}.{}", event.stream, event.seq),
-            presentation(group, role),
-        );
+        record_groups.insert(format!("{}.{}", event.stream, event.seq), (group, role));
     }
+    // Each group's presentation is built once, the first time a span's event
+    // names it: a long node holds thousands of records in a handful of groups.
+    let mut presented: BTreeMap<(usize, DispatchRole), Value> = BTreeMap::new();
     for span in spans {
         for event in span["events"].as_array_mut().into_iter().flatten() {
-            if let Some(group) = event["record_id"]
+            if let Some(&(group, role)) = event["record_id"]
                 .as_str()
                 .and_then(|id| record_groups.get(id))
             {
-                event["dispatch_group"] = group.clone();
+                event["dispatch_group"] = presented
+                    .entry((group, role))
+                    .or_insert_with(|| presentation(group, role))
+                    .clone();
             }
         }
         if span["kind"] == "node" {
@@ -7359,6 +7392,10 @@ fn relayed_sessions<'a>(
     events: &[(usize, &'a Envelope)],
 ) -> Vec<(&'a str, Vec<(usize, &'a Envelope)>)> {
     let mut sessions: Vec<(&str, Vec<(usize, &Envelope)>)> = Vec::new();
+    // Where each session sits in `sessions`: a long run relays thousands of them,
+    // and a search of the list per record would compare every record's session
+    // with every one before it.
+    let mut placed: HashMap<&str, usize> = HashMap::new();
     for (index, event) in events {
         if event.source != Source::Agentgraph {
             continue;
@@ -7383,12 +7420,17 @@ fn relayed_sessions<'a>(
                     .flatten()
                 })
             });
-        let Some(session) = session.filter(|s| ConversationId::try_from(*s).is_ok()) else {
+        let Some(session) = session else {
             continue;
         };
-        match sessions.iter_mut().find(|(name, _)| *name == session) {
-            Some((_, relayed)) => relayed.push((*index, event)),
-            None => sessions.push((session, vec![(*index, event)])),
+        match placed.get(session) {
+            Some(&at) => sessions[at].1.push((*index, event)),
+            // Checked the first time it is met; one already placed was checked.
+            None if ConversationId::try_from(session).is_ok() => {
+                placed.insert(session, sessions.len());
+                sessions.push((session, vec![(*index, event)]));
+            }
+            None => {}
         }
     }
     sessions
@@ -7486,8 +7528,16 @@ impl<'a> SessionIndex<'a> {
             (Some(held), Some(at)) => Some(held.max(at)),
             (held, at) => held.or(at),
         };
+        // Each `{stream}.{member}` spelled once per session rather than once per
+        // record: a long run relays a hundred thousand records of a few thousand.
+        let mut spelled: HashMap<(&'a str, &'a str), String> = HashMap::new();
         for &(position, event) in events {
-            let key = member_label(event).map(|member| format!("{}.{member}", event.stream));
+            let key = member_label(event).map(|member| {
+                spelled
+                    .entry((event.stream.as_str(), member))
+                    .or_insert_with(|| format!("{}.{member}", event.stream))
+                    .as_str()
+            });
             let kind = event.kind.0.as_str();
             if event.source == Source::Pipeline
                 && matches!(kind, "node-settled" | "node-dispatched")
@@ -7506,18 +7556,25 @@ impl<'a> SessionIndex<'a> {
                     }
                 }
                 if [graph::MEMBER_SETTLED, graph::MEMBER_DIED].contains(&kind) {
-                    if let (Some(key), Some(at)) = (&key, millis_of(&event.ts)) {
-                        let held = index.member_closers.entry(key.clone()).or_insert(at);
-                        *held = (*held).max(at);
+                    if let (Some(key), Some(at)) = (key, millis_of(&event.ts)) {
+                        match index.member_closers.get_mut(key) {
+                            Some(held) => *held = (*held).max(at),
+                            None => {
+                                index.member_closers.insert(key.to_owned(), at);
+                            }
+                        }
                     }
                 }
             }
             if let Some(key) = key {
-                index
-                    .members
-                    .entry(key)
-                    .or_default()
-                    .push((position, event));
+                match index.members.get_mut(key) {
+                    Some(records) => records.push((position, event)),
+                    None => {
+                        index
+                            .members
+                            .insert(key.to_owned(), vec![(position, event)]);
+                    }
+                }
             }
         }
         index
