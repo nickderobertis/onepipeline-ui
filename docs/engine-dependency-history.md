@@ -769,3 +769,16 @@ copies, and for 0.79.1, 0.82.0, 0.84.0, 0.84.1 and 0.85.0; 0.56.9 for 0.89.0,
 which relays each check's times; 0.56.11 for 0.90.0; 0.57.0 for 0.95.5; and
 0.57.4 for 0.96.0 (^0.57.4), 0.96.1, 0.96.2, 0.97.0, 0.97.2,
 0.98.0, 0.98.3 and 0.98.4.
+
+0.110.2 is the engine that runs a `kind: command` node itself — its plan
+`command` argv with no shell and no agent, its output kept in the log its
+`command-started` record names, settled `done`, `failed` with `command-failed`
+or `failed` with `command-timed-out` — and offers every node a reply introduces
+or changes to the run's plan-edit hook, journalling the hook's refusal as
+`edit-rejected`. This crate moves to it, with the onetaskgraph 0.14.14 store that
+engine pins, so that the read API links the engine and plan store a host
+dispatches with, and serves (telemetry schema 29) a command node as a `command`
+with its argv, outcome and log, and every refused edit as `graph.rejected_edits`.
+0.110.1, released from the commit before that change merged, is skipped. Its
+oneagentgraph and onejudge requirements are the ones 0.110.0 resolved; the
+test-only onevcs moves to 0.66.0, which the engine now requires.
