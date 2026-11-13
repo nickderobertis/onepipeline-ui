@@ -109,6 +109,55 @@ fn with_ui_the_root_answers_the_bundles_index_and_its_assets_answer_their_bytes(
     }
 }
 
+/// A body served gzip-encoded, decoded.
+fn gunzipped(body: &[u8]) -> Vec<u8> {
+    use std::io::Read;
+    let mut decoded = Vec::new();
+    flate2::read::GzDecoder::new(body)
+        .read_to_end(&mut decoded)
+        .expect("the body is gzip");
+    decoded
+}
+
+/// An embedded file a request takes gzip for is served the encoding `build.rs`
+/// made of it: whole, so its length is known before it is sent, and the file's
+/// own bytes once decoded. A request that does not take gzip is served the file
+/// as it is, so what a page loads costs the server no compression either way.
+#[test]
+fn with_ui_an_embedded_file_asked_for_gzip_is_served_the_encoding_made_when_it_was_built() {
+    let bundle = built_bundle();
+    let index = fs::read(bundle.join("index.html")).expect("read the built index");
+    let serving = a_run_served_with(&["--ui"]);
+    let assets = assets_named_by(&String::from_utf8_lossy(&index));
+    assert!(!assets.is_empty(), "the built index names no asset");
+    for asset in assets {
+        let on_disk = fs::read(bundle.join(asset.trim_start_matches('/')))
+            .unwrap_or_else(|err| panic!("the index names {asset}, which the bundle lacks: {err}"));
+        let encoded = http::get_raw_with(
+            serving.address,
+            &asset,
+            &[("Accept-Encoding", "gzip, deflate, br, zstd")],
+        );
+        assert_eq!(encoded.status, 200, "{asset}");
+        assert_eq!(encoded.header("content-encoding"), Some("gzip"), "{asset}");
+        assert_eq!(encoded.header("vary"), Some("accept-encoding"), "{asset}");
+        // Encoded before it was asked for, so it is sent with its length rather
+        // than streamed out of an encoder.
+        assert_eq!(encoded.header("transfer-encoding"), None, "{asset}");
+        assert_eq!(
+            encoded.header("content-length"),
+            Some(encoded.body.len().to_string().as_str()),
+            "{asset}"
+        );
+        assert!(encoded.body.len() < on_disk.len(), "{asset}");
+        assert_eq!(gunzipped(&encoded.body), on_disk, "{asset}");
+
+        let plain = http::get_raw_with(serving.address, &asset, &[("Accept-Encoding", "identity")]);
+        assert_eq!(plain.header("content-encoding"), None, "{asset}");
+        assert_eq!(plain.body, on_disk, "{asset}");
+    }
+}
+
 /// What zod 4 keeps its internals under: a property name, which no minifier renames.
 const ZOD: &str = "_zod";
 
@@ -272,6 +321,16 @@ fn ui_dist_serves_the_directory_named_in_place_of_the_embedded_bundle() {
     let icon = http::get_raw(serving.address, "/favicon.svg");
     assert_eq!(icon.header("content-type"), Some("image/svg+xml"));
     assert_eq!(icon.body, b"<svg/>");
+    // Asked for gzip, a file on disk is encoded as it is served: no encoding
+    // made for the embedded bundle stands in for it.
+    let encoded = http::get_raw_with(
+        serving.address,
+        "/assets/app-1234.js",
+        &[("Accept-Encoding", "gzip")],
+    );
+    assert_eq!(encoded.header("content-encoding"), Some("gzip"));
+    assert_eq!(encoded.header("content-length"), None);
+    assert_eq!(gunzipped(&encoded.body), b"console.log('on disk')");
 
     // A deep link is the index here too.
     let deep = http::get_raw(serving.address, "/runs/deep/link?view=graph");

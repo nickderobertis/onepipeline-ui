@@ -12,6 +12,12 @@
 //!
 //! A client that does not ask is served exactly what it was before, and a
 //! body known to be empty, such as a `204`'s, is never encoded.
+//!
+//! A handler that already holds its body's encoding — the browser view's
+//! embedded files, encoded when the binary was built — attaches it as
+//! [`Precompressed`], and a request that takes gzip is served that instead of
+//! one made here. The decision stays this module's: a request that does not
+//! take gzip is served the body as it is.
 
 use std::io::Write;
 use std::pin::Pin;
@@ -28,6 +34,12 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use futures_core::Stream;
 
+/// The gzip encoding of a response's whole body, made before it was asked for,
+/// carried in the response's extensions for [`negotiate`] to serve in place of
+/// encoding the body itself.
+#[derive(Debug, Clone)]
+pub struct Precompressed(pub Bytes);
+
 /// Serve the response `next` makes gzip-encoded when the request takes gzip.
 pub async fn negotiate(request: Request, next: Next) -> Response {
     let gzip = accepts_gzip(request.headers());
@@ -36,8 +48,19 @@ pub async fn negotiate(request: Request, next: Next) -> Response {
     response
         .headers_mut()
         .append(VARY, HeaderValue::from_static("accept-encoding"));
+    let precompressed = response.extensions_mut().remove::<Precompressed>();
     if !gzip || response.body().size_hint().exact() == Some(0) {
         return response;
+    }
+    if let Some(Precompressed(encoded)) = precompressed {
+        let (mut parts, _) = response.into_parts();
+        parts
+            .headers
+            .insert(CONTENT_LENGTH, HeaderValue::from(encoded.len()));
+        parts
+            .headers
+            .insert(CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+        return Response::from_parts(parts, Body::from(encoded));
     }
     let per_frame = response
         .headers()
