@@ -22879,7 +22879,7 @@ fn a_command_log_outside_the_run_or_gone_is_served_as_its_name_alone() {
             .join("elsewhere.log");
         fs::write(&elsewhere, "a file the run never wrote\n").expect("a file elsewhere");
         let journal = dir.join("events.jsonl");
-        let named = dir.join("commands").join("build.log").display().to_string();
+        let named = dir.join("commands/build.log").display().to_string();
         let text = fs::read_to_string(&journal).expect("the journal");
         let rewritten: String = text
             .lines()
