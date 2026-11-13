@@ -399,6 +399,78 @@ test("each prototype makes its one change and leaves the other file alone", () =
   );
 });
 
+function scratchCrate() {
+  const dir = mkdtempSync(join(tmpdir(), "spike-split-"));
+  for (const f of [
+    "Cargo.toml",
+    "tests/e2e/main.rs",
+    "tests/e2e/ensure_sibling.rs",
+  ]) {
+    mkdirSync(join(dir, dirname(f)), { recursive: true });
+    copyFileSync(join(root, f), join(dir, f));
+  }
+  return dir;
+}
+const split = (dir) =>
+  spawnSync(
+    "node",
+    [join(root, "spikes/ci-test-speed/demo/split-script-journeys.mjs")],
+    { cwd: dir, encoding: "utf8" },
+  );
+
+test("the split moves the four script tiers' modules into a member that never names the crate", () => {
+  const dir = scratchCrate();
+  const r = split(dir);
+  assert.equal(r.status, 0, r.stderr);
+  const main = readFileSync(join(dir, "tests/e2e/main.rs"), "utf8");
+  for (const m of [
+    "ci_jobs",
+    "judged_tier",
+    "deps_audit_toolchain",
+    "nx_worker_startup",
+  ])
+    assert.doesNotMatch(main, new RegExp(`\\nmod ${m};\\n`));
+  assert.match(main, /\nmod deps_audit;\n/);
+  const member = readFileSync(
+    join(dir, "tests/script_journeys/Cargo.toml"),
+    "utf8",
+  );
+  assert.doesNotMatch(member, /onepipeline-ui =|onepipeline_ui/);
+  assert.match(member, /\[\[test\]\]\nname = "script-journeys"/);
+  const helpers = readFileSync(
+    join(dir, "tests/script_journeys/view_task_graph.rs"),
+    "utf8",
+  );
+  assert.match(
+    helpers,
+    /\npub\(super\) fn view_task_graph\(\) -> Command \{\n/,
+  );
+  assert.match(helpers, /\nfn reaches\(/);
+  assert.doesNotMatch(helpers, /onepipeline_ui/);
+  assert.match(
+    readFileSync(join(dir, "Cargo.toml"), "utf8"),
+    /\[workspace\]\nmembers = \[".", "tests\/script_journeys"\]\n$/,
+  );
+  const again = split(dir);
+  assert.equal(again.status, 1);
+  assert.match(again.stderr, /already exists: the split is applied/);
+});
+
+test("the cold-build measurement refuses a mode it does not know", () => {
+  const r = spawnSync(
+    "bash",
+    [
+      join(root, "spikes/ci-test-speed/demo/local-compile.sh"),
+      root,
+      "warm",
+      join(tmpdir(), "spike-never-built"),
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /mode is plain or instrumented, not 'warm'/);
+});
+
 test("the pyramid fake swaps the journey for the tarball test in the versions tier", () => {
   const dir = scratchTree();
   assert.equal(proto(dir, "pyramid-fake").status, 0);
