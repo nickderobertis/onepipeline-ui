@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.81.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.81.0...v0.81.1) - 2026-11-13
+
+### Fixed
+
+- *(deps)* link the engine whose warm host-wide unpublished read re-derives nothing ([#749](https://github.com/nickderobertis/onepipeline-ui/pull/749))
+
 ## [0.81.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.80.2...v0.81.0) - 2026-11-12
 
 ### Added
