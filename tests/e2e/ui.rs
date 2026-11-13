@@ -109,6 +109,42 @@ fn with_ui_the_root_answers_the_bundles_index_and_its_assets_answer_their_bytes(
     }
 }
 
+/// What zod 4 keeps its internals under: a property name, which no minifier renames.
+const ZOD: &str = "_zod";
+
+/// The script a page loads first draws a run's first screen, and asks for its first
+/// answer only once it has been evaluated, so it carries no zod and none of the
+/// contract's schemas built from it: the app's chunk, loaded after that answer is
+/// drawn, holds the full contract parse. Both are read as a browser reads them.
+#[test]
+fn with_ui_the_first_script_carries_no_contract_schema_and_the_app_chunk_holds_them() {
+    built_bundle();
+    let serving = a_run_served_with(&["--ui"]);
+    let index = String::from_utf8(http::get_raw(serving.address, "/").body).expect("utf-8 index");
+    let entry = assets_named_by(&index)
+        .into_iter()
+        .find(|asset| asset.ends_with(".js"))
+        .expect("the index names a script");
+    let first = http::get_raw(serving.address, &entry);
+    assert_eq!(first.status, 200, "{entry}");
+    let first = String::from_utf8_lossy(&first.body);
+    assert!(
+        !first.contains(ZOD),
+        "{entry}, the script a page evaluates before it asks for its first answer, carries zod"
+    );
+    let app = first
+        .split(['`', '"', '\''])
+        .find(|part| part.starts_with("./mount-") && part.ends_with(".js"))
+        .map(|part| format!("/assets/{}", part.trim_start_matches("./")))
+        .expect("the first script imports the app's chunk");
+    let chunk = http::get_raw(serving.address, &app);
+    assert_eq!(chunk.status, 200, "{app}");
+    assert!(
+        String::from_utf8_lossy(&chunk.body).contains(ZOD),
+        "{app}, the app's chunk, holds no zod, so the check above reads nothing"
+    );
+}
+
 /// The app is a single-page one: a path it owns is a route, not a file, and
 /// opens as the index rather than as a 404.
 #[test]
