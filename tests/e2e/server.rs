@@ -22783,6 +22783,12 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
 
     let ended = node_record_fields(&serving, &run, "integration", "command-exited");
     assert_eq!(ended[0]["Ending"], json!("timed-out"), "{ended:?}");
+    assert_eq!(ended[0]["Duration (ms)"], json!(30004), "{ended:?}");
+    assert!(ended[0].get("Exit code").is_none(), "{ended:?}");
+    let started = node_record_fields(&serving, &run, "integration", "command-started");
+    assert_eq!(started[0]["Timeout (seconds)"], json!(30), "{started:?}");
+    let started = node_record_fields(&serving, &run, "lint", "command-started");
+    assert!(started[0].get("Timeout (seconds)").is_none(), "{started:?}");
     let ended = node_record_fields(&serving, &run, "lint", "command-exited");
     assert_eq!(ended[0]["Exit code"], json!(101), "{ended:?}");
 
