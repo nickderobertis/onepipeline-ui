@@ -288,6 +288,11 @@ function windows(dir) {
 const SERVICES =
   /^(svchost|wmiprvse|wmiadap|smartscreen|vssvc|mousocoreworker|trustedinstaller|tiworker|runtimebroker|sppsvc|provtool|searchindexer|searchprotocolhost|searchfilterhost|msmpeng|mpcmdrun|compattelrunner|taskhostw|dllhost|backgroundtaskhost|wudfhost|lsass|services|csrss|wininit|winlogon|vctip|mdworker_s|mdworker|mds|mds_stores|spotlightk|spotlight|CacheDelet|xpcproxy|warmd|rpcsvchost|corecaptur|mdmclient|wifiFirmwa|ManagedCli|trustd|syspolicyd|XprotectSe)$/i;
 
+// A build inside the job's container runs as root, often under parents the
+// recorder never saw start: a root compiler is still the job's work.
+const BUILD_TOOLS =
+  /^(rustc|cargo|maturin|rustup|cc|c\+\+|gcc|cc1|cc1plus|as|ar|ld|ld\.bfd|ld\.lld|collect2|rust-lld|build-script-|strip|auditwheel|patchelf)/;
+
 // The user most of the job's compiler and shell processes ran as; every other
 // user's process (root's daemons, Spotlight's indexers) is the runner image's.
 function jobUser(procs) {
@@ -302,9 +307,26 @@ export function recorded(dir) {
   const rec = linux(dir) ?? macos(dir) ?? windows(dir);
   if (!rec) return null;
   const user = jobUser(rec.procs);
+  // A container the job started (the manylinux wheel build) runs as root: its
+  // processes descend from containerd-shim and are the job's work.
+  const byPid = new Map();
+  for (const p of rec.procs) if (!byPid.has(p.pid)) byPid.set(p.pid, p);
+  const inContainer = (p) => {
+    for (
+      let q = byPid.get(p.ppid), n = 0;
+      q && n < 40;
+      q = byPid.get(q.ppid), n += 1
+    )
+      if (/^containerd-shim/.test(q.comm ?? "")) return true;
+    return false;
+  };
   for (const p of rec.procs)
     p.system =
-      (user != null && p.uid != null && p.uid !== user) ||
+      (user != null &&
+        p.uid != null &&
+        p.uid !== user &&
+        !(rec.tree && inContainer(p)) &&
+        !BUILD_TOOLS.test(p.comm ?? "")) ||
       /^(kworker|ksoftirq|kthreadd|rcu_|migration\/|dbus-daemon|systemd)/.test(
         p.comm ?? "",
       ) ||

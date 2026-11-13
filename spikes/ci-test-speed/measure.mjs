@@ -146,6 +146,16 @@ function owners(procs, executions, commands) {
 }
 
 const BIN = 250;
+// Built or run under `cargo llvm-cov` (or this repository's coverage-rustc
+// forwarder): an exit record keeps its name even where its arguments were lost.
+function underCoverage(p) {
+  if (p._cov !== undefined) return p._cov;
+  let q = p.parent;
+  for (let n = 0; q && n < 60; q = q.parent, n += 1)
+    if (/^(cargo-llvm-cov|coverage-rustc)$/.test(q.comm ?? ""))
+      return (p._cov = true);
+  return (p._cov = false);
+}
 function leafShares(rec, a, b, instrumentedTask) {
   const nbins = Math.ceil((b - a) / BIN);
   const bins = Array.from({ length: nbins }, () => []);
@@ -168,6 +178,7 @@ function leafShares(rec, a, b, instrumentedTask) {
   const perTask = new Map();
   const add = (m, k, v) => m.set(k, (m.get(k) ?? 0) + v);
   const others = new Map();
+  const waiters = new Map();
   let idle = 0;
   for (let i = 0; i < nbins; i += 1) {
     const lo = a + i * BIN;
@@ -201,17 +212,24 @@ function leafShares(rec, a, b, instrumentedTask) {
       const wait = Math.min(1 - sleep, overlap(p.waits) / width);
       const inst =
         (p.task && instrumentedTask(p.task)) ||
-        /llvm-cov|instrument-coverage/.test(p.argv ?? "");
+        /llvm-cov|instrument-coverage/.test(p.argv ?? "") ||
+        underCoverage(p);
       const work = group(classify(p), inst);
       add(cats, work, share * (1 - sleep - wait));
       if (work === group("other")) add(others, p.comm ?? "?", share);
       if (sleep) add(cats, group("sleep"), share * sleep);
       if (wait) add(cats, group("wait"), share * wait);
+      if (sleep || wait)
+        add(
+          waiters,
+          `${p.comm ?? "?"} (${classify(p)})`,
+          share * (sleep + wait),
+        );
       add(perTask, p.task ?? "(no Nx task)", share);
     }
     if (total < 1) idle += len * (1 - total);
   }
-  return { cats, perTask, idle, others };
+  return { cats, perTask, idle, others, waiters };
 }
 
 // Without a recorder: each instant shared equally between the Nx tasks that
@@ -369,6 +387,7 @@ for (const name of wanted) {
   let covered = 0;
   const perTask = new Map();
   const others = new Map();
+  const waiters = new Map();
   const instrumentedTask = (task) =>
     /_tier-test-covered|coverage/.test(commands[task] ?? "");
   let matched = null;
@@ -387,6 +406,8 @@ for (const name of wanted) {
       add(`${prefix}unattributed (no recorded work running)`, sub.idle);
       for (const [k, v] of sub.others ?? [])
         others.set(k, (others.get(k) ?? 0) + v);
+      for (const [k, v] of sub.waiters ?? [])
+        waiters.set(k, (waiters.get(k) ?? 0) + v);
       // Each task's exclusive minutes on every platform: each instant of the
       // gate step shared equally between the Nx tasks executing then.
       if (st.cat === "gate")
@@ -444,6 +465,10 @@ for (const name of wanted) {
       })
       .filter(Boolean),
     nested_fixture_records: nestedRecords,
+    sleeping_and_polling: [...waiters]
+      .map(([process, ms]) => ({ process, minutes: ms / 60000 }))
+      .sort((x, y) => y.minutes - x.minutes)
+      .slice(0, 15),
     other_processes: [...others]
       .map(([comm, ms]) => ({ comm, minutes: ms / 60000 }))
       .sort((x, y) => y.minutes - x.minutes)
