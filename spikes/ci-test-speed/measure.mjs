@@ -179,6 +179,7 @@ function leafShares(rec, a, b, instrumentedTask) {
   const add = (m, k, v) => m.set(k, (m.get(k) ?? 0) + v);
   const others = new Map();
   const waiters = new Map();
+  const idleOf = new Map();
   let idle = 0;
   for (let i = 0; i < nbins; i += 1) {
     const lo = a + i * BIN;
@@ -208,14 +209,24 @@ function leafShares(rec, a, b, instrumentedTask) {
           0,
         );
       const width = Math.max(1, span[1] - span[0]);
-      const sleep = Math.min(1, overlap(p.sleeps) / width);
-      const wait = Math.min(1 - sleep, overlap(p.waits) / width);
+      // Linux's tracer sees each sleep and timed-out wait. Elsewhere only a
+      // process's CPU time is recorded: its elapsed time beyond that CPU is
+      // waiting of every kind (sleeps, polls, timeouts and I/O alike).
+      const traced = rec.platform === "linux";
+      const sleep = traced ? Math.min(1, overlap(p.sleeps) / width) : 0;
+      const beyondCpu =
+        !traced && p.cpu != null && p.end > p.start
+          ? Math.max(0, 1 - p.cpu / (p.end - p.start))
+          : 0;
+      const wait = traced ? Math.min(1 - sleep, overlap(p.waits) / width) : 0;
       const inst =
         (p.task && instrumentedTask(p.task)) ||
         /llvm-cov|instrument-coverage/.test(p.argv ?? "") ||
         underCoverage(p);
       const work = group(classify(p), inst);
       add(cats, work, share * (1 - sleep - wait));
+      // Off Linux not a category of its own: an "of which" beside each one.
+      if (beyondCpu) add(idleOf, work, share * beyondCpu);
       if (work === group("other")) add(others, p.comm ?? "?", share);
       if (sleep) add(cats, group("sleep"), share * sleep);
       if (wait) add(cats, group("wait"), share * wait);
@@ -229,7 +240,7 @@ function leafShares(rec, a, b, instrumentedTask) {
     }
     if (total < 1) idle += len * (1 - total);
   }
-  return { cats, perTask, idle, others, waiters };
+  return { cats, perTask, idle, others, waiters, idleOf };
 }
 
 // Without a recorder: each instant shared equally between the Nx tasks that
@@ -388,6 +399,7 @@ for (const name of wanted) {
   const perTask = new Map();
   const others = new Map();
   const waiters = new Map();
+  const idleOf = new Map();
   const instrumentedTask = (task) =>
     /_tier-test-covered|coverage/.test(commands[task] ?? "");
   let matched = null;
@@ -408,6 +420,8 @@ for (const name of wanted) {
         others.set(k, (others.get(k) ?? 0) + v);
       for (const [k, v] of sub.waiters ?? [])
         waiters.set(k, (waiters.get(k) ?? 0) + v);
+      for (const [k, v] of sub.idleOf ?? [])
+        idleOf.set(prefix + k, (idleOf.get(prefix + k) ?? 0) + v);
       // Each task's exclusive minutes on every platform: each instant of the
       // gate step shared equally between the Nx tasks executing then.
       if (st.cat === "gate")
@@ -416,6 +430,30 @@ for (const name of wanted) {
     } else add(st.cat, e - s);
   }
   add("unattributed (runner time between steps)", Math.max(0, b - a - covered));
+  // Every category the brief names is reported, a measured zero included: on a
+  // run with the recorder a category absent here is one no process fell in.
+  if (rec)
+    for (const name of [
+      "compile (plain)",
+      "compile (instrumented)",
+      "link (plain)",
+      "link (instrumented)",
+      "coverage overhead (profdata, llvm-cov, merge)",
+      "spawns: onepipeline engine CLI",
+      "spawns: git",
+      "spawns: npm",
+      "spawns: bun",
+      "spawns: Python (python, pip, uv, llmlint)",
+      "spawns: browsers",
+      "spawns: network clients (curl, gh)",
+      "fixtures (fixture-building scripts)",
+      "sleeps",
+      "polls and timeouts (waits that ended by timing out)",
+      "setup",
+      "cache restore",
+      "cache save (post steps)",
+    ])
+      add(name, 0);
   const wall = b - a;
   const tests = blocks.flatMap((blk) =>
     blk.tests.map((t) => ({ ...t, task: blk.task })),
@@ -497,6 +535,11 @@ for (const name of wanted) {
           tasks_matched: matched,
         }
       : null,
+    // Off Linux: of each category's minutes, how many its processes spent
+    // beyond their CPU time (sleeps, polls, timeouts and I/O, inseparable).
+    elapsed_beyond_cpu: Object.fromEntries(
+      [...idleOf].map(([k, v]) => [k, v / 60000]),
+    ),
     categories: [...cats]
       .map(([k, v]) => ({ category: k, minutes: v / 60000, share: v / wall }))
       .sort((x, y) => y.minutes - x.minutes),
@@ -543,11 +586,14 @@ for (const j of result.jobs) {
   console.log(
     `   Nx remote cache stored ${j.nx_cache_stored_bytes ?? "?"} bytes`,
   );
-  console.log("   minutes  share  category");
+  const beyond = Object.keys(j.elapsed_beyond_cpu).length > 0;
+  console.log(
+    `   minutes  share  ${beyond ? "of which beyond CPU  " : ""}category`,
+  );
   for (const c of j.categories)
-    if (c.minutes >= 0.05)
+    if (c.minutes >= 0.05 || c.minutes === 0)
       console.log(
-        `   ${fmt(c.minutes)} ${(c.share * 100).toFixed(1).padStart(5)}%  ${c.category}`,
+        `   ${fmt(c.minutes)} ${(c.share * 100).toFixed(1).padStart(5)}%  ${beyond ? `${fmt(j.elapsed_beyond_cpu[c.category] ?? 0)}               ` : ""}${c.category}`,
       );
   console.log(
     `   ${fmt(j.categories.reduce((s, c) => s + c.minutes, 0))} total (wall ${j.wall_minutes.toFixed(1)})`,

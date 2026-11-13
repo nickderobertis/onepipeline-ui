@@ -160,6 +160,8 @@ export function group(cat, instrumented) {
       return "sleeps";
     case "wait":
       return "polls and timeouts (waits that ended by timing out)";
+    case "idle":
+      return "sleeps, polls, timeouts and I/O waits (elapsed beyond CPU; not separable here)";
     case "glue":
     case "archive":
       return "shell, just and archive glue";
