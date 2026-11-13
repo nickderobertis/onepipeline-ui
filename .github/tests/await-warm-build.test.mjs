@@ -227,11 +227,21 @@ journey(
   async () => {
     const host = await github([warm.exact]);
     try {
-      const result = await workflowStep(host, await guardStarted());
+      const started = await guardStarted();
+      const before = Date.now();
+      const result = await workflowStep(host, started);
       assert.equal(result.code, 0, result.stderr);
-      assert.equal(
-        result.stdout,
-        "warm-linux (run 42) restored this key's own build, which the release pull request restores too; waited 0 s.\n",
+      // At once is one read and no poll: the figure it prints is how long that
+      // read took, which on a loaded runner can round to a second, so it is
+      // held to the step's own run rather than to a wall-clock boundary.
+      const waited = result.stdout.match(
+        /^warm-linux \(run 42\) restored this key's own build, which the release pull request restores too; waited (\d+) s\.\n$/,
+      );
+      assert.ok(waited, result.stdout);
+      assert.equal(host.state.reads, 1, "nothing was waited for");
+      assert.ok(
+        Number(waited[1]) <= Math.ceil((result.endedAt - before) / 1000),
+        `waited ${waited[1]} s is no longer than the step ran`,
       );
       assert.equal(result.stderr, "");
       // The newest run for this push, read with the job's own token.
