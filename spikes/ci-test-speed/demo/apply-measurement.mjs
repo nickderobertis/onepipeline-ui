@@ -11,7 +11,7 @@
 //     its gate step and uploads it as `spike-profile-<job>`, and asks nextest
 //     for every passing test's duration (NEXTEST_STATUS_LEVEL=pass).
 //
-// `--touch-src` also appends a comment line to src/lib.rs, so Nx selects what a
+// `--ab` is the historical A/B's addition (below). `--touch-src` also appends a comment line to src/lib.rs, so Nx selects what a
 // pull request editing the crate's Rust source selects.
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 
@@ -23,7 +23,9 @@ const fail = (why) => {
 };
 function replaceAll(pattern, replacement, expected) {
   const found = text.match(pattern)?.length ?? 0;
-  if (found !== expected)
+  // `expected` null: every match, at least one (workflows differ in how
+  // many setup steps they carry).
+  if (expected === null ? found === 0 : found !== expected)
     fail(`expected ${expected} matches of ${pattern}, found ${found}`);
   text = text.replace(pattern, replacement);
 }
@@ -31,8 +33,8 @@ for (const m of text.matchAll(/save-if: (.*)/g))
   if (m[1].trim() !== "false") fail(`a rust-cache step saves: ${m[0]}`);
 
 replaceAll(/CACHE_READ_ONLY: \$\{\{[^\n]*\}\}/g, "CACHE_READ_ONLY: '1'", 4);
-replaceAll(/no-cache: \$\{\{[^\n]*\}\}/g, "no-cache: true", 5);
-replaceAll(/enable-cache: \$\{\{[^\n]*\}\}/g, "enable-cache: false", 2);
+replaceAll(/no-cache: \$\{\{[^\n]*\}\}/g, "no-cache: true", null);
+replaceAll(/enable-cache: \$\{\{[^\n]*\}\}/g, "enable-cache: false", null);
 replaceAll(
   /\n {2}lint:\n {4}if: github\.event_name == 'pull_request'\n/g,
   "\n  lint:\n    if: false\n",
@@ -68,6 +70,17 @@ const stop = (step) => `${step}
 for (const recipe of ["ci-test-linux", "ci-test-windows", "ci-test-macos"]) {
   const pattern = new RegExp(`\\n {8}run: just ${recipe}[^\\n]*\\n`, "g");
   replaceAll(pattern, (m) => stop(m.replace(/\n$/, "")), 1);
+}
+// `--ab`: the historical A/B executes every task on both sides (no Nx cache
+// read, so today's cache contents cannot favour either tree) and gives Linux
+// room to finish a whole-workspace selection.
+if (process.argv.includes("--ab")) {
+  replaceAll(
+    /\n {6}NEXTEST_STATUS_LEVEL: pass\n/g,
+    "\n      NEXTEST_STATUS_LEVEL: pass\n      NX_SKIP_NX_CACHE: 'true'\n",
+    3,
+  );
+  replaceAll(/\n {4}timeout-minutes: 36\n/g, "\n    timeout-minutes: 60\n", 1);
 }
 writeFileSync(file, text);
 if (process.argv.includes("--touch-src"))

@@ -188,3 +188,16 @@ test("the measurement patch refuses a workflow whose Rust cache saves", () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /a rust-cache step saves: save-if: true/);
 });
+
+test("the A/B patch skips Nx cache reads in every test job and widens only Linux's timeout", () => {
+  const dir = scratchCi();
+  const r = apply(dir, "--ab");
+  assert.equal(r.status, 0, r.stderr);
+  const ci = readFileSync(join(dir, ".github/workflows/ci.yml"), "utf8");
+  assert.equal((ci.match(/NX_SKIP_NX_CACHE: 'true'/g) ?? []).length, 3);
+  assert.equal((ci.match(/timeout-minutes: 60/g) ?? []).length, 1);
+  assert.doesNotMatch(
+    readFileSync(join(dir, "src/lib.rs"), "utf8"),
+    /Spike measurement/,
+  );
+});

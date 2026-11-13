@@ -31,6 +31,12 @@ const cache = new Cache(
   resolve(opt("cache", "target/spike-ci-test-speed/cache")),
   argv.includes("--offline"),
 );
+const ECOSYSTEMS = [
+  ["cargo", ["Cargo.toml", "Cargo.lock"]],
+  ["npm", ["package.json", "bun.lock", "package-lock.json", "pnpm-lock.yaml"]],
+  ["python", ["pyproject.toml", "uv.lock"]],
+  ["files", [".github/nx-version-files"]],
+];
 const JOBS = ["test-linux", "test-macos", "test-windows"];
 const here = process.cwd();
 const git = (...a) =>
@@ -208,13 +214,24 @@ for (const pr of prs) {
         t.matched = inp?.files ?? [];
         if (t.result === "executed" && t.cacheable && !t.matched.length) {
           const rt = inp?.runtime ?? [];
-          t.cause = rt.includes("git merge-base HEAD origin/main")
-            ? "runtime input `git merge-base HEAD origin/main` (moves with every base)"
-            : rt.includes("git ls-files") && lsFilesMoved.length
-              ? "runtime input `git ls-files` (files added or removed)"
-              : inp?.dep_outputs?.length
-                ? `an upstream task's outputs (${inp.dep_outputs.join(", ").slice(0, 120)})`
-                : "no diff-matched input: entry absent from the remote cache";
+          // A manifest is keyed through its version-free digest, a runtime input,
+          // rather than as a file: a moved lock reaches a task that way.
+          const eco = ECOSYSTEMS.filter(
+            ([name, files]) =>
+              rt.some((c) => c.includes(`--ecosystem ${name}`)) &&
+              row.changed.some((f) =>
+                files.some((m) => f === m || f.endsWith(`/${m}`)),
+              ),
+          ).map(([name]) => name);
+          t.cause = eco.length
+            ? `version-free manifest digest (${eco.join(", ")}): ${row.changed.filter((f) => ECOSYSTEMS.some(([n, files]) => eco.includes(n) && files.some((m) => f === m || f.endsWith(`/${m}`)))).join(", ")}`
+            : rt.includes("git merge-base HEAD origin/main")
+              ? "runtime input `git merge-base HEAD origin/main` (moves with every base)"
+              : rt.includes("git ls-files") && lsFilesMoved.length
+                ? "runtime input `git ls-files` (files added or removed)"
+                : inp?.dep_outputs?.length
+                  ? `an upstream task's outputs (${inp.dep_outputs.join(", ").slice(0, 120)})`
+                  : "no diff-matched input: entry absent from the remote cache";
         }
       }
   } catch (error) {
