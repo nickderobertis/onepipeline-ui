@@ -7442,7 +7442,9 @@ impl<'a> SessionIndex<'a> {
                 match index.members.get_mut(key) {
                     Some(records) => records.push((position, event)),
                     None => {
-                        index.members.insert(key.to_owned(), vec![(position, event)]);
+                        index
+                            .members
+                            .insert(key.to_owned(), vec![(position, event)]);
                     }
                 }
             }
