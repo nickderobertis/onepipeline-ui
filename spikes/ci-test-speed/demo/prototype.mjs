@@ -31,16 +31,24 @@ const TARBALL_FAKE = `
 #[test]
 fn the_crate_tarball_carries_the_view_sources_and_no_built_view() {
     let packaged = packaged_files();
-    assert!(packaged.iter().any(|path| path == "build.rs"), "{packaged:?}");
     assert!(
-        packaged.iter().any(|path| path.starts_with("apps/dag-ui/src/")),
+        packaged.iter().any(|path| path == "build.rs"),
+        "{packaged:?}"
+    );
+    assert!(
+        packaged
+            .iter()
+            .any(|path| path.starts_with("apps/dag-ui/src/")),
         "{packaged:?}"
     );
     let built: Vec<&String> = packaged
         .iter()
         .filter(|path| path.starts_with("apps/dag-ui/dist/"))
         .collect();
-    assert!(built.is_empty(), "the crate tarball carries a built view: {built:?}");
+    assert!(
+        built.is_empty(),
+        "the crate tarball carries a built view: {built:?}"
+    );
 }
 `;
 
