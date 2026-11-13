@@ -7909,3 +7909,114 @@ pub fn recorded_termination(kind: &str) -> Value {
     }
     corpus
 }
+
+/// The run the command-steps corpus records: five `kind: command` nodes the
+/// engine ran itself — two settled `done` (one first started on another host, one
+/// whose log the run no longer holds), one `failed` with `command-failed`, one
+/// `failed` with `command-timed-out` whose log runs past what a route serves, and
+/// one never started — and two refused live edits journalled `edit-rejected`: a
+/// decline refused by kind, and an `add` the run's plan-edit hook refused.
+///
+/// The corpus is one document, `apps/dag-ui-e2e/fixtures/command-steps.json`,
+/// which the browser tier writes into its own runs root as well, so the run a
+/// journey here serves and the run the view renders are the same records.
+pub const COMMAND_STEPS_CORPUS: &str =
+    include_str!("../../apps/dag-ui-e2e/fixtures/command-steps.json");
+
+pub fn command_steps() -> Value {
+    serde_json::from_str(COMMAND_STEPS_CORPUS).expect("the command-steps corpus is JSON")
+}
+
+/// The whole log the command-steps corpus writes for `node`: its `logs` text,
+/// after the `log_padding` the corpus names for it — a run of one character long
+/// enough to put the log past what a route serves of one.
+pub fn command_steps_log(corpus: &Value, node: &str, said: &Value) -> String {
+    let said = said.as_str().expect("a log's text");
+    let padding = &corpus["log_padding"][node];
+    let repeat = padding["repeat"]
+        .as_u64()
+        .map_or(0, |n| usize::try_from(n).expect("a count"));
+    format!(
+        "{}{said}",
+        padding["text"].as_str().unwrap_or_default().repeat(repeat)
+    )
+}
+
+/// Write the command-steps corpus under `root` as the engine records a run: its
+/// launch record, the plan its `run-started` carried, each command's log under
+/// the run, and its journal — every line the engine's own [`Envelope`] as it
+/// serializes, every kind one the engine declares and every payload held to the
+/// schema the engine publishes for that kind, the plan read as the engine's `Plan`
+/// and a refused edit's command as its channel `Command`, so a record the linked
+/// engine could not have written is refused here before anything serves it.
+/// A `command-started` naming its log relative to the run names it by its path
+/// under the run, as the engine writes it, absolute; one naming an absolute path —
+/// a start recorded on another host — names that path as written.
+pub fn write_command_steps(root: &Path) -> PathBuf {
+    let corpus = command_steps();
+    let run = corpus["run_id"].as_str().expect("the corpus names its run");
+    let dir = root.join(run);
+    fs::create_dir_all(&dir).expect("the run directory");
+    fs::write(dir.join("launch.json"), pretty(&corpus["launch"])).expect("the launch record");
+    let records = corpus["records"].as_array().expect("the corpus's records");
+    let plan = &records[0]["payload"]["plan"];
+    let _: onepipeline::plan::Plan =
+        serde_json::from_value(plan.clone()).expect("the corpus's plan is the engine's");
+    fs::write(dir.join("plan.json"), pretty(plan)).expect("the plan");
+    for (node, said) in corpus["logs"].as_object().expect("the corpus's logs") {
+        let log = dir.join("commands").join(format!("{node}.log"));
+        fs::create_dir_all(log.parent().expect("the log's directory")).expect("the log directory");
+        fs::write(&log, command_steps_log(&corpus, node, said)).expect("the log");
+    }
+    let start = time::OffsetDateTime::parse(START, &time::format_description::well_known::Rfc3339)
+        .expect("the fixture's start");
+    let mut lines = String::new();
+    let registry = onepipeline::payload::registry();
+    for (seq, record) in (0_i64..).zip(records) {
+        let kind = record["kind"].as_str().expect("a record's kind");
+        let declared = onepipeline::event::PipelineKind::from_wire(&onepipeline::event::EventKind(
+            kind.to_owned(),
+        ))
+        .unwrap_or_else(|| panic!("`{kind}` is not a kind the linked engine journals"));
+        let mut payload = record["payload"].clone();
+        if let Some(log) = payload.get("log").and_then(Value::as_str) {
+            payload["log"] = json!(dir.join(log).display().to_string());
+        }
+        // Each payload is held, as it is written, to the schema the linked engine
+        // publishes for its kind — the document that engine's own writer
+        // serializes — so a corpus record whose fields the engine renamed, retyped or
+        // made required is refused here rather than served as if it were current.
+        if let Err(refused) = registry.check(&onepipeline::payload::schema_of(declared), &payload) {
+            panic!("the corpus's `{kind}` record departs from the engine's schema: {refused}");
+        }
+        if let Some(command) = payload.get("command").filter(|_| kind == "edit-rejected") {
+            let _: onepipeline::channel::Command = serde_json::from_value(command.clone())
+                .expect("the refused command is the engine's");
+        }
+        let mut labels = json!({ "run_id": run });
+        if let Some(node) = record.get("node") {
+            labels["node"] = node.clone();
+        }
+        let at = (start + time::Duration::seconds(seq))
+            .format(&time::macros::format_description!(
+                "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+            ))
+            .expect("a stamp");
+        let envelope: Envelope = serde_json::from_value(json!({
+            "v": 1,
+            "ts": at,
+            "stream": corpus["stream"],
+            "seq": seq,
+            "source": record["source"],
+            "kind": kind,
+            "labels": labels,
+            "payload": payload,
+            "artifacts": [],
+        }))
+        .expect("a record the engine's envelope reads");
+        lines.push_str(&serde_json::to_string(&envelope).expect("the envelope serializes"));
+        lines.push('\n');
+    }
+    fs::write(dir.join("events.jsonl"), lines).expect("the journal");
+    dir
+}

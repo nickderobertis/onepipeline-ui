@@ -190,6 +190,7 @@ export function NodeTimelineView({
 
       <NodeProblemBanner node={node} nodes={nodes} />
       <NodeAwaitingPanel node={node} />
+      <NodeCommandPanel node={node} />
 
       <Tabs
         className="node-tabs"
@@ -1134,6 +1135,63 @@ function NodeAwaitingPanel({ node }: { readonly node: NodeView }) {
         )}
         {/* llmlint: ignore-end[changed_behavior_has_e2e] */}
       </dl>
+    </section>
+  );
+}
+
+/**
+ * A command node's own account: what the engine ran, how it ended, and the end of
+ * the log its command wrote — the whole of what such a node did, since it
+ * dispatched no agent and so has no transcript to open. Absent for every other kind.
+ */
+function NodeCommandPanel({ node }: { readonly node: NodeView }) {
+  if (node.kind !== "command") return null;
+  const argv = node.task?.command;
+  const timeout = node.task?.timeout_seconds;
+  const outcome = node.result?.outcome;
+  const log = node.result?.log;
+  return (
+    <section aria-label="Command" className="node-command m-5">
+      <dl className="facts">
+        {argv !== undefined && (
+          <div>
+            <dt>Command</dt>
+            <dd>
+              <code>{argv.join(" ")}</code>
+            </dd>
+          </div>
+        )}
+        {timeout !== undefined && (
+          <div>
+            <dt>Timeout</dt>
+            <dd>{timeout} seconds</dd>
+          </div>
+        )}
+        <div>
+          <dt>Outcome</dt>
+          <dd>{outcome ?? node.status}</dd>
+        </div>
+        <div>
+          <dt>Log</dt>
+          <dd>
+            {log === undefined ? "The command has not started." : log.path}
+          </dd>
+        </div>
+      </dl>
+      {log?.content !== undefined ? (
+        <figure className="node-command-log-figure">
+          <figcaption>Command log</figcaption>
+          <pre className="node-command-log">
+            {log.truncated === true ? `…${log.content}` : log.content}
+          </pre>
+        </figure>
+      ) : (
+        log !== undefined && (
+          <p className="node-command-log-missing">
+            The log is not readable from this run.
+          </p>
+        )
+      )}
     </section>
   );
 }

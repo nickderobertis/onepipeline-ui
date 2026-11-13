@@ -198,7 +198,7 @@
     {
       "kind": "enum",
       "nullable": false,
-      "words": ["agent", "human"],
+      "words": ["agent", "human", "command"],
       "field": "answer.initial.snapshot.visible.detail.graph.plan.tasks[0].kind",
       "required": false,
       "wrong": 42,

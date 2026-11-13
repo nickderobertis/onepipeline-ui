@@ -396,7 +396,7 @@ const result = object({
 
 const task = object({
   id: string,
-  kind: maybe(oneOf(["agent", "human"])),
+  kind: maybe(oneOf(["agent", "human", "command"])),
   deps: maybe(strings),
 });
 
