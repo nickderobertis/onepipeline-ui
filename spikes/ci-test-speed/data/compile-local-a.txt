@@ -1,0 +1,18 @@
+# Option A's cold build, today's layout against the split, 3 runs per side, interleaved, on this shared 20-core host
+# (load1 recorded; CPU seconds are the comparison). Each line is one run of
+#   bash spikes/ci-test-speed/demo/local-compile.sh <checkout> <plain|instrumented> <target dir>
+# at commit 7fe89df's local-compile.sh, sccache off. 'today' is a checkout of 88afb66; 'split' is 8473458
+# with demo/split-script-journeys.mjs (as committed at 88afb66) applied. The two commits differ only under
+# spikes/, which the crate does not build.
+run=1 layout=today plain elapsed_s=336.02 user_s=1444.09 sys_s=229.66 cpu_s=1673.75 load1=30.12/26.16 13:14:04Z
+run=1 layout=split plain elapsed_s=248.17 user_s=1285.83 sys_s=212.60 cpu_s=1498.43 load1=26.16/14.89 13:18:13Z
+run=1 layout=today instrumented elapsed_s=250.72 user_s=1257.94 sys_s=212.73 cpu_s=1470.67 load1=14.89/17.60 13:22:25Z
+run=1 layout=split instrumented elapsed_s=302.64 user_s=1330.02 sys_s=217.86 cpu_s=1547.88 load1=17.60/19.63 13:27:29Z
+run=2 layout=today plain elapsed_s=280.01 user_s=1326.46 sys_s=216.33 cpu_s=1542.79 load1=19.63/20.05 13:32:11Z
+run=2 layout=split plain elapsed_s=328.49 user_s=1367.70 sys_s=217.74 cpu_s=1585.44 load1=20.05/22.73 13:37:40Z
+run=2 layout=today instrumented elapsed_s=265.00 user_s=1288.21 sys_s=213.62 cpu_s=1501.83 load1=22.73/21.12 13:42:07Z
+run=2 layout=split instrumented elapsed_s=259.40 user_s=1270.39 sys_s=212.00 cpu_s=1482.39 load1=20.23/21.37 13:46:27Z
+run=3 layout=today plain elapsed_s=256.53 user_s=1260.81 sys_s=206.37 cpu_s=1467.18 load1=22.71/17.89 13:50:46Z
+run=3 layout=split plain elapsed_s=247.31 user_s=1286.70 sys_s=211.44 cpu_s=1498.14 load1=17.89/18.02 13:54:54Z
+run=3 layout=today instrumented elapsed_s=273.15 user_s=1320.23 sys_s=215.41 cpu_s=1535.64 load1=18.02/21.46 13:59:28Z
+run=3 layout=split instrumented elapsed_s=244.40 user_s=1256.21 sys_s=213.52 cpu_s=1469.73 load1=21.46/16.93 14:03:34Z
