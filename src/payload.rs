@@ -2536,7 +2536,7 @@ fn log_tail(run_dir: &Path, path: &Path) -> Option<(String, bool)> {
     let skipped = length.saturating_sub(bound);
     file.seek(SeekFrom::Start(skipped)).ok()?;
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).ok()?;
+    file.take(bound).read_to_end(&mut bytes).ok()?;
     Some((String::from_utf8_lossy(&bytes).into_owned(), skipped > 0))
 }
 
