@@ -387,3 +387,60 @@ test("a prototype whose edit site moved is refused, and an unknown one is a usag
   assert.match(again.stderr, /\.config\/nextest\.toml no longer holds/);
   assert.equal(proto(dir, "faster").status, 2);
 });
+
+const data = join(here, "../data");
+const node = (script, args) =>
+  spawnSync("node", [join(root, "spikes/ci-test-speed", script), ...args], {
+    cwd: root,
+    encoding: "utf8",
+  });
+
+test("the replay analysis prices each option over the 30 latest PRs of the committed replay", () => {
+  const r = node("analyse.mjs", [join(data, "replay-45.json")]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(
+    r.stdout,
+    /^population: 30 merged non-release PRs \(#675–#767\)/,
+  );
+  assert.match(
+    r.stdout,
+    /== test-linux: wall = [\d.]+ \+ [\d.]+ × executed task-minutes/,
+  );
+  assert.match(
+    r.stdout,
+    /B: github-workflows-nx-cache:test keyed on what it reads.*: \d+\/30 PRs/,
+  );
+  assert.equal(node("analyse.mjs", []).status, 2);
+});
+
+test("a comparison says whether a difference is inside the runs' spread", () => {
+  const f = (n) => join(data, `measure-${n}.json`);
+  const r = node("compare.mjs", [
+    "--a",
+    `${f("control1")},${f("control2")}`,
+    "--b",
+    `${f("pyramid1")},${f("pyramid2")}`,
+    "--tasks",
+    "onepipeline-ui-versions:test-quick",
+  ]);
+  assert.equal(r.status, 0, r.stderr);
+  const windows = r.stdout.split("== test-windows")[1];
+  assert.match(
+    windows,
+    /onepipeline-ui-versions:test-quick A mean +8\.7 \| B mean +0\.1 \| B−A -8\.6 min \(spread 0\.2; outside the runs' spread\)/,
+  );
+  assert.match(
+    windows,
+    /wall {25}A mean +13\.4 \| B mean +12\.3 \| B−A -1\.1 min \(spread 3\.5; inside the runs' spread\)/,
+  );
+  assert.equal(node("compare.mjs", ["--a", f("control1")]).status, 2);
+});
+
+test("the job medians recompute from the committed listing", () => {
+  const r = node("medians.mjs", []);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(
+    r.stdout,
+    /test-linux {4}non-release {2}before n= 55 median 18\.3 min \| after n= 34 median 24\.9 min/,
+  );
+});
