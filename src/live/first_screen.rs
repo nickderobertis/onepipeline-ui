@@ -262,6 +262,20 @@ pub(super) struct Split {
     pub(super) timeline_s: Option<f64>,
 }
 
+impl Split {
+    /// Take each figure `other` holds that this split does not: an opening made on
+    /// another thread, for the answer this thread builds from it.
+    pub(super) fn adopt(&mut self, other: Self) {
+        self.heads_s = self.heads_s.or(other.heads_s);
+        self.fetch_s = self.fetch_s.or(other.fetch_s);
+        self.fetched = self.fetched.or(other.fetched);
+        self.records = self.records.or(other.records);
+        self.index_s = self.index_s.or(other.index_s);
+        self.detail_s = self.detail_s.or(other.detail_s);
+        self.timeline_s = self.timeline_s.or(other.timeline_s);
+    }
+}
+
 thread_local! {
     static SPLIT: Cell<Split> = Cell::new(Split::default());
 }

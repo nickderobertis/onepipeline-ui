@@ -33,7 +33,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 use axum::response::sse::Event;
@@ -112,6 +112,14 @@ const OVERDUE_INTERVALS: u32 = 4;
 /// costs nothing.
 pub const TRACE_ENV: &str = "ONEPIPELINE_UI_LIVE_TRACE";
 
+/// How long a run opened for a page's document is kept for the subscription that
+/// page makes: a page that never subscribes lets it go then.
+const PREPARED_HOLD: Duration = Duration::from_secs(30);
+
+/// The most runs opened ahead of their subscriptions at once: a document is cheap
+/// to ask for and a long run's opening is not, so asking for many does not open many.
+const PREPARED_RUNS: usize = 2;
+
 /// Every subscription this process holds, and the poller that keeps them
 /// current.
 #[derive(Clone)]
@@ -132,6 +140,10 @@ struct Shared {
     looking: Mutex<()>,
     /// Each subscribed run's reading. The map is held only to look one up.
     runs: Mutex<HashMap<RunId, Arc<Mutex<LiveRun>>>>,
+    /// Runs a page's document named, opening or opened ahead of the subscription
+    /// that page makes ([`Hub::prepare`]). Held only to look one up, and never with
+    /// another lock.
+    prepared: Mutex<HashMap<RunId, Arc<Prepared>>>,
     /// The human-item views subscriptions show. Taken where a run is — after the
     /// sidebar and before the state — and held across the engine's reads of it,
     /// so two looks never send one change twice.
@@ -1407,6 +1419,16 @@ pub struct Stream {
 /// reconnect and replay — never more than the subscription retains.
 const CONNECTION_BUFFER: usize = RETAINED_FRAMES;
 
+/// A run opened for a page's document ahead of its subscription ([`Hub::prepare`]):
+/// its reading once made, with what making it cost, or the refusal.
+#[derive(Default)]
+struct Prepared {
+    opened: OnceLock<Opened>,
+}
+
+/// A run's reading as [`Hub::open_prepared`] made it, and where its time went.
+type Opened = Result<(Arc<Mutex<LiveRun>>, first_screen::Split), ApiError>;
+
 impl Hub {
     /// A hub over `store`, ending its streams once `stopping` is set.
     #[must_use]
@@ -1423,6 +1445,7 @@ impl Hub {
             sidebar: Mutex::new(Sidebar::default()),
             looking: Mutex::new(()),
             runs: Mutex::new(HashMap::new()),
+            prepared: Mutex::new(HashMap::new()),
             human_items: Mutex::new(HumanItemsReading::default()),
             polling: AtomicBool::new(false),
             trace: std::env::var_os(TRACE_ENV).map(PathBuf::from),
@@ -1809,15 +1832,77 @@ impl Hub {
         if let Some(live) = lock(&self.0.runs).get(run) {
             return Ok(Arc::clone(live));
         }
-        let opened = Arc::new(Mutex::new(LiveRun::open_selective(
-            &self.0.store,
-            run,
-            node,
-            self.0.whole_read,
-        )?));
+        // A run a page's document named is taken as that opening left it, waiting
+        // for it while it is still being made; one that failed is opened again, so
+        // the answer is this request's own.
+        let prepared = lock(&self.0.prepared).get(run).map(Arc::clone);
+        let taken = prepared.and_then(|prepared| {
+            let opened = self.open_prepared(&prepared, run, node);
+            lock(&self.0.prepared).retain(|_, held| !Arc::ptr_eq(held, &prepared));
+            let (live, split) = opened.ok()?;
+            first_screen::record(|own| own.adopt(split));
+            Some(live)
+        });
+        let opened = match taken {
+            Some(live) => live,
+            None => {
+                let live = LiveRun::open_selective(&self.0.store, run, node, self.0.whole_read)?;
+                self.trace(&json!({ "unprepared": run.as_str() }));
+                Arc::new(Mutex::new(live))
+            }
+        };
         Ok(Arc::clone(
             lock(&self.0.runs).entry(run.clone()).or_insert(opened),
         ))
+    }
+
+    /// Open `run` for the subscription a page whose document named it is about to
+    /// make, on a thread of its own, so the run's reading is under way while the
+    /// browser loads and runs the page. Nothing else changes: the subscription takes
+    /// the reading as [`live_run`](Self::live_run) would have made it, or waits for
+    /// it to be made, and a run nobody subscribes to is let go after
+    /// [`PREPARED_HOLD`]. A run already held, already being opened, or beyond
+    /// [`PREPARED_RUNS`] opened this way is left alone.
+    pub fn prepare(&self, run: RunId, node: Option<NodeId>) {
+        if lock(&self.0.runs).contains_key(&run) {
+            return;
+        }
+        let prepared = {
+            let mut held = lock(&self.0.prepared);
+            if held.contains_key(&run) || held.len() >= PREPARED_RUNS {
+                return;
+            }
+            let prepared = Arc::new(Prepared::default());
+            held.insert(run.clone(), Arc::clone(&prepared));
+            prepared
+        };
+        let hub = self.clone();
+        let opening = Arc::clone(&prepared);
+        let spawned = std::thread::Builder::new()
+            .name("prepare-run".to_owned())
+            .spawn(move || {
+                let _ = hub.open_prepared(&opening, &run, node.as_ref());
+                std::thread::sleep(PREPARED_HOLD);
+                lock(&hub.0.prepared).retain(|_, held| !Arc::ptr_eq(held, &opening));
+            });
+        if spawned.is_err() {
+            lock(&self.0.prepared).retain(|_, held| !Arc::ptr_eq(held, &prepared));
+        }
+    }
+
+    /// `prepared`'s reading of `run`, made here if nothing has made it yet and
+    /// waited for if something is making it.
+    fn open_prepared(&self, prepared: &Prepared, run: &RunId, node: Option<&NodeId>) -> Opened {
+        prepared
+            .opened
+            .get_or_init(|| {
+                let opened = LiveRun::open_selective(&self.0.store, run, node, self.0.whole_read);
+                // What the opening cost goes with it, to the answer that takes it.
+                let split = first_screen::take();
+                self.trace(&json!({ "prepared": run.as_str(), "opened": opened.is_ok() }));
+                opened.map(|live| (Arc::new(Mutex::new(live)), split))
+            })
+            .clone()
     }
 
     fn start_polling(&self) {

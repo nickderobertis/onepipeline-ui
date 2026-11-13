@@ -135,6 +135,17 @@ impl Serving {
         Self::spawn_as(workspace, &[], false, None, None, arguments)
     }
 
+    /// The same, in an environment changed by `environment`.
+    pub fn start_with_env_and_args(
+        build: impl FnOnce(&Path),
+        environment: &[(&str, &str)],
+        arguments: &[&str],
+    ) -> Self {
+        let (workspace, runs) = fixture_run::workspace();
+        build(&runs);
+        Self::spawn_as(workspace, environment, false, None, None, arguments)
+    }
+
     /// The same, acting as `session`, with `arguments` after the ones every
     /// server here is started with.
     pub fn start_as_with_args(

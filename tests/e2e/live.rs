@@ -45,6 +45,14 @@ impl Live {
     }
 
     fn start_with(build: impl FnOnce(&Path), extra: &[(&str, &str)]) -> Self {
+        Self::start_with_args(build, extra, &[])
+    }
+
+    fn start_with_args(
+        build: impl FnOnce(&Path),
+        extra: &[(&str, &str)],
+        arguments: &[&str],
+    ) -> Self {
         let trace_dir = tempfile::tempdir().expect("a trace directory");
         let trace = trace_dir.path().join("live.jsonl");
         let trace_text = trace.to_str().expect("utf-8").to_owned();
@@ -53,7 +61,7 @@ impl Live {
             (onepipeline_ui::live::TELEMETRY_REFOLD_ENV, "0"),
         ];
         environment.extend_from_slice(extra);
-        let serving = Serving::start_with_env(build, &environment);
+        let serving = Serving::start_with_env_and_args(build, &environment, arguments);
         Self {
             serving,
             trace,
@@ -2859,6 +2867,141 @@ fn with_no_view_open_pages_over_a_long_journal_are_the_complete_rows() {
         *span["events"].as_array().expect("events"),
         "a span's pages with no view open"
     );
+}
+
+/// A page's document naming a run, as a browser asks for it before it runs the page,
+/// starts that run's opening; the subscription the page then makes takes that reading
+/// rather than opening the run again, and answers exactly what a server asked nothing
+/// before it answers over the same run. A document naming a run that is not there, or
+/// no valid run at all, is the page as ever, and the subscription is refused as it
+/// always was.
+#[test]
+fn a_page_starts_its_runs_opening_and_its_subscription_answers_as_ever() {
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::NODE_ID;
+    let (_source, source) = fixture_run::workspace();
+    growing_run(&source, run);
+    let journal = source.join(run).join("events.jsonl");
+    pad_past_a_whole_read(&journal, run);
+    for marker in 0..12 {
+        let line = activity(&journal, run, node, &format!("row {marker}"));
+        live_journal::append_lines(&journal, &[line]);
+    }
+    let copy = |root: &Path| {
+        copy_run(&source.join(run), &root.join(run));
+        let records = fixture_run::graph_records_for(&source);
+        if records.is_dir() {
+            copy_run(&records, &fixture_run::graph_records_for(root));
+        }
+    };
+    let paged = Live::start_with_args(copy, &[], &["--ui"]);
+    let unpaged = Live::start_with(copy, &[]);
+    let view = json!({
+        "view": {
+            "type": "timeline",
+            "run_id": run,
+            "scope": "node",
+            "node": node,
+            "filter": "detailed",
+        }
+    });
+
+    let page = http::get_raw(
+        paged.address(),
+        &format!("/?run={run}&view=graph&node={node}"),
+    );
+    assert_eq!(page.status, 200);
+    assert_eq!(
+        page.header("content-type"),
+        Some("text/html; charset=utf-8")
+    );
+    let deadline = Instant::now() + PATIENCE;
+    let prepared = loop {
+        let lines: Vec<Value> = paged
+            .traced()
+            .into_iter()
+            .filter(|line| line.get("prepared").is_some())
+            .collect();
+        if !lines.is_empty() {
+            break lines;
+        }
+        assert!(Instant::now() < deadline, "the page opened no run");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(prepared, [json!({ "prepared": run, "opened": true })]);
+
+    let answer = paged.subscribe(&view);
+    let first = paged.first_answers();
+    assert_eq!(first.len(), 1, "{first:#?}");
+    // The opening's own figures go with the reading to the answer that took it: a
+    // reading of the journal's heads, which this journal is long enough to need.
+    assert!(first[0]["heads_ms"].is_number(), "{first:#?}");
+    let visible = |answer: &Value| unstamped(answer["initial"]["snapshot"]["visible"].clone());
+    let mut taken = visible(&answer);
+    let mut opened = visible(&unpaged.subscribe(&view));
+    for held in [&mut taken, &mut opened] {
+        for part in ["detail", "timeline"] {
+            if let Some(object) = held[part].as_object_mut() {
+                object.remove("observed_at");
+            }
+        }
+    }
+    assert_eq!(taken, opened, "the answer from the page's opening");
+    // Opened once: the subscription took the page's reading, where a server no page
+    // asked opens the run for the subscription itself.
+    let unprepared = |live: &Live| -> Vec<Value> {
+        live.traced()
+            .into_iter()
+            .filter_map(|line| line.get("unprepared").cloned())
+            .collect()
+    };
+    assert_eq!(unprepared(&paged), Vec::<Value>::new());
+    assert_eq!(unprepared(&unpaged), [json!(run)]);
+
+    for (address, refused) in [
+        ("/?run=no-such-run&view=overall", Some("no-such-run")),
+        ("/?run=..%2Foutside&view=overall", None),
+    ] {
+        let page = http::get_raw(paged.address(), address);
+        assert_eq!(page.status, 200, "{address}");
+        assert_eq!(
+            page.header("content-type"),
+            Some("text/html; charset=utf-8")
+        );
+        if let Some(missing) = refused {
+            let response = http::post(
+                paged.address(),
+                "/api/v2/subscriptions",
+                &json!({ "view": { "type": "detail", "run_id": missing } }).to_string(),
+            );
+            assert_eq!(response.status, 404, "{}", response.body);
+            assert_eq!(response.json()["error"]["code"], "run_not_found");
+        }
+    }
+    let named: Vec<Value> = paged
+        .traced()
+        .into_iter()
+        .filter_map(|line| line.get("prepared").cloned())
+        .collect();
+    assert_eq!(
+        named,
+        [json!(run), json!("no-such-run")],
+        "a malformed run is never opened"
+    );
+}
+
+/// Copy a directory, so two servers read the same records.
+fn copy_run(from: &Path, to: &Path) {
+    fs::create_dir_all(to).expect("a run directory");
+    for entry in fs::read_dir(from).expect("the run's directory") {
+        let entry = entry.expect("an entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("a file type").is_dir() {
+            copy_run(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), &target).expect("a copy");
+        }
+    }
 }
 
 /// Another node's records, appended to `journal` until it is past the size a

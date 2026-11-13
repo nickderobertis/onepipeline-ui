@@ -295,9 +295,36 @@ async fn fallback(State(serving): Store, uri: Uri) -> Response {
         return ApiError::RemovedRoute(uri.path().to_owned()).into_response();
     }
     match &serving.view {
-        Some(view) if !crate::ui::is_api_path(uri.path()) => view.answer(uri.path()).await,
+        Some(view) if !crate::ui::is_api_path(uri.path()) => {
+            prepare_named_run(&serving.hub, &uri);
+            view.answer(uri.path()).await
+        }
         _ => ApiError::NoSuchRoute.into_response(),
     }
+}
+
+/// Start opening the run a page's address names — `?run=`, with the node of
+/// `?node=` — so that its reading is under way while the browser loads the page
+/// and before the page's subscription asks for it ([`Hub::prepare`]). An address
+/// naming no run, or a run or node that is not a valid identifier, starts nothing;
+/// the page is served the same either way, and whatever the subscription is then
+/// refused is its own refusal. Only a document is asked for with an address: the
+/// bundle's hashed files are not.
+fn prepare_named_run(hub: &Hub, uri: &Uri) {
+    if uri.path().starts_with("/assets/") {
+        return;
+    }
+    let Ok(Query(address)) = Query::<HashMap<String, String>>::try_from_uri(uri) else {
+        return;
+    };
+    let Some(Ok(run)) = address.get("run").cloned().map(RunId::try_from) else {
+        return;
+    };
+    let node = address
+        .get("node")
+        .cloned()
+        .and_then(|node| NodeId::try_from(node).ok());
+    hub.prepare(run, node);
 }
 
 async fn healthz(State(serving): Store) -> Json<crate::contract::Health> {

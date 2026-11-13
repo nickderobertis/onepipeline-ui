@@ -401,10 +401,13 @@ impl Indexed {
         if let Some(held) = held {
             return Lent::Held(held);
         }
-        let mut events = Vec::new();
-        let mut positions = Vec::new();
-        let mut places = Vec::new();
-        for &index in self.indices(owner) {
+        // Sized once: an owner of a long run lends thousands of records, and growing
+        // a vector of whole records one at a time copied each of them again.
+        let indices = self.indices(owner);
+        let mut events = Vec::with_capacity(indices.len());
+        let mut positions = Vec::with_capacity(indices.len());
+        let mut places = Vec::with_capacity(indices.len());
+        for &index in indices {
             if let Some(position) = self.canonical[index] {
                 events.push(std::mem::replace(&mut view.events[index], vacant()));
                 positions.push(position);
