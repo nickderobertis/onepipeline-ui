@@ -37,13 +37,13 @@ const glob = (p) =>
   new RegExp(
     `^${p
       .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-      .replace(/\*\*/g, "\u0000")
+      .replace(/\*\*/g, "§§")
       .replace(/\*/g, "[^/]*")
-      .replace(/\u0000/g, ".*")}$`,
+      .replace(/§§/g, ".*")}$`,
   );
 
 // Wall clock against executed task-minutes, per platform, over every run read.
-function fit(job) {
+function fitLine(job) {
   const pts = rows
     .map((r) => r.jobs?.[job])
     .filter((e) => e?.tasks?.length >= 5 && e.wall_minutes)
@@ -64,7 +64,7 @@ function fit(job) {
     n: pts.length,
   };
 }
-const FIT = Object.fromEntries(JOBS.map((j) => [j, fit(j)]));
+const FIT = Object.fromEntries(JOBS.map((j) => [j, fitLine(j)]));
 
 // The options replayed: each says whether a task that ran would have replayed.
 const SCRIPT_TIERS = new Set([
@@ -89,7 +89,7 @@ const NX_KEY = [
   ".github/nx-version-files",
 ].map(glob);
 const OPTIONS = {
-  "A: script-only e2e tiers in a crate of their own": (r, t) =>
+  "A: the script-testing e2e tiers in a crate of their own": (_r, t) =>
     SCRIPT_TIERS.has(t.task.split(":")[0]) &&
     t.matched?.length > 0 &&
     t.matched.every((f) => f.startsWith("src/")) &&

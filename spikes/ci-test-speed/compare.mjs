@@ -82,5 +82,5 @@ for (const job of ["test-linux", "test-macos", "test-windows"]) {
   };
   row("wall", (r) => r.wall);
   row("executed task-minutes", (r) => r.busy);
-  tasks.forEach((t, i) => row(t, (r) => r.tasks[i]));
+  for (const [i, t] of tasks.entries()) row(t, (r) => r.tasks[i]);
 }

@@ -7,7 +7,18 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export const REPO = "nickderobertis/onepipeline-ui";
-const FLOOR = Number(process.env.SPIKE_CORE_FLOOR ?? 2500);
+
+import { refuse } from "./check.mjs";
+
+const FLOOR = (() => {
+  const v = process.env.SPIKE_CORE_FLOOR ?? "2500";
+  if (!/^\d+$/.test(v))
+    refuse(
+      `SPIKE_CORE_FLOOR=${JSON.stringify(v)} is not a whole number`,
+      "unset it, or set it to the core requests to leave unspent",
+    );
+  return Number(v);
+})();
 
 let checked = 0;
 let remaining = null;
@@ -24,7 +35,13 @@ function gh(args, binary = false) {
 // before the floor: no single measurement makes 25 reads between checks.
 function guard() {
   if (remaining === null || checked >= 25) {
-    remaining = JSON.parse(gh(["api", "rate_limit"])).resources.core.remaining;
+    remaining = JSON.parse(gh(["api", "rate_limit"]))?.resources?.core
+      ?.remaining;
+    if (!Number.isInteger(remaining))
+      refuse(
+        "GitHub's rate_limit answer names no core remaining count",
+        "check `gh api rate_limit` answers on this host, then retry",
+      );
     checked = 0;
   }
   if (remaining < FLOOR) {
@@ -74,6 +91,11 @@ export class Cache {
     for (let page = 1; page < 50; page += 1) {
       const sep = path.includes("?") ? "&" : "?";
       const body = this.json(`${path}${sep}per_page=100&page=${page}`, tag);
+      if (!Array.isArray(body?.[field]))
+        refuse(
+          `${path} page ${page} carries no ${field} list`,
+          "remove that response from the cache and retry online",
+        );
       out.push(...body[field]);
       if (body[field].length < 100) break;
     }
