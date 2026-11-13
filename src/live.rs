@@ -1869,10 +1869,10 @@ impl Hub {
     /// Open `run` for the subscription a page whose document named it is about to
     /// make, on a thread of its own, so the run's reading is under way while the
     /// browser loads and runs the page. Nothing else changes: the subscription takes
-    /// the reading as [`live_run`](Self::live_run) would have made it, or waits for
+    /// the reading as any other subscription would have made it, or waits for
     /// it to be made, and a run nobody subscribes to is let go after
     /// [`PREPARED_HOLD`]. A run already held, already being opened, or beyond
-    /// [`PREPARED_RUNS`] opened this way is left alone.
+    /// the few runs that may be opened this way at once is left alone.
     pub fn prepare(&self, run: RunId, node: Option<NodeId>) {
         if lock(&self.0.runs).contains_key(&run) {
             return;
