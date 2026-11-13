@@ -87,7 +87,7 @@ async function firstRequest(
   node: string | undefined,
 ): Promise<{ body: string; answer: unknown }> {
   let caught: { body: string; answer: unknown } | undefined;
-  const taken = new Promise<void>((resolve) => {
+  const taken = new Promise<{ body: string; answer: unknown }>((resolve) => {
     page.on("response", async (response) => {
       const request = response.request();
       if (
@@ -99,18 +99,17 @@ async function firstRequest(
           body: request.postData() ?? "",
           answer: await response.json(),
         };
-        resolve();
+        resolve(caught);
       }
     });
   });
   await page.goto(`${served.origin}${addressOf(run, view, node)}`);
-  await Promise.race([
+  return Promise.race([
     taken,
-    new Promise((_, reject) =>
+    new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error(`no first answer for ${view}`)), NEVER),
     ),
   ]);
-  return caught as { body: string; answer: unknown };
 }
 
 /** The same request, sent to `served` as the page sent it. */

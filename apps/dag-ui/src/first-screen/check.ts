@@ -160,7 +160,7 @@ const number = leaf(
 
 const counter = leaf(
   "integer",
-  (value) => Number.isInteger(value) && (value as number) >= 0,
+  (value) => typeof value === "number" && Number.isInteger(value) && value >= 0,
   "a non-negative integer",
   { exemplar: 1, wrong: "many", unfit: 1.5 },
   undefined,

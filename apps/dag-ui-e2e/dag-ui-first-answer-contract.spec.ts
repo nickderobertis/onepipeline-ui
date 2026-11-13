@@ -155,11 +155,16 @@ test("an answer missing or mistyping any field the first screen draws shows its 
     overall: `/?run=${run}&view=overall`,
   };
   const answers: Record<string, unknown> = {};
+  const addressOf = (view: string): string => {
+    const address = addresses[view];
+    if (address === undefined) throw new Error(`no address for ${view}`);
+    return address;
+  };
 
   // As served, each view's first screen is drawn from its answer.
   const draws = async (view: string) => {
     held.received = undefined;
-    await page.goto(addresses[view] as string);
+    await page.goto(addressOf(view));
     await expect
       .poll(() => page.evaluate(() => window.__firstScreenDrawn))
       .toBe(true);
@@ -176,8 +181,8 @@ test("an answer missing or mistyping any field the first screen draws shows its 
     }
   ).initial.snapshot.visible.detail.graph.plan.tasks;
   const node = tasks[0]?.id;
-  expect(node, "the run has a node to open").toBeDefined();
-  addresses.node = `/?run=${run}&view=graph&node=${encodeURIComponent(node as string)}`;
+  if (node === undefined) throw new Error("the run has no node to open");
+  addresses.node = `/?run=${run}&view=graph&node=${encodeURIComponent(node)}`;
   await draws("node");
   await draws("overall");
 
@@ -233,7 +238,7 @@ test("an answer missing or mistyping any field the first screen draws shows its 
         (_, index) => index % LANES === at,
       )) {
         lane.held.alter = () => answer;
-        await lane.page.goto(addresses[view] as string);
+        await lane.page.goto(addressOf(view));
         await expect(
           alert,
           `${view}'s answer with ${name} ${pass} shows the contract failure`,

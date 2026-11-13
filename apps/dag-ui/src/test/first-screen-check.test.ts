@@ -161,9 +161,9 @@ it("refuses what is not an answer at all, naming where it stopped", () => {
   expect(checkFirstAnswer(null)).toEqual(
     new FirstAnswerContractError("answer is null, not an object"),
   );
-  expect(
-    (checkFirstAnswer({ initial: { snapshot: {} } }) as Error).message,
-  ).toBe(
+  const refused = checkFirstAnswer({ initial: { snapshot: {} } });
+  expect(refused).toBeInstanceOf(FirstAnswerContractError);
+  expect(refused instanceof Error ? refused.message : refused).toBe(
     "The first answer failed contract validation: answer.initial.snapshot.visible is missing",
   );
 });
