@@ -7925,14 +7925,30 @@ pub fn command_steps() -> Value {
     serde_json::from_str(COMMAND_STEPS_CORPUS).expect("the command-steps corpus is JSON")
 }
 
+/// The whole log the command-steps corpus writes for `node`: its `logs` text,
+/// after the `log_padding` the corpus names for it — a run of one character long
+/// enough to put the log past what a route serves of one.
+pub fn command_steps_log(corpus: &Value, node: &str, said: &Value) -> String {
+    let said = said.as_str().expect("a log's text");
+    let padding = &corpus["log_padding"][node];
+    let repeat = padding["repeat"]
+        .as_u64()
+        .map_or(0, |n| usize::try_from(n).expect("a count"));
+    format!(
+        "{}{said}",
+        padding["text"].as_str().unwrap_or_default().repeat(repeat)
+    )
+}
+
 /// Write the command-steps corpus under `root` as the engine records a run: its
 /// launch record, the plan its `run-started` carried, each command's log under
 /// the run, and its journal — every line the engine's own [`Envelope`] as it
 /// serializes, every kind one the engine declares, the plan read as the engine's
 /// `Plan` and the refused edit's command as its channel `Command`, so a record the
 /// linked engine could not have written is refused here before anything serves it.
-/// Each `command-started` names its log by the path under the run, as the engine
-/// writes it, absolute.
+/// A `command-started` naming its log relative to the run names it by its path
+/// under the run, as the engine writes it, absolute; one naming an absolute path —
+/// a start recorded on another host — names that path as written.
 pub fn write_command_steps(root: &Path) -> PathBuf {
     let corpus = command_steps();
     let run = corpus["run_id"].as_str().expect("the corpus names its run");
@@ -7947,7 +7963,7 @@ pub fn write_command_steps(root: &Path) -> PathBuf {
     for (node, said) in corpus["logs"].as_object().expect("the corpus's logs") {
         let log = dir.join("commands").join(format!("{node}.log"));
         fs::create_dir_all(log.parent().expect("the log's directory")).expect("the log directory");
-        fs::write(&log, said.as_str().expect("a log's text")).expect("the log");
+        fs::write(&log, command_steps_log(&corpus, node, said)).expect("the log");
     }
     let start = time::OffsetDateTime::parse(START, &time::format_description::well_known::Rfc3339)
         .expect("the fixture's start");

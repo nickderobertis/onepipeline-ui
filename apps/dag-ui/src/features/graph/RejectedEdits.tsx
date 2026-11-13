@@ -24,7 +24,7 @@ export function RejectedEdits({
         {edits.map((edit) => (
           <li key={`${edit.at}:${edit.envelope ?? ""}:${edit.index ?? ""}`}>
             <span className="rejected-edit-what">
-              {edit.author}: {editSummary(edit.command)}
+              {edit.author}: {opOf(edit.command)}
             </span>
             <span className="rejected-edit-reason">{edit.reason}</span>
           </li>
@@ -35,19 +35,11 @@ export function RejectedEdits({
 }
 
 /**
- * The command in a few words — its op and the node it named — read only for
- * display; the reason beside it is the record's whole account.
+ * The command's op — `add`, `drop`, `decline` — which is all of it a reader needs
+ * beside the refusal; the reason names the node it was about. A command from an
+ * envelope this engine could not decode is journalled as it was sent, which may
+ * carry no op, and is then named as an edit.
  */
-function editSummary(command: Readonly<Record<string, unknown>>): string {
-  const op = typeof command.op === "string" ? command.op : "edit";
-  const node = command.node;
-  const named =
-    typeof node === "string"
-      ? node
-      : typeof node === "object" &&
-          node !== null &&
-          typeof (node as { id?: unknown }).id === "string"
-        ? (node as { id: string }).id
-        : undefined;
-  return named === undefined ? op : `${op} ${named}`;
+function opOf(command: Readonly<Record<string, unknown>>): string {
+  return typeof command.op === "string" ? command.op : "edit";
 }

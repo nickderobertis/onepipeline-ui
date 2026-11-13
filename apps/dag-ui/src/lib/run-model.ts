@@ -304,8 +304,9 @@ export function recordedReason(node: NodeView): string | undefined {
   // the reader to infer, so it leads.
   const outcome = node.result?.outcome?.trim();
   if (node.kind === "command" && outcome) {
-    const detail = (node.failure?.detail || node.result?.detail)?.trim();
-    return detail ? `${outcome}: ${detail}` : outcome;
+    return [outcome, (node.failure?.detail || node.result?.detail)?.trim()]
+      .filter(Boolean)
+      .join(": ");
   }
   const recorded =
     node.failure?.detail ||

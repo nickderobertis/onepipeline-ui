@@ -13,7 +13,7 @@
  */
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { appendLines } from "../load/journal.ts";
 import { thisHost } from "./this-host.mjs";
 
@@ -4324,9 +4324,8 @@ const COMMAND_STEPS = JSON.parse(
 
 /**
  * Write the command-steps corpus under `root`: its launch record, its plan, each
- * command's log under the run, and its records a second apart, each
- * `command-started` naming its log by its absolute path under the run as the
- * engine writes it.
+ * command's log under the run (after any `log_padding` the corpus names for it),
+ * and its records a second apart.
  */
 export function buildCommandStepsRuns(root) {
   mkdirSync(root, { recursive: true });
@@ -4340,7 +4339,10 @@ export function buildCommandStepsRuns(root) {
   });
   mkdirSync(join(dir, "commands"), { recursive: true });
   for (const [node, said] of Object.entries(COMMAND_STEPS.logs)) {
-    writeFileSync(join(dir, "commands", `${node}.log`), said);
+    const padding = COMMAND_STEPS.log_padding[node];
+    const before =
+      padding === undefined ? "" : padding.text.repeat(padding.repeat);
+    writeFileSync(join(dir, "commands", `${node}.log`), `${before}${said}`);
   }
   const journal = new Journal(dir, COMMAND_STEPS.stream, HISTORIC);
   for (const [index, record] of COMMAND_STEPS.records.entries()) {
@@ -4348,8 +4350,10 @@ export function buildCommandStepsRuns(root) {
       run_id: runId,
       ...(record.node === undefined ? {} : { node: record.node }),
     };
+    // A log named relative to the run is named by its path under the run, as the
+    // engine writes it; an absolute one — a start on another host — as written.
     const payload =
-      typeof record.payload.log === "string"
+      typeof record.payload.log === "string" && !isAbsolute(record.payload.log)
         ? { ...record.payload, log: join(dir, record.payload.log) }
         : record.payload;
     journal

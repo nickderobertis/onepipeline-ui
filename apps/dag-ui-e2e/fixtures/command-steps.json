@@ -19,6 +19,12 @@
     "lint": "error: unused variable: `scratch`\n --> src/lib.rs:12:9\nerror: could not compile `widgets` (lib) due to 1 previous error\n",
     "integration": "running 14 tests\ntest checkout::round_trip ... ok\ntest checkout::slow_mirror ... "
   },
+  "log_padding": {
+    "integration": {
+      "text": "ä",
+      "repeat": 40000
+    }
+  },
   "records": [
     {
       "source": "pipeline",
@@ -27,7 +33,7 @@
         "plan": {
           "schema_version": 3,
           "goal": {
-            "text": "Gate the widgets release on its build, lint and integration commands"
+            "text": "Gate the widgets release on its build, lint, integration and docs commands"
           },
           "name": "dag-ui-command-steps",
           "concurrency": 3,
@@ -49,12 +55,33 @@
               "command": ["cargo", "test", "--test", "integration"],
               "timeout_seconds": 30,
               "deps": ["build"]
+            },
+            {
+              "id": "docs",
+              "kind": "command",
+              "command": ["mdbook", "build", "docs"],
+              "deps": ["build"]
+            },
+            {
+              "id": "package",
+              "kind": "command",
+              "command": ["cargo", "package"],
+              "deps": ["lint", "integration"]
             }
           ]
         },
         "graph": null,
         "dir": "/a-recording-host/workspace",
         "heartbeat_interval": 1800
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-started",
+      "node": "build",
+      "payload": {
+        "command": ["cargo", "build", "--release"],
+        "log": "/a-recording-host/workspace/runs/dag-ui-command-steps/commands/build.log"
       }
     },
     {
@@ -70,13 +97,19 @@
       "source": "pipeline",
       "kind": "command-exited",
       "node": "build",
-      "payload": { "ending": "exited", "exit_code": 0, "duration_ms": 41230 }
+      "payload": {
+        "ending": "exited",
+        "exit_code": 0,
+        "duration_ms": 41230
+      }
     },
     {
       "source": "pipeline",
       "kind": "node-settled",
       "node": "build",
-      "payload": { "status": "done" }
+      "payload": {
+        "status": "done"
+      }
     },
     {
       "source": "pipeline",
@@ -99,9 +132,40 @@
     },
     {
       "source": "pipeline",
+      "kind": "command-started",
+      "node": "docs",
+      "payload": {
+        "command": ["mdbook", "build", "docs"],
+        "log": "commands/docs.log"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-exited",
+      "node": "docs",
+      "payload": {
+        "ending": "exited",
+        "exit_code": 0,
+        "duration_ms": 2210
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "docs",
+      "payload": {
+        "status": "done"
+      }
+    },
+    {
+      "source": "pipeline",
       "kind": "command-exited",
       "node": "lint",
-      "payload": { "ending": "exited", "exit_code": 101, "duration_ms": 8120 }
+      "payload": {
+        "ending": "exited",
+        "exit_code": 101,
+        "duration_ms": 8120
+      }
     },
     {
       "source": "pipeline",
@@ -115,9 +179,37 @@
     },
     {
       "source": "pipeline",
+      "kind": "edit-rejected",
+      "payload": {
+        "author": "planner",
+        "command": {
+          "op": "decline",
+          "id": "lint",
+          "comments": [
+            {
+              "id": "c-17",
+              "url": "https://example.invalid/changes/17#c-17"
+            }
+          ],
+          "reason": ""
+        },
+        "reason": "refused: decline: node 'lint': the reason cannot be blank",
+        "envelope": 3,
+        "index": 0,
+        "refusal": {
+          "kind": "blank-reason",
+          "node": "lint"
+        }
+      }
+    },
+    {
+      "source": "pipeline",
       "kind": "command-exited",
       "node": "integration",
-      "payload": { "ending": "timed-out", "duration_ms": 30004 }
+      "payload": {
+        "ending": "timed-out",
+        "duration_ms": 30004
+      }
     },
     {
       "source": "pipeline",

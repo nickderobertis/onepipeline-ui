@@ -22629,8 +22629,8 @@ fn check_visibility_records_reach_every_event_reading_and_the_node_checks() {
     assert_eq!(refused.status, 422, "{}", refused.body);
 }
 
-/// The command-steps corpus, served: three `kind: command` nodes and a live edit
-/// the run's plan-edit hook refused.
+/// The command-steps corpus, served: five `kind: command` nodes and two refused
+/// live edits, one of them the run's plan-edit hook's.
 fn command_steps() -> (Serving, String) {
     let corpus = fixture_run::command_steps();
     let run = corpus["run_id"]
@@ -22661,18 +22661,23 @@ fn node_record_fields(serving: &Serving, run: &str, node: &str, kind: &str) -> V
         .collect()
 }
 
+/// The served run detail of the command-steps corpus, read through `query`.
+fn command_steps_detail(serving: &Serving, run: &str, query: &str) -> Value {
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}{query}"));
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    detail.json()
+}
+
 /// A plan of command steps, as the engine journals one: every command node is
 /// served as a `command` — never folded into an agent — with its argv, its
-/// outcome and the log its command wrote, on the run route and on each node's
-/// own timeline, and the live edit the run's plan-edit hook refused is answered
-/// on the run route naming that hook.
+/// outcome and the log its last start named, on the run route and on each node's
+/// own timeline, and every live edit the run refused is answered on the run route
+/// in journal order, the plan-edit hook's refusal naming that hook.
 #[test]
 fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
     let corpus = fixture_run::command_steps();
     let (serving, run) = command_steps();
-    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}"));
-    assert_eq!(detail.status, 200, "{}", detail.body);
-    let detail = detail.json();
+    let detail = command_steps_detail(&serving, &run, "");
     let graph = &detail["graph"];
 
     let tasks: BTreeMap<String, Value> = graph["plan"]["tasks"]
@@ -22681,7 +22686,10 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
         .iter()
         .map(|task| (task["id"].as_str().expect("an id").to_owned(), task.clone()))
         .collect();
-    assert_eq!(tasks["build"]["kind"], json!("command"));
+    assert_eq!(tasks.len(), 5, "{tasks:?}");
+    for task in tasks.values() {
+        assert_eq!(task["kind"], json!("command"), "{task}");
+    }
     assert_eq!(
         tasks["build"]["command"],
         json!(["cargo", "build", "--release"])
@@ -22691,16 +22699,17 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
         "{}",
         tasks["build"]
     );
-    assert_eq!(tasks["integration"]["kind"], json!("command"));
     assert_eq!(tasks["integration"]["timeout_seconds"], json!(30));
 
-    let expected = [
+    let results = &graph["node_results"];
+    let settled = [
         ("build", "done", None),
+        ("docs", "done", None),
         ("lint", "failed", Some("command-failed")),
         ("integration", "failed", Some("command-timed-out")),
     ];
-    for (node, status, outcome) in expected {
-        let result = &graph["node_results"][node];
+    for (node, status, outcome) in settled {
+        let result = &results[node];
         assert_eq!(result["kind"], json!("command"), "{node}: {result}");
         assert_eq!(result["status"], json!(status), "{node}: {result}");
         assert_eq!(graph["node_status"][node], json!(status), "{node}");
@@ -22709,45 +22718,96 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
             outcome.map(|word| json!(word)),
             "{node}"
         );
-        let log = &result["log"];
-        let path = log["path"].as_str().expect("the log's path");
+        let path = result["log"]["path"].as_str().expect("the log's path");
         assert!(
-            Path::new(path).ends_with(Path::new("commands").join(format!("{node}.log"))),
+            Path::new(path).ends_with(Path::new(&run).join("commands").join(format!("{node}.log"))),
             "{node}: {path}"
         );
-        assert_eq!(log["content"], corpus["logs"][node], "{node}");
-        assert_eq!(log["truncated"], json!(false), "{node}");
 
         // The node's own route: what it ran and where its output is, and how it
         // ended.
         let started = node_record_fields(&serving, &run, node, "command-started");
-        assert_eq!(started.len(), 1, "{node}: {started:?}");
-        assert_eq!(started[0]["Command"], tasks[node]["command"], "{node}");
-        assert_eq!(started[0]["Log"], json!(path), "{node}");
-        let settled = node_record_fields(&serving, &run, node, "node-settled");
-        assert_eq!(settled.len(), 1, "{node}: {settled:?}");
         assert_eq!(
-            settled[0].get("Outcome").cloned(),
+            started.last().expect("a start")["Command"],
+            tasks[node]["command"],
+            "{node}"
+        );
+        assert_eq!(
+            started.last().expect("a start")["Log"],
+            json!(path),
+            "{node}"
+        );
+        let settlement = node_record_fields(&serving, &run, node, "node-settled");
+        assert_eq!(settlement.len(), 1, "{node}: {settlement:?}");
+        assert_eq!(
+            settlement[0].get("Outcome").cloned(),
             outcome.map(|word| json!(word)),
             "{node}"
         );
     }
+
+    // `build` started first on another host, whose log this run does not hold;
+    // the log served is the one its last start named, here.
+    let starts = node_record_fields(&serving, &run, "build", "command-started");
+    assert_eq!(starts.len(), 2, "{starts:?}");
+    assert_ne!(starts[0]["Log"], results["build"]["log"]["path"]);
+    assert_eq!(results["build"]["log"]["content"], corpus["logs"]["build"]);
+    assert_eq!(results["build"]["log"]["truncated"], json!(false));
+    assert_eq!(results["lint"]["log"]["content"], corpus["logs"]["lint"]);
+
+    // A log past the bound is served as its end: the bound's worth of bytes, the
+    // character the cut fell inside replaced rather than refused.
+    let integration = &results["integration"]["log"];
+    assert_eq!(integration["truncated"], json!(true));
+    let tail = integration["content"].as_str().expect("the log's end");
+    let said = corpus["logs"]["integration"].as_str().expect("the log");
+    assert!(tail.ends_with(said), "{said:?}");
+    assert!(
+        tail.starts_with('\u{FFFD}'),
+        "the cut fell inside a character"
+    );
+    let whole =
+        fixture_run::command_steps_log(&corpus, "integration", &corpus["logs"]["integration"]);
+    assert!(whole.len() > onepipeline_ui::payload::ARTIFACT_TAIL_BYTES);
+
+    // A log the run no longer holds is its name alone, and a command that never
+    // started has no log to name.
+    let docs = results["docs"]["log"].as_object().expect("docs' log");
+    assert_eq!(docs.keys().collect::<Vec<_>>(), vec!["path"], "{docs:?}");
+    assert_eq!(tasks["package"]["command"], json!(["cargo", "package"]));
+    assert!(
+        results["package"].get("log").is_none(),
+        "{}",
+        results["package"]
+    );
+    assert!(node_record_fields(&serving, &run, "package", "command-started").is_empty());
+
     let ended = node_record_fields(&serving, &run, "integration", "command-exited");
     assert_eq!(ended[0]["Ending"], json!("timed-out"), "{ended:?}");
     let ended = node_record_fields(&serving, &run, "lint", "command-exited");
     assert_eq!(ended[0]["Exit code"], json!(101), "{ended:?}");
 
+    // Every refused edit, oldest first, each as its record carried it: the
+    // typed refusal where the record carried one and no key where it did not.
     let hook = corpus["hook"].as_str().expect("the corpus's hook");
     let rejected = graph["rejected_edits"]
         .as_array()
         .expect("the refused edits");
-    assert_eq!(rejected.len(), 1, "{rejected:?}");
-    let edit = &rejected[0];
+    assert_eq!(rejected.len(), 2, "{rejected:?}");
+    let declined = &rejected[0];
+    assert_eq!(declined["command"]["op"], json!("decline"));
+    assert_eq!(
+        declined["refusal"],
+        json!({ "kind": "blank-reason", "node": "lint" })
+    );
+    assert_eq!(declined["envelope"], json!(3));
+    let edit = &rejected[1];
     assert_eq!(edit["author"], json!("planner"));
     assert_eq!(edit["command"]["op"], json!("add"));
     assert_eq!(edit["command"]["node"]["id"], json!("deploy"));
     assert_eq!(edit["envelope"], json!(4));
     assert_eq!(edit["index"], json!(0));
+    assert!(edit.get("refusal").is_none(), "{edit}");
     let reason = edit["reason"].as_str().expect("the refusal's reason");
     assert!(
         reason.contains(&format!(
@@ -22755,7 +22815,42 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
         )),
         "{reason}"
     );
-    assert!(edit["at"].is_string(), "{edit}");
+    assert!(
+        declined["at"].as_str() < edit["at"].as_str(),
+        "{rejected:?}"
+    );
+
+    // On the run's own timeline, each refusal lists who sent it and why.
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    )
+    .json();
+    let refusals: Vec<Value> = timeline["spans"]
+        .as_array()
+        .expect("the run's spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
+        .filter(|event| event["kind"] == "edit-rejected")
+        .map(|event| event["fields"].clone())
+        .collect();
+    assert_eq!(
+        refusals,
+        rejected
+            .iter()
+            .map(|edit| json!({ "Author": edit["author"], "Reason": edit["reason"] }))
+            .collect::<Vec<_>>()
+    );
+
+    // A filter narrows the events a response lists, never the run: a reader who
+    // asked for no refusals is shown the same refused edits and command logs.
+    let narrowed = command_steps_detail(
+        &serving,
+        &run,
+        "?filter=%7B%22exclude%22%3A%5B%7B%22kind%22%3A%22edit-rejected%22%7D%2C%7B%22kind%22%3A%22command-*%22%7D%5D%7D",
+    );
+    assert_eq!(narrowed["graph"]["rejected_edits"], graph["rejected_edits"]);
+    assert_eq!(narrowed["graph"]["node_results"], graph["node_results"]);
 }
 
 /// A run that refused nothing is served no `rejected_edits` at all, and a
@@ -22809,8 +22904,8 @@ fn a_command_log_outside_the_run_or_gone_is_served_as_its_name_alone() {
         "{}",
         detail["graph"]
     );
-    assert_eq!(
-        results["integration"]["log"]["content"],
-        corpus["logs"]["integration"]
-    );
+    let integration = results["integration"]["log"]["content"]
+        .as_str()
+        .expect("integration's log");
+    assert!(integration.ends_with(corpus["logs"]["integration"].as_str().expect("the log")));
 }
