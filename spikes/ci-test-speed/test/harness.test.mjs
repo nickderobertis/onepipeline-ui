@@ -436,6 +436,29 @@ test("a comparison says whether a difference is inside the runs' spread", () => 
   assert.equal(node("compare.mjs", ["--a", f("control1")]).status, 2);
 });
 
+test("the committed replay splits each job's change into the PR mix and like for like", () => {
+  const r = node("mix.mjs", [join(data, "replay-45.json.gz")]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(
+    r.stdout,
+    /== test-linux: mean wall 20\.4 \(n=26, before #711\) → 25\.8 \(n=19\), \+5\.4 min = mix \+6\.5 \+ like for like -1\.2/,
+  );
+  assert.match(
+    r.stdout,
+    / {3}engine bump {5}before n=5 mean 29\.9 \| after n=9 mean 27\.5/,
+  );
+  const missing = node("mix.mjs", []);
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /usage: mix\.mjs/);
+  const badCut = node("mix.mjs", [
+    join(data, "replay-45.json.gz"),
+    "--cut-pr",
+    "abc",
+  ]);
+  assert.equal(badCut.status, 2);
+  assert.match(badCut.stderr, /--cut-pr takes a pull request number/);
+});
+
 test("the job medians recompute from the committed listing", () => {
   const r = node("medians.mjs", []);
   assert.equal(r.status, 0, r.stderr);
