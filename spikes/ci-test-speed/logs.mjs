@@ -36,7 +36,7 @@ export function facts(log) {
     const { s, t } = log[i];
     const g = /^##\[group\]Run (.*)$/.exec(s);
     if (g) group = { name: g[1], t };
-    if (/git log -1 --format=['"]?%H/.test(s)) {
+    if (/git(?:\.exe"?)? log -1 --format=['"]?%H/.test(s)) {
       for (let j = i + 1; j < Math.min(i + 6, log.length); j += 1) {
         const sha = /^'?([0-9a-f]{40})'?$/.exec(log[j].s.trim());
         if (sha) {
@@ -52,8 +52,9 @@ export function facts(log) {
         count: Number(sel[2]),
         tasks: sel[3] === "none" ? [] : sel[3].split(" "),
       };
-    const hit =
-      /(?:Cache restored from key|Restored from cache key):?\s*(\S+)/.exec(s);
+    // actions/cache prints `Cache hit for: <key>`, then the size, then a
+    // `restored from key` line: one restore opens on the hit (or the miss).
+    const hit = /^Cache hit for:\s*(\S+)/.exec(s);
     const miss =
       /^(No cache found\.|Cache not found for input keys: (.*))$/.exec(s);
     const size = /Cache Size: ~?(\d+) MB/.exec(s);
@@ -64,7 +65,7 @@ export function facts(log) {
         key: hit ? hit[1] : (miss[2] ?? null),
         at: new Date(t).toISOString(),
       });
-    if (size && out.restores.length)
+    else if (size && out.restores.length && out.restores.at(-1).size_mb == null)
       out.restores.at(-1).size_mb = Number(size[1]);
   }
   return out;
@@ -75,11 +76,17 @@ export function tasks(log) {
   const blocks = [];
   let cur = null;
   for (const { s, t } of log) {
-    const m = /^> nx run (\S+?)(?:\s+(\[[^\]]+\]))?\s*$/.exec(s.trim());
+    // Static output under GitHub Actions opens each task as a log group with
+    // its outcome: `##[group]✅ > nx run <task>` (❌ when it failed).
+    const m =
+      /^(?:##\[group\])?(?:(✅|❌|⏭️?|✔|✖)\s*)?> nx run (\S+?)(?:\s+(\[[^\]]+\]))?\s*$/u.exec(
+        s.trim(),
+      );
     if (m) {
       cur = {
-        task: m[1],
-        note: m[2] ?? null,
+        task: m[2],
+        outcome: m[1] === "❌" ? "failed" : m[1] ? "passed" : null,
+        note: m[3] ?? null,
         printed_at: new Date(t).toISOString(),
         cargo: [],
         compiling: 0,

@@ -81,7 +81,11 @@ export class Cache {
   // A job's whole log as text.
   log(jobId) {
     return this.read(`log-${jobId}.txt`, () =>
-      gh(["api", `repos/${REPO}/actions/jobs/${jobId}/logs`]),
+      gh([
+        "api",
+        "--allow-escape-sequences",
+        `repos/${REPO}/actions/jobs/${jobId}/logs`,
+      ]),
     );
   }
   // An artifact's zip, as bytes.

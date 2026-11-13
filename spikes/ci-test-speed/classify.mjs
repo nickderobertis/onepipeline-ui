@@ -36,16 +36,19 @@ const RULES = [
     "compile",
   ],
   [
-    /^(cc|c\+\+|gcc|g\+\+|cc1|cc1plus|clang|clang\+\+|as|ar|ranlib)$/,
+    /^(cc|c\+\+|gcc|g\+\+|cc1|cc1plus|clang|clang\+\+|as|ar|ranlib|cl)$/,
     "compile-c",
   ],
   [
     /^(ld|ld\.bfd|ld\.gold|ld\.lld|lld|collect2|rust-lld|ld64|link|lld-link|mold)$/,
     "link",
   ],
-  [/^(cargo|cargo-auditable|cargo-cyclonedx)$/, "cargo"],
+  [
+    /^(cargo|cargo-auditable|cargo-cyclonedx|cargo-clip|cargo-clippy|build-scri)$/,
+    "cargo",
+  ],
   [/^(llvm-profdata|llvm-cov|cargo-llvm-cov|llvm-readobj)$/, "coverage"],
-  [/^(cargo-nextest)$/, "test-harness"],
+  [/^(cargo-nextest|cargo-next)$/, "test-harness"],
   [/^onepipeline-api/, "server-under-test"],
   [/^onepipeline$/, "engine-cli"],
   [/^(git|git-remote-https?|git-upload-pack|git-receive-pack|ssh)$/, "git"],
@@ -65,7 +68,7 @@ const RULES = [
     "container",
   ],
   [/^(esbuild|vite|tsc|biome|eslint|node_modules)$/, "js-tooling"],
-  [/^(strace|bpftrace)$/, "tracer"],
+  [/^(strace|bpftrace|auditpol|wevtutil|accton|lastcomm)$/, "tracer"],
   [/^(tar|zstd|gzip|unzip|zip|xz)$/, "archive"],
 ];
 

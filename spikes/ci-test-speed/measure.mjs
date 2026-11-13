@@ -150,6 +150,7 @@ function leafShares(rec, a, b, instrumentedTask) {
   const nbins = Math.ceil((b - a) / BIN);
   const bins = Array.from({ length: nbins }, () => []);
   for (const p of rec.procs) {
+    if (p.system) continue;
     const s = Math.max(p.start, a);
     const e = Math.min(p.end ?? b, b);
     if (e <= s) continue;
@@ -166,6 +167,7 @@ function leafShares(rec, a, b, instrumentedTask) {
   const cats = new Map();
   const perTask = new Map();
   const add = (m, k, v) => m.set(k, (m.get(k) ?? 0) + v);
+  const others = new Map();
   let idle = 0;
   for (let i = 0; i < nbins; i += 1) {
     const lo = a + i * BIN;
@@ -202,13 +204,14 @@ function leafShares(rec, a, b, instrumentedTask) {
         /llvm-cov|instrument-coverage/.test(p.argv ?? "");
       const work = group(classify(p), inst);
       add(cats, work, share * (1 - sleep - wait));
+      if (work === group("other")) add(others, p.comm ?? "?", share);
       if (sleep) add(cats, group("sleep"), share * sleep);
       if (wait) add(cats, group("wait"), share * wait);
       add(perTask, p.task ?? "(no Nx task)", share);
     }
     if (total < 1) idle += len * (1 - total);
   }
-  return { cats, perTask, idle };
+  return { cats, perTask, idle, others };
 }
 
 // Without a recorder: each instant shared equally between the Nx tasks that
@@ -365,6 +368,7 @@ for (const name of wanted) {
     .filter((s) => s.cat !== "background");
   let covered = 0;
   const perTask = new Map();
+  const others = new Map();
   const instrumentedTask = (task) =>
     /_tier-test-covered|coverage/.test(commands[task] ?? "");
   let matched = null;
@@ -381,8 +385,12 @@ for (const name of wanted) {
       const prefix = st.cat === "bootstrap" ? "bootstrap: " : "";
       for (const [k, v] of sub.cats) add(prefix + k, v);
       add(`${prefix}unattributed (no recorded work running)`, sub.idle);
+      for (const [k, v] of sub.others ?? [])
+        others.set(k, (others.get(k) ?? 0) + v);
+      // Each task's exclusive minutes on every platform: each instant of the
+      // gate step shared equally between the Nx tasks executing then.
       if (st.cat === "gate")
-        for (const [k, v] of sub.perTask)
+        for (const [k, v] of taskShares(executions, blocks, s, e).perTask)
           perTask.set(k, (perTask.get(k) ?? 0) + v);
     } else add(st.cat, e - s);
   }
@@ -411,16 +419,35 @@ for (const name of wanted) {
     wall_minutes: wall / 60000,
     github_sha: f.github_sha,
     selection: f.selection,
-    restores: f.restores.map((r) => ({
-      ...r,
-      step_seconds: (() => {
-        const st = steps.find((x) =>
-          x.name.includes(r.step?.split("@")[0]?.replace(/^Run /, "") ?? "~"),
+    // Each restore line belongs to the step whose time window holds it.
+    // Each restore line belongs to the cache-restore step whose window holds
+    // it; a hit or miss printed by a test inside the gate step is not one.
+    restores: f.restores
+      .map((r) => {
+        const t = Date.parse(r.at);
+        const st = job.steps.find(
+          (x) =>
+            x.started_at &&
+            stepCategory(x.name) === "cache restore" &&
+            Date.parse(x.started_at) <= t + 1000 &&
+            Date.parse(x.completed_at) >= t - 1000,
         );
-        return st ? (st.e - st.s) / 1000 : null;
-      })(),
-    })),
+        return st
+          ? {
+              ...r,
+              step: st.name,
+              step_seconds:
+                (Date.parse(st.completed_at) - Date.parse(st.started_at)) /
+                1000,
+            }
+          : null;
+      })
+      .filter(Boolean),
     nested_fixture_records: nestedRecords,
+    other_processes: [...others]
+      .map(([comm, ms]) => ({ comm, minutes: ms / 60000 }))
+      .sort((x, y) => y.minutes - x.minutes)
+      .slice(0, 25),
     nx_cache_stored_bytes: manifestDoc?.stored_bytes ?? null,
     nx_store_attempts: execDoc?.store_attempts?.map((s) => s.status) ?? null,
     recorder: rec

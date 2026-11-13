@@ -19,6 +19,7 @@ function linuxAcct(buf) {
       .toString("latin1")
       .replace(/\0.*$/s, "");
     out.push({
+      uid: buf.readUInt32LE(o + 8),
       pid: buf.readUInt32LE(o + 16),
       ppid: buf.readUInt32LE(o + 20),
       btime: buf.readUInt32LE(o + 24) * 1000,
@@ -73,9 +74,12 @@ function linux(dir) {
   // are given back, in order, to the exec records still waiting for them.
   const pending = [];
   const RECORD = /^(READY|END|[FXQST]) \d/;
-  const queue = [...trace.split("\n")];
-  while (queue.length) {
-    const line = queue.shift();
+  // Lines are read by index (shift() on a trace's million lines is quadratic);
+  // a record found inside an X line goes on `again` and is read next.
+  const all = trace.split("\n");
+  const again = [];
+  for (let i = 0; i < all.length || again.length; ) {
+    const line = again.length ? again.pop() : all[i++];
     if (!line) continue;
     if (!RECORD.test(line) && !line.startsWith("@")) {
       const p = pending.shift();
@@ -102,7 +106,7 @@ function linux(dir) {
       const words = m[3].trim();
       if (!words || RECORD.test(words)) {
         pending.push(p);
-        if (words) queue.unshift(words);
+        if (words) again.push(words);
       } else {
         p.argv = words;
         p.execs.push(words);
@@ -149,7 +153,10 @@ function linux(dir) {
       const best = cands.find(
         (a) => Math.abs(a.btime + a.etime - p.end) < 2500,
       );
-      if (best) p.cpu = best.cpu;
+      if (best) {
+        p.cpu = best.cpu;
+        p.uid = best.uid;
+      }
     }
   }
   return { platform: "linux", tree: true, begin, end, procs };
@@ -171,6 +178,7 @@ function macos(dir) {
       ((comp(buf.readUInt16LE(o + 10)) + comp(buf.readUInt16LE(o + 12))) / 64) *
       1000;
     procs.push({
+      uid: buf.readUInt32LE(o + 20),
       pid: null,
       ppid: null,
       start: btime,
@@ -238,29 +246,69 @@ function windows(dir) {
   const stopTxt = read(dir, "clock-stop.txt");
   const begin = startTxt ? Number(startTxt.trim()) : null;
   const end = stopTxt ? Number(stopTxt.trim()) : null;
-  for (const p of procs) p.end ??= end;
   const samples = read(dir, "samples.csv");
+  const sampled = new Map();
   if (samples) {
-    const cpu = new Map();
+    // pid -> [started, cpu ms, last time sampled] per process instance.
+    const seen = new Map();
     for (const line of samples.split("\n")) {
-      const [, pid, , ms, started] = line.trim().split(",");
+      const [t, pid, , ms, started] = line.trim().split(",");
       if (!started) continue;
       const k = `${pid}@${started}`;
-      cpu.set(k, Math.max(cpu.get(k) ?? 0, Number(ms)));
+      const cur = seen.get(k) ?? [Number(started), 0, 0];
+      seen.set(k, [
+        cur[0],
+        Math.max(cur[1], Number(ms)),
+        Math.max(cur[2], Number(t)),
+      ]);
     }
-    const byPid = new Map();
-    for (const [k, v] of cpu) {
-      const [pid, started] = k.split("@").map(Number);
-      if (!byPid.has(pid)) byPid.set(pid, []);
-      byPid.get(pid).push([started, v]);
+    for (const [k, v] of seen) {
+      const pid = Number(k.split("@")[0]);
+      if (!sampled.has(pid)) sampled.set(pid, []);
+      sampled.get(pid).push(v);
     }
-    for (const p of procs)
-      for (const [started, v] of byPid.get(p.pid) ?? [])
-        if (Math.abs(started - p.start) < 1500) p.cpu = v;
+  }
+  for (const p of procs) {
+    const sample = (sampled.get(p.pid) ?? []).find(
+      ([started]) => Math.abs(started - p.start) < 1500,
+    );
+    if (sample) p.cpu = sample[1];
+    // A process created before termination auditing was on has no 4689: it
+    // ends where the sampler last saw it, or a second after it started.
+    if (p.end === null) {
+      p.end = Math.min(end ?? Infinity, sample ? sample[2] : p.start + 1000);
+      p.end_estimated = true;
+    }
   }
   return { platform: "windows", tree: true, begin, end, procs };
 }
 
+// Services the runner image keeps running beside a job: not the job's work, so
+// they take no share of an instant (Windows records no uid to tell them apart).
+const SERVICES =
+  /^(svchost|wmiprvse|wmiadap|smartscreen|vssvc|mousocoreworker|trustedinstaller|tiworker|runtimebroker|sppsvc|provtool|searchindexer|searchprotocolhost|searchfilterhost|msmpeng|mpcmdrun|compattelrunner|taskhostw|dllhost|backgroundtaskhost|wudfhost|lsass|services|csrss|wininit|winlogon|vctip|mdworker_s|mdworker|mds|mds_stores|spotlightk|spotlight|CacheDelet|xpcproxy|warmd|rpcsvchost|corecaptur|mdmclient|wifiFirmwa|ManagedCli|trustd|syspolicyd|XprotectSe)$/i;
+
+// The user most of the job's compiler and shell processes ran as; every other
+// user's process (root's daemons, Spotlight's indexers) is the runner image's.
+function jobUser(procs) {
+  const n = new Map();
+  for (const p of procs)
+    if (p.uid != null && /^(rustc|cargo|bash|sh|node|git)$/.test(p.comm ?? ""))
+      n.set(p.uid, (n.get(p.uid) ?? 0) + 1);
+  return [...n].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
 export function recorded(dir) {
-  return linux(dir) ?? macos(dir) ?? windows(dir);
+  const rec = linux(dir) ?? macos(dir) ?? windows(dir);
+  if (!rec) return null;
+  const user = jobUser(rec.procs);
+  for (const p of rec.procs)
+    p.system =
+      (user != null && p.uid != null && p.uid !== user) ||
+      /^(kworker|ksoftirq|kthreadd|rcu_|migration\/|dbus-daemon|systemd)/.test(
+        p.comm ?? "",
+      ) ||
+      SERVICES.test(p.comm ?? "");
+  rec.job_uid = user;
+  return rec;
 }
