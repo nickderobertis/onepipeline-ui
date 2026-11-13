@@ -64,15 +64,16 @@ export class Cache {
     return body;
   }
   // A REST GET, parsed as JSON.
-  json(path) {
-    return JSON.parse(this.read(`rest${path}`, () => gh(["api", path])));
+  json(path, tag = "") {
+    return JSON.parse(this.read(`rest${path}${tag}`, () => gh(["api", path])));
   }
   // Every page of a paginated REST list, concatenated under `field`.
-  pages(path, field) {
+  // `tag` names a cached copy apart (a run's artifact list grows per attempt).
+  pages(path, field, tag = "") {
     const out = [];
     for (let page = 1; page < 50; page += 1) {
       const sep = path.includes("?") ? "&" : "?";
-      const body = this.json(`${path}${sep}per_page=100&page=${page}`);
+      const body = this.json(`${path}${sep}per_page=100&page=${page}`, tag);
       out.push(...body[field]);
       if (body[field].length < 100) break;
     }

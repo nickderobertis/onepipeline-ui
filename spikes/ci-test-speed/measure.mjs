@@ -50,6 +50,8 @@ const jobs = cache.pages(
 const artifacts = cache.pages(
   `/repos/${REPO}/actions/runs/${run}/artifacts`,
   "artifacts",
+  // Attempt 1's listing is the one cached before this change named attempts.
+  attempt > 1 ? `@attempt-${attempt}` : "",
 );
 
 function unpack(artifact) {
