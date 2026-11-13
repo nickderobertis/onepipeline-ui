@@ -56,6 +56,7 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -209,6 +210,12 @@ function serverBinary() {
  * filesystems, and a checkout whose temporary directory is on another one — this
  * host's — would need a second path a journey cannot choose to run. A clone where
  * the filesystem can share the blocks gets one rather than a copy.
+ *
+ * Copied beside the name and renamed over it rather than written through it. A
+ * persistent corpus's workspace already holds the copy its last start made, and
+ * Linux refuses to open for writing a file anything is still executing
+ * (`ETXTBSY`); a rename replaces only the name, so a process still running the
+ * old copy keeps it and this start serves the new one.
  */
 function privateBinary(binary, workspace) {
   // Keep Cargo's debug layout so later fixture servers can use this retained
@@ -216,7 +223,9 @@ function privateBinary(binary, workspace) {
   const directory = join(workspace, "debug");
   mkdirSync(directory, { recursive: true });
   const staged = join(directory, basename(binary));
-  copyFileSync(binary, staged, constants.COPYFILE_FICLONE);
+  const copying = `${staged}.${process.pid}.staging`;
+  copyFileSync(binary, copying, constants.COPYFILE_FICLONE);
+  renameSync(copying, staged);
   return staged;
 }
 

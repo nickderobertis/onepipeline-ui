@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdtempSync,
@@ -21,7 +21,11 @@ import {
   test,
 } from "@playwright/test";
 import { z } from "zod";
-import { type FixtureServer, startFixtureServer } from "./fixture-server";
+import {
+  exited,
+  type FixtureServer,
+  startFixtureServer,
+} from "./fixture-server";
 import { FIXTURE_WORKSPACE } from "./playwright.config";
 
 /**
@@ -1615,6 +1619,43 @@ for (const acting of ["browser-owns-nothing", SUPERVISOR, ""]) {
     });
   });
 }
+
+test("a world restarts while something still runs its last copy of the server", async ({
+  page,
+}) => {
+  const served = await serveWorld("hostwide");
+  // Another process executing the copy this start made: a server over a runs
+  // root of its own, held until the world has been served again.
+  const runsRoot = mkdtempSync(join(tmpdir(), "dag-ui-e2e-running-copy-"));
+  const running = spawn(
+    join(served.workspace, "debug", "onepipeline-api"),
+    ["serve", "--runs-root", runsRoot, "--bind", "127.0.0.1:0"],
+    { stdio: ["ignore", "pipe", "inherit"] },
+  );
+  try {
+    const stdout = running.stdout;
+    if (stdout === null) throw new Error("the running copy has no stdout");
+    await new Promise<void>((resolve, reject) => {
+      stdout.setEncoding("utf8");
+      stdout.on("data", (text: string) => {
+        if (text.includes("onepipeline-api: serving ")) resolve();
+      });
+      running.once("exit", (code) =>
+        reject(new Error(`the running copy exited ${code}`)),
+      );
+    });
+    await actAs(served, SUPERVISOR);
+    const list = await open(page, served);
+    expect(await titles(list)).toEqual(
+      listed(served).map(({ item }) => item.title),
+    );
+    expect(running.exitCode).toBeNull();
+  } finally {
+    running.kill("SIGTERM");
+    await exited(running);
+    rmSync(runsRoot, { recursive: true, force: true });
+  }
+});
 
 test("a detail that cannot be read says why, and another item's opens once the server can read again", async ({
   page,
