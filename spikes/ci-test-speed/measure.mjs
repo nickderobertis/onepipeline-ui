@@ -128,7 +128,9 @@ function owners(procs, executions, commands) {
     const head = cmd.slice(0, 50);
     const start = Date.parse(t.started_at);
     const cands = procs.filter(
-      (p) => p.argv?.includes(head) && Math.abs(p.start - start) < 60000,
+      (p) =>
+        (p.execs ?? [p.argv]).some((a) => a?.includes(head)) &&
+        Math.abs(p.start - start) < 60000,
     );
     cands.sort((x, y) => Math.abs(x.start - start) - Math.abs(y.start - start));
     if (cands[0]) roots.set(cands[0].key, t.task);

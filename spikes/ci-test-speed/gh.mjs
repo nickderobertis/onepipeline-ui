@@ -44,9 +44,17 @@ export class Cache {
   path(key) {
     return join(this.dir, key.replace(/[^A-Za-z0-9._-]+/g, "_"));
   }
-  read(key, fetch, binary = false) {
+  // `local` marks a computation on this host rather than a GitHub read: it
+  // runs offline too, and spends no quota.
+  read(key, fetch, binary = false, local = false) {
     const file = this.path(key);
     if (existsSync(file)) return readFileSync(file, binary ? null : "utf8");
+    if (local) {
+      const body = fetch();
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, body);
+      return body;
+    }
     if (this.offline)
       throw new Error(`offline and ${key} is not cached under ${this.dir}`);
     guard();

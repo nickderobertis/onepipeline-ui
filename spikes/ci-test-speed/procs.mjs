@@ -59,6 +59,7 @@ function linux(dir) {
       argv: null,
       sleeps: [],
       waits: [],
+      execs: [],
       exec: false,
     };
     if (!byPid.has(pid)) byPid.set(pid, []);
@@ -66,7 +67,25 @@ function linux(dir) {
     return p;
   };
   let begin = null;
-  for (const line of trace.split("\n")) {
+  // An earlier trace.bt printed exec arguments with join(), which bpftrace
+  // emits apart from its prefix: other records can follow `X <ns> <pid> ` on
+  // its line, and the words arrive later as a line of their own. Those words
+  // are given back, in order, to the exec records still waiting for them.
+  const pending = [];
+  const RECORD = /^(READY|END|[FXQST]) \d/;
+  const queue = [...trace.split("\n")];
+  while (queue.length) {
+    const line = queue.shift();
+    if (!line) continue;
+    if (!RECORD.test(line) && !line.startsWith("@")) {
+      const p = pending.shift();
+      if (p) {
+        p.argv = line.trim();
+        p.execs.push(p.argv);
+        p.comm = p.argv.split(" ")[0].split("/").pop();
+      }
+      continue;
+    }
     const sp = line.indexOf(" ");
     const kind = line.slice(0, sp);
     const rest = line.slice(sp + 1);
@@ -75,13 +94,20 @@ function linux(dir) {
       const [ns, parent, child] = rest.split(" ");
       fresh(Number(child), ms(ns), Number(parent));
     } else if (kind === "X") {
-      const m = /^(\d+) (\d+) (.*)$/.exec(rest);
+      const m = /^(\d+) (\d+) ?(.*)$/.exec(rest);
       if (!m) continue;
       const pid = Number(m[2]);
       const p = inst(pid) ?? fresh(pid, ms(m[1]), null);
-      p.argv = m[3];
       p.exec = true;
-      p.comm = m[3].split(" ")[0].split("/").pop();
+      const words = m[3].trim();
+      if (!words || RECORD.test(words)) {
+        pending.push(p);
+        if (words) queue.unshift(words);
+      } else {
+        p.argv = words;
+        p.execs.push(words);
+        p.comm = words.split(" ")[0].split("/").pop();
+      }
     } else if (kind === "Q") {
       const [ns, pid, ...comm] = rest.split(" ");
       const p = inst(Number(pid));
