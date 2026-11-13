@@ -100,7 +100,7 @@ final-status-level = "fail"
 
 # Tests that read the crate version, isolated so a release replays other journeys.
 [profile.versions]
-default-filter = "(binary(=e2e) and (test(=cli::version_reports_the_crate_version) or test(=server::browser_supervision_is_removed_and_shutdown_is_host_only) or test(=ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing))) or (binary(=packaging) and test(=the_assembled_launcher_pins_every_platform_package_to_the_crate_version))"
+default-filter = "(binary(=e2e) and (test(=cli::version_reports_the_crate_version) or test(=server::browser_supervision_is_removed_and_shutdown_is_host_only))) or (binary(=packaging) and (test(=the_assembled_launcher_pins_every_platform_package_to_the_crate_version) or test(=the_crate_tarball_carries_the_view_sources_and_no_built_view)))"
 status-level = "fail"
 final-status-level = "fail"
 

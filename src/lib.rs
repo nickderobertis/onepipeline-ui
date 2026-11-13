@@ -60,3 +60,4 @@ pub mod telemetry;
 pub mod ui;
 
 pub use error::ApiError;
+// Spike measurement: a pull request editing the crate source.

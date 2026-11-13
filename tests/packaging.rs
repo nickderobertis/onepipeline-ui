@@ -2511,3 +2511,20 @@ fn npm_packaging_refuses_bytes_other_than_the_verified_wheel_binary() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("verified wheel SHA256"));
 }
+
+/// The pyramid sample's fake for the no-bundle journey's packaged half: the
+/// crate as crates.io serves it carries the view's sources and no built view.
+#[test]
+fn the_crate_tarball_carries_the_view_sources_and_no_built_view() {
+    let packaged = packaged_files();
+    assert!(packaged.iter().any(|path| path == "build.rs"), "{packaged:?}");
+    assert!(
+        packaged.iter().any(|path| path.starts_with("apps/dag-ui/src/")),
+        "{packaged:?}"
+    );
+    let built: Vec<&String> = packaged
+        .iter()
+        .filter(|path| path.starts_with("apps/dag-ui/dist/"))
+        .collect();
+    assert!(built.is_empty(), "the crate tarball carries a built view: {built:?}");
+}
