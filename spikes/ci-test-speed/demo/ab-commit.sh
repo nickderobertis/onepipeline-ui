@@ -16,12 +16,12 @@ cp "$here/apply-measurement.mjs" "$patch/"
 git switch -q -c "$branch" "$session"
 git read-tree --reset -u "$hist"
 git checkout "$session" -- spikes/ci-test-speed/recorder
-node "$patch/apply-measurement.mjs" --ab
+node "$patch/apply-measurement.mjs" --ab --only-job test-linux
 git add -A
 git commit -q -m "test(spike): DO NOT MERGE — A/B side: the tree of ${hist:0:12} with measurement-only changes
 
 The historical tree, the spike recorder and the measurement-only patch (no cache
-writes or reads, lint and budgets off, a 60-minute Linux timeout).
+writes or reads; lint, budgets, test-macos and test-windows off; a 60-minute Linux timeout).
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 git log --oneline -1

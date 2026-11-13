@@ -444,3 +444,22 @@ test("the job medians recompute from the committed listing", () => {
     /test-linux {4}non-release {2}before n= 55 median 18\.3 min \| after n= 34 median 24\.9 min/,
   );
 });
+
+test("--only-job leaves one test job running, and the patch refuses to apply twice", () => {
+  const dir = scratchCi();
+  const r = apply(dir, "--ab", "--only-job", "test-linux");
+  assert.equal(r.status, 0, r.stderr);
+  const ci = readFileSync(join(dir, ".github/workflows/ci.yml"), "utf8");
+  assert.match(ci, /\n {2}test-windows:\n {4}if: false\n/);
+  assert.match(ci, /\n {2}test-macos:\n {4}if: false\n/);
+  assert.match(
+    ci,
+    /\n {2}test-linux:\n {4}if: github\.event_name == 'pull_request'\n/,
+  );
+  const again = apply(dir, "--only-job", "test-linux");
+  assert.equal(
+    again.status,
+    1,
+    "a second application found the jobs it had already switched off",
+  );
+});

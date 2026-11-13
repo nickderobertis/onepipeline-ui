@@ -82,6 +82,24 @@ if (process.argv.includes("--ab")) {
   );
   replaceAll(/\n {4}timeout-minutes: 36\n/g, "\n    timeout-minutes: 60\n", 1);
 }
+// `--only-job <job>`: every other test job does not run (manager ruling a6:
+// the historical A/B runs only the job under question, the same on both sides).
+const only = process.argv.includes("--only-job")
+  ? process.argv[process.argv.indexOf("--only-job") + 1]
+  : null;
+if (only) {
+  for (const other of ["test-linux", "test-windows", "test-macos"].filter(
+    (j) => j !== only,
+  ))
+    replaceAll(
+      new RegExp(
+        `\\n {2}${other}:\\n {4}if: github\\.event_name == 'pull_request'\\n`,
+        "g",
+      ),
+      `\n  ${other}:\n    if: false\n`,
+      1,
+    );
+}
 writeFileSync(file, text);
 if (process.argv.includes("--touch-src"))
   appendFileSync(
