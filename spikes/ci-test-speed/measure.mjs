@@ -15,7 +15,7 @@
 // equally between what was running then (the leaf processes, with the
 // recorder; the executing Nx tasks, without it), so no minute counts twice.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONTAINERS, classify, group } from "./classify.mjs";
 import { outer } from "./executions.mjs";
@@ -391,17 +391,11 @@ for (const name of wanted) {
   const tests = blocks.flatMap((blk) =>
     blk.tests.map((t) => ({ ...t, task: blk.task })),
   );
+  // node's spec reporter also prints each file (and each describe) with the
+  // sum of what it holds: a file-level line is a suite, not a test. Vitest's
+  // default reporter prints files only, which stay, named as files.
   const leafTests = tests.filter(
-    (t) =>
-      t.runner !== "node" ||
-      !tests.some(
-        (u) =>
-          u.runner === "node" &&
-          u.task === t.task &&
-          (u.depth ?? 0) > (t.depth ?? 0) &&
-          u.name !== t.name &&
-          false,
-      ),
+    (t) => !(t.runner === "node" && /\.(test|spec)\.[cm]?[jt]s$/.test(t.name)),
   );
   const binaries = new Map();
   for (const t of tests.filter((t) => t.runner === "nextest"))
@@ -507,4 +501,3 @@ for (const j of result.jobs) {
 }
 const out = opt("json");
 if (out) writeFileSync(out, `${JSON.stringify(result, null, 1)}\n`);
-void readdirSync;

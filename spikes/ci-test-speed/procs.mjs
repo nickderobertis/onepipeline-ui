@@ -248,13 +248,15 @@ function windows(dir) {
       const k = `${pid}@${started}`;
       cpu.set(k, Math.max(cpu.get(k) ?? 0, Number(ms)));
     }
-    for (const p of procs) {
-      for (const [k, v] of cpu) {
-        const [pid, started] = k.split("@");
-        if (Number(pid) === p.pid && Math.abs(Number(started) - p.start) < 1500)
-          p.cpu = v;
-      }
+    const byPid = new Map();
+    for (const [k, v] of cpu) {
+      const [pid, started] = k.split("@").map(Number);
+      if (!byPid.has(pid)) byPid.set(pid, []);
+      byPid.get(pid).push([started, v]);
     }
+    for (const p of procs)
+      for (const [started, v] of byPid.get(p.pid) ?? [])
+        if (Math.abs(started - p.start) < 1500) p.cpu = v;
   }
   return { platform: "windows", tree: true, begin, end, procs };
 }
