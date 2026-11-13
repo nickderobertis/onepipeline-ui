@@ -46,6 +46,13 @@ await cli(async () => {
       `run ${run} as read names no attempt`,
       "check the run id, or remove its cached response and retry online",
     );
+  // While any attempt runs, GitHub lists none of the run's earlier artifacts,
+  // so a measurement then would read every recorder as absent.
+  if (runInfo.status !== "completed")
+    refuse(
+      `run ${run} is ${runInfo.status}: GitHub lists no attempt's artifacts until it completes`,
+      `wait for it to complete, then remove ${cache.path(`rest_repos_${REPO.replace("/", "_")}_actions_runs_${run}`)}* and retry`,
+    );
   const attempt = o.int("attempt", runInfo.run_attempt, { min: 1 });
   const jobs = jobsList(
     cache.pages(

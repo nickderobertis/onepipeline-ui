@@ -341,6 +341,40 @@ test("one measurement of a cached run divides the Windows job's wall clock exact
   );
 });
 
+test("a run still in progress is refused, since its earlier artifacts are hidden", () => {
+  const cache = fixtureCache();
+  const doc = join(
+    cache,
+    "rest_repos_nickderobertis_onepipeline-ui_actions_runs_43370095836",
+  );
+  writeFileSync(
+    doc,
+    JSON.stringify({
+      ...JSON.parse(readFileSync(doc, "utf8")),
+      status: "in_progress",
+    }),
+  );
+  const r = spawnSync(
+    "node",
+    [
+      join(root, "spikes/ci-test-speed/measure.mjs"),
+      "--run",
+      "43370095836",
+      "--jobs",
+      "test-windows",
+      "--offline",
+      "--cache",
+      cache,
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(r.status, 2);
+  assert.match(
+    r.stderr,
+    /run 43370095836 is in_progress: GitHub lists no attempt's artifacts until it completes\. ACTION: wait for it to complete/,
+  );
+});
+
 test("offline, a run whose log was never fetched is refused naming the log", () => {
   const cache = fixtureCache();
   spawnSync("rm", [join(cache, "log-131703598302.txt")]);
