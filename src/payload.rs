@@ -2558,7 +2558,9 @@ fn rejected_edits(view: &Run<'_>) -> Vec<Value> {
         .map(|event| {
             let mut edit = Map::new();
             edit.insert("at".into(), json!(event.ts));
-            for field in ["author", "command", "reason", "envelope", "index", "refusal"] {
+            for field in [
+                "author", "command", "reason", "envelope", "index", "refusal",
+            ] {
                 if let Some(value) = event.payload.get(field) {
                     edit.insert(field.into(), value.clone());
                 }
@@ -6936,7 +6938,10 @@ pub const TIMELINE_RECORD_FIELDS: &[(&str, &[(&str, &str)])] = &[
     ),
     // A live edit refused, the plan-edit hook's refusal among them: who sent it
     // and why it was refused, which names the hook that refused it.
-    ("edit-rejected", &[("author", "Author"), ("reason", "Reason")]),
+    (
+        "edit-rejected",
+        &[("author", "Author"), ("reason", "Reason")],
+    ),
     ("completion-requested", &[("reason", "Reason")]),
     (
         "run-stopped",

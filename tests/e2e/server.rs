@@ -22633,7 +22633,10 @@ fn check_visibility_records_reach_every_event_reading_and_the_node_checks() {
 /// the run's plan-edit hook refused.
 fn command_steps() -> (Serving, String) {
     let corpus = fixture_run::command_steps();
-    let run = corpus["run_id"].as_str().expect("the corpus's run").to_owned();
+    let run = corpus["run_id"]
+        .as_str()
+        .expect("the corpus's run")
+        .to_owned();
     let serving = Serving::start(|root| {
         fixture_run::write_command_steps(root);
     });
@@ -22679,8 +22682,15 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
         .map(|task| (task["id"].as_str().expect("an id").to_owned(), task.clone()))
         .collect();
     assert_eq!(tasks["build"]["kind"], json!("command"));
-    assert_eq!(tasks["build"]["command"], json!(["cargo", "build", "--release"]));
-    assert!(tasks["build"].get("timeout_seconds").is_none(), "{}", tasks["build"]);
+    assert_eq!(
+        tasks["build"]["command"],
+        json!(["cargo", "build", "--release"])
+    );
+    assert!(
+        tasks["build"].get("timeout_seconds").is_none(),
+        "{}",
+        tasks["build"]
+    );
     assert_eq!(tasks["integration"]["kind"], json!("command"));
     assert_eq!(tasks["integration"]["timeout_seconds"], json!(30));
 
@@ -22694,7 +22704,11 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
         assert_eq!(result["kind"], json!("command"), "{node}: {result}");
         assert_eq!(result["status"], json!(status), "{node}: {result}");
         assert_eq!(graph["node_status"][node], json!(status), "{node}");
-        assert_eq!(result.get("outcome").cloned(), outcome.map(|word| json!(word)), "{node}");
+        assert_eq!(
+            result.get("outcome").cloned(),
+            outcome.map(|word| json!(word)),
+            "{node}"
+        );
         let log = &result["log"];
         let path = log["path"].as_str().expect("the log's path");
         assert!(
@@ -22712,7 +22726,11 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
         assert_eq!(started[0]["Log"], json!(path), "{node}");
         let settled = node_record_fields(&serving, &run, node, "node-settled");
         assert_eq!(settled.len(), 1, "{node}: {settled:?}");
-        assert_eq!(settled[0].get("Outcome").cloned(), outcome.map(|word| json!(word)), "{node}");
+        assert_eq!(
+            settled[0].get("Outcome").cloned(),
+            outcome.map(|word| json!(word)),
+            "{node}"
+        );
     }
     let ended = node_record_fields(&serving, &run, "integration", "command-exited");
     assert_eq!(ended[0]["Ending"], json!("timed-out"), "{ended:?}");
@@ -22720,7 +22738,9 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
     assert_eq!(ended[0]["Exit code"], json!(101), "{ended:?}");
 
     let hook = corpus["hook"].as_str().expect("the corpus's hook");
-    let rejected = graph["rejected_edits"].as_array().expect("the refused edits");
+    let rejected = graph["rejected_edits"]
+        .as_array()
+        .expect("the refused edits");
     assert_eq!(rejected.len(), 1, "{rejected:?}");
     let edit = &rejected[0];
     assert_eq!(edit["author"], json!("planner"));
@@ -22730,7 +22750,9 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
     assert_eq!(edit["index"], json!(0));
     let reason = edit["reason"].as_str().expect("the refusal's reason");
     assert!(
-        reason.contains(&format!("the plan-edit hook `{hook}` refused node 'deploy'")),
+        reason.contains(&format!(
+            "the plan-edit hook `{hook}` refused node 'deploy'"
+        )),
         "{reason}"
     );
     assert!(edit["at"].is_string(), "{edit}");
@@ -22743,12 +22765,18 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
 #[test]
 fn a_command_log_outside_the_run_or_gone_is_served_as_its_name_alone() {
     let corpus = fixture_run::command_steps();
-    let run = corpus["run_id"].as_str().expect("the corpus's run").to_owned();
+    let run = corpus["run_id"]
+        .as_str()
+        .expect("the corpus's run")
+        .to_owned();
     let outside = std::sync::Mutex::new(String::new());
     let serving = Serving::start(|root| {
         let dir = fixture_run::write_command_steps(root);
         fs::remove_file(dir.join("commands").join("lint.log")).expect("remove a log");
-        let elsewhere = root.parent().expect("the root's parent").join("elsewhere.log");
+        let elsewhere = root
+            .parent()
+            .expect("the root's parent")
+            .join("elsewhere.log");
         fs::write(&elsewhere, "a file the run never wrote\n").expect("a file elsewhere");
         let journal = dir.join("events.jsonl");
         let named = dir.join("commands").join("build.log").display().to_string();
@@ -22776,6 +22804,13 @@ fn a_command_log_outside_the_run_or_gone_is_served_as_its_name_alone() {
     let lint = results["lint"]["log"].as_object().expect("lint's log");
     assert_eq!(lint.keys().collect::<Vec<_>>(), vec!["path"], "{lint:?}");
     assert_eq!(results["lint"]["outcome"], json!("command-failed"));
-    assert!(detail["graph"].get("rejected_edits").is_none(), "{}", detail["graph"]);
-    assert_eq!(results["integration"]["log"]["content"], corpus["logs"]["integration"]);
+    assert!(
+        detail["graph"].get("rejected_edits").is_none(),
+        "{}",
+        detail["graph"]
+    );
+    assert_eq!(
+        results["integration"]["log"]["content"],
+        corpus["logs"]["integration"]
+    );
 }
