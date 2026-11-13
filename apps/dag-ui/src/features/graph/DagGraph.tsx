@@ -64,7 +64,7 @@ export function DagGraph({
         ...(awaits.get(node.id) === undefined ? {} : { lines: 1 }),
       })),
       edges: nodeViews.flatMap((node) =>
-        (node.task.deps ?? [])
+        (node.task?.deps ?? [])
           // A cross-DAG dependency (`run:<run_id>#<node_id>`) names a node in
           // another run, which this graph cannot draw an edge to. The node detail
           // still lists it, so the prerequisite stays visible.

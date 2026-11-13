@@ -14,8 +14,15 @@
 # time, and keeps each unit's newest build and every build from those 2 days, so
 # the next run in the slot still starts warm. The recipe holds the window and the
 # directories; `pool-maintenance/budgets.yaml` holds how long one pass may take.
-schema_version = 1
+schema_version = 2
 
 [pool.maintain]
 command = ["just", "pool-maintenance"]
 timeout = "30m"
+
+[policy]
+publication = "change-auto"
+approvals = "none"
+
+[policy.checks]
+wait_seconds = 27300  # recorded max 21761 s (run 39382834193) + 25% margin

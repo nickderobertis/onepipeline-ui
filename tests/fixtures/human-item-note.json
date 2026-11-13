@@ -22,7 +22,8 @@
         "actor": "browser:session:claude-code-supervising-session",
         "on_behalf_of": null,
         "text": null,
-        "reason": "The outage ended on its own."
+        "reason": "The outage ended on its own.",
+        "provenance": "user"
       },
       "tracker": {
         "task": "board:I_3",

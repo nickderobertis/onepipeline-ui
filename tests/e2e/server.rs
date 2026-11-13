@@ -13550,6 +13550,177 @@ fn a_reply_reaches_the_engine_byte_for_byte_and_is_answered_in_its_words() {
     );
 }
 
+/// **A reply from the browser is the user's words.** The route submits it
+/// through `verbs::reply_as(.., Provenance::User)`, so the linked engine
+/// journals its edit with provenance `user` whatever version the envelope is —
+/// and an envelope claiming the manager's words is refused `422` naming the
+/// field, with nothing queued and nothing applied: a person at the browser is
+/// the user.
+#[test]
+fn a_reply_through_the_route_is_journaled_as_the_users_and_a_body_claiming_the_managers_is_refused()
+{
+    let mut run_dir = std::path::PathBuf::new();
+    let serving = Serving::start(|root| {
+        run_dir = fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let reply = format!("/api/v2/runs/{run}/channel/reply");
+    let journal_path = run_dir.join("events.jsonl");
+    let journal = || fs::read_to_string(&journal_path).expect("the run's journal");
+    let committed = || -> Vec<Value> {
+        journal()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("a journal line"))
+            .filter(|event| event["kind"] == json!("edit-committed"))
+            .collect()
+    };
+    let add = |id: &str| {
+        json!({
+            "op": "add",
+            "node": {
+                "id": id,
+                "persona": "engineer",
+                "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done",
+            },
+        })
+    };
+
+    // Claiming the manager's words, on the envelope that carries the field.
+    let before = journal();
+    let claimed = http::post(
+        serving.address,
+        &reply,
+        &json!({"version": 4, "provenance": "manager", "commands": [add("claimed")]}).to_string(),
+    );
+    assert_eq!(claimed.status, 422, "{}", claimed.body);
+    let claimed = claimed.json();
+    assert_eq!(claimed["error"]["code"], json!("refused"), "{claimed}");
+    let said = claimed["error"]["message"].as_str().expect("the refusal");
+    assert!(
+        said.contains("provenance") && said.contains("Nothing was queued"),
+        "the refusal names the field: {said}"
+    );
+    assert_eq!(journal(), before, "a refused reply journals nothing");
+    let channel = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
+    assert_eq!(channel["commands"], json!([]), "{channel}");
+    assert_eq!(channel["replies"], json!([]), "{channel}");
+
+    // Every version the engine reads, saying nothing of whose words, or saying
+    // the user's, is journaled as the user's.
+    for (version, stated, id) in [
+        (2, None, "from-v2"),
+        (3, None, "from-v3"),
+        (4, None, "from-v4"),
+        (4, Some("user"), "stated-user"),
+    ] {
+        let mut envelope = json!({"version": version, "commands": [add(id)]});
+        if let Some(stated) = stated {
+            envelope["provenance"] = json!(stated);
+        }
+        let applied = http::post(serving.address, &reply, &envelope.to_string());
+        assert_eq!(applied.status, 200, "{id}: {}", applied.body);
+        assert_eq!(applied.json()["receipt"]["state"], json!("applied"));
+    }
+    let parties: Vec<Value> = committed()
+        .iter()
+        .map(|event| event["payload"]["provenance"].clone())
+        .collect();
+    assert_eq!(parties, vec![json!("user"); 4], "{:?}", committed());
+}
+
+/// **A declined ruling is served with the engine's typed record.** A manager's
+/// note, sent through the real `onepipeline reply` with no `--as`, declined
+/// through the real `onepipeline decline-ruling`, is served by the channel
+/// route as one `declined-ruling` surface whose `declined_ruling` names every
+/// fact of it as the test declined it — so a reader takes the node, the
+/// reference, the party, the kind, the reply, the text and the reason from
+/// there rather than from the message.
+#[test]
+fn a_ruling_declined_through_the_cli_is_served_by_the_channel_with_its_typed_record() {
+    const NOTE: &str = "Keep the export under fifty lines.";
+    const REASON: &str = "The fixture already exceeds fifty lines.";
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let root = serving.runs_root();
+    let files = tempfile::tempdir().expect("the CLI's input files");
+    let cli = |arguments: &[&str], input: Option<(&str, &str)>| -> Value {
+        let mut arguments = arguments.to_vec();
+        let path;
+        if let Some((name, text)) = input {
+            path = files.path().join(name);
+            fs::write(&path, text).expect("the CLI's input");
+            arguments.push(path.to_str().expect("a UTF-8 path"));
+        }
+        let output = sibling::run(&root, Some(fixture_run::SESSION), &arguments);
+        assert!(
+            output.status.success(),
+            "`onepipeline {}` refused: {}",
+            arguments.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap_or(Value::Null)
+    };
+    let envelope = |commands: Value| json!({"version": 4, "commands": commands}).to_string();
+    cli(
+        &["reply", run],
+        Some((
+            "add.json",
+            &envelope(
+                json!([{"op": "add", "node": {"id": "export", "persona": "engineer",
+                "task": "## What\nExport it.\n\n## Acceptance criteria\n\n- it is exported"}}]),
+            ),
+        )),
+    );
+    let noted = cli(
+        &["reply", run],
+        Some((
+            "note.json",
+            &envelope(json!([{"op": "note", "id": "export", "addressee": "worker", "text": NOTE}])),
+        )),
+    );
+    let reply = noted["reply"].as_u64().expect("the note's envelope id");
+    let ruling = format!("c{reply}.0");
+    cli(
+        &["decline-ruling", run, "--ruling", &ruling],
+        Some(("reason.txt", REASON)),
+    );
+
+    let channel = http::get(serving.address, &format!("/api/v2/runs/{run}/channel"));
+    assert_eq!(channel.status, 200, "{}", channel.body);
+    let channel = channel.json();
+    let surfaces = channel["surfaces"].as_array().expect("the surfaces");
+    let declined: Vec<&Value> = surfaces
+        .iter()
+        .filter(|surface| surface["kind"] == json!("declined-ruling"))
+        .collect();
+    assert_eq!(declined.len(), 1, "{channel}");
+    let declined = declined[0];
+    assert_eq!(declined["blocking"], json!(false), "{declined}");
+    assert_eq!(declined["workstream"], json!("export"), "{declined}");
+    assert_eq!(
+        declined["declined_ruling"],
+        json!({
+            "node": "export",
+            "ruling": ruling,
+            "provenance": "manager",
+            "kind": "note",
+            "reply": reply,
+            "text": NOTE,
+            "reason": REASON,
+        }),
+        "{declined}"
+    );
+    // Every other surface serializes as it always did: without the record.
+    for other in surfaces
+        .iter()
+        .filter(|surface| surface["kind"] != json!("declined-ruling"))
+    {
+        assert!(other.get("declined_ruling").is_none(), "{other}");
+    }
+}
+
 /// The note op's newer fields and the op that takes a note back pass through
 /// the reply route as written, and are answered in the engine's words.
 ///
@@ -13743,6 +13914,7 @@ fn a_correlated_verdict_on_a_settled_run_reaches_its_listener_and_requests_no_co
                 abandoned: false,
                 asker: None,
                 correlation: None,
+                declined_ruling: None,
             },
             AskOptions {
                 blocking: false,

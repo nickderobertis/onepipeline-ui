@@ -4,10 +4,11 @@ import {
   type HumanItem,
   type HumanItemDetail,
   type HumanItemFilter,
+  type HumanItemHistoryEntry,
   type HumanItemNode,
   type HumanItemView,
+  type Provenance,
 } from "@onepipeline-ui/dag-model";
-import { formatAbsoluteTimestamp } from "../../lib/time";
 
 /**
  * What a reader sees of an action item, derived from the engine's record and
@@ -125,10 +126,48 @@ export function blockedGroups(detail: HumanItemDetail): {
   });
 }
 
-/** One labelled field of an item's metadata block. */
-export interface MetadataField {
-  readonly label: string;
-  readonly value: string;
+/**
+ * One labelled field of an item's metadata block: words, or a recorded moment
+ * the pane shows as an age, with the party whose words it was where the field
+ * is a resolution.
+ */
+export type MetadataField =
+  | { readonly label: string; readonly value: string }
+  | {
+      readonly label: string;
+      readonly at: string;
+      readonly party?: string;
+    };
+
+/**
+ * A party in the page's own words: a person reading this page is the user, so
+ * the user's words are "you"; the manager's are "the manager".
+ */
+export function partyWords(provenance: Provenance): string {
+  return provenance === "user" ? "you" : "the manager";
+}
+
+/** Whose words a resolution was: absent, the manager's, as the engine reads it. */
+export function resolutionParty(item: HumanItem): Provenance {
+  return item.resolution?.provenance ?? "manager";
+}
+
+const HISTORY_ACTIONS: Record<HumanItemHistoryEntry["action"], string> = {
+  "human-item-raised": "Raised",
+  "human-item-answered": "Answered",
+  "human-item-completed": "Completed",
+  "human-item-dismissed": "Dismissed",
+  "human-item-auto-resolved": "Resolved",
+  "human-item-reopened": "Reopened",
+  "human-item-noted": "Note",
+};
+
+/**
+ * What one entry of the engine's history says, in words: its action and whose
+ * words it was — "Raised by the manager", "Answered by you", "Note by you".
+ */
+export function historyWords(entry: HumanItemHistoryEntry): string {
+  return `${HISTORY_ACTIONS[entry.action]} by ${partyWords(entry.provenance)}`;
 }
 
 /**
@@ -154,10 +193,16 @@ export function metadataFields(view: HumanItemView): MetadataField[] {
     ...(plan === null ? [] : [{ label: "Plan", value: plan }]),
     ...(run === null ? [] : [{ label: "Run", value: run }]),
     { label: "Blocks", value: blocks === "" ? "Nothing" : blocks },
-    { label: "Raised", value: formatAbsoluteTimestamp(item.created_at) },
+    { label: "Raised", at: item.created_at },
     ...(resolved === undefined
       ? []
-      : [{ label: resolved, value: formatAbsoluteTimestamp(item.updated_at) }]),
+      : [
+          {
+            label: resolved,
+            at: item.updated_at,
+            party: partyWords(resolutionParty(item)),
+          },
+        ]),
   ];
 }
 

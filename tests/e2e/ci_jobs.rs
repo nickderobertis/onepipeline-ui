@@ -279,7 +279,7 @@ fn each_job_selects_the_changed_project_and_its_dependents_and_no_unreached_pack
 }
 
 /// `test-linux` lists its targets rather than reaching them through `check`,
-/// so that it leaves formatting, lints and type checks to `lint`; this holds
+/// so that it leaves formatting, lints, type checks and docs to `lint`; this holds
 /// the list to `check`'s own selection, so a target a project's `check` gains
 /// is not silently dropped from the job.
 #[test]
@@ -300,7 +300,7 @@ fn the_linux_job_runs_what_check_selects_less_what_lint_runs() {
     let text = plain(&output.stdout);
     let graph: serde_json::Value =
         serde_json::from_str(&text[text.find('{').expect("a graph")..]).expect("a JSON graph");
-    let lint_owned = [":format-check", ":lint", ":typecheck", ":check"];
+    let lint_owned = [":format-check", ":lint", ":typecheck", ":doc", ":check"];
     let owed: BTreeSet<String> = graph["tasks"]["tasks"]
         .as_object()
         .expect("a task map")
@@ -545,9 +545,16 @@ fn the_jobs_platform_split_is_what_each_selects_for_a_crate_change() {
         "onepipeline-ui:msrv",
         "onepipeline-ui:deps-check",
         "onepipeline-ui:lint",
+        "onepipeline-ui:doc",
     ] {
         assert!(lint.contains(task), "lint does not select {task}: {lint:?}");
     }
+    // The docs' dependency graph is the check-mode one `lint`'s clippy compiles;
+    // test-linux would compile it again for `doc` alone.
+    assert!(
+        !linux.contains("onepipeline-ui:doc"),
+        "test-linux documents the crate, which lint does over clippy's graph: {linux:?}"
+    );
 }
 
 #[test]

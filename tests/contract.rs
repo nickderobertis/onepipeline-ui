@@ -3344,7 +3344,10 @@ fn the_failure_kinds_and_fall_through_reasons_the_fixtures_carry_are_oneharnesss
 /// renamed optional fields cannot disappear through permissive deserialization.
 #[test]
 fn the_browser_channel_records_match_the_sdks_writer() {
-    use onepipeline::channel::layout::{Channel, QueuedReply, Surface, REPLIES, SURFACES};
+    use onepipeline::channel::layout::{
+        Channel, CommandOutcome, QueuedCommands, QueuedReply, Surface, COMMANDS, COMMAND_OUTCOMES,
+        REPLIES, SURFACES,
+    };
     use std::sync::Arc;
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -3384,6 +3387,37 @@ fn the_browser_channel_records_match_the_sdks_writer() {
             .replies()
             .push(&reply)
             .expect("the SDK writes the reply");
+    }
+    // The reconciler's part, as it plays out: each envelope it answered is
+    // claimed and answered before the ones still waiting are written, so the
+    // cursor the SDK leaves is past the answered ones and short of the rest.
+    let outcomes = records[format!("{COMMAND_OUTCOMES}.jsonl")]
+        .as_array()
+        .expect("command outcome records");
+    for record in records[format!("{COMMANDS}.jsonl")]
+        .as_array()
+        .expect("command envelope records")
+    {
+        let envelope: QueuedCommands =
+            serde_json::from_value(record.clone()).expect("SDK command envelope record");
+        channel
+            .commands()
+            .push(&envelope)
+            .expect("the SDK writes the envelope");
+        if let Some(answer) = outcomes
+            .iter()
+            .find(|outcome| outcome["id"] == record["id"])
+        {
+            let claimed = channel
+                .claim_commands()
+                .expect("the SDK claims the envelope");
+            assert_eq!(claimed.len(), 1, "one envelope claimed at a time");
+            let outcome: CommandOutcome =
+                serde_json::from_value(answer.clone()).expect("SDK command outcome record");
+            channel
+                .answer_commands(&outcome)
+                .expect("the SDK writes the outcome");
+        }
     }
     for (file, expected) in records.as_object().expect("named channel files") {
         let written = fs::read_to_string(scratch.path().join(file))

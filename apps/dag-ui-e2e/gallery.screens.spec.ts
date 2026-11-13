@@ -973,6 +973,48 @@ const SURFACES: readonly Surface[] = [
     },
     point: holdToast,
   },
+  {
+    name: "33-channel-declined-ruling",
+    title:
+      "The channel: a declined ruling, and replies and envelopes from each party",
+    open: async (page) => {
+      await visit(page, `/?run=${runs().history}&view=channel`);
+      await settleReads(page);
+      const declined = page.getByRole("region", { name: "Declined ruling" });
+      await declined.scrollIntoViewIfNeeded();
+      await expect(declined).toBeVisible();
+      await expect(
+        page
+          .getByRole("region", { name: "Queued commands" })
+          .getByText(/^Envelope \d+ · from you$/u),
+      ).toHaveCount(1);
+    },
+  },
+  {
+    name: "34-action-items-history",
+    title:
+      "Action items: an item's history, the user's rulings and the manager's",
+    open: async (page) => {
+      const list = await openActionItems(page, "provenance-gallery");
+      const folded = page.getByRole("button", { name: /^Filters/u });
+      if (await folded.isVisible()) await folded.click();
+      await page
+        .getByRole("group", { name: "Filter action items" })
+        .getByLabel("State", { exact: true })
+        .selectOption("completed");
+      if (await folded.isVisible()) await folded.click();
+      await expect(list.getByRole("article")).toHaveCount(1);
+      await page
+        .getByRole("button", { name: "Details: File the flaky-runner report" })
+        .click();
+      const history = page
+        .getByRole("complementary", { name: "Action item detail" })
+        .getByRole("region", { name: "History" });
+      await expect(history.getByText(/^Note by you · /u)).toBeVisible();
+      await history.scrollIntoViewIfNeeded();
+      await settleReads(page);
+    },
+  },
 ];
 
 /**

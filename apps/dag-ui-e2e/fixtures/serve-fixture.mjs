@@ -20,7 +20,7 @@
  *                     [--shutdown-corpus [--live-dispatch-pid PID]
  *                      | --preserved-corpus | --review-corpus
  *                      | --review-loop-corpus | --transcripts-corpus
- *                      | --held-turn-corpus
+ *                      | --held-turn-corpus | --large-run-views-corpus
  *                      | --human-items-world NAME]
  *                                                  build the fixture and serve it,
  *                                                  the browser view beside it with --ui;
@@ -31,7 +31,9 @@
  *                                                  reworked stack's with
  *                                                  --review-loop-corpus, and the
  *                                                  held turn's with
- *                                                  --held-turn-corpus; the
+ *                                                  --held-turn-corpus, and the
+ *                                                  large-run views' with
+ *                                                  --large-run-views-corpus; the
  *                                                  action-items journeys' with
  *                                                  --human-items-world, a host
  *                                                  whose items and runs the
@@ -76,6 +78,7 @@ import harnessBinaries from "./harness-binaries.json" with { type: "json" };
 import { humanItemsWorld } from "./human-items-world.mjs";
 import {
   buildHeldTurnRuns,
+  buildLargeRunViews,
   buildPreservedRuns,
   buildProjectCentricRuns,
   buildReviewLoopRuns,
@@ -88,6 +91,7 @@ import {
   growTranscript,
   heldTurnEnvironment,
   heldTurnFacts,
+  largeRunViewsFacts,
   overridesDir,
   preservedFacts,
   projectCentricFacts,
@@ -458,6 +462,7 @@ function parseArgs(argv) {
     "--review-corpus",
     "--review-loop-corpus",
     "--held-turn-corpus",
+    "--large-run-views-corpus",
   ]);
   const valued = new Set([
     "--workspace",
@@ -568,6 +573,20 @@ if (
   die(
     "--held-turn-corpus serves its own corpus",
     "pass --held-turn-corpus with --workspace, --port and --ui alone",
+  );
+}
+if (
+  args["large-run-views-corpus"] &&
+  (asked.length > 0 ||
+    args["shutdown-corpus"] ||
+    args["preserved-corpus"] ||
+    args["review-corpus"] ||
+    args["review-loop-corpus"] ||
+    args["held-turn-corpus"])
+) {
+  die(
+    "--large-run-views-corpus serves its own corpus",
+    "pass --large-run-views-corpus with --workspace, --port and --ui alone",
   );
 }
 if (args["shutdown-corpus"] && args["preserved-corpus"]) {
@@ -800,6 +819,8 @@ if (args.stall) {
         corpus = { build: buildPreservedRuns, facts: preservedFacts };
       } else if (args["review-loop-corpus"]) {
         corpus = { build: buildReviewLoopRuns, facts: reviewLoopFacts };
+      } else if (args["large-run-views-corpus"]) {
+        corpus = { build: buildLargeRunViews, facts: largeRunViewsFacts };
       } else if (args["held-turn-corpus"]) {
         corpus = {
           build: (root) => buildHeldTurnRuns(root, workspace),

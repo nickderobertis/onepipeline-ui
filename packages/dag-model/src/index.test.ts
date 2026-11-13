@@ -6,6 +6,7 @@ import {
   API_V2_PATHS,
   agentRoleSchema,
   agentSessionSchema,
+  channelSurfaceSchema,
   dagConversationSchema,
   frameCarriesWholeEvents,
   graphPayloadSchema,
@@ -20,6 +21,8 @@ import {
   planTaskSchema,
   projectAgentsSchema,
   projectGroupSchema,
+  provenanceOf,
+  queuedCommandsSchema,
   REPLY_ENVELOPE_VERSION,
   REPLY_OPS,
   replyEnvelopeSchema,
@@ -1424,7 +1427,7 @@ test("a reply envelope composed against the engine's grammar carries what the en
       { op: "settle", id: "ship", outcome: "done", evidence: "landed as #12" },
     ],
   });
-  expect(edit.version).toBe(3);
+  expect(edit.version).toBe(4);
   expect(edit.commands).toHaveLength(3);
   // The field the engine retired is refused by name, as the engine refuses it,
   // and an op the engine does not declare never reaches the wire.
@@ -1442,14 +1445,14 @@ test("a reply envelope composed against the engine's grammar carries what the en
     }).success,
   ).toBe(false);
   // Commands under no version, or another, are what the engine refuses as "an
-  // edit envelope requires version 3"; an envelope carrying neither half is one
+  // edit envelope requires version 4"; an envelope carrying neither half is one
   // the engine answers, naming no verdict, so it parses.
   const unversioned = replyEnvelopeSchema.safeParse({
     commands: [{ op: "drop", id: "obsolete", dependents: "detach" }],
   });
   expect(unversioned.success).toBe(false);
   expect(unversioned.error?.issues[0]?.message).toBe(
-    "an edit envelope requires version 3",
+    "an edit envelope requires version 4",
   );
   expect(
     replyEnvelopeSchema.safeParse({
@@ -1458,6 +1461,79 @@ test("a reply envelope composed against the engine's grammar carries what the en
     }).success,
   ).toBe(false);
   expect(replyEnvelopeSchema.safeParse({}).success).toBe(true);
+});
+
+test("an envelope, a queued envelope and a surface read whose words a ruling is, as the engine writes it", () => {
+  // Version 4 states the party; versions 2 and 3, and any envelope saying
+  // nothing, are the manager's.
+  for (const stated of ["user", "manager"] as const)
+    expect(
+      replyEnvelopeSchema.parse({
+        version: REPLY_ENVELOPE_VERSION,
+        provenance: stated,
+        commands: [{ op: "note", id: "docs", addressee: "worker", text: "x" }],
+      }).provenance,
+    ).toBe(stated);
+  expect(
+    replyEnvelopeSchema.safeParse({ version: 4, provenance: "admin" }).success,
+  ).toBe(false);
+  expect(provenanceOf(undefined)).toBe("manager");
+  expect(provenanceOf("user")).toBe("user");
+  expect(
+    queuedCommandsSchema.parse({ id: 3, commands: [], provenance: "user" })
+      .provenance,
+  ).toBe("user");
+  expect(
+    provenanceOf(
+      queuedCommandsSchema.parse({ id: 2, commands: [] }).provenance,
+    ),
+  ).toBe("manager");
+
+  const surface = {
+    id: 4,
+    kind: "declined-ruling",
+    message: "node 'export' declined the manager's note.",
+    source: "proposal",
+    blocking: false,
+    queued_at: 1,
+    workstream: "export",
+  };
+  const declined = {
+    node: "export",
+    ruling: "c1.0",
+    provenance: "manager",
+    kind: "note",
+    reply: 1,
+    text: "Keep the export under fifty lines.",
+    reason: "The fixture already exceeds fifty lines.",
+  };
+  expect(
+    channelSurfaceSchema.parse({ ...surface, declined_ruling: declined })
+      .declined_ruling,
+  ).toEqual(declined);
+  // On every declined-ruling surface and on no other, closed, in the
+  // engine's vocabulary.
+  expect(channelSurfaceSchema.safeParse(surface).success).toBe(false);
+  expect(
+    channelSurfaceSchema.safeParse({
+      ...surface,
+      kind: "finding",
+      declined_ruling: declined,
+    }).success,
+  ).toBe(false);
+  for (const wrong of [
+    { ...declined, kind: "verdict" },
+    { ...declined, provenance: "admin" },
+    { ...declined, reply: -1 },
+    { ...declined, extra: true },
+  ])
+    expect(
+      channelSurfaceSchema.safeParse({ ...surface, declined_ruling: wrong })
+        .success,
+    ).toBe(false);
+  expect(
+    channelSurfaceSchema.safeParse({ ...surface, kind: "finding" }).success,
+  ).toBe(true);
 });
 
 test("a note's delivery deadline and its withdrawal are spelled as the engine declares them", () => {

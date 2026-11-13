@@ -907,6 +907,12 @@ const urlOf = (
     ? `/?run=${encodeURIComponent(run)}&view=graph&node=${encodeURIComponent(node)}`
     : `/?run=${encodeURIComponent(run)}&view=${view}`;
 
+/** The first answer's POST as `SCREEN_OBSERVER` timed it, set with the answer. */
+const postTimingSchema = z.object({
+  at: z.number().nonnegative(),
+  done: z.number().nonnegative(),
+});
+
 async function firstViewReading(
   browser: Browser,
   world: LargeWorld,
@@ -933,27 +939,9 @@ async function firstViewReading(
     (await browser.newContext({ viewport: { width: 1440, height: 900 } }));
   const page = await context.newPage();
   await page.addInitScript(SCREEN_OBSERVER);
+  // The POST's start and end as the page's fetch saw them (`SCREEN_OBSERVER`), on
+  // the clock its marks are taken on: milliseconds from navigation start.
   let posted: { at: number; done: number; body: string } | undefined;
-  const postStart = new Map<string, number>();
-  page.on("request", (request) => {
-    if (
-      new URL(request.url()).pathname === "/api/v2/subscriptions" &&
-      request.method() === "POST"
-    )
-      postStart.set(request.url(), Date.now());
-  });
-  page.on("response", async (response) => {
-    if (
-      new URL(response.url()).pathname === "/api/v2/subscriptions" &&
-      response.request().method() === "POST"
-    ) {
-      posted = {
-        at: postStart.get(response.url()) ?? Date.now(),
-        done: Date.now(),
-        body: "",
-      };
-    }
-  });
   await page.goto(`${origin}${urlOf(run, view, world.busiestNode)}`, {
     waitUntil: "commit",
   });
@@ -961,10 +949,13 @@ async function firstViewReading(
   let mark: ScreenState | undefined;
   let answer: Answer | undefined;
   while (Date.now() < deadline) {
-    if (posted !== undefined && answer === undefined) {
+    if (answer === undefined) {
       const text = await page.evaluate("window.__firstAnswer");
       if (typeof text === "string") {
-        posted.body = text;
+        posted = {
+          ...postTimingSchema.parse(await page.evaluate("window.__firstPost")),
+          body: text,
+        };
         answer = {
           initial: { snapshot: { visible: visibleOf(JSON.parse(text)) } },
         };
@@ -983,19 +974,17 @@ async function firstViewReading(
     }
     await page.waitForTimeout(50);
   }
-  const navStart = await page.evaluate("performance.timeOrigin");
   const posted2 = posted;
   const body = posted2?.body ?? "";
   const load = hostLoad();
   const reading: Reading = {
     seconds: mark === undefined ? null : mark.at / 1000,
-    navigation_to_post_s:
-      posted2 === undefined ? null : (posted2.at - Number(navStart)) / 1000,
+    navigation_to_post_s: posted2 === undefined ? null : posted2.at / 1000,
     post_s: posted2 === undefined ? null : (posted2.done - posted2.at) / 1000,
     answer_to_mark_s:
       mark === undefined || posted2 === undefined
         ? null
-        : mark.at / 1000 - (posted2.done - Number(navStart)) / 1000,
+        : (mark.at - posted2.done) / 1000,
     server: serverSplitOf(trace),
     first_answer_bytes: Buffer.byteLength(body),
     first_answer_gzipped: gzipSync(body).length,
