@@ -67,6 +67,12 @@ threads moved onto one loaded core) is what reproduced the action-items page
 missing its first list item: what the server does per page load is part of every
 journey's cost.
 
+A slow suite also reaches a journey later in the fixture's life, and the live run's
+plot ends at the server's clock, so its segments narrow as the suite runs. Setting
+`DAG_UI_FIXTURE_NOW` to an instant in the past ages the corpus, and that reproduces
+a late journey's reading without the hour: a 12 s gap read with the run-level row on
+one line was overdrawn by the work after it from about fifty minutes in.
+
 ## Reading a tier that would not start
 
 `Timed out waiting 120000ms from config.webServer` is the whole of what Playwright
