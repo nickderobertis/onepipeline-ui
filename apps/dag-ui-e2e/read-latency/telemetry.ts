@@ -328,8 +328,8 @@ export type Telemetry = z.infer<typeof telemetrySchema>;
 /** `telemetry/read-latency-large.json`: one large run's first screens and the rest. */
 export const largeTelemetrySchema = z.object({
   /**
-   * 2 since each reading carries the server's split of its `POST`; 3 since the
-   * first views hold `relayed_overall` and the corpus its drivers.
+   * Each reading carries the server's split of its `POST`; the first views hold
+   * `relayed_overall` and the corpus its drivers.
    */
   schema_version: z.literal(3),
   recorded_at: z.iso.datetime(),

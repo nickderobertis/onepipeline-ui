@@ -7396,7 +7396,6 @@ fn relayed_sessions<'a>(
     // and a search of the list per record would compare every record's session
     // with every one before it.
     let mut placed: HashMap<&str, usize> = HashMap::new();
-    // Built the first time a record names no session of its own, and only then.
     let mut named: Option<NamedSessions<'a>> = None;
     for (index, event) in events {
         if event.source != Source::Agentgraph {
