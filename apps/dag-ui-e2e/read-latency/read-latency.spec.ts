@@ -984,6 +984,8 @@ async function firstViewReading(
   complete: Complete,
   cachedContext?: BrowserContext,
   run = world.run,
+  /** Run on the page before it navigates, so it sees every frame the page does. */
+  beforeOpening?: (page: Page, context: BrowserContext) => Promise<void>,
 ): Promise<{
   reading: Reading;
   state: ScreenState | undefined;
@@ -1002,6 +1004,7 @@ async function firstViewReading(
     (await browser.newContext({ viewport: { width: 1440, height: 900 } }));
   const page = await context.newPage();
   await page.addInitScript(SCREEN_OBSERVER);
+  if (beforeOpening !== undefined) await beforeOpening(page, context);
   // The POST's start and end as the page's fetch saw them (`SCREEN_OBSERVER`), on
   // the clock its marks are taken on: milliseconds from navigation start.
   let posted: { at: number; done: number; body: string } | undefined;
@@ -1177,23 +1180,38 @@ async function restArrived(
     view: (typeof FIRST_VIEWS)[number],
     pages?: HistoryPages,
   ) => {
-    const opened = await firstViewReading(browser, world, port, view, complete);
     let framesBytes = 0;
     // The detail's `progress` as the server last published it, read off the
     // patches the page applied: the page saying nothing is loading is only the
     // rest arriving when the server also said `complete` and named no failure.
     let served: Progress | undefined;
-    const cdp = await opened.context.newCDPSession(opened.page);
-    await cdp.send("Network.enable");
-    cdp.on("Network.eventSourceMessageReceived", (event) => {
-      if (
-        event.eventName === "detail.patch" ||
-        event.eventName === "timeline.patch"
-      )
-        framesBytes += Buffer.byteLength(event.data);
-      if (event.eventName === "detail.patch")
-        served = progressPatched(served, event.data);
-    });
+    // Listening from before the page navigates: the rest of a small run is
+    // published within moments of its first answer, so a listener attached once
+    // the first screen was found missed it whenever the runner was slow to look
+    // (the frame had gone by, and `served` read as never published).
+    const listen = async (page: Page, context: BrowserContext) => {
+      const cdp = await context.newCDPSession(page);
+      await cdp.send("Network.enable");
+      cdp.on("Network.eventSourceMessageReceived", (event) => {
+        if (
+          event.eventName === "detail.patch" ||
+          event.eventName === "timeline.patch"
+        )
+          framesBytes += Buffer.byteLength(event.data);
+        if (event.eventName === "detail.patch")
+          served = progressPatched(served, event.data);
+      });
+    };
+    const opened = await firstViewReading(
+      browser,
+      world,
+      port,
+      view,
+      complete,
+      undefined,
+      world.run,
+      listen,
+    );
     // The mark is taken; the observer that found it, which reads the whole screen
     // on every change, is stopped so it does not slow the page it times.
     await opened.page.evaluate("window.__firstScreenStop?.()");
