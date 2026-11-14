@@ -3513,6 +3513,70 @@ fn a_stale_human_items_cursor_is_reset_to_what_the_routes_answer() {
     resumed.until_current(&server);
 }
 
+/// A first `human-items` subscription reads the items beside the sidebar's rows,
+/// so its answer waits on the longer of the two reads rather than on both.
+///
+/// Both reads cover every run under the root. On a CI runner short of CPU and
+/// disk, the first answer of
+/// [`a_stale_human_items_cursor_is_reset_to_what_the_routes_answer`] was the items'
+/// read and then 64 rows read one after another, and the client gave up reading
+/// its status line while the server was still reading rows. Here the items'
+/// index and every run's row each take three fifths of the client's read timeout
+/// and then finish on their own: one read after the other is longer than the
+/// client waits, side by side it is not.
+#[cfg(unix)]
+#[test]
+fn a_first_human_items_answer_reads_the_items_beside_the_rows() {
+    let world = World::new();
+    let runs: Vec<String> = (0..4)
+        .map(|index| format!("beside-the-items-{index}"))
+        .collect();
+    for run in &runs {
+        fixture_run::write(&world.root, run);
+        live_journal::receipt_for(&world.root.join(run).join("events.jsonl"));
+    }
+    let item = raised(&world, "read-beside-the-rows", "task");
+    let server = world.serve(Some("manager-of-items"));
+    let delay = http::TIMEOUT * 3 / 5;
+    let index = world
+        .root
+        .join(onepipeline::human_items::JOURNAL_PATH)
+        .with_file_name("index.json");
+    let reads: Vec<_> = runs
+        .iter()
+        .map(|run| world.root.join(run).join("summary.json"))
+        .chain([index])
+        .map(|file| crate::live::delay_the_next_read(&file, delay))
+        .collect();
+
+    let subscribed = subscribe(&server, &json!({ "view": { "type": "human-items" } }));
+    let snapshot = &subscribed["initial"]["snapshot"];
+    assert!(
+        snapshot["visible"]["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .any(|view| view["item"]["id"] == item.as_str()),
+        "the item is listed: {}",
+        snapshot["visible"]
+    );
+    let mut listed: Vec<&str> = snapshot["sidebar"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .filter_map(|row| row["id"].as_str())
+        .filter(|run| run.starts_with("beside-the-items-"))
+        .collect();
+    listed.sort_unstable();
+    assert_eq!(listed, runs, "the snapshot carries every row");
+    for read in reads {
+        read.join()
+            .expect("the server read the items and every row");
+    }
+    let view = json!({ "type": "human-items" });
+    assert_eq!(snapshot["visible"], routes_answer(&server, &view));
+}
+
 /// A filter that selects by nothing is no filter: the answer names none, and the
 /// view is the unfiltered one, the same list as a subscription that named none.
 #[test]

@@ -583,6 +583,7 @@ impl Look {
             known: held.keys().cloned().collect(),
         };
         let entries = std::fs::read_dir(store.root()).ok()?;
+        let mut moved = Vec::new();
         for entry in entries.flatten() {
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
@@ -603,13 +604,65 @@ impl Look {
                 Some((_, read_at)) if read && read_at.elapsed() < reread => continue,
                 _ => {}
             }
-            let Some(row) = row_of(&paths, &run) else {
-                continue;
-            };
-            look.read.push((run, stamps, row));
+            moved.push((run, paths, stamps));
         }
+        look.read = rows_of(moved);
         Some(look)
     }
+}
+
+/// How many runs' rows one look reads at once.
+///
+/// A row whose cached summary is stale is the SDK folding the run and writing the
+/// cache back, syncing it to disk, and the first look reads every run's row. Read
+/// one after another, the fold and the syncs of each row add up: on a host short
+/// of CPU and disk, a root of 64 runs held a first `human-items` subscription's
+/// answer past the 20 s a client waits for a status line. Read side by side, one
+/// row's wait overlaps the next one's.
+const ROW_READERS: usize = 8;
+
+/// Each run's row, read [`ROW_READERS`] at a time and answered in `runs`' order;
+/// a run whose summary cannot be read is left out, as [`row_of`] leaves it.
+fn rows_of(runs: Vec<(RunId, RunPaths, Stamps)>) -> Vec<(RunId, Stamps, Arc<str>)> {
+    let readers = ROW_READERS.min(runs.len());
+    if readers <= 1 {
+        return runs
+            .into_iter()
+            .filter_map(|(run, paths, stamps)| row_of(&paths, &run).map(|row| (run, stamps, row)))
+            .collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut rows: Vec<Option<Arc<str>>> = std::thread::scope(|scope| {
+        let readers: Vec<_> = (0..readers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut read = Vec::new();
+                    loop {
+                        let at = next.fetch_add(1, Ordering::Relaxed);
+                        let Some((run, paths, _)) = runs.get(at) else {
+                            return read;
+                        };
+                        read.push((at, row_of(paths, run)));
+                    }
+                })
+            })
+            .collect();
+        let mut rows = vec![None; runs.len()];
+        for reader in readers {
+            // A reader's panic is the look's, as it was when one thread read them.
+            let read = reader
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+            for (at, row) in read {
+                rows[at] = row;
+            }
+        }
+        rows
+    });
+    runs.into_iter()
+        .zip(rows.iter_mut())
+        .filter_map(|((run, _, stamps), row)| Some((run, stamps, row.take()?)))
+        .collect()
 }
 
 /// `run`'s sidebar row, read from its bounded summary; `None` where the
@@ -1525,21 +1578,33 @@ impl Hub {
                 Some(live)
             }
         };
-        // A human-item view's first reading likewise: the engine may refuse it.
         let human_items = human_items_view(&request.view);
-        if let Some(view) = &human_items {
-            let mut reading = lock(&shared.human_items);
-            self.ensure_human_items(&mut reading, view)?;
-        }
         // A run view's snapshot waits on neither the sidebar nor the run's
         // complete read: its rows arrive as the stream's first frame.
         let run_view = visible.run_id().is_some();
+        // A human-item view's first reading likewise, which the engine may refuse,
+        // beside the sidebar's first look: each reads every run under the root and
+        // neither needs the other, so the answer waits on the longer of the two
+        // rather than on both.
+        std::thread::scope(|scope| {
+            let reading = human_items.as_ref().map(|view| {
+                scope.spawn(move || {
+                    let mut reading = lock(&shared.human_items);
+                    self.ensure_human_items(&mut reading, view).map(drop)
+                })
+            });
+            if !run_view {
+                self.first_look();
+            }
+            reading.map_or(Ok(()), |reading| {
+                reading
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            })
+        })?;
         // Then the publication boundary: the sidebar, the run and the
         // subscriptions locked together, so every change after the snapshot is
         // one this subscription is sent and none before it is.
-        if !run_view {
-            self.first_look();
-        }
         let sidebar = lock(&shared.sidebar);
         let mut run = live.as_ref().map(|live| lock(live));
         let mut reading = human_items.as_ref().map(|_| lock(&shared.human_items));
