@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { subscribedSchema } from "@onepipeline-ui/dag-model";
 import {
   type BrowserContext,
   expect,
@@ -520,6 +521,7 @@ function recordRequests(page: Page) {
     request.method() === "POST" &&
     new URL(request.url()).pathname === "/api/v2/subscriptions";
   const created: string[] = [];
+  const refused: string[] = [];
   let creating = 0;
   page.on("request", (request) => {
     if (isCreation(request)) creating += 1;
@@ -528,10 +530,9 @@ function recordRequests(page: Page) {
     if (!isCreation(request)) return;
     try {
       const answer = await request.response();
-      const body = z
-        .object({ subscription: z.string() })
-        .safeParse(await answer?.json());
+      const body = subscribedSchema.safeParse(await answer?.json());
       if (body.success) created.push(body.data.subscription);
+      else refused.push(body.error.message);
     } finally {
       creating -= 1;
     }
@@ -548,6 +549,10 @@ function recordRequests(page: Page) {
      * which every request it sends is one a journey caused.
      */
     standing: () => {
+      if (refused.length > 0)
+        throw new Error(
+          `a subscription's answer broke the contract: ${refused}`,
+        );
       const [open, ...more] = streams;
       return (
         creating === 0 &&
