@@ -44,6 +44,8 @@ const MOST_OTHER_LIVE_RUNS = 11;
 export const OPEN_LIVE_RUN = "load-live-open";
 export const SETTLED_OPEN_RUN = "load-settled-000";
 export const STOPPED_OPEN_RUN = "load-stopped-00";
+/** A settled run whose own drivers relayed a third of its records at no node. */
+export const RELAYED_RUN = "load-relayed-settled";
 /** A settled one-node run, the status budget's small run. */
 export const SMALL_SETTLED_RUN = "load-small-settled";
 export const OTHER_LIVE_RUNS = Array.from(
@@ -724,6 +726,145 @@ function writeLargeRun(root, runId, project, scale, startMs, stepMs) {
 /** How many records each node beyond the budget's named ones holds. */
 const LARGE_SPECIAL_NODE_RECORDS = 32;
 
+/** The members a run's own drivers relay as, both of which every graph here declares. */
+const DRIVER_MEMBERS = ["monitor", "llmlint"];
+
+/**
+ * Where one run-level record falls in its member's turn on a driver's stream: the
+ * heartbeats, which name no session, then a turn whose records each name one.
+ */
+const DRIVER_TURN = [
+  ...Array.from({ length: 19 }, () => "member-heartbeat"),
+  "turn-started",
+  ...Array.from({ length: 5 }, () => "turn-activity"),
+  "turn-message",
+  "turn-completed",
+];
+
+/**
+ * A settled run whose own drivers relayed a third of its records at no node: this
+ * host's run that opened Overall slowest, in the shape that made it slow. Its
+ * driver streams come one after another, as a run's adoptions leave them, and the
+ * last lives longest; on each, a member's heartbeats name no session and its turns
+ * name one, so every heartbeat of the last driver is attributed to a session first
+ * named after `records_before_long_driver` run-level records of the drivers before
+ * it. The rest of its records are its nodes' ordinary work.
+ */
+function writeRelayedRun(root, runId, project, relayed, startMs, stepMs) {
+  const dir = join(root, runId);
+  mkdirSync(dir, { recursive: true });
+  const nodes = Array.from(
+    { length: relayed.nodes },
+    (_, n) => `relayed-step-${n}`,
+  );
+  const plan = planOf(nodes);
+  writeJson(join(dir, "plan.json"), plan);
+  writeJson(join(dir, "launch.json"), launch(runId, project, stamp(startMs)));
+  const journal = new Journal(runId, startMs);
+  declareGraph(root, journal.stream, startMs);
+  journal.emit("pipeline", "run-started", {}, { plan });
+  const drivers = Array.from(
+    { length: relayed.driver_streams },
+    (_, n) => `${journal.stream}-driver-${String(n).padStart(2, "0")}`,
+  );
+  for (const driver of drivers) declareGraph(root, driver, startMs);
+  // Every run-level record, in order: each early driver's even share of the
+  // records before the long one, then the long one's.
+  const early = drivers.length - 1;
+  const before = relayed.records_before_long_driver;
+  const quota = (at) =>
+    at < early
+      ? Math.floor(before / early) + (at < before % early ? 1 : 0)
+      : relayed.run_level_records - before;
+  const runLevel = [];
+  drivers.forEach((stream, at) => {
+    const turns = new Map();
+    for (let index = 0; index < quota(at); index += 1) {
+      // One record in eight is the second member's.
+      const member = DRIVER_MEMBERS[index % 8 === 7 ? 1 : 0];
+      const place = turns.get(member) ?? 0;
+      turns.set(member, place + 1);
+      runLevel.push({
+        stream,
+        member,
+        kind: DRIVER_TURN[place % DRIVER_TURN.length],
+        turn: Math.floor(place / DRIVER_TURN.length) + 1,
+      });
+    }
+  });
+  let next = 0;
+  const relay = (count) => {
+    for (const end = Math.min(next + count, runLevel.length); next < end; ) {
+      const { stream, member, kind, turn } = runLevel[next];
+      next += 1;
+      journal.at += stepMs;
+      journal.streamOverride = stream;
+      const labels = { member, persona: member };
+      const session = { ...labels, session: `${stream}.${member}` };
+      if (kind === "member-heartbeat")
+        journal.emit("agentgraph", kind, labels, {});
+      else if (kind === "turn-started")
+        journal.emit("agentgraph", kind, session, {
+          turn,
+          role: "assistant",
+          instruction: "Keep the run moving.",
+          started_at: stamp(journal.at),
+          model: "a-model",
+        });
+      else if (kind === "turn-activity")
+        journal.emit("agentgraph", kind, session, {
+          kind: "tool_call",
+          name: "Bash",
+          detail: `driver step ${next} on ${stream}`,
+          truncated: false,
+          output: toolOutput(next),
+          index: next,
+        });
+      else if (kind === "turn-message")
+        journal.emit("agentgraph", kind, session, {
+          turn,
+          role: "assistant",
+          text: `Driver turn ${turn} done`,
+        });
+      else
+        journal.emit("agentgraph", kind, session, {
+          turn,
+          role: "assistant",
+          usage: { input_tokens: 20, output_tokens: 700, cost_usd: 0.4 },
+          started_at: stamp(journal.at - 7 * stepMs),
+          finished_at: stamp(journal.at),
+        });
+    }
+    journal.streamOverride = null;
+  };
+  // The run-level records between the nodes' work, as a driver relays them
+  // while its nodes run: a share before each node and the rest after the last.
+  const nodeRecords =
+    relayed.records - 1 - 2 * nodes.length - relayed.run_level_records;
+  const perNode = Math.floor(nodeRecords / nodes.length);
+  const share = Math.ceil(runLevel.length / (nodes.length + 1));
+  nodes.forEach((node, index) => {
+    relay(share);
+    const last = index === nodes.length - 1;
+    journal.work(
+      node,
+      perNode + (last ? nodeRecords - perNode * nodes.length : 0),
+      stepMs,
+      true,
+    );
+  });
+  relay(runLevel.length);
+  journal.pad(relayed.journal_bytes);
+  journal.write(dir);
+  writeJson(join(dir, "result.json"), {
+    run_id: runId,
+    state: "complete",
+    ok: true,
+    nodes: nodes.map((id) => ({ id, status: "done", outcome: "merged" })),
+  });
+  return { nodes, longDriver: drivers[early] };
+}
+
 /**
  * The corpus's two sizes: this host's scale, which every budget is stated over,
  * and the journeys' — the same shapes and names at a size a functional journey
@@ -778,10 +919,33 @@ function scaleOfWorkload(path) {
           off_graph_node_records: count.positive(),
         })
         .optional(),
+      relayed: z
+        .object({
+          state: z.literal("settled"),
+          nodes: count.positive(),
+          records: count.positive(),
+          journal_bytes: count.positive(),
+          run_level_records: count.positive(),
+          driver_streams: count.min(2),
+          records_before_long_driver: count.positive(),
+          session_search_records: count.positive(),
+        })
+        .refine(
+          (run) =>
+            run.records > 1 + 2 * run.nodes + run.run_level_records &&
+            run.run_level_records > run.records_before_long_driver,
+          "a relayed run's records hold its run-level records and its nodes' work, and its run-level records its earlier drivers'",
+        )
+        .optional(),
     })
     .refine(
-      (held) => held.runs > 1 + held.other_live_runs + held.stopped_runs,
-      "a workload's runs hold its open, live and stopped runs and a settled one",
+      (held) =>
+        held.runs >
+        1 +
+          held.other_live_runs +
+          held.stopped_runs +
+          (held.relayed === undefined ? 0 : 1),
+      "a workload's runs hold its open, live, stopped and relayed runs and a settled one",
     )
     .parse(JSON.parse(readFileSync(path, "utf8")));
   return {
@@ -793,6 +957,7 @@ function scaleOfWorkload(path) {
     settledBig: declared.settled_big_records,
     settledSmall: declared.settled_small_records,
     large: declared.large,
+    relayed: declared.relayed,
   };
 }
 
@@ -857,6 +1022,17 @@ export function buildLoadCorpus(root, scaleName = "host") {
       now - 3 * day,
       2_000,
     );
+  const relayed =
+    scale.relayed === undefined
+      ? undefined
+      : writeRelayedRun(
+          root,
+          RELAYED_RUN,
+          projectOfRun(index++),
+          scale.relayed,
+          now - 2 * day,
+          Math.floor(day / scale.relayed.records),
+        );
   for (const runId of otherLiveRuns) {
     writeRun(
       root,
@@ -908,6 +1084,9 @@ export function buildLoadCorpus(root, scaleName = "host") {
     liveNode: LIVE_NODE,
     openProject: projectOf(0),
     ...(large === undefined ? {} : { large, smallRun: SMALL_SETTLED_RUN }),
+    ...(relayed === undefined
+      ? {}
+      : { relayed: { run: RELAYED_RUN, ...relayed } }),
   };
 }
 

@@ -18,5 +18,15 @@
     "checkpoint_bytes": 7000000,
     "busiest_node_records": 10000,
     "off_graph_node_records": 6000
+  },
+  "relayed": {
+    "state": "settled",
+    "nodes": 9,
+    "records": 76000,
+    "journal_bytes": 57000000,
+    "run_level_records": 27700,
+    "driver_streams": 16,
+    "records_before_long_driver": 6300,
+    "session_search_records": 110000000
   }
 }

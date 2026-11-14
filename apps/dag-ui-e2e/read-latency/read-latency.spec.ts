@@ -76,10 +76,11 @@ import {
   type Visible,
 } from "./mark";
 import {
-  FIRST_VIEWS,
+  type FIRST_VIEWS,
   firstViewSchema,
   type LargeRun,
   largeTelemetrySchema,
+  MEASURED_VIEWS,
   type Reading,
   type ServerSplit,
   telemetrySchema,
@@ -605,6 +606,8 @@ interface LargeWorld {
   readonly run: string;
   readonly busiestNode: string;
   readonly smallRun: string;
+  /** The settled run whose drivers relayed records at no node, or "" on a host. */
+  readonly relayedRun: string;
   readonly facts: z.infer<typeof largeFactsSchema> | undefined;
   readonly standInLog: string;
   readonly writer: ChildProcess | undefined;
@@ -624,6 +627,7 @@ const largeFactsSchema = z.object({
     historyStore: z.string(),
     sessions: z.number().int(),
   }),
+  relayed: z.object({ run: z.string() }),
 });
 
 const hostEnv = (workspace: string, runsRoot: string): NodeJS.ProcessEnv => {
@@ -666,8 +670,15 @@ function writeStandIn(dir: string): string {
 const journalRecordSchema = z.looseObject({
   ts: z.string(),
   stream: z.string(),
+  source: z.string().optional(),
   kind: z.string(),
-  labels: z.looseObject({ node: z.string().optional() }).optional(),
+  labels: z
+    .looseObject({
+      node: z.string().optional(),
+      member: z.string().optional(),
+      session: z.unknown().optional(),
+    })
+    .optional(),
   payload: z
     .looseObject({
       transcript: z
@@ -676,6 +687,48 @@ const journalRecordSchema = z.looseObject({
     })
     .optional(),
 });
+
+type JournalRecord = z.infer<typeof journalRecordSchema>;
+
+/** A run's journal, every record parsed. */
+const journalOf = (world: LargeWorld, run: string) =>
+  readFileSync(join(world.runsRoot, run, "events.jsonl"), "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => journalRecordSchema.parse(JSON.parse(line)));
+
+/**
+ * How many records a search of a run's run-level records passes to find the session
+ * of each relayed one that names none: the first record of its stream, and of its
+ * member where it has one, that names a session, or every record where none does.
+ * What made the relayed run's Overall slow, as a figure of the corpus alone.
+ */
+function sessionSearchRecords(records: readonly JournalRecord[]): number {
+  const runLevel = records.filter(
+    (record) => record.labels?.node === undefined,
+  );
+  const firstNamed = new Map<string, number>();
+  runLevel.forEach((record, at) => {
+    if (typeof record.labels?.session !== "string") return;
+    for (const member of [record.labels.member, undefined]) {
+      const key = `${record.stream}\0${member ?? ""}`;
+      if (!firstNamed.has(key)) firstNamed.set(key, at);
+    }
+  });
+  let passed = 0;
+  for (const record of runLevel) {
+    if (
+      record.source !== "agentgraph" ||
+      typeof record.labels?.session === "string"
+    )
+      continue;
+    const at = firstNamed.get(
+      `${record.stream}\0${record.labels?.member ?? ""}`,
+    );
+    passed += at === undefined ? runLevel.length : at + 1;
+  }
+  return passed;
+}
 
 /** The driver figures read off the corpus itself, never off the corpus's word. */
 function readCorpusDrivers(
@@ -695,6 +748,7 @@ function readCorpusDrivers(
   const records = journal.map((line) =>
     journalRecordSchema.parse(JSON.parse(line)),
   );
+  const relayed = journalOf(world, world.relayedRun);
   const facts = world.facts;
   const nodeOf = (record: { labels?: { node?: string } }) =>
     record.labels?.node;
@@ -772,6 +826,14 @@ function readCorpusDrivers(
     cross_run_settled_consumers: crossRunConsumers.length,
     stand_in_provider:
       existsSync(standIn) && (statSync(standIn).mode & 0o111) !== 0 ? 1 : 0,
+    relayed_records: relayed.length,
+    relayed_journal_bytes: statSync(
+      join(world.runsRoot, world.relayedRun, "events.jsonl"),
+    ).size,
+    relayed_run_level_records: relayed.filter(
+      (record) => record.labels?.node === undefined,
+    ).length,
+    relayed_session_search_records: sessionSearchRecords(relayed),
   };
 }
 
@@ -787,6 +849,7 @@ function buildLargeWorld(): LargeWorld {
       run: HOST_RUN,
       busiestNode: HOST_NODE ?? "",
       smallRun: "",
+      relayedRun: "",
       facts: undefined,
       standInLog: join(workspace, "no-stand-in"),
       writer: undefined,
@@ -840,6 +903,7 @@ function buildLargeWorld(): LargeWorld {
     run: facts.openLiveRun,
     busiestNode: facts.large.busiestNode,
     smallRun: facts.smallRun,
+    relayedRun: facts.relayed.run,
     facts,
     standInLog,
     writer,
@@ -1062,11 +1126,19 @@ const timelineSchema = z.looseObject({
   spans: z.array(z.record(z.string(), z.unknown())),
 });
 
-/** The complete documents, read once by their own server before any timing. */
-async function readComplete(world: LargeWorld, port: number) {
+/**
+ * `run`'s complete documents, read once by their own server before any timing; a
+ * node's timeline is read where `node` names one.
+ */
+async function readComplete(
+  world: LargeWorld,
+  port: number,
+  run = world.run,
+  node = world.busiestNode,
+) {
   const { origin, server } = await serveLarge(world, port);
   try {
-    const root = `${origin}/api/v2/runs/${encodeURIComponent(world.run)}`;
+    const root = `${origin}/api/v2/runs/${encodeURIComponent(run)}`;
     const read = async (path: string): Promise<unknown> =>
       (await fetch(`${root}${path}`)).json();
     // Each document is its own whole read, and nothing here is timed, so the
@@ -1081,14 +1153,14 @@ async function readComplete(world: LargeWorld, port: number) {
         runTimelineSchema.parse(body);
         return timelineSchema.parse(body);
       }),
-      world.busiestNode === ""
+      node === ""
         ? Promise.resolve({ spans: [] })
-        : read(
-            `/timeline?scope=node&node=${encodeURIComponent(world.busiestNode)}`,
-          ).then((body) => {
-            runTimelineSchema.parse(body);
-            return timelineSchema.parse(body);
-          }),
+        : read(`/timeline?scope=node&node=${encodeURIComponent(node)}`).then(
+            (body) => {
+              runTimelineSchema.parse(body);
+              return timelineSchema.parse(body);
+            },
+          ),
     ]);
     return { detail, timeline, nodeTimeline, spans: timeline.spans };
   } finally {
@@ -1361,7 +1433,9 @@ async function statusRead(world: LargeWorld, port: number) {
  * large-run telemetry's schema requires; a host's run may leave the two this
  * names `null`, as `historyPages` and `statusRead` say.
  */
-type Measured = Omit<LargeRun, "history_page" | "status"> & {
+type Measured = Omit<LargeRun, "first_view" | "history_page" | "status"> & {
+  /** A host's measurement of one run reads no relayed run. */
+  readonly first_view: z.infer<typeof firstViewSchema>;
   readonly history_page: Omit<
     LargeRun["history_page"],
     "node_before_rest_s"
@@ -1379,11 +1453,23 @@ async function measureLargeRun(browser: Browser): Promise<Measured> {
   try {
     const hostStart = hostLoad();
     const complete = await readComplete(world, port);
+    // The relayed run's own documents, which its Overall is held to; none on a host.
+    const relayedComplete =
+      world.relayedRun === ""
+        ? undefined
+        : await readComplete(world, port, world.relayedRun, "");
     const first: Partial<
-      Record<(typeof FIRST_VIEWS)[number], LargeRun["first_view"]["graph"]>
+      Record<(typeof MEASURED_VIEWS)[number], LargeRun["first_view"]["graph"]>
     > = {};
     let overallBytes = 0;
-    for (const view of FIRST_VIEWS) {
+    for (const measured of MEASURED_VIEWS) {
+      // `relayed_overall` is Overall's screen on the relayed run, against that
+      // run's documents; every other view is its own screen on the large run.
+      const relayed = measured === "relayed_overall";
+      if (relayed && relayedComplete === undefined) continue;
+      const view = relayed ? "overall" : measured;
+      const run = relayed ? world.relayedRun : world.run;
+      const against = relayed && relayedComplete ? relayedComplete : complete;
       // A primer that leaves the bundle in this context's HTTP cache. It is a
       // new context on a fresh server, so its reading is the cold-cache one.
       const primer = await firstViewReading(
@@ -1391,7 +1477,9 @@ async function measureLargeRun(browser: Browser): Promise<Measured> {
         world,
         port,
         view,
-        complete,
+        against,
+        undefined,
+        run,
       );
       await primer.page.close();
       await stopServing(primer.server);
@@ -1402,15 +1490,16 @@ async function measureLargeRun(browser: Browser): Promise<Measured> {
           world,
           port,
           view,
-          complete,
+          against,
           primer.context,
+          run,
         );
         readings.push(taken.reading);
         await taken.page.close();
         await stopServing(taken.server);
       }
       let small: number | null = null;
-      if (world.smallRun !== "" && view !== "node") {
+      if (world.smallRun !== "" && view !== "node" && !relayed) {
         const tiny = await firstViewReading(
           browser,
           world,
@@ -1428,7 +1517,7 @@ async function measureLargeRun(browser: Browser): Promise<Measured> {
       const taken = readings.flatMap((reading) =>
         reading.seconds === null ? [] : [reading.seconds],
       );
-      first[view] = {
+      first[measured] = {
         readings,
         median_s: taken.length === 3 ? median(taken) : null,
         cold_cache: primer.reading,
@@ -1437,21 +1526,25 @@ async function measureLargeRun(browser: Browser): Promise<Measured> {
         fresh_server: readings[0] ?? primer.reading,
         small_run_s: small,
       };
-      if (view === "overall")
+      if (measured === "overall")
         overallBytes = readings[0]?.first_answer_bytes ?? 0;
     }
-    const taken = (view: (typeof FIRST_VIEWS)[number]) => {
+    const taken = (view: (typeof MEASURED_VIEWS)[number]) => {
       const measured = first[view];
       if (measured === undefined) throw new Error(`no ${view} view was read`);
       return measured;
     };
-    const medians = FIRST_VIEWS.map((view) => taken(view).median_s ?? Infinity);
+    const read = MEASURED_VIEWS.filter((view) => first[view] !== undefined);
+    const medians = read.map((view) => taken(view).median_s ?? Infinity);
     const slowestIndex = medians.indexOf(Math.max(...medians));
-    const firstView: LargeRun["first_view"] = {
+    const firstView: Measured["first_view"] = {
       graph: taken("graph"),
       overall: taken("overall"),
       node: taken("node"),
-      slowest_view: FIRST_VIEWS[slowestIndex] ?? "graph",
+      ...(first.relayed_overall === undefined
+        ? {}
+        : { relayed_overall: first.relayed_overall }),
+      slowest_view: read[slowestIndex] ?? "graph",
       slowest_s: medians[slowestIndex] ?? 0,
     };
     const { rest, history } = await restArrived(world, port, browser, complete);
@@ -1702,7 +1795,7 @@ test("a large run's first screens, the rest, its history and its status, at real
   const git = (args: string[]) =>
     execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
   const telemetry = largeTelemetrySchema.parse({
-    schema_version: 2,
+    schema_version: 3,
     recorded_at: new Date().toISOString(),
     commit: git(["rev-parse", "HEAD"]),
     dirty: git(["status", "--porcelain"]) !== "",
