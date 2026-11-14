@@ -2912,10 +2912,6 @@ test("a pointer that moves off as Add reason is replaced lets the toast leave af
   await reason.fill("Warm caches stay");
   await reason.press("Enter");
   await expect(outcome(page)).toHaveText(`Reason saved: ${LAST_QUESTION}`);
-  await page.evaluate(() => {
-    if (document.activeElement instanceof HTMLElement)
-      document.activeElement.blur();
-  });
   await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
   await expect(toast(page)).toBeVisible();
   await page.clock.runFor(1_500);
