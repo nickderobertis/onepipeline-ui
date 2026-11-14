@@ -2484,8 +2484,8 @@ fn the_build_script_embeds_a_built_view_and_refuses_a_missing_one_only_when_requ
 
 /// The build script's encodings, driven over a real directory: every file gzip
 /// makes smaller is written and listed by its path, decoding to the file; one it
-/// would make larger is left out, so the server sends that file as it is; and
-/// no view lists nothing.
+/// would make larger is left out, and is encoded as it is served like any other
+/// body; and no view lists nothing.
 #[test]
 fn the_build_script_gzips_each_file_it_makes_smaller_and_leaves_out_the_rest() {
     use std::io::Read;
