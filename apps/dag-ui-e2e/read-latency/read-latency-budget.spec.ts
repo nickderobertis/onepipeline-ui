@@ -569,6 +569,38 @@ test("the budgets file states the workload workload.json records", () => {
     expect(text.split(stated)).toHaveLength(2);
 });
 
+test("the large-run budgets file states the relayed run large-run-workload.json records", () => {
+  const text = readFileSync(
+    join(import.meta.dirname, "large-run/budgets.yaml"),
+    "utf8",
+  ).replace(/\s+/gu, " ");
+  const { relayed } = z
+    .object({
+      relayed: z.object({
+        nodes: z.number().int(),
+        records: z.number().int(),
+        journal_bytes: z.number().int(),
+        run_level_records: z.number().int(),
+      }),
+    })
+    .parse(
+      JSON.parse(
+        readFileSync(
+          join(import.meta.dirname, "large-run-workload.json"),
+          "utf8",
+        ),
+      ),
+    );
+  const count = (n: number) => n.toLocaleString("en-US");
+  const megabytes = Math.round(relayed.journal_bytes / 1_000_000);
+  // Only the first-view budget opens the relayed run, so it is stated once.
+  expect(
+    text.split(
+      `Overall on a settled ${relayed.nodes}-node run of ${count(relayed.records)} records and ${megabytes} MB whose drivers relayed ${count(relayed.run_level_records)} of them at no node`,
+    ),
+  ).toHaveLength(2);
+});
+
 /** The members of a generated journal record this test reads. */
 const journalRecordSchema = z.looseObject({
   stream: z.string(),
