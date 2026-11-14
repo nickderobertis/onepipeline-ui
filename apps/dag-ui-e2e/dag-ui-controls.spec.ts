@@ -978,7 +978,6 @@ async function transcriptsShown(page: Page, runId: string): Promise<string[]> {
     ? detail.conversations
     : [];
 
-  // Each node's transcript reading.
   const transcriptOf = new Map<string, string | undefined>();
   for (const { id } of tasks) {
     const response = await page.request.get(
@@ -1003,7 +1002,6 @@ async function transcriptsShown(page: Page, runId: string): Promise<string[]> {
   for (const { id } of tasks) {
     const rendered = transcriptOf.get(id);
     if (rendered === undefined) {
-      // The view counts no turns for it either.
       const view = await openNode(page, runId, id);
       await expect(view.getByText(/ node · 0 turns · /)).toBeVisible();
       continue;
