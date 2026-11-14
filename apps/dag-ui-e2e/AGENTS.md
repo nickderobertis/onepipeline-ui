@@ -53,6 +53,20 @@ for the app's own package instead is the same coupling with a nicer spelling. Th
 vocabulary is what a journey must not restate: a journey holding its own copy of
 `EVENT_CATEGORIES` passes while the app grows a category nobody draws.
 
+## A journey that times out only on CI
+
+`test-linux` runs this suite on four cores beside the crate's tiers and a wheel
+build weighted about three times their CPU, so a journey there gets a fraction of
+what a developer host gives it. A journey that passes alone and times out there is
+usually too much work for one limit, not a slow line: pinning the run to four
+cores with 24 busy loops on them (`taskset`, `--workers=2`) reproduced the
+removed-reads inventory and the ten-session journey timing out every time, and a
+full suite took over twice CI's slowest. Split such a journey into ones that
+together check what it did; never raise its limit. A server starved alone (its
+threads moved onto one loaded core) is what reproduced the action-items page
+missing its first list item: what the server does per page load is part of every
+journey's cost.
+
 ## Reading a tier that would not start
 
 `Timed out waiting 120000ms from config.webServer` is the whole of what Playwright
