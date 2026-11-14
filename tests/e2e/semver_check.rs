@@ -303,7 +303,9 @@ impl Fixture {
             let mut manifest =
                 fs::read_to_string(repo.join("Cargo.toml")).expect("read the manifest");
             manifest.push('\n');
-            manifest.push_str(&this_crates_features());
+            manifest.push_str(&this_crates_table("[features]"));
+            manifest.push('\n');
+            manifest.push_str(&this_crates_table("[build-dependencies]"));
             fs::write(repo.join("Cargo.toml"), manifest).expect("declare this crate's features");
         }
         // The script lists the packaged files with `--locked`, which is a lockfile
@@ -685,15 +687,16 @@ fn engine_requirement_line(manifest: &str) -> String {
         .to_owned()
 }
 
-/// This crate's `[features]` table, as its manifest declares it — the one
-/// feature a build of this crate can be asked for, and the one whose refusal the
-/// reading has to stay clear of.
-fn this_crates_features() -> String {
+/// One table of this crate's manifest, as it declares it. The build script the
+/// fixture copies needs two: `[features]`, the one feature a build of this crate
+/// can be asked for and whose refusal the reading has to stay clear of, and
+/// `[build-dependencies]`, the crates the script itself compiles against.
+fn this_crates_table(header: &str) -> String {
     let manifest = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
         .expect("read this crate's manifest");
     let start = manifest
-        .find("\n[features]\n")
-        .expect("this crate declares its features");
+        .find(&format!("\n{header}\n"))
+        .unwrap_or_else(|| panic!("this crate declares {header}"));
     let table = &manifest[start + 1..];
     let end = table[1..].find("\n[").map_or(table.len(), |end| end + 2);
     table[..end].to_owned()
