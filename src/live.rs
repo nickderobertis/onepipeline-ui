@@ -2537,15 +2537,25 @@ impl Hub {
         }));
     }
 
+    /// Append `line` to the trace whole, whatever any other thread is tracing.
+    ///
+    /// `writeln!` straight to the file wrote a line in one `write` per token, so
+    /// two threads tracing at once interleaved their fragments and left neither
+    /// line readable: two runs a page prepared, opened side by side and traced
+    /// as they finished, were then read back as no opening at all. A line is
+    /// therefore rendered first and written with one call, one line at a time.
     fn trace(&self, line: &Value) {
+        static TRACING: Mutex<()> = Mutex::new(());
         let Some(path) = &self.0.trace else { return };
+        let rendered = format!("{line}\n");
+        let _tracing = lock(&TRACING);
         if let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(path)
         {
             use std::io::Write;
-            let _ = writeln!(file, "{line}");
+            let _ = file.write_all(rendered.as_bytes());
         }
     }
 

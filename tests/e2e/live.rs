@@ -1284,6 +1284,40 @@ fn a_first_subscription_reads_its_rows_side_by_side_within_a_clients_patience() 
     }
 }
 
+/// Lines a server traces at once are each traced whole.
+///
+/// The trace is how these journeys read what the server did, and a line written
+/// in pieces interleaved with another thread's was dropped as unreadable: two
+/// runs a page prepared, opened side by side and traced as they finished, were
+/// read back as no opening at all, and
+/// `pages_open_each_run_once_two_at_a_time_and_an_untaken_opening_is_let_go`
+/// failed so on a macOS runner and beside the human-items cursor journey on
+/// Linux. Many tabs
+/// subscribing at once trace their first answers at once.
+#[test]
+fn lines_traced_at_once_are_each_traced_whole() {
+    const TABS: usize = 16;
+    const EACH: usize = 8;
+    let live = Live::start(|root| growing_run(root, fixture_run::RUN_ID));
+    live.subscribe(&json!({ "view": { "type": "sidebar" } }));
+    std::thread::scope(|scope| {
+        for _ in 0..TABS {
+            scope.spawn(|| {
+                for _ in 0..EACH {
+                    live.subscribe(&json!({ "view": { "type": "sidebar" } }));
+                }
+            });
+        }
+    });
+    let text = fs::read_to_string(&live.trace).expect("a trace");
+    let unreadable: Vec<&str> = text
+        .lines()
+        .filter(|line| serde_json::from_str::<Value>(line).is_err())
+        .collect();
+    assert_eq!(unreadable, Vec::<&str>::new(), "every traced line is whole");
+    assert_eq!(live.first_answers().len(), 1 + TABS * EACH);
+}
+
 #[test]
 fn a_retired_or_replaced_subscription_is_gone_and_its_stream_says_so() {
     let run = fixture_run::RUN_ID;
