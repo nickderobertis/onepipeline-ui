@@ -56,22 +56,18 @@ vocabulary is what a journey must not restate: a journey holding its own copy of
 ## A journey that times out only on CI
 
 `test-linux` runs this suite on four cores beside the crate's tiers and a wheel
-build weighted about three times their CPU, so a journey there gets a fraction of
-what a developer host gives it. A journey that passes alone and times out there is
-usually too much work for one limit, not a slow line: pinning the run to four
-cores with 24 busy loops on them (`taskset`, `--workers=2`) reproduced the
-removed-reads inventory and the ten-session journey timing out every time, and a
-full suite took over twice CI's slowest. Split such a journey into ones that
-together check what it did; never raise its limit. A server starved alone (its
-threads moved onto one loaded core) is what reproduced the action-items page
-missing its first list item: what the server does per page load is part of every
-journey's cost.
+build weighted above them, so a journey there gets a fraction of a developer
+host's CPU. Reproduce that before changing anything: pin the run to four cores
+with busy loops on the same cores (`taskset`, `--workers=2`), and to tell a slow
+server from a slow page, starve only the server's threads. A journey too much work
+for one limit is split into journeys that together check what it did; its limit is
+never raised. What the server does on every page load is part of every journey's
+cost.
 
 A slow suite also reaches a journey later in the fixture's life, and the live run's
 plot ends at the server's clock, so its segments narrow as the suite runs. Setting
-`DAG_UI_FIXTURE_NOW` to an instant in the past ages the corpus, and that reproduces
-a late journey's reading without the hour: a 12 s gap read with the run-level row on
-one line was overdrawn by the work after it from about fifty minutes in.
+`DAG_UI_FIXTURE_NOW` to an instant in the past ages the corpus, which reproduces a
+late journey's reading without waiting for it.
 
 ## Reading a tier that would not start
 
