@@ -109,7 +109,6 @@ fn with_ui_the_root_answers_the_bundles_index_and_its_assets_answer_their_bytes(
     }
 }
 
-/// A body served gzip-encoded, decoded.
 fn gunzipped(body: &[u8]) -> Vec<u8> {
     use std::io::Read;
     let mut decoded = Vec::new();
