@@ -158,6 +158,56 @@ fn with_ui_an_embedded_file_asked_for_gzip_is_served_the_encoding_made_when_it_w
     }
 }
 
+/// A library caller serving a table of its own through `serve_with_view` is
+/// never served the encoding this binary made of its own file at the same path:
+/// the caller's bytes are what decode, encoded as they are served.
+#[test]
+fn a_table_of_other_bytes_at_a_built_in_path_is_served_its_own_bytes() {
+    built_bundle();
+    let embedded = onepipeline_ui::ui::EMBEDDED.expect("this build embedded the view");
+    let built_in = embedded
+        .iter()
+        .find(|file| file.path.starts_with("assets/") && file.path.ends_with(".js"))
+        .expect("the embedded view has a script");
+    let other = "console.log('another build of this script');\n".repeat(64);
+    let table: &'static [onepipeline_ui::ui::EmbeddedFile] = Box::leak(Box::new([
+        onepipeline_ui::ui::EmbeddedFile {
+            path: built_in.path,
+            bytes: Box::leak(other.clone().into_bytes().into_boxed_slice()),
+        },
+        onepipeline_ui::ui::EmbeddedFile {
+            path: onepipeline_ui::ui::INDEX,
+            bytes: b"<!doctype html>",
+        },
+    ]));
+    let runs = tempfile::tempdir().expect("temp dir");
+    let root =
+        onepipeline_ui::cli::RunsRoot::try_from(runs.path().to_path_buf()).expect("a runs root");
+    let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+    let listener = runtime
+        .block_on(onepipeline_ui::server::bind(
+            "127.0.0.1:0".parse().expect("an address"),
+        ))
+        .expect("bound");
+    let address = listener.local_addr().expect("the bound address");
+    let stop = runtime.block_on(async { onepipeline_ui::server::StopSignal::install() });
+    runtime.spawn(onepipeline_ui::server::serve_with_view(
+        onepipeline_ui::store::RunStore::new(&root),
+        listener,
+        stop,
+        Some(onepipeline_ui::ui::View::Embedded(table)),
+    ));
+
+    let path = format!("/{}", built_in.path);
+    let encoded = http::get_raw_with(address, &path, &[("Accept-Encoding", "gzip")]);
+    assert_eq!(encoded.status, 200);
+    assert_eq!(encoded.header("content-encoding"), Some("gzip"));
+    assert_eq!(gunzipped(&encoded.body), other.as_bytes());
+    let plain = http::get_raw(address, &path);
+    assert_eq!(plain.body, other.as_bytes());
+    drop(runtime);
+}
+
 /// What zod 4 keeps its internals under: a property name, which no minifier renames.
 const ZOD: &str = "_zod";
 
