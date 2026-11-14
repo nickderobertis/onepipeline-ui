@@ -2870,6 +2870,58 @@ test("the toast leaves after its duration, stays while hovered or focused, and l
   await expectToastGone(page);
 });
 
+/**
+ * A pointer that leaves as the control under it is replaced is gone, not held.
+ *
+ * Add reason is replaced by its field the moment it is pressed, and until the
+ * browser's next frame it still takes the pointer to be over the button it
+ * removed: a move in that window leaves a node the page no longer holds, and is
+ * heard nowhere on the toast. The release and the move are sent back to back, so
+ * the move is queued behind the press — the order a busy renderer gave the
+ * journey above on CI, where the toast then stood past its duration for good.
+ */
+test("a pointer that moves off as Add reason is replaced lets the toast leave after its duration", async ({
+  page,
+}) => {
+  await page.clock.install();
+  const served = await serveWorld("queue");
+  await open(page, served);
+  await page.clock.pauseAt(Date.now() + 1_000);
+  await page.getByRole("button", { name: `Dismiss: ${LAST_QUESTION}` }).click();
+  await expect(outcome(page)).toHaveText(`Dismissed: ${LAST_QUESTION}`);
+
+  const box = await toast(page)
+    .getByRole("button", { name: "Add reason" })
+    .boundingBox();
+  if (box === null) throw new Error("the toast offers no Add reason");
+  const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.move(at.x, at.y);
+  const input = await page.context().newCDPSession(page);
+  const press = { ...at, button: "left", clickCount: 1 } as const;
+  await input.send("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    ...press,
+  });
+  await Promise.all([
+    input.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...press }),
+    input.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 }),
+  ]);
+  await page.mouse.move(1, 1);
+
+  const reason = toast(page).getByRole("textbox", { name: "Reason" });
+  await reason.fill("Warm caches stay");
+  await reason.press("Enter");
+  await expect(outcome(page)).toHaveText(`Reason saved: ${LAST_QUESTION}`);
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement)
+      document.activeElement.blur();
+  });
+  await page.clock.runFor((TOAST_SECONDS - 1) * 1_000);
+  await expect(toast(page)).toBeVisible();
+  await page.clock.runFor(1_500);
+  await expectToastGone(page);
+});
+
 for (const width of [1440, 390] as const)
   test(`at ${width} wide the toast sits where it should, stands out in green or red, and leaves room to reach every card`, async ({
     page,

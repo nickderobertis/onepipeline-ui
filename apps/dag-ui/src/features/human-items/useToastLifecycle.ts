@@ -77,6 +77,26 @@ export function useToastLifecycle(
     onClose();
   }, [expired, hovered, focused, writing, onClose]);
 
+  // Where the pointer went is asked of the document as well as its leaving
+  // heard: a control replaced while under it — Add reason, by its field — leaves
+  // the browser pointing at a node the page no longer holds until its next frame,
+  // and a pointer moving off before then leaves that node, which no handler here
+  // hears. Where it arrives is a node the document does hold.
+  useEffect(() => {
+    if (!hovered) return;
+    const arrived = (event: PointerEvent) => {
+      const element = ref.current;
+      if (
+        element !== null &&
+        event.target instanceof Node &&
+        !element.contains(event.target)
+      )
+        setHovered(false);
+    };
+    document.addEventListener("pointerover", arrived, true);
+    return () => document.removeEventListener("pointerover", arrived, true);
+  }, [hovered]);
+
   useEffect(() => {
     const element = ref.current;
     if (element === null) return;
