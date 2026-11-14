@@ -75,6 +75,11 @@ export const factsSchema = z.object({
     sessions: z.number().int(),
     settled: z.boolean(),
   }),
+  relayed: z.object({
+    run: z.string(),
+    nodes: z.array(z.string()),
+    longDriver: z.string(),
+  }),
 });
 export type Facts = z.infer<typeof factsSchema>;
 
@@ -105,6 +110,19 @@ export const JOURNEY_WORKLOAD = {
     checkpoint_bytes: 200_000,
     busiest_node_records: 300,
     off_graph_node_records: 200,
+  },
+  relayed: {
+    state: "settled",
+    nodes: 9,
+    records: 6000,
+    journal_bytes: 4_000_000,
+    run_level_records: 2200,
+    driver_streams: 4,
+    records_before_long_driver: 500,
+    heartbeats_per_turn: 19,
+    named_per_turn: 8,
+    second_member_every: 8,
+    session_search_records: 700_000,
   },
 } as const;
 

@@ -13,7 +13,9 @@ budgets:
       start to the first useful screen, a rendered DOM state, in a real browser
       with the bundle in the HTTP cache, on a fresh release server that has
       answered one sidebar read; the median of 3 readings per view, then the
-      slowest of Graph, Overall and the busiest node's timeline. Detail per view:
+      slowest of Graph, Overall and the busiest node's timeline, and Overall on a
+      settled 9-node run of 76,000 records and 57 MB whose drivers relayed 27,700
+      of them at no node, most naming no session. Detail per view:
       navigation to POST, the POST and inside it the engine's heads read and
       fetch, the timeline, detail and serialization, answer to mark,
       first-answer bytes raw and gzipped, cold-cache and fresh-server readings,

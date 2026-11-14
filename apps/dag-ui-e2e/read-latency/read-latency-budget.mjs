@@ -26,8 +26,8 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { report } from "@onebudgetspec/sdk";
 import {
-  FIRST_VIEWS,
   largeTelemetrySchema,
+  MEASURED_VIEWS,
   PAGES,
   telemetrySchema,
 } from "./telemetry.ts";
@@ -97,7 +97,7 @@ const MEASURES = {
       value: view.slowest_s,
       detail: {
         slowest_view: view.slowest_view,
-        ...Object.fromEntries(FIRST_VIEWS.map((name) => [name, view[name]])),
+        ...Object.fromEntries(MEASURED_VIEWS.map((name) => [name, view[name]])),
         ...provenance(telemetry),
       },
     };

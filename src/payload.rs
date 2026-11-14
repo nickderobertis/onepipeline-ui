@@ -7396,6 +7396,7 @@ fn relayed_sessions<'a>(
     // and a search of the list per record would compare every record's session
     // with every one before it.
     let mut placed: HashMap<&str, usize> = HashMap::new();
+    let mut named: Option<NamedSessions<'a>> = None;
     for (index, event) in events {
         if event.source != Source::Agentgraph {
             continue;
@@ -7406,19 +7407,9 @@ fn relayed_sessions<'a>(
             .get("session")
             .and_then(Value::as_str)
             .or_else(|| {
-                events.iter().find_map(|(_, candidate)| {
-                    (candidate.stream == event.stream
-                        && (member_label(event).is_none()
-                            || member_label(event) == member_label(candidate)))
-                    .then(|| {
-                        candidate
-                            .labels
-                            .extra
-                            .get("session")
-                            .and_then(Value::as_str)
-                    })
-                    .flatten()
-                })
+                named
+                    .get_or_insert_with(|| NamedSessions::of(events))
+                    .of_unnamed(event)
             });
         let Some(session) = session else {
             continue;
@@ -7434,6 +7425,66 @@ fn relayed_sessions<'a>(
         }
     }
     sessions
+}
+
+/// The session a record that names none of its own is attributed to: the first one
+/// named, in the slice's order, by a record on its stream, and of its member where it
+/// has one.
+///
+/// Held as an index made in one pass rather than found by a search of the slice per
+/// record: a long run's run-level heartbeats name no session, and the first record of
+/// their stream and member that does can lie tens of thousands of records in, so a
+/// search per heartbeat compared over a hundred million records on a 76,000-record
+/// journal and held Overall's first answer for seconds.
+struct NamedSessions<'a> {
+    /// The first session named on each stream.
+    by_stream: HashMap<&'a str, &'a str>,
+    /// The first session named on each stream by each member.
+    by_member: HashMap<(&'a str, &'a str), &'a str>,
+}
+
+impl<'a> NamedSessions<'a> {
+    fn of(events: &[(usize, &'a Envelope)]) -> Self {
+        let mut by_stream = HashMap::new();
+        let mut by_member = HashMap::new();
+        for (_, candidate) in events {
+            examined_by_fallback();
+            let Some(session) = candidate
+                .labels
+                .extra
+                .get("session")
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            let stream = candidate.stream.as_str();
+            by_stream.entry(stream).or_insert(session);
+            if let Some(member) = member_label(candidate) {
+                by_member.entry((stream, member)).or_insert(session);
+            }
+        }
+        Self {
+            by_stream,
+            by_member,
+        }
+    }
+
+    /// The session `event`'s stream, or its member on that stream, first named.
+    fn of_unnamed(&self, event: &'a Envelope) -> Option<&'a str> {
+        let stream = event.stream.as_str();
+        match member_label(event) {
+            None => self.by_stream.get(stream).copied(),
+            Some(member) => self.by_member.get(&(stream, member)).copied(),
+        }
+    }
+}
+
+/// Counts one record the session fallback examined, in a test build only, so a test
+/// can hold the fallback to one pass over its slice rather than a search per record.
+#[inline]
+fn examined_by_fallback() {
+    #[cfg(test)]
+    tests::FALLBACK_EXAMINED.with(|examined| examined.set(examined.get() + 1));
 }
 
 /// One recorded moment: the epoch milliseconds a reading orders by, and the stamp
@@ -8806,4 +8857,136 @@ pub fn receipt(run: &RunId, receipt: &onepipeline::verbs::Receipt) -> Value {
         "receipt": receipt,
         "advice": receipt.advice,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use onepipeline::event::{Envelope, ENVELOPE_VERSION};
+    use serde_json::json;
+
+    use super::{relayed_sessions, Deserialize};
+
+    thread_local! {
+        /// The records the session fallback examined on this thread.
+        pub(super) static FALLBACK_EXAMINED: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// The relayed run `apps/dag-ui-e2e/read-latency/large-run-workload.json` states,
+    /// which `load/corpus.mjs` generates the read-latency tier's `load-relayed-settled`
+    /// run from: the members of it its run-level records are laid out by.
+    #[derive(Deserialize)]
+    struct Relayed {
+        driver_streams: usize,
+        run_level_records: usize,
+        records_before_long_driver: usize,
+        heartbeats_per_turn: usize,
+        named_per_turn: usize,
+        second_member_every: usize,
+    }
+
+    #[derive(Deserialize)]
+    struct Workload {
+        relayed: Relayed,
+    }
+
+    fn relayed_workload() -> Relayed {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("apps/dag-ui-e2e/read-latency/large-run-workload.json");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        serde_json::from_str::<Workload>(&text)
+            .expect("the large-run workload states a relayed run")
+            .relayed
+    }
+
+    /// That run's run-level records in journal order, laid out as `writeRelayedRun`
+    /// lays them: its `run-started`, then each driver stream's share in turn, the
+    /// last driver holding the rest.
+    fn relayed_run_level(relayed: &Relayed) -> Vec<Envelope> {
+        let early = relayed.driver_streams - 1;
+        let before = relayed.records_before_long_driver;
+        let quota = |at: usize| {
+            if at < early {
+                before / early + usize::from(at < before % early)
+            } else {
+                relayed.run_level_records - before
+            }
+        };
+        let turn_records = relayed.heartbeats_per_turn + relayed.named_per_turn;
+        let envelope = |seq: usize, stream: &str, source: &str, kind: &str, labels| {
+            serde_json::from_value::<Envelope>(json!({
+                "v": ENVELOPE_VERSION,
+                "ts": "2026-09-09T04:00:00.000Z",
+                "stream": stream,
+                "seq": seq,
+                "source": source,
+                "kind": kind,
+                "labels": labels,
+            }))
+            .expect("a generated record parses")
+        };
+        let mut records = vec![envelope(1, "run", "pipeline", "run-started", json!({}))];
+        for at in 0..relayed.driver_streams {
+            let stream = format!("run-driver-{at:02}");
+            let mut places = [0_usize; 2];
+            for index in 0..quota(at) {
+                let which = usize::from(
+                    index % relayed.second_member_every == relayed.second_member_every - 1,
+                );
+                let member = ["monitor", "llmlint"][which];
+                let place = places[which];
+                places[which] += 1;
+                let (kind, labels) = if place % turn_records < relayed.heartbeats_per_turn {
+                    ("member-heartbeat", json!({"member": member}))
+                } else {
+                    (
+                        "turn-activity",
+                        json!({"member": member, "session": format!("{stream}.{member}")}),
+                    )
+                };
+                records.push(envelope(index + 1, &stream, "agentgraph", kind, labels));
+            }
+        }
+        assert_eq!(records.len(), relayed.run_level_records + 1);
+        records
+    }
+
+    #[test]
+    fn overall_attributes_a_relayed_runs_session_less_records_in_one_pass() {
+        let relayed = relayed_workload();
+        let records = relayed_run_level(&relayed);
+        let slice: Vec<(usize, &Envelope)> = records.iter().enumerate().collect();
+        FALLBACK_EXAMINED.with(|examined| examined.set(0));
+        let sessions = relayed_sessions(&slice);
+        let examined = FALLBACK_EXAMINED.with(Cell::get);
+        // Every heartbeat joins its driver's member's session, and nothing else
+        // relays one: each record but the run's own lands in exactly one.
+        assert_eq!(sessions.len(), 2 * relayed.driver_streams);
+        assert_eq!(
+            sessions
+                .iter()
+                .map(|(_, relayed)| relayed.len())
+                .sum::<usize>(),
+            relayed.run_level_records
+        );
+        let long = format!("run-driver-{:02}.monitor", relayed.driver_streams - 1);
+        let long_driver = relayed.run_level_records - relayed.records_before_long_driver;
+        let (_, relayed_by_long) = sessions
+            .iter()
+            .find(|(session, _)| *session == long)
+            .expect("the long driver's session");
+        assert_eq!(
+            relayed_by_long.len(),
+            long_driver - long_driver / relayed.second_member_every
+        );
+        // The fallback reads the slice at most once, however many of its records
+        // name no session: a search per such record read over a hundred million.
+        assert!(
+            examined <= slice.len() as u64,
+            "the session fallback examined {examined} records over a slice of {}",
+            slice.len()
+        );
+    }
 }

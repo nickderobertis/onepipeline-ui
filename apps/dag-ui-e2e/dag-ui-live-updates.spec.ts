@@ -638,8 +638,6 @@ test("a dropped stream resumes from its last frame, and every change made meanwh
   await expect(rowOf(page, warm)).toHaveCount(1, {
     timeout: FRAME_PATIENCE,
   });
-  const lastFrame = wire.frames.at(-1)?.frame?.id;
-  expect(lastFrame).toBeDefined();
 
   // The stream drops; records keep arriving while nothing is connected.
   await page.context().setOffline(true);
@@ -647,6 +645,11 @@ test("a dropped stream resumes from its last frame, and every change made meanwh
     recordActivity(server, run, node, `while away ${n} ${Date.now()}`),
   );
   await page.waitForTimeout(1_500);
+  // The last frame applied is read once the stream is cut, not when the warm row
+  // renders: the rest of that record's frames can still be arriving then, and the
+  // client resumes from the last of them.
+  const lastFrame = wire.frames.at(-1)?.frame?.id;
+  expect(lastFrame).toBeDefined();
   const streamsBefore = wire.requests.filter(
     ({ path }) => path === API_V2_PATHS.events,
   ).length;

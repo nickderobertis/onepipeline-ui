@@ -11,6 +11,10 @@
  * `tests/e2e/baseline.rs`'s question over the routes it compares. Fed an answer with one
  * of the reference's fields taken out, the same comparison names that field, so it
  * cannot pass blind.
+ *
+ * Overall is read on two runs: the large run, and the settled run whose own drivers
+ * relayed a third of its records at no node, most of them naming no session — the
+ * shape whose Overall was slowest on a real host.
  */
 import { expect, type Page, test } from "@playwright/test";
 import {
@@ -132,12 +136,17 @@ test.afterAll(() => removeWorld(world));
 test("each view's first answer carries every field a whole read's does, and each drawn field is the complete document's or marked loading", async ({
   browser,
 }) => {
-  const run = world.facts.openLiveRun;
   const node = world.facts.large.busiestNode;
   const served = await serve(world);
   const whole = await serve(world, WHOLE);
+  const opened = [
+    ["graph", world.facts.openLiveRun],
+    ["overall", world.facts.openLiveRun],
+    ["node", world.facts.openLiveRun],
+    ["overall", world.facts.relayed.run],
+  ] as const;
   try {
-    for (const view of ["graph", "overall", "node"] as const) {
+    for (const [view, run] of opened) {
       const at = view === "node" ? node : undefined;
       // A context of its own per view, so each page's first answer is that view's.
       const context = await browser.newContext();
@@ -147,7 +156,7 @@ test("each view's first answer carries every field a whole read's does, and each
       const reference = await sameRequest(whole, body);
       expect(
         missingFrom(answer, reference),
-        `${view}: fields a whole read's first answer carries`,
+        `${view} of ${run}: fields a whole read's first answer carries`,
       ).toStrictEqual([]);
       expect(
         checkAnswer(
@@ -155,7 +164,7 @@ test("each view's first answer carries every field a whole read's does, and each
           await completeDocuments(served, run, at),
           view === "overall" ? "run" : view === "node" ? "node" : undefined,
         ),
-        `${view}: each drawn field against the complete document`,
+        `${view} of ${run}: each drawn field against the complete document`,
       ).toStrictEqual([]);
       // Fed an answer missing any one of those fields, the same comparison names it.
       const fields = [...fieldsOf(reference)];
@@ -163,7 +172,7 @@ test("each view's first answer carries every field a whole read's does, and each
       for (const path of fields)
         expect(
           missingFrom(without(answer, path), reference),
-          `${view}: an answer without ${path}`,
+          `${view} of ${run}: an answer without ${path}`,
         ).toContain(path);
     }
   } finally {
