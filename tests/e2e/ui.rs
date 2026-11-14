@@ -160,7 +160,9 @@ fn with_ui_an_embedded_file_asked_for_gzip_is_served_the_encoding_made_when_it_w
 
 /// A library caller serving a table of its own through `serve_with_view` is
 /// never served the encoding this binary made of its own file at the same path:
-/// the caller's bytes are what decode, encoded as they are served.
+/// the caller's bytes are what decode, encoded as they are served. A file of its
+/// own holding the very bytes this binary embedded at that path is the same file,
+/// and is served the encoding made of it, with its length.
 #[test]
 fn a_table_of_other_bytes_at_a_built_in_path_is_served_its_own_bytes() {
     built_bundle();
@@ -169,11 +171,19 @@ fn a_table_of_other_bytes_at_a_built_in_path_is_served_its_own_bytes() {
         .iter()
         .find(|file| file.path.starts_with("assets/") && file.path.ends_with(".js"))
         .expect("the embedded view has a script");
+    let same = embedded
+        .iter()
+        .find(|file| file.path.starts_with("assets/") && file.path.ends_with(".css"))
+        .expect("the embedded view has a stylesheet");
     let other = "console.log('another build of this script');\n".repeat(64);
     let table: &'static [onepipeline_ui::ui::EmbeddedFile] = Box::leak(Box::new([
         onepipeline_ui::ui::EmbeddedFile {
             path: built_in.path,
             bytes: Box::leak(other.clone().into_bytes().into_boxed_slice()),
+        },
+        onepipeline_ui::ui::EmbeddedFile {
+            path: same.path,
+            bytes: Box::leak(same.bytes.to_vec().into_boxed_slice()),
         },
         onepipeline_ui::ui::EmbeddedFile {
             path: onepipeline_ui::ui::INDEX,
@@ -202,9 +212,20 @@ fn a_table_of_other_bytes_at_a_built_in_path_is_served_its_own_bytes() {
     let encoded = http::get_raw_with(address, &path, &[("Accept-Encoding", "gzip")]);
     assert_eq!(encoded.status, 200);
     assert_eq!(encoded.header("content-encoding"), Some("gzip"));
+    assert_eq!(encoded.header("content-length"), None);
     assert_eq!(gunzipped(&encoded.body), other.as_bytes());
     let plain = http::get_raw(address, &path);
     assert_eq!(plain.body, other.as_bytes());
+
+    let path = format!("/{}", same.path);
+    let encoded = http::get_raw_with(address, &path, &[("Accept-Encoding", "gzip")]);
+    assert_eq!(encoded.status, 200);
+    assert_eq!(encoded.header("content-encoding"), Some("gzip"));
+    assert_eq!(
+        encoded.header("content-length"),
+        Some(encoded.body.len().to_string().as_str())
+    );
+    assert_eq!(gunzipped(&encoded.body), same.bytes);
     drop(runtime);
 }
 
