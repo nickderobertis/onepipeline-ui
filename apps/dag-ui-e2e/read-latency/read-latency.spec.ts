@@ -690,7 +690,6 @@ const journalRecordSchema = z.looseObject({
 
 type JournalRecord = z.infer<typeof journalRecordSchema>;
 
-/** A run's journal, every record parsed. */
 const journalOf = (world: LargeWorld, run: string) =>
   readFileSync(join(world.runsRoot, run, "events.jsonl"), "utf8")
     .split("\n")

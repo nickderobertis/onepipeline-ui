@@ -780,7 +780,8 @@ function writeRelayedRun(root, runId, project, relayed, startMs, stepMs) {
   drivers.forEach((stream, at) => {
     const turns = new Map();
     for (let index = 0; index < quota(at); index += 1) {
-      // One record in eight is the second member's.
+      // A second member keyed apart from the first, as on the host's run, so a
+      // record's session is found by its stream and member, not its stream alone.
       const member = DRIVER_MEMBERS[index % 8 === 7 ? 1 : 0];
       const place = turns.get(member) ?? 0;
       turns.set(member, place + 1);

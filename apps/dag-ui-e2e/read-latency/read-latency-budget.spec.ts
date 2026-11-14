@@ -761,7 +761,6 @@ test("the relayed run is written settled, at its size, its long driver's heartbe
           .filter(Boolean)
           .map((line) => JSON.parse(line)),
       );
-    // Its size, and its nine planned nodes each settled done.
     expect(records).toHaveLength(relayed.records);
     const journalBytes = readFileSync(join(run, "events.jsonl")).length;
     expect(Math.abs(journalBytes - relayed.journal_bytes)).toBeLessThan(
