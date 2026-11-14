@@ -102,6 +102,7 @@ const largeRun = (overrides: object = {}) => ({
     graph: view(0.4),
     overall: view(0.7),
     node: view(0.6),
+    relayed_overall: view(0.5),
     slowest_view: "overall",
     slowest_s: 0.7,
   },
@@ -172,7 +173,7 @@ const telemetry = (overrides: object = {}) => ({
 });
 
 const largeTelemetry = (overrides: object = {}) => ({
-  schema_version: 2,
+  schema_version: 3,
   recorded_at: "2026-11-07T00:00:00.000Z",
   commit: "a".repeat(40),
   dirty: false,
@@ -298,6 +299,38 @@ for (const driver of Object.keys(DRIVERS) as (keyof typeof DRIVERS)[]) {
     expect(results[0]?.detail ?? run.stderr).toContain(driver);
   });
 }
+
+test("Overall on the relayed run over the line fails the first-view budget, and one never read is refused", () => {
+  const slow = recorded(
+    largeTelemetry({
+      large_run: largeRun({
+        first_view: {
+          ...largeRun().first_view,
+          relayed_overall: view(2.1),
+          slowest_view: "relayed_overall",
+          slowest_s: 2.1,
+        },
+      }),
+    }),
+  );
+  const [result] = check(slow, [["first-view", 1]]);
+  expect([result?.actual, result?.verdict]).toStrictEqual([2.1, "over"]);
+  expect(
+    z
+      .object({ slowest_view: z.string(), relayed_overall: z.unknown() })
+      .parse(JSON.parse(result?.detail ?? "{}")).slowest_view,
+  ).toBe("relayed_overall");
+  // A large-run recording that never opened the relayed run measured a smaller
+  // workload than the budget states, and is not read as a pass.
+  const unread: Record<string, unknown> = { ...largeRun().first_view };
+  delete unread.relayed_overall;
+  const run = measure(
+    "first-view",
+    recorded(largeTelemetry({ large_run: largeRun({ first_view: unread }) })),
+  );
+  expect(run.status).toBe(1);
+  expect(run.stderr).toContain("relayed_overall");
+});
 
 test("a run with no mark fails the check, naming the reading", () => {
   const graph = {
@@ -536,6 +569,38 @@ test("the budgets file states the workload workload.json records", () => {
     expect(text.split(stated)).toHaveLength(2);
 });
 
+test("the large-run budgets file states the relayed run large-run-workload.json records", () => {
+  const text = readFileSync(
+    join(import.meta.dirname, "large-run/budgets.yaml"),
+    "utf8",
+  ).replace(/\s+/gu, " ");
+  const { relayed } = z
+    .object({
+      relayed: z.object({
+        nodes: z.number().int(),
+        records: z.number().int(),
+        journal_bytes: z.number().int(),
+        run_level_records: z.number().int(),
+      }),
+    })
+    .parse(
+      JSON.parse(
+        readFileSync(
+          join(import.meta.dirname, "large-run-workload.json"),
+          "utf8",
+        ),
+      ),
+    );
+  const count = (n: number) => n.toLocaleString("en-US");
+  const megabytes = Math.round(relayed.journal_bytes / 1_000_000);
+  // Only the first-view budget opens the relayed run, so it is stated once.
+  expect(
+    text.split(
+      `Overall on a settled ${relayed.nodes}-node run of ${count(relayed.records)} records and ${megabytes} MB whose drivers relayed ${count(relayed.run_level_records)} of them at no node`,
+    ),
+  ).toHaveLength(2);
+});
+
 /** The members of a generated journal record this test reads. */
 const journalRecordSchema = z.looseObject({
   stream: z.string(),
@@ -659,6 +724,133 @@ test("the large-run corpus writes the shapes its drivers are read from, at a sma
         .filter(Boolean),
     ).toHaveLength(50);
     expect(existsSync(join(root, facts.smallRun, "result.json"))).toBe(true);
+    expect(readdirSync(root)).toHaveLength(6);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the relayed run is written settled, at its size, its long driver's heartbeats naming no session past its earlier drivers' records", () => {
+  const dir = mkdtempSync(join(tmpdir(), "read-latency-relayed-"));
+  try {
+    const relayed = {
+      state: "settled",
+      nodes: 9,
+      records: 6000,
+      journal_bytes: 4_000_000,
+      run_level_records: 2200,
+      driver_streams: 4,
+      records_before_long_driver: 500,
+      heartbeats_per_turn: 19,
+      named_per_turn: 8,
+      second_member_every: 8,
+      session_search_records: 700_000,
+    };
+    const workload = join(dir, "workload.json");
+    writeFileSync(
+      workload,
+      JSON.stringify({
+        runs: 6,
+        projects: 3,
+        other_live_runs: 1,
+        stopped_runs: 1,
+        open_live_run_records_at_start: 300,
+        settled_big_records: 60,
+        settled_small_records: 20,
+        relayed,
+      }),
+    );
+    const root = join(dir, "runs");
+    const facts = z
+      .object({
+        relayed: z.object({
+          run: z.string(),
+          nodes: z.array(z.string()),
+          longDriver: z.string(),
+        }),
+      })
+      .parse(
+        JSON.parse(
+          execFileSync(
+            process.execPath,
+            [join(import.meta.dirname, "../load/corpus.mjs"), root, workload],
+            { encoding: "utf8" },
+          ),
+        ),
+      );
+    const run = join(root, facts.relayed.run);
+    const records = z
+      .array(
+        journalRecordSchema.extend({
+          source: z.string(),
+          labels: z.looseObject({
+            node: z.string().optional(),
+            member: z.string().optional(),
+            session: z.string().optional(),
+          }),
+        }),
+      )
+      .parse(
+        readFileSync(join(run, "events.jsonl"), "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line)),
+      );
+    expect(records).toHaveLength(relayed.records);
+    const journalBytes = readFileSync(join(run, "events.jsonl")).length;
+    expect(Math.abs(journalBytes - relayed.journal_bytes)).toBeLessThan(
+      relayed.journal_bytes * 0.03,
+    );
+    const plan = planSchema.parse(
+      JSON.parse(readFileSync(join(run, "plan.json"), "utf8")),
+    );
+    expect(plan.tasks.map((task) => task.id)).toStrictEqual(
+      facts.relayed.nodes,
+    );
+    expect(
+      records
+        .filter((record) => record.kind === "node-settled")
+        .map((record) => record.labels.node),
+    ).toStrictEqual(facts.relayed.nodes);
+    expect(
+      z
+        .object({ state: z.literal("complete"), nodes: z.array(z.unknown()) })
+        .parse(JSON.parse(readFileSync(join(run, "result.json"), "utf8")))
+        .nodes,
+    ).toHaveLength(relayed.nodes);
+    // A third of its records relayed at no node, on its driver streams.
+    const runLevel = records.filter(
+      (record) => record.labels.node === undefined,
+    );
+    expect(runLevel.length).toBe(relayed.run_level_records + 1);
+    const drivers = new Set(
+      runLevel
+        .filter((record) => record.source === "agentgraph")
+        .map((record) => record.stream),
+    );
+    expect(drivers.size).toBe(relayed.driver_streams);
+    // The long driver's heartbeats name no session, and the first of its records
+    // that does lies past every earlier driver's.
+    const long = runLevel.filter(
+      (record) => record.stream === facts.relayed.longDriver,
+    );
+    const unnamed = long.filter(
+      (record) => record.labels.session === undefined,
+    );
+    expect(unnamed.length).toBeGreaterThan(long.length / 2);
+    expect(
+      unnamed.every(
+        (record) =>
+          record.kind === "member-heartbeat" &&
+          record.labels.member !== undefined,
+      ),
+    ).toBe(true);
+    const firstNamed = runLevel.findIndex(
+      (record) =>
+        record.stream === facts.relayed.longDriver &&
+        record.labels.session !== undefined,
+    );
+    expect(firstNamed).toBeGreaterThan(relayed.records_before_long_driver);
     expect(readdirSync(root)).toHaveLength(6);
   } finally {
     rmSync(dir, { recursive: true, force: true });

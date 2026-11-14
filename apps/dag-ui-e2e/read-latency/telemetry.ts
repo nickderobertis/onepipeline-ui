@@ -140,8 +140,15 @@ const selecting = (selected: (filter: Record<string, unknown>) => boolean) =>
     message: "a page measures the filter it is named for",
   });
 
-/** The three first-useful-screen views, the slowest of which is the budget. */
+/** The three first-useful-screen views a large run opens on. */
 export const FIRST_VIEWS = ["graph", "overall", "node"] as const;
+
+/**
+ * Every first view the budget is the slowest of: the large run's three, and
+ * Overall on the settled run whose own drivers relayed a third of its records at
+ * no node (`relayed_overall`), which a host measurement of one run does not read.
+ */
+export const MEASURED_VIEWS = [...FIRST_VIEWS, "relayed_overall"] as const;
 
 /**
  * Where the server spent a first answer's `POST`, off its own trace
@@ -206,6 +213,10 @@ export const DRIVERS = {
   awaits: 1,
   cross_run_settled_consumers: 1,
   stand_in_provider: 1,
+  relayed_records: large.relayed.records,
+  relayed_journal_bytes: large.relayed.journal_bytes,
+  relayed_run_level_records: large.relayed.run_level_records,
+  relayed_session_search_records: large.relayed.session_search_records,
 } as const;
 export type Driver = keyof typeof DRIVERS;
 /** The least fraction of a driver's stated figure a corpus must reach to stand for that workload. */
@@ -254,18 +265,23 @@ const viewSchema = z
     }
   });
 
-/** A run's first views: each reached its mark, and held to its answer and the complete document. */
+/**
+ * A run's first views: each reached its mark, and held to its answer and the
+ * complete document. `relayed_overall` is absent from a host measurement of one run.
+ */
 export const firstViewSchema = z.object({
   graph: viewSchema,
   overall: viewSchema,
   node: viewSchema,
-  slowest_view: z.enum(FIRST_VIEWS),
+  relayed_overall: viewSchema.optional(),
+  slowest_view: z.enum(MEASURED_VIEWS),
   slowest_s: figure,
 });
 
 const largeRunSchema = z.object({
   corpus: corpusSchema,
-  first_view: firstViewSchema,
+  // The corpus holds the relayed run, so its Overall is read with the rest.
+  first_view: firstViewSchema.extend({ relayed_overall: viewSchema }),
   rest_arrived: z.object({
     overall_s: figure,
     graph_s: seconds,
@@ -311,8 +327,11 @@ export type Telemetry = z.infer<typeof telemetrySchema>;
 
 /** `telemetry/read-latency-large.json`: one large run's first screens and the rest. */
 export const largeTelemetrySchema = z.object({
-  /** 2 since each reading carries the server's split of its `POST`. */
-  schema_version: z.literal(2),
+  /**
+   * Each reading carries the server's split of its `POST`; the first views hold
+   * `relayed_overall` and the corpus its drivers.
+   */
+  schema_version: z.literal(3),
   recorded_at: z.iso.datetime(),
   commit: z.string().regex(/^[0-9a-f]{40}$/u),
   dirty: z.boolean(),

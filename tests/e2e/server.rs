@@ -1953,6 +1953,121 @@ fn observer_sessions_on_multiple_streams_keep_their_declared_roles() {
 }
 
 #[test]
+fn a_run_level_record_naming_no_session_joins_its_members_first_session_on_its_stream() {
+    // A long-lived driver's member: its heartbeats and messages name no session,
+    // and the first record of its stream and member that does lies after many of
+    // them, as on a long run where an earlier driver's records come first.
+    let stream = "dag-scope-1786925520010-4311";
+    let other = "dag-scope-1786925520011-4311";
+    let run_level = |member: Option<&str>, session: Option<&str>, on: &str| {
+        let mut labels = json!({"run_id": on, "onepipeline.run_id": fixture_run::LANES_RUN_ID});
+        if let Some(member) = member {
+            labels["member"] = json!(member);
+            labels["persona"] = json!("monitor");
+        }
+        if let Some(session) = session {
+            labels["session"] = json!(session);
+        }
+        labels
+    };
+    let message = |text: &str| json!({"turn": 1, "role": "assistant", "text": text});
+    let serving = Serving::start(|root| {
+        let dir = fixture_run::write_lanes(root, fixture_run::LANES_RUN_ID);
+        for on in [stream, other] {
+            fixture_run::declare_graph(root, on, &["monitor", "check-in"]);
+        }
+        // An earlier driver's conversation, on a stream of its own, before anything
+        // of the later one.
+        fixture_run::append_relayed_on(
+            &dir,
+            other,
+            "turn-started",
+            run_level(Some("monitor"), Some(&format!("{other}.monitor")), other),
+            json!({"turn": 1}),
+        );
+        for (member, said) in [
+            ("monitor", "monitor before"),
+            ("check-in", "check-in before"),
+        ] {
+            fixture_run::append_relayed_on(
+                &dir,
+                stream,
+                "turn-message",
+                run_level(Some(member), None, stream),
+                message(said),
+            );
+        }
+        // A member that never names a session on this stream: its records join none.
+        fixture_run::append_relayed_on(
+            &dir,
+            stream,
+            "turn-message",
+            run_level(Some("stranger"), None, stream),
+            message("stranger unnamed"),
+        );
+        for member in ["check-in", "monitor"] {
+            fixture_run::append_relayed_on(
+                &dir,
+                stream,
+                "turn-started",
+                run_level(Some(member), Some(&format!("{stream}.{member}")), stream),
+                json!({"turn": 1}),
+            );
+        }
+        fixture_run::append_relayed_on(
+            &dir,
+            stream,
+            "turn-message",
+            run_level(Some("monitor"), None, stream),
+            message("monitor after"),
+        );
+        // No member at all: the stream's first session named, whoever named it.
+        fixture_run::append_relayed_on(
+            &dir,
+            stream,
+            "turn-message",
+            run_level(None, None, stream),
+            message("memberless"),
+        );
+    });
+    let response = http::get(
+        serving.address,
+        &format!(
+            "/api/v2/runs/{}/timeline?scope=run",
+            fixture_run::LANES_RUN_ID,
+        ),
+    );
+    assert_eq!(response.status, 200, "{}", response.body);
+    let timeline = response.json();
+    let spans = timeline["spans"].as_array().expect("spans");
+    let texts = |id: &str| -> Vec<String> {
+        span_named(spans, id)["events"]
+            .as_array()
+            .expect("a session span's events")
+            .iter()
+            .filter(|event| event["kind"] == "turn-message")
+            .filter_map(|event| event["description"].as_str().map(str::to_owned))
+            .collect()
+    };
+    assert_eq!(
+        texts(&format!("run-session.{stream}.monitor")),
+        ["monitor before", "monitor after"]
+    );
+    assert_eq!(
+        texts(&format!("run-session.{stream}.check-in")),
+        ["check-in before", "memberless"]
+    );
+    assert_eq!(
+        texts(&format!("run-session.{other}.monitor")),
+        [] as [&str; 0]
+    );
+    assert!(
+        !timeline.to_string().contains("stranger unnamed"),
+        "a record no session of its stream and member named was served: {timeline}"
+    );
+}
+
+#[test]
 fn the_graph_records_are_read_from_where_the_engine_keeps_them_when_nothing_names_them() {
     // The host an operator's own server runs on: the engine wrote every graph
     // run's record under `HOME`, and nothing set `ONEAGENTGRAPH_STATE_DIR`. The

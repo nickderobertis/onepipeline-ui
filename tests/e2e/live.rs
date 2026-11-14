@@ -3063,15 +3063,18 @@ fn pages_open_each_run_once_two_at_a_time_and_an_untaken_opening_is_let_go() {
     );
     assert_eq!(seen.len(), 3, "{seen:?}");
     assert_eq!(seen[2], json!(runs[2]));
-    // The first run's opening was let go, so its subscription opens it itself.
-    let answer = live.subscribe(&json!({ "view": { "type": "detail", "run_id": runs[0] } }));
+    // Each opening is held for the same time after it is traced, so the one traced
+    // first is the one let go first — whichever of the two that was — and its
+    // subscription opens the run itself.
+    let released = seen[0].as_str().expect("a run id").to_owned();
+    let answer = live.subscribe(&json!({ "view": { "type": "detail", "run_id": released } }));
     assert_eq!(answer["initial"]["snapshot"]["visible"]["type"], "detail");
     let unprepared: Vec<Value> = live
         .traced()
         .into_iter()
         .filter_map(|line| line.get("unprepared").cloned())
         .collect();
-    assert_eq!(unprepared, [json!(runs[0])]);
+    assert_eq!(unprepared, [json!(released)]);
 }
 
 /// Copy a directory, so two servers read the same records.
