@@ -15689,6 +15689,7 @@ fn an_adopted_panel_member_judges_under_one_evidence_contract_and_its_judge_sett
         "{handed}"
     );
 }
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// **A run the linked engine drove is served with its nodes and settlements.**
 /// The pinned engine CLI adopts a launched run and dispatches its one node
@@ -15697,10 +15698,6 @@ fn an_adopted_panel_member_judges_under_one_evidence_contract_and_its_judge_sett
 /// with the status and result the engine settled it with, the run as settled,
 /// and the results route as what `onepipeline results` prints over the same
 /// records. A run nothing launched is refused rather than served empty.
-// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
-// `an_adopted_panel_member_judges_under_one_evidence_contract_and_its_judge_settings`: one
-// driver settling a one-node graph through a one-turn scripted conversation in a few
-// seconds; the ceiling beside it is what a failing wait reaches, which no passing run pays.
 #[cfg(unix)]
 #[test]
 fn a_run_the_linked_engine_drove_is_served_with_its_nodes_and_settlements() {
@@ -15777,7 +15774,6 @@ fn a_run_the_linked_engine_drove_is_served_with_its_nodes_and_settlements() {
         missing.body
     );
 }
-// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
 
 /// The refusal half of the same pass-through: a `judge_settings` key
 /// `oneagentgraph` composes itself is refused by name before the member takes a
