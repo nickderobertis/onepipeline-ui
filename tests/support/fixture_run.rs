@@ -164,6 +164,35 @@ pub fn write_awaiting_attestation(root: &Path, run: &str, dir: &Path) -> PathBuf
     write_undriven(root, run, dir, &plan, &[])
 }
 
+/// The node of the run [`write_awaiting_commands`] writes whose command exits 0.
+pub const COMMAND_DONE_NODE_ID: &str = "succeeds";
+
+/// The node of the same run whose command exits 1.
+pub const COMMAND_FAILED_NODE_ID: &str = "fails";
+
+/// A run nothing is driving, launched from `dir` on this host, whose graph is
+/// two `kind: command` nodes nobody has started: one running `true`, one
+/// running `false`.
+///
+/// The engine runs a command node itself — no agent, no session, no shell — so
+/// an adoption of this run drives it to settlement with nothing stood in for:
+/// every record the run then holds is one the linked engine wrote, one node
+/// settled `done` and the other `failed` with `command-failed`.
+pub fn write_awaiting_commands(root: &Path, run: &str, dir: &Path) -> PathBuf {
+    let plan = json!({
+        "schema_version": 2,
+        "goal": { "text": "run the release's two checks" },
+        "name": "commands",
+        "concurrency": 2,
+        "tasks": [
+            { "id": COMMAND_DONE_NODE_ID, "kind": "command", "command": ["true"] },
+            { "id": COMMAND_FAILED_NODE_ID, "kind": "command", "command": ["false"] },
+        ],
+    });
+    configure_plan_project_store(dir);
+    write_undriven(root, run, dir, &plan, &[])
+}
+
 /// The unstarted node of the run [`write_waiting_approval`] writes, which its
 /// approval does not yet come after.
 pub const UNSTARTED_NODE_ID: &str = "document";

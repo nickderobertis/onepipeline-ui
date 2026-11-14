@@ -13836,6 +13836,117 @@ fn a_ruling_declined_through_the_cli_is_served_by_the_channel_with_its_typed_rec
     }
 }
 
+/// **A ruling declined with its reason as one argument is served with it.** The
+/// linked engine's `decline-ruling` takes `--reason TEXT` — the form a caller
+/// that can pass only arguments uses, and the one the manager-ruling
+/// attribution it records now names — and the channel serves that decline's
+/// typed record with the reason as given. `--reason` beside a file is refused
+/// naming both, and records nothing the channel then serves.
+#[test]
+fn a_ruling_declined_with_its_reason_as_an_argument_is_served_with_it() {
+    const NOTE: &str = "Keep the export under fifty lines.";
+    const REASON: &str = "The fixture already exceeds fifty lines.";
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let root = serving.runs_root();
+    let files = tempfile::tempdir().expect("the CLI's input files");
+    let cli = |arguments: &[&str]| sibling::run(&root, Some(fixture_run::SESSION), arguments);
+    let reply = |name: &str, commands: Value| -> Value {
+        let path = files.path().join(name);
+        fs::write(
+            &path,
+            json!({"version": 4, "commands": commands}).to_string(),
+        )
+        .expect("the envelope");
+        let output = cli(&["reply", run, path.to_str().expect("a UTF-8 path")]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).expect("the reply's receipt")
+    };
+    reply(
+        "add.json",
+        json!([{"op": "add", "node": {"id": "export", "persona": "engineer",
+        "task": "## What\nExport it.\n\n## Acceptance criteria\n\n- it is exported"}}]),
+    );
+    let noted = reply(
+        "note.json",
+        json!([{"op": "note", "id": "export", "addressee": "worker", "text": NOTE}]),
+    );
+    let ruling = format!(
+        "c{}.0",
+        noted["reply"].as_u64().expect("the note's envelope id")
+    );
+    let declined = || -> Vec<Value> {
+        let channel = http::get(serving.address, &format!("/api/v2/runs/{run}/channel"));
+        assert_eq!(channel.status, 200, "{}", channel.body);
+        channel.json()["surfaces"]
+            .as_array()
+            .expect("the surfaces")
+            .iter()
+            .filter(|surface| surface["kind"] == json!("declined-ruling"))
+            .cloned()
+            .collect()
+    };
+
+    let file = files.path().join("reason.txt");
+    fs::write(&file, REASON).expect("the reason file");
+    let both = cli(&[
+        "decline-ruling",
+        run,
+        "--ruling",
+        &ruling,
+        "--reason",
+        REASON,
+        file.to_str().expect("a UTF-8 path"),
+    ]);
+    assert!(
+        !both.status.success(),
+        "`--reason` beside a file was accepted"
+    );
+    let refusal = String::from_utf8_lossy(&both.stderr);
+    assert!(
+        refusal.contains("never both") && refusal.contains("reason.txt"),
+        "{refusal}"
+    );
+    assert!(declined().is_empty(), "{:?}", declined());
+
+    let output = cli(&[
+        "decline-ruling",
+        run,
+        "--ruling",
+        &ruling,
+        "--reason",
+        REASON,
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let served = declined();
+    assert_eq!(served.len(), 1, "{served:?}");
+    assert_eq!(
+        served[0]["declined_ruling"]["ruling"],
+        json!(ruling),
+        "{served:?}"
+    );
+    assert_eq!(
+        served[0]["declined_ruling"]["reason"],
+        json!(REASON),
+        "{served:?}"
+    );
+    assert_eq!(
+        served[0]["declined_ruling"]["text"],
+        json!(NOTE),
+        "{served:?}"
+    );
+}
+
 /// The note op's newer fields and the op that takes a note back pass through
 /// the reply route as written, and are answered in the engine's words.
 ///

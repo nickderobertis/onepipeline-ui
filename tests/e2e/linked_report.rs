@@ -10,6 +10,11 @@
 //! a member of the plan-store family left behind, or a second copy of one at
 //! another release, is a disagreement rather than a pass.
 //!
+//! Beside them, the server built against that engine reads a run the engine
+//! itself drove: the pinned sibling CLI adopts a run of `kind: command` nodes,
+//! which the engine runs with no agent, and the read API serves the nodes and
+//! settlements it wrote.
+//!
 //! A tier of its own (`onepipeline-ui-linked-report`), because the second build
 //! is what it costs and only a change that can move the linked set owes it.
 
@@ -242,4 +247,127 @@ fn a_lock_moved_past_the_built_server_disagrees_naming_both_releases() {
     disagrees.sort();
     expected.sort();
     assert_eq!(disagrees, expected);
+}
+
+/// How long [`until`] waits for the adopted driver before calling it failed: a
+/// ceiling on a failure, which a passing journey never pays, generous because
+/// the driver is a process a loaded host schedules.
+#[cfg(unix)]
+const DRIVER_PATIENCE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Wait until `condition` holds, or fail naming what never happened.
+#[cfg(unix)]
+fn until(what: &str, mut condition: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + DRIVER_PATIENCE;
+    while !condition() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{what} never happened within {DRIVER_PATIENCE:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// **A run the linked engine drove is served with its nodes and settlements.**
+/// The pinned engine CLI adopts a launched run of two `kind: command` nodes and
+/// runs them itself, so every record the server built against the linked engine
+/// reads back is one that engine wrote. The plan's nodes are served with the
+/// settlements the engine reached — `done` for the command that exited 0,
+/// `failed` with `command-failed` for the one that exited 1 — the run as
+/// ended, and the results route as what the linked engine's own `onepipeline
+/// results` prints over the same records. A run nothing launched is refused.
+#[cfg(unix)]
+#[test]
+fn a_run_the_linked_engine_drove_is_served_with_its_nodes_and_settlements() {
+    use crate::fixture_run;
+    use serde_json::json;
+
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    let done = fixture_run::COMMAND_DONE_NODE_ID;
+    let failed = fixture_run::COMMAND_FAILED_NODE_ID;
+    fixture_run::write_awaiting_commands(&root, run, &dir);
+    // What this suite's own dispatch exported for *its* run, which the driver
+    // this journey adopts must meet none of.
+    let inherited: Vec<String> = std::env::vars()
+        .map(|(name, _)| name)
+        .filter(|name| {
+            ["ONEPIPELINE_", "ONEAGENTGRAPH_", "ONEHARNESS_"]
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+        })
+        .collect();
+    let serving = Serving::start_in_as_with_env_removing(
+        workspace,
+        fixture_run::SESSION,
+        &[
+            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
+            (
+                "XDG_STATE_HOME",
+                &dir.join("xdg-state").display().to_string(),
+            ),
+        ],
+        &inherited,
+    );
+    let address = serving.address;
+    let detail = move || http::get(address, &format!("/api/v2/runs/{run}")).json();
+
+    serving.drive_fixture(run);
+    // `ended-failed`: the engine settled both nodes, one of them `failed`,
+    // and its driver let go of the run.
+    until("the adopted run to end", || {
+        detail()["run"]["state"] == json!("ended-failed")
+    });
+
+    let settled = detail();
+    assert_eq!(
+        settled["run"]["last_event"],
+        json!("driver-exited"),
+        "{settled}"
+    );
+    let graph = &settled["graph"];
+    let tasks: Vec<&str> = graph["plan"]["tasks"]
+        .as_array()
+        .expect("the plan's tasks")
+        .iter()
+        .filter_map(|task| task["id"].as_str())
+        .collect();
+    assert_eq!(tasks, vec![done, failed], "{graph}");
+    assert_eq!(graph["node_status"][done], json!("done"), "{graph}");
+    assert_eq!(graph["node_status"][failed], json!("failed"), "{graph}");
+    let results = &graph["node_results"];
+    assert_eq!(results[done]["kind"], json!("command"), "{graph}");
+    assert_eq!(results[done]["status"], json!("done"), "{graph}");
+    assert_eq!(results[failed]["status"], json!("failed"), "{graph}");
+    assert_eq!(
+        results[failed]["outcome"],
+        json!("command-failed"),
+        "{graph}"
+    );
+    assert_eq!(graph["result"]["state"], json!("failed"), "{graph}");
+    assert_eq!(graph["result"]["ok"], json!(false), "{graph}");
+
+    let served = http::get(address, &format!("/api/v2/runs/{run}/results"));
+    assert_eq!(served.status, 200, "{}", served.body);
+    let printed = crate::sibling::run(&serving.runs_root(), None, &["results", run]);
+    assert!(
+        printed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&printed.stderr)
+    );
+    assert_eq!(
+        served.json()["rendered"],
+        json!(String::from_utf8_lossy(&printed.stdout)),
+        "the results route is not what the linked engine's `onepipeline results` prints"
+    );
+
+    let missing = http::get(address, "/api/v2/runs/no-run-launched-this");
+    assert_eq!(missing.status, 404, "{}", missing.body);
+    assert_eq!(
+        missing.json()["error"]["code"],
+        json!("run_not_found"),
+        "{}",
+        missing.body
+    );
 }

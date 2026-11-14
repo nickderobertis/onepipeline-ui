@@ -39,18 +39,21 @@ use crate::stub_bin;
 /// The tasks that start the read API beside the sibling, and so cannot run
 /// before the sibling is provisioned: the crate's e2e journeys — instrumented,
 /// and as the cross-platform legs run them — the baseline comparison, which
-/// starts two servers rather than one, and the browser tier, whose Playwright
-/// journeys drive a real server over a fixture runs root.
+/// starts two servers rather than one, the linked-report journeys, whose
+/// sibling drives the run the server built against the linked engine reads,
+/// and the browser tier, whose Playwright journeys drive a real server over a
+/// fixture runs root.
 ///
 /// Several targets and not one, because each of them is a tier a reader can ask
 /// for by name — that is what having an edge of their own means — and a tier
 /// reached on its own is exactly the one whose provisioning nothing else has done.
-const SUITES_THAT_START_THE_READ_API: [&str; 9] = [
+const SUITES_THAT_START_THE_READ_API: [&str; 10] = [
     "onepipeline-ui-versions:test",
     "onepipeline-ui-versions:test-quick",
     "onepipeline-ui-e2e:test",
     "onepipeline-ui-e2e:test-quick",
     "onepipeline-ui-baseline:test-baseline",
+    "onepipeline-ui-linked-report:test",
     "dag-ui-e2e:test",
     "dag-ui-read-latency:test",
     "dag-ui-read-latency:test-large",
