@@ -13836,6 +13836,117 @@ fn a_ruling_declined_through_the_cli_is_served_by_the_channel_with_its_typed_rec
     }
 }
 
+/// **A ruling declined with its reason as one argument is served with it.** The
+/// linked engine's `decline-ruling` takes `--reason TEXT` — the form a caller
+/// that can pass only arguments uses, and the one the manager-ruling
+/// attribution it records now names — and the channel serves that decline's
+/// typed record with the reason as given. `--reason` beside a file is refused
+/// naming both, and records nothing the channel then serves.
+#[test]
+fn a_ruling_declined_with_its_reason_as_an_argument_is_served_with_it() {
+    const NOTE: &str = "Keep the export under fifty lines.";
+    const REASON: &str = "The fixture already exceeds fifty lines.";
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let root = serving.runs_root();
+    let files = tempfile::tempdir().expect("the CLI's input files");
+    let cli = |arguments: &[&str]| sibling::run(&root, Some(fixture_run::SESSION), arguments);
+    let reply = |name: &str, commands: Value| -> Value {
+        let path = files.path().join(name);
+        fs::write(
+            &path,
+            json!({"version": 4, "commands": commands}).to_string(),
+        )
+        .expect("the envelope");
+        let output = cli(&["reply", run, path.to_str().expect("a UTF-8 path")]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).expect("the reply's receipt")
+    };
+    reply(
+        "add.json",
+        json!([{"op": "add", "node": {"id": "export", "persona": "engineer",
+        "task": "## What\nExport it.\n\n## Acceptance criteria\n\n- it is exported"}}]),
+    );
+    let noted = reply(
+        "note.json",
+        json!([{"op": "note", "id": "export", "addressee": "worker", "text": NOTE}]),
+    );
+    let ruling = format!(
+        "c{}.0",
+        noted["reply"].as_u64().expect("the note's envelope id")
+    );
+    let declined = || -> Vec<Value> {
+        let channel = http::get(serving.address, &format!("/api/v2/runs/{run}/channel"));
+        assert_eq!(channel.status, 200, "{}", channel.body);
+        channel.json()["surfaces"]
+            .as_array()
+            .expect("the surfaces")
+            .iter()
+            .filter(|surface| surface["kind"] == json!("declined-ruling"))
+            .cloned()
+            .collect()
+    };
+
+    let file = files.path().join("reason.txt");
+    fs::write(&file, REASON).expect("the reason file");
+    let both = cli(&[
+        "decline-ruling",
+        run,
+        "--ruling",
+        &ruling,
+        "--reason",
+        REASON,
+        file.to_str().expect("a UTF-8 path"),
+    ]);
+    assert!(
+        !both.status.success(),
+        "`--reason` beside a file was accepted"
+    );
+    let refusal = String::from_utf8_lossy(&both.stderr);
+    assert!(
+        refusal.contains("never both") && refusal.contains("reason.txt"),
+        "{refusal}"
+    );
+    assert!(declined().is_empty(), "{:?}", declined());
+
+    let output = cli(&[
+        "decline-ruling",
+        run,
+        "--ruling",
+        &ruling,
+        "--reason",
+        REASON,
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let served = declined();
+    assert_eq!(served.len(), 1, "{served:?}");
+    assert_eq!(
+        served[0]["declined_ruling"]["ruling"],
+        json!(ruling),
+        "{served:?}"
+    );
+    assert_eq!(
+        served[0]["declined_ruling"]["reason"],
+        json!(REASON),
+        "{served:?}"
+    );
+    assert_eq!(
+        served[0]["declined_ruling"]["text"],
+        json!(NOTE),
+        "{served:?}"
+    );
+}
+
 /// The note op's newer fields and the op that takes a note back pass through
 /// the reply route as written, and are answered in the engine's words.
 ///
@@ -15576,6 +15687,94 @@ fn an_adopted_panel_member_judges_under_one_evidence_contract_and_its_judge_sett
         provider["judges"].as_array().map(Vec::len),
         Some(2),
         "{handed}"
+    );
+}
+
+/// **A run the linked engine drove is served with its nodes and settlements.**
+/// The pinned engine CLI adopts a launched run and dispatches its one node
+/// through a real `oneagentgraph` member and onejudge panel, so every record the
+/// server reads back is one the linked engine wrote: the plan's node is served
+/// with the status and result the engine settled it with, the run as settled,
+/// and the results route as what `onepipeline results` prints over the same
+/// records. A run nothing launched is refused rather than served empty.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] the same terms as
+// `an_adopted_panel_member_judges_under_one_evidence_contract_and_its_judge_settings`: one
+// driver settling a one-node graph through a one-turn scripted conversation in a few
+// seconds; the ceiling beside it is what a failing wait reaches, which no passing run pays.
+#[cfg(unix)]
+#[test]
+fn a_run_the_linked_engine_drove_is_served_with_its_nodes_and_settlements() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::DISPATCH_NODE_ID;
+    let graph = write_panel_node_scope_graph(&dir, PANEL_JUDGE_SETTINGS);
+    fixture_run::write_awaiting_dispatch_with_persona(&root, run, &dir, &graph);
+    let harness = install_panel_harness(&dir.join("harness-double"));
+    let (serving, driver) = adopt_with_panel_harness(workspace, &dir, &harness);
+    let address = serving.address;
+    let detail = move || http::get(address, &format!("/api/v2/runs/{run}")).json();
+
+    eventually("the adopted run to settle", || {
+        detail()["run"]["state"] == json!("settled")
+    });
+    eventually("the driver was reaped", || !process_is_live(driver.0));
+    drop(driver);
+
+    let settled = detail();
+    assert_enveloped(&settled);
+    let graph = &settled["graph"];
+    let tasks: Vec<&str> = graph["plan"]["tasks"]
+        .as_array()
+        .expect("the plan's tasks")
+        .iter()
+        .filter_map(|task| task["id"].as_str())
+        .collect();
+    assert_eq!(tasks, vec![node], "{graph}");
+    assert_eq!(graph["node_status"][node], json!("done"), "{graph}");
+    assert_eq!(
+        graph["node_results"][node]["status"],
+        json!("done"),
+        "{graph}"
+    );
+    assert_eq!(
+        graph["node_results"][node]["completed"],
+        json!(true),
+        "{graph}"
+    );
+    assert_eq!(graph["result"]["state"], json!("complete"), "{graph}");
+    assert_eq!(graph["result"]["ok"], json!(true), "{graph}");
+    // The engine journalled the settlement the result above folds.
+    let journal =
+        events_on(&http::get(address, &format!("/api/v2/runs/{run}/timeline?scope=run")).json());
+    assert!(
+        journal
+            .iter()
+            .any(|event| event["kind"] == json!("node-settled") && event["node_id"] == json!(node)),
+        "{journal:?}"
+    );
+
+    let results = http::get(address, &format!("/api/v2/runs/{run}/results"));
+    assert_eq!(results.status, 200, "{}", results.body);
+    let printed = sibling::run(&serving.runs_root(), None, &["results", run]);
+    assert!(
+        printed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&printed.stderr)
+    );
+    assert_eq!(
+        results.json()["rendered"],
+        json!(String::from_utf8_lossy(&printed.stdout)),
+        "the results route is not what the linked engine's `onepipeline results` prints"
+    );
+
+    let missing = http::get(address, "/api/v2/runs/no-run-launched-this");
+    assert_eq!(missing.status, 404, "{}", missing.body);
+    assert_eq!(
+        missing.json()["error"]["code"],
+        json!("run_not_found"),
+        "{}",
+        missing.body
     );
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]

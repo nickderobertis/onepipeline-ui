@@ -791,3 +791,13 @@ engine writes; nothing it serves changes. The move is announced as a break: the
 re-exported engine types change. Its oneagentgraph, onejudge, onemessagebus and
 onetaskgraph requirements are the ones 0.110.2 resolved; the test-only onevcs
 moves to 0.67.0, which the engine now requires.
+
+0.113.0 is the first engine that links onetaskgraph 0.14.15, the store whose
+follow-up tickets carry their metadata in board fields and a collapsed Linear
+section, and its `decline-ruling` takes the reason as `--reason TEXT` as well as
+from a file or standard input, which the manager-ruling attribution it records
+now names. This crate moves to it, with the onetaskgraph 0.14.15 store that
+engine pins, so that the read API links the engine and plan store a host
+dispatches with; nothing it serves changes. 0.112.x is skipped. The move is
+announced as a break: the re-exported engine types change. Its oneagentgraph,
+onejudge, onemessagebus and onevcs requirements are the ones 0.111.0 resolved.
