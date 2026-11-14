@@ -794,232 +794,248 @@ test("says in run details when the status read fails, and shows the readings aga
  * `report ROLE PATH` line with the note under it (the producer's scratch path).
  * A dispatch whose run recorded no transcript still says so, in the dispatch's
  * own detail.
+ *
+ * Each run's Results and Goals readings, and its Transcript readings, are
+ * journeys of their own, the eight together being the inventory: each opens
+ * every node it reads, and all of it in one journey ran past its time limit on
+ * a loaded CI runner.
  */
-test("shows every fact the removed Results, Goals and Transcript reads printed", async ({
-  page,
-}) => {
+for (const run of ["live", "history", "outcomes", "legacy"] as const) {
+  test(`shows every fact the removed Results and Goals reads printed, for the ${run} run`, async ({
+    page,
+  }) => {
+    expect(await resultsAndGoalsShown(page, runs()[run])).toEqual([]);
+  });
+  test(`shows every fact the removed Transcript reads printed, for the ${run} run`, async ({
+    page,
+  }) => {
+    expect(await transcriptsShown(page, runs()[run])).toEqual([]);
+  });
+}
+
+/**
+ * Hold `runId`'s Results and Goals readings to the views, and answer the lines
+ * no rule maps.
+ */
+async function resultsAndGoalsShown(
+  page: Page,
+  runId: string,
+): Promise<string[]> {
   const unmapped: string[] = [];
-  for (const runId of [
-    runs().live,
-    runs().history,
-    runs().outcomes,
-    runs().legacy,
-  ]) {
-    const detail = await served(
-      page,
-      `/api/v2/runs/${runId}?include_conversations=true`,
-      runDetailSchema,
-    );
-    const tasks = detail.graph?.plan.tasks ?? [];
-    const conversations = Array.isArray(detail.conversations)
-      ? detail.conversations
-      : [];
-    const results = (
-      await served(page, `/api/v2/runs/${runId}/results`, renderedRunSchema)
-    ).rendered.split("\n");
-    const goals = (
-      await served(page, `/api/v2/runs/${runId}/goals`, renderedRunSchema)
-    ).rendered.split("\n");
+  const detail = await served(
+    page,
+    `/api/v2/runs/${runId}?include_conversations=true`,
+    runDetailSchema,
+  );
+  const results = (
+    await served(page, `/api/v2/runs/${runId}/results`, renderedRunSchema)
+  ).rendered.split("\n");
+  const goals = (
+    await served(page, `/api/v2/runs/${runId}/goals`, renderedRunSchema)
+  ).rendered.split("\n");
 
-    // Goals and the Results header: the run's whole-graph readings.
-    await page.goto(`/?run=${runId}&view=overall`);
-    await page.getByText("Run details", { exact: true }).click();
-    const header = page.getByRole("group", {
-      name: "Run details",
-      exact: true,
-    });
-    const [resultsHead, ...nodeLines] = results.filter((line) => line !== "");
-    const graphState = resultsHead?.match(/^(\S+) {2}(\S+)$/);
-    expect(graphState?.[1]).toBe(runId);
-    await expect(header).toContainText(`Graph state${graphState?.[2]}`);
-    const [goalsHead, goalLine, tally, ...goalRest] = goals.filter(
-      (line) => line !== "",
-    );
-    const liveness = goalsHead?.match(/^(\S+) {2}(\S+)$/);
-    expect(liveness?.[1]).toBe(runId);
-    await expect(
-      page.getByRole("group", { name: "Status", exact: true }),
-    ).toContainText(String(liveness?.[2]).toLowerCase());
-    await expect(header).toContainText(`Summary${tally?.trim()}`);
-    // Every node's status word as the engine folds it, each in Node statuses —
-    // the one word the graph and Dependencies show too.
-    const nodeStatuses = page.getByRole("region", {
-      name: "Node statuses",
-      exact: true,
-    });
-    for (const line of nodeLines) {
-      const word = line.match(/^ {2}(\S+)\s+(\S+)/);
-      if (word !== null)
-        await expect(
-          nodeStatuses.getByRole("group", {
-            name: `Record.${word[1]}`,
-            exact: true,
-          }),
-        ).toContainText(String(word[2]));
-    }
-    await page.getByText("Run details", { exact: true }).click();
-    await page
-      .getByText("Goal and repository identities", { exact: true })
-      .click();
-    const identity = page.getByRole("group", {
-      name: "Goal and repository identities",
-      exact: true,
-    });
-    const goal = goalLine?.trim();
-    // A run whose journal the engine folds to no plan states no goal; the plan
-    // the API serves for it can still name one, and that is what is shown.
-    await expect(identity).toContainText(
-      goal === "(no goal stated)"
-        ? (detail.graph?.plan.goal?.text ?? "Not recorded")
-        : String(goal),
-    );
-    for (const line of goalRest) {
-      const repos = line.match(/^ {2}identities: (.+)$/);
-      if (repos === null) {
-        unmapped.push(`${runId} goals: ${line}`);
-        continue;
-      }
-      for (const repo of repos[1]?.split(", ") ?? [])
-        await expect(identity).toContainText(repo);
-    }
-
-    // Each node's transcript reading, asked first, so a node whose transcript the
-    // engine refuses is checked on the page opened for its results lines below
-    // rather than on a page opened for that alone.
-    const transcriptOf = new Map<string, string | undefined>();
-    for (const { id } of tasks) {
-      const response = await page.request.get(
-        `/api/v2/runs/${runId}/transcript?node=${encodeURIComponent(id)}`,
-      );
-      if (!response.ok()) {
-        // The engine refuses a node it recorded nothing for, and so does the
-        // view: that node's header counts no turns.
-        expect((await refusedBy(response, 422)).message).toContain(
-          `has recorded nothing for node '${id}'`,
-        );
-        transcriptOf.set(id, undefined);
-        continue;
-      }
-      transcriptOf.set(
-        id,
-        runTranscriptSchema.parse(await response.json()).rendered,
-      );
-    }
-    const countsNoTurns = new Set<string>();
-    const noTurns = async (id: string, view: Locator) => {
-      if (!transcriptOf.has(id) || transcriptOf.get(id) !== undefined) return;
-      await expect(view.getByText(/ node · 0 turns · /)).toBeVisible();
-      countsNoTurns.add(id);
-    };
-
-    let current: string | undefined;
-    // The node a line is about stays open for the lines under it, which read its
-    // tabs: opening it again for each was a whole page load per line.
-    let open: Locator | undefined;
-    for (const line of nodeLines) {
-      const nodeLine = line.match(/^ {2}(\S+)\s+(\S+)(?: \(([^)]+)\))?(.*)$/);
-      if (nodeLine !== null) {
-        const [, id, , outcome, rest] = nodeLine;
-        current = String(id);
-        const view = await openNode(page, runId, String(id));
-        open = view;
-        await noTurns(String(id), view);
-        const task = await nodeTab(view, "Task");
-        if (outcome !== undefined)
-          await expect(task).toContainText(`Settled as${outcome}`);
-        const url = rest?.match(/ — (https?:\/\/\S+)$/)?.[1];
-        if (url !== undefined)
-          await expect(
-            view.getByRole("link", { name: "Pull request" }),
-          ).toHaveAttribute("href", url);
-        const beside = (rest ?? "").replace(/ — https?:\/\/\S+$/, "");
-        // Dropped: a landing read taken when the read was asked, not a record.
-        if (
-          beside !== "" &&
-          !/^ — (landing UNDECIDED|NOT landed|landed on its base)/.test(beside)
-        )
-          unmapped.push(`${runId} results: ${line}`);
-        continue;
-      }
-      const under = line.match(
-        /^ {6}(detail|action|unblocks|never attempted; skipped by): (.+)$/,
-      );
-      const id = current;
-      if (under === null || id === undefined) {
-        unmapped.push(`${runId} results: ${line}`);
-        continue;
-      }
-      const [, term, value] = under;
-      const view = open ?? (await openNode(page, runId, id));
-      if (term === "detail")
-        await expect(await nodeTab(view, "Task")).toContainText(
-          `Outcome${value}`,
-        );
-      else if (term === "action")
-        await expect(await nodeTab(view, "Task")).toContainText(String(value));
-      else if (term === "unblocks")
-        await expect(await nodeTab(view, "Dependencies")).toContainText(
-          `Unblocks${value}`,
-        );
-      else {
-        // Skipped — never attempted — is the node's word under Node statuses
-        // above; what skipped it is each dependency with the status it holds,
-        // and where the recorded graph reads the node skipped too, its banner
-        // names both.
-        const dependencies = await nodeTab(view, "Dependencies");
-        for (const cause of String(value).split(", "))
-          await expect(dependencies).toContainText(cause);
-        if (detail.graph?.node_status[id] === "skipped") {
-          const banner = view.getByRole("alert");
-          await expect(banner).toContainText(`Unmet${value}`);
-          await expect(banner).toContainText("AttemptsNever attempted");
-        }
-      }
-    }
-
-    const perNode: string[] = [];
-    for (const { id } of tasks) {
-      const rendered = transcriptOf.get(id);
-      if (rendered === undefined) {
-        if (!countsNoTurns.has(id))
-          await noTurns(id, await openNode(page, runId, id));
-        continue;
-      }
-      perNode.push(rendered);
-      unmapped.push(
-        ...(await expectTranscriptShown(
-          page,
-          runId,
-          id,
-          rendered,
-          conversations.filter((entry) => entry.attribution?.nodeId === id),
-        )),
-      );
-    }
-    // The whole-run reading is the per-node ones together, or says there are none.
-    const whole = (
-      await served(
-        page,
-        `/api/v2/runs/${runId}/transcript`,
-        runTranscriptSchema,
-      )
-    ).rendered;
-    if (perNode.length === 0) {
-      expect(whole).toBe("no dispatch has recorded a transcript\n");
-      await page.goto(`/?run=${runId}&view=overall`);
+  // Goals and the Results header: the run's whole-graph readings.
+  await page.goto(`/?run=${runId}&view=overall`);
+  await page.getByText("Run details", { exact: true }).click();
+  const header = page.getByRole("group", {
+    name: "Run details",
+    exact: true,
+  });
+  const [resultsHead, ...nodeLines] = results.filter((line) => line !== "");
+  const graphState = resultsHead?.match(/^(\S+) {2}(\S+)$/);
+  expect(graphState?.[1]).toBe(runId);
+  await expect(header).toContainText(`Graph state${graphState?.[2]}`);
+  const [goalsHead, goalLine, tally, ...goalRest] = goals.filter(
+    (line) => line !== "",
+  );
+  const liveness = goalsHead?.match(/^(\S+) {2}(\S+)$/);
+  expect(liveness?.[1]).toBe(runId);
+  await expect(
+    page.getByRole("group", { name: "Status", exact: true }),
+  ).toContainText(String(liveness?.[2]).toLowerCase());
+  await expect(header).toContainText(`Summary${tally?.trim()}`);
+  // Every node's status word as the engine folds it, each in Node statuses —
+  // the one word the graph and Dependencies show too.
+  const nodeStatuses = page.getByRole("region", {
+    name: "Node statuses",
+    exact: true,
+  });
+  for (const line of nodeLines) {
+    const word = line.match(/^ {2}(\S+)\s+(\S+)/);
+    if (word !== null)
       await expect(
-        page.getByRole("group", { name: "Turns", exact: true }),
-      ).toContainText("0");
-    } else
-      expect(
-        whole
-          .split(new RegExp(`(?=^${runId} {2})`, "m"))
-          .filter(Boolean)
-          .sort(),
-      ).toEqual([...perNode].sort());
+        nodeStatuses.getByRole("group", {
+          name: `Record.${word[1]}`,
+          exact: true,
+        }),
+      ).toContainText(String(word[2]));
   }
-  expect(unmapped).toEqual([]);
-});
+  await page.getByText("Run details", { exact: true }).click();
+  await page
+    .getByText("Goal and repository identities", { exact: true })
+    .click();
+  const identity = page.getByRole("group", {
+    name: "Goal and repository identities",
+    exact: true,
+  });
+  const goal = goalLine?.trim();
+  // A run whose journal the engine folds to no plan states no goal; the plan
+  // the API serves for it can still name one, and that is what is shown.
+  await expect(identity).toContainText(
+    goal === "(no goal stated)"
+      ? (detail.graph?.plan.goal?.text ?? "Not recorded")
+      : String(goal),
+  );
+  for (const line of goalRest) {
+    const repos = line.match(/^ {2}identities: (.+)$/);
+    if (repos === null) {
+      unmapped.push(`${runId} goals: ${line}`);
+      continue;
+    }
+    for (const repo of repos[1]?.split(", ") ?? [])
+      await expect(identity).toContainText(repo);
+  }
+
+  let current: string | undefined;
+  // The node a line is about stays open for the lines under it, which read its
+  // tabs: opening it again for each was a whole page load per line.
+  let open: Locator | undefined;
+  for (const line of nodeLines) {
+    const nodeLine = line.match(/^ {2}(\S+)\s+(\S+)(?: \(([^)]+)\))?(.*)$/);
+    if (nodeLine !== null) {
+      const [, id, , outcome, rest] = nodeLine;
+      current = String(id);
+      const view = await openNode(page, runId, String(id));
+      open = view;
+      const task = await nodeTab(view, "Task");
+      if (outcome !== undefined)
+        await expect(task).toContainText(`Settled as${outcome}`);
+      const url = rest?.match(/ — (https?:\/\/\S+)$/)?.[1];
+      if (url !== undefined)
+        await expect(
+          view.getByRole("link", { name: "Pull request" }),
+        ).toHaveAttribute("href", url);
+      const beside = (rest ?? "").replace(/ — https?:\/\/\S+$/, "");
+      // Dropped: a landing read taken when the read was asked, not a record.
+      if (
+        beside !== "" &&
+        !/^ — (landing UNDECIDED|NOT landed|landed on its base)/.test(beside)
+      )
+        unmapped.push(`${runId} results: ${line}`);
+      continue;
+    }
+    const under = line.match(
+      /^ {6}(detail|action|unblocks|never attempted; skipped by): (.+)$/,
+    );
+    const id = current;
+    if (under === null || id === undefined) {
+      unmapped.push(`${runId} results: ${line}`);
+      continue;
+    }
+    const [, term, value] = under;
+    const view = open ?? (await openNode(page, runId, id));
+    if (term === "detail")
+      await expect(await nodeTab(view, "Task")).toContainText(
+        `Outcome${value}`,
+      );
+    else if (term === "action")
+      await expect(await nodeTab(view, "Task")).toContainText(String(value));
+    else if (term === "unblocks")
+      await expect(await nodeTab(view, "Dependencies")).toContainText(
+        `Unblocks${value}`,
+      );
+    else {
+      // Skipped — never attempted — is the node's word under Node statuses
+      // above; what skipped it is each dependency with the status it holds,
+      // and where the recorded graph reads the node skipped too, its banner
+      // names both.
+      const dependencies = await nodeTab(view, "Dependencies");
+      for (const cause of String(value).split(", "))
+        await expect(dependencies).toContainText(cause);
+      if (detail.graph?.node_status[id] === "skipped") {
+        const banner = view.getByRole("alert");
+        await expect(banner).toContainText(`Unmet${value}`);
+        await expect(banner).toContainText("AttemptsNever attempted");
+      }
+    }
+  }
+  return unmapped;
+}
+
+/**
+ * Hold `runId`'s per-node and whole-run Transcript readings to the views, and
+ * answer the lines no rule maps.
+ */
+async function transcriptsShown(page: Page, runId: string): Promise<string[]> {
+  const unmapped: string[] = [];
+  const detail = await served(
+    page,
+    `/api/v2/runs/${runId}?include_conversations=true`,
+    runDetailSchema,
+  );
+  const tasks = detail.graph?.plan.tasks ?? [];
+  const conversations = Array.isArray(detail.conversations)
+    ? detail.conversations
+    : [];
+
+  const transcriptOf = new Map<string, string | undefined>();
+  for (const { id } of tasks) {
+    const response = await page.request.get(
+      `/api/v2/runs/${runId}/transcript?node=${encodeURIComponent(id)}`,
+    );
+    if (!response.ok()) {
+      // The engine refuses a node it recorded nothing for, and so does the
+      // view: that node's header counts no turns.
+      expect((await refusedBy(response, 422)).message).toContain(
+        `has recorded nothing for node '${id}'`,
+      );
+      transcriptOf.set(id, undefined);
+      continue;
+    }
+    transcriptOf.set(
+      id,
+      runTranscriptSchema.parse(await response.json()).rendered,
+    );
+  }
+
+  const perNode: string[] = [];
+  for (const { id } of tasks) {
+    const rendered = transcriptOf.get(id);
+    if (rendered === undefined) {
+      const view = await openNode(page, runId, id);
+      await expect(view.getByText(/ node · 0 turns · /)).toBeVisible();
+      continue;
+    }
+    perNode.push(rendered);
+    unmapped.push(
+      ...(await expectTranscriptShown(
+        page,
+        runId,
+        id,
+        rendered,
+        conversations.filter((entry) => entry.attribution?.nodeId === id),
+      )),
+    );
+  }
+  // The whole-run reading is the per-node ones together, or says there are none.
+  const whole = (
+    await served(page, `/api/v2/runs/${runId}/transcript`, runTranscriptSchema)
+  ).rendered;
+  if (perNode.length === 0) {
+    expect(whole).toBe("no dispatch has recorded a transcript\n");
+    await page.goto(`/?run=${runId}&view=overall`);
+    await expect(
+      page.getByRole("group", { name: "Turns", exact: true }),
+    ).toContainText("0");
+  } else
+    expect(
+      whole
+        .split(new RegExp(`(?=^${runId} {2})`, "m"))
+        .filter(Boolean)
+        .sort(),
+    ).toEqual([...perNode].sort());
+  return unmapped;
+}
 
 async function openNode(
   page: Page,

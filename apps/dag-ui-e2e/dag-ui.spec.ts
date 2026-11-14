@@ -3362,9 +3362,17 @@ test("draws the stretches the run recorded nothing in", async ({ page }) => {
   expect(working).not.toContain("repeating-linear-gradient");
 
   // And how long it was silent is on the segment itself rather than left to be
-  // measured off the axis.
+  // measured off the axis. Read with the row opened into its lanes, as a reader
+  // reaches a stretch that short: on one line, a gap the plot draws wider than it
+  // is has the work after it drawn over the overhang, and a live run's range grows
+  // with its age, so a page read an hour into it has all but the gap's first
+  // pixels overdrawn.
+  const lanes = runLevel.getByRole("button", { name: "Expand timeline" });
+  await lanes.click();
   await idle.hover();
   await expect(page.getByRole("tooltip")).toContainText("Lane: idle");
+  await runLevel.getByRole("button", { name: "Collapse timeline" }).click();
+  await expect(lanes).toBeVisible();
 
   // A node the run never reached is that same reading for its whole life. Not
   // `queued`, which the scheduler *did* reach and record a hold for: a node the run

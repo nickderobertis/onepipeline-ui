@@ -2482,6 +2482,66 @@ fn the_build_script_embeds_a_built_view_and_refuses_a_missing_one_only_when_requ
     assert!(refusal.contains("ACTION:"), "{refusal}");
 }
 
+/// The build script's encodings, driven over a real directory: every file gzip
+/// makes smaller is written and listed by its path, decoding to the file; one it
+/// would make larger is left out, and is encoded as it is served like any other
+/// body; and no view lists nothing.
+#[test]
+fn the_build_script_gzips_each_file_it_makes_smaller_and_leaves_out_the_rest() {
+    use std::io::Read;
+    let out = tempfile::tempdir().expect("temp dir");
+    let generated = out.path().join("embedded_ui_gzip.rs");
+    let dir = out.path().join("gzip");
+
+    let view = tempfile::tempdir().expect("temp dir");
+    // Too short for gzip's header and trailer to pay for themselves.
+    fs::write(view.path().join("index.html"), "<p>").expect("index");
+    fs::create_dir(view.path().join("assets")).expect("assets");
+    let script = "console.log('a script long enough to compress');\n".repeat(64);
+    fs::write(view.path().join("assets/app-abc123.js"), &script).expect("script");
+    assert_eq!(
+        build_script::precompress(view.path(), &dir, &generated).expect("encoded"),
+        1
+    );
+    let table = fs::read_to_string(&generated).expect("the generated table");
+    assert!(
+        table.contains("const EMBEDDED_GZIP: &[(&str, &[u8])] = &["),
+        "{table}"
+    );
+    assert!(!table.contains("\"index.html\""), "{table}");
+    let listed = table
+        .lines()
+        .find(|line| line.contains("\"assets/app-abc123.js\""))
+        .unwrap_or_else(|| panic!("the script is not listed: {table}"));
+    let encoded = listed
+        .split("include_bytes!(\"")
+        .nth(1)
+        .and_then(|rest| rest.split("\")").next())
+        .unwrap_or_else(|| panic!("no encoding named: {listed}"))
+        .replace("\\\\", "\\");
+    let bytes = fs::read(&encoded).unwrap_or_else(|err| panic!("read {encoded}: {err}"));
+    assert!(bytes.len() < script.len());
+    let mut decoded = String::new();
+    flate2::read::GzDecoder::new(bytes.as_slice())
+        .read_to_string(&mut decoded)
+        .expect("the encoding is gzip");
+    assert_eq!(decoded, script);
+
+    // No view: an empty table, which the binary compiles all the same.
+    let missing = tempfile::tempdir().expect("temp dir");
+    assert_eq!(
+        build_script::precompress(&missing.path().join("dist"), &dir, &generated)
+            .expect("tolerated"),
+        0
+    );
+    assert_eq!(
+        fs::read_to_string(&generated).expect("the generated table"),
+        "/// The gzip encoding of every embedded file it makes smaller, made when this binary was\n\
+         /// built, by the file's path under the bundle.\n\
+         const EMBEDDED_GZIP: &[(&str, &[u8])] = &[\n];\n"
+    );
+}
+
 #[test]
 fn npm_packaging_refuses_bytes_other_than_the_verified_wheel_binary() {
     let root = std::env::var_os("ONEPIPELINE_NODE_SCRATCH_DIR")

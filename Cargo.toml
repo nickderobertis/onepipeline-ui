@@ -214,6 +214,12 @@ uuid = { version = "1", features = ["v4"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# `build.rs` gzips each file of the embedded browser view once, at build time,
+# so a page load costs the server no compression (`src/ui.rs`). The same
+# encoder the server's own `Content-Encoding` uses.
+[build-dependencies]
+flate2 = "1.1"
+
 [dev-dependencies]
 assert_cmd = "2"
 # The reader of the dependency record `cargo auditable` embeds in a binary, so

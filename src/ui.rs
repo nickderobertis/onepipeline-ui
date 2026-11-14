@@ -17,6 +17,11 @@
 //! root and the only way to serve a bundle of another version. A binary built
 //! without the bundle refuses `--ui` naming what is missing rather than serving
 //! an empty page.
+//!
+//! An embedded file a request takes gzip for is answered with the encoding
+//! `build.rs` made of it when this binary was built, so a page load costs the
+//! server no compression; a bundle on disk is encoded as it is served, as every
+//! other response is (`src/encoding.rs`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,6 +53,26 @@ impl std::fmt::Debug for EmbeddedFile {
 // `EMBEDDED`: the table `build.rs` wrote at build time — `Some` of every file
 // under `apps/dag-ui/dist`, or `None` when nothing had built it.
 include!(concat!(env!("OUT_DIR"), "/embedded_ui.rs"));
+
+// `EMBEDDED_GZIP`: the gzip encoding `build.rs` made of each of those files it
+// makes smaller, by path.
+include!(concat!(env!("OUT_DIR"), "/embedded_ui_gzip.rs"));
+
+/// The encoding `build.rs` made of `file`, when `file` is the file this binary
+/// embedded at that path — the same bytes — and that encoding is smaller.
+///
+/// Held to the bytes, not the path alone, because [`View::Embedded`] takes any
+/// table: an encoding is only ever served for the file it was made from.
+fn precompressed(file: &EmbeddedFile) -> Option<&'static [u8]> {
+    let built = EMBEDDED?.iter().find(|built| built.path == file.path)?;
+    if !(std::ptr::eq(built.bytes, file.bytes) || built.bytes == file.bytes) {
+        return None;
+    }
+    EMBEDDED_GZIP
+        .iter()
+        .find(|(path, _)| *path == file.path)
+        .map(|(_, encoded)| *encoded)
+}
 
 /// The file a bundle is entered through, and the one every path the bundle
 /// has no file for is answered with.
@@ -188,7 +213,17 @@ impl View {
                     .find(|file| file.path == relative)
                     .or_else(|| files.iter().find(|file| file.path == INDEX));
                 match served {
-                    Some(file) => serve(file.path, Bytes::from_static(file.bytes)),
+                    Some(file) => {
+                        let mut response = serve(file.path, Bytes::from_static(file.bytes));
+                        if let Some(encoded) = precompressed(file) {
+                            response
+                                .extensions_mut()
+                                .insert(crate::encoding::Precompressed(Bytes::from_static(
+                                    encoded,
+                                )));
+                        }
+                        response
+                    }
                     // A bundle with no index would have been refused at build
                     // time; the branch exists so a table nothing checked cannot
                     // be a panic in a handler.

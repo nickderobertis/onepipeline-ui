@@ -25,11 +25,19 @@
 //!
 //! The directory is scanned rather than listed: Vite names its assets by
 //! content hash, so any list here would be stale on the next build.
+//!
+//! Beside that table it writes `$OUT_DIR/embedded_ui_gzip.rs`: each file's gzip
+//! encoding, made here once, for every file it makes smaller. A page load would
+//! otherwise have the server compress the whole bundle again, which in a debug
+//! build is most of what opening a page costs it.
 
 use std::fmt::Write as _;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+
+use flate2::write::GzEncoder;
+use flate2::Compression;
 
 /// Where the built view is, relative to the crate root: Vite's `outDir` in
 /// `apps/dag-ui/vite.config.ts`, and the default `scripts/npm-build.mjs ui`
@@ -42,6 +50,13 @@ const INDEX: &str = "index.html";
 
 /// The generated file's name under `OUT_DIR`, as `src/ui.rs` includes it.
 const GENERATED: &str = "embedded_ui.rs";
+
+/// The generated table of build-time gzip encodings, under `OUT_DIR`, as
+/// `src/ui.rs` includes it.
+const GENERATED_GZIP: &str = "embedded_ui_gzip.rs";
+
+/// The directory under `OUT_DIR` the encodings themselves are written to.
+const GZIP_DIR: &str = "embedded-ui-gzip";
 
 fn main() {
     let manifest_dir = PathBuf::from(env("CARGO_MANIFEST_DIR"));
@@ -64,7 +79,13 @@ fn main() {
     // Quiet on both outcomes: a build without the bundle is a binary that
     // refuses `--ui` in its own words at run time, and the recipes here are
     // quiet on success.
-    if let Err(refusal) = embed(&bundle, required, &out_dir.join(GENERATED)) {
+    if let Err(refusal) = embed(&bundle, required, &out_dir.join(GENERATED)).and_then(|_| {
+        precompress(
+            &bundle,
+            &out_dir.join(GZIP_DIR),
+            &out_dir.join(GENERATED_GZIP),
+        )
+    }) {
         eprintln!("{refusal}");
         std::process::exit(1);
     }
@@ -121,6 +142,54 @@ pub fn embed(bundle: &Path, required: bool, generated: &Path) -> Result<Option<u
     table.push_str("]);\n");
     write(generated, &table)?;
     Ok(Some(files.len()))
+}
+
+/// Write the gzip encoding of every file of the bundle at `bundle` that it
+/// makes smaller into `dir`, and the table of them, by path, to `generated`.
+///
+/// Answers how many were written: none when there is no bundle, whose table is
+/// then empty. Each is encoded as the server's own `Content-Encoding` encodes a
+/// body, at the default level and with no timestamp in its header, so the same
+/// bundle always generates the same bytes.
+pub fn precompress(bundle: &Path, dir: &Path, generated: &Path) -> Result<usize, String> {
+    let mut files = Vec::new();
+    if bundle.join(INDEX).is_file() {
+        collect(bundle, bundle, &mut files)?;
+    }
+    files.sort();
+    fs::create_dir_all(dir)
+        .map_err(|err| format!("onepipeline-ui: cannot create {}: {err}", dir.display()))?;
+    let mut table = String::from(
+        "/// The gzip encoding of every embedded file it makes smaller, made when this binary was\n\
+         /// built, by the file's path under the bundle.\n\
+         const EMBEDDED_GZIP: &[(&str, &[u8])] = &[\n",
+    );
+    let mut written = 0;
+    for (number, (relative, absolute)) in files.iter().enumerate() {
+        let bytes = fs::read(absolute)
+            .map_err(|err| format!("onepipeline-ui: cannot read {}: {err}", absolute.display()))?;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let encoded = encoder
+            .write_all(&bytes)
+            .and_then(|()| encoder.finish())
+            .map_err(|err| format!("onepipeline-ui: cannot gzip {}: {err}", absolute.display()))?;
+        if encoded.len() >= bytes.len() {
+            continue;
+        }
+        let path = dir.join(format!("{number}.gz"));
+        fs::write(&path, &encoded)
+            .map_err(|err| format!("onepipeline-ui: cannot write {}: {err}", path.display()))?;
+        writeln!(
+            table,
+            "    ({relative:?}, include_bytes!({:?})),",
+            path.display().to_string()
+        )
+        .expect("writing to a String cannot fail");
+        written += 1;
+    }
+    table.push_str("];\n");
+    write(generated, &table)?;
+    Ok(written)
 }
 
 /// Every file under `dir`, as (path relative to `root` with `/` separators,

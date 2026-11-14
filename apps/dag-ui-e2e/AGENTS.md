@@ -53,6 +53,22 @@ for the app's own package instead is the same coupling with a nicer spelling. Th
 vocabulary is what a journey must not restate: a journey holding its own copy of
 `EVENT_CATEGORIES` passes while the app grows a category nobody draws.
 
+## A journey that times out only on CI
+
+`test-linux` runs this suite on four cores beside the crate's tiers and a wheel
+build weighted above them, so a journey there gets a fraction of a developer
+host's CPU. Reproduce that before changing anything: pin the run to four cores
+with busy loops on the same cores (`taskset`, `--workers=2`), and to tell a slow
+server from a slow page, starve only the server's threads. A journey too much work
+for one limit is split into journeys that together check what it did; its limit is
+never raised. What the server does on every page load is part of every journey's
+cost.
+
+A slow suite also reaches a journey later in the fixture's life, and the live run's
+plot ends at the server's clock, so its segments narrow as the suite runs. Setting
+`DAG_UI_FIXTURE_NOW` to an instant in the past ages the corpus, which reproduces a
+late journey's reading without waiting for it.
+
 ## Reading a tier that would not start
 
 `Timed out waiting 120000ms from config.webServer` is the whole of what Playwright
