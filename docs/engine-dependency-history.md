@@ -782,3 +782,12 @@ with its argv, outcome and log, and every refused edit as `graph.rejected_edits`
 0.110.1, released from the commit before that change merged, is skipped. Its
 oneagentgraph and onejudge requirements are the ones 0.110.0 resolved; the
 test-only onevcs moves to 0.66.0, which the engine now requires.
+
+0.111.0 is the engine that links onevcs 0.67.0, which reads a repository's own
+default publication policy from its `onevcs.toml`, with the host's rules only
+overriding it. This crate moves to it so that the read API links the engine and
+onevcs a host registers repositories with, and reads the runs and registry that
+engine writes; nothing it serves changes. The move is announced as a break: the
+re-exported engine types change. Its oneagentgraph, onejudge, onemessagebus and
+onetaskgraph requirements are the ones 0.110.2 resolved; the test-only onevcs
+moves to 0.67.0, which the engine now requires.
