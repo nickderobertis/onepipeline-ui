@@ -15,6 +15,10 @@
       "command": "just _tier-test linked-report",
       "dependsOn": [
         {
+          "projects": ["onepipeline-ui"],
+          "target": "ensure-sibling"
+        },
+        {
           "projects": ["dag-ui"],
           "target": "build"
         }
