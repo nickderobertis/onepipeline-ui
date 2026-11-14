@@ -731,12 +731,16 @@ const DRIVER_MEMBERS = ["monitor", "llmlint"];
 
 /**
  * Where one run-level record falls in its member's turn on a driver's stream: the
- * heartbeats, which name no session, then a turn whose records each name one.
+ * workload's `heartbeats_per_turn` heartbeats, which name no session, then a turn
+ * of `named_per_turn` records that each name one.
  */
-const DRIVER_TURN = [
-  ...Array.from({ length: 19 }, () => "member-heartbeat"),
+const driverTurn = (relayed) => [
+  ...Array.from(
+    { length: relayed.heartbeats_per_turn },
+    () => "member-heartbeat",
+  ),
   "turn-started",
-  ...Array.from({ length: 5 }, () => "turn-activity"),
+  ...Array.from({ length: relayed.named_per_turn - 3 }, () => "turn-activity"),
   "turn-message",
   "turn-completed",
 ];
@@ -776,20 +780,23 @@ function writeRelayedRun(root, runId, project, relayed, startMs, stepMs) {
     at < early
       ? Math.floor(before / early) + (at < before % early ? 1 : 0)
       : relayed.run_level_records - before;
+  const turn = driverTurn(relayed);
   const runLevel = [];
   drivers.forEach((stream, at) => {
     const turns = new Map();
     for (let index = 0; index < quota(at); index += 1) {
       // A second member keyed apart from the first, as on the host's run, so a
       // record's session is found by its stream and member, not its stream alone.
-      const member = DRIVER_MEMBERS[index % 8 === 7 ? 1 : 0];
+      const second =
+        index % relayed.second_member_every === relayed.second_member_every - 1;
+      const member = DRIVER_MEMBERS[second ? 1 : 0];
       const place = turns.get(member) ?? 0;
       turns.set(member, place + 1);
       runLevel.push({
         stream,
         member,
-        kind: DRIVER_TURN[place % DRIVER_TURN.length],
-        turn: Math.floor(place / DRIVER_TURN.length) + 1,
+        kind: turn[place % turn.length],
+        turn: Math.floor(place / turn.length) + 1,
       });
     }
   });
@@ -929,6 +936,10 @@ function scaleOfWorkload(path) {
           run_level_records: count.positive(),
           driver_streams: count.min(2),
           records_before_long_driver: count.positive(),
+          heartbeats_per_turn: count.positive(),
+          // A turn's `turn-started`, `turn-message` and `turn-completed`, and its activity.
+          named_per_turn: count.min(3),
+          second_member_every: count.min(2),
           session_search_records: count.positive(),
         })
         .refine(

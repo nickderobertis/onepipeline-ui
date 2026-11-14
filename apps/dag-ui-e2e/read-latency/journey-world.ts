@@ -119,6 +119,9 @@ export const JOURNEY_WORKLOAD = {
     run_level_records: 2200,
     driver_streams: 4,
     records_before_long_driver: 500,
+    heartbeats_per_turn: 19,
+    named_per_turn: 8,
+    second_member_every: 8,
     session_search_records: 700_000,
   },
 } as const;

@@ -8867,36 +8867,55 @@ mod tests {
     use onepipeline::event::{Envelope, ENVELOPE_VERSION};
     use serde_json::json;
 
-    use super::relayed_sessions;
+    use super::{relayed_sessions, Deserialize};
 
     thread_local! {
         /// The records the session fallback examined on this thread.
         pub(super) static FALLBACK_EXAMINED: Cell<u64> = const { Cell::new(0) };
     }
 
-    /// The run-level shape `relayed` in
-    /// `apps/dag-ui-e2e/read-latency/large-run-workload.json` states, which the
-    /// read-latency tier's `load-relayed-settled` run is generated with.
-    const DRIVER_STREAMS: usize = 16;
-    const RUN_LEVEL_RECORDS: usize = 27_700;
-    const RECORDS_BEFORE_LONG_DRIVER: usize = 6_300;
-    /// A member's turn on a driver's stream, as `DRIVER_TURN` in `load/corpus.mjs`
-    /// writes it: nineteen heartbeats naming no session, then a turn naming one.
-    const HEARTBEATS_PER_TURN: usize = 19;
-    const TURN_RECORDS: usize = HEARTBEATS_PER_TURN + 8;
+    /// The relayed run `apps/dag-ui-e2e/read-latency/large-run-workload.json` states,
+    /// which `load/corpus.mjs` generates the read-latency tier's `load-relayed-settled`
+    /// run from: the members of it its run-level records are laid out by.
+    #[derive(Deserialize)]
+    struct Relayed {
+        driver_streams: usize,
+        run_level_records: usize,
+        records_before_long_driver: usize,
+        heartbeats_per_turn: usize,
+        named_per_turn: usize,
+        second_member_every: usize,
+    }
 
-    /// The run-level records of that run in journal order: its `run-started`, then
-    /// each driver stream's share in turn, the last driver holding the rest.
-    fn relayed_run_level() -> Vec<Envelope> {
-        let early = DRIVER_STREAMS - 1;
+    #[derive(Deserialize)]
+    struct Workload {
+        relayed: Relayed,
+    }
+
+    fn relayed_workload() -> Relayed {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("apps/dag-ui-e2e/read-latency/large-run-workload.json");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        serde_json::from_str::<Workload>(&text)
+            .expect("the large-run workload states a relayed run")
+            .relayed
+    }
+
+    /// That run's run-level records in journal order, laid out as `writeRelayedRun`
+    /// lays them: its `run-started`, then each driver stream's share in turn, the
+    /// last driver holding the rest.
+    fn relayed_run_level(relayed: &Relayed) -> Vec<Envelope> {
+        let early = relayed.driver_streams - 1;
+        let before = relayed.records_before_long_driver;
         let quota = |at: usize| {
             if at < early {
-                RECORDS_BEFORE_LONG_DRIVER / early
-                    + usize::from(at < RECORDS_BEFORE_LONG_DRIVER % early)
+                before / early + usize::from(at < before % early)
             } else {
-                RUN_LEVEL_RECORDS - RECORDS_BEFORE_LONG_DRIVER
+                relayed.run_level_records - before
             }
         };
+        let turn_records = relayed.heartbeats_per_turn + relayed.named_per_turn;
         let envelope = |seq: usize, stream: &str, source: &str, kind: &str, labels| {
             serde_json::from_value::<Envelope>(json!({
                 "v": ENVELOPE_VERSION,
@@ -8910,17 +8929,17 @@ mod tests {
             .expect("a generated record parses")
         };
         let mut records = vec![envelope(1, "run", "pipeline", "run-started", json!({}))];
-        for at in 0..DRIVER_STREAMS {
+        for at in 0..relayed.driver_streams {
             let stream = format!("run-driver-{at:02}");
             let mut places = [0_usize; 2];
             for index in 0..quota(at) {
-                // One record in eight is the second member's.
-                let which = usize::from(index % 8 == 7);
+                let which = usize::from(
+                    index % relayed.second_member_every == relayed.second_member_every - 1,
+                );
                 let member = ["monitor", "llmlint"][which];
                 let place = places[which];
                 places[which] += 1;
-                let step = place % TURN_RECORDS;
-                let (kind, labels) = if step < HEARTBEATS_PER_TURN {
+                let (kind, labels) = if place % turn_records < relayed.heartbeats_per_turn {
                     ("member-heartbeat", json!({"member": member}))
                 } else {
                     (
@@ -8931,34 +8950,38 @@ mod tests {
                 records.push(envelope(index + 1, &stream, "agentgraph", kind, labels));
             }
         }
-        assert_eq!(records.len(), RUN_LEVEL_RECORDS + 1);
+        assert_eq!(records.len(), relayed.run_level_records + 1);
         records
     }
 
     #[test]
     fn overall_attributes_a_relayed_runs_session_less_records_in_one_pass() {
-        let records = relayed_run_level();
+        let relayed = relayed_workload();
+        let records = relayed_run_level(&relayed);
         let slice: Vec<(usize, &Envelope)> = records.iter().enumerate().collect();
         FALLBACK_EXAMINED.with(|examined| examined.set(0));
         let sessions = relayed_sessions(&slice);
         let examined = FALLBACK_EXAMINED.with(Cell::get);
         // Every heartbeat joins its driver's member's session, and nothing else
         // relays one: each record but the run's own lands in exactly one.
-        assert_eq!(sessions.len(), 2 * DRIVER_STREAMS);
+        assert_eq!(sessions.len(), 2 * relayed.driver_streams);
         assert_eq!(
             sessions
                 .iter()
                 .map(|(_, relayed)| relayed.len())
                 .sum::<usize>(),
-            RUN_LEVEL_RECORDS
+            relayed.run_level_records
         );
-        let long = format!("run-driver-{:02}.monitor", DRIVER_STREAMS - 1);
-        let long_driver = RUN_LEVEL_RECORDS - RECORDS_BEFORE_LONG_DRIVER;
-        let (_, relayed) = sessions
+        let long = format!("run-driver-{:02}.monitor", relayed.driver_streams - 1);
+        let long_driver = relayed.run_level_records - relayed.records_before_long_driver;
+        let (_, relayed_by_long) = sessions
             .iter()
             .find(|(session, _)| *session == long)
             .expect("the long driver's session");
-        assert_eq!(relayed.len(), long_driver - long_driver / 8);
+        assert_eq!(
+            relayed_by_long.len(),
+            long_driver - long_driver / relayed.second_member_every
+        );
         // The fallback reads the slice at most once, however many of its records
         // name no session: a search per such record read over a hundred million.
         assert!(

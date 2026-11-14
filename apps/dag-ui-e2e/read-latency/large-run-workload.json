@@ -27,6 +27,9 @@
     "run_level_records": 27700,
     "driver_streams": 16,
     "records_before_long_driver": 6300,
+    "heartbeats_per_turn": 19,
+    "named_per_turn": 8,
+    "second_member_every": 8,
     "session_search_records": 110000000
   }
 }

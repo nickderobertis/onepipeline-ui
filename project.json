@@ -73,6 +73,7 @@
         "{workspaceRoot}/docs/contract.md",
         "{workspaceRoot}/apps/dag-ui/src/**/*",
         "{workspaceRoot}/apps/dag-ui-e2e/fixtures/**/*",
+        "{workspaceRoot}/apps/dag-ui-e2e/read-latency/large-run-workload.json",
         "{workspaceRoot}/packages/*/src/**/*",
         "coverageTierNoCiScripts"
       ],
@@ -93,6 +94,7 @@
         "{workspaceRoot}/docs/contract.md",
         "{workspaceRoot}/apps/dag-ui/src/**/*",
         "{workspaceRoot}/apps/dag-ui-e2e/fixtures/**/*",
+        "{workspaceRoot}/apps/dag-ui-e2e/read-latency/large-run-workload.json",
         "{workspaceRoot}/packages/*/src/**/*",
         "platform"
       ]
