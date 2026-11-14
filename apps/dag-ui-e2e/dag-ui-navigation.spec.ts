@@ -754,6 +754,11 @@ test("reads a segment of the graph timeline, and follows it as the view scrolls"
   // reading away from someone who never asked for it to go. It follows the segment
   // rather than being left behind pointing at nothing.
   await tabTo(page, segment);
+  // Measured only once the reading stands shown on the segment the keyboard reached:
+  // focus lands before the reading is placed against it, and a position read in
+  // between is the unplaced reading's, which the scroll below is then held against.
+  await expect(reading).toBeVisible();
+  await expect(reading).toContainText("Lane: monitor");
   const before = await reading.boundingBox();
   const anchoredAt = await segment.boundingBox();
   await page.locator(".overall-hero").hover();
