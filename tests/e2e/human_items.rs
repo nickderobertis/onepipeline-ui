@@ -3516,11 +3516,7 @@ fn a_stale_human_items_cursor_is_reset_to_what_the_routes_answer() {
 /// A first `human-items` subscription reads the items beside the sidebar's rows,
 /// so its answer waits on the longer of the two reads rather than on both.
 ///
-/// Both reads cover every run under the root. On a CI runner short of CPU and
-/// disk, the first answer of
-/// [`a_stale_human_items_cursor_is_reset_to_what_the_routes_answer`] was the items'
-/// read and then 64 rows read one after another, and the client gave up reading
-/// its status line while the server was still reading rows. Here the items'
+/// Both reads cover every run under the root. Here the items'
 /// index and every run's row each take three fifths of the client's read timeout
 /// and then finish on their own: one read after the other is longer than the
 /// client waits, side by side it is not.

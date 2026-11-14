@@ -1239,12 +1239,8 @@ fn a_run_no_look_has_listed_yet_is_in_the_snapshot_of_a_subscription_to_it() {
 /// within a client's patience however long each row takes on its own.
 ///
 /// A subscription's first look reads every run's row, and a stale one is the SDK
-/// folding the run and syncing its cache back to disk. Read one after another, on
-/// a CI runner short of CPU and disk, 64 runs' rows held a first `human-items`
-/// subscription past the client's read timeout:
-/// `human_items::a_stale_human_items_cursor_is_reset_to_what_the_routes_answer`
-/// failed reading the status line while the server was still reading rows. Here
-/// each row's read takes an eighth of that timeout and then finishes on its own:
+/// folding the run and syncing its cache back to disk. Here each row's read takes
+/// an eighth of the client's read timeout and then finishes on its own:
 /// one after another, twelve of them take half as long again as the client
 /// waits; side by side, a fraction of it.
 #[cfg(unix)]
@@ -1284,16 +1280,9 @@ fn a_first_subscription_reads_its_rows_side_by_side_within_a_clients_patience() 
     }
 }
 
-/// Lines a server traces at once are each traced whole.
-///
-/// The trace is how these journeys read what the server did, and a line written
-/// in pieces interleaved with another thread's was dropped as unreadable: two
-/// runs a page prepared, opened side by side and traced as they finished, were
-/// read back as no opening at all, and
-/// `pages_open_each_run_once_two_at_a_time_and_an_untaken_opening_is_let_go`
-/// failed so on a macOS runner and beside the human-items cursor journey on
-/// Linux. Many tabs
-/// subscribing at once trace their first answers at once.
+/// Lines a server traces at once are each traced whole: the trace is how these
+/// journeys read what the server did, and an unreadable line reads as nothing
+/// done. Many tabs subscribing at once trace their first answers at once.
 #[test]
 fn lines_traced_at_once_are_each_traced_whole() {
     const TABS: usize = 16;
