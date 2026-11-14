@@ -7396,6 +7396,8 @@ fn relayed_sessions<'a>(
     // and a search of the list per record would compare every record's session
     // with every one before it.
     let mut placed: HashMap<&str, usize> = HashMap::new();
+    // Built the first time a record names no session of its own, and only then.
+    let mut named: Option<NamedSessions<'a>> = None;
     for (index, event) in events {
         if event.source != Source::Agentgraph {
             continue;
@@ -7406,19 +7408,9 @@ fn relayed_sessions<'a>(
             .get("session")
             .and_then(Value::as_str)
             .or_else(|| {
-                events.iter().find_map(|(_, candidate)| {
-                    (candidate.stream == event.stream
-                        && (member_label(event).is_none()
-                            || member_label(event) == member_label(candidate)))
-                    .then(|| {
-                        candidate
-                            .labels
-                            .extra
-                            .get("session")
-                            .and_then(Value::as_str)
-                    })
-                    .flatten()
-                })
+                named
+                    .get_or_insert_with(|| NamedSessions::of(events))
+                    .of_unnamed(event)
             });
         let Some(session) = session else {
             continue;
@@ -7434,6 +7426,57 @@ fn relayed_sessions<'a>(
         }
     }
     sessions
+}
+
+/// The session a record that names none of its own is attributed to: the first one
+/// named, in the slice's order, by a record on its stream, and of its member where it
+/// has one.
+///
+/// Held as an index made in one pass rather than found by a search of the slice per
+/// record: a long run's run-level heartbeats name no session, and the first record of
+/// their stream and member that does can lie tens of thousands of records in, so a
+/// search per heartbeat compared over a hundred million records on a 76,000-record
+/// journal and held Overall's first answer for seconds.
+struct NamedSessions<'a> {
+    /// The first session named on each stream.
+    by_stream: HashMap<&'a str, &'a str>,
+    /// The first session named on each stream by each member.
+    by_member: HashMap<(&'a str, &'a str), &'a str>,
+}
+
+impl<'a> NamedSessions<'a> {
+    fn of(events: &[(usize, &'a Envelope)]) -> Self {
+        let mut by_stream = HashMap::new();
+        let mut by_member = HashMap::new();
+        for (_, candidate) in events {
+            let Some(session) = candidate
+                .labels
+                .extra
+                .get("session")
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            let stream = candidate.stream.as_str();
+            by_stream.entry(stream).or_insert(session);
+            if let Some(member) = member_label(candidate) {
+                by_member.entry((stream, member)).or_insert(session);
+            }
+        }
+        Self {
+            by_stream,
+            by_member,
+        }
+    }
+
+    /// The session `event`'s stream, or its member on that stream, first named.
+    fn of_unnamed(&self, event: &'a Envelope) -> Option<&'a str> {
+        let stream = event.stream.as_str();
+        match member_label(event) {
+            None => self.by_stream.get(stream).copied(),
+            Some(member) => self.by_member.get(&(stream, member)).copied(),
+        }
+    }
 }
 
 /// One recorded moment: the epoch milliseconds a reading orders by, and the stamp
