@@ -6,7 +6,8 @@ import { defineConfig } from "@playwright/test";
  * read-latency telemetry and the runner that reads it, `dag-ui-read-latency:test`.
  * `large` holds one large run's telemetry and the host measurement of a run,
  * `dag-ui-read-latency:test-large`, and
- * `journeys` the large-corpus journeys, `dag-ui-read-latency:test-journeys`.
+ * `journeys` the large-corpus journeys and the rest-arrived check's own journey,
+ * `dag-ui-read-latency:test-journeys`.
  * ci.yml's `budgets` job runs all three, one at a time, wherever a change reaches
  * this project (`scripts/ci-job.sh read-latency`).
  *
@@ -53,6 +54,7 @@ export default defineConfig({
         "reach-everything.spec.ts",
         "reach-pages.spec.ts",
         "reach-transcript.spec.ts",
+        "rest-arrived.spec.ts",
       ],
       workers: JOURNEY_WORKERS,
     },
