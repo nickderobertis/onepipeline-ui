@@ -1,0 +1,248 @@
+
+== test-linux (run 43257411385 attempt 1, job 131330318404, success) wall 28.6 min
+   head 92137b479030dda920e7d2ca6cd92a30bed545df  GITHUB_SHA c78f95bf7a483015d53909d5df744f5029fd4068  selection 53 task(s)  recorder none
+   restore HIT (restore key, partial) Run Swatinem/rust-cache@v2.9.2 1472 MB 51 s
+   restore HIT  Run oven-sh/setup-bun@v2 32 MB 1 s
+   restore MISS Restore the sibling CLI 0 s
+   restore HIT  Restore the base commit's server 41 MB 1 s
+   Nx remote cache stored 325941 bytes
+   minutes  share  category
+      4.9  17.3%  Rust tests running (nextest Summary)
+      3.9  13.6%  rest of onepipeline-ui-release:test-standalone
+      3.8  13.4%  rest of dag-ui-e2e:test
+      2.6   9.0%  rest of github-workflows-nx-cache:test
+      2.3   7.9%  compile and link (from cargo's Finished line)
+      2.2   7.6%  rest of onepipeline-ui-release:test
+      1.9   6.8%  rest of onepipeline-ui-release:test-staged
+      0.9   3.0%  cache restore
+      0.8   2.8%  rest of onepipeline-ui-judged-tier:test
+      0.7   2.4%  rest of onepipeline-ui-release:rehearse
+      0.5   1.8%  rest of onepipeline-ui:test
+      0.5   1.8%  rest of onepipeline-ui-npm-launcher:test
+      0.5   1.8%  setup
+      0.4   1.5%  rest of onepipeline-ui:doc
+      0.4   1.3%  rest of dag-ui:build-api-server
+      0.4   1.2%  rest of github-workflows:test
+      0.3   0.9%  rest of dag-ui-read-latency:compile-release-server
+      0.2   0.7%  rest of onepipeline-ui-repo-tooling:test
+      0.2   0.7%  rest of onepipeline-ui:wheel-smoke
+      0.2   0.6%  rest of dag-ui-e2e:test-isolation
+      0.2   0.5%  bootstrap: rest of dag-ui-e2e:bootstrap
+      0.1   0.4%  bootstrap: rest of onepipeline-ui:bootstrap
+      0.1   0.4%  rest of onepipeline-ui-release:tools
+      0.1   0.4%  bootstrap: unattributed (no recorded work running)
+      0.1   0.4%  report and upload
+     0.08   0.3%  unattributed (no recorded work running)
+     0.05   0.2%  unattributed (runner time between steps)
+     0.04   0.1%  rest of telemetry-client:build
+     0.04   0.1%  rest of dag-model:build
+     0.03   0.1%  rest of docs:test
+     0.03   0.1%  rest of onepipeline-ui-nx-worker-startup:test
+     0.03   0.1%  rest of dag-layout:build
+     0.02   0.1%  bootstrap: rest of github-workflows-nx-cache:bootstrap
+     0.02   0.1%  rest of onepipeline-ui-e2e:test
+     0.02   0.1%  rest of onepipeline-ui:install-smoke
+     0.02   0.1%  rest of timeline-categories:build
+     0.02   0.1%  rest of github-workflows-judge-install:test
+     0.02   0.1%  rest of onepipeline-ui-baseline:test-baseline
+     0.02   0.1%  cache save (post steps)
+     0.02   0.1%  teardown (post steps)
+     0.02   0.1%  rest of onepipeline-ui-versions:test
+     0.01   0.0%  rest of github-workflows:test-ci-jobs
+     0.01   0.0%  rest of onepipeline-ui-cost:test-cost
+     0.01   0.0%  rest of github-workflows:budgets
+     0.00   0.0%  rest of onepipeline-ui-ci-jobs:test
+     0.00   0.0%  rest of onepipeline-ui-coverage:coverage
+     0.00   0.0%  bootstrap: Rust tests running (nextest Summary)
+     0.00   0.0%  bootstrap: rest of github-workflows-installs:bootstrap
+     0.00   0.0%  rest of dag-ui-e2e:prioritize
+     0.00   0.0%  rest of onepipeline-ui-release:prioritize
+     0.00   0.0%  rest of onepipeline-ui:ensure-sibling
+     0.00   0.0%  rest of onepipeline-ui:ensure-node-without-execve
+     0.00   0.0%  rest of onepipeline-ui:ensure-baseline
+     0.00   0.0%  rest of github-workflows-nx-cache:prioritize
+     0.00   0.0%  rest of github-workflows:bootstrap
+     0.00   0.0%  rest of github-workflows-judge-install:bootstrap
+      0.0   0.0%  bootstrap: compile and link (from cargo's Finished line)
+      0.0   0.0%  bootstrap: rest of pool-maintenance:bootstrap
+      0.0   0.0%  rest of dag-ui:build
+     28.5 total (wall 28.6)
+   Nx tasks: inclusive / exclusive minutes
+     22.2    3.9  executed   onepipeline-ui-release:test-standalone
+     20.9    3.8  executed   dag-ui-e2e:test
+     17.3    2.9  executed   onepipeline-ui-repo-tooling:test
+     15.4    2.6  executed   github-workflows-nx-cache:test
+     15.1    2.5  executed   dag-ui-read-latency:compile-release-server
+      5.8    1.0  executed   onepipeline-ui-judged-tier:test
+      5.3    0.9  executed   onepipeline-ui-e2e:test
+      4.9    1.9  executed   onepipeline-ui-release:test-staged
+      4.2    0.7  executed   onepipeline-ui-release:rehearse
+      3.8    0.6  executed   onepipeline-ui-npm-launcher:test
+      3.3    0.6  executed   onepipeline-ui:test
+      3.2    0.7  executed   onepipeline-ui-ci-jobs:test
+      2.5    0.4  executed   onepipeline-ui:doc
+      2.3    0.4  executed   dag-ui:build-api-server
+      2.2    2.2  executed   onepipeline-ui-release:test
+      2.1    0.4  executed   github-workflows:test
+      1.2    0.2  executed   onepipeline-ui:wheel-smoke
+      1.0    0.2  executed   onepipeline-ui-versions:test
+      0.6    0.1  executed   onepipeline-ui-release:tools
+      0.6   0.10  executed   onepipeline-ui-nx-worker-startup:test
+      0.5   0.09  executed   onepipeline-ui-baseline:test-baseline
+      0.5   0.09  executed   onepipeline-ui-cost:test-cost
+      0.3    0.2  executed   dag-ui-e2e:test-isolation
+      0.2   0.04  executed   telemetry-client:build
+      0.2   0.04  executed   dag-model:build
+   critical chain: pool-maintenance:bootstrap 0.0 -> dag-ui-build-cache:test 0.0 -> dag-ui-e2e:budgets 0.0 -> dag-ui:test 0.0 -> dag-layout:test 0.0 -> timeline-categories:test 0.0 -> telemetry-client:test 0.0 -> dag-model:test 0.0 -> github-workflows:bootstrap 0.0 -> onepipeline-ui:ensure-sibling 0.0 -> github-workflows-judge-install:bootstrap 0.0 -> onepipeline-ui:ensure-node-without-execve 0.0 -> timeline-categories:build 0.1 -> dag-ui-read-latency:compile-release-server 15.1 -> onepipeline-ui-release:rehearse 4.2 -> onepipeline-ui-release:test-staged 4.9 -> onepipeline-ui-release:prioritize 0.0 -> onepipeline-ui-release:test 2.2
+   slowest tests:
+    690.1 s  node  a whole release against registry doubles
+    354.5 s  node  each declared file input rule moves every task that reads its probe
+    326.8 s  node  over v0.40.0's wheels and npm platform package, it ends with every artifact it builds published
+    295.0 s  node  publication against registry doubles
+    293.7 s  node  from nothing published, it ends with every artifact it builds published
+    268.2 s  node  a re-run of a platform job whose earlier attempt published part of it
+    243.3 s  node  the build-linux recipe, with publication in its dry-run mode
+    181.0 s  node  the split tiers run exactly the tests the original targets ran
+    150.6 s  node  cache-use under onebudgetspec measures real executions behind simulated release selection
+    137.3 s  node  the build-linux recipe, over staged files that do not install
+    123.9 s  node  every non-file input moves the tiers whose keys name it
+    115.1 s  node  build-linux publishes exactly the files it built, and a failed upload is finished by a re-run
+    101.0 s  node  a test-install that fails stops the recipe before any publish command
+    100.8 s  node  a tier replays until something its run reads changes, and only those tiers re-run
+     93.0 s  node  semantic manifest inputs retain the recorded base's real Nx affected selections
+     90.2 s  node  native publication regressions
+     89.2 s  node  the warmer compiles what each OS's pull-request jobs compile, and nothing else
+     78.0 s  node  a tool's version moves every cached target, explicit inputs that omit the shared globals among them
+     71.1 s  node  keeps everything the earlier attempt published, says so with both digests, and verifies that build
+     68.0 s  vitest-file  src/app/App.test.tsx
+
+== test-macos (run 43257411385 attempt 1, job 131330317918, success) wall 9.4 min
+   head 92137b479030dda920e7d2ca6cd92a30bed545df  GITHUB_SHA c78f95bf7a483015d53909d5df744f5029fd4068  selection 32 task(s)  recorder none
+   restore HIT (restore key, partial) Run Swatinem/rust-cache@v2.9.2 479 MB 40 s
+   restore HIT  Run oven-sh/setup-bun@v2 20 MB 2 s
+   restore MISS Restore the sibling CLI 1 s
+   Nx remote cache stored 968 bytes
+   minutes  share  category
+      3.6  37.7%  rest of onepipeline-ui:install-smoke
+      2.7  29.1%  rest of onepipeline-ui:test-quick
+      0.8   8.2%  rest of onepipeline-ui:lint
+      0.7   7.4%  cache restore
+      0.5   5.1%  setup
+      0.4   3.8%  bootstrap: rest of onepipeline-ui:bootstrap
+      0.2   2.6%  bootstrap: rest of dag-ui-e2e:bootstrap
+      0.2   1.9%  bootstrap: unattributed (no recorded work running)
+      0.1   1.2%  unattributed (no recorded work running)
+     0.06   0.7%  Rust tests running (nextest Summary)
+     0.05   0.5%  report and upload
+     0.05   0.5%  unattributed (runner time between steps)
+     0.03   0.4%  teardown (post steps)
+     0.02   0.2%  bootstrap: rest of github-workflows-nx-cache:bootstrap
+     0.02   0.2%  rest of onepipeline-ui:format-check
+     0.01   0.1%  rest of github-workflows-nx-cache:bootstrap
+     0.00   0.0%  rest of onepipeline-ui:ensure-node-without-execve
+     0.00   0.0%  bootstrap: rest of github-workflows-installs:bootstrap
+     0.00   0.0%  rest of onepipeline-ui:ensure-sibling
+     0.00   0.0%  rest of github-workflows-nx-cache:lint
+     0.00   0.0%  rest of pool-maintenance:bootstrap
+     0.00   0.0%  bootstrap: rest of github-workflows-judge-install:bootstrap
+     0.00   0.0%  rest of github-workflows:bootstrap
+      0.0   0.0%  bootstrap: compile and link (from cargo's Finished line)
+      0.0   0.0%  bootstrap: Rust tests running (nextest Summary)
+      0.0   0.0%  compile and link (from cargo's Finished line)
+      0.0   0.0%  rest of dag-ui:build
+      9.4 total (wall 9.4)
+   Nx tasks: inclusive / exclusive minutes
+      7.1    3.6  executed   onepipeline-ui:install-smoke
+      6.3    2.8  executed   onepipeline-ui:test-quick
+      2.3    0.8  executed   onepipeline-ui:lint
+      0.4    0.0  executed   onepipeline-ui:bootstrap
+      0.2    0.0  executed   dag-ui-e2e:bootstrap
+     0.05   0.03  executed   dag-ui:build
+     0.04   0.02  executed   onepipeline-ui:format-check
+     0.03   0.01  executed   github-workflows-nx-cache:bootstrap
+     0.01   0.00  executed   onepipeline-ui:ensure-node-without-execve
+     0.01   0.00  executed   github-workflows-nx-cache:lint
+     0.01   0.00  executed   onepipeline-ui:ensure-sibling
+     0.00   0.00  executed   pool-maintenance:bootstrap
+     0.00   0.00  executed   github-workflows:bootstrap
+     0.00    0.0  executed   github-workflows-judge-install:bootstrap
+     0.00    0.0  executed   github-workflows-installs:bootstrap
+     0.00    0.0  remote_hit dag-model:format-check
+     0.00    0.0  remote_hit dag-model:lint
+     0.00    0.0  remote_hit telemetry-client:format-check
+     0.00    0.0  remote_hit telemetry-client:lint
+     0.00    0.0  remote_hit timeline-categories:format-check
+     0.00    0.0  remote_hit timeline-categories:lint
+     0.00    0.0  remote_hit dag-layout:format-check
+     0.00    0.0  remote_hit dag-layout:lint
+     0.00    0.0  remote_hit dag-ui:format-check
+     0.00    0.0  remote_hit dag-ui:lint
+   critical chain: pool-maintenance:bootstrap 0.0 -> onepipeline-ui-release:lint 0.0 -> dag-ui-read-latency:lint 0.0 -> dag-ui-read-latency:format-check 0.0 -> dag-ui-e2e:lint 0.0 -> dag-ui-e2e:format-check 0.0 -> dag-ui:lint 0.0 -> dag-ui:format-check 0.0 -> dag-layout:lint 0.0 -> dag-layout:format-check 0.0 -> timeline-categories:lint 0.0 -> timeline-categories:format-check 0.0 -> telemetry-client:lint 0.0 -> telemetry-client:format-check 0.0 -> dag-model:lint 0.0 -> dag-model:format-check 0.0 -> github-workflows:bootstrap 0.0 -> github-workflows:lint 0.0 -> onepipeline-ui:ensure-sibling 0.0 -> github-workflows-nx-cache:lint 0.0 -> onepipeline-ui:ensure-node-without-execve 0.0 -> dag-ui:build 0.1 -> onepipeline-ui-nx-worker-startup:test-quick 0.0 -> onepipeline-ui-e2e:test-quick 0.0 -> onepipeline-ui-versions:test-quick 0.0 -> dag-ui-build-cache:lint 0.0 -> onepipeline-ui-repo-tooling:test-quick 0.0 -> onepipeline-ui-npm-launcher:test-quick 0.0 -> onepipeline-ui-baseline-reuse:test-quick 0.0 -> onepipeline-ui:install-smoke 7.1
+   slowest tests:
+
+== test-windows (run 43257411385 attempt 1, job 131330318508, success) wall 11.0 min
+   head 92137b479030dda920e7d2ca6cd92a30bed545df  GITHUB_SHA c78f95bf7a483015d53909d5df744f5029fd4068  selection 36 task(s)  recorder none
+   restore HIT (restore key, partial) Run Swatinem/rust-cache@v2.9.2 519 MB 52 s
+   restore HIT  Run oven-sh/setup-bun@v2 35 MB 4 s
+   restore MISS Restore the sibling CLI 1 s
+   Nx remote cache stored 793 bytes
+   minutes  share  category
+      4.5  40.5%  rest of onepipeline-ui:install-smoke
+      1.6  14.2%  rest of onepipeline-ui:lint
+      0.9   8.5%  bootstrap: unattributed (no recorded work running)
+      0.9   8.0%  cache restore
+      0.9   8.0%  rest of onepipeline-ui:test-quick
+      0.8   7.1%  setup
+      0.5   4.5%  bootstrap: rest of onepipeline-ui:bootstrap
+      0.3   3.1%  bootstrap: rest of dag-ui-e2e:bootstrap
+      0.2   1.9%  unattributed (no recorded work running)
+     0.08   0.7%  Rust tests running (nextest Summary)
+     0.07   0.6%  teardown (post steps)
+     0.07   0.6%  unattributed (runner time between steps)
+     0.06   0.5%  rest of dag-model:build
+     0.04   0.3%  bootstrap: rest of github-workflows-nx-cache:bootstrap
+     0.04   0.3%  rest of dag-ui:build
+     0.03   0.3%  rest of dag-layout:build
+     0.03   0.2%  rest of timeline-categories:build
+     0.02   0.2%  rest of onepipeline-ui:format-check
+     0.02   0.2%  report and upload
+     0.01   0.1%  bootstrap: rest of pool-maintenance:bootstrap
+     0.01   0.1%  rest of onepipeline-ui:ensure-sibling
+     0.00   0.0%  rest of onepipeline-ui:ensure-node-without-execve
+     0.00   0.0%  bootstrap: rest of github-workflows-installs:bootstrap
+     0.00   0.0%  rest of github-workflows-nx-cache:lint
+     0.00   0.0%  bootstrap: rest of github-workflows-judge-install:bootstrap
+     0.00   0.0%  rest of github-workflows:bootstrap
+      0.0   0.0%  bootstrap: compile and link (from cargo's Finished line)
+      0.0   0.0%  bootstrap: Rust tests running (nextest Summary)
+      0.0   0.0%  compile and link (from cargo's Finished line)
+      0.0   0.0%  rest of telemetry-client:build
+     11.0 total (wall 11.0)
+   Nx tasks: inclusive / exclusive minutes
+      6.9    4.5  executed   onepipeline-ui:install-smoke
+      4.0    1.6  executed   onepipeline-ui:lint
+      2.7    0.9  executed   onepipeline-ui:test-quick
+      0.5    0.0  executed   onepipeline-ui:bootstrap
+      0.3    0.0  executed   dag-ui-e2e:bootstrap
+      0.2   0.06  executed   dag-model:build
+      0.2   0.06  executed   telemetry-client:build
+      0.2   0.04  executed   dag-ui:build
+      0.2   0.03  executed   dag-layout:build
+      0.1   0.03  executed   timeline-categories:build
+      0.1   0.02  executed   onepipeline-ui:format-check
+     0.04    0.0  executed   github-workflows-nx-cache:bootstrap
+     0.02   0.01  executed   onepipeline-ui:ensure-sibling
+     0.01   0.00  executed   onepipeline-ui:ensure-node-without-execve
+     0.01   0.00  executed   github-workflows-nx-cache:lint
+     0.00    0.0  executed   pool-maintenance:bootstrap
+     0.00   0.00  executed   github-workflows:bootstrap
+     0.00    0.0  executed   github-workflows-judge-install:bootstrap
+     0.00    0.0  executed   github-workflows-installs:bootstrap
+     0.00    0.0  remote_hit dag-model:format-check
+     0.00    0.0  remote_hit dag-model:lint
+     0.00    0.0  remote_hit telemetry-client:format-check
+     0.00    0.0  remote_hit telemetry-client:lint
+     0.00    0.0  remote_hit timeline-categories:format-check
+     0.00    0.0  remote_hit timeline-categories:lint
+   critical chain: onepipeline-ui-release:lint 0.0 -> dag-ui-read-latency:lint 0.0 -> dag-ui-read-latency:format-check 0.0 -> dag-ui-e2e:lint 0.0 -> dag-ui-e2e:format-check 0.0 -> dag-ui:lint 0.0 -> dag-ui:format-check 0.0 -> dag-layout:lint 0.0 -> dag-layout:format-check 0.0 -> timeline-categories:lint 0.0 -> timeline-categories:format-check 0.0 -> telemetry-client:lint 0.0 -> telemetry-client:format-check 0.0 -> dag-model:lint 0.0 -> dag-model:format-check 0.0 -> github-workflows:bootstrap 0.0 -> onepipeline-ui:ensure-node-without-execve 0.0 -> onepipeline-ui:ensure-sibling 0.0 -> github-workflows:lint 0.0 -> telemetry-client:build 0.2 -> onepipeline-ui-nx-worker-startup:test-quick 0.0 -> onepipeline-ui-e2e:test-quick 0.0 -> onepipeline-ui-versions:test-quick 0.0 -> dag-ui-build-cache:lint 0.0 -> onepipeline-ui-repo-tooling:test-quick 0.0 -> onepipeline-ui-npm-launcher:test-quick 0.0 -> onepipeline-ui-baseline-reuse:test-quick 0.0 -> onepipeline-ui:install-smoke 6.9
+   slowest tests:

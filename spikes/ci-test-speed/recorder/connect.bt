@@ -1,0 +1,14 @@
+// The recorder's network half, kept apart from trace.bt so a probe this kernel
+// cannot attach loses only the network figures: every IPv4 or IPv6 connect
+// with its port and, for IPv4, its address.
+tracepoint:syscalls:sys_enter_connect {
+  $sa = (struct sockaddr *)args->uservaddr;
+  if ($sa->sa_family == 2) {
+    $in = (struct sockaddr_in *)args->uservaddr;
+    printf("C %llu %d %s %d\n", nsecs, pid, ntop(2, $in->sin_addr.s_addr), ($in->sin_port >> 8) | (($in->sin_port & 0xff) << 8));
+  }
+  if ($sa->sa_family == 10) {
+    $in6 = (struct sockaddr_in6 *)args->uservaddr;
+    printf("C %llu %d %s %d\n", nsecs, pid, ntop(10, $in6->sin6_addr.in6_u.u6_addr8), ($in6->sin6_port >> 8) | (($in6->sin6_port & 0xff) << 8));
+  }
+}
