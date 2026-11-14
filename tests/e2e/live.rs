@@ -1280,6 +1280,101 @@ fn a_first_subscription_reads_its_rows_side_by_side_within_a_clients_patience() 
     }
 }
 
+/// A look folds and writes back one stale summary at a time, however many rows it
+/// reads side by side.
+///
+/// A stale row is the SDK folding the run, persisting the fold's checkpoint and
+/// writing the summary cache back, syncing each to disk. Here every run's summary
+/// is missing, so every row folds, and each fold's read of the run's launch record
+/// is held a while once it starts. Were the folds side by side, a second would
+/// start while the first was held.
+#[cfg(unix)]
+#[test]
+fn a_look_folds_and_writes_back_one_stale_summary_at_a_time() {
+    use std::io::Write;
+
+    const HOLD: Duration = Duration::from_millis(250);
+    let runs: Vec<String> = (0..6)
+        .map(|index| format!("fold-one-at-a-time-{index}"))
+        .collect();
+    // In place before the server starts, so that every look it takes, its first
+    // included, folds through them.
+    let mut texts = Vec::new();
+    let live = Live::start(|root| {
+        for run in &runs {
+            growing_run(root, run);
+            let launch = root.join(run).join("launch.json");
+            assert!(
+                !root.join(run).join("summary.json").exists(),
+                "{run} has no summary"
+            );
+            texts.push(fs::read(&launch).expect("the launch record"));
+            fifo_in_place_of(&launch);
+        }
+    });
+    let launches: Vec<(PathBuf, Vec<u8>)> = runs
+        .iter()
+        .map(|run| live.serving.run_dir(run).join("launch.json"))
+        .zip(texts)
+        .collect();
+
+    let (most_at_once, folded) = std::thread::scope(|scope| {
+        let subscribed = scope.spawn(|| live.subscribe(&json!({ "view": { "type": "sidebar" } })));
+        let mut folded = vec![0usize; launches.len()];
+        let mut held: Vec<(usize, fs::File, Instant)> = Vec::new();
+        let mut most_at_once = 0;
+        let deadline = Instant::now() + PATIENCE;
+        while !subscribed.is_finished() || !held.is_empty() {
+            assert!(Instant::now() < deadline, "the look never finished folding");
+            for (at, (launch, _)) in launches.iter().enumerate() {
+                if held.iter().any(|(holding, _, _)| *holding == at) {
+                    continue;
+                }
+                if let Some(writer) = being_read(launch) {
+                    held.push((at, writer, Instant::now()));
+                }
+            }
+            most_at_once = most_at_once.max(held.len());
+            held.retain_mut(|(at, writer, since)| {
+                if since.elapsed() < HOLD {
+                    return true;
+                }
+                writer
+                    .write_all(&launches[*at].1)
+                    .expect("hand the fold its launch record");
+                folded[*at] += 1;
+                false
+            });
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let subscribed = subscribed.join().expect("the subscription");
+        let mut listed: Vec<&str> = subscribed["initial"]["snapshot"]["sidebar"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .filter_map(|row| row["id"].as_str())
+            .collect();
+        listed.sort_unstable();
+        assert_eq!(listed, runs, "the snapshot carries every row");
+        (most_at_once, folded)
+    });
+    for (launch, text) in &launches {
+        fs::remove_file(launch).expect("remove the FIFO");
+        fs::write(launch, text).expect("restore the launch record");
+    }
+    assert!(
+        folded.iter().all(|times| *times > 0),
+        "every run folded: {folded:?}"
+    );
+    assert_eq!(most_at_once, 1, "folds in flight at once");
+    for run in &runs {
+        assert!(
+            live.serving.run_dir(run).join("summary.json").is_file(),
+            "{run}'s summary is cached again"
+        );
+    }
+}
+
 /// Lines a server traces at once are each traced whole: the trace is how these
 /// journeys read what the server did, and an unreadable line reads as nothing
 /// done. Many tabs subscribing at once trace their first answers at once.
