@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.82.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.81.2...v0.82.0) - 2026-11-14
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine and onevcs that read a repository's declared publication policy ([#786](https://github.com/nickderobertis/onepipeline-ui/pull/786))
+
+### Performance
+
+- *(api)* [**breaking**] open a large run's first screen in under a second ([#782](https://github.com/nickderobertis/onepipeline-ui/pull/782))
+
 ## [0.81.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.81.1...v0.81.2) - 2026-11-13
 
 ### Added
