@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.83.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.82.1...v0.83.0) - 2026-11-14
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine whose plan store projects lists and maps onto board fields ([#799](https://github.com/nickderobertis/onepipeline-ui/pull/799))
+
+### Performance
+
+- *(api)* open every large run's Overall first screen in under a second ([#791](https://github.com/nickderobertis/onepipeline-ui/pull/791))
+
 ## [0.82.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.82.0...v0.82.1) - 2026-11-14
 
 ### Fixed
