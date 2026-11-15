@@ -801,3 +801,11 @@ engine pins, so that the read API links the engine and plan store a host
 dispatches with; nothing it serves changes. 0.112.x is skipped. The move is
 announced as a break: the re-exported engine types change. Its oneagentgraph,
 onejudge, onemessagebus and onevcs requirements are the ones 0.111.0 resolved.
+
+0.113.1 is the engine that links onetaskgraph 0.14.16, the store release that
+lets a reviewed plan keep its review across a board copy. This crate moves to
+it, with the onetaskgraph 0.14.16 store that engine pins, so that a host can
+adopt that store fix together with a read API linking the same crates; nothing
+it serves changes. A patch move inside 0.113 leaves the re-exported engine
+types where they were, so it is not announced as a break. Its oneagentgraph,
+onejudge, onemessagebus and onevcs requirements are the ones 0.113.0 resolved.
