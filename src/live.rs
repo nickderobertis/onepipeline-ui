@@ -2472,6 +2472,11 @@ impl Hub {
         }));
     }
 
+    /// Append `line` to the trace file as one write. Threads trace at once — two
+    /// runs a page prepared finish opening together — and a value formatted
+    /// straight into the unbuffered file reaches it as many small writes, which
+    /// interleave into lines no reader can parse; one appending write of the
+    /// whole line does not.
     fn trace(&self, line: &Value) {
         let Some(path) = &self.0.trace else { return };
         if let Ok(mut file) = std::fs::OpenOptions::new()
@@ -2480,7 +2485,9 @@ impl Hub {
             .open(path)
         {
             use std::io::Write;
-            let _ = writeln!(file, "{line}");
+            let mut text = line.to_string();
+            text.push('\n');
+            let _ = file.write_all(text.as_bytes());
         }
     }
 
