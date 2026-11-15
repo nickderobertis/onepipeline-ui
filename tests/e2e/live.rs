@@ -1022,38 +1022,85 @@ fn rename(from: &Path, to: &Path) {
 /// look caches every run's.
 #[cfg(unix)]
 fn hold_a_look_on(live: &Live, run: &str) -> (PathBuf, fs::File) {
-    use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::OpenOptionsExt;
-
     let summary = live.serving.run_dir(run).join("summary.json");
     assert!(summary.is_file(), "the first look cached the run's summary");
-    // llmlint: ignore-block[tests_mirror_real_usage] the condition under test is storage that answers slower than a client waits — what a Windows host's syncs did to this server's look — and no request a client can make produces that on demand: a genuinely slow fold is the host's timing, which these journeys must not depend on. The FIFO is that storage at the filesystem boundary the server reads the runs root through; the server is the real binary, nothing in it is stubbed, and every request these journeys hold to an answer is the HTTP one a tab makes.
-    fs::remove_file(&summary).expect("remove the cached summary");
-    let path = std::ffi::CString::new(summary.as_os_str().as_bytes()).expect("a path");
-    // SAFETY: `path` is a NUL-terminated path this test owns.
-    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0, "mkfifo");
-    // llmlint: ignore-end[tests_mirror_real_usage]
+    fifo_in_place_of(&summary);
     // The summary's stamp moved, so the next look reads the run again and
     // blocks opening the FIFO; a writer can open it once that reader has, and
     // from then on the look blocks reading it until the writer closes.
     let deadline = Instant::now() + PATIENCE;
     loop {
-        match fs::OpenOptions::new()
-            .write(true)
-            .custom_flags(libc::O_NONBLOCK)
-            .open(&summary)
-        {
-            Ok(writer) => return (summary, writer),
-            Err(err) if err.raw_os_error() == Some(libc::ENXIO) => {
-                assert!(
-                    Instant::now() < deadline,
-                    "the server never looked at the run's summary again"
-                );
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Err(err) => panic!("open the summary FIFO: {err}"),
+        if let Some(writer) = being_read(&summary) {
+            return (summary, writer);
         }
+        assert!(
+            Instant::now() < deadline,
+            "the server never looked at the run's summary again"
+        );
+        std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// Put a FIFO where `file` is, so the server's next read of it blocks opening it
+/// until a writer does.
+#[cfg(unix)]
+pub(crate) fn fifo_in_place_of(file: &Path) {
+    use std::os::unix::ffi::OsStrExt;
+
+    // llmlint: ignore-block[tests_mirror_real_usage] the condition under test is storage that answers slower than a client waits — what a Windows host's syncs, and a loaded CI runner's folds and syncs, did to this server's look — and no request a client can make produces that on demand: a genuinely slow fold is the host's timing, which these journeys must not depend on. The FIFO is that storage at the filesystem boundary the server reads the runs root through; the server is the real binary, nothing in it is stubbed, and every request these journeys hold to an answer is the HTTP one a tab makes.
+    match fs::remove_file(file) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => panic!("remove {}: {err}", file.display()),
+    }
+    let path = std::ffi::CString::new(file.as_os_str().as_bytes()).expect("a path");
+    // SAFETY: `path` is a NUL-terminated path this test owns.
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0, "mkfifo");
+    // llmlint: ignore-end[tests_mirror_real_usage]
+}
+
+/// A writer on a [`fifo_in_place_of`], once the server is reading it: from then
+/// on that read blocks until the writer closes. `None` while nothing reads it.
+#[cfg(unix)]
+fn being_read(file: &Path) -> Option<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    match fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(file)
+    {
+        Ok(writer) => Some(writer),
+        Err(err) if err.raw_os_error() == Some(libc::ENXIO) => None,
+        Err(err) => panic!("open the FIFO at {}: {err}", file.display()),
+    }
+}
+
+/// Make the server's next read of `file` take `delay` from the moment it
+/// starts, and then finish on its own, whatever any other read is doing: the
+/// read a slow disk or a starved CPU makes of one file. Once released, the read
+/// takes an empty file, which the SDK reads as no cache and rebuilds. The handle
+/// fails if the server never began the read.
+#[cfg(unix)]
+pub(crate) fn delay_the_next_read(file: &Path, delay: Duration) -> std::thread::JoinHandle<()> {
+    fifo_in_place_of(file);
+    let file = file.to_path_buf();
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let writer = loop {
+            if let Some(writer) = being_read(&file) {
+                break writer;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the server never read {}",
+                file.display()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        std::thread::sleep(delay);
+        drop(writer);
+    })
 }
 
 /// A stream is answered while the sidebar is still reading a run.
@@ -1186,6 +1233,177 @@ fn a_run_no_look_has_listed_yet_is_in_the_snapshot_of_a_subscription_to_it() {
         .expect("the look lists the run")
         .clone();
     assert_eq!(row, looked, "the row is the one a look reads");
+}
+
+/// A look reads its runs' rows side by side, so a first subscription answers
+/// within a client's patience however long each row takes on its own.
+///
+/// A subscription's first look reads every run's row, and a stale one is the SDK
+/// folding the run and syncing its cache back to disk. Here each row's read takes
+/// an eighth of the client's read timeout and then finishes on its own:
+/// one after another, twelve of them take half as long again as the client
+/// waits; side by side, a fraction of it.
+#[cfg(unix)]
+#[test]
+fn a_first_subscription_reads_its_rows_side_by_side_within_a_clients_patience() {
+    let runs: Vec<String> = (0..12)
+        .map(|index| format!("read-beside-{index:02}"))
+        .collect();
+    let live = Live::start(|root| {
+        for run in &runs {
+            growing_run(root, run);
+        }
+    });
+    let delay = http::TIMEOUT / 8;
+    let reads: Vec<_> = runs
+        .iter()
+        .map(|run| delay_the_next_read(&live.serving.run_dir(run).join("summary.json"), delay))
+        .collect();
+
+    let subscribed = live.subscribe(&json!({ "view": { "type": "sidebar" } }));
+    let mut listed: Vec<&str> = subscribed["initial"]["snapshot"]["sidebar"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .filter_map(|row| row["id"].as_str())
+        .collect();
+    listed.sort_unstable();
+    assert_eq!(listed, runs, "the snapshot carries every row");
+    for read in reads {
+        read.join().expect("the server read every row");
+    }
+    for run in &runs {
+        assert!(
+            live.serving.run_dir(run).join("summary.json").is_file(),
+            "{run}'s summary is cached again"
+        );
+    }
+}
+
+/// A look folds and writes back one stale summary at a time, however many rows it
+/// reads side by side.
+///
+/// A stale row is the SDK folding the run, persisting the fold's checkpoint and
+/// writing the summary cache back, syncing each to disk. Here every run's summary
+/// is missing, so every row folds, and each fold's read of the run's launch record
+/// is held a while once it starts. Were the folds side by side, a second would
+/// start while the first was held.
+#[cfg(unix)]
+#[test]
+fn a_look_folds_and_writes_back_one_stale_summary_at_a_time() {
+    use std::io::Write;
+
+    const HOLD: Duration = Duration::from_millis(250);
+    let runs: Vec<String> = (0..6)
+        .map(|index| format!("fold-one-at-a-time-{index}"))
+        .collect();
+    // In place before the server starts, so that every look it takes, its first
+    // included, folds through them.
+    let mut texts = Vec::new();
+    let live = Live::start(|root| {
+        for run in &runs {
+            growing_run(root, run);
+            let launch = root.join(run).join("launch.json");
+            assert!(
+                !root.join(run).join("summary.json").exists(),
+                "{run} has no summary"
+            );
+            texts.push(fs::read(&launch).expect("the launch record"));
+            fifo_in_place_of(&launch);
+        }
+    });
+    let launches: Vec<(PathBuf, Vec<u8>)> = runs
+        .iter()
+        .map(|run| live.serving.run_dir(run).join("launch.json"))
+        .zip(texts)
+        .collect();
+
+    let (most_at_once, served) = std::thread::scope(|scope| {
+        let subscribed = scope.spawn(|| live.subscribe(&json!({ "view": { "type": "sidebar" } })));
+        // Each run's launch record is handed over once and then put back as the
+        // file it was: a fold's reader holds the FIFO open until it has read to
+        // the end, and a second writer opened on it then would hand the same
+        // record over twice.
+        let mut served = vec![false; launches.len()];
+        let mut held: Vec<(usize, fs::File, Instant)> = Vec::new();
+        let mut most_at_once = 0;
+        let deadline = Instant::now() + PATIENCE;
+        while !subscribed.is_finished() || !held.is_empty() {
+            assert!(Instant::now() < deadline, "the look never finished folding");
+            for (at, (launch, _)) in launches.iter().enumerate() {
+                if served[at] || held.iter().any(|(holding, _, _)| *holding == at) {
+                    continue;
+                }
+                if let Some(writer) = being_read(launch) {
+                    held.push((at, writer, Instant::now()));
+                }
+            }
+            most_at_once = most_at_once.max(held.len());
+            held.retain_mut(|(at, writer, since)| {
+                if since.elapsed() < HOLD {
+                    return true;
+                }
+                let (launch, text) = &launches[*at];
+                writer
+                    .write_all(text)
+                    .expect("hand the fold its launch record");
+                let restored = launch.with_extension("json.restored");
+                fs::write(&restored, text).expect("write the launch record back");
+                fs::rename(&restored, launch).expect("put the launch record back");
+                served[*at] = true;
+                false
+            });
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let subscribed = subscribed.join().expect("the subscription");
+        let mut listed: Vec<&str> = subscribed["initial"]["snapshot"]["sidebar"]
+            .as_array()
+            .expect("rows")
+            .iter()
+            .filter_map(|row| row["id"].as_str())
+            .collect();
+        listed.sort_unstable();
+        assert_eq!(listed, runs, "the snapshot carries every row");
+        (most_at_once, served)
+    });
+    assert!(
+        served.iter().all(|served| *served),
+        "every run folded: {served:?}"
+    );
+    assert_eq!(most_at_once, 1, "folds in flight at once");
+    for run in &runs {
+        assert!(
+            live.serving.run_dir(run).join("summary.json").is_file(),
+            "{run}'s summary is cached again"
+        );
+    }
+}
+
+/// Lines a server traces at once are each traced whole: the trace is how these
+/// journeys read what the server did, and an unreadable line reads as nothing
+/// done. Many tabs subscribing at once trace their first answers at once.
+#[test]
+fn lines_traced_at_once_are_each_traced_whole() {
+    const TABS: usize = 16;
+    const EACH: usize = 8;
+    let live = Live::start(|root| growing_run(root, fixture_run::RUN_ID));
+    live.subscribe(&json!({ "view": { "type": "sidebar" } }));
+    std::thread::scope(|scope| {
+        for _ in 0..TABS {
+            scope.spawn(|| {
+                for _ in 0..EACH {
+                    live.subscribe(&json!({ "view": { "type": "sidebar" } }));
+                }
+            });
+        }
+    });
+    let text = fs::read_to_string(&live.trace).expect("a trace");
+    let unreadable: Vec<&str> = text
+        .lines()
+        .filter(|line| serde_json::from_str::<Value>(line).is_err())
+        .collect();
+    assert_eq!(unreadable, Vec::<&str>::new(), "every traced line is whole");
+    assert_eq!(live.first_answers().len(), 1 + TABS * EACH);
 }
 
 #[test]

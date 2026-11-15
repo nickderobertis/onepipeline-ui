@@ -583,6 +583,7 @@ impl Look {
             known: held.keys().cloned().collect(),
         };
         let entries = std::fs::read_dir(store.root()).ok()?;
+        let mut moved = Vec::new();
         for entry in entries.flatten() {
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
@@ -603,18 +604,103 @@ impl Look {
                 Some((_, read_at)) if read && read_at.elapsed() < reread => continue,
                 _ => {}
             }
-            let Some(row) = row_of(&paths, &run) else {
-                continue;
-            };
-            look.read.push((run, stamps, row));
+            moved.push((run, paths, stamps));
         }
+        look.read = rows_of(moved);
         Some(look)
     }
 }
 
+/// How many runs' rows one look reads at once.
+///
+/// The first look reads every run's row, and the poller's looks read every run
+/// that moved. A row whose summary is current is a bounded read of the cache, and
+/// those overlap: read one after another, a root of 64 runs on a host short of
+/// CPU and disk held a first `human-items` subscription's answer past the 20 s a
+/// client waits for a status line. A row whose summary is behind its journal
+/// folds and writes the cache back, and those go through [`CACHE_WRITER`] one at
+/// a time whatever this says.
+const ROW_READERS: usize = 8;
+
+/// Each run's row, read [`ROW_READERS`] at a time and answered in `runs`' order;
+/// a run whose summary cannot be read is left out, as [`row_of`] leaves it.
+fn rows_of(runs: Vec<(RunId, RunPaths, Stamps)>) -> Vec<(RunId, Stamps, Arc<str>)> {
+    let readers = ROW_READERS.min(runs.len());
+    if readers <= 1 {
+        return runs
+            .into_iter()
+            .filter_map(|(run, paths, stamps)| {
+                row_of(&paths, &run, &stamps).map(|row| (run, stamps, row))
+            })
+            .collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut rows: Vec<Option<Arc<str>>> = std::thread::scope(|scope| {
+        let readers: Vec<_> = (0..readers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut read = Vec::new();
+                    loop {
+                        let at = next.fetch_add(1, Ordering::Relaxed);
+                        let Some((run, paths, stamps)) = runs.get(at) else {
+                            return read;
+                        };
+                        read.push((at, row_of(paths, run, stamps)));
+                    }
+                })
+            })
+            .collect();
+        let mut rows = vec![None; runs.len()];
+        for reader in readers {
+            // A reader's panic is the look's, as it was when one thread read them.
+            let read = reader
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+            for (at, row) in read {
+                rows[at] = row;
+            }
+        }
+        rows
+    });
+    runs.into_iter()
+        .zip(rows.iter_mut())
+        .filter_map(|((run, _, stamps), row)| Some((run, stamps, row.take()?)))
+        .collect()
+}
+
+/// The one reader at a time, across the server, whose row folds a run and
+/// writes its summary cache back.
+///
+/// That write-back is a durable write: the SDK persists the fold's checkpoint and
+/// writes the summary, syncing it and its directory. Syncs issued at once by many
+/// readers are inferred to queue behind each other rather than overlap, most of
+/// all on macOS, where a sync is `F_FULLFSYNC`, a flush of the whole device. That
+/// is read from what the call does, not measured here. So a row that will fold
+/// takes this first, and only one reader at a time runs the fold, the checkpoint
+/// and the syncs.
+static CACHE_WRITER: Mutex<()> = Mutex::new(());
+
+/// Whether `stamps` show a summary behind its journal: missing, or written no
+/// later than the journal last moved. That is a row whose read folds the run
+/// and writes the cache back.
+///
+/// Read off the stamps a look already took, since only the SDK reads the summary's
+/// own record of the journal, and so only up to them: a journal that moves between
+/// the stamp and the read, or a summary that is newer and still stale, folds and
+/// writes outside [`CACHE_WRITER`]. Closing that window takes a summary read from
+/// the SDK that does not sync a cache it can rebuild.
+fn behind_its_journal(stamps: &Stamps) -> bool {
+    match (&stamps.0[0], &stamps.0[1]) {
+        (Some((_, journal)), Some((_, summary))) => summary <= journal,
+        _ => true,
+    }
+}
+
 /// `run`'s sidebar row, read from its bounded summary; `None` where the
-/// summary cannot be read.
-fn row_of(paths: &RunPaths, run: &RunId) -> Option<Arc<str>> {
+/// summary cannot be read. Where `stamps` show the summary behind its journal,
+/// read through [`CACHE_WRITER`].
+fn row_of(paths: &RunPaths, run: &RunId, stamps: &Stamps) -> Option<Arc<str>> {
+    let _writer = behind_its_journal(stamps).then(|| lock(&CACHE_WRITER));
     let summary = RunSummary::of(paths).ok()?;
     Some(
         payload::sidebar_row(run, &summary, paths)
@@ -634,7 +720,7 @@ fn missing_row(shared: &Shared, run: &RunId) -> Option<(RunId, Stamps, Arc<str>)
     let paths = shared.store.paths_of(run);
     let stamps = Stamps::of(&paths);
     stamps.0[0]?;
-    let row = row_of(&paths, run)?;
+    let row = row_of(&paths, run, &stamps)?;
     Some((run.clone(), stamps, row))
 }
 
@@ -1525,21 +1611,33 @@ impl Hub {
                 Some(live)
             }
         };
-        // A human-item view's first reading likewise: the engine may refuse it.
         let human_items = human_items_view(&request.view);
-        if let Some(view) = &human_items {
-            let mut reading = lock(&shared.human_items);
-            self.ensure_human_items(&mut reading, view)?;
-        }
         // A run view's snapshot waits on neither the sidebar nor the run's
         // complete read: its rows arrive as the stream's first frame.
         let run_view = visible.run_id().is_some();
+        // A human-item view's first reading likewise, which the engine may refuse,
+        // beside the sidebar's first look: each reads every run under the root and
+        // neither needs the other, so the answer waits on the longer of the two
+        // rather than on both.
+        std::thread::scope(|scope| {
+            let reading = human_items.as_ref().map(|view| {
+                scope.spawn(move || {
+                    let mut reading = lock(&shared.human_items);
+                    self.ensure_human_items(&mut reading, view).map(drop)
+                })
+            });
+            if !run_view {
+                self.first_look();
+            }
+            reading.map_or(Ok(()), |reading| {
+                reading
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            })
+        })?;
         // Then the publication boundary: the sidebar, the run and the
         // subscriptions locked together, so every change after the snapshot is
         // one this subscription is sent and none before it is.
-        if !run_view {
-            self.first_look();
-        }
         let sidebar = lock(&shared.sidebar);
         let mut run = live.as_ref().map(|live| lock(live));
         let mut reading = human_items.as_ref().map(|_| lock(&shared.human_items));
@@ -2472,22 +2570,23 @@ impl Hub {
         }));
     }
 
-    /// Append `line` to the trace file as one write. Threads trace at once — two
-    /// runs a page prepared finish opening together — and a value formatted
-    /// straight into the unbuffered file reaches it as many small writes, which
-    /// interleave into lines no reader can parse; one appending write of the
-    /// whole line does not.
+    /// Append `line` to the trace whole, whatever any other thread is tracing.
+    ///
+    /// Formatting straight into the file writes once per token, and two threads
+    /// tracing at once would interleave those writes into unreadable lines; so a
+    /// line is rendered first and written with one call, one line at a time.
     fn trace(&self, line: &Value) {
+        static TRACING: Mutex<()> = Mutex::new(());
         let Some(path) = &self.0.trace else { return };
+        let rendered = format!("{line}\n");
+        let _tracing = lock(&TRACING);
         if let Ok(mut file) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(path)
         {
             use std::io::Write;
-            let mut text = line.to_string();
-            text.push('\n');
-            let _ = file.write_all(text.as_bytes());
+            let _ = file.write_all(rendered.as_bytes());
         }
     }
 

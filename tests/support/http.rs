@@ -13,7 +13,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
 /// How long any single read may block before the journey is declared hung.
-const TIMEOUT: Duration = Duration::from_secs(20);
+pub const TIMEOUT: Duration = Duration::from_secs(20);
 
 /// One complete response.
 pub struct Response {
