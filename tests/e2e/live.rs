@@ -1318,16 +1318,20 @@ fn a_look_folds_and_writes_back_one_stale_summary_at_a_time() {
         .zip(texts)
         .collect();
 
-    let (most_at_once, folded) = std::thread::scope(|scope| {
+    let (most_at_once, served) = std::thread::scope(|scope| {
         let subscribed = scope.spawn(|| live.subscribe(&json!({ "view": { "type": "sidebar" } })));
-        let mut folded = vec![0usize; launches.len()];
+        // Each run's launch record is handed over once and then put back as the
+        // file it was: a fold's reader holds the FIFO open until it has read to
+        // the end, and a second writer opened on it then would hand the same
+        // record over twice.
+        let mut served = vec![false; launches.len()];
         let mut held: Vec<(usize, fs::File, Instant)> = Vec::new();
         let mut most_at_once = 0;
         let deadline = Instant::now() + PATIENCE;
         while !subscribed.is_finished() || !held.is_empty() {
             assert!(Instant::now() < deadline, "the look never finished folding");
             for (at, (launch, _)) in launches.iter().enumerate() {
-                if held.iter().any(|(holding, _, _)| *holding == at) {
+                if served[at] || held.iter().any(|(holding, _, _)| *holding == at) {
                     continue;
                 }
                 if let Some(writer) = being_read(launch) {
@@ -1339,10 +1343,14 @@ fn a_look_folds_and_writes_back_one_stale_summary_at_a_time() {
                 if since.elapsed() < HOLD {
                     return true;
                 }
+                let (launch, text) = &launches[*at];
                 writer
-                    .write_all(&launches[*at].1)
+                    .write_all(text)
                     .expect("hand the fold its launch record");
-                folded[*at] += 1;
+                let restored = launch.with_extension("json.restored");
+                fs::write(&restored, text).expect("write the launch record back");
+                fs::rename(&restored, launch).expect("put the launch record back");
+                served[*at] = true;
                 false
             });
             std::thread::sleep(Duration::from_millis(5));
@@ -1356,15 +1364,11 @@ fn a_look_folds_and_writes_back_one_stale_summary_at_a_time() {
             .collect();
         listed.sort_unstable();
         assert_eq!(listed, runs, "the snapshot carries every row");
-        (most_at_once, folded)
+        (most_at_once, served)
     });
-    for (launch, text) in &launches {
-        fs::remove_file(launch).expect("remove the FIFO");
-        fs::write(launch, text).expect("restore the launch record");
-    }
     assert!(
-        folded.iter().all(|times| *times > 0),
-        "every run folded: {folded:?}"
+        served.iter().all(|served| *served),
+        "every run folded: {served:?}"
     );
     assert_eq!(most_at_once, 1, "folds in flight at once");
     for run in &runs {
