@@ -809,3 +809,12 @@ adopt that store fix together with a read API linking the same crates; nothing
 it serves changes. A patch move inside 0.113 leaves the re-exported engine
 types where they were, so it is not announced as a break. Its oneagentgraph,
 onejudge, onemessagebus and onevcs requirements are the ones 0.113.0 resolved.
+
+0.113.3 is the engine that links onevcs 0.67.2, the release carrying onevcs's
+change to how an unpublished branch is read. This crate moves
+to it, with the onevcs 0.67.2 that engine requires, so that a host can adopt that
+onevcs fix together with a read API linking the same engine; nothing it serves
+changes. 0.113.2 is skipped. A patch move inside 0.113 leaves the re-exported
+engine types where they were, so it is not announced as a break. Its
+oneagentgraph, onejudge, onemessagebus and onetaskgraph requirements are the ones
+0.113.1 resolved.
