@@ -818,3 +818,13 @@ changes. 0.113.2 is skipped. A patch move inside 0.113 leaves the re-exported
 engine types where they were, so it is not announced as a break. Its
 oneagentgraph, onejudge, onemessagebus and onetaskgraph requirements are the ones
 0.113.1 resolved.
+
+0.113.4 is the engine that links oneagentgraph 0.13.1, the release whose
+`engineer` persona asks for proportionate proof: a committed test for durable
+behaviour and one-off proof for point-in-time work. This crate moves to it,
+with the oneagentgraph 0.13.1 that engine resolves, so that a host can adopt
+that persona together with a read API linking the same engine; nothing it
+serves changes. A patch move inside 0.113 leaves the re-exported engine types
+where they were, so it is not announced as a break. Its onejudge,
+onemessagebus, onetaskgraph and onevcs requirements are the ones 0.113.3
+resolved.
