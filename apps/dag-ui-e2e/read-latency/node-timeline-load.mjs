@@ -382,6 +382,9 @@ async function measure(context, world, origin, index) {
           route: url.pathname.replace(/\/runs\/[^/]+/u, "/runs/:run"),
           query: url.search,
           status: response?.status() ?? null,
+          // When the request was sent, wall clock: entries are pushed as their
+          // handling finishes, so concurrent requests are put back in send order by it.
+          sent_at: timing.startTime,
           // From the request sent to its answer's first byte: the server's time, on loopback.
           server_ms:
             timing.responseStart >= 0 && timing.requestStart >= 0
@@ -462,7 +465,9 @@ async function measure(context, world, origin, index) {
   // whatever shape was measured, keyed as the view keys a record's row.
   const expected = await expectedRows(origin, world);
   const total = expected.total;
-  const pages = requests.filter(isTimelineRead);
+  const pages = requests
+    .filter(isTimelineRead)
+    .sort((a, b) => a.sent_at - b.sent_at);
   // What the pages or the stream carried, off the copies the page kept.
   const read = await page.evaluate(async () => {
     const ids = [];
@@ -543,7 +548,12 @@ async function measure(context, world, origin, index) {
       (sum, entry) => sum + (entry.bytes ?? 0),
       0,
     ),
+    // Each timeline request's server time, in the order the requests were sent.
     timeline_server_ms: pages.map((entry) => entry.server_ms),
+    // Each one's send time, in ms after the first timeline request's.
+    timeline_sent_ms: pages.map((entry) =>
+      Math.round(entry.sent_at - (pages[0]?.sent_at ?? entry.sent_at)),
+    ),
     timeline_server_ms_sum: pages.reduce(
       (sum, entry) => sum + (entry.server_ms ?? 0),
       0,
