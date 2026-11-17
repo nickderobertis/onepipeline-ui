@@ -99,6 +99,8 @@ export function TimelineItemDetail({
               <ListTree size={30} />
               <p>Select an item in the timeline to read what it recorded.</p>
             </div>
+          ) : spikeDetail(row) !== undefined ? (
+            spikeDetail(row)
           ) : (
             <>
               <ItemHeading row={row} />
@@ -983,4 +985,73 @@ function roleLabel(
   transportRole: Attribution["transportRole"],
 ): string {
   return dispatchRoleLabel(agentRole, transportRole);
+}
+
+// SPIKE (spike-visual): bespoke details the plan adds — what a person attested,
+// and a command as one command line. Hard-coded from the fixture's record.
+import { commandLine } from "../../spike/mock";
+
+function spikeDetail(row: TimelineRow) {
+  if (row.rowKind !== "event") return undefined;
+  const fields = (row.event.fields ?? {}) as Record<string, unknown>;
+  if (row.event.kind === "human-attested") {
+    const item = (fields.item ?? {
+      title: "Approve the widgets release notes?",
+      resolved_by: "operator",
+      on_behalf_of: "release-manager",
+      provenance: "dag-ui action items",
+      choice: { title: "Approve" },
+      text: "Approved; mention the reader switch in the upgrade notes.",
+    }) as Record<string, any>;
+    return (
+      <div className="spike-detail">
+        <p className="eyebrow">Human answer · human-attested</p>
+        <h2 className="m-0 text-lg">{item.title}</h2>
+        <dl>
+          <dt>Answered by</dt>
+          <dd>{item.resolved_by}</dd>
+          <dt>On behalf of</dt>
+          <dd>{item.on_behalf_of}</dd>
+          <dt>Through</dt>
+          <dd>{item.provenance}</dd>
+          <dt>Choice</dt>
+          <dd>
+            <span className="spike-choice">✓ {item.choice?.title}</span>
+          </dd>
+          <dt>Words</dt>
+          <dd>
+            <blockquote>{item.text}</blockquote>
+          </dd>
+          <dt>Step</dt>
+          <dd>{row.event.step_id ?? "approve-release"}</dd>
+          <dt>Recorded</dt>
+          <dd>{new Date(row.startedAt).toLocaleString()}</dd>
+        </dl>
+      </div>
+    );
+  }
+  if (row.event.kind === "command-started") {
+    const argv = Array.isArray(fields.command)
+      ? (fields.command as unknown[]).map(String)
+      : ["bun", "run", "build", "--name", "a b"];
+    return (
+      <div className="spike-detail">
+        <p className="eyebrow">Command · command-started</p>
+        <pre className="spike-command">{commandLine(argv)}</pre>
+        <dl>
+          <dt>Node</dt>
+          <dd>{row.event.node_id ?? "build-docs"}</dd>
+          <dt>Started</dt>
+          <dd>{new Date(row.startedAt).toLocaleString()}</dd>
+          <dt>Log</dt>
+          <dd>
+            <code>{String(fields.log ?? "commands/build-docs.log")}</code>
+          </dd>
+          <dt>Ended</dt>
+          <dd>exited 0 after 41 s</dd>
+        </dl>
+      </div>
+    );
+  }
+  return undefined;
 }

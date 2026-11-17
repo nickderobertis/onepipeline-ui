@@ -288,7 +288,7 @@ export function App({
             <div className="topbar-title">
               <div>
                 <p className="eyebrow">Execution telemetry</p>
-                <h2>
+                <h2 title={selectedRunId}>
                   {humanItems.active
                     ? "Action items"
                     : selection.host
@@ -355,63 +355,52 @@ export function App({
               </Button>
             </div>
           </section>
+          {/* SPIKE (spike-visual): run details always shown, as label and value pairs. */}
           {!runless && detail && (
-            <RecordDisclosure
-              label="Run details"
-              className="run-header-details"
-              onOpen={control.reread}
-            >
-              <p>
-                Launching session:{" "}
-                {runLoaded ? launchLabel(detail.launch) : LOADING_TEXT}
-              </p>
-              {/* A reading already shown stays beside this, so a failed re-read
-                  says the figures below are the last ones served. */}
-              {control.status.error && (
-                <p role="alert">
-                  Status unavailable: {control.status.error.message}
-                </p>
-              )}
-              {control.status.value && (
-                <dl>
-                  <dt>Summary</dt>
-                  <dd>{control.status.value.summary}</dd>
-                  <dt>Graph state</dt>
-                  <dd>{graphStateWord(control.status.value.node_status)}</dd>
-                  <dt>Unread surfaces</dt>
-                  <dd>{control.status.value.unread_surfaces.count}</dd>
-                  <dt>Oldest unread (seconds)</dt>
-                  <dd>
-                    {control.status.value.unread_surfaces.oldest_seconds ??
-                      "None"}
-                  </dd>
-                  {/* How long the run's journal has been quiet: the age Status
-                      gave a parked driver, read off the run's own last write. */}
-                  <dt>Last progress</dt>
-                  <dd>
-                    <output aria-label="Last progress">
-                      {!runLoaded ? (
-                        LOADING_TEXT
-                      ) : detail.run.last_progress_at === undefined ? (
-                        "Not recorded"
-                      ) : (
-                        <Timestamp
-                          at={new Date(
-                            detail.run.last_progress_at * 1000,
-                          ).toISOString()}
-                          relative
-                        />
-                      )}
-                    </output>
-                  </dd>
-                </dl>
-              )}
-              {control.status.value && (
-                <section aria-label="Node statuses">
-                  <StructuredFields value={control.status.value.node_status} />
-                </section>
-              )}
-            </RecordDisclosure>
+            <dl aria-label="Run details" className="spike-run-details">
+              <div>
+                <dt>Launching session</dt>
+                <dd>{runLoaded ? launchLabel(detail.launch) : LOADING_TEXT}</dd>
+              </div>
+              <div>
+                <dt>Summary</dt>
+                <dd>{control.status.value?.summary ?? LOADING_TEXT}</dd>
+              </div>
+              <div>
+                <dt>Graph state</dt>
+                <dd>
+                  {control.status.value
+                    ? graphStateWord(control.status.value.node_status)
+                    : LOADING_TEXT}
+                </dd>
+              </div>
+              <div>
+                <dt>Unread surfaces</dt>
+                <dd>
+                  {control.status.value?.unread_surfaces.count ?? LOADING_TEXT}
+                  {control.status.value?.unread_surfaces.oldest_seconds
+                    ? ` · oldest ${control.status.value.unread_surfaces.oldest_seconds}s`
+                    : ""}
+                </dd>
+              </div>
+              <div>
+                <dt>Last progress</dt>
+                <dd>
+                  {!runLoaded ? (
+                    LOADING_TEXT
+                  ) : detail.run.last_progress_at === undefined ? (
+                    "Not recorded"
+                  ) : (
+                    <Timestamp
+                      at={new Date(
+                        detail.run.last_progress_at * 1000,
+                      ).toISOString()}
+                      relative
+                    />
+                  )}
+                </dd>
+              </div>
+            </dl>
           )}
           {telemetry.error && !readFailed && (
             // `Alert` carries `role="alert"` itself, so the banner keeps announcing
@@ -514,32 +503,11 @@ export function App({
                   <TabsTrigger value="overall">
                     <Route size={15} /> Overall
                   </TabsTrigger>
-                  <TabsTrigger value="channel">
-                    <Inbox size={15} /> Channel
-                  </TabsTrigger>
                 </TabsList>
                 {/* How much of what the run recorded this reading carries. Beside
                   the views rather than in the toolbar: it selects a reading, like
                   they do, and the toolbar is a fixed-height row the timeline
                   region's own share of the window is measured against. */}
-                <fieldset className="detail-switch">
-                  <legend className="sr-only">Level of detail</legend>
-                  {detailLevels.map(([level, { label, description }]) => (
-                    <Button
-                      aria-pressed={selection.detail === level}
-                      key={level}
-                      onClick={() => selection.selectDetail(level)}
-                      size="sm"
-                      title={description}
-                      type="button"
-                      variant={
-                        selection.detail === level ? "default" : "outline"
-                      }
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </fieldset>
               </div>
               {/* One content region for whichever view is selected: the other tab's
                 panel is unmounted by the primitive, exactly as it is for any tab set. */}

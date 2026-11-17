@@ -182,7 +182,7 @@ export function NodeTimelineView({
               rel="noreferrer"
               target="_blank"
             >
-              Pull request <ExternalLink size={12} />
+              {changeId(prUrl)} <ExternalLink size={12} />
             </a>
           )}
         </div>
@@ -373,7 +373,12 @@ export function NodeTimelineView({
                               check.name
                             )}
                           </th>
-                          <td>{check.status ?? "Not recorded"}</td>
+                          <td>
+                            <SpikeCheckStatus
+                              conclusion={check.conclusion}
+                              status={check.status}
+                            />
+                          </td>
                           <td>{check.conclusion ?? "—"}</td>
                           <td>
                             <CheckRuntime
@@ -477,6 +482,19 @@ export function NodeTimelineView({
     </section>
   );
 }
+
+// SPIKE (spike-visual)
+import {
+  changeId,
+  collapseCycles,
+  commandLine,
+  CycleBlock,
+  EventTypeFilter,
+  eventType,
+  oneRowPerSurface,
+  spikePartial,
+  spikeRuns,
+} from "../../spike/mock";
 
 function NodeExecution({
   client,
@@ -721,11 +739,11 @@ function NodeExecution({
         data-testid="node-timeline"
         ref={plotArea}
       >
-        <PlotHatches
-          container={plotArea}
-          range={zoom ?? shown}
-          stretches={history.unheld}
-        />
+        {spikePartial() && (
+          <div className="spike-partial" role="status">
+            <span>Partial — loading · 1,240 of 3,100 records</span>
+          </div>
+        )}
         <Timeline
           {...TIMELINE_TIME_MARKS}
           axis={{ origin: plotted[0] }}
@@ -792,9 +810,35 @@ function NodeExecution({
             onLoad={askEarlier}
           />
         )}
-        {transcriptRuns(reading).map((run) => {
+        <header className="spike-events-head">
+          <h3>Events</h3>
+          <EventTypeFilter
+            counts={reading.reduce((counts, entry) => {
+              if (entry.entryKind === "row") {
+                const type = eventType(entry.row);
+                counts.set(type, (counts.get(type) ?? 0) + 1);
+              }
+              return counts;
+            }, new Map<string, number>())}
+          />
+        </header>
+        {spikeRuns(collapseCycles(oneRowPerSurface(reading))).map((run) => {
           const items = run.entries.map((entry) =>
-            entry.entryKind === "row" ? (
+            entry.entryKind === "cycle" ? (
+              <CycleBlock cycle={entry} key={entry.id}>
+                {(rows) =>
+                  rows.map((row) => (
+                    <TranscriptItem
+                      key={row.id}
+                      onOpen={openRow}
+                      register={sync.register}
+                      row={row}
+                      selected={row.id === selectedItemId}
+                    />
+                  ))
+                }
+              </CycleBlock>
+            ) : entry.entryKind === "row" ? (
               <TranscriptItem
                 key={entry.row.id}
                 onOpen={openRow}
@@ -985,7 +1029,7 @@ const TranscriptItem = memo(function TranscriptItem({
           )}
           {row.displayKind}
         </span>
-        <strong>{row.displayLabel}</strong>
+        <strong className="spike-row-label">{spikeLabel(row)}</strong>
         <span className="transcript-facts">
           <Timestamp at={row.startedAt} />
           {row.durationMs !== null && ` · ${formatDuration(row.durationMs)}`}
@@ -1047,7 +1091,7 @@ function Publication({ node }: { readonly node: NodeView }) {
         rel="noreferrer"
         target="_blank"
       >
-        Pull request <ExternalLink size={12} />
+        {changeId(node.result.pr)} <ExternalLink size={12} />
       </a>
     ) : (
       <>Not recorded</>
@@ -1055,14 +1099,14 @@ function Publication({ node }: { readonly node: NodeView }) {
   }
   const links = publication.merged
     ? [
-        [publication.pr_url, "Pull request"],
+        [publication.pr_url, changeId(publication.pr_url ?? "")],
         [
           publication.commit_url,
           `Commit ${publication.commit?.slice(0, 8) ?? ""}`,
         ],
       ]
     : [
-        [publication.pr_url, "Pull request"],
+        [publication.pr_url, changeId(publication.pr_url ?? "")],
         [publication.branch_url, publication.branch ?? "Branch"],
       ];
   const renderedLinks = links.filter(([url]) => url);
@@ -1157,7 +1201,7 @@ function NodeCommandPanel({ node }: { readonly node: NodeView }) {
           <div>
             <dt>Command</dt>
             <dd>
-              <code>{argv.join(" ")}</code>
+              <code>{commandLine(argv)}</code>
             </dd>
           </div>
         )}
@@ -1297,4 +1341,51 @@ function formatValue(value: unknown): string {
     return "Not recorded";
   if (typeof value === "string") return value;
   return JSON.stringify(value, null, 2);
+}
+
+// SPIKE (spike-visual): a command-started row reads as its command line.
+function spikeLabel(row: TimelineRow): string {
+  if (row.rowKind === "event" && row.event.kind === "command-started") {
+    const command = row.event.fields?.command;
+    if (Array.isArray(command)) return commandLine(command.map(String));
+    return "bun run build --name 'a b'";
+  }
+  if (row.rowKind === "event" && row.event.kind === "human-attested")
+    return "Approved by operator for release-manager";
+  return row.displayLabel;
+}
+
+// SPIKE (spike-visual): the Status column as a coloured icon and a word.
+function SpikeCheckStatus({
+  status,
+  conclusion,
+}: {
+  readonly status?: string | null;
+  readonly conclusion?: string | null;
+}) {
+  const state =
+    status !== "completed"
+      ? status === "queued"
+        ? "queued"
+        : "running"
+      : conclusion === "success"
+        ? "passed"
+        : conclusion === "skipped" || conclusion === "neutral"
+          ? "skipped"
+          : "failed";
+  const glyph = {
+    passed: <path d="M3 6.5 L5.2 8.6 L9.2 3.8" fill="none" stroke="currentColor" strokeWidth="1.8" />,
+    failed: <path d="M3.5 3.5 L8.5 8.5 M8.5 3.5 L3.5 8.5" fill="none" stroke="currentColor" strokeWidth="1.8" />,
+    running: <circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeDasharray="5 3" />,
+    queued: <circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" strokeWidth="1.6" />,
+    skipped: <path d="M3 6 H9" fill="none" stroke="currentColor" strokeWidth="1.8" />,
+  }[state];
+  return (
+    <span className={`spike-check spike-check-${state}`}>
+      <svg aria-label={state} height="12" role="img" viewBox="0 0 12 12" width="12">
+        {glyph}
+      </svg>
+      {state}
+    </span>
+  );
 }

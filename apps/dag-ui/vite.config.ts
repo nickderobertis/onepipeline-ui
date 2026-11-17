@@ -31,6 +31,19 @@ const proxy = {
 export default defineConfig({
   root: import.meta.dirname,
   plugins: [react(), tailwindcss()],
+  // SPIKE (spike-visual): a patched copy of @oneharness/ui's built files.
+  resolve: {
+    alias: [
+      {
+        find: /^@oneharness\/ui$/u,
+        replacement: `${import.meta.dirname}/src/spike/oneharness-ui/dist/index.mjs`,
+      },
+      {
+        find: /^@oneharness\/ui\/styles\.css$/u,
+        replacement: `${import.meta.dirname}/src/spike/oneharness-ui/dist/styles.css`,
+      },
+    ],
+  },
   build: {
     outDir: "dist",
     emptyOutDir: true,

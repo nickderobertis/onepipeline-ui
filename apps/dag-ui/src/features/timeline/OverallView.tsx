@@ -167,46 +167,7 @@ export function OverallView({
                 : "no events recorded yet"}
             </p>
           </section>
-          <section aria-label="Run records">
-            <RecordDisclosure label="Timing and usage">
-              {foldLoading ? (
-                <p className="loading-value">{LOADING_TEXT}</p>
-              ) : (
-                <>
-                  {foldAsOf !== undefined && (
-                    <p className="loading-value">
-                      as of <Timestamp at={foldAsOf} />, updating
-                    </p>
-                  )}
-                  <StructuredFields value={detail.telemetry} />
-                </>
-              )}
-            </RecordDisclosure>
-            <RecordDisclosure label="Goal and repository identities">
-              <StructuredFields
-                value={{
-                  goal: detail.graph?.plan.goal,
-                  repositories: [
-                    ...new Set(
-                      detail.graph?.plan.tasks.flatMap((task) =>
-                        task.repo ? [task.repo] : [],
-                      ) ?? [],
-                    ),
-                  ],
-                }}
-              />
-            </RecordDisclosure>
-            <RecordDisclosure label="Recorded results">
-              <StructuredFields value={detail.graph?.result} />
-            </RecordDisclosure>
-            <RecordDisclosure label="Provider health">
-              {runLoaded ? (
-                <StructuredFields value={detail.provider_health} />
-              ) : (
-                <p className="loading-value">{LOADING_TEXT}</p>
-              )}
-            </RecordDisclosure>
-          </section>
+          {/* SPIKE (spike-visual): the four run-record sections are gone. */}
           <section aria-label="Run metrics" className="metric-grid">
             <Metric
               icon={<Activity />}
@@ -332,6 +293,8 @@ export function OverallView({
  * "one scale" means: the upstream plot positions everything against the range it is
  * given, so a wheel or a brush anywhere reframes the lot together.
  */
+import { EventTypeFilter } from "../../spike/mock"; // SPIKE
+
 function GraphExecution({
   failureShown,
   graph,
@@ -412,21 +375,29 @@ function GraphExecution({
         range={range}
         selectedId={selectedItemId}
       />
-      {graph.line.markers.some((marker) => marker.at > graph.range[1]) && (
-        <section aria-label="Records after execution" className="p-3 border-t">
-          <h3 className="eyebrow">After execution ended</h3>
-          {graph.line.markers
-            .filter((marker) => marker.at > graph.range[1])
+      {/* SPIKE (spike-visual): no "After execution ended" strip; its records are
+          rows of the run's event list, in time order. */}
+      {graph.line.markers.length > 0 && (
+        <section aria-label="Run events" className="spike-run-events">
+          <header className="spike-events-head">
+            <h3>Events</h3>
+            <EventTypeFilter counts={new Map([["Lifecycle", graph.line.markers.length]])} />
+          </header>
+          {[...graph.line.markers]
+            .sort((left, right) => left.at - right.at)
             .map((marker) => (
-              <Button
-                key={marker.id}
-                onClick={() => open(marker.payload)}
-                variant="outline"
-                size="sm"
-              >
-                {marker.payload.label} ·{" "}
-                <Timestamp at={marker.payload.startedAt} />
-              </Button>
+              <article className="transcript-item" key={marker.id}>
+                <button onClick={() => open(marker.payload)} type="button">
+                  <span className="eyebrow">Event</span>
+                  <strong>{marker.payload.label}</strong>
+                  <span className="transcript-facts">
+                    <Timestamp at={marker.payload.startedAt} /> ·{" "}
+                    {marker.at > graph.range[1]
+                      ? "after execution ended"
+                      : "recorded"}
+                  </span>
+                </button>
+              </article>
             ))}
         </section>
       )}

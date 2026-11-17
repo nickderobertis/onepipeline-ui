@@ -19,7 +19,7 @@
  * `index.html`, which is the package's documented switch.
  */
 @import "@oneharness/ui/styles.css" source(none);
-@source "../../../node_modules/@oneharness/ui/dist";
+@source "./spike/oneharness-ui/dist"; /* SPIKE */
 @source "./";
 
 /*
@@ -3484,4 +3484,308 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 .node-command-log-figure figcaption {
   font-size: 12px;
   font-weight: 600;
+}
+
+/* ------------------------------------------------------------------------- */
+/* SPIKE (spike-visual, never lands): the readability plan's mock.            */
+/* ------------------------------------------------------------------------- */
+
+/* Event section header and its event-type filter. */
+.spike-events-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 8px;
+  padding: 6px 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+.spike-events-head h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.spike-filter {
+  position: relative;
+}
+.spike-filter-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--card);
+}
+.spike-filter-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  display: grid;
+  min-width: 260px;
+  gap: 2px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--popover, var(--card));
+  box-shadow: 0 12px 30px rgb(0 0 0 / 40%);
+}
+.spike-filter-menu label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.spike-filter-menu label:hover {
+  background: var(--accent);
+}
+.spike-filter-count {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.spike-filter-foot {
+  display: flex;
+  justify-content: space-between;
+  margin: 4px 0 0;
+  padding: 6px 6px 0;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--primary);
+}
+
+/* A repeated cycle: one pass, its count and its span. */
+.spike-cycle {
+  margin: 4px 0;
+  padding: 0 0 4px;
+  border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+.spike-cycle-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.spike-cycle-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 25%, transparent);
+  color: var(--foreground);
+  font-size: 12px;
+}
+.spike-cycle-head button {
+  margin-left: auto;
+  color: var(--primary);
+}
+.spike-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The partial mark, over the stretch still loading. */
+.node-timeline-sticky {
+  position: relative;
+}
+.spike-partial {
+  position: absolute;
+  z-index: 4;
+  top: 88px;
+  bottom: 52px;
+  left: 18px;
+  right: 58%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  border-right: 2px dashed var(--warning);
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--warning) 14%, transparent) 0 6px,
+    transparent 6px 12px
+  );
+  pointer-events: none;
+}
+.spike-partial span {
+  margin-top: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--warning);
+  border-radius: 999px;
+  background: var(--background);
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Remote checks: coloured status icons; Required toned down. */
+.spike-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.spike-check-passed { color: var(--success); }
+.spike-check-failed { color: var(--destructive); }
+.spike-check-running { color: var(--info); }
+.spike-check-queued { color: #94a3b8; }
+.spike-check-skipped { color: #94a3b8; }
+.remote-checks .check-required {
+  color: var(--foreground);
+  font-weight: 400;
+}
+.remote-checks .check-required svg {
+  color: #94a3b8;
+}
+
+/* Graph card: the status word right under the title. */
+.dag-node {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 8px 13px 9px;
+}
+.dag-node > * {
+  flex-shrink: 0;
+}
+.dag-node strong {
+  margin: 3px 0 0;
+}
+.dag-node .node-status {
+  line-height: 1.3;
+}
+
+/* Task tab: real heading sizes and paragraph and list spacing. */
+.node-tab-panel .otg-markdown h1 { margin: 22px 0 10px; font-size: 22px; line-height: 28px; font-weight: 650; }
+.node-tab-panel .otg-markdown h2 { margin: 20px 0 8px; font-size: 18px; line-height: 24px; font-weight: 650; }
+.node-tab-panel .otg-markdown h3 { margin: 16px 0 6px; font-size: 15px; line-height: 21px; font-weight: 650; }
+.node-tab-panel .otg-markdown > :first-child { margin-top: 0; }
+.node-tab-panel .otg-markdown p { margin: 0 0 12px; }
+.node-tab-panel .otg-markdown ul,
+.node-tab-panel .otg-markdown ol { margin: 0 0 12px; padding-left: 22px; }
+.node-tab-panel .otg-markdown li + li { margin-top: 4px; }
+
+/* Run details, always shown as aligned label and value pairs. */
+.spike-run-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 24px;
+  margin: 0;
+  padding: 10px 28px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.spike-run-details div {
+  display: grid;
+  grid-template-columns: 9.5em minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+.spike-run-details dt {
+  color: var(--muted-foreground);
+}
+.spike-run-details dd {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Header: the title truncates and the badge and Updates keep their room. */
+.run-topbar h2 {
+  max-width: 100%;
+}
+.run-topbar .topbar-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.run-topbar .topbar-actions {
+  flex: 0 1 auto;
+  min-width: auto;
+}
+.run-topbar .last-activity {
+  flex: 0 1 auto;
+}
+@media (max-width: 700px) {
+  .run-topbar {
+    flex-wrap: wrap;
+    height: auto;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .run-topbar .topbar-title {
+    flex: 1 1 calc(100% - 60px);
+  }
+  .run-topbar .run-actions-badge {
+    display: inline-flex;
+  }
+  .spike-run-details div {
+    grid-template-columns: 8em minmax(0, 1fr);
+  }
+}
+
+/* Event detail: label and value pairs for what a person attested, and a command. */
+.spike-detail {
+  display: grid;
+  gap: 14px;
+}
+.spike-detail dl {
+  display: grid;
+  grid-template-columns: 10em minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+.spike-detail dt {
+  color: var(--muted-foreground);
+}
+.spike-detail dd {
+  margin: 0;
+}
+.spike-detail blockquote {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--primary);
+  background: var(--muted);
+  border-radius: 4px;
+}
+.spike-command {
+  overflow-x: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.spike-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px;
+  border: 1px solid var(--success);
+  border-radius: 999px;
+  color: var(--success);
+  font-weight: 600;
+}
+
+.spike-run-events {
+  margin-top: 4px;
 }
