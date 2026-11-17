@@ -242,7 +242,7 @@ test("a node settling during the rest is not moved back when a complete read tha
   }
 });
 
-test("after the rest, Turns reaches the page equal to a fresh document and usage is labelled as of its fold", async ({
+test("after the rest, Turns reaches the page equal to a fresh document", async ({
   page,
 }) => {
   const world = copyWorld(base);
@@ -276,55 +276,6 @@ test("after the rest, Turns reaches the page equal to a fresh document and usage
           { timeout: 60_000 },
         )
         .toBe(true);
-      const complete = await completeDocuments(served, world.facts.openLiveRun);
-      const usage = (
-        complete.detail.telemetry as { usage: { total: { cost_usd: number } } }
-      ).usage.total.cost_usd;
-      expect(usage).toBeGreaterThan(0);
-      // The disclosure draws the whole-journal fold's figures, which arrive on the
-      // refold clock rather than with the rest, so it is read until the fold lands.
-      const timing = page.getByRole("group", { name: "Timing and usage" });
-      await timing.getByText("Timing and usage").click();
-      await expect
-        .poll(() => timing.textContent(), { timeout: 30_000 })
-        .toContain("cost usd");
-    } finally {
-      await stop(served);
-    }
-  } finally {
-    removeWorld(world);
-  }
-});
-
-test("usage is labelled as of its fold, then drawn as loading once the fold is held past overdue", async ({
-  page,
-}) => {
-  const world = copyWorld(base);
-  try {
-    const write = writerOf(world);
-    const served = await serve(world, {
-      ONEPIPELINE_UI_TELEMETRY_REFOLD_MS: "1500",
-      ONEPIPELINE_UI_TELEMETRY_FOLD_HOLD_MS: "600000",
-    });
-    try {
-      await page.goto(
-        `${served.origin}${addressOf(world.facts.openLiveRun, "overall")}`,
-      );
-      await expect(metricText(page, "Turns")).toHaveText(/^\d+$/u, {
-        timeout: 120_000,
-      });
-      const timing = page.getByRole("group", { name: "Timing and usage" });
-      await timing.getByText("Timing and usage").click();
-      write.turn();
-      await expect(timing).toContainText("updating", { timeout: 30_000 });
-      await expect(timing).toContainText("as of");
-      const stop_at = Date.now() + 60_000;
-      while (Date.now() < stop_at) {
-        write.row();
-        if (((await timing.textContent()) ?? "").includes("Loading…")) break;
-        await page.waitForTimeout(500);
-      }
-      await expect(timing).toContainText("Loading…", { timeout: 10_000 });
     } finally {
       await stop(served);
     }

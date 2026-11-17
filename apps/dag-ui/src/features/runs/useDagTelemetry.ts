@@ -1,5 +1,4 @@
 import type {
-  ChannelQueue,
   LiveActivity,
   LiveRunDetail,
   RunTimeline,
@@ -27,14 +26,14 @@ import type { FirstRead } from "../../main";
 // llmlint: ignore-file[changed_behavior_has_e2e] The browser journeys in
 // apps/dag-ui-e2e/dag-ui-live-updates.spec.ts drive every branch a conforming
 // server reaches against the real one: the opening snapshot, a run.changed row
-// for another run, a detail, timeline and channel patch for the open run, a
+// for another run, a detail and timeline patch for the open run, a
 // switch of view replacing the subscription, and a stream dropped and resumed;
 // apps/dag-ui-e2e/dag-ui-human-items.spec.ts drives Action items on the same one.
 // What only a broken peer reaches — a frame that fails validation, a patch that
 // does not apply — is proven in App.test.tsx at the browser boundary.
 
 /** Which of a run's views the page shows. */
-export type RunViewKind = "graph" | "overall" | "node" | "channel";
+export type RunViewKind = "graph" | "overall" | "node";
 
 export interface DagTelemetryOptions {
   /** The run the address names. */
@@ -87,7 +86,6 @@ export interface DagTelemetryState {
   readonly runId?: string;
   readonly detail?: LiveRunDetail;
   readonly timeline?: RunTimeline;
-  readonly channel?: ChannelQueue;
   readonly humanItems: LiveHumanItems;
   /**
    * A timeline view the server would not subscribe, reported where the timeline
@@ -357,7 +355,6 @@ export function useDagTelemetry(
     runId,
     detail,
     timeline: shown && "timeline" in shown ? shown.timeline : undefined,
-    channel: shown && "channel" in shown ? shown.channel : undefined,
     humanItems,
     timelineError: timelineRefused ? error : undefined,
     loading: state === undefined && error === undefined,

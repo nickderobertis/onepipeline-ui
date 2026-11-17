@@ -5497,3 +5497,344 @@ export function transcriptFacts() {
     drafted: DRAFTED_STREAM,
   };
 }
+
+/**
+ * The readability journeys' corpus: one run for each of the eight words a run's
+ * state is shown in, each reached the way the engine reaches it, and a run whose
+ * nodes cover every kind a card's pill names, a reason line, a change request on
+ * GitHub with its checks, and a task written as a document.
+ *
+ * A run is undriven when its launch names this host and a pid above the kernel's
+ * maximum, so the engine proves its driver gone; one launched on another host and
+ * quiet for half an hour is parked, and one written in the last minutes is active.
+ */
+export const READABILITY = {
+  states: {
+    Complete: "readable-complete",
+    Failed: "readable-failed",
+    Stopped: "readable-stopped",
+    Unfinished: "readable-unfinished",
+    "Waiting on you": "readable-waiting",
+    // The longest run id the read API admits, so it is also the header's longest
+    // title: 128 characters.
+    "Driver dead":
+      "readable-driver-dead-with-the-longest-run-id-the-read-api-admits-so-the-header-truncates-it-beside-its-badge-and-the-updates-128",
+    Idle: "readable-idle",
+    Running: "readable-running",
+  },
+  /**
+   * A title of 28 characters, the longest the bar keeps on one line at 1440 CSS px
+   * beside a state, a failure count and Stop.
+   */
+  oneLineTitle: "readable-one-line-title-28ch",
+  /** The running run's nodes, each a kind a card names, and what they show. */
+  cards: {
+    agent: "work",
+    failed: "build",
+    blocked: "deploy",
+    command: "compile",
+    human: "approve",
+    changeByRepo: "publish",
+    changeBySteps: "docs",
+    commandWithRepo: "package",
+    humanWithRepo: "sign-off",
+  },
+  pr: "https://github.com/example/widgets/pull/769",
+  prId: "widgets#769",
+  /** A run that has recorded nothing, so it has no progress to date. */
+  noProgress: "readable-no-progress",
+};
+
+const READABLE_TASK = `## What
+
+Move the widgets service onto the new storage engine, and keep the old reader
+working until every caller has moved.
+
+The reader, the writer and the migration command change. The public API does not.
+
+### Scope
+
+- Add the engine behind a feature switch.
+- Port the writer first, then the reader.
+
+### Out of scope
+
+Dashboards and alerting stay as they are.
+
+## Acceptance criteria
+
+- The migration command copies every record and reports the count.
+`;
+
+const readableTask = (what) =>
+  `## What\n${what}\n\n## Acceptance criteria\n\n- It is done.\n`;
+
+/** One run of the readability corpus, its plan and launch written, its journal begun. */
+function readableRun(root, runId, tasks, { start, here }) {
+  const dir = runDir(root, runId);
+  const plan = {
+    schema_version: 3,
+    goal: { text: `Read ${runId} at a glance` },
+    name: runId,
+    concurrency: 2,
+    tasks,
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  const record = launch(
+    runId,
+    "claude-code",
+    SUPERVISOR_SESSION,
+    stamp(start),
+    0x7ffffff0,
+  );
+  writeJson(
+    join(dir, "launch.json"),
+    here ? { ...record, host: thisHost() } : record,
+  );
+  const journal = new Journal(dir, streamOf(runId), start);
+  journal.emit("pipeline", "run-started", { run_id: runId }, { plan });
+  return journal;
+}
+
+/** Dispatch `node` and, where `status` is named, settle it so. */
+function readableNode(journal, runId, node, status, settled = {}) {
+  journal.advance(1).emit("pipeline", "node-dispatched", {
+    run_id: runId,
+    node,
+    persona: "worker",
+  });
+  if (status !== undefined)
+    journal
+      .advance(1)
+      .emit(
+        "pipeline",
+        "node-settled",
+        { run_id: runId, node },
+        { status, ...settled },
+      );
+}
+
+const two = (first, second) => [
+  { id: first, persona: "worker", task: readableTask(`Do ${first}.`) },
+  {
+    id: second,
+    persona: "worker",
+    deps: [first],
+    task: readableTask(`Do ${second}.`),
+  },
+];
+
+/** Write the readability corpus under `root`. */
+export function buildReadabilityRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const { states } = READABILITY;
+  const old = { start: HISTORIC, here: false };
+  const dead = { start: HISTORIC, here: true };
+
+  // Every node done: the graph is complete whoever drives it.
+  let journal = readableRun(root, states.Complete, two("draft", "review"), old);
+  readableNode(journal, states.Complete, "draft", "done");
+  readableNode(journal, states.Complete, "review", "done");
+  journal.write();
+
+  // Nothing drives it and a node failed: it ended failed.
+  journal = readableRun(root, states.Failed, two("draft", "review"), dead);
+  readableNode(journal, states.Failed, "draft", "done");
+  readableNode(journal, states.Failed, "review", "failed", {
+    detail: "the review found the draft wrong",
+  });
+  journal.write();
+
+  // A recorded stop: it ended stopped.
+  journal = readableRun(root, states.Stopped, two("draft", "review"), old);
+  readableNode(journal, states.Stopped, "draft");
+  journal
+    .advance(2)
+    .emit("pipeline", "run-stopped", { run_id: states.Stopped });
+  journal.write();
+
+  // Nothing drives it, nothing failed, and nothing is left that could move.
+  journal = readableRun(root, states.Unfinished, two("draft", "review"), dead);
+  readableNode(journal, states.Unfinished, "draft", "done");
+  readableNode(journal, states.Unfinished, "review", "cancelled", {
+    detail: "the work was called off",
+  });
+  journal.write();
+
+  // Nothing drives it, and a person's decision holds it.
+  journal = readableRun(
+    root,
+    states["Waiting on you"],
+    [
+      { id: "approve", kind: "human", task: "Approve the change." },
+      {
+        id: "ship",
+        persona: "worker",
+        deps: ["approve"],
+        task: readableTask("Ship it."),
+      },
+    ],
+    dead,
+  );
+  journal.write();
+
+  // Its driver went while it had work it could still move.
+  journal = readableRun(
+    root,
+    states["Driver dead"],
+    two("draft", "review"),
+    dead,
+  );
+  readableNode(journal, states["Driver dead"], "draft");
+  journal.write();
+
+  // Driven from another host and quiet since: parked.
+  journal = readableRun(root, states.Idle, two("draft", "review"), old);
+  readableNode(journal, states.Idle, "draft");
+  journal.write();
+
+  writeEventlessRun(
+    root,
+    READABILITY.noProgress,
+    "claude-code",
+    SUPERVISOR_SESSION,
+  );
+
+  // Driven, written minutes ago, one node failed and another at work.
+  const recent = { start: now() - 5 * 60 * 1000, here: false };
+  writeReadableCards(root, states.Running, recent);
+  writeReadableCards(root, READABILITY.oneLineTitle, recent);
+}
+
+/** The running run: one node of each kind a card names, and a published change. */
+function writeReadableCards(root, runId, when) {
+  const { cards, pr } = READABILITY;
+  const journal = readableRun(
+    root,
+    runId,
+    [
+      { id: cards.agent, persona: "worker", task: READABLE_TASK },
+      { id: cards.failed, persona: "worker", task: readableTask("Build it.") },
+      {
+        id: cards.blocked,
+        persona: "worker",
+        deps: [cards.failed],
+        task: readableTask("Deploy it."),
+      },
+      {
+        id: cards.command,
+        kind: "command",
+        command: ["bun", "run", "build"],
+        deps: [cards.agent],
+        task: "Compile the site.",
+      },
+      {
+        id: cards.human,
+        kind: "human",
+        deps: [cards.agent],
+        task: "Approve the release.",
+      },
+      {
+        id: cards.changeByRepo,
+        persona: "worker",
+        repo: "example/widgets",
+        task: readableTask("Publish the change."),
+      },
+      {
+        id: cards.changeBySteps,
+        persona: "worker",
+        deps: [cards.agent],
+        task: readableTask("Write the docs."),
+        steps: [{ id: "write", persona: "worker", task: "Write them." }],
+      },
+      // A declared kind wins over a change's shape.
+      {
+        id: cards.commandWithRepo,
+        kind: "command",
+        command: ["bun", "run", "pack"],
+        repo: "example/widgets",
+        deps: [cards.agent],
+        task: "Pack the release.",
+      },
+      {
+        id: cards.humanWithRepo,
+        kind: "human",
+        repo: "example/widgets",
+        deps: [cards.agent],
+        task: "Sign the release off.",
+      },
+    ],
+    when,
+  );
+  const run = { run_id: runId };
+  readableNode(journal, runId, cards.agent);
+  // What the working node was last seen doing: the run bar's last-activity line,
+  // long enough that the bar has to truncate it.
+  journal.advance(2).emit(
+    "agentgraph",
+    "turn-activity",
+    {
+      ...run,
+      node: cards.agent,
+      member: "worker",
+      persona: "worker",
+      session: `worker-${cards.agent}`,
+    },
+    {
+      kind: "tool_use",
+      name: "Bash",
+      detail:
+        "cargo test --locked --all-targets -p widgets -- writer:: reader:: migration:: --test-threads=1",
+      truncated: false,
+    },
+  );
+  readableNode(journal, runId, cards.failed, "failed", {
+    detail: "the build exited non-zero",
+  });
+  readableNode(journal, runId, cards.changeByRepo);
+  const node = { ...run, node: cards.changeByRepo };
+  journal.advance(1).emit("vcs", "change-opened", node, {
+    url: pr,
+    host: "github",
+    id: "769",
+    base: "main",
+    author: "a-recording-host",
+  });
+  // A check of each standing, required and optional: passed, failed, running,
+  // queued, skipped and neutral.
+  for (const [name, required, status, conclusion] of [
+    ["lint", true, "completed", "success"],
+    ["unit", false, "completed", "success"],
+    ["e2e", true, "completed", "failure"],
+    ["build", true, "in_progress", null],
+    ["deploy-preview", false, "queued", null],
+    ["docs", false, "completed", "skipped"],
+    ["audit", false, "completed", "neutral"],
+  ]) {
+    journal.advance(1).emit("vcs", "change-check", node, {
+      name,
+      required,
+      status,
+      conclusion,
+      ...(status === "completed"
+        ? {
+            started_at: stamp(journal.at - 4000),
+            completed_at: stamp(journal.at),
+          }
+        : status === "in_progress"
+          ? { started_at: stamp(journal.at - 2000) }
+          : {}),
+    });
+  }
+  journal.advance(1).emit("pipeline", "node-settled", node, {
+    status: "done",
+    outcome: "published",
+    branch: "feature/publish",
+    change_url: pr,
+  });
+  journal.write();
+}
+
+export function readabilityFacts() {
+  return READABILITY;
+}

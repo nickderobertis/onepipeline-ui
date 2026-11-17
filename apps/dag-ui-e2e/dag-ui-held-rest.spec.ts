@@ -52,12 +52,12 @@ test("Run details reads its launching session and last progress as loading, then
     const run = runs().live;
     const release = await hold(page, "**/api/v2/events?*");
     await page.goto(`${server.origin}/?run=${run}&view=overall`);
-    await page.getByText("Run details", { exact: true }).click();
     const details = page.getByRole("group", {
       name: "Run details",
       exact: true,
     });
-    await expect(details).toContainText(`Launching session: ${LOADING}`);
+    const launching = details.getByRole("definition").first();
+    await expect(launching).toHaveText(LOADING);
     const lastProgress = details.getByRole("status", {
       name: "Last progress",
       exact: true,
@@ -65,42 +65,14 @@ test("Run details reads its launching session and last progress as loading, then
     await expect(lastProgress).toHaveText(LOADING);
     release();
     const detail = await completeDetail(page, server, run);
-    await expect(details).not.toContainText(`Launching session: ${LOADING}`);
-    await expect(details).toContainText(/Launching session: Codex session/u);
+    await expect(launching).toHaveText(/^Codex session/u);
     if (detail.run.last_progress_at === undefined)
-      await expect(lastProgress).toHaveText("Not recorded");
+      await expect(lastProgress).toHaveText("—");
     else
       await expect(lastProgress.getByRole("time")).toHaveAttribute(
         "datetime",
         new Date(detail.run.last_progress_at * 1000).toISOString(),
       );
-  } finally {
-    await server.stop();
-  }
-});
-
-test("Channel reads its ready human actions as loading, then as served", async ({
-  page,
-}) => {
-  // A server of its own: one that has read the run answers with it complete.
-  const server = await startFixtureServer("held-rest", []);
-  try {
-    const run = runs().supervised;
-    const release = await hold(page, "**/api/v2/events?*");
-    await page.goto(`${server.origin}/?run=${run}&view=channel`);
-    const actions = page.getByRole("region", { name: "Ready human actions" });
-    await expect(actions).toContainText(LOADING);
-    await expect(actions).not.toContainText("No decision point");
-    release();
-    const detail = await completeDetail(page, server, run);
-    await expect(actions).not.toContainText(LOADING);
-    const decisions = detail.graph?.decisions ?? [];
-    if (decisions.length === 0)
-      await expect(actions).toContainText(
-        "No decision point is holding the graph.",
-      );
-    else
-      await expect(actions.getByRole("listitem")).toHaveCount(decisions.length);
   } finally {
     await server.stop();
   }
@@ -180,7 +152,7 @@ const DRAWN: Record<
     // The tiles first: they are drawn with the first answer, so once they are there
     // the run's own heading is too, below the header's heading of the same run.
     ...Object.fromEntries(
-      ["Status", "Nodes", "Wall time", "Turns"].flatMap((name) => {
+      ["Nodes", "Wall time", "Turns"].flatMap((name) => {
         const tile = page.getByRole("group", { name, exact: true });
         return [
           [`the ${name} tile`, tile],

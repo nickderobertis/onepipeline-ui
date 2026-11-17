@@ -53,6 +53,7 @@ const HISTORY_START_TEXT = "No earlier history remains";
 const OFF_GRAPH_TASK =
   "This node is not on the run's graph, so the plan holds no task for it.";
 
+import { changeRequestId } from "../../lib/change-request";
 import { StateBadge } from "../../lib/StateBadge";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration } from "../../lib/time";
@@ -63,6 +64,7 @@ import {
 } from "../../lib/useUrlSelection";
 import { boundedZoom, TIMELINE_TIME_MARKS } from "./axis";
 import { CheckRuntime } from "./CheckRuntime";
+import { CheckStatus } from "./CheckStatus";
 import { ControlBadge } from "./ControlBadge";
 import { EventCategoryIcon } from "./event-category";
 import { LoadEarlier, PlotHatches } from "./history-controls";
@@ -150,48 +152,8 @@ export function NodeTimelineView({
 
   return (
     <section aria-label={`Timeline for ${node.label}`} className="node-view">
-      <header className="node-view-head">
-        <nav aria-label="Breadcrumb">
-          <ol className="breadcrumb">
-            <li>
-              <Button onClick={onBack} size="sm" type="button" variant="ghost">
-                <ArrowLeft size={14} /> Graph
-              </Button>
-            </li>
-            <li aria-current="page">
-              <span className="breadcrumb-node">{node.label}</span>
-            </li>
-          </ol>
-        </nav>
-        <div className="node-view-facts">
-          {/* Named so a reader of this header — and the journeys that hold its
-              tones — can say *which* badge they mean: the reading beside it is
-              also one, and the two answer different questions. */}
-          <StateBadge className="node-view-state" state={node.status} />
-          <ControlBadge control={node.control} />
-          <span className="node-view-meta">
-            {nodeKindWord(node)} node ·{" "}
-            {runLoaded
-              ? `${node.telemetry?.turns ?? 0} turns · ${node.telemetry?.lint ?? 0} lint turns`
-              : `turns ${LOADING_TEXT}`}
-          </span>
-          {prUrl !== undefined && (
-            <a
-              className="node-view-pr"
-              href={prUrl}
-              rel="noreferrer"
-              target="_blank"
-            >
-              Pull request <ExternalLink size={12} />
-            </a>
-          )}
-        </div>
-      </header>
-
-      <NodeProblemBanner node={node} nodes={nodes} />
-      <NodeAwaitingPanel node={node} />
-      <NodeCommandPanel node={node} />
-
+      {/* The tab set holds the node bar, because the node's tabs are selected in
+          it: one band above the node's content rather than two. */}
       <Tabs
         className="node-tabs"
         onValueChange={(value) => {
@@ -199,13 +161,60 @@ export function NodeTimelineView({
         }}
         value={selectedTab}
       >
-        <TabsList aria-label="Node details" variant="line">
-          {Object.entries(NODE_TAB_LABELS).map(([value, label]) => (
-            <TabsTrigger key={value} value={value}>
-              {label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <section aria-label="Node header" className="node-view-head">
+          <nav aria-label="Breadcrumb">
+            <ol className="breadcrumb">
+              <li>
+                <Button
+                  onClick={onBack}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <ArrowLeft size={14} /> Graph
+                </Button>
+              </li>
+              <li aria-current="page">
+                <span className="breadcrumb-node">{node.label}</span>
+              </li>
+            </ol>
+          </nav>
+          <div className="node-view-facts">
+            {/* Named so a reader of this header — and the journeys that hold its
+                tones — can say *which* badge they mean: the reading beside it is
+                also one, and the two answer different questions. */}
+            <StateBadge className="node-view-state" state={node.status} />
+            <ControlBadge control={node.control} />
+            <span className="node-view-meta">
+              {nodeKindWord(node)} node ·{" "}
+              {runLoaded
+                ? `${node.telemetry?.turns ?? 0} turns · ${node.telemetry?.lint ?? 0} lint turns`
+                : `turns ${LOADING_TEXT}`}
+            </span>
+            {prUrl !== undefined && (
+              <a
+                className="node-view-pr"
+                href={prUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {changeRequestId(prUrl)} <ExternalLink size={12} />
+              </a>
+            )}
+          </div>
+          <TabsList aria-label="Node details" variant="line">
+            {Object.entries(NODE_TAB_LABELS).map(([value, label]) => (
+              <TabsTrigger key={value} value={value}>
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </section>
+
+        <NodeProblemBanner node={node} nodes={nodes} />
+        <NodeAwaitingPanel node={node} />
+        <NodeCommandPanel node={node} />
+
         <TabsContent className="node-tab-panel" value="task">
           {/* The task is untrusted markdown: the shared package renders it
               safely, as every other place this app shows a task. */}
@@ -338,7 +347,6 @@ export function NodeTimelineView({
                       <tr>
                         <th>Name</th>
                         <th>Status</th>
-                        <th>Conclusion</th>
                         <th>Runtime</th>
                         <th>Required</th>
                       </tr>
@@ -373,8 +381,9 @@ export function NodeTimelineView({
                               check.name
                             )}
                           </th>
-                          <td>{check.status ?? "Not recorded"}</td>
-                          <td>{check.conclusion ?? "—"}</td>
+                          <td>
+                            <CheckStatus check={check} />
+                          </td>
                           <td>
                             <CheckRuntime
                               {...(check.started_at === undefined
@@ -1047,7 +1056,7 @@ function Publication({ node }: { readonly node: NodeView }) {
         rel="noreferrer"
         target="_blank"
       >
-        Pull request <ExternalLink size={12} />
+        {changeRequestId(node.result.pr)} <ExternalLink size={12} />
       </a>
     ) : (
       <>Not recorded</>
@@ -1055,14 +1064,14 @@ function Publication({ node }: { readonly node: NodeView }) {
   }
   const links = publication.merged
     ? [
-        [publication.pr_url, "Pull request"],
+        [publication.pr_url, changeRequestId(publication.pr_url)],
         [
           publication.commit_url,
           `Commit ${publication.commit?.slice(0, 8) ?? ""}`,
         ],
       ]
     : [
-        [publication.pr_url, "Pull request"],
+        [publication.pr_url, changeRequestId(publication.pr_url)],
         [publication.branch_url, publication.branch ?? "Branch"],
       ];
   const renderedLinks = links.filter(([url]) => url);

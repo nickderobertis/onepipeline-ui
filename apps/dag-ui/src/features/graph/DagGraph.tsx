@@ -17,6 +17,7 @@ import {
 import { useMemo } from "react";
 import {
   awaitedLine,
+  cardLines,
   isUnhealthy,
   type NodeView,
   nodeReason,
@@ -64,9 +65,9 @@ export function DagGraph({
         label: node.label,
         kind: node.kind,
         state: node.status,
-        // The card carries its awaits line inside its border, so it is laid out
-        // one line taller.
-        ...(awaits.get(node.id) === undefined ? {} : { lines: 1 }),
+        // The card carries its reason and awaits lines inside its border, so it
+        // is laid out a line taller for each.
+        ...cardLines(reasons.get(node.id), awaits.get(node.id)),
       })),
       edges: nodeViews.flatMap((node) =>
         (node.task?.deps ?? [])

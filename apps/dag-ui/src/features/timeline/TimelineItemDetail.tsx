@@ -33,6 +33,7 @@ import type {
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ExternalLink, ListTree, TriangleAlert } from "lucide-react";
 import { useState } from "react";
+import { changeRequestId } from "../../lib/change-request";
 import { HarnessConversation } from "../../lib/HarnessConversation";
 import type { NodeView } from "../../lib/run-model";
 import { StoredArtifact, servableArtifact } from "../../lib/StoredArtifact";
@@ -865,7 +866,11 @@ function Reference({
     return (
       <p className="detail-link">
         <a href={reference.value} rel="noreferrer" target="_blank">
-          {reference.value} <ExternalLink size={13} />
+          {/* A change request is named by its short id, as everywhere else. */}
+          {reference.kind === "pr"
+            ? changeRequestId(reference.value)
+            : reference.value}{" "}
+          <ExternalLink size={13} />
         </a>
       </p>
     );

@@ -17,9 +17,9 @@ import {
   TabsTrigger,
   TooltipProvider,
 } from "@oneharness/ui";
+import { API_V2_FILTER_PROFILES } from "@onepipeline-ui/dag-model";
 import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import {
-  Inbox,
   Menu,
   RefreshCw,
   Route,
@@ -27,8 +27,14 @@ import {
   TriangleAlert,
   Workflow,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChannelView } from "../features/control/ChannelView";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { RunActions } from "../features/control/RunActions";
 import { useRunControl } from "../features/control/useRunControl";
 import { DagGraph } from "../features/graph/DagGraph";
@@ -49,45 +55,18 @@ import { OverallView } from "../features/timeline/OverallView";
 import { TimelinePopoverLayer } from "../features/timeline/TimelinePopover";
 import { runPageKind } from "../first-screen/address";
 import { useHumanItemsRoute } from "../lib/humanItemsRoute";
-import { HISTORY_LOADING_TEXT, LOADING_TEXT, loaded } from "../lib/loading";
-import { RecordDisclosure } from "../lib/RecordDisclosure";
-import {
-  currentOverrides,
-  graphOf,
-  graphStateWord,
-  launchLabel,
-  nodeViews,
-  openedNode,
-} from "../lib/run-model";
-import { StructuredFields } from "../lib/StructuredFields";
+import { HISTORY_LOADING_TEXT, loaded } from "../lib/loading";
+import { graphOf, nodeViews, openedNode, runState } from "../lib/run-model";
 import { sidebarGroups } from "../lib/sidebar-model";
 import { Timestamp } from "../lib/Timestamp";
 import { UpdateSetting } from "../lib/UpdateSetting";
 import { useUpdateSettings } from "../lib/update-settings";
-import {
-  DETAIL_LEVELS,
-  type DetailLevel,
-  isRunView,
-  useUrlSelection,
-} from "../lib/useUrlSelection";
+import { useUrlSelection } from "../lib/useUrlSelection";
 import type { FirstRead } from "../main";
 
 const defaultClient = new TelemetryClient(window.location.origin, {
   fetch: window.fetch.bind(window),
 });
-
-/**
- * The two readings, in the order they are offered: the narrow one first, because
- * it is the one a reader reaches for when there is too much to read.
- *
- * `Object.entries` widens the key to `string`, which would make the click handler
- * take a level this app has no profile for — so the pairs are typed back to the
- * union they came from, once, here.
- */
-const detailLevels = Object.entries(DETAIL_LEVELS) as [
-  DetailLevel,
-  (typeof DETAIL_LEVELS)[DetailLevel],
-][];
 
 /** How many times `value` has changed identity since this component mounted. */
 function useChangeCount(value: unknown): number {
@@ -118,11 +97,9 @@ export function App({
   const humanItems = useHumanItemsRoute();
   const runless = selection.host || humanItems.active;
   const humanItemsSelection = useHumanItemsSelection(humanItems.active);
-  // The reading the viewer asked for, as the filter profile the server names it
-  // by. Every payload this app shows is read under it, so the graph, the
-  // timeline and the pushed changes can never be three different slices of one
-  // run.
-  const filter = DETAIL_LEVELS[selection.detail].profile;
+  // Every payload this app shows is read under the one detailed profile, so the
+  // graph, the timeline and the pushed changes are one slice of the run.
+  const filter = API_V2_FILTER_PROFILES.detailed;
   const updates = useUpdateSettings();
   const drawer = useNavigationDrawer();
   const telemetry = useDagTelemetry(client, {
@@ -145,6 +122,18 @@ export function App({
   const detail = telemetry.detail;
   const nodes = useMemo(() => (detail ? nodeViews(detail) : []), [detail]);
   const control = useRunControl(client, selectedRunId);
+  const liveness = control.status.value?.liveness;
+  const state = useMemo(
+    () =>
+      detail === undefined
+        ? undefined
+        : runState({
+            state: detail.run.state,
+            ...(liveness === undefined ? {} : { liveness }),
+            statuses: detail.graph?.node_status ?? {},
+          }),
+    [detail, liveness],
+  );
   // Held here rather than under the run's view: a shutdown is minutes long, and
   // what it is doing stays on screen whichever run or list the reader moves to.
   const hostShutdowns = useHostShutdowns(client);
@@ -222,6 +211,157 @@ export function App({
     }
   }, [selection.runId, selectedRunId, selection.view]);
 
+  const title = humanItems.active
+    ? "Action items"
+    : selection.host
+      ? "Host"
+      : (selectedRunId ?? "No DAG selected");
+  /**
+   * The one bar above every view: the title, the run's state and actions, its last
+   * activity, the run's views where there are any, and the update setting.
+   */
+  const header = (views: ReactNode) => (
+    <section
+      aria-label={selectedRunId && !runless ? "Run header" : "Workspace header"}
+      className={`topbar${selectedRunId && !runless ? " run-topbar" : ""}`}
+    >
+      <button
+        aria-controls="run-navigation"
+        aria-expanded={drawer.open}
+        aria-label="Open navigation"
+        className="nav-menu"
+        onClick={drawer.toggle}
+        ref={drawer.menuButton}
+        type="button"
+      >
+        <Menu aria-hidden="true" size={18} />
+      </button>
+      <div className="topbar-title">
+        <div>
+          <p className="eyebrow">Execution telemetry</p>
+          {/* A run id is up to 128 characters, and the bar truncates it: the
+              whole of it is the heading's tooltip, and its accessible name. */}
+          <h2 title={title}>{title}</h2>
+        </div>
+      </div>
+      <div className="topbar-actions">
+        {!runless && selectedRunId !== undefined && (
+          <RunActions
+            control={control}
+            runId={selectedRunId}
+            ended={
+              detail !== undefined &&
+              (detail.run.state === "settled" ||
+                detail.run.state.startsWith("ended-"))
+            }
+            {...(state === undefined ? {} : { state })}
+          />
+        )}
+        <span className="connection">
+          <Satellite size={15} />
+          {telemetry.lastUpdated === undefined ? (
+            "Waiting for first update"
+          ) : (
+            <>
+              Last updated <Timestamp at={telemetry.lastUpdated} relative />
+            </>
+          )}
+        </span>
+        {!runless && lastActivity !== undefined && (
+          <button
+            className="last-activity connection"
+            type="button"
+            title={`${lastActivity.node}: ${activityLine(lastActivity)}`}
+            onClick={() => {
+              selection.selectNode(lastActivity.node);
+              selection.selectItem(lastActivity.event_id);
+            }}
+          >
+            {lastActivity.node}: {activityLine(lastActivity)}
+          </button>
+        )}
+      </div>
+      {views}
+      <div className="main-updates">
+        <UpdateSetting
+          caption="Updates"
+          name="Main area updates"
+          onChange={updates.setMain}
+          setting={updates.main}
+          waiting={telemetry.mainWaiting}
+        />
+        <Button
+          onClick={() => {
+            setHostRefresh((value) => value + 1);
+            telemetry.refresh();
+          }}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <RefreshCw size={14} /> Refresh
+        </Button>
+      </div>
+    </section>
+  );
+  /** What the page says about its reads and the host's shutdown, under the bar. */
+  const notices = (
+    <>
+      {telemetry.error && !readFailed && (
+        // `Alert` carries `role="alert"` itself, so the banner keeps announcing
+        // itself the moment a read fails.
+        <Alert
+          className="live-issue rounded-none border-x-0 border-t-0"
+          variant="destructive"
+        >
+          <TriangleAlert />
+          <AlertTitle>Live telemetry issue</AlertTitle>
+          <AlertDescription>
+            {telemetry.error.message}{" "}
+            <Button
+              onClick={telemetry.refresh}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Try again
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+      {historyFailed !== undefined && (
+        <Alert
+          className="live-issue rounded-none border-x-0 border-t-0"
+          variant="destructive"
+        >
+          <TriangleAlert />
+          <AlertTitle>The rest of this run's history did not load</AlertTitle>
+          <AlertDescription>
+            {historyFailed}{" "}
+            <Button
+              onClick={telemetry.refresh}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Try again
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+      {telemetry.notice && (
+        <p className="live-notice" role="status">
+          {telemetry.notice}
+        </p>
+      )}
+      <ShutdownStatus
+        label="Shutdown of the entire host"
+        onDismiss={hostShutdowns.host.dismiss}
+        rows={hostList?.runs ?? []}
+        state={hostShutdowns.host.state}
+      />
+    </>
+  );
   return (
     <TooltipProvider>
       <TimelinePopoverLayer />
@@ -268,279 +408,62 @@ export function App({
           />
         )}
         <main className="workspace" inert={drawer.open}>
-          <section
-            aria-label={
-              selectedRunId && !runless ? "Run header" : "Workspace header"
-            }
-            className={`topbar${selectedRunId && !runless ? " run-topbar" : ""}`}
-          >
-            <button
-              aria-controls="run-navigation"
-              aria-expanded={drawer.open}
-              aria-label="Open navigation"
-              className="nav-menu"
-              onClick={drawer.toggle}
-              ref={drawer.menuButton}
-              type="button"
-            >
-              <Menu aria-hidden="true" size={18} />
-            </button>
-            <div className="topbar-title">
-              <div>
-                <p className="eyebrow">Execution telemetry</p>
-                <h2>
-                  {humanItems.active
-                    ? "Action items"
-                    : selection.host
-                      ? "Host"
-                      : (selectedRunId ?? "No DAG selected")}
-                </h2>
-              </div>
-            </div>
-            <div className="topbar-actions">
-              {!runless && selectedRunId !== undefined && (
-                <RunActions
-                  control={control}
-                  runId={selectedRunId}
-                  ended={
-                    detail !== undefined &&
-                    (detail.run.state === "settled" ||
-                      detail.run.state.startsWith("ended-"))
-                  }
+          {runless ? (
+            <>
+              {header(undefined)}
+              {notices}
+              {humanItems.active ? (
+                <HumanItemsPage
+                  client={client}
+                  live={telemetry.humanItems}
+                  choice={humanItemsSelection.choice}
+                  setChoice={humanItemsSelection.setChoice}
+                  selectedId={humanItemsSelection.selectedId}
+                  setSelectedId={humanItemsSelection.setSelectedId}
                 />
-              )}
-              <span className="connection">
-                <Satellite size={15} />
-                {telemetry.lastUpdated === undefined ? (
-                  "Waiting for first update"
-                ) : (
-                  <>
-                    Last updated{" "}
-                    <Timestamp at={telemetry.lastUpdated} relative />
-                  </>
-                )}
-              </span>
-              {!runless && lastActivity !== undefined && (
-                <button
-                  className="last-activity connection"
-                  type="button"
-                  title={`${lastActivity.node}: ${activityLine(lastActivity)}`}
-                  onClick={() => {
-                    selection.selectNode(lastActivity.node);
-                    selection.selectItem(lastActivity.event_id);
-                  }}
+              ) : (
+                <HostPage
+                  client={client}
+                  listError={hostListError}
+                  onRefresh={() => setHostRefresh((value) => value + 1)}
+                  list={hostList}
+                  rows={telemetry.hostRows}
                 >
-                  {lastActivity.node}: {activityLine(lastActivity)}
-                </button>
+                  <HostShutdownButtons
+                    list={hostList}
+                    loadMore={noMorePages}
+                    loadingMore={false}
+                    shutdowns={hostShutdowns}
+                  />
+                </HostPage>
               )}
-            </div>
-            <div className="main-updates">
-              <UpdateSetting
-                caption="Updates"
-                name="Main area updates"
-                onChange={updates.setMain}
-                setting={updates.main}
-                waiting={telemetry.mainWaiting}
-              />
-              <Button
-                onClick={() => {
-                  setHostRefresh((value) => value + 1);
-                  telemetry.refresh();
-                }}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                <RefreshCw size={14} /> Refresh
-              </Button>
-            </div>
-          </section>
-          {!runless && detail && (
-            <RecordDisclosure
-              label="Run details"
-              className="run-header-details"
-              onOpen={control.reread}
-            >
-              <p>
-                Launching session:{" "}
-                {runLoaded ? launchLabel(detail.launch) : LOADING_TEXT}
-              </p>
-              {/* A reading already shown stays beside this, so a failed re-read
-                  says the figures below are the last ones served. */}
-              {control.status.error && (
-                <p role="alert">
-                  Status unavailable: {control.status.error.message}
-                </p>
-              )}
-              {control.status.value && (
-                <dl>
-                  <dt>Summary</dt>
-                  <dd>{control.status.value.summary}</dd>
-                  <dt>Graph state</dt>
-                  <dd>{graphStateWord(control.status.value.node_status)}</dd>
-                  <dt>Unread surfaces</dt>
-                  <dd>{control.status.value.unread_surfaces.count}</dd>
-                  <dt>Oldest unread (seconds)</dt>
-                  <dd>
-                    {control.status.value.unread_surfaces.oldest_seconds ??
-                      "None"}
-                  </dd>
-                  {/* How long the run's journal has been quiet: the age Status
-                      gave a parked driver, read off the run's own last write. */}
-                  <dt>Last progress</dt>
-                  <dd>
-                    <output aria-label="Last progress">
-                      {!runLoaded ? (
-                        LOADING_TEXT
-                      ) : detail.run.last_progress_at === undefined ? (
-                        "Not recorded"
-                      ) : (
-                        <Timestamp
-                          at={new Date(
-                            detail.run.last_progress_at * 1000,
-                          ).toISOString()}
-                          relative
-                        />
-                      )}
-                    </output>
-                  </dd>
-                </dl>
-              )}
-              {control.status.value && (
-                <section aria-label="Node statuses">
-                  <StructuredFields value={control.status.value.node_status} />
-                </section>
-              )}
-            </RecordDisclosure>
-          )}
-          {telemetry.error && !readFailed && (
-            // `Alert` carries `role="alert"` itself, so the banner keeps announcing
-            // itself the moment a read fails.
-            <Alert
-              className="live-issue rounded-none border-x-0 border-t-0"
-              variant="destructive"
-            >
-              <TriangleAlert />
-              <AlertTitle>Live telemetry issue</AlertTitle>
-              <AlertDescription>
-                {telemetry.error.message}{" "}
-                <Button
-                  onClick={telemetry.refresh}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Try again
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-          {historyFailed !== undefined && (
-            <Alert
-              className="live-issue rounded-none border-x-0 border-t-0"
-              variant="destructive"
-            >
-              <TriangleAlert />
-              <AlertTitle>
-                The rest of this run's history did not load
-              </AlertTitle>
-              <AlertDescription>
-                {historyFailed}{" "}
-                <Button
-                  onClick={telemetry.refresh}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Try again
-                </Button>
-              </AlertDescription>
-            </Alert>
-          )}
-          {telemetry.notice && (
-            <p className="live-notice" role="status">
-              {telemetry.notice}
-            </p>
-          )}
-          <ShutdownStatus
-            label="Shutdown of the entire host"
-            onDismiss={hostShutdowns.host.dismiss}
-            rows={hostList?.runs ?? []}
-            state={hostShutdowns.host.state}
-          />
-          {humanItems.active ? (
-            <HumanItemsPage
-              client={client}
-              live={telemetry.humanItems}
-              choice={humanItemsSelection.choice}
-              setChoice={humanItemsSelection.setChoice}
-              selectedId={humanItemsSelection.selectedId}
-              setSelectedId={humanItemsSelection.setSelectedId}
-            />
-          ) : selection.host ? (
-            <HostPage
-              client={client}
-              listError={hostListError}
-              onRefresh={() => setHostRefresh((value) => value + 1)}
-              list={hostList}
-              rows={telemetry.hostRows}
-            >
-              <HostShutdownButtons
-                list={hostList}
-                loadMore={noMorePages}
-                loadingMore={false}
-                shutdowns={hostShutdowns}
-              />
-            </HostPage>
+            </>
           ) : (
+            // The tab set holds the run bar too, because the run's views are
+            // selected in that bar: one band above the view rather than a strip of
+            // tabs under the header.
             <Tabs
               className="min-h-0 flex-1 gap-0"
               onValueChange={(value) =>
                 value === "overall"
                   ? selection.showOverall()
-                  : value === "graph"
-                    ? selection.selectNode(undefined)
-                    : isRunView(value)
-                      ? selection.selectView(value)
-                      : undefined
+                  : selection.selectNode(undefined)
               }
               value={selection.view}
             >
-              <div className="view-tabs">
-                <TabsList aria-label="DAG views" variant="line">
-                  <TabsTrigger value="graph">
-                    <Workflow size={15} /> Graph
-                  </TabsTrigger>
-                  <TabsTrigger value="overall">
-                    <Route size={15} /> Overall
-                  </TabsTrigger>
-                  <TabsTrigger value="channel">
-                    <Inbox size={15} /> Channel
-                  </TabsTrigger>
-                </TabsList>
-                {/* How much of what the run recorded this reading carries. Beside
-                  the views rather than in the toolbar: it selects a reading, like
-                  they do, and the toolbar is a fixed-height row the timeline
-                  region's own share of the window is measured against. */}
-                <fieldset className="detail-switch">
-                  <legend className="sr-only">Level of detail</legend>
-                  {detailLevels.map(([level, { label, description }]) => (
-                    <Button
-                      aria-pressed={selection.detail === level}
-                      key={level}
-                      onClick={() => selection.selectDetail(level)}
-                      size="sm"
-                      title={description}
-                      type="button"
-                      variant={
-                        selection.detail === level ? "default" : "outline"
-                      }
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </fieldset>
-              </div>
+              {header(
+                <div className="view-tabs">
+                  <TabsList aria-label="DAG views" variant="line">
+                    <TabsTrigger value="graph">
+                      <Workflow size={15} /> Graph
+                    </TabsTrigger>
+                    <TabsTrigger value="overall">
+                      <Route size={15} /> Overall
+                    </TabsTrigger>
+                  </TabsList>
+                </div>,
+              )}
+              {notices}
               {/* One content region for whichever view is selected: the other tab's
                 panel is unmounted by the primitive, exactly as it is for any tab set. */}
               <TabsContent className="min-h-0" value={selection.view}>
@@ -565,20 +488,7 @@ export function App({
                     Loading execution history…
                   </div>
                 ) : detail && selectedRunId ? (
-                  selection.view === "channel" ? (
-                    <ChannelView
-                      channel={telemetry.channel}
-                      client={client}
-                      decisions={graph?.decisions}
-                      filter={filter}
-                      journalSeq={graph?.last_seq}
-                      observedAt={detail.observed_at}
-                      overrides={
-                        graph && runLoaded ? currentOverrides(graph) : undefined
-                      }
-                      runId={selectedRunId}
-                    />
-                  ) : selection.view === "overall" ? (
+                  selection.view === "overall" ? (
                     <OverallView
                       client={client}
                       detail={detail}
@@ -587,6 +497,9 @@ export function App({
                       journalSeq={graph?.last_seq}
                       nodes={nodes}
                       onRetry={telemetry.refresh}
+                      state={state}
+                      status={control.status}
+                      onReadStatus={control.reread}
                       timeline={telemetry.timeline}
                       timelineError={telemetry.timelineError}
                       onSelectNode={selection.selectNode}

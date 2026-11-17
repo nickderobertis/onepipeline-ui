@@ -1,4 +1,4 @@
-import { API_V2_FILTER_PROFILES, isProjectId } from "@onepipeline-ui/dag-model";
+import { isProjectId } from "@onepipeline-ui/dag-model";
 import { useCallback, useSyncExternalStore } from "react";
 import { isOpaqueId } from "../first-screen/address";
 import { appRootPath } from "./humanItemsRoute";
@@ -45,20 +45,6 @@ export interface UrlSelection {
    * where the node view lives.
    */
   readonly view: RunView;
-  /**
-   * How much of what the run recorded this reading carries.
-   *
-   * `activity` is the detailed stream — every record all three producing libraries
-   * put on it — and `decisions` narrows to onepipeline's own vocabulary, which is
-   * exactly the decisions: a node became ready, was dispatched, settled; an edit
-   * was committed; a decision began holding dependents back and was cleared. It is
-   * the same distinction the planner and an observer get on the CLI, and it is in
-   * the query string for the same reason every other selection is — a reader who
-   * narrowed their attention can send someone the reading they were looking at.
-   *
-   * Defaults to `activity`: a reader who asked for nothing is shown everything.
-   */
-  readonly detail: DetailLevel;
   readonly nodeTab: NodeTab;
   readonly selectList: (list: ListMode) => void;
   readonly selectProject: (projectKey?: string) => void;
@@ -66,22 +52,13 @@ export interface UrlSelection {
   readonly selectNode: (nodeId?: string) => void;
   readonly selectItem: (itemId?: string) => void;
   readonly showOverall: () => void;
-  readonly selectDetail: (detail: DetailLevel) => void;
   readonly selectNodeTab: (tab: NodeTab) => void;
-  /** Open one of the run’s readings. */
-  readonly selectView: (view: RunView) => void;
 }
 
-/**
- * The readings of one run. `graph` and `overall` are the two readings of its
- * recorded execution; `channel` is the supervising
- * surface — what the CLI does to a run once its plan has started, each wired to
- * the route the contract names for it.
- */
+/** The two readings of one run's recorded execution. */
 export const RUN_VIEWS = {
   graph: "graph",
   overall: "overall",
-  channel: "channel",
 } as const;
 export type RunView = keyof typeof RUN_VIEWS;
 
@@ -113,32 +90,6 @@ export function isListMode(value: string | null): value is ListMode {
  * collide with one.
  */
 export const NO_PROJECT_KEY = "none";
-
-/**
- * The two readings a viewer switches between, and the filter profile each one
- * asks the server for.
- *
- * Named profiles rather than inline specs: the server defines both for every run,
- * so the browser and the CLI narrow to the same thing under the same word, and a
- * spec written here would be a second definition of it.
- */
-export const DETAIL_LEVELS = {
-  decisions: {
-    label: "Decisions",
-    description: "Decision points and settlements only",
-    profile: API_V2_FILTER_PROFILES.planner,
-  },
-  activity: {
-    label: "Detailed activity",
-    description: "Every record all three producers put on the stream",
-    profile: API_V2_FILTER_PROFILES.detailed,
-  },
-} as const;
-export type DetailLevel = keyof typeof DETAIL_LEVELS;
-
-export function isDetailLevel(value: string | null): value is DetailLevel {
-  return value !== null && Object.hasOwn(DETAIL_LEVELS, value);
-}
 
 export const NODE_TAB_LABELS = {
   timeline: "Timeline",
@@ -178,10 +129,6 @@ export function useUrlSelection(): UrlSelection {
   const itemId = identifier(params, "event");
   const named = params.get("view");
   const namedTab = params.get("tab");
-  const namedDetail = params.get("detail");
-  const detail: DetailLevel = isDetailLevel(namedDetail)
-    ? namedDetail
-    : "activity";
   const nodeTab =
     namedTab === "pr" || namedTab === "checks"
       ? "remote"
@@ -228,7 +175,6 @@ export function useUrlSelection(): UrlSelection {
     nodeId,
     itemId,
     view,
-    detail,
     nodeTab,
     // Switching lists is a change of navigation, not of what is being read: the
     // run on screen stays on screen. The project page does not survive it, because
@@ -287,28 +233,11 @@ export function useUrlSelection(): UrlSelection {
         next.delete("event");
         next.delete("tab");
       }),
-    // Only the reading changes: which run, which node and which moment are all
-    // still what the reader was looking at, so narrowing the stream keeps their
-    // place rather than sending them back to the top of the run.
-    selectDetail: (level) =>
-      update((next) => {
-        if (level === "activity") next.delete("detail");
-        else next.set("detail", level);
-      }),
     selectNodeTab: (tab) =>
       update((next) => {
         if (tab === "timeline") next.delete("tab");
         else next.set("tab", tab);
         if (tab !== "timeline") next.delete("event");
-      }),
-    // A supervising reading is of the run as a whole, so whatever node and
-    // moment were open close with the reading they belonged to.
-    selectView: (view) =>
-      update((next) => {
-        next.set("view", view);
-        next.delete("node");
-        next.delete("event");
-        next.delete("tab");
       }),
   };
 }

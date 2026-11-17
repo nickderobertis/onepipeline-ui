@@ -89,12 +89,12 @@ describe("layoutDag", () => {
     const at = (layout: typeof plain, id: string) =>
       layout.nodes.find((node) => node.id === id);
     expect(at(plain, "b")?.height).toBe(72);
-    expect(at(grown, "b")?.height).toBe(92);
+    expect(at(grown, "b")?.height).toBe(87);
     // The card beneath it in the same column keeps its own gap below the taller one.
-    expect((at(grown, "c")?.y ?? 0) - (at(plain, "c")?.y ?? 0)).toBe(20);
+    expect((at(grown, "c")?.y ?? 0) - (at(plain, "c")?.y ?? 0)).toBe(15);
     // Its edge still meets it at its middle.
     const edge = grown.edges.find(({ id }) => id === "a-b");
-    expect(edge?.points.at(-1)?.y).toBe((at(grown, "b")?.y ?? 0) + 46);
+    expect(edge?.points.at(-1)?.y).toBe((at(grown, "b")?.y ?? 0) + 43.5);
     // A column of standard cards sits where it always did.
     expect(at(grown, "a")).toEqual(at(plain, "a"));
   });

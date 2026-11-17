@@ -15,21 +15,25 @@ import {
   ScrollArea,
   Timeline,
 } from "@oneharness/ui";
-import type { LiveRunDetail, RunTimeline } from "@onepipeline-ui/dag-model";
+import type {
+  LiveRunDetail,
+  RunStatus,
+  RunTimeline,
+} from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { Activity, Clock3, Cpu, Layers3, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { LOADING_TEXT, loaded } from "../../lib/loading";
+import { RunStateBadge } from "../../lib/RunStateBadge";
 import {
-  LOADING_TEXT,
-  loaded,
-  loadingPath,
-  staleFoldAsOf,
-} from "../../lib/loading";
-import { RecordDisclosure } from "../../lib/RecordDisclosure";
-import type { NodeView } from "../../lib/run-model";
-import { StructuredFields } from "../../lib/StructuredFields";
+  doneCount,
+  launchLabel,
+  type NodeView,
+  type RunState,
+} from "../../lib/run-model";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration, formatDurationSeconds } from "../../lib/time";
+import type { Read } from "../../lib/useRead";
 import { boundedZoom, TIMELINE_TIME_MARKS } from "./axis";
 import {
   type GraphRow,
@@ -66,9 +70,18 @@ export function OverallView({
   onSelectNode,
   selectedItemId,
   onSelectItem,
+  state,
+  status,
+  onReadStatus,
 }: {
   readonly client: TelemetryClient;
   readonly detail: LiveRunDetail;
+  /** The run's one state, shown once here, in the Whole DAG card. */
+  readonly state?: RunState;
+  /** The run's status read, which the run details card shows. */
+  readonly status: Read<RunStatus>;
+  /** Read the status again: the reader opened the run's details. */
+  readonly onReadStatus: () => void;
   readonly filter?: string;
   /** Subscribe again, from a failed read. */
   readonly onRetry?: () => void;
@@ -91,12 +104,6 @@ export function OverallView({
   });
   const timeline = history.timeline;
   const runLoaded = loaded(detail.progress);
-  const foldLoading =
-    !runLoaded ||
-    loadingPath(detail, "telemetry") ||
-    loadingPath(detail, "run.timing") ||
-    loadingPath(detail, "run.usage");
-  const foldAsOf = staleFoldAsOf(detail);
   const graph = useMemo(
     () => graphTimeline(timeline, nodes),
     [timeline, nodes],
@@ -154,70 +161,23 @@ export function OverallView({
     <div className="overall-view" data-journal-seq={journalSeq}>
       <ScrollArea className="h-full">
         <div className="p-[34px] max-sm:p-3">
-          <section className="overall-hero">
+          <section aria-label="Whole DAG" className="overall-hero">
             <p className="eyebrow">Whole DAG</p>
             <h2>{runId}</h2>
             {detail.graph?.plan.goal?.text && (
               <p className="run-goal">{detail.graph.plan.goal.text}</p>
             )}
-            <p>
-              {detail.run.phase} ·{" "}
-              {detail.run.last_event
-                ? `last event ${detail.run.last_event}`
-                : "no events recorded yet"}
+            <p className="overall-state">
+              {state !== undefined && <RunStateBadge large state={state} />}
+              <span>
+                {detail.run.last_event
+                  ? `last event ${detail.run.last_event}`
+                  : "no events recorded yet"}
+              </span>
             </p>
           </section>
-          <section aria-label="Run records">
-            <RecordDisclosure label="Timing and usage">
-              {foldLoading ? (
-                <p className="loading-value">{LOADING_TEXT}</p>
-              ) : (
-                <>
-                  {foldAsOf !== undefined && (
-                    <p className="loading-value">
-                      as of <Timestamp at={foldAsOf} />, updating
-                    </p>
-                  )}
-                  <StructuredFields value={detail.telemetry} />
-                </>
-              )}
-            </RecordDisclosure>
-            <RecordDisclosure label="Goal and repository identities">
-              <StructuredFields
-                value={{
-                  goal: detail.graph?.plan.goal,
-                  repositories: [
-                    ...new Set(
-                      detail.graph?.plan.tasks.flatMap((task) =>
-                        task.repo ? [task.repo] : [],
-                      ) ?? [],
-                    ),
-                  ],
-                }}
-              />
-            </RecordDisclosure>
-            <RecordDisclosure label="Recorded results">
-              <StructuredFields value={detail.graph?.result} />
-            </RecordDisclosure>
-            <RecordDisclosure label="Provider health">
-              {runLoaded ? (
-                <StructuredFields value={detail.provider_health} />
-              ) : (
-                <p className="loading-value">{LOADING_TEXT}</p>
-              )}
-            </RecordDisclosure>
-          </section>
           <section aria-label="Run metrics" className="metric-grid">
-            <Metric
-              icon={<Activity />}
-              label="Status"
-              value={detail.run.state}
-            />
-            <Metric
-              icon={<Layers3 />}
-              label="Nodes"
-              value={String(detail.run.nodes.length)}
-            />
+            <Metric icon={<Layers3 />} label="Nodes" value={doneCount(nodes)} />
             <Metric
               icon={<Clock3 />}
               label="Wall time"
@@ -245,6 +205,12 @@ export function OverallView({
                   ? String(detail.run.turns)
                   : LOADING_TEXT
               }
+            />
+            <RunDetails
+              detail={detail}
+              onRead={onReadStatus}
+              runLoaded={runLoaded}
+              status={status}
             />
           </section>
           <Card className="gap-0 py-[15px]">
@@ -537,6 +503,81 @@ function GraphRowView({
         selectedId={selectedItemId}
       />
     </li>
+  );
+}
+
+/**
+ * Who launched the run, what it has raised that nobody has read, and when it last
+ * moved: one card of label and value pairs beside the tiles, read off the status
+ * route, which is read again each time the card is shown.
+ */
+function RunDetails({
+  detail,
+  status,
+  onRead,
+  runLoaded,
+}: {
+  readonly detail: LiveRunDetail;
+  readonly status: Read<RunStatus>;
+  readonly onRead: () => void;
+  readonly runLoaded: boolean;
+}) {
+  useEffect(onRead, [onRead]);
+  const unread = status.value?.unread_surfaces;
+  const lastProgress = detail.run.last_progress_at;
+  return (
+    <Card
+      aria-label="Run details"
+      className="metric run-details gap-2 p-4"
+      role="group"
+    >
+      <p>Run details</p>
+      <dl>
+        <div>
+          <dt>Launching session</dt>
+          <dd>{runLoaded ? launchLabel(detail.launch) : LOADING_TEXT}</dd>
+        </div>
+        <div>
+          <dt>Unread surfaces</dt>
+          <dd>
+            {unread === undefined
+              ? status.error === undefined
+                ? LOADING_TEXT
+                : "Unavailable"
+              : unread.oldest_seconds === null
+                ? String(unread.count)
+                : `${unread.count} · oldest ${formatDurationSeconds(unread.oldest_seconds)}`}
+            {/* A reading already shown stays beside this, so a failed re-read
+                says the figure is the last one served. */}
+            {status.error !== undefined && (
+              <span className="run-details-error" role="alert">
+                {" "}
+                Status unavailable: {status.error.message}
+              </span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>Last progress</dt>
+          <dd>
+            {/* How long the run's journal has been quiet, read off its own last
+                write; a run that recorded none has no moment to count from. */}
+            <output aria-label="Last progress">
+              {!runLoaded ? (
+                LOADING_TEXT
+              ) : lastProgress === undefined || lastProgress <= 0 ? (
+                "—"
+              ) : (
+                <Timestamp
+                  at={new Date(lastProgress * 1000).toISOString()}
+                  relative
+                />
+              )}
+            </output>
+          </dd>
+        </div>
+      </dl>
+    </Card>
   );
 }
 

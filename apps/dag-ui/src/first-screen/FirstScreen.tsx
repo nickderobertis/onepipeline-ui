@@ -36,12 +36,15 @@ import {
 } from "../lib/loading";
 import {
   awaitedLine,
+  cardLines,
+  doneCount,
   isUnhealthy,
   type NodeView,
   nodeKindWord,
   nodeReason,
   nodeViews,
   openedNode,
+  runState,
 } from "../lib/run-model";
 import { Timestamp } from "../lib/Timestamp";
 import { formatDuration, formatDurationSeconds } from "../lib/time";
@@ -145,7 +148,7 @@ function useFirstGraph(nodes: readonly NodeView[]) {
       label: node.label,
       kind: node.kind,
       state: node.status,
-      ...(awaits.get(node.id) === undefined ? {} : { lines: 1 }),
+      ...cardLines(reasons.get(node.id), awaits.get(node.id)),
     })),
     edges: nodes.flatMap((node) =>
       (node.task?.deps ?? [])
@@ -245,7 +248,8 @@ function Graph({ nodes }: { readonly nodes: readonly NodeView[] }) {
                 onClick={() => openNode(node.id)}
               >
                 <div className="node-heading">
-                  <span className="inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-border px-1.5 py-0 text-[9px] font-medium tracking-[.1em] whitespace-nowrap text-foreground uppercase">
+                  <span className="node-kind inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-border px-1.5 py-0 text-[9px] font-medium tracking-[.1em] whitespace-nowrap text-foreground uppercase">
+                    <IconRoom size={10} />
                     {node.kind}
                   </span>
                   <IconRoom size={17} />
@@ -373,6 +377,38 @@ function Metric({
   );
 }
 
+/**
+ * The run's one state as the app's badge draws it, an icon's room where the app
+ * draws its icon, read off the first answer alone.
+ */
+function FirstRunState({ detail }: { readonly detail: LiveRunDetail }) {
+  const state = runState({
+    state: detail.run.state,
+    statuses: detail.graph?.node_status ?? {},
+  });
+  return (
+    <span className="run-state-group" data-large="true">
+      <span
+        className="run-state"
+        data-run-state={
+          state.known
+            ? state.word.toLowerCase().replaceAll(/[^a-z]+/gu, "-")
+            : "unknown"
+        }
+      >
+        <IconRoom size={16} />
+        {state.word}
+      </span>
+      {state.failed > 0 && (
+        <span className="run-failures">
+          <IconRoom size={16} />
+          {state.failed} failed
+        </span>
+      )}
+    </span>
+  );
+}
+
 function Overall({
   detail,
   timeline,
@@ -387,35 +423,23 @@ function Overall({
   return (
     <div className="overall-view">
       <div className="p-[34px] max-sm:p-3">
-        <section className="overall-hero">
+        <section aria-label="Whole DAG" className="overall-hero">
           <p className="eyebrow">Whole DAG</p>
           <h2>{detail.run.run_id}</h2>
           {detail.graph?.plan.goal?.text && (
             <p className="run-goal">{detail.graph.plan.goal.text}</p>
           )}
-          <p>
-            {detail.run.phase} ·{" "}
-            {detail.run.last_event
-              ? `last event ${detail.run.last_event}`
-              : "no events recorded yet"}
+          <p className="overall-state">
+            <FirstRunState detail={detail} />
+            <span>
+              {detail.run.last_event
+                ? `last event ${detail.run.last_event}`
+                : "no events recorded yet"}
+            </span>
           </p>
         </section>
-        {/* The run's records, each a closed disclosure in the app. */}
-        <Reserved>
-          {[
-            "Timing and usage",
-            "Goal and repository identities",
-            "Recorded results",
-            "Provider health",
-          ].map((record) => (
-            <details key={record}>
-              <summary>{record}</summary>
-            </details>
-          ))}
-        </Reserved>
         <section aria-label="Run metrics" className="metric-grid">
-          <Metric label="Status" value={detail.run.state} />
-          <Metric label="Nodes" value={String(detail.run.nodes.length)} />
+          <Metric label="Nodes" value={doneCount(nodes)} />
           <Metric
             label="Wall time"
             value={
@@ -428,6 +452,20 @@ function Overall({
             label="Turns"
             value={typeof turns === "number" ? String(turns) : LOADING_TEXT}
           />
+          {/* The run details card, its values the status read and the rest bring. */}
+          <Reserved className="metric run-details flex flex-col gap-2 rounded-xl border bg-card p-4 text-card-foreground">
+            <p>Run details</p>
+            <dl>
+              {["Launching session", "Unread surfaces", "Last progress"].map(
+                (term) => (
+                  <div key={term}>
+                    <dt>{term}</dt>
+                    <dd>{LOADING_TEXT}</dd>
+                  </div>
+                ),
+              )}
+            </dl>
+          </Reserved>
         </section>
         <div className="flex flex-col gap-0 rounded-xl border bg-card py-[15px] text-card-foreground shadow-sm">
           <div className="px-[15px]">
@@ -509,47 +547,47 @@ function NodeTimeline({
   );
   return (
     <section aria-label={`Timeline for ${node.label}`} className="node-view">
-      <header className="node-view-head">
-        <nav>
-          <ol className="breadcrumb">
-            <li>
-              <Reserved className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium whitespace-nowrap">
-                <IconRoom size={16} />
-                Graph
-              </Reserved>
-            </li>
-            <li>
-              <span className="breadcrumb-node">{node.label}</span>
-            </li>
-          </ol>
-        </nav>
-        <div className="node-view-facts">
-          <span className="node-view-state inline-flex w-fit shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-full border px-2 py-0.5 text-xs font-medium tracking-[.03em] whitespace-nowrap uppercase">
-            <span
-              aria-hidden="true"
-              className="size-1.5 rounded-full bg-current"
-            />
-            {node.status}
-          </span>
-          <span className="node-view-meta">
-            {nodeKindWord(node)} node · turns {LOADING_TEXT}
-          </span>
-        </div>
-      </header>
       <div className="node-tabs">
-        <Reserved className="mx-5 inline-flex h-9 w-fit flex-none items-center justify-start gap-1 p-[3px] text-sm font-medium text-muted-foreground">
-          {[
-            "Timeline",
-            "Task",
-            "Acceptance criteria",
-            "Dependencies",
-            "Remote",
-          ].map((tab) => (
-            <span className={TAB} key={tab}>
-              {tab}
+        <section aria-label="Node header" className="node-view-head">
+          <nav>
+            <ol className="breadcrumb">
+              <li>
+                <Reserved className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium whitespace-nowrap">
+                  <IconRoom size={16} />
+                  Graph
+                </Reserved>
+              </li>
+              <li>
+                <span className="breadcrumb-node">{node.label}</span>
+              </li>
+            </ol>
+          </nav>
+          <div className="node-view-facts">
+            <span className="node-view-state inline-flex w-fit shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-full border px-2 py-0.5 text-xs font-medium tracking-[.03em] whitespace-nowrap uppercase">
+              <span
+                aria-hidden="true"
+                className="size-1.5 rounded-full bg-current"
+              />
+              {node.status}
             </span>
-          ))}
-        </Reserved>
+            <span className="node-view-meta">
+              {nodeKindWord(node)} node · turns {LOADING_TEXT}
+            </span>
+          </div>
+          <Reserved className={`${TAB_ROW} node-tab-row`}>
+            {[
+              "Timeline",
+              "Task",
+              "Acceptance criteria",
+              "Dependencies",
+              "Remote",
+            ].map((tab) => (
+              <span className={TAB} key={tab}>
+                {tab}
+              </span>
+            ))}
+          </Reserved>
+        </section>
         <div className="node-timeline-panel flex-1">
           <div className="node-execution" data-expanded="false">
             <section
@@ -670,40 +708,25 @@ function Shell({
         </div>
       </nav>
       <main className="workspace">
-        <section aria-label="Run header" className="topbar run-topbar">
-          <div className="topbar-title">
-            <div>
-              <p className="eyebrow">Execution telemetry</p>
-              <h2>{address.runId}</h2>
-            </div>
-          </div>
-        </section>
-        <Reserved className="run-header-details">
-          <details>
-            <summary>Run details</summary>
-          </details>
-        </Reserved>
         <div className="flex min-h-0 flex-1 flex-col gap-0">
-          <Reserved className="view-tabs">
-            <div className={TAB_ROW}>
-              {["Graph", "Overall", "Channel"].map((view) => (
-                <span className={TAB} key={view}>
-                  <IconRoom size={15} />
-                  {view}
-                </span>
-              ))}
+          <section aria-label="Run header" className="topbar run-topbar">
+            <div className="topbar-title">
+              <div>
+                <p className="eyebrow">Execution telemetry</p>
+                <h2 title={address.runId}>{address.runId}</h2>
+              </div>
             </div>
-            <div className="detail-switch">
-              {["Decisions", "Detailed activity"].map((level) => (
-                <span
-                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium whitespace-nowrap"
-                  key={level}
-                >
-                  {level}
-                </span>
-              ))}
-            </div>
-          </Reserved>
+            <Reserved className="view-tabs">
+              <div className={TAB_ROW}>
+                {["Graph", "Overall"].map((view) => (
+                  <span className={TAB} key={view}>
+                    <IconRoom size={15} />
+                    {view}
+                  </span>
+                ))}
+              </div>
+            </Reserved>
+          </section>
           <div className="min-h-0 flex-1">{children}</div>
         </div>
       </main>

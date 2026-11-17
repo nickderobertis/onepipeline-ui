@@ -356,8 +356,10 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(banner).toHaveTextContent("Deploy failed");
     expect(banner).toHaveTextContent("publication exited non-zero");
     expect(banner).toHaveTextContent("2");
+    // Under the node bar, which holds the tabs, and above the content they select.
+    const node = screen.getByRole("region", { name: "Timeline for publish" });
     expect(
-      banner.compareDocumentPosition(screen.getByRole("tab", { name: "Task" })),
+      banner.compareDocumentPosition(within(node).getByRole("tabpanel")),
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
@@ -544,10 +546,8 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
 
     await userEvent.click(railRow(/local\/example/));
     expect(
-      await within(detail()).findByRole("link", {
-        name: /github\.com\/example\/repo\/pull\/12/,
-      }),
-    ).toBeInTheDocument();
+      await within(detail()).findByRole("link", { name: /^repo#12/ }),
+    ).toHaveAttribute("href", PR_URL);
     // A PR event states the checks that were observed on it, not just its url.
     expect(within(detail()).getByText("Observed checks")).toBeInTheDocument();
     expect(within(detail()).getByText("unit")).toBeInTheDocument();
@@ -951,7 +951,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     const { client } = telemetryHarness();
     const view = render(<App client={client} />);
     await userEvent.click(await screen.findByRole("tab", { name: "Remote" }));
-    const [link] = await screen.findAllByRole("link", { name: /Pull request/ });
+    const [link] = await screen.findAllByRole("link", { name: /^repo#12/ });
     expect(link).toHaveAttribute("href", PR_URL);
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noreferrer");
@@ -982,7 +982,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         commit_url: "https://github.com/example/repo/commit/abc12345",
       },
       expectedLinks: ["Commit abc12345"],
-      absentLinks: ["Pull request"],
+      absentLinks: ["repo#12", "Pull request"],
     },
     {
       name: "remote PR unmerged",
@@ -993,7 +993,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         base_branch: "main",
         merged: false,
       },
-      expectedLinks: ["Pull request", "feature/remote"],
+      expectedLinks: ["repo#12", "feature/remote"],
       absentLinks: ["Commit"],
     },
     {
@@ -1007,7 +1007,7 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         commit: "def67890",
         commit_url: "https://github.com/example/repo/commit/def67890",
       },
-      expectedLinks: ["Pull request", "Commit def67890"],
+      expectedLinks: ["repo#12", "Commit def67890"],
       absentLinks: ["feature/remote"],
     },
   ])(
@@ -1117,13 +1117,15 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     );
   });
 
-  test("shows launching sessions in header details and updates a row from its pushed frame", async () => {
+  test("shows launching sessions in the run details and updates a row from its pushed frame", async () => {
+    window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=overall`);
     const { client, fetch, push } = telemetryHarness();
     render(<App client={client} />);
-    await userEvent.click(await screen.findByText("Run details"));
+    const details = await screen.findByRole("group", { name: "Run details" });
     expect(
-      await screen.findByText(/Launching session: Codex session/),
+      await within(details).findByText(/^Codex session/),
     ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Graph" }));
     expect(
       within(screen.getByRole("navigation")).queryByText(/session/),
     ).toBeNull();
@@ -1908,69 +1910,11 @@ describe("the reading a viewer asks for", () => {
       .map((view) => ("filter" in view ? view.filter : undefined) ?? "");
 
   test(
-    "switches between decisions and detailed activity, and says which is on",
+    "reads every view under the detailed profile, whatever an old address names",
     JOURNEY_TIMEOUT,
     async () => {
-      window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=overall`);
-      const { client, views } = telemetryHarness();
-      render(<App client={client} />);
-      await screen.findByRole("heading", { name: LIVE_RUN });
-
-      const choice = (name: string) =>
-        within(
-          screen.getByRole("group", { name: "Level of detail" }),
-        ).getByRole("button", { name });
-      const decisions = choice("Decisions");
-      const activity = choice("Detailed activity");
-
-      // A reader who asked for nothing is shown everything, and the control says
-      // so rather than leaving both settings looking equally selected.
-      expect(activity).toHaveAttribute("aria-pressed", "true");
-      expect(decisions).toHaveAttribute("aria-pressed", "false");
-      await waitFor(() =>
-        expect(filtersAsked(views).length).toBeGreaterThan(0),
-      );
-      expect(new Set(filtersAsked(views))).toEqual(new Set(["detailed"]));
-
-      // Narrowing to the decisions is one click, and every read of the run is
-      // taken again under the profile it names — so the graph, the timeline and
-      // the stream can never be showing three different slices of one run.
-      const before = filtersAsked(views).length;
-      await userEvent.click(decisions);
-      expect(decisions).toHaveAttribute("aria-pressed", "true");
-      expect(activity).toHaveAttribute("aria-pressed", "false");
-      await waitFor(() =>
-        expect(filtersAsked(views).length).toBeGreaterThan(before),
-      );
-      expect(filtersAsked(views).slice(before)).toContain("planner");
-      expect(filtersAsked(views).slice(before)).not.toContain("detailed");
-
-      // And the reading is in the address, like every other selection: a reader
-      // who narrowed their attention can send someone what they were looking at.
-      expect(window.location.search).toContain("detail=decisions");
-      // The run and the view they were on are untouched by it.
-      expect(window.location.search).toContain(`run=${LIVE_RUN}`);
-      expect(window.location.search).toContain("view=overall");
-
-      // Back returns to the detailed reading, so the switch is undoable the way
-      // the rest of the drill-down is.
-      act(() => {
-        window.history.back();
-      });
-      await waitFor(() =>
-        expect(choice("Detailed activity")).toHaveAttribute(
-          "aria-pressed",
-          "true",
-        ),
-      );
-      cleanup();
-    },
-  );
-
-  test(
-    "opens on the decisions-level reading when the address names one",
-    JOURNEY_TIMEOUT,
-    async () => {
+      // The Decisions reading is retired with its switch: a bookmark that named it
+      // opens the whole reading rather than a narrower one nothing on screen says.
       window.history.replaceState(
         null,
         "",
@@ -1982,14 +1926,10 @@ describe("the reading a viewer asks for", () => {
       await waitFor(() =>
         expect(filtersAsked(views).length).toBeGreaterThan(0),
       );
-      // Every read from the first one: a bookmarked reading is not a reading the
-      // app arrives at after showing the other one first.
-      expect(new Set(filtersAsked(views))).toEqual(new Set(["planner"]));
+      expect(new Set(filtersAsked(views))).toEqual(new Set(["detailed"]));
       expect(
-        within(
-          screen.getByRole("group", { name: "Level of detail" }),
-        ).getByRole("button", { name: "Decisions" }),
-      ).toHaveAttribute("aria-pressed", "true");
+        screen.queryByRole("group", { name: "Level of detail" }),
+      ).toBeNull();
       cleanup();
     },
   );
@@ -1998,11 +1938,7 @@ describe("the reading a viewer asks for", () => {
     "a reading the server has no profile for is reported, not silently widened",
     JOURNEY_TIMEOUT,
     async () => {
-      window.history.replaceState(
-        null,
-        "",
-        `/?run=${LIVE_RUN}&view=overall&detail=decisions`,
-      );
+      window.history.replaceState(null, "", `/?run=${LIVE_RUN}&view=overall`);
       const { client } = telemetryHarness((url) => {
         if (!isRunDetail(url)) return defaultResponder(url);
         // What a server serves for a profile the run does not have. A viewer
@@ -2012,7 +1948,7 @@ describe("the reading a viewer asks for", () => {
           {
             error: {
               code: "unknown_filter_profile",
-              message: '"planner" is not a filter profile of this run',
+              message: '"detailed" is not a filter profile of this run',
             },
           },
           { status: 404 },

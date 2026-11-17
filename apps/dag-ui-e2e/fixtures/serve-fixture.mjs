@@ -22,7 +22,7 @@
  *                      | --review-loop-corpus | --command-steps-corpus
  *                      | --transcripts-corpus
  *                      | --held-turn-corpus | --large-run-views-corpus
- *                      | --human-items-world NAME]
+ *                      | --readability-corpus | --human-items-world NAME]
  *                                                  build the fixture and serve it,
  *                                                  the browser view beside it with --ui;
  *                                                  the shutdown journeys' own runs
@@ -36,7 +36,9 @@
  *                                                  held turn's with
  *                                                  --held-turn-corpus, and the
  *                                                  large-run views' with
- *                                                  --large-run-views-corpus; the
+ *                                                  --large-run-views-corpus, the
+ *                                                  readability journeys' with
+ *                                                  --readability-corpus; the
  *                                                  action-items journeys' with
  *                                                  --human-items-world, a host
  *                                                  whose items and runs the
@@ -86,6 +88,7 @@ import {
   buildLargeRunViews,
   buildPreservedRuns,
   buildProjectCentricRuns,
+  buildReadabilityRuns,
   buildReviewLoopRuns,
   buildRuns,
   buildShutdownRuns,
@@ -101,6 +104,7 @@ import {
   overridesDir,
   preservedFacts,
   projectCentricFacts,
+  readabilityFacts,
   recordActivity,
   recordWords,
   removePageRuns,
@@ -478,6 +482,7 @@ function parseArgs(argv) {
     "--command-steps-corpus",
     "--held-turn-corpus",
     "--large-run-views-corpus",
+    "--readability-corpus",
   ]);
   const valued = new Set([
     "--workspace",
@@ -838,6 +843,8 @@ if (args.stall) {
         corpus = { build: buildCommandStepsRuns, facts: commandStepsFacts };
       } else if (args["large-run-views-corpus"]) {
         corpus = { build: buildLargeRunViews, facts: largeRunViewsFacts };
+      } else if (args["readability-corpus"]) {
+        corpus = { build: buildReadabilityRuns, facts: readabilityFacts };
       } else if (args["held-turn-corpus"]) {
         corpus = {
           build: (root) => buildHeldTurnRuns(root, workspace),
