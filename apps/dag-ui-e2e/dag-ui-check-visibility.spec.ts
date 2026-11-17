@@ -91,6 +91,21 @@ test("the served view marks requirement and failing checks, including a check re
         await expect(status).not.toHaveAccessibleName("failed");
       }
     }
+    // A check that completed with no conclusion has no verdict to pass on, and
+    // reads failed, as a cancelled one does.
+    await expect(
+      table
+        .getByRole("row")
+        .filter({
+          has: page.getByRole("rowheader", {
+            name: "empty-conclusion",
+            exact: true,
+          }),
+        })
+        .getByRole("cell")
+        .first()
+        .getByRole("img"),
+    ).toHaveAccessibleName("failed");
     await page.getByRole("tab", { name: "Timeline", exact: true }).click();
     const eventRows = page.getByRole("button", {
       name: "Open change-check",
