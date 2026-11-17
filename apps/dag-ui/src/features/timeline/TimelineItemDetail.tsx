@@ -866,7 +866,6 @@ function Reference({
     return (
       <p className="detail-link">
         <a href={reference.value} rel="noreferrer" target="_blank">
-          {/* A change request is named by its short id, as everywhere else. */}
           {reference.kind === "pr"
             ? changeRequestId(reference.value)
             : reference.value}{" "}

@@ -1,4 +1,4 @@
-import { runDetailSchema } from "@onepipeline-ui/dag-model";
+import { API_V2_PATHS, runDetailSchema } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
@@ -643,4 +643,30 @@ test("the Remote tab's checks read as one coloured status icon each, with no Con
     }
   }
   expect(new Set(colours.values()).size).toBe(colours.size);
+});
+
+test("a bookmark naming the retired Channel view or Decisions reading opens Overall, read whole", async ({
+  page,
+}) => {
+  const run = facts.states.Running;
+  // The reading the page subscribes under, read off the request as it leaves.
+  const subscribed = page.waitForRequest(
+    (request) =>
+      new URL(request.url()).pathname === API_V2_PATHS.subscriptions &&
+      request.method() === "POST",
+  );
+  await page.goto(`${server.origin}/?run=${run}&view=channel&detail=decisions`);
+  const view = z
+    .object({ view: z.object({ filter: z.string().optional() }) })
+    .parse((await subscribed).postDataJSON()).view;
+  expect(view.filter).toBe("detailed");
+  await expect(page.getByRole("tab", { name: "Overall" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(wholeDag(page)).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Channel" })).toHaveCount(0);
+  await expect(
+    page.getByRole("group", { name: "Level of detail" }),
+  ).toHaveCount(0);
 });

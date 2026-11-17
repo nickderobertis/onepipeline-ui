@@ -134,6 +134,18 @@ test("Remote displays incomplete check records without inventing a status or lin
         },
         artifacts: [],
       },
+      {
+        v: 1,
+        ts: new Date().toISOString(),
+        stream: "legacy-check-fixture",
+        seq: 1,
+        source: "vcs",
+        kind: "change-check",
+        labels: { run_id: run, node: "missing-artifact" },
+        // A writer that recorded the check and neither its status nor its outcome.
+        payload: { name: "unreported-check", required: false },
+        artifacts: [],
+      },
     ]);
     await page.goto(
       `${server.origin}/?run=${run}&node=missing-artifact&tab=remote`,
@@ -148,11 +160,22 @@ test("Remote displays incomplete check records without inventing a status or lin
     await expect(
       row.getByRole("cell").first().getByRole("img"),
     ).toHaveAccessibleName("skipped");
+    // Neither a status nor an outcome: it says so, rather than reading queued.
+    const unreported = table.getByRole("row").filter({
+      has: page.getByRole("rowheader", {
+        name: "unreported-check",
+        exact: true,
+      }),
+    });
+    await expect(
+      unreported.getByRole("cell").first().getByRole("img"),
+    ).toHaveAccessibleName("not recorded");
     await expect(row.getByRole("link")).toHaveCount(0);
     await page.getByRole("tab", { name: "Timeline", exact: true }).click();
+    // Both records are rows of the node's timeline.
     await expect(
       page.getByRole("button", { name: "Open change-check", exact: true }),
-    ).toBeVisible();
+    ).toHaveCount(2);
   } finally {
     await server.stop();
   }

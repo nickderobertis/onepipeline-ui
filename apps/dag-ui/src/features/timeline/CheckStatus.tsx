@@ -35,7 +35,6 @@ const ICONS: Readonly<Record<CheckWord, LucideIcon>> = {
   "not recorded": CircleHelp,
 };
 
-/** The word a check's `status` and `conclusion` read as. */
 function checkWord(check: {
   readonly status?: string;
   readonly conclusion?: string;
