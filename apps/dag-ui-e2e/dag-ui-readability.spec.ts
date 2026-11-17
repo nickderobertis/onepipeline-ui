@@ -558,7 +558,7 @@ test("every change request link reads as its short id", async ({ page }) => {
   });
   await expect(
     node
-      .getByLabel("Node header", { exact: true })
+      .getByRole("region", { name: "Node header", exact: true })
       .getByRole("link", { name: prId }),
   ).toHaveAttribute("href", pr);
   await expect(
