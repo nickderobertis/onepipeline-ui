@@ -2085,6 +2085,7 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 }
 .run-topbar .run-actions-badge {
   display: inline-flex;
+  gap: 6px;
 }
 .last-activity {
   max-width: 32rem;
@@ -3653,12 +3654,28 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   color: #94a3b8;
 }
 
-/* Graph card: the status word right under the title. */
+/* Graph card: the status word right under the title; the content block centred
+   (ruling c7.0: equal space above the pill row and below the last line). */
 .dag-node {
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
-  padding: 8px 13px 9px;
+  justify-content: center;
+  padding: 8px 13px;
+}
+/* Ruling c7.0: the kind icon on the pill text's midline. */
+.dag-node .spike-kind-pill {
+  display: inline-flex;
+  align-items: center;
+  line-height: 10px;
+}
+.dag-node .node-heading {
+  /* The row is the 17 px status icon tall, the pill ~14 px: pull the row up so the
+     pill's top and the last line sit evenly in the centred block. */
+  margin-top: -1.5px;
+}
+.dag-node .spike-kind-pill svg {
+  display: block;
+  flex-shrink: 0;
 }
 .dag-node > * {
   flex-shrink: 0;

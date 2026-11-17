@@ -314,6 +314,8 @@ export interface OneRunState {
   readonly word: string;
   readonly Icon: LucideIcon;
   readonly tone: string;
+  /** Ruling: a run that has not ended shows its failed nodes as a count beside the word. */
+  readonly failed?: number;
 }
 
 const TONES = {
@@ -345,12 +347,16 @@ export function oneRunState(
     return { word: "Waiting on you", Icon: Hand, tone: TONES.warning };
   if (l === "DRIVER DEAD" || l === "UNDRIVEN" || s === "driver-dead" || s === "undriven")
     return { word: "Driver dead", Icon: Unplug, tone: TONES.destructive };
+  // Ruling: PARKED is still driven, only quiet.
   if (l === "PARKED" || s === "parked")
-    return { word: "Paused", Icon: CirclePause, tone: TONES.muted };
+    return { word: "Idle", Icon: CirclePause, tone: TONES.muted };
   if (l === "ACTIVE" || s === "active" || s === "running") {
+    // Ruling: failed nodes keep the word and add a separate count beside it.
+    const failed = statuses.filter((status) => status === "failed").length;
+    const count = failed > 0 ? { failed } : {};
     if (statuses.includes("waiting"))
-      return { word: "Waiting on you", Icon: Hand, tone: TONES.warning };
-    return { word: "Running", Icon: LoaderCircle, tone: TONES.info };
+      return { word: "Waiting on you", Icon: Hand, tone: TONES.warning, ...count };
+    return { word: "Running", Icon: LoaderCircle, tone: TONES.info, ...count };
   }
   return state === undefined && liveness === undefined
     ? undefined
@@ -365,16 +371,28 @@ export function RunStateBadge({
   readonly large?: boolean;
 }) {
   if (runState === undefined) return null;
-  const { Icon, word, tone } = runState;
+  const { Icon, word, tone, failed } = runState;
+  const size = large ? "px-2.5 py-1 text-sm" : "px-2 py-0.5 text-xs";
   return (
-    <span
-      aria-label={`Run state ${word}`}
-      className={`spike-run-state inline-flex items-center gap-1.5 rounded-md border font-semibold whitespace-nowrap ${tone} ${large ? "px-2.5 py-1 text-sm" : "px-2 py-0.5 text-xs"}`}
-      role="status"
-    >
-      <Icon aria-hidden="true" size={large ? 16 : 13} />
-      {word}
-    </span>
+    <>
+      <span
+        aria-label={`Run state ${word}`}
+        className={`spike-run-state inline-flex items-center gap-1.5 rounded-md border font-semibold whitespace-nowrap ${tone} ${size}`}
+        role="status"
+      >
+        <Icon aria-hidden="true" size={large ? 16 : 13} />
+        {word}
+      </span>
+      {failed !== undefined && (
+        <span
+          aria-label={`${failed} failed nodes`}
+          className={`spike-failed-count inline-flex items-center gap-1.5 rounded-md border font-semibold whitespace-nowrap ${TONES.destructive} ${size}`}
+        >
+          <CircleX aria-hidden="true" size={large ? 16 : 13} />
+          {failed} failed
+        </span>
+      )}
+    </>
   );
 }
 

@@ -236,6 +236,34 @@ const SHOTS: readonly Shot[] = [
         }),
       );
       console.log(`SPIKE card padding:\n${pads.join("\n")}`);
+      // Ruling c7.0's evidence: the pill icon's midline against its text's, and the
+      // space above the pill row against the space below the last line, in CSS px.
+      const centring = await page.$$eval("article.dag-node", (cards) =>
+        cards.map((card) => {
+          const scale = card.getBoundingClientRect().height / card.offsetHeight;
+          const box = card.getBoundingClientRect();
+          const pill = card.querySelector(".spike-kind-pill");
+          const icon = pill?.querySelector("svg")?.getBoundingClientRect();
+          const text = [...(pill?.childNodes ?? [])].find(
+            (child) => child.nodeType === Node.TEXT_NODE,
+          );
+          const range = document.createRange();
+          if (text) range.selectNodeContents(text);
+          const glyphs = range.getBoundingClientRect();
+          const mid = (r: DOMRect) => r.top + r.height / 2;
+          const iconOff =
+            icon && text ? ((mid(icon) - mid(glyphs)) / scale).toFixed(2) : "-";
+          const last = [...card.children]
+            .filter((child) => child.tagName === "SPAN" || child.tagName === "STRONG")
+            .at(-1)
+            ?.getBoundingClientRect();
+          const pillTop = pill?.getBoundingClientRect().top ?? box.top;
+          const above = (pillTop - box.top) / scale - card.clientTop;
+          const below = (box.bottom - (last?.bottom ?? box.bottom)) / scale - card.clientTop;
+          return `${card.getAttribute("aria-label")} reason=${card.querySelector(".node-reason") !== null} icon-minus-text-midline=${iconOff} above=${above.toFixed(1)} below=${below.toFixed(1)} diff=${(below - above).toFixed(1)}`;
+        }),
+      );
+      console.log(`SPIKE card centring:\n${centring.join("\n")}`);
     },
   },
   {

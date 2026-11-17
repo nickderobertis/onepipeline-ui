@@ -51,7 +51,7 @@ export function DagNodeCard({ data }: NodeProps<DagFlowNode>) {
       <Handle type="target" position={Position.Left} />
       <div className="node-heading">
         <Badge
-          className="gap-1 px-1.5 py-0 text-[9px] tracking-[.1em] uppercase"
+          className="spike-kind-pill gap-1 px-1.5 py-0 text-[9px] tracking-[.1em] uppercase"
           variant="outline"
         >
           {/* SPIKE (spike-visual): the kind's icon before its word. */}
