@@ -20,7 +20,7 @@ read as a whole: its telemetry tiles over the graph timeline, which is the same 
 the same lane words and the same clock used at three scopes — the whole run, one node,
 one conversation — each a single click into the last.
 
-The browser can stop a run, attest a human action, reply on the channel, and shut
+The browser can stop a run, answer the action items waiting on a person, and shut
 down the whole host — each behind a confirm
 that names what it will act on, and each showing the engine's own receipt or refusal
 verbatim rather than a restatement of it. [`docs/dag-ui.md`](docs/dag-ui.md) is the
@@ -68,18 +68,6 @@ The sidebar lists projects by most recent activity, with their runs underneath.
 Selecting a project opens its newest visible run. Kind filters are discovered from
 run labels and saved in the URL. Ungrouped runs sit under **Other runs** at the end.
 **Host** opens resources, unwatched runs, and the confirmed host shutdown.
-
-### The channel
-
-![The Channel tab: questions with their correlated replies directly beneath them, one-line message previews, an unanswered question marked waiting, and the reply composer below](docs/screens/13-channel-1440x900.png)
-
-The run's channel pairs each question with the replies whose correlation answers it,
-newest question first. An unanswered question says it is waiting. Each message shows
-its first line and expands to its complete text; a reply's raw envelope is one further
-expansion away. Reading consumes nothing. The
-composer sends the editor's text **byte for byte** — never a parse of it — so a manager
-can type an envelope this app has never heard of and the engine's refusal of a
-malformed one is the engine's own.
 
 ### At the width it is actually read
 
