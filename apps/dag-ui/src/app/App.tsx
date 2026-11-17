@@ -294,6 +294,8 @@ export function App({
           onClick={() => {
             setHostRefresh((value) => value + 1);
             telemetry.refresh();
+            // The status is read on request, never on a change: Refresh is one.
+            if (!runless) control.reread();
           }}
           size="sm"
           type="button"
@@ -499,7 +501,6 @@ export function App({
                       onRetry={telemetry.refresh}
                       state={state}
                       status={control.status}
-                      onReadStatus={control.reread}
                       timeline={telemetry.timeline}
                       timelineError={telemetry.timelineError}
                       onSelectNode={selection.selectNode}

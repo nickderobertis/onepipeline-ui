@@ -81,11 +81,12 @@ spike's six realistic items are taken, as the journeys' long-content fixture.
 - **A question's choices are compact buttons on its card**, 28 to 32 CSS pixels tall on
   one line, side by side and at least 8 apart; a press makes that choice the card's
   draft answer, a second press clears it and a press on another replaces it. A title
-  wraps inside its button, capped at 46ch at every width. A question offering no
-  choices keeps its answer box on its card, resting one line tall and growing with
+  wraps inside its button, capped at 46ch at every width. Every open question keeps
+  its answer box on its card, beside its choices where it offers some, because a
+  person can always answer in their own words; it rests one line tall and grows with
   what is written: Enter keeps the draft and never sends it, and Shift+Enter writes
-  a new line. The detail offers the answer box on every question, so a draft may be a
-  choice, words, or both.
+  a new line. The detail offers the answer box on every question too, so a draft may
+  be a choice, words, or both.
 - **The send bar is how an answer leaves.** A fixed region below the list reads "Send N
   answers" with a Discard control while any draft is sendable, and sends every draft as
   one `POST /api/human-items/answers`, so a queue is answered once and each manager
@@ -169,8 +170,7 @@ action beside it. The detail pane takes the main area while it is open.
 ## Keyboard
 
 Tab moves from one open question's answer controls **straight to the next**: its choice
-buttons, or its answer box where it offers none, and nothing else on a card is in
-that sequence. After the last of them, Tab enters the
+buttons and then its answer box, and nothing else on a card is in that sequence. After the last of them, Tab enters the
 **card-action group** — every card's tracker link, Details, Complete and Dismiss — at
 its first action. The toast's actions follow in the ordinary Tab order. Arrow keys
 move through the group, holding at either end, and Home

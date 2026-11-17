@@ -621,46 +621,6 @@ const SURFACES: readonly Surface[] = [
     },
   },
   {
-    name: "13-channel",
-    title: "The channel: the queue, the composer and the surface form",
-    open: async (page) => {
-      await visit(page, `/?run=${runs().history}&view=channel`);
-      await settleReads(page);
-      await expect(
-        page.getByRole("region", { name: "Channel queue" }),
-      ).toContainText("Other replies");
-      await expect(page.getByRole("region", { name: "Reply" })).toBeVisible();
-    },
-  },
-  {
-    name: "14-channel-graph-overrides",
-    title: "The composer editing a node's graph overrides as an ordered list",
-    open: async (page) => {
-      await visit(page, `/?run=${runs().supervised}&view=channel`);
-      await settleReads(page);
-      const composer = page.getByRole("region", { name: "Reply" });
-      await composer.getByLabel("Shortcut").selectOption("set-node-sets");
-      await composer.getByLabel("Node id").fill("build");
-      const list = composer.getByRole("group", {
-        name: "Node overrides, in order",
-      });
-      // Two rows, so the reorder controls read in both states, and the longest
-      // entry a reader types: a config path the row has to wrap or truncate.
-      for (const entry of [
-        "members.worker.agent.oneharness_config=./configs/worker-large.toml",
-        "members.worker.agent.model=claude-opus",
-      ]) {
-        await list.getByRole("button", { name: "Add override" }).click();
-        await list.getByRole("textbox").last().fill(entry);
-      }
-      await composer.getByRole("button", { name: "Compose envelope" }).click();
-      await list.scrollIntoViewIfNeeded();
-      await expect(
-        list.getByRole("button", { name: "Move override 2 up" }),
-      ).toBeEnabled();
-    },
-  },
-  {
     name: "15-recorded-node-collapsed",
     title: "Recorded worker and change request drafter, collapsed",
     open: async (page) => {
@@ -972,23 +932,6 @@ const SURFACES: readonly Surface[] = [
       await expect(toast.getByRole("tooltip")).toBeVisible();
     },
     point: holdToast,
-  },
-  {
-    name: "33-channel-declined-ruling",
-    title:
-      "The channel: a declined ruling, and replies and envelopes from each party",
-    open: async (page) => {
-      await visit(page, `/?run=${runs().history}&view=channel`);
-      await settleReads(page);
-      const declined = page.getByRole("region", { name: "Declined ruling" });
-      await declined.scrollIntoViewIfNeeded();
-      await expect(declined).toBeVisible();
-      await expect(
-        page
-          .getByRole("region", { name: "Queued commands" })
-          .getByText(/^Envelope \d+ · from you$/u),
-      ).toHaveCount(1);
-    },
   },
   {
     name: "34-action-items-history",

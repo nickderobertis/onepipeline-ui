@@ -227,7 +227,7 @@ const WRONG_ANSWERS: {
     refusedAs: /awaiting/u,
   },
   {
-    name: "Status",
+    name: "the run's state",
     view: "overall",
     feed: (v) => {
       (v.detail.run as { state: string }).state = "complete-wrongly";
@@ -381,9 +381,7 @@ test("a screen drawing a value unlike its answer is refused by name", async ({
       changed(copy);
       return checkScreen("overall", overall.visible, copy).join(" ");
     };
-    expect(of((s) => (s.status = { value: "wrong" }))).toMatch(
-      /metric Status/u,
-    );
+    expect(of((s) => (s.run_state = "wrong"))).toMatch(/run state/u);
     expect(of((s) => (s.nodes = { value: "0" }))).toMatch(/metric Nodes/u);
     expect(of((s) => (s.wall = { value: "0s" }))).toMatch(/metric Wall time/u);
     expect(of((s) => (s.turns = { value: "0" }))).toMatch(/metric Turns/u);

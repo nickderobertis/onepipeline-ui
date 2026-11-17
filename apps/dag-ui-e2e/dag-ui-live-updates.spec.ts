@@ -230,10 +230,6 @@ async function shown(page: Page, view: string, node: string): Promise<void> {
     await expect(
       page.getByRole("region", { name: "Graph timeline" }),
     ).toBeVisible();
-  else if (view === "channel")
-    await expect(
-      page.getByRole("heading", { name: "Channel queue" }),
-    ).toBeVisible();
   else
     await expect(
       page.getByRole("region", { name: `Timeline for ${node}` }),
@@ -260,9 +256,7 @@ async function switchTo(page: Page, view: string, node: string): Promise<void> {
       .getByRole("button", { name: "Graph" })
       .click();
   } else {
-    const tab = { graph: "Graph", overall: "Overall", channel: "Channel" }[
-      view
-    ];
+    const tab = { graph: "Graph", overall: "Overall" }[view];
     await page.getByRole("tab", { name: tab }).click();
   }
   await shown(page, view, node);
@@ -298,7 +292,6 @@ const streaming = (wire: Wire): string | undefined => {
 const SUBSCRIBES: Record<string, string> = {
   graph: "detail",
   overall: "timeline",
-  channel: "channel",
   node: "timeline",
 };
 
@@ -509,32 +502,6 @@ test("a record appended to the open live run reaches every view as a patch, with
   expect(
     Object.keys(row.row).filter((key) => key !== "started_at"),
   ).toStrictEqual(fields.filter((key) => key !== "started_at"));
-
-  // A surface raised on the live run appears on its Channel tab, and the queue
-  // is never read for it.
-  await page.goto(`${server.origin}${address(run, "channel", node)}`);
-  await shown(page, "channel", node);
-  const raisedAt = Date.now();
-  const message = `is the channel live ${raisedAt}?`;
-  const raised = await page.request.post(
-    `${server.origin}/api/v2/runs/${run}/channel/surface`,
-    { data: { kind: "question", message } },
-  );
-  expect(raised.ok()).toBe(true);
-  await expect(page.getByText(message).first()).toBeVisible({
-    timeout: FRAME_PATIENCE,
-  });
-  await frameArrives(
-    wire,
-    "channel.patch",
-    (frame) => frame.type === "channel.patch" && frame.run_id === run,
-    raisedAt,
-  );
-  expect(
-    requestsSince(wire, raisedAt).filter((request) =>
-      request.includes("/channel"),
-    ),
-  ).toEqual([]);
 });
 
 test("no run-list snapshot follows the first read, on connection or after a reconnect, and a view switch replaces the subscription", async ({
@@ -590,10 +557,10 @@ test("no run-list snapshot follows the first read, on connection or after a reco
     wire.frames.filter(({ type }) => type === "snapshot" || type === "reset"),
   ).toEqual([]);
 
-  // Moving among Graph, Channel and a node's timeline replaces the
+  // Moving among Overall, Graph and a node's timeline replaces the
   // subscription, naming the one it replaces, and the view left behind is
   // neither subscribed nor read.
-  for (const view of ["channel", "node", "graph"]) {
+  for (const view of ["overall", "node", "graph"]) {
     await streamsSettled(wire);
     const before = streaming(wire);
     const since = Date.now();
@@ -615,7 +582,7 @@ test("no run-list snapshot follows the first read, on connection or after a reco
     expect(left.status(), `the subscription ${view} left behind`).toBe(410);
     expect(
       requestsSince(wire, since).filter((request) =>
-        /\/(timeline|channel)$|\/runs\/[^/]+$/u.test(request),
+        /\/timeline$|\/runs\/[^/]+$/u.test(request),
       ),
     ).toEqual([]);
   }
@@ -683,7 +650,7 @@ test("a dropped stream resumes from its last frame, and every change made meanwh
 
   // Every view the page moves among leaves the one it left unsubscribed and
   // unread: its subscription is gone, and nothing reads its payload.
-  for (const view of ["graph", "overall", "channel", "node"]) {
+  for (const view of ["graph", "overall", "node"]) {
     await streamsSettled(wire);
     const before = streaming(wire);
     const since = Date.now();
@@ -703,16 +670,15 @@ test("a dropped stream resumes from its last frame, and every change made meanwh
         request.startsWith("GET /api/v2/runs/"),
       ),
     ).toEqual([]);
-    // Only the view on screen is patched: a hidden timeline or channel is not.
+    // Only the view on screen is patched: a hidden timeline is not.
     const patched = new Set(
       wire.frames
         .filter(({ at }) => at >= since)
         .map(({ frame }) => frame?.type)
         .filter((type) => type?.endsWith(".patch")),
     );
-    if (view === "graph" || view === "channel")
-      expect(patched.has("timeline.patch")).toBe(false);
-    if (view !== "channel") expect(patched.has("channel.patch")).toBe(false);
+    if (view === "graph") expect(patched.has("timeline.patch")).toBe(false);
+    expect(patched.has("channel.patch")).toBe(false);
   }
 });
 

@@ -388,8 +388,11 @@ function FirstRunState({ detail }: { readonly detail: LiveRunDetail }) {
   });
   return (
     <span className="run-state-group" data-large="true">
+      {/* biome-ignore lint/a11y/useSemanticElements: the app's badge's grouping, named as it is; `fieldset` is for controls. */}
       <span
+        aria-label="Run state"
         className="run-state"
+        role="group"
         data-run-state={
           state.known
             ? state.word.toLowerCase().replaceAll(/[^a-z]+/gu, "-")

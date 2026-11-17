@@ -25,23 +25,11 @@ The view switcher is its `Tabs`; panels, metric tiles and transcript cards are i
 its `ScrollArea`; the node's task and context are its `Accordion`; the telemetry banner is its
 `Alert`; the loading view is its `Skeleton`; and every secondary action is its
 `Button`, with `Badge`, `Separator`, `Tooltip` and the `cn` helper where they fit.
-`ConversationView` is still not adopted, for a reason that has changed. It used to
-be that it requires a reply handler and this app only read runs. The app now takes
-a reply — on the run's channel — and the decision was revisited on those terms:
-the component is a whole page for continuing one *harness session* with a free-text
-follow-up (its form is labelled "Continue this session", its help line says it
-"continues the exact native session", and the `Conversation` it renders is a
-harness session with `harnesses`, a `project` and `user`/`assistant` turns), and
-the reply this app sends is none of those. A channel reply is the engine's `Reply`
-envelope — a verdict half and a commands half, JSON, sent byte for byte — and the
-one conversation that takes one is the run's channel, whose sides are surfaces
-raised by a run and envelopes written by a manager, not turns of a session.
-Rendering the channel through `ConversationView` would put the run's surfaces on
-the `user` side and the manager's envelopes on the `assistant` side of a session
-that never existed, and its uncontrolled textarea gives a shortcut nothing to fill.
-The composer is built from the package's `Textarea`, `Input`, `Label`, `Button`,
-`Card`, `Badge` and `Dialog` instead, and the planner's own conversations are
-still only shown, under `ConversationTimeline` and `TurnCard`, exactly as before.
+`ConversationView` is not adopted: the component is a whole page for continuing one
+*harness session* with a free-text follow-up (its form is labelled "Continue this
+session", and the `Conversation` it renders is a harness session with `harnesses`, a
+`project` and `user`/`assistant` turns), and this app continues no session. The
+planner's own conversations are shown under `ConversationTimeline` and `TurnCard`.
 
 Status is the one place the package's components are not used unchanged.
 `StatusBadge` is the right component for a conversation, whose state really is one
@@ -112,7 +100,7 @@ parameters. A run without a kind carries no badge. Runs without a resolved group
 runs** at the end. Copy-origin and overlay groups are resolved by the engine.
 
 There is no project landing or separate project page. The run id stays in `?run=`;
-its launching session is in **Run details** in the header. **Host** opens the host's
+its launching session is in the **Run details** card on Overall. **Host** opens the host's
 resources, provider health, dispatches, and runs. Its unwatched count is read on entry
 and **Refresh host**, never on a cadence. Host shutdown lives there alone, with a
 confirmation naming each owner and the number of runs it affects.
@@ -150,9 +138,6 @@ Select a run, then:
   that says nothing about having more beside it.
 - select a node in the graph or keyboard-accessible node list to open its
   **timeline view** (below).
-- **Channel** is the supervising surface, described in
-  [Supervising a run](#supervising-a-run): every verb the CLI has once a plan is
-  running, from the run it is about.
 - **Agents** is every agent the run launched, described in
   [The agents a run launched](#the-agents-a-run-launched): each oneharness session
   under any of its launches, whatever the repository's agent structure, opening to
@@ -193,73 +178,43 @@ position you chose while the session keeps being written below.
 
 ## Supervising a run
 
-A manager supervising a plan used to read run ids here and leave for a terminal to
-act. The run view now offers every post-launch verb, each wired to its one route
-and nothing else — the routes are named verb by verb below — and every receipt and
-refusal is shown **as the API returned it** — the engine's own object, the engine's
-own words — never restated. The header of a run carries the controls that are about
-the run as a whole; two tabs beside Graph and Overall carry the rest, and a
-third, **Agents**, is the section after this one.
+**One run bar** sits above every run view: the run id (truncated to two lines, the
+whole id its tooltip and accessible name), the run's state, Stop, the last activity,
+the **Graph** and **Overall** tabs, and the update setting with **Refresh**. Short of
+room, the last-activity line gives way first; on a phone the bar wraps within itself.
+Inside a node, **one node bar** holds the way back, the node, its status, its change
+link and the node's tabs.
 
-- **Status and liveness** in the header are `GET .../status`: the engine's own word
-  for how the run is being driven, read again on every stream invalidation and on a
-  ten-second clock of its own, because a driver that dies writes nothing and the
-  stream announces nothing.
+- **The run's state** is one word, icon and colour, derived by `runState` in
+  `src/lib/run-model.ts` from the run detail's `run.state`, the status route's
+  `liveness` and the node statuses: `settled` is **Complete**; `ended-failed`,
+  `ended-stopped` and `ended-unfinished` are **Failed**, **Stopped** and
+  **Unfinished**; `paused`, or an `ACTIVE` run with a node waiting on a person, is
+  **Waiting on you**; `DRIVER DEAD` or `UNDRIVEN` is **Driver dead**; `PARKED` is
+  **Idle**; any other `ACTIVE` run is **Running**. It is shown once on Overall, in the
+  Whole DAG card, and as the run bar's badge. A run that has not ended counts its
+  failed nodes beside the word (`2 failed`) in the failure colour.
 - **Stop** is `POST .../stop` as the acting session, behind one confirm. A run
   another session owns comes back `409 not_owner` naming the owner as the engine
   names it — `[codex:160c290a]`, never the raw session — and that refusal is shown
   verbatim; only then is a **forced stop** offered, behind a second confirm that
   names the owner it would override. It is never the default and never the first
-  dialog. The body sent is `{force}` exactly as the route takes it.
-- **Channel** is the run's channel. The queue is `GET .../channel`, a reading that
-  consumes nothing, shown as the engine keeps it: the **pending** surface (the held
-  one nobody has given up on), the **waiting** ones nobody has read, an
-  **abandoned** one where the process serving it exited without an answer, and the
-  **answered** ones — each with its kind, its source, whether it blocks, the node it
-  holds and its age against the payload's own clock — then the replies written, the
-  edit envelopes the reconciler has not claimed, and its answers to the ones it
-  has. **Next** is `POST .../channel/next`, the channel's only consumer, and shows
-  what it claimed. **Ready human actions** are the graph's own `decisions`, each
-  with an **Attest** (`POST .../attest` with the decision's reference). **Surface**
-  is `POST .../channel/surface` with a kind and a message. The composer is
-  available on every run, a planning run included: the browser launches nothing
-  and authors no plan, and a reply is a post-launch route.
-- **The reply composer** sends `POST .../channel/reply` the editor's text, **byte
-  for byte** — never a parse of it — so a manager can type an envelope this app has
-  never heard of, and the engine's refusal of a malformed one is the engine's. The
-  shortcuts only ever fill the editor: a **verdict** — `approve`, `reject`,
-  `continue` — is the engine's legacy verdict half (`completion: true`,
-  `completion: false` with a reason, or a `message` alone), and every op the
-  engine's `Reply` schema declares (`add`, `drop`, `reparent`, `retry`, `cancel`,
-  `requeue`, `set-node-sets`, `set-run-node-sets`, `attest`, `complete`, `amend`,
-  `note`, `finding`, `settle`) is a form that renders to one command at the
-  envelope version the engine reads edits at. The two graph-override edits take an
-  **ordered list** — a row per `PATH=VALUE`, each row movable up or down and
-  removable, plus **Load current list** for the list the served graph holds for
-  that node or run — and compose the whole replacement list, an empty one as
-  `"sets": []`, which is how a list is cleared. A node's own list is on its
-  **Task** tab under *Graph overrides*, in the order its next dispatch applies it.
-  That grammar is `@onepipeline-ui/dag-model`'s `replyEnvelopeSchema`, held to the
-  engine's own field set, and a form that cannot compose an envelope the grammar
-  reads says which field rather than sending something the engine would refuse for
-  a reason that is not the reader's. A correlation names the question a verdict
-  answers.
-- The former Reads information is structured in the remaining views: status and
-  unread age in **Run details**, goals, repository identities, results, timing and
-  usage in **Overall**, per-node outcomes in **Task**, publication and checks in
-  **Remote**, and transcript turns in the conversation. Host resources are on **Host**.
+  dialog. The body sent is `{force}` exactly as the route takes it. Every receipt and
+  refusal is shown **as the API returned it**.
+- **Run details** is a card on Overall of the launching session, the unread surfaces
+  `GET .../status` counted (read when the run opens and on **Refresh**, never on a
+  clock) and the run's last progress, a dash where it recorded none. The Nodes tile
+  beside it shows the done count beside the total (`3 of 5 done`).
+- The former Reads information is structured in the remaining views: per-node
+  outcomes in **Task**, publication and checks in **Remote**, and transcript turns in
+  the conversation. Host resources and provider health are on **Host**.
 
-`e2e/dag-ui-controls.spec.ts` drives every one of these against the real API over
-runs the fixture writes for them alone — the supervised run the acting session
-owns, the run another session owns, and the run nothing drives — so the live run
-every other journey reads is left as it was.
-
-A reply to a node whose turn is still open is answered at hand-off: the receipt
-names each live note under `notes`, `queued` while it waits for the turn to take
-it, and **Command outcomes** shows the envelope applied with that note's `queued`
-result. `e2e/dag-ui-held-turn.spec.ts` drives that through the composer on a
-server of its own, against a run the pinned `onepipeline` adopts and dispatches
-to the harness double `tests/e2e/server.rs` holds its own turn open with.
+The Channel view, its reply composer and the Decisions/Detailed activity switch are
+gone from the app; every view reads under the `detailed` filter profile.
+`e2e/dag-ui-controls.spec.ts` drives Stop and the run details against the real API
+over runs the fixture writes for them alone, and `e2e/dag-ui-readability.spec.ts`
+holds the run bar, the node bar, the state words and the graph's cards against a
+corpus of its own.
 
 ### Shutting down the host
 
@@ -570,16 +525,16 @@ Escape key. It is a **timeline over a transcript**, both projected from
   other, `edit-applied`, raised by that author.
 - the node's **task, completion criteria, dependencies and Remote** are tabs
   beside the timeline. Remote keeps the change request, branch, merge and release
-  information above a table of checks, with status, conclusion, runtime and
-  requiredness. A finished check's runtime is its own `completed_at` minus its own
+  information above a table of checks, with status, runtime and requiredness. The
+  status is one coloured icon and word: the check's outcome once it has one
+  (`passed`, `failed`, `skipped`, `neutral`), its progress before (`queued`,
+  `running`). A change request is named by its short id, `<repository>#<number>`,
+  wherever it is linked; a URL that is not a GitHub pull request reads
+  "Change request". A finished check's runtime is its own `completed_at` minus its own
   `started_at`; a running one counts on from its start and says `running`; a queued
   one shows none.
   Each recorded check URL opens its destination. The tab strip wraps at intermediate
   widths and scrolls on the phone so the timeline has room to be drawn.
-
-The channel pairs each surface with the replies whose correlation answers it, newest
-surface first. An unanswered surface says it is waiting. Each message starts as one
-line and expands to its whole text; a reply's raw envelope is one disclosure deeper.
 
 Nothing in either surface grows with the size of the run. A run of eight or more
 consecutive same-kind siblings arrives as one grouped row, and a conversation
@@ -679,8 +634,6 @@ being photographed.
 | `11-project-list` | projects and their runs in one sidebar, the open drawer at phone width |
 | `12-host` | host resources, unwatched runs and host shutdown |
 | `21-remote` | publication, release and each check’s evidence |
-| `13-channel` | the channel: the queue, the composer and the surface form |
-| `14-channel-graph-overrides` | the composer editing a node's graph overrides as an ordered list, composed into the editor |
 | `15-recorded-node-collapsed` | the recorded worker and change request drafter in their own groups, collapsed |
 | `16-recorded-node-expanded` | the same recorded sessions with their lanes expanded |
 | `17-recorded-gate-run` | the gate's own result and measured duration |
@@ -698,7 +651,6 @@ being photographed.
 | `30-action-items-comment` | the green toast after Complete, offering Reopen and taking a comment |
 | `31-action-items-refused` | the red toast with the engine's refusal of a review whose document changed, and the replacement card |
 | `32-action-items-reopen-unavailable` | Reopen greyed for a review with no undo, its question mark pressed and the reason showing |
-| `33-channel-declined-ruling` | a declined ruling read as one message from its typed record, beside replies and queued envelopes headed "from you" and "from the manager" |
 | `34-action-items-history` | an item's history in the detail: raised and completed by the manager, completed and noted by you, every time as an age |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
@@ -835,4 +787,4 @@ sees the failure with the whole API unreachable. Those branches carry a
 line-scoped `llmlint: ignore[changed_behavior_has_e2e]` naming this reason, and
 are driven through the real telemetry client in `src/app/App.test.tsx`.
 
-The run header keeps the run id, liveness, Stop and last activity on one line at every gallery viewport. Stop is absent after the run ends, including failure and explicit stop. The activity clips with an ellipsis, keeps its full text in its title, and opens the exact node timeline event named by its `event_id`.
+The run bar keeps the run id, its state, Stop and last activity on one line at every desktop viewport, and wraps within itself on a phone. Stop is absent after the run ends, including failure and explicit stop. The activity clips with an ellipsis, keeps its full text in its title, and opens the exact node timeline event named by its `event_id`.

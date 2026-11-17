@@ -13,7 +13,9 @@ test("Remote retains publication and release and follows each check's destinatio
   await expect(page.getByRole("tab", { name: /^(PR|Checks)$/ })).toHaveCount(0);
   const remote = page.getByRole("tabpanel", { name: "Remote", exact: true });
   await expect(
-    remote.getByRole("link", { name: "Pull request", exact: true }),
+    // The corpus's change URLs are not GitHub's, so the link keeps the readable
+    // name rather than a short id.
+    remote.getByRole("link", { name: "Change request", exact: true }),
   ).toHaveAttribute("href", fixture().remote_open_pr);
   await expect(remote).toContainText("feature/remote-open");
   await expect(remote).toContainText("Not merged");
@@ -39,35 +41,22 @@ test("Remote retains publication and release and follows each check's destinatio
       );
     return `${seconds}s`;
   };
-  for (const [name, status, conclusion, ran, required] of [
-    ["gate", "completed", "success", runtime("gate"), "Required"],
-    [
-      "published-smoke",
-      "completed",
-      "failure",
-      runtime("published-smoke"),
-      "Optional",
-    ],
-    ["e2e", "in_progress", "—", /^(\d+h )?(\d+m )?\d+s · running$/, "Required"],
+  // One status word a check: its outcome once completed, its progress before.
+  for (const [name, status, ran, required] of [
+    ["gate", "passed", runtime("gate"), "Required"],
+    ["published-smoke", "failed", runtime("published-smoke"), "Optional"],
+    ["e2e", "running", /^(\d+h )?(\d+m )?\d+s · running$/, "Required"],
     // Queued: no start, so no runtime — never a zero.
-    ["queued-check", "queued", "—", "", "Optional"],
-    [
-      "skipped-check",
-      "completed",
-      "skipped",
-      runtime("skipped-check"),
-      "Required",
-    ],
+    ["queued-check", "queued", "", "Optional"],
+    ["skipped-check", "skipped", runtime("skipped-check"), "Required"],
   ] as const) {
     const row = table
       .getByRole("row")
       .filter({ has: page.getByRole("rowheader", { name, exact: true }) });
-    await expect(row.getByRole("cell")).toHaveText([
-      status,
-      conclusion,
-      ran,
-      required,
-    ]);
+    await expect(row.getByRole("cell")).toHaveText([status, ran, required]);
+    await expect(
+      row.getByRole("cell").first().getByRole("img"),
+    ).toHaveAccessibleName(status);
     if (name === "published-smoke") {
       await expect(row).toHaveClass("check-failing");
     } else {
@@ -88,7 +77,7 @@ test("Remote retains publication and release and follows each check's destinatio
     .getByRole("row")
     .filter({ has: page.getByRole("rowheader", { name: "e2e", exact: true }) })
     .getByRole("cell")
-    .nth(2);
+    .nth(1);
   const started = Date.parse(
     checks.find((each) => each.name === "e2e")?.started_at ?? "",
   );
@@ -153,13 +142,12 @@ test("Remote displays incomplete check records without inventing a status or lin
     const row = table.getByRole("row").filter({
       has: page.getByRole("rowheader", { name: "legacy-check", exact: true }),
     });
-    // An unreadable start is no start: no runtime is made up for it.
-    await expect(row.getByRole("cell")).toHaveText([
-      "Not recorded",
-      "skipped",
-      "",
-      "Required",
-    ]);
+    // An unreadable start is no start: no runtime is made up for it. The
+    // recorded conclusion is the check's outcome; no status is made up either.
+    await expect(row.getByRole("cell")).toHaveText(["skipped", "", "Required"]);
+    await expect(
+      row.getByRole("cell").first().getByRole("img"),
+    ).toHaveAccessibleName("skipped");
     await expect(row.getByRole("link")).toHaveCount(0);
     await page.getByRole("tab", { name: "Timeline", exact: true }).click();
     await expect(
@@ -169,151 +157,3 @@ test("Remote displays incomplete check records without inventing a status or lin
     await server.stop();
   }
 });
-
-for (const width of [1440, 390]) {
-  test(`pairs long channel replies by correlation and expands text before the envelope at ${width}px`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width, height: 900 });
-    const questions = [0, 1, 2].map(
-      (id) =>
-        `Question ${id} ${"long preview ".repeat(30)}\nQuestion final sentinel ${id}`,
-    );
-    const answers = [0, 1].map(
-      (id) =>
-        `Answer ${id} ${"long preview ".repeat(30)}\nAnswer final sentinel ${id}`,
-    );
-    const followUp = `Follow-up answer ${"long preview ".repeat(30)}\nFollow-up final sentinel`;
-    await page.goto(`/?run=${runs().history}&view=channel`);
-    const surfaces = page.getByRole("listitem", { name: /^Surface \d+$/ });
-    // The three questions, and the declined ruling raised after them.
-    await expect(surfaces).toHaveCount(4);
-    expect(
-      await surfaces.evaluateAll((elements) =>
-        elements.map((element) => element.getAttribute("aria-label")),
-      ),
-    ).toEqual(["Surface 3", "Surface 2", "Surface 1", "Surface 0"]);
-    for (const id of [0, 1, 2]) {
-      const exchange = page.getByRole("listitem", {
-        name: `Surface ${id}`,
-        exact: true,
-      });
-      const messages =
-        id === 0
-          ? [questions[id], answers[id], followUp]
-          : id === 1
-            ? [questions[id], answers[id]]
-            : [questions[id]];
-      await expect(
-        exchange.getByRole("group", { name: /^(Surface|Reply) \d+ message$/ }),
-      ).toHaveCount(messages.length);
-      for (const [index, text] of messages.entries()) {
-        if (text === undefined)
-          throw new Error("the recorded exchange has no expected text");
-        const label =
-          index === 0
-            ? `Surface ${id} message`
-            : index === 1
-              ? `Reply ${1 - id} message`
-              : "Reply 3 message";
-        const message = exchange.getByRole("group", {
-          name: label,
-          exact: true,
-        });
-        const preview = message.getByText(`${text.split("\n")[0]}…`, {
-          exact: true,
-        });
-        await expect(preview).toBeVisible();
-        expect(
-          await preview.evaluate(
-            (element) => getComputedStyle(element).whiteSpace,
-          ),
-        ).toBe("nowrap");
-        const secondaryMetadata =
-          index === 0
-            ? [
-                // Where it came from and how old it is, as one muted line: a
-                // surface that holds nothing carries no badge saying so.
-                message.getByText(
-                  new RegExp(`^from proposal · surface ${id} · .+ old$`),
-                ),
-              ]
-            : [message.getByRole("time")];
-        await expect(
-          message.getByText(
-            index === 0
-              ? "finding"
-              : index === 1
-                ? // A recorded reply naming no party is the manager's.
-                  `Reply ${1 - id} · from the manager`
-                : // The follow-up was sent from the browser: the user's.
-                  "Reply 3 · from you",
-            {
-              exact: true,
-            },
-          ),
-        ).toBeVisible();
-        if (index === 0)
-          await expect(message).not.toContainText("non-blocking");
-        for (const metadata of secondaryMetadata) {
-          if (width === 390) await expect(metadata).toBeHidden();
-          else await expect(metadata).toBeVisible();
-        }
-        const full = message.getByText(text, { exact: true });
-        await expect(full).toBeHidden();
-        const toggle = message.getByLabel(new RegExp(`^${label}:`));
-        await toggle.focus();
-        await page.keyboard.press("Enter");
-        await expect(full).toBeVisible();
-        await expect(full).toHaveText(text);
-        for (const metadata of secondaryMetadata)
-          await expect(metadata).toBeVisible();
-        if (index > 0) {
-          const raw = message.getByRole("group", {
-            name: /^Raw envelope for reply/,
-          });
-          const envelope = raw.getByText(
-            JSON.stringify(
-              index === 1
-                ? { completion: false, message: text }
-                : { provenance: "user", completion: false, message: text },
-              null,
-              2,
-            ),
-            { exact: true },
-          );
-          await expect(envelope).toBeHidden();
-          await raw.getByText("Raw envelope", { exact: true }).click();
-          await expect(envelope).toBeVisible();
-          await expect(envelope).toContainText(
-            index === 1
-              ? `Answer final sentinel ${id}`
-              : "Follow-up final sentinel",
-          );
-        }
-      }
-      if (id === 2) await expect(exchange).toContainText("Waiting for reply");
-    }
-    const fallback = page.getByRole("group", {
-      name: "Reply 2 message",
-      exact: true,
-    });
-    await expect(
-      fallback.getByText("Reply without message…", { exact: true }),
-    ).toBeVisible();
-    await fallback.getByLabel(/^Reply 2 message:/).click();
-    await expect(
-      fallback.getByText("Reply without message", { exact: true }),
-    ).toBeVisible();
-    const raw = fallback.getByRole("group", {
-      name: "Raw envelope for reply 2",
-      exact: true,
-    });
-    const envelope = raw.getByText('{\n  "completion": false\n}', {
-      exact: true,
-    });
-    await expect(envelope).toBeHidden();
-    await raw.getByText("Raw envelope", { exact: true }).click();
-    await expect(envelope).toBeVisible();
-  });
-}

@@ -6,7 +6,7 @@ import { type Read, useRead } from "../../lib/useRead";
 export interface RunControl {
   readonly status: Read<RunStatus>;
   readonly stop: (force: boolean) => Promise<Stopped>;
-  /** Read the status again: the reader opened the run details. */
+  /** Read the status again: the reader asked for a refresh. */
   readonly reread: () => void;
 }
 
@@ -14,7 +14,7 @@ export interface RunControl {
  * The run's status — its liveness and the summary the run details show — and
  * the stop verb.
  *
- * The status is read when the run is opened, when the reader opens its details
+ * The status is read when the run is opened, when the reader presses Refresh
  * and after a stop this page asked for, and never on a timer or on a change:
  * what the run records reaches the page as pushed patches, and the status is
  * the one reading of how it is being driven, which a reader asks for.

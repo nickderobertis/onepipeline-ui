@@ -263,7 +263,7 @@ export async function stop(served: Served): Promise<void> {
 
 export const addressOf = (
   run: string,
-  view: "graph" | "overall" | "node" | "channel",
+  view: "graph" | "overall" | "node",
   node = "",
 ) =>
   view === "node"

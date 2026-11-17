@@ -72,7 +72,6 @@ export function OverallView({
   onSelectItem,
   state,
   status,
-  onReadStatus,
 }: {
   readonly client: TelemetryClient;
   readonly detail: LiveRunDetail;
@@ -80,8 +79,6 @@ export function OverallView({
   readonly state?: RunState;
   /** The run's status read, which the run details card shows. */
   readonly status: Read<RunStatus>;
-  /** Read the status again: the reader opened the run's details. */
-  readonly onReadStatus: () => void;
   readonly filter?: string;
   /** Subscribe again, from a failed read. */
   readonly onRetry?: () => void;
@@ -206,12 +203,7 @@ export function OverallView({
                   : LOADING_TEXT
               }
             />
-            <RunDetails
-              detail={detail}
-              onRead={onReadStatus}
-              runLoaded={runLoaded}
-              status={status}
-            />
+            <RunDetails detail={detail} runLoaded={runLoaded} status={status} />
           </section>
           <Card className="gap-0 py-[15px]">
             <CardContent className="px-[15px]">
@@ -508,21 +500,18 @@ function GraphRowView({
 
 /**
  * Who launched the run, what it has raised that nobody has read, and when it last
- * moved: one card of label and value pairs beside the tiles, read off the status
- * route, which is read again each time the card is shown.
+ * moved: one card of label and value pairs beside the tiles. The unread count is
+ * the status read the run took when it opened, read again on Refresh.
  */
 function RunDetails({
   detail,
   status,
-  onRead,
   runLoaded,
 }: {
   readonly detail: LiveRunDetail;
   readonly status: Read<RunStatus>;
-  readonly onRead: () => void;
   readonly runLoaded: boolean;
 }) {
-  useEffect(onRead, [onRead]);
   const unread = status.value?.unread_surfaces;
   const lastProgress = detail.run.last_progress_at;
   return (

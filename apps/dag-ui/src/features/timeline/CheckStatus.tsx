@@ -2,6 +2,7 @@ import {
   CircleCheck,
   CircleDashed,
   CircleDot,
+  CircleHelp,
   CircleMinus,
   CircleX,
   LoaderCircle,
@@ -9,10 +10,11 @@ import {
 } from "lucide-react";
 
 /**
- * One check's standing in a word: its outcome once it completed, its progress
- * before. Every completed check that is neither a pass, a skip nor neutral reads
- * failed — a cancellation or a timeout fails the merge as a failure does — and the
- * producer's own words stay in the icon's title.
+ * One check's standing in a word: its outcome once it has one, its progress
+ * before. Every outcome that is neither a pass, a skip nor neutral reads failed —
+ * a cancellation, a timeout or a completion with no verdict fails the merge as a
+ * failure does — and the producer's own words stay in the icon's title. A record
+ * that names neither is `not recorded`, never a progress made up for it.
  */
 type CheckWord =
   | "passed"
@@ -20,7 +22,8 @@ type CheckWord =
   | "skipped"
   | "neutral"
   | "queued"
-  | "running";
+  | "running"
+  | "not recorded";
 
 const ICONS: Readonly<Record<CheckWord, LucideIcon>> = {
   passed: CircleCheck,
@@ -29,6 +32,7 @@ const ICONS: Readonly<Record<CheckWord, LucideIcon>> = {
   neutral: CircleDot,
   queued: CircleDashed,
   running: LoaderCircle,
+  "not recorded": CircleHelp,
 };
 
 /** The word a check's `status` and `conclusion` read as. */
@@ -36,8 +40,11 @@ function checkWord(check: {
   readonly status?: string;
   readonly conclusion?: string;
 }): CheckWord {
-  if (check.status !== "completed")
-    return check.status === "in_progress" ? "running" : "queued";
+  if (check.conclusion === undefined) {
+    if (check.status === undefined) return "not recorded";
+    if (check.status === "in_progress") return "running";
+    if (check.status !== "completed") return "queued";
+  }
   switch (check.conclusion) {
     case "success":
       return "passed";
@@ -64,7 +71,7 @@ export function CheckStatus({
   return (
     <span
       className="check-status"
-      data-check={word}
+      data-check={word.replace(" ", "-")}
       title={[check.status ?? "not recorded", check.conclusion]
         .filter(Boolean)
         .join(": ")}

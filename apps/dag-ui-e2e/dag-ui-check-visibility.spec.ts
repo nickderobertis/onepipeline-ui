@@ -66,23 +66,29 @@ test("the served view marks requirement and failing checks, including a check re
         "href",
         check.url ?? "",
       );
+      // The Status cell is one icon naming the check's outcome, in its colour.
+      const status = row.getByRole("cell").first().getByRole("img");
       if (
         record.payload.state === "failed" ||
         record.payload.state === "no-verdict"
       ) {
         await expect(row).toHaveClass("check-failing");
-        await expect(row.getByRole("cell").nth(1)).toHaveCSS(
-          "color",
-          "rgb(248, 113, 113)",
-        );
+        await expect(status).toHaveAccessibleName("failed");
         expect(
-          await row
-            .getByRole("cell")
-            .nth(1)
-            .evaluate((cell) => getComputedStyle(cell, "::after").content),
-        ).toContain("failing");
+          await status.evaluate((icon) => getComputedStyle(icon).color),
+        ).toBe(
+          await page.evaluate(() => {
+            const probe = document.createElement("span");
+            probe.style.color = "var(--destructive)";
+            document.body.append(probe);
+            const colour = getComputedStyle(probe).color;
+            probe.remove();
+            return colour;
+          }),
+        );
       } else {
         await expect(row).not.toHaveClass("check-failing");
+        await expect(status).not.toHaveAccessibleName("failed");
       }
     }
     await page.getByRole("tab", { name: "Timeline", exact: true }).click();

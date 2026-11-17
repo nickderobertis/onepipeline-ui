@@ -846,13 +846,15 @@ p {
   clip-path: inset(50%);
 }
 
+/* Over the view it opened from and no higher: the run bar and the node bar keep
+   their tabs and controls in reach while it is open. A phone gives it the screen. */
 .detail-drawer {
-  position: fixed;
+  position: absolute;
   z-index: 30;
   top: 0;
   right: 0;
-  width: calc((100vw - var(--sidebar-width, 260px)) * 0.6667);
-  height: 100vh;
+  bottom: 0;
+  width: 66.67%;
   border-left: 1px solid var(--border);
   background: var(--background);
   box-shadow: -12px 0 35px rgb(0 0 0 / 18%);
@@ -1088,6 +1090,7 @@ pre {
 }
 
 .overall-view {
+  position: relative;
   min-height: 0;
   height: 100%;
 }
@@ -1801,6 +1804,8 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
      one: at this width the reading it carries is the whole screen, and the transcript
      it was opened from is one Escape away. */
   .detail-drawer {
+    position: fixed;
+    inset: 0;
     width: 100vw;
   }
 
@@ -3305,6 +3310,11 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   .run-topbar .topbar-title {
     flex: 0 1 auto;
   }
+  /* No basis of its own, so the line takes the room the title and the state
+     leave rather than wrapping onto a row of its own. */
+  .run-topbar .last-activity {
+    flex: 1 1 0;
+  }
   .run-topbar .view-tabs {
     order: 10;
     margin-left: 0;
@@ -3543,6 +3553,9 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 }
 .check-status[data-check="skipped"] {
   --check: var(--muted-foreground);
+}
+.check-status[data-check="not-recorded"] {
+  --check: color-mix(in srgb, var(--muted-foreground) 55%, var(--background));
 }
 .check-status[data-check="neutral"] {
   --check: color-mix(in srgb, var(--muted-foreground) 55%, var(--foreground));

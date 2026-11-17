@@ -335,10 +335,16 @@ test("keeps a node the run reported a problem on readable", async ({
   await expect(panel).toBeInViewport({ ratio: 1 });
   await expect(timeline(page)).toBeInViewport({ ratio: 1 });
   await expect(transcript(page)).toBeInViewport({ ratio: 1 });
-  // The panel begins where the tab strip ends rather than a stretched row below it.
-  const tabs = await page.getByRole("tab", { name: "Timeline" }).boundingBox();
+  // The panel begins where the banner under the node bar ends rather than a
+  // stretched row below it.
+  const banner = await page
+    .getByRole("alert")
+    .filter({ hasText: "This node failed" })
+    .boundingBox();
   const opened = await panel.boundingBox();
-  expect((opened?.y ?? 0) - (tabs?.y ?? 0)).toBeLessThan(60);
+  expect(
+    (opened?.y ?? 0) - ((banner?.y ?? 0) + (banner?.height ?? 0)),
+  ).toBeLessThan(60);
   await expectThePageItselfDoesNotScroll(page);
 
   // What it records is reachable, which is the whole point of the region being there.
