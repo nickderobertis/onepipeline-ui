@@ -343,17 +343,19 @@ export function oneRunState(
   // Not placed among the seven words: nothing failed, nothing left to decide.
   if (s === "ended-unfinished")
     return { word: "Unfinished", Icon: CircleSlash, tone: TONES.warning };
+  // Ruling: an unended run with failed nodes keeps its word and adds a separate
+  // count beside it. Every ended state has returned above, so the count is
+  // computed here, before the unended words that carry it.
+  const failed = statuses.filter((status) => status === "failed").length;
+  const count = failed > 0 ? { failed } : {};
   if (s === "paused")
-    return { word: "Waiting on you", Icon: Hand, tone: TONES.warning };
+    return { word: "Waiting on you", Icon: Hand, tone: TONES.warning, ...count };
   if (l === "DRIVER DEAD" || l === "UNDRIVEN" || s === "driver-dead" || s === "undriven")
     return { word: "Driver dead", Icon: Unplug, tone: TONES.destructive };
   // Ruling: PARKED is still driven, only quiet.
   if (l === "PARKED" || s === "parked")
     return { word: "Idle", Icon: CirclePause, tone: TONES.muted };
   if (l === "ACTIVE" || s === "active" || s === "running") {
-    // Ruling: failed nodes keep the word and add a separate count beside it.
-    const failed = statuses.filter((status) => status === "failed").length;
-    const count = failed > 0 ? { failed } : {};
     if (statuses.includes("waiting"))
       return { word: "Waiting on you", Icon: Hand, tone: TONES.warning, ...count };
     return { word: "Running", Icon: LoaderCircle, tone: TONES.info, ...count };
