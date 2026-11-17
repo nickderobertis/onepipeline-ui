@@ -3711,7 +3711,7 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   max-width: 100%;
 }
 .run-topbar .topbar-title {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
 }
 .run-topbar .topbar-actions {

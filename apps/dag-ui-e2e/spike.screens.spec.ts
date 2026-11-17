@@ -162,9 +162,10 @@ const SHOTS: readonly Shot[] = [
       const list = page.getByRole("region", { name: "Node transcript" });
       await expect(list).toBeVisible();
       await settle(page);
-      await list.evaluate((element) => {
-        element.scrollTop = element.scrollHeight;
-      });
+      await list
+        .locator("article.transcript-item")
+        .last()
+        .evaluate((element) => element.scrollIntoView({ block: "end" }));
     },
   },
   {
