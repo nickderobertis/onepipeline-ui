@@ -1176,7 +1176,58 @@ function buildProvenanceGallery(workspace, token) {
   return { ids, runs: {}, plans: {} };
 }
 
+// SPIKE (spike-visual, never lands): the action items the readability plan's
+// before/after pair shows. "before" is the approval item today's planning
+// template raises; "after" is the one the plan rewrites it to. Invented text.
+const SPIKE_RUN_ID = "widgets-storage-planning";
+const SPIKE_PLAN = "local-md:widgets-storage";
+const SPIKE_PLAN_TITLE = "Move the widgets service onto the new storage engine";
+const SPIKE_QUESTION = {
+  dedup_key: "backup-region",
+  kind: "question",
+  priority: "high",
+  title: "Which region should the nightly backups move to?",
+  body: "The current bucket is being retired at the end of the month. Pick a region, or say what you would rather do.",
+  choices: [
+    { id: "us-east", title: "us-east", description: "Closest to the most traffic." },
+    { id: "eu-west", title: "eu-west", description: "Matches where the data is held today." },
+    { id: "keep", title: "Keep where they are", description: "Move them later, by hand." },
+  ],
+};
+const SPIKE_APPROVAL = {
+  before: {
+    dedup_key: "approve-design",
+    kind: "task",
+    priority: "medium",
+    title: "Read and approve the design for local-md:widgets-storage",
+    body: "Read the design document of the copy of local-md:widgets-storage in public-plans (its id is the `onetaskgraph.copies` entry `onetaskgraph project show local-md:widgets-storage --json` names). Once the user approves it, run `just approve-design <that copy> <this run's id>`.",
+  },
+  after: {
+    dedup_key: "approve-design",
+    kind: "question",
+    priority: "medium",
+    title: `Read the design for ${SPIKE_PLAN_TITLE} and approve it or suggest changes`,
+    body: "[Read the design document](https://github.com/example/plans/blob/main/documents/widgets-storage-design.md), then choose **Approve**, or write the changes you want below.",
+    choices: [{ id: "approve", title: "Approve", description: "Approve the design as written." }],
+  },
+};
+
+function buildSpike(phase) {
+  return (workspace, token) => {
+    const ids = {};
+    for (const input of [SPIKE_APPROVAL[phase], SPIKE_QUESTION])
+      ids[input.dedup_key] = raise(workspace, token, SUPERVISOR_SESSION, {
+        ...input,
+        owner: owner(SPIKE_RUN_ID, SPIKE_PLAN),
+        block: { scope: "nothing" },
+      });
+    return { ids, runs: {}, plans: {} };
+  };
+}
+
 const WORLDS = {
+  "spike-before": { plans: {}, build: buildSpike("before") },
+  "spike-after": { plans: {}, build: buildSpike("after") },
   sessions: { plans: {}, build: buildSessions },
   queue: { plans: QUEUE_PLANS, build: buildQueue },
   hostwide: {

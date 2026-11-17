@@ -3378,6 +3378,7 @@ export function buildRuns(
   writeSiblingRun(root);
   writeNamedRun(root);
   writeLiveRun(root, checkOrigin);
+  buildSpikeRuns(root); // SPIKE (spike-visual)
   // Kinds among the projects, so the navigation's kind dropdown has something to
   // offer and its rows something to show.
   for (const [run, kind] of [
@@ -5496,4 +5497,248 @@ export function transcriptFacts() {
     },
     drafted: DRAFTED_STREAM,
   };
+}
+
+// ---------------------------------------------------------------------------
+// SPIKE (spike-visual, never lands): the runs the readability plan's
+// before/after screenshots are taken over. Invented text throughout.
+// ---------------------------------------------------------------------------
+
+export const SPIKE_RUN = "spike-readability";
+// The plan asks for a 160-character title, but the header's title is the run id
+// and the read API refuses a run id over 128 characters (`invalid_run_id`), so the
+// longest title a run can carry is 128 characters: this one.
+export const SPIKE_LONG_RUN =
+  "make-the-dag-ui-readable-at-a-glance-and-complete-on-drill-in-with-compact-event-lists-and-answerable-approval-items-planning-v2";
+
+const SPIKE_TASK = `## What
+
+Move the widgets service onto the new storage engine and keep the old reader working until every caller has moved.
+
+### Scope
+
+The reader, the writer and the migration command change. The public API does not.
+
+- Add the engine behind a feature switch.
+- Port the writer first, then the reader.
+- Keep the old reader until the last caller moves.
+
+### Out of scope
+
+Dashboards and alerting stay as they are; a later plan covers them.
+
+## Acceptance criteria
+
+- The migration command copies every record and reports the count.
+- Both readers return the same answer for the sample set.
+`;
+
+function writeSpikeRun(root) {
+  const runId = SPIKE_RUN;
+  const run = { run_id: runId };
+  const dir = runDir(root, runId);
+  const plan = {
+    schema_version: 3,
+    goal: { text: "Move the widgets service onto the new storage engine" },
+    name: runId,
+    concurrency: 2,
+    tasks: [
+      { id: "adopt-engine", persona: "worker", task: SPIKE_TASK },
+      {
+        id: "build-docs",
+        kind: "command",
+        command: ["bun", "run", "build", "--name", "a b"],
+        deps: ["adopt-engine"],
+      },
+      {
+        id: "approve-release",
+        kind: "human",
+        task: "Approve the widgets release notes.",
+        deps: ["build-docs"],
+      },
+    ],
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  // Whole minutes, so the axis has whole-minute ticks to show.
+  const start = Math.floor(HISTORIC / 3_600_000) * 3_600_000 + 12 * 60_000;
+  writeJson(
+    join(dir, "launch.json"),
+    launch(runId, "claude-code", SUPERVISOR_SESSION, stamp(start), 4242),
+  );
+  writeJson(join(dir, "result.json"), {
+    run_id: runId,
+    state: "settled",
+    ok: true,
+    nodes: plan.tasks.map(({ id }) => ({ id, status: "done" })),
+  });
+  const journal = new Journal(dir, streamOf(runId), start);
+  const node = (id) => ({ ...run, node: id });
+  journal.emit("pipeline", "run-started", run, { plan });
+  journal.advance(2).emit("pipeline", "node-ready", node("adopt-engine"), {});
+  // The hold loop: held behind the concurrency limit and released, twelve times.
+  for (let pass = 0; pass < 12; pass += 1) {
+    journal
+      .advance(5)
+      .emit("pipeline", "node-held", node("adopt-engine"), {
+        reasons: [
+          {
+            kind: "concurrency",
+            ahead: ["migrate-index", "rebuild-cache"],
+            limit: 2,
+          },
+        ],
+      });
+    journal
+      .advance(50)
+      .emit("pipeline", "node-unheld", node("adopt-engine"), {
+        released: [
+          {
+            kind: "concurrency",
+            ahead: ["migrate-index", "rebuild-cache"],
+            limit: 2,
+          },
+        ],
+      });
+  }
+  journal.advance(3).emit("pipeline", "node-dispatched", {
+    ...node("adopt-engine"),
+    persona: "worker",
+  }, { persona: "worker", attempt: 1 });
+  const session = "worker-adopt-engine";
+  const labels = {
+    ...node("adopt-engine"),
+    member: "worker",
+    persona: "worker",
+    session,
+  };
+  const turnStarted = stamp(journal.advance(2).at);
+  journal.emit("agentgraph", "turn-started", labels, {
+    turn: 1,
+    role: "assistant",
+    instruction: "Port the writer to the new storage engine.",
+    started_at: turnStarted,
+    model: "a-model",
+  });
+  const said = [
+    ["reasoning", null, "", "The writer is the smaller half; port it first so the reader can be checked against real writes."],
+    ["tool_use", "Read", "src/writer.rs", ""],
+    ["message", null, "", "The writer only touches the store through one trait, so the port is a new implementation of it."],
+    ["tool_use", "Edit", "src/writer.rs: implement Store for EngineStore", ""],
+    ["reasoning", null, "", "Run the writer's tests before touching the reader, so a failure points at one half."],
+    ["tool_use", "Bash", "cargo test -p widgets writer::", ""],
+    ["message", null, "", "Writer tests pass on the new engine. Moving to the reader next."],
+  ];
+  for (const [index, [kind, name, detail, output]] of said.entries()) {
+    journal.advance(20).emit("agentgraph", "turn-activity", labels, {
+      kind,
+      name,
+      detail,
+      truncated: false,
+      ...(output === "" ? {} : { output }),
+      index,
+    });
+  }
+  journal.advance(5).emit("agentgraph", "turn-message", labels, {
+    turn: 1,
+    role: "assistant",
+    text: "Writer tests pass on the new engine. Moving to the reader next.",
+  });
+  journal.advance(2).emit("agentgraph", "turn-completed", labels, {
+    turn: 1,
+    role: "assistant",
+    usage: {
+      input_tokens: 5400,
+      output_tokens: 820,
+      cache_read_tokens: 3100,
+      cache_write_tokens: 400,
+      cost_usd: 0.18,
+    },
+    started_at: turnStarted,
+    completed_at: stamp(journal.at),
+  });
+  // One surface: queued, then surfaced — today two rows with the same words.
+  const surface = {
+    kind: "question",
+    message: "Should the old reader stay behind the switch for one release?",
+    source: "worker",
+    blocking: true,
+  };
+  journal.advance(30).emit("pipeline", "planner-surface-queued", node("adopt-engine"), surface);
+  journal.advance(40).emit("pipeline", "planner-surfaced", node("adopt-engine"), {
+    ...surface,
+    queued_at: journal.at - 40_000,
+  });
+  journal.advance(120).emit("pipeline", "node-settled", node("adopt-engine"), {
+    status: "done",
+    outcome: "merged",
+    branch: "feature/adopt-engine",
+    change_url: "https://github.com/example/widgets/pull/769",
+    detail: "Writer and reader moved; gate green",
+  });
+  journal.advance(5).emit("pipeline", "node-dispatched", node("build-docs"), {});
+  journal.advance(1).emit("pipeline", "command-started", node("build-docs"), {
+    command: ["bun", "run", "build", "--name", "a b"],
+    log: join(dir, "commands", "build-docs.log"),
+  });
+  mkdirSync(join(dir, "commands"), { recursive: true });
+  writeFileSync(join(dir, "commands", "build-docs.log"), "built 42 pages\n");
+  journal.advance(41).emit("pipeline", "command-exited", node("build-docs"), {
+    ending: "exited",
+    exit_code: 0,
+    duration_ms: 41_000,
+  });
+  journal.advance(1).emit("pipeline", "node-settled", node("build-docs"), { status: "done" });
+  journal.advance(300).emit(
+    "pipeline",
+    "human-attested",
+    { ...node("approve-release"), step: "approve-release" },
+    {
+      action: "answered",
+      actor: "operator",
+      // The resolution the plan's engine node adds to this record.
+      item: {
+        kind: "question",
+        title: "Approve the widgets release notes?",
+        resolved_by: "operator",
+        on_behalf_of: "release-manager",
+        provenance: "dag-ui action items",
+        choice: { id: "approve", title: "Approve" },
+        text: "Approved; mention the reader switch in the upgrade notes.",
+      },
+    },
+  );
+  journal.advance(1).emit("pipeline", "node-settled", node("approve-release"), { status: "done" });
+  journal.write();
+}
+
+/** A run whose 160-character id is its title, with its driver proved gone. */
+function writeSpikeLongRun(root) {
+  const runId = SPIKE_LONG_RUN;
+  const run = { run_id: runId };
+  const dir = runDir(root, runId);
+  const plan = {
+    schema_version: 3,
+    goal: { text: "Show a long run title beside a dead driver" },
+    name: runId,
+    concurrency: 1,
+    tasks: [
+      { id: "draft", persona: "worker", task: "## What\nDraft the plan.\n\n## Acceptance criteria\n\n- Drafted.\n" },
+      { id: "review", persona: "worker", deps: ["draft"], task: "## What\nReview it.\n\n## Acceptance criteria\n\n- Reviewed.\n" },
+    ],
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  const start = now() - 30 * 60 * 1000;
+  writeJson(join(dir, "launch.json"), {
+    ...launch(runId, "claude-code", SUPERVISOR_SESSION, stamp(start), 0x7ffffff0),
+    host: thisHost(),
+  });
+  const journal = new Journal(dir, streamOf(runId), start);
+  journal.emit("pipeline", "run-started", run, { plan });
+  journal.advance(2).emit("pipeline", "node-dispatched", { ...run, node: "draft" }, { persona: "worker", attempt: 1 });
+  journal.write();
+}
+
+export function buildSpikeRuns(root) {
+  writeSpikeRun(root);
+  writeSpikeLongRun(root);
 }
