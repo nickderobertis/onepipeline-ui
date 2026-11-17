@@ -3789,3 +3789,17 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 .spike-run-events {
   margin-top: 4px;
 }
+
+/* SPIKE (spike-visual): a long run title wraps to two lines and ends in an ellipsis;
+   the full title is the heading's tooltip. */
+.run-topbar .topbar-title > div {
+  min-width: 0;
+}
+.run-topbar h2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}

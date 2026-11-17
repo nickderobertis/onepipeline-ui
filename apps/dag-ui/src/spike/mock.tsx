@@ -239,7 +239,8 @@ export function changeId(url: string): string {
   const github = /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/u.exec(url);
   if (github) return `${github[1]}#${github[2]}`;
   const number = /(\d+)\/?$/u.exec(url);
-  return number ? `Change #${number[1]}` : "Change request";
+  // SPIKE: the fixture's change URLs are not GitHub's, so the repo is hard-coded.
+  return number ? `widgets#${number[1]}` : "Change request";
 }
 
 export const spikePartial = () =>
@@ -280,3 +281,9 @@ export function spikeRuns(entries: readonly (TranscriptEntry | Cycle)[]) {
   }
   return runs;
 }
+
+/** SPIKE: the run's display title, hard-coded for the long-title fixture run (160 characters). */
+export const SPIKE_TITLE =
+  "Make the DAG UI readable at a glance and complete on drill-in, with compact event lists, a readable chart, answerable approval items and the run details on view";
+export const spikeTitle = (runId: string | undefined) =>
+  runId?.startsWith("make-the-dag-ui-readable") ? SPIKE_TITLE : runId;

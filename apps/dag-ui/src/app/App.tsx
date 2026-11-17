@@ -5,6 +5,7 @@
 // repository imported precisely so as not to reimplement it, with nothing but the copied
 // journeys to catch what moved. The two hooks it does have — useConversation and
 // useStickyBottom — are the ones that were extracted upstream.
+import { spikeTitle } from "../spike/mock"; // SPIKE
 import {
   Alert,
   AlertDescription,
@@ -288,12 +289,12 @@ export function App({
             <div className="topbar-title">
               <div>
                 <p className="eyebrow">Execution telemetry</p>
-                <h2 title={selectedRunId}>
+                <h2 title={spikeTitle(selectedRunId)}>
                   {humanItems.active
                     ? "Action items"
                     : selection.host
                       ? "Host"
-                      : (selectedRunId ?? "No DAG selected")}
+                      : (spikeTitle(selectedRunId) ?? "No DAG selected")}
                 </h2>
               </div>
             </div>
