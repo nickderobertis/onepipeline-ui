@@ -17,7 +17,6 @@ import {
  * failure does — and the producer's own words stay in the icon's title. A record
  * that names neither is `not recorded`, never a progress made up for it.
  */
-/** The two fields of a served check this reads, as the model declares them. */
 type CheckState = Pick<
   NonNullable<NodeDetail["verification"]["checks"]>[number],
   "status" | "conclusion"

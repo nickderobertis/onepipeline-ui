@@ -97,11 +97,9 @@ async function openOverall(page: Page, run: string) {
   await expect(runDetails(page)).toBeVisible();
 }
 
-/** The colour `element`'s text is painted in, as the browser computed it. */
 const colourOf = (locator: Locator): Promise<string> =>
   locator.evaluate((element) => getComputedStyle(element).color);
 
-/** What `token` computes to as a text colour on this page. */
 const tokenColour = (page: Page, token: string): Promise<string> =>
   page.evaluate((name) => {
     const probe = document.createElement("span");
