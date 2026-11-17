@@ -14,6 +14,9 @@ export function changeRequestId(url: string | undefined): string | undefined {
   try {
     path = new URL(url).pathname;
   } catch {
+    // Only an address that is no URL reaches here, which no engine writes for a
+    // change request, so no recorded run a journey serves carries one;
+    // change-request.test.ts proves this fallback directly.
     return CHANGE_REQUEST;
   }
   const pull = /\/[^/]+\/([^/]+)\/pull\/(\d+)\/?$/u.exec(path);

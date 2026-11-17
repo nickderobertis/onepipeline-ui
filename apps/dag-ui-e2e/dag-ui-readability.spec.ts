@@ -136,7 +136,6 @@ test("Overall shows the run's state once, the done count, and the run details ca
   await expect(icon).toHaveAccessibleName("Running");
   await expect(shownState(runBar(page)).group).toHaveText("Running");
 
-  // Nodes: the done count beside the total, as served.
   const detail = runDetailSchema.parse(
     await (
       await page.request.get(`${server.origin}/api/v2/runs/${run}`)
@@ -325,7 +324,6 @@ test("the longest title the read API admits never overlaps the state badge or Up
   const badge = shownState(bar).group;
   const updates = bar.getByRole("combobox", { name: "Main area updates" });
   await expect(badge).toHaveText("Driver dead");
-  // The whole title, as its accessible name and its tooltip.
   await expect(title).toHaveAccessibleName(run);
   await expect(title).toHaveAttribute("title", run);
   for (let width = 320; width <= 1920; width += 40) {
@@ -501,11 +499,9 @@ test("every card's kind pill names its kind, with an icon of its own", async ({
     });
     const icon = card.getByRole("img", { name: kind.toLowerCase() });
     await expect(icon).toHaveCount(1);
-    // The pill is the icon's own badge, its word drawn in capitals.
     // llmlint: ignore[e2e_uses_accessible_selectors] the pill has no role of its own: it is reached as the parent of its icon, found by the kind it names, so its drawn word can be read beside it.
     const pill = icon.locator("xpath=..");
     await expect(pill).toHaveText(kind, { useInnerText: true });
-    // Before the word.
     expect((await boxOf(icon)).x).toBeLessThan(
       (await boxOf(pill)).x + (await boxOf(pill)).width / 2,
     );
