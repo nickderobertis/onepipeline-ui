@@ -98,13 +98,25 @@ export interface TimelineHistory {
   readonly failure?: HistoryFailure;
 }
 
+/**
+ * Spike `spike-node-timeline-load`, throwaway: the key a held row is merged under.
+ * Today's view merges by the row's `id`, which two records of one turn can share
+ * (its opening and its close), so one of them is dropped; the streamed prototype
+ * merges by the record, as the view's projection keys a record's row.
+ */
+const byRecord =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("spike-read") === "stream";
+const rowKey = (row: { readonly id: string; readonly record_id?: string }) =>
+  byRecord ? (row.record_id ?? row.id) : row.id;
+
 function rowsOfSpan(
   span: TimelineSpan,
   extra: readonly TimelineEventRow[] | undefined,
 ): TimelineSpan {
   if (extra === undefined) return span;
-  const seen = new Set(span.events.map((event) => event.id));
-  const fresh = extra.filter((row) => !seen.has(row.id));
+  const seen = new Set(span.events.map(rowKey));
+  const fresh = extra.filter((row) => !seen.has(rowKey(row)));
   if (fresh.length === 0) return span;
   return {
     ...span,
@@ -176,7 +188,7 @@ export function useTimelineHistory({
   const bump = useCallback(() => setVersion((value) => value + 1), []);
   const take = useCallback(
     (page: { readonly rows: readonly TimelineEventRow[] }) => {
-      for (const row of page.rows) rows.current.set(row.id, row);
+      for (const row of page.rows) rows.current.set(rowKey(row), row);
     },
     [],
   );
@@ -202,8 +214,8 @@ export function useTimelineHistory({
     if (scope === "node") {
       for (const span of timeline.spans)
         for (const event of span.events)
-          if (!rows.current.has(event.id))
-            rows.current.set(event.id, { ...event, span_id: span.id });
+          if (!rows.current.has(rowKey(event)))
+            rows.current.set(rowKey(event), { ...event, span_id: span.id });
     }
     const bySpan = new Map<string, TimelineEventRow[]>();
     for (const row of rows.current.values()) {

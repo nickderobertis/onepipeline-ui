@@ -21,8 +21,9 @@
  * A reading counts only if, at that mark, both the chart's data and the event list
  * held every row of the node: the view's probe (`NodeTimelineView.tsx`) reports
  * after each commit which rows each holds, the observer keeps the report of the
- * commit it marks on, and the rows expected are read afterwards through the
- * ordinary paged route. The rows the reads carried are also checked off the wire.
+ * commit it marks on, and the records expected are read afterwards off the node's
+ * complete timeline document. The rows the reads carried are also checked off the
+ * wire.
  *
  * `--read`:
  * - `today` drives today's view to its start by its own Load earlier control,
@@ -333,27 +334,26 @@ const isTimelineRead = (entry) =>
   entry.route.endsWith("/timeline/events") ||
   entry.route.endsWith("/timeline/node-stream");
 
-/** The node's every row, by the paged route, keyed `record_id ?? id` as the view keys it. */
+/**
+ * The node's every record, as the view keys a record's row (`record_id ?? id`), off
+ * the node's complete timeline document (`GET .../timeline?scope=node`), read after
+ * the reading whatever shape was measured. Not off the paged route: a page keeps one
+ * row per row `id`, and two records of one turn share one. `total` is the paged
+ * route's count of rows, for comparison.
+ */
 async function expectedRows(origin, world) {
+  const root = `${origin}/api/v2/runs/${encodeURIComponent(world.run)}`;
+  const node = encodeURIComponent(world.node);
+  const whole = await fetch(`${root}/timeline?scope=node&node=${node}`).then(
+    (response) => response.json(),
+  );
   const ids = new Set();
-  let total = null;
-  let cursor;
-  for (;;) {
-    const query = new URLSearchParams({
-      scope: "node",
-      node: world.node,
-      limit: "500",
-    });
-    if (cursor !== undefined) query.set("cursor", cursor);
-    const page = await fetch(
-      `${origin}/api/v2/runs/${encodeURIComponent(world.run)}/timeline/events?${query}`,
-    ).then((response) => response.json());
-    total ??= page.total;
-    for (const row of page.rows) ids.add(row.record_id ?? row.id);
-    if (page.next_cursor === null) break;
-    cursor = page.next_cursor;
-  }
-  return { ids: [...ids], total };
+  for (const span of whole.spans)
+    for (const event of span.events) ids.add(event.record_id ?? event.id);
+  const counted = await fetch(
+    `${root}/timeline/events?scope=node&node=${node}&limit=1`,
+  ).then((response) => response.json());
+  return { ids: [...ids], total: counted.total };
 }
 
 const seconds = (ms) => (ms === null ? null : Math.round(ms) / 1000);
@@ -458,7 +458,7 @@ async function measure(context, world, origin, index) {
       '[aria-label="Node transcript"] article',
     ).length,
   }));
-  // The node's every row, read after the reading through the ordinary paged route
+  // The node's every record, read after the reading off its complete timeline
   // whatever shape was measured, keyed as the view keys a record's row.
   const expected = await expectedRows(origin, world);
   const total = expected.total;
@@ -497,9 +497,14 @@ async function measure(context, world, origin, index) {
     if (snapshot === null) return null;
     const chart = new Set(snapshot.chart);
     const list = new Set(snapshot.list);
+    const notInChart = expected.ids.filter((id) => !chart.has(id));
+    const notInList = expected.ids.filter((id) => !list.has(id));
     return {
-      chart: expected.ids.filter((id) => !chart.has(id)).length,
-      list: expected.ids.filter((id) => !list.has(id)).length,
+      chart: notInChart.length,
+      list: notInList.length,
+      // The first few missing rows' ids, to find what the view left out.
+      chart_missing_ids: notInChart.slice(0, 5),
+      list_missing_ids: notInList.slice(0, 5),
       chart_rows: chart.size,
       list_rows: list.size,
     };

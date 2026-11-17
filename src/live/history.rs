@@ -124,15 +124,30 @@ impl Hub {
             agents.as_ref(),
             ItemsWindow::All,
         );
-        let page = page_of(&built.payload()["spans"], query)?;
-        let mut rows = match page {
-            Value::Object(mut answer) => match answer.remove("rows") {
-                Some(Value::Array(rows)) => rows,
-                _ => Vec::new(),
-            },
-            _ => Vec::new(),
-        };
-        rows.reverse();
+        // Every record's row once, by its record rather than by the row id two
+        // records of one turn share, which a page's `page_of` keeps only one of.
+        let mut seen = std::collections::HashSet::new();
+        let mut rows: Vec<((i128, u64), Value)> = Vec::new();
+        for owner in built.payload()["spans"].as_array().into_iter().flatten() {
+            for row in owner["events"].as_array().into_iter().flatten() {
+                let Some(order) = payload::row_order(row) else {
+                    continue;
+                };
+                let key = row["record_id"]
+                    .as_str()
+                    .or_else(|| row["id"].as_str())
+                    .unwrap_or_default()
+                    .to_owned();
+                if !seen.insert(key) {
+                    continue;
+                }
+                let mut served = row.clone();
+                served["span_id"] = owner["id"].clone();
+                rows.push((order, served));
+            }
+        }
+        rows.sort_by_key(|(order, _)| std::cmp::Reverse(*order));
+        let rows: Vec<Value> = rows.into_iter().map(|(_, row)| row).collect();
         let build_s = building.elapsed().as_secs_f64();
         Ok(NodeStream {
             rows,
