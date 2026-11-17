@@ -3913,3 +3913,18 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   align-items: center;
   gap: 10px;
 }
+
+/* SPIKE (spike-visual): in the run bar the last-activity text gives way first,
+   truncating to its minimum; the title wraps only when it cannot fit after that.
+   The actions group dissolves into the bar so the text and the title shrink
+   against each other, the text weighted a thousand to one. */
+.run-topbar .topbar-actions {
+  display: contents;
+}
+.run-topbar .topbar-title {
+  flex: 0 1 auto;
+}
+.run-topbar .last-activity {
+  flex: 0 1000 auto;
+  min-width: 6rem;
+}
