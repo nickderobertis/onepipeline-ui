@@ -549,7 +549,9 @@ function HumanItemCard({
           ))}
         </fieldset>
       )}
-      {item.kind === "question" && open && !offers && (
+      {/* Beside the choices too, as the detail pane offers it: a person can
+          always answer in their own words. */}
+      {item.kind === "question" && open && (
         <AnswerBox
           answering={answering}
           label={`Answer: ${item.title}`}
@@ -680,7 +682,11 @@ function AnswerBox({
         if (event.nativeEvent.isComposing) return;
         event.preventDefault();
       }}
-      placeholder="Write an answer"
+      placeholder={
+        (view.item.choices?.length ?? 0) > 0
+          ? "Or write your own answer"
+          : "Write an answer"
+      }
       readOnly={answering.sending}
       rows={1}
       value={answering.drafts[view.item.id]?.text ?? ""}

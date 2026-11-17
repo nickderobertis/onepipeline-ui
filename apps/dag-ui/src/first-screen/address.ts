@@ -42,33 +42,31 @@ function usable(value: string | null): string | undefined {
 }
 
 /**
- * Which page a run's view shows: its graph, Overall, its channel, or a node's
- * timeline where the graph names a node. The app and the first screen both read
- * the address through this.
+ * Which page a run's view shows: its graph, Overall, or a node's timeline where
+ * the graph names a node. The app and the first screen both read the address
+ * through this.
  */
 export function runPageKind(
-  view: "graph" | "overall" | "channel",
+  view: "graph" | "overall",
   nodeId: string | undefined,
-): "graph" | "overall" | "node" | "channel" {
-  if (view === "overall" || view === "channel") return view;
+): "graph" | "overall" | "node" {
+  if (view === "overall") return view;
   return nodeId === undefined ? "graph" : "node";
 }
 
-/** The server's two profile names for the two levels of detail. */
-const FILTERS = { decisions: "planner", activity: "detailed" } as const;
+/** The server's profile name every view of a run is read under. */
+const FILTER = "detailed";
 
 /** The view a run's page subscribes to, once it knows what it shows. */
 export function subscriptionView(
   runId: string | undefined,
-  kind: "graph" | "overall" | "node" | "channel",
+  kind: "graph" | "overall" | "node",
   nodeId: string | undefined,
   filter: string | undefined,
 ): SubscriptionView {
   if (runId === undefined) return { type: "sidebar" };
   const filtered = filter === undefined ? {} : { filter };
   switch (kind) {
-    case "channel":
-      return { type: "channel", run_id: runId };
     case "overall":
       return { type: "timeline", run_id: runId, scope: "run", ...filtered };
     case "node":
@@ -88,7 +86,7 @@ export function subscriptionView(
 
 /**
  * The first screen `search` asks for, or `undefined` where none is drawn: no run, the
- * Host or action-items page, a channel, or a node's tab other than its timeline.
+ * Host or action-items page, or a node's tab other than its timeline.
  */
 export function firstAddress(
   search: string,
@@ -106,19 +104,17 @@ export function firstAddress(
   const named = params.get("view");
   const tab = params.get("tab");
   if (tab !== null && tab !== "timeline") return undefined;
-  const filter =
-    params.get("detail") === "decisions" ? FILTERS.decisions : FILTERS.activity;
+  const filter = FILTER;
   // An address naming no view, or one this app has no page for, opens the graph
   // where it names a node and Overall where it names none, as `useUrlSelection` does.
   const kind = runPageKind(
-    named === "overall" || named === "graph" || named === "channel"
+    named === "overall" || named === "graph"
       ? named
       : nodeId === undefined
         ? "overall"
         : "graph",
     nodeId,
   );
-  if (kind === "channel") return undefined;
   return {
     runId,
     ...(kind === "node" && nodeId !== undefined ? { nodeId } : {}),

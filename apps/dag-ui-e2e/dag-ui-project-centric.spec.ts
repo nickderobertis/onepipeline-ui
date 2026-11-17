@@ -134,10 +134,13 @@ test("groups effective labels and copy origins, filters open kinds in the URL, a
     await openProject.focus();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/run=project-follow-ups/);
-    await page.getByText("Run details", { exact: true }).click();
+    await page.getByRole("tab", { name: "Overall" }).click();
     await expect(
-      page.getByText(/Launching session: Claude session/),
-    ).toBeVisible();
+      page
+        .getByRole("group", { name: "Run details" })
+        .getByRole("definition")
+        .first(),
+    ).toHaveText(/^Claude session/u);
     await expect(nav.getByText(/session/)).toHaveCount(0);
     await expect(
       nav.getByRole("button", { name: /Shut down|^Runs$|^Projects$/ }),

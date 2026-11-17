@@ -4,7 +4,29 @@ import type {
   StatusStyleToken,
 } from "@onepipeline-ui/dag-layout";
 import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
-import { Check, CircleDashed, Clock3, X } from "lucide-react";
+import {
+  Bot,
+  Check,
+  CircleDashed,
+  Clock3,
+  GitPullRequest,
+  type LucideIcon,
+  Shapes,
+  SquareTerminal,
+  UserRound,
+  X,
+} from "lucide-react";
+
+/**
+ * Each node kind's icon on its card's pill, named by the kind for a reader who
+ * cannot see it. A kind no table holds still gets a mark.
+ */
+const KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
+  agent: Bot,
+  human: UserRound,
+  command: SquareTerminal,
+  change: GitPullRequest,
+};
 
 export interface DagNodeData extends Record<string, unknown> {
   readonly label: string;
@@ -28,6 +50,7 @@ export interface DagNodeData extends Record<string, unknown> {
 export type DagFlowNode = Node<DagNodeData, "dagNode">;
 
 export function DagNodeCard({ data }: NodeProps<DagFlowNode>) {
+  const KindIcon = KIND_ICONS[data.kind] ?? Shapes;
   const Icon =
     data.style === "success"
       ? Check
@@ -50,9 +73,10 @@ export function DagNodeCard({ data }: NodeProps<DagFlowNode>) {
       <Handle type="target" position={Position.Left} />
       <div className="node-heading">
         <Badge
-          className="px-1.5 py-0 text-[9px] tracking-[.1em] uppercase"
+          className="node-kind px-1.5 py-0 text-[9px] tracking-[.1em] uppercase"
           variant="outline"
         >
+          <KindIcon aria-label={data.kind} role="img" size={10} />
           {data.kind}
         </Badge>
         <Icon className={cn(data.style === "active" && "spin")} size={17} />

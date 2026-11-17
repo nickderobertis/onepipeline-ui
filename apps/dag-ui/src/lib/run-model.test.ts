@@ -8,8 +8,9 @@ import { LIVE_RUN, runDetail, runList } from "../test/fixtures";
 import {
   awaitedLine,
   awaitedReleases,
+  cardLines,
+  doneCount,
   graphOf,
-  graphStateWord,
   isOwnWorkLost,
   isUnhealthy,
   launchLabel,
@@ -17,6 +18,7 @@ import {
   nodeReason,
   nodeViews,
   openedNode,
+  runState,
 } from "./run-model";
 
 const live = parseRunDetail(runDetail(LIVE_RUN));
@@ -132,7 +134,7 @@ describe("node views", () => {
       "obsolete",
     ]);
     const byId = new Map(views.map((view) => [view.id, view]));
-    expect(byId.get("foundation")?.kind).toBe("lifecycle");
+    expect(byId.get("foundation")?.kind).toBe("change");
     expect(byId.get("approval")?.kind).toBe("human");
     expect(byId.get("dashboard")?.kind).toBe("agent");
     expect(byId.get("dashboard")?.telemetry?.turns).toBe(2);
@@ -273,11 +275,6 @@ describe("node views", () => {
     // A node in any other status awaits nothing, whatever its result carries.
     expect(awaitedLine(view("foundation"))).toBeUndefined();
     expect(awaitedReleases(view("foundation"))).toEqual([]);
-    // A graph holding only finished work awaiting releases is waiting, as the
-    // engine reads one: neither settled nor failed.
-    expect(
-      graphStateWord({ a: "complete-but-held", b: "complete-but-draft" }),
-    ).toBe("waiting");
   });
 
   test("renders nothing for a detail with no projected graph", () => {
@@ -323,22 +320,115 @@ describe("how a row names its launch", () => {
   });
 });
 
-describe("graphStateWord", () => {
-  test("fails a graph with any failed or skipped node, before anything held", () => {
-    expect(graphStateWord({ a: "done", b: "waiting", c: "skipped" })).toBe(
-      "failed",
+describe("runState", () => {
+  const word = (
+    state: string,
+    liveness?: string,
+    statuses: Record<string, string> = { a: "done", b: "running" },
+  ) =>
+    runState({
+      state,
+      ...(liveness === undefined ? {} : { liveness }),
+      statuses,
+    });
+
+  test("reads each ending the read API serves as its own word", () => {
+    expect(word("settled", "DRIVER DEAD").word).toBe("Complete");
+    expect(word("ended-failed", "DRIVER DEAD").word).toBe("Failed");
+    expect(word("ended-stopped", "DRIVER DEAD").word).toBe("Stopped");
+    expect(word("ended-unfinished", "UNDRIVEN").word).toBe("Unfinished");
+  });
+
+  test("reads a run waiting on a person as Waiting on you", () => {
+    expect(word("paused", "DRIVER DEAD").word).toBe("Waiting on you");
+    expect(word("active", "ACTIVE", { a: "waiting", b: "running" }).word).toBe(
+      "Waiting on you",
     );
-    expect(graphStateWord({ a: "failed", b: "done" })).toBe("failed");
+    // Paused before the driver: the decision is what the run needs first.
+    expect(word("paused", "UNDRIVEN").word).toBe("Waiting on you");
   });
 
-  test("is complete only when every node is done, and for an empty graph", () => {
-    expect(graphStateWord({ a: "done", b: "done" })).toBe("complete");
-    expect(graphStateWord({})).toBe("complete");
+  test("reads a run nothing drives as Driver dead, whichever word says so", () => {
+    expect(word("driver-dead", "DRIVER DEAD").word).toBe("Driver dead");
+    expect(word("undriven", "UNDRIVEN").word).toBe("Driver dead");
+    // A waiting node does not make a dead driver's run anything but dead.
+    expect(word("driver-dead", "DRIVER DEAD", { a: "waiting" }).word).toBe(
+      "Driver dead",
+    );
   });
 
-  test("leaves a graph with work outstanding waiting", () => {
-    expect(graphStateWord({ a: "done", b: "running" })).toBe("waiting");
-    expect(graphStateWord({ a: "blocked", b: "done" })).toBe("waiting");
+  test("reads a parked run as Idle and an active one as Running", () => {
+    expect(word("parked", "PARKED").word).toBe("Idle");
+    expect(word("active", "ACTIVE").word).toBe("Running");
+  });
+
+  test("reads the detail's own word before the status route has answered", () => {
+    expect(word("active").word).toBe("Running");
+    expect(word("parked").word).toBe("Idle");
+    expect(word("driver-dead").word).toBe("Driver dead");
+    expect(word("undriven").word).toBe("Driver dead");
+    expect(word("active", undefined, { a: "waiting" }).word).toBe(
+      "Waiting on you",
+    );
+    // The status route's liveness is the fresher reading where it has one.
+    expect(word("active", "PARKED").word).toBe("Idle");
+  });
+
+  test("names each of the eight states by a word no other state shares", () => {
+    const words = [
+      word("settled"),
+      word("ended-failed"),
+      word("ended-stopped"),
+      word("ended-unfinished"),
+      word("paused"),
+      word("driver-dead"),
+      word("parked"),
+      word("active"),
+    ];
+    expect(words.every((state) => state.known)).toBe(true);
+    expect(new Set(words.map((state) => state.word)).size).toBe(8);
+  });
+
+  test("counts the failed nodes of a run that has not ended, beside its word", () => {
+    const failing = { a: "failed", b: "failed", c: "running" };
+    expect(word("active", "ACTIVE", failing)).toEqual({
+      word: "Running",
+      known: true,
+      failed: 2,
+    });
+    expect(word("paused", "DRIVER DEAD", { ...failing, d: "waiting" })).toEqual(
+      { word: "Waiting on you", known: true, failed: 2 },
+    );
+    expect(word("active", "ACTIVE").failed).toBe(0);
+    // An ended run's word already says how it ended.
+    expect(word("ended-failed", "DRIVER DEAD", failing).failed).toBe(0);
+  });
+
+  test("shows a word a later engine adds as served, rather than guessing", () => {
+    expect(word("hibernating", "HIBERNATING")).toEqual({
+      word: "hibernating",
+      known: false,
+      failed: 0,
+    });
+  });
+});
+
+describe("cardLines", () => {
+  test("counts the lines a card carries, and is nothing for none", () => {
+    expect(cardLines(undefined, undefined)).toEqual({});
+    expect(cardLines("blocked by publish", undefined)).toEqual({ lines: 1 });
+    expect(cardLines("blocked by publish", "awaits crate of engine")).toEqual({
+      lines: 2,
+    });
+  });
+});
+
+describe("doneCount", () => {
+  test("counts the done nodes out of all of them", () => {
+    expect(
+      doneCount([{ status: "done" }, { status: "failed" }, { status: "done" }]),
+    ).toBe("2 of 3 done");
+    expect(doneCount([])).toBe("0 of 0 done");
   });
 });
 

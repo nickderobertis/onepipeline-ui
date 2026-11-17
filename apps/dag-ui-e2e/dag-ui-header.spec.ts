@@ -135,8 +135,8 @@ for (const viewport of VIEWPORTS) {
         name: runs().live,
         exact: true,
       });
-      const liveness = header.getByLabel(/^Liveness /);
-      const members = [runId, liveness, ...controls];
+      const state = header.getByRole("group", { name: "Run state" });
+      const members = [runId, state, ...controls];
       const memberBoxes = await Promise.all(
         members.map(async (member) => {
           const box = await member.boundingBox();
@@ -167,10 +167,22 @@ for (const viewport of VIEWPORTS) {
       expect(clipping.clipped).toBe(true);
       expect(clipping.ellipsis).toBe("ellipsis");
       expect(clipping.nowrap).toBe("nowrap");
-      expect(
-        new Set(memberBoxes.map((box) => Math.round(box.y + box.height / 2)))
-          .size,
-      ).toBe(1);
+      // One row on a desktop; a phone's bar wraps within itself, its members
+      // never on top of one another.
+      if (phone)
+        for (const [index, box] of memberBoxes.entries())
+          for (const other of memberBoxes.slice(index + 1))
+            expect(
+              box.x < other.x + other.width &&
+                other.x < box.x + box.width &&
+                box.y < other.y + other.height &&
+                other.y < box.y + box.height,
+            ).toBe(false);
+      else
+        expect(
+          new Set(memberBoxes.map((box) => Math.round(box.y + box.height / 2)))
+            .size,
+        ).toBe(1);
       await activity.click();
       await expect(page).toHaveURL(/node=dashboard/);
       expect(new URL(page.url()).searchParams.get("event")).toBe(

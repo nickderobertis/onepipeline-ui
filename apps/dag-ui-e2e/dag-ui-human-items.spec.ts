@@ -4443,6 +4443,70 @@ test("one press and Send answers a question, and a typed answer on a question wi
   expect(answered.resolution?.choice ?? null).toBeNull();
 });
 
+test("a question offering choices offers its answer box on its card too, and an answer written there resolves it with no choice", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const title = "Which region should the backups move to?";
+  const id = raiseQuestion(served, {
+    key: "write-in-on-card",
+    title,
+    choices: REGIONS,
+  });
+  await open(page, served);
+  const asked = card(page, title);
+  for (const { title: choice } of REGIONS)
+    await expect(choiceButton(asked, choice)).toBeVisible();
+  const box = answerBox(page, title);
+  await expect(box).toBeVisible();
+  await expect(asked.getByRole("textbox")).toHaveCount(1);
+  await box.fill("Neither: keep them where they are until the move");
+  await expect(sendButton(page)).toHaveText("Send 1 answer");
+  await sendAnswers(page);
+  await expect(card(page, title)).toHaveCount(0);
+  const answered = stored(served, id);
+  expect(answered.state).toBe("answered");
+  expect(answered.resolution?.text).toBe(
+    "Neither: keep them where they are until the move",
+  );
+  expect(answered.resolution?.choice ?? null).toBeNull();
+});
+
+test("a body that opens with a heading stays four lines on its card, the heading at the body's size", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const title = "Read the storage engine move plan";
+  const paragraphs = [1, 2, 3, 4, 5].map(
+    (n) => `Paragraph ${n} of the plan says what changes in that step.`,
+  );
+  raiseQuestion(served, {
+    key: "heading-body",
+    title,
+    body: `## Heading\n\n${paragraphs.join("\n\n")}`,
+  });
+  await open(page, served);
+  const heading = card(page, title).getByRole("heading", { name: "Heading" });
+  await expect(heading).toBeVisible();
+  // llmlint: ignore[e2e_uses_accessible_selectors] a body's four-line clamp is the computed style and geometry of the box the shared package renders it in, which no accessible role or name exposes; it is reached as the located heading's own container, never by a class.
+  const measured = await heading.evaluate((element) => {
+    const body = element.parentElement;
+    if (body === null) throw new Error("the heading has no container");
+    const style = getComputedStyle(body);
+    return {
+      clamp: style.getPropertyValue("-webkit-line-clamp"),
+      lines: Math.round(
+        body.clientHeight / Number.parseFloat(style.lineHeight),
+      ),
+      heading: getComputedStyle(element).fontSize,
+      text: style.fontSize,
+    };
+  });
+  expect(measured.clamp).toBe("4");
+  expect(measured.lines).toBe(4);
+  expect(measured.heading).toBe(measured.text);
+});
+
 test("a press clears and replaces the draft, and four drafts survive a reload and go as one batch", async ({
   page,
 }) => {

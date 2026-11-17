@@ -20,9 +20,11 @@ import { LOADING_TEXT } from "../../dag-ui/src/lib/loading";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
 import {
   awaitedLine,
+  doneCount,
   isUnhealthy,
   nodeReason,
   nodeViews,
+  runState,
 } from "../../dag-ui/src/lib/run-model";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
 import { formatDurationSeconds } from "../../dag-ui/src/lib/time";
@@ -50,6 +52,7 @@ export const screenStateSchema = z.object({
   header: z.string().nullable(),
   hero: z.string().nullable(),
   hero_lines: z.string(),
+  run_state: z.string().nullable(),
   cards: z.array(
     z.object({
       name: z.string().nullable(),
@@ -57,7 +60,6 @@ export const screenStateSchema = z.object({
       awaits: z.string().nullable(),
     }),
   ),
-  status: tileSchema.nullable(),
   nodes: tileSchema.nullable(),
   wall: tileSchema.nullable(),
   turns: tileSchema.nullable(),
@@ -124,12 +126,12 @@ export const SCREEN_OBSERVER = `
       header: text(document, '[aria-label="Run header"] h2'),
       hero: text(document, ".overall-hero h2"),
       hero_lines: [...document.querySelectorAll(".overall-hero p")].map((p) => p.textContent).join("\\n"),
+      run_state: text(document, '.overall-hero [aria-label="Run state"]'),
       cards: [...document.querySelectorAll("article.dag-node")].map((card) => ({
         name: card.getAttribute("aria-label"),
         reason: text(card, ".node-reason"),
         awaits: text(card, ".node-awaits"),
       })),
-      status: tile(metrics, "Status"),
       nodes: tile(metrics, "Nodes"),
       wall: tile(metrics, "Wall time"),
       turns: tile(metrics, "Turns"),
@@ -234,16 +236,17 @@ function checkOverall(state: ScreenState, visible: Visible): string[] {
   const out: string[] = [];
   if (state.hero !== detail.run.run_id)
     out.push(`hero: ${state.hero} is not ${detail.run.run_id}`);
-  if (!state.hero_lines.includes(detail.run.phase))
-    out.push(
-      `hero phase: ${state.hero_lines} does not say ${detail.run.phase}`,
-    );
+  const word = runState({
+    state: detail.run.state,
+    statuses: detail.graph?.node_status ?? {},
+  }).word;
+  if (state.run_state !== word)
+    out.push(`run state: ${state.run_state ?? "missing"} is not ${word}`);
   const metric = (name: string, tile: Tile | null, value: string) => {
     if (tile?.value !== value)
       out.push(`metric ${name}: ${tile?.value ?? "missing"} is not ${value}`);
   };
-  metric("Status", state.status, detail.run.state);
-  metric("Nodes", state.nodes, String(detail.run.nodes.length));
+  metric("Nodes", state.nodes, doneCount(nodeViews(detail)));
   metric(
     "Wall time",
     state.wall,

@@ -134,17 +134,13 @@ test("keeps the flat run list one toggle away, and reads an unknown list as the 
   expect(window.location.search).not.toContain("list=");
 });
 
-test("opens a supervising reading of the run, closing the node under it", () => {
-  window.history.replaceState(null, "", "/?run=run-1&node=build&event=e-1");
-  const { result } = renderHook(() => useUrlSelection());
-  act(() => result.current.selectView("channel"));
-  expect(result.current.view).toBe("channel");
-  expect(result.current.nodeId).toBeUndefined();
-  expect(result.current.itemId).toBeUndefined();
-  expect(window.location.search).toBe("?run=run-1&view=channel");
-});
-
 test("reads a view the app has no reading for as an unnamed one", () => {
+  // The retired channel among them: an old bookmark lands on the run as a whole.
+  for (const view of ["launch", "channel"]) {
+    window.history.replaceState(null, "", `/?run=run-1&view=${view}`);
+    const { result } = renderHook(() => useUrlSelection());
+    expect(result.current.view).toBe("overall");
+  }
   window.history.replaceState(null, "", "/?run=run-1&view=launch");
   const { result } = renderHook(() => useUrlSelection());
   expect(result.current.view).toBe("overall");

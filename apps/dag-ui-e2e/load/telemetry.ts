@@ -22,7 +22,7 @@ export const KINDS = [
 export interface Variant {
   readonly name: string;
   readonly kind: (typeof KINDS)[number];
-  readonly view?: (typeof VIEWS)[number] | "channel";
+  readonly view?: (typeof VIEWS)[number];
   readonly tabs: number;
 }
 
@@ -44,7 +44,7 @@ export const VARIANTS: readonly Variant[] = [
     view,
     tabs: 1,
   })),
-  ...[...VIEWS, "channel" as const].flatMap((view) =>
+  ...VIEWS.flatMap((view) =>
     [1, 2].map((tabs) => ({
       name: `live-${view}${tabs === 1 ? "" : "-2-tabs"}`,
       kind: "live" as const,
@@ -102,6 +102,8 @@ const resent = z.object({
 });
 export const variantSchema = z.object({
   kind: z.enum(KINDS),
+  // "channel" stays readable: telemetry recorded before the Channel view was
+  // retired measured it, and a recording is read as it was written.
   view: z.enum([...VIEWS, "channel"]).optional(),
   tabs: z.number().int().positive(),
   load_s: z.array(figure),

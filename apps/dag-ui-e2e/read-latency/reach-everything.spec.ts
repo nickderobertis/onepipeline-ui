@@ -41,38 +41,37 @@ const open = (page: Page, view: "graph" | "overall" | "node", node?: string) =>
     `${served.origin}${addressOf(world.facts.openLiveRun, view, node)}`,
   );
 
-test("Overall reaches its line, tiles, run records and disclosures", async ({
+test("Overall reaches its line, tiles, state and run details", async ({
   page,
 }) => {
   await open(page, "overall");
   const detail = await settledDetail(world, served, world.facts.openLiveRun);
-  const run = detail.run as { state: string; turns: number; nodes: unknown[] };
-  await expect(metricText(page, "Turns")).toHaveText(String(run.turns), {
+  await expect(metricText(page, "Turns")).toHaveText(String(detail.run.turns), {
     timeout: NEVER,
   });
-  await expect(metricText(page, "Status")).toHaveText(run.state);
-  await expect(metricText(page, "Nodes")).toHaveText(String(run.nodes.length));
+  const statuses = Object.values(detail.graph.node_status);
+  await expect(metricText(page, "Nodes")).toHaveText(
+    `${statuses.filter((status) => status === "done").length} of ${statuses.length} done`,
+  );
+  await expect(
+    page
+      .getByRole("region", { name: "Whole DAG" })
+      .getByRole("group", { name: "Run state" }),
+  ).toHaveText(/\S/u);
   await expect(
     page.getByRole("heading", { name: "Graph timeline" }),
   ).toBeVisible();
   await expect(page.getByText(HISTORY_LOADING)).toHaveCount(0, {
     timeout: NEVER,
   });
-  for (const label of [
-    "Timing and usage",
-    "Goal and repository identities",
-    "Recorded results",
-    "Provider health",
-  ]) {
-    const disclosure = page.getByRole("group", { name: label });
-    await disclosure.getByText(label).click();
-    await expect(disclosure, label).not.toHaveText(/Loading…/u);
-  }
+  await expect(
+    page.getByRole("group", { name: "Run details" }).getByText("Loading…"),
+  ).toHaveCount(0);
   const goal = detail.graph.plan.goal?.text;
   if (goal === undefined) throw new Error("the corpus's run states no goal");
-  await expect(
-    page.getByRole("group", { name: "Goal and repository identities" }),
-  ).toContainText(goal);
+  await expect(page.getByRole("region", { name: "Whole DAG" })).toContainText(
+    goal,
+  );
 });
 
 const pageAsks = (page: Page) => {
@@ -316,22 +315,4 @@ test("a node replanned off the graph is reached by a page of its own history", a
   } while (cursor !== null);
   expect(new Set(rows)).toEqual(new Set(expected));
   expect(rows).toHaveLength(new Set(expected).size);
-});
-
-test("Channel opens its queue on the large run, reached from Overall", async ({
-  page,
-}) => {
-  await open(page, "overall");
-  // By the view tabs, as a reader on Overall moves to Channel: the app is the one
-  // that replaced the first screen, so its tabs are the sign it has arrived.
-  const tab = page.getByRole("tab", { name: "Channel", exact: true });
-  await expect(tab).toBeVisible({ timeout: NEVER });
-  await tab.click();
-  await expect(tab).toHaveAttribute("aria-selected", "true");
-  await expect(page).toHaveURL(/[?&]view=channel(?:&|$)/u);
-  await expect(
-    page.getByRole("heading", { name: "Channel queue" }),
-  ).toBeVisible({
-    timeout: NEVER,
-  });
 });

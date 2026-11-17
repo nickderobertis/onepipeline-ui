@@ -259,31 +259,6 @@ p {
   gap: 12px;
 }
 
-/*
- * The two readings, offered as one control rather than two loose buttons: a
- * `fieldset` with a legend is what says the pair is a choice, and the pressed
- * state is what says which one is taken. Borderless because the buttons carry
- * their own.
- *
- * Positioned so the legend — visually hidden, which is to say absolutely
- * positioned — is placed against the fieldset rather than against whatever
- * positioned ancestor lies outside the strip that scrolls. Placed outside it, the
- * legend's one pixel sat wherever the fieldset's static position put it, which
- * once the strip held six views was past the right edge of a narrow viewport —
- * and a pixel outside the scroller is a document with somewhere to scroll to.
- */
-.detail-switch {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  flex-shrink: 0;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
 /* The topbar is a row of things that each know their own width, and the widest of
    them is the live-activity line, whose text is whatever a node last reported.
    Without this it refuses to shrink and pushes the row — the reading switch
@@ -568,16 +543,15 @@ p {
  * the design system's own `ScrollArea` hides them; the tabs are reachable by drag, by
  * swipe, and by the arrow keys the tab set already answers.
  */
-.node-tabs > [role="tablist"] {
+.node-view-head > [role="tablist"] {
   overflow-x: auto;
-  max-width: calc(100% - 40px);
+  max-width: 100%;
   flex: none;
   /* The list centres its tabs, which in a scroll container puts the overflow on both
      sides at once — and the leading half of it behind a `scrollLeft` that cannot go
      below zero. The first tab is the selected one on arrival, so that is the tab it
      hid. */
   justify-content: flex-start;
-  margin: 0 20px;
   /* Six named readings do not fit a laptop's working area; they scroll rather than
      widening the view that holds them, and between the breakpoint and the phone they
      wrap instead (see the media queries at the foot of this file). The design system
@@ -586,7 +560,7 @@ p {
   scrollbar-width: none;
 }
 
-.node-tabs > [role="tablist"]::-webkit-scrollbar {
+.node-view-head > [role="tablist"]::-webkit-scrollbar {
   display: none;
 }
 
@@ -872,13 +846,15 @@ p {
   clip-path: inset(50%);
 }
 
+/* Over the view it opened from and no higher: the run bar and the node bar keep
+   their tabs and controls in reach while it is open. A phone gives it the screen. */
 .detail-drawer {
-  position: fixed;
+  position: absolute;
   z-index: 30;
   top: 0;
   right: 0;
-  width: calc((100vw - var(--sidebar-width, 260px)) * 0.6667);
-  height: 100vh;
+  bottom: 0;
+  width: 66.67%;
   border-left: 1px solid var(--border);
   background: var(--background);
   box-shadow: -12px 0 35px rgb(0 0 0 / 18%);
@@ -1114,6 +1090,7 @@ pre {
 }
 
 .overall-view {
+  position: relative;
   min-height: 0;
   height: 100%;
 }
@@ -1312,7 +1289,7 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
      single line, so releasing that is what lets the second one exist. Only down to
      the phone: four rows buy the same reachability at four times the price, and the
      rule at the foot of this file takes the scroller back there. */
-  .node-tabs > [role="tablist"] {
+  .node-view-head > [role="tablist"] {
     flex-wrap: wrap;
     height: auto;
     overflow-x: visible;
@@ -1324,7 +1301,7 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
      drawn below its own tab strip and clipped away entirely. Wrapped, they take the
      height of the name they carry, plus the padding that keeps each one a target a
      finger can hit on the layout that needs two rows in the first place. */
-  .node-tabs > [role="tablist"] > [role="tab"] {
+  .node-view-head > [role="tablist"] > [role="tab"] {
     height: auto;
     padding-block: 5px;
   }
@@ -1537,20 +1514,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   font-size: 14px;
 }
 
-.channel-heading {
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.channel-heading h3 {
-  margin-bottom: 0;
-}
-
-.channel-queue {
-  display: grid;
-  gap: 14px;
-}
-
 .channel-list h4 {
   display: flex;
   align-items: center;
@@ -1563,7 +1526,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 }
 
 .channel-list ul,
-.attest-list,
 .watch-frames {
   display: grid;
   gap: 8px;
@@ -1583,42 +1545,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-}
-
-/* A reply's, an envelope's or an outcome's heading: plain text, never a badge. */
-.channel-card-title {
-  font-weight: 600;
-}
-
-/* The notes an envelope carries, under it, with no party of their own. */
-.channel-envelope-notes {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 12.5px;
-  overflow-wrap: anywhere;
-}
-
-/* A declined ruling, read as one message: who declined what, the ruling, why. */
-.declined-ruling {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  font-size: 13px;
-  overflow-wrap: anywhere;
-}
-
-.declined-ruling p {
-  margin: 0;
-}
-
-.declined-ruling blockquote {
-  margin: 0;
-  padding-left: 10px;
-  border-left: 2px solid var(--border);
-  white-space: pre-wrap;
 }
 
 .channel-empty,
@@ -1657,17 +1583,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   font-size: 14px;
 }
 
-.composer-shortcut,
-.composer-field {
-  display: grid;
-  gap: 6px;
-}
-
-.composer-fields {
-  display: grid;
-  gap: 10px;
-}
-
 .composer-check {
   display: flex;
   align-items: center;
@@ -1685,15 +1600,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   font-size: 13px;
 }
 
-.composer-envelope {
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.composer-correlation {
-  max-width: 420px;
-}
-
 .composer-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1701,83 +1607,10 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   gap: 10px;
 }
 
-.sets-editor {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-  margin: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.sets-editor legend {
-  padding: 0 4px;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.sets-hint,
-.sets-empty,
-.sets-current {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.sets-list {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* The entry takes the row and the three controls sit at its end; where the column
-   is too narrow for a readable entry beside them, the entry keeps a line of its own
-   and the controls wrap beneath it rather than squeezing it to a few characters. */
-.sets-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 2px;
-}
-
-.sets-entry {
-  flex: 1 1 14rem;
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
 .sets-served {
   margin: 0;
   padding-left: 18px;
   overflow-wrap: anywhere;
-}
-
-.composer-problem {
-  margin: 0;
-  color: var(--destructive);
-  font-size: 12px;
-}
-
-.attest-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 13px;
-}
-
-.attest-reference {
-  font-family: var(--font-mono);
 }
 
 .watch-frame {
@@ -1971,6 +1804,8 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
      one: at this width the reading it carries is the whole screen, and the transcript
      it was opened from is one Escape away. */
   .detail-drawer {
+    position: fixed;
+    inset: 0;
     width: 100vw;
   }
 
@@ -2025,10 +1860,8 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
      timeline — drawn below the fold of its own region. They scroll again, which is
      how the strip behaves at every width above the breakpoint, and every name stays
      reachable by drag, by swipe and by the arrow keys the tab set answers. */
-  .node-tabs > [role="tablist"] {
-    max-width: calc(100% - 28px);
+  .node-view-head > [role="tablist"] {
     flex-wrap: nowrap;
-    margin: 0 14px;
     overflow-x: auto;
   }
 
@@ -2053,103 +1886,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   }
 }
 
-/* A run's identity, liveness, Stop and activity share one bounded header row. */
-.run-topbar {
-  flex-wrap: nowrap;
-  flex-shrink: 0;
-  gap: 10px;
-  min-height: 56px;
-}
-.run-topbar .topbar-title {
-  flex: 0 1 auto;
-  overflow: hidden;
-}
-.run-topbar h2 {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  overflow-wrap: normal;
-}
-.run-topbar .eyebrow,
-.run-topbar .topbar-actions > .connection:not(.last-activity) {
-  display: none;
-}
-.run-topbar .topbar-actions {
-  flex: 1;
-  min-width: 0;
-  flex-wrap: nowrap;
-}
-.run-topbar .run-actions {
-  flex-wrap: nowrap;
-  flex-shrink: 0;
-}
-.run-topbar .run-actions-badge {
-  display: inline-flex;
-}
-.last-activity {
-  max-width: 32rem;
-  display: block;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-}
-
-@media (max-width: 700px) {
-  .run-topbar .topbar-title {
-    max-width: 35%;
-  }
-  .run-topbar h2 {
-    font-size: 10px;
-  }
-  .run-topbar .run-actions-badge {
-    padding-inline: 4px;
-    font-size: 9px;
-  }
-  .run-topbar .run-actions,
-  .run-topbar .topbar-actions {
-    gap: 4px;
-  }
-}
-
-.channel-message-details {
-  min-width: 0;
-}
-.channel-message-details > summary {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.channel-message-details > summary::before {
-  content: "▸";
-}
-.channel-message-details[open] > summary::before {
-  content: "▾";
-}
-.channel-message-preview {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.channel-message-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  max-width: 45%;
-  overflow: hidden;
-  white-space: nowrap;
-}
-.channel-message-details[open] .channel-message-meta {
-  flex-wrap: wrap;
-  white-space: normal;
-}
-
 .remote-checks {
   width: 100%;
   border-collapse: collapse;
@@ -2170,14 +1906,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   color: var(--primary);
   text-decoration: underline;
   text-underline-offset: 3px;
-}
-
-@media (max-width: 600px) {
-  .channel-message-details:not([open])
-    .channel-message-meta
-    > :not(:first-child) {
-    display: none;
-  }
 }
 
 .nav-pages {
@@ -2431,13 +2159,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     flex: none;
   }
 }
-.run-header-details {
-  padding: 8px 24px;
-  font-size: 12px;
-}
-.run-header-details summary {
-  cursor: pointer;
-}
 .structured-fields fieldset {
   min-width: 0;
   margin: 8px 0;
@@ -2450,11 +2171,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 }
 .structured-fields ol {
   margin-left: 16px;
-}
-.run-header-details {
-  flex-shrink: 0;
-  max-height: min(40vh, 320px);
-  overflow: auto;
 }
 .shutdown-status {
   flex-shrink: 0;
@@ -2492,6 +2208,50 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 .node-tab-panel .otg-markdown {
   font-size: 13px;
   line-height: 20px;
+}
+
+/* A node's task is read as a document here, so its headings take real sizes and
+   its blocks real spacing; the package stays compact for clamped cards. */
+.node-tab-panel .otg-markdown h1,
+.node-tab-panel .otg-markdown h2,
+.node-tab-panel .otg-markdown h3,
+.node-tab-panel .otg-markdown h4 {
+  font-weight: 650;
+}
+.node-tab-panel .otg-markdown h1 {
+  margin: 22px 0 10px;
+  font-size: 22px;
+  line-height: 28px;
+}
+.node-tab-panel .otg-markdown h2 {
+  margin: 20px 0 8px;
+  font-size: 18px;
+  line-height: 24px;
+}
+.node-tab-panel .otg-markdown h3 {
+  margin: 16px 0 6px;
+  font-size: 15px;
+  line-height: 21px;
+}
+.node-tab-panel .otg-markdown h4 {
+  margin: 14px 0 6px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.node-tab-panel .otg-markdown > :first-child {
+  margin-top: 0;
+}
+.node-tab-panel .otg-markdown :where(p, ul, ol, pre, blockquote) {
+  margin: 0 0 12px;
+}
+.node-tab-panel .otg-markdown :where(ul, ol) {
+  padding-left: 22px;
+}
+.node-tab-panel .otg-markdown li + li {
+  margin-top: 4px;
+}
+.node-tab-panel .otg-markdown p + p {
+  text-indent: 0;
 }
 
 /*
@@ -3253,31 +3013,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   }
 }
 
-.remote-checks .check-required {
-  color: #fbbf24;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.remote-checks .check-optional {
-  color: #94a3b8;
-  white-space: nowrap;
-}
-.remote-checks td svg {
-  display: inline-block;
-  margin-right: 6px;
-  vertical-align: -1px;
-}
-.remote-checks .check-failing td:nth-child(3) {
-  color: #f87171;
-  font-weight: 600;
-}
-.remote-checks .check-failing td:nth-child(3)::before {
-  content: "✕ ";
-}
-.remote-checks .check-failing td:nth-child(3)::after {
-  content: " — failing";
-}
-
 /* A run still arriving: the quiet line, a stretch not held, and what stands in for it. */
 .history-loading {
   position: fixed;
@@ -3484,4 +3219,358 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 .node-command-log-figure figcaption {
   font-size: 12px;
   font-weight: 600;
+}
+
+/*
+ * One run bar above every run view: the title, the run's state and actions, its
+ * last activity, the views and the update setting. The actions group dissolves into
+ * the bar so the title and the last-activity line shrink against each other — the
+ * line first, and the title only once the line is gone,
+ * wrapping to two lines and then truncating, its whole text in its tooltip.
+ */
+.run-topbar {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  gap: 6px 12px;
+  height: auto;
+  min-height: 56px;
+  padding: 6px 20px;
+}
+.run-topbar .eyebrow,
+.run-topbar .topbar-actions > .connection:not(.last-activity) {
+  display: none;
+}
+.run-topbar .topbar-actions {
+  display: contents;
+}
+.run-topbar .topbar-title {
+  flex: 0 1 auto;
+  min-width: 3rem;
+  overflow: hidden;
+}
+.run-topbar .topbar-title > div {
+  min-width: 0;
+}
+.run-topbar h2 {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.run-topbar .run-actions {
+  flex: none;
+  flex-wrap: nowrap;
+}
+.run-topbar .run-actions-badge {
+  display: inline-flex;
+}
+.last-activity {
+  display: block;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Shrink is weighted by basis, so the weight has to dwarf the ratio of the two
+   bases: at a thousand to one the title still lost a fraction of a pixel, and a
+   title a fraction of a pixel short of its width wraps. */
+.run-topbar .last-activity {
+  flex: 0 1000000 auto;
+  min-width: 0;
+  max-width: 24rem;
+}
+.run-topbar .view-tabs {
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+}
+
+.run-topbar .main-updates {
+  flex: none;
+  gap: 6px;
+}
+
+/* Short of room for one row, the views and the update setting take a second row of
+   the same bar rather than squeezing the title to nothing. */
+@media (max-width: 1279px) {
+  .run-topbar {
+    flex-wrap: wrap;
+  }
+  .run-topbar::after {
+    flex-basis: 100%;
+    order: 9;
+    content: "";
+  }
+  .run-topbar .topbar-title {
+    flex: 0 1 auto;
+  }
+  /* No basis of its own, so the line takes the room the title and the state
+     leave rather than wrapping onto a row of its own. */
+  .run-topbar .last-activity {
+    flex: 1 1 0;
+  }
+  .run-topbar .view-tabs {
+    order: 10;
+    margin-left: 0;
+  }
+  .run-topbar .main-updates {
+    order: 11;
+    margin-left: auto;
+  }
+}
+
+/* A phone gives the title a row of its own beside the menu, the state and actions
+   the next, and the views and the update setting a strip each. */
+@media (max-width: 640px) {
+  .run-topbar {
+    display: flex;
+    padding: 8px 14px 0;
+  }
+  .run-topbar .topbar-title {
+    flex: 1 1 calc(100% - 56px);
+  }
+  .run-topbar h2 {
+    font-size: 14px;
+  }
+  .run-topbar .last-activity {
+    flex: 1 1 0;
+  }
+  .run-topbar .view-tabs {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .run-topbar .main-updates {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}
+
+/* One node bar: the way back, the node, its state and change link, and its tabs. */
+.node-view-head {
+  justify-content: flex-start;
+  gap: 6px 16px;
+  padding: 4px 20px;
+}
+.node-view-head .node-view-facts {
+  flex-wrap: wrap;
+}
+.node-view-head > [role="tablist"],
+.node-view-head > .node-tab-row {
+  margin-left: auto;
+}
+.node-view-head > [role="tablist"] > [role="tab"],
+.node-view-head > .node-tab-row > span {
+  padding-inline: 6px;
+  font-size: 13px;
+}
+@media (max-width: 640px) {
+  .node-view-head {
+    padding: 6px 14px;
+  }
+  .node-view-head > [role="tablist"],
+  .node-view-head > .node-tab-row {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+}
+
+/*
+ * The run's one state: a word, its icon and its colour. Words of one family differ
+ * in shade, so no two words share a colour.
+ */
+.run-state-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.run-state,
+.run-failures {
+  --run-state: var(--muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--run-state);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--run-state) 14%, transparent);
+  color: var(--run-state);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.run-state-group[data-large="true"] .run-state,
+.run-state-group[data-large="true"] .run-failures {
+  padding: 3px 10px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.run-state > svg,
+.run-failures > svg {
+  flex-shrink: 0;
+}
+.run-state[data-run-state="complete"] {
+  --run-state: var(--success);
+}
+.run-state[data-run-state="failed"] {
+  --run-state: var(--destructive);
+}
+.run-state[data-run-state="stopped"] {
+  --run-state: var(--muted-foreground);
+}
+.run-state[data-run-state="unfinished"] {
+  --run-state: color-mix(in srgb, var(--warning) 70%, var(--destructive));
+}
+.run-state[data-run-state="waiting-on-you"] {
+  --run-state: var(--warning);
+}
+.run-state[data-run-state="driver-dead"] {
+  --run-state: color-mix(in srgb, var(--destructive) 70%, var(--foreground));
+}
+.run-state[data-run-state="idle"] {
+  --run-state: color-mix(in srgb, var(--muted-foreground) 65%, var(--info));
+}
+.run-state[data-run-state="running"] {
+  --run-state: var(--info);
+}
+.run-failures {
+  --run-state: var(--destructive);
+}
+
+/* The Whole DAG card's state line: the badge, then when the run last moved. */
+.overall-hero .overall-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Run details: aligned label and value pairs beside the tiles, spanning two. */
+.metric-grid .run-details {
+  grid-column: 3 / span 2;
+  grid-row: 1 / span 2;
+  min-width: 0;
+}
+.run-details dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 12px;
+}
+.run-details dl > div {
+  display: contents;
+}
+.run-details dt {
+  color: var(--muted-foreground);
+}
+.run-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.run-details-error {
+  color: var(--destructive);
+}
+@media (max-width: 1100px) {
+  .metric-grid .run-details {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+}
+
+/*
+ * A graph card's content is centred in the card, the status word close under the
+ * title and each reason line close under that: a line is one of the lines the
+ * layout grew the card by, so it sits inside the border with the card's padding
+ * below it.
+ */
+.dag-node {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 13px;
+}
+.dag-node > * {
+  flex-shrink: 0;
+}
+.dag-node strong {
+  margin: 4px 0 1px;
+  line-height: 18px;
+}
+.dag-node .node-status {
+  line-height: 12px;
+}
+.dag-node .node-reason,
+.dag-node .node-awaits {
+  margin-top: 3px;
+  line-height: 12px;
+}
+/* The kind's icon on the pill text's midline. */
+.dag-node .node-kind {
+  display: inline-flex;
+  align-items: center;
+  line-height: 12px;
+}
+.dag-node .node-kind > svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+/* Remote checks: each status its own coloured icon; the requirement stays quiet. */
+.check-status {
+  --check: var(--muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--check);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.check-status > svg {
+  flex-shrink: 0;
+}
+.check-status[data-check="passed"] {
+  --check: var(--success);
+}
+.check-status[data-check="failed"] {
+  --check: var(--destructive);
+}
+.check-status[data-check="running"] {
+  --check: var(--info);
+}
+.check-status[data-check="queued"] {
+  --check: color-mix(in srgb, var(--info) 45%, var(--muted-foreground));
+}
+.check-status[data-check="skipped"] {
+  --check: var(--muted-foreground);
+}
+.check-status[data-check="not-recorded"] {
+  --check: color-mix(in srgb, var(--muted-foreground) 55%, var(--background));
+}
+.check-status[data-check="neutral"] {
+  --check: color-mix(in srgb, var(--muted-foreground) 55%, var(--foreground));
+}
+.remote-checks .check-required,
+.remote-checks .check-optional {
+  white-space: nowrap;
+}
+.remote-checks .check-optional {
+  color: var(--muted-foreground);
+}
+.remote-checks .check-required svg,
+.remote-checks .check-optional svg {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--muted-foreground);
+  vertical-align: -1px;
 }

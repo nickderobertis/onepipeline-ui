@@ -20,8 +20,11 @@ export type LauncherName = "Claude" | "Codex" | "Unattributed";
 export interface NodeView {
   readonly id: string;
   readonly label: string;
-  /** The plan's node kind, or `lifecycle` for an agent node that runs steps. */
-  readonly kind: NodeKind | "lifecycle";
+  /**
+   * The plan's declared `human` or `command`, otherwise `change` for a node naming a
+   * `repo` or `steps` — work that lands as a change request — and `agent` for the rest.
+   */
+  readonly kind: NodeKind | "change";
   /** The authoritative `GraphState.node_status`, rendered without client-side defaults. */
   readonly status: NodeStatus;
   /**
@@ -97,8 +100,8 @@ export function nodeViews(detail: LiveRunDetail): NodeView[] {
     const kind =
       isNodeKind(declared) && declared !== "agent"
         ? declared
-        : hasLifecycleShape(task)
-          ? "lifecycle"
+        : hasChangeShape(task)
+          ? "change"
           : "agent";
     // `node_results` holds only what a *terminal journal event* carried, so it is
     // empty for every node the scheduler settled without dispatching. A run whose
@@ -205,23 +208,96 @@ export function nodeKindWord(node: NodeView): string {
 }
 
 /**
- * How the run's graph stands as a whole — `failed`, `waiting` or `complete` — read
- * from the engine's own per-node statuses (`GET /status`'s `node_status`) by the
- * engine's own rule (`graph::state_of`): any node failed or skipped fails the
- * graph, only a graph whose every node is done is complete, and anything else is
- * waiting. An empty graph is complete, as the engine reads it.
+ * The one word a run's state is shown in, wherever this app shows it.
  *
- * Derived here rather than served because it is a pure reading of statuses every
- * client already holds.
+ * The driver's word (`run.state`, `liveness`) and the graph's statuses are one
+ * concept to a reader, so they are folded here into one of eight words, by rules
+ * applied in this order: `settled` is Complete; `ended-failed`, `ended-stopped` and
+ * `ended-unfinished` are Failed, Stopped and Unfinished; `paused`, or an `ACTIVE`
+ * run with a node waiting on a person, is Waiting on you; a driver `DRIVER DEAD` or
+ * `UNDRIVEN` is Driver dead, because adopting the run is the remedy for both;
+ * `PARKED` is Idle, still driven but quiet; and any other `ACTIVE` run is Running.
  */
-export function graphStateWord(
-  statuses: Readonly<Record<string, string>>,
-): "failed" | "waiting" | "complete" {
-  const all = Object.values(statuses);
-  if (all.some((status) => status === "failed" || status === "skipped"))
-    return "failed";
-  if (all.every((status) => status === "done")) return "complete";
-  return "waiting";
+export type RunStateWord =
+  | "Complete"
+  | "Failed"
+  | "Stopped"
+  | "Unfinished"
+  | "Waiting on you"
+  | "Driver dead"
+  | "Idle"
+  | "Running";
+
+export type RunState = (
+  | { readonly known: true; readonly word: RunStateWord }
+  /**
+   * A state a later engine adds that no rule above reads: shown as the server spelt
+   * it rather than as a guess.
+   */
+  | { readonly known: false; readonly word: string }
+) & {
+  /**
+   * Failed nodes on a run that has not ended, counted beside its word rather than
+   * folded into it: a running run with failures still reads Running. Zero for an
+   * ended run, whose word already says how it ended.
+   */
+  readonly failed: number;
+};
+
+/**
+ * The run's one state, from the run detail's `run.state`, the status route's
+ * `liveness` where it has been read, and the run's node statuses. `run.state` of a
+ * run that has neither ended nor paused is the liveness word lowercased, so the
+ * status route only sharpens a reading the detail already gives.
+ */
+export function runState({
+  state,
+  liveness,
+  statuses,
+}: {
+  readonly state: string;
+  readonly liveness?: string;
+  readonly statuses: Readonly<Record<string, string>>;
+}): RunState {
+  const ended = ENDED_WORDS[state];
+  if (ended !== undefined) return { word: ended, known: true, failed: 0 };
+  const failed = Object.values(statuses).filter(
+    (status) => status === "failed",
+  ).length;
+  const driver = liveness ?? state.toUpperCase().replaceAll("-", " ");
+  const waiting = Object.values(statuses).includes("waiting");
+  const word: RunStateWord | undefined =
+    state === "paused" || (driver === "ACTIVE" && waiting)
+      ? "Waiting on you"
+      : driver === "DRIVER DEAD" || driver === "UNDRIVEN"
+        ? "Driver dead"
+        : driver === "PARKED"
+          ? "Idle"
+          : driver === "ACTIVE"
+            ? "Running"
+            : undefined;
+  // A word the linked engine does not write reaches no fixture a journey can
+  // serve — the read API serves the engine's own vocabulary, and a run store holds
+  // only what that engine wrote — so this fallback is proved by run-model.test.ts
+  // alone, where a later engine's word is handed to it directly.
+  return word === undefined
+    ? { word: state, known: false, failed }
+    : { word, known: true, failed };
+}
+
+const ENDED_WORDS: Readonly<Record<string, RunStateWord>> = {
+  settled: "Complete",
+  "ended-failed": "Failed",
+  "ended-stopped": "Stopped",
+  "ended-unfinished": "Unfinished",
+};
+
+/** `3 of 5 done`: how many of the run's nodes are done, out of all of them. */
+export function doneCount(
+  nodes: readonly { readonly status: string }[],
+): string {
+  const done = nodes.filter((node) => node.status === "done").length;
+  return `${done} of ${nodes.length} done`;
 }
 
 /** The harness that launched a run, named the one way this app names it. */
@@ -405,10 +481,21 @@ export function readString(
   return typeof result === "string" && result.length > 0 ? result : undefined;
 }
 
-function hasLifecycleShape(task: PlanTask): boolean {
+function hasChangeShape(task: PlanTask): boolean {
   return "repo" in task || "steps" in task;
 }
 
 function shortId(value: string): string {
   return value.length > 12 ? `${value.slice(0, 8)}…` : value;
+}
+
+/**
+ * The lines a card carries beneath its status word, as `layoutDag` reads them:
+ * absent for none, so a card with nothing to add keeps the standard height.
+ */
+export function cardLines(...lines: readonly (string | undefined)[]): {
+  readonly lines?: number;
+} {
+  const count = lines.filter((line) => line !== undefined).length;
+  return count === 0 ? {} : { lines: count };
 }

@@ -1,3 +1,4 @@
+import { API_V2_FILTER_PROFILES } from "@onepipeline-ui/dag-model";
 import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -5,14 +6,14 @@ import {
   runPageKind,
   subscriptionView,
 } from "../first-screen/address";
-import { DETAIL_LEVELS, useUrlSelection } from "../lib/useUrlSelection";
+import { useUrlSelection } from "../lib/useUrlSelection";
 
 /**
  * The drift gate for the first-screen chunk's reading of the address.
  *
  * `first-screen/address.ts` reads the address without `useUrlSelection`, whose module
- * the first-screen chunk must not load, and copies the two detail words' filter
- * profiles. The app takes the first answer over only when the view it would subscribe
+ * the first-screen chunk must not load, and copies the filter profile every view is
+ * read under. The app takes the first answer over only when the view it would subscribe
  * equals the one the first screen subscribed, so a reading that drifted would draw a
  * first screen for one view and then read the run again for another. Each address
  * here is read both ways, and the first screen's view is held to the app's.
@@ -31,7 +32,7 @@ function appView(search: string) {
       selection.runId,
       runPageKind(selection.view, selection.nodeId),
       selection.nodeId,
-      DETAIL_LEVELS[selection.detail].profile,
+      API_V2_FILTER_PROFILES.detailed,
     ),
   };
 }
@@ -46,8 +47,9 @@ const filterOf = (search: string): string | undefined => {
 };
 
 describe("the first screen subscribes the view the app would", () => {
-  // Every address a first screen is drawn for: each page kind, each detail word,
-  // a view word this app has no page for, and identifiers at their bounds.
+  // Every address a first screen is drawn for: each page kind, a view word this app
+  // has no page for — the retired channel among them — a retired detail word, and
+  // identifiers at their bounds.
   const drawn = [
     "?run=r",
     "?run=r&view=overall",
@@ -58,10 +60,9 @@ describe("the first screen subscribes the view the app would", () => {
     "?run=r&node=build&tab=timeline",
     "?run=r&view=elsewhere",
     "?run=r&node=build&view=elsewhere",
+    "?run=r&view=channel",
     "?run=r&node=build&detail=decisions",
     "?run=r&view=overall&detail=decisions",
-    "?run=r&view=graph&detail=activity",
-    "?run=r&detail=other",
     `?run=${"r".repeat(512)}&node=${"n".repeat(512)}`,
   ];
   for (const search of drawn)
@@ -75,7 +76,7 @@ describe("the first screen subscribes the view the app would", () => {
 
   // Addresses the app reads with no run of its own naming, so no first screen
   // stands in for them: an identifier the read API could never serve, a page that
-  // is not a run's, a channel, and a node's tab other than its timeline.
+  // is not a run's, and a node's tab other than its timeline.
   const notDrawn: readonly (readonly [string, string])[] = [
     ["?view=overall", "/"],
     ["?run=", "/"],
@@ -85,7 +86,6 @@ describe("the first screen subscribes the view the app would", () => {
     ["?run=a%01b", "/"],
     ["?run=r&page=host", "/"],
     ["?run=r", "/human-items"],
-    ["?run=r&view=channel", "/"],
     ["?run=r&node=build&tab=task", "/"],
   ];
   for (const [search, path] of notDrawn)
@@ -102,14 +102,12 @@ describe("the first screen subscribes the view the app would", () => {
     }
   });
 
-  for (const [level, { profile }] of Object.entries(DETAIL_LEVELS))
-    it(`under ?detail=${level}, the app's filter profile`, () => {
-      expect(filterOf(`?run=r&view=graph&detail=${level}`)).toBe(profile);
-    });
-
-  it("with no detail word, the app's default level's", () => {
-    // `useUrlSelection` reads an absent or unknown word as `activity`.
-    for (const search of ["?run=r&view=overall", "?run=r&detail=other"])
-      expect(filterOf(search)).toBe(DETAIL_LEVELS.activity.profile);
+  it("reads every address under the app's one profile, whatever it names", () => {
+    for (const search of [
+      "?run=r&view=overall",
+      "?run=r&view=graph&detail=decisions",
+      "?run=r&detail=other",
+    ])
+      expect(filterOf(search)).toBe(API_V2_FILTER_PROFILES.detailed);
   });
 });

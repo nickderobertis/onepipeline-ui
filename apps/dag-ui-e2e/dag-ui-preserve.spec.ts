@@ -105,7 +105,9 @@ test("shows a node its plan kept as done, on its branch at its head, and never a
   await expect(keptPr).toContainText("ReleaseNot recorded");
   await expect(keptPr).toContainText("No checks observed");
   await expect(keptPr.getByRole("link")).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Pull request" })).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: /Change request|#\d+$/u }),
+  ).toHaveCount(0);
 
   // The node beside it landed, and is shown so — the treatment the kept node
   // was not given: the change request it merged through, and the release its
@@ -117,8 +119,9 @@ test("shows a node its plan kept as done, on its branch at its head, and never a
     facts.landed_node,
     "Remote",
   );
+  // Not a GitHub URL, so the link keeps the readable name.
   await expect(
-    landed.getByRole("link", { name: "Pull request" }),
+    landed.getByRole("link", { name: "Change request" }),
   ).toBeVisible();
   await expect(landed).toContainText(facts.landed_version);
 });

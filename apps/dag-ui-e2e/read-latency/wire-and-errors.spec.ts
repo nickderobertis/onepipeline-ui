@@ -183,7 +183,7 @@ async function recovers(page: Page, served: Served) {
   await expect(tryAgain).toBeInViewport();
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await tryAgain.click();
-  await expect(metricText(page, "Status")).toHaveText(/\S/u, {
+  await expect(metricText(page, "Nodes")).toHaveText(/\S/u, {
     timeout: 60_000,
   });
   void served;
@@ -207,7 +207,7 @@ for (const [name, viewport] of FAILURE_VIEWPORTS) {
         );
         await page.goto(url(served));
         await expect(page.getByText("Loading execution history")).toBeVisible();
-        await expect(metricText(page, "Status")).toHaveCount(0);
+        await expect(metricText(page, "Nodes")).toHaveCount(0);
       } finally {
         await stop(served);
       }
@@ -313,7 +313,7 @@ test("progress.failed shows the error and keeps the held screen", async ({
     await expect(page.getByRole("alert").first()).toContainText(
       "the complete read failed",
     );
-    await expect(metricText(page, "Status")).toHaveText(/\S/u);
+    await expect(metricText(page, "Nodes")).toHaveText(/\S/u);
   } finally {
     await stop(served);
   }

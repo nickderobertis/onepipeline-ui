@@ -1,5 +1,4 @@
 import {
-  Badge,
   Button,
   Dialog,
   DialogClose,
@@ -13,6 +12,8 @@ import { TelemetryClientError } from "@onepipeline-ui/telemetry-client";
 import { OctagonX } from "lucide-react";
 import { useCallback, useState } from "react";
 import { Outcome } from "../../lib/Outcome";
+import { RunStateBadge } from "../../lib/RunStateBadge";
+import type { RunState } from "../../lib/run-model";
 import type { RunControl } from "./useRunControl";
 import { useVerb } from "./useVerb";
 
@@ -26,15 +27,21 @@ function ownerNamed(message: string): string | undefined {
   return /\[[^\]]+\]/.exec(message)?.[0];
 }
 
-/** Stop a run, confirming an owner override only after the engine refuses it. */
+/**
+ * The run's state, and Stop, confirming an owner override only after the engine
+ * refuses it.
+ */
 export function RunActions({
   runId,
   control,
   ended,
+  state,
 }: {
   readonly runId: string;
   readonly control: RunControl;
   readonly ended: boolean;
+  /** The run's one state, absent until its detail has been read. */
+  readonly state?: RunState;
 }) {
   const { stop, stopOpen, setStopOpen, forceOpen, setForceOpen, refusal } =
     useStop(control);
@@ -42,19 +49,13 @@ export function RunActions({
   const stopOutcome = stop.outcome;
   const stopping = stop.pending;
 
-  const liveness = control.status.value?.liveness;
-
   return (
     <>
       <div className="run-actions">
-        {liveness !== undefined && (
-          <Badge
-            aria-label={`Liveness ${liveness}`}
-            className="run-actions-badge"
-            variant="outline"
-          >
-            {liveness}
-          </Badge>
+        {state !== undefined && (
+          <span className="run-actions-badge">
+            <RunStateBadge state={state} />
+          </span>
         )}
         {!ended && (
           <Button
