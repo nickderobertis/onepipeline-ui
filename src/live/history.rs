@@ -71,6 +71,76 @@ impl Hub {
     }
 }
 
+/// Spike `spike-node-timeline-load`, throwaway: what the node-scoped streamed read
+/// sends, every row of a node's timeline, newest first, and how its server time split.
+pub struct NodeStream {
+    /// Every row, newest first.
+    pub rows: Vec<Value>,
+    /// The server's split, in seconds: the heads read, the node's fetch, the build.
+    pub split: Value,
+}
+
+impl Hub {
+    /// Spike `spike-node-timeline-load`: every row of `node`'s own timeline, read
+    /// apart from any subscription's reading by [`first_screen::read_node`] — the
+    /// run's heads, then the node's records by their handles — and built whole.
+    ///
+    /// # Errors
+    ///
+    /// `404` for a run or node the run does not hold, a filter's refusal, and the
+    /// engine's refusal of the read.
+    pub fn node_stream(
+        &self,
+        run: &RunId,
+        query: &TimelineEventsQuery,
+    ) -> Result<NodeStream, ApiError> {
+        let PageOwner::Node(node) = &query.owner else {
+            return Err(ApiError::InvalidRequest(
+                "the node stream is scope=node only".to_owned(),
+            ));
+        };
+        let paths = self.0.store.present(run)?;
+        let (read, heads_s, fetch_s) = super::first_screen::read_node(&paths, node.as_str())
+            .map_err(|error| ApiError::from_engine(run, error))?;
+        let building = std::time::Instant::now();
+        let view = read.view;
+        if !(payload::plan_names(&view, node.as_str())
+            || view
+                .events
+                .iter()
+                .any(|event| event.labels.node.as_deref() == Some(node.as_str())))
+        {
+            return Err(ApiError::NodeNotFound(node.clone()));
+        }
+        let filter = RunStore::resolve(&view, query.filter.as_ref())?;
+        let declared = self.0.store.declared(&view);
+        let agents = agents_of(&paths);
+        let built = LiveTimeline::build(
+            &view,
+            &read.indexed,
+            &declared,
+            TimelineScope::Node(node.clone()),
+            filter,
+            agents.as_ref(),
+            ItemsWindow::All,
+        );
+        let page = page_of(&built.payload()["spans"], query)?;
+        let mut rows = match page {
+            Value::Object(mut answer) => match answer.remove("rows") {
+                Some(Value::Array(rows)) => rows,
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        rows.reverse();
+        let build_s = building.elapsed().as_secs_f64();
+        Ok(NodeStream {
+            rows,
+            split: json!({ "heads_s": heads_s, "fetch_s": fetch_s, "build_s": build_s }),
+        })
+    }
+}
+
 fn read_share(
     paths: &onepipeline::views::RunPaths,
     owner: &PageOwner,

@@ -543,6 +543,34 @@ function NodeExecution({
       ),
     [reading],
   );
+  // Spike `spike-node-timeline-load`, throwaway: when a measurement has installed
+  // `window.__nodeLoadProbe`, tell it after each commit which rows the chart's data
+  // and the event list hold — every row the transcript reads, and every row a
+  // collapsed run's control stands for. A layout effect, so what it says is of the
+  // same commit as the DOM a mutation observer sees.
+  useLayoutEffect(() => {
+    const probe = (
+      window as {
+        __nodeLoadProbe?: (held: { chart: string[]; list: string[] }) => void;
+      }
+    ).__nodeLoadProbe;
+    if (typeof probe !== "function") return;
+    const list: string[] = [];
+    const under = (row: TimelineRow) => {
+      list.push(row.id);
+      for (const child of row.children) under(child);
+    };
+    for (const entry of reading)
+      if (entry.entryKind === "row") list.push(entry.row.id);
+      else for (const member of entry.group.children) under(member);
+    probe({
+      chart: [
+        ...projection.items.map((item) => item.id),
+        ...projection.markers.map((marker) => marker.id),
+      ],
+      list,
+    });
+  }, [projection, reading]);
   const sync = useTimelineScrollSync(entries);
   const [expanded, setExpanded] = useState(false);
   // Held here rather than inside the plot so every zoom is bounded: the plot's

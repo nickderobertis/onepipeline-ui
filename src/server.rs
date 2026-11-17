@@ -96,6 +96,7 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::RUN, get(run))
         .route(routes::RUN_TIMELINE, get(timeline))
         .route(routes::RUN_TIMELINE_EVENTS, get(timeline_events))
+        .route("/api/v2/runs/{run}/timeline/node-stream", get(node_stream))
         .route(routes::RUN_CONVERSATION, get(conversation))
         .route(routes::RUN_ARTIFACT, get(artifact))
         .route(routes::EVENTS, get(events))
@@ -646,6 +647,62 @@ async fn timeline_events(
         Err(error) => return error.into_response(),
     };
     answer(move || serving.hub.timeline_events(&run, &query)).await
+}
+
+/// Spike `spike-node-timeline-load`, throwaway: rows streamed in a line of each.
+const NODE_STREAM_CHUNK: usize = 1000;
+
+/// Spike `spike-node-timeline-load`, throwaway: `GET .../timeline/node-stream?scope=node&node=N`,
+/// every row of a node's own timeline as newline-delimited JSON. The first line is
+/// `{"total", "server"}`, sent once the node is read and built; then one
+/// `{"rows": [...]}` line per [`NODE_STREAM_CHUNK`] rows, newest first, each
+/// serialized and flushed while the client reads the ones before it; then `{"end": true}`.
+async fn node_stream(
+    State(serving): Store,
+    Path(run): Path<String>,
+    Query(mut raw): Query<HashMap<String, String>>,
+) -> Response {
+    let run = match RunId::try_from(run.as_str()) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    // Every row, whatever the caller asked: the stream is the node whole.
+    for bound in ["cursor", "from", "to", "span"] {
+        raw.remove(bound);
+    }
+    raw.insert(
+        "limit".to_owned(),
+        crate::contract::TIMELINE_EVENTS_PAGE_MAX.to_string(),
+    );
+    let query = match timeline_events_query(&raw) {
+        Ok(query) => query,
+        Err(error) => return error.into_response(),
+    };
+    let built =
+        match tokio::task::spawn_blocking(move || serving.hub.node_stream(&run, &query)).await {
+            Ok(Ok(built)) => built,
+            Ok(Err(error)) => return error.into_response(),
+            Err(_) => return ApiError::Read("unexpected read failure".to_owned()).into_response(),
+        };
+    let (tx, rx) = mpsc::channel::<Result<String, Infallible>>(4);
+    tokio::task::spawn_blocking(move || {
+        let head = serde_json::json!({ "total": built.rows.len(), "server": built.split });
+        if tx.blocking_send(Ok(format!("{head}\n"))).is_err() {
+            return;
+        }
+        for chunk in built.rows.chunks(NODE_STREAM_CHUNK) {
+            let line = serde_json::json!({ "rows": chunk });
+            if tx.blocking_send(Ok(format!("{line}\n"))).is_err() {
+                return;
+            }
+        }
+        let _ = tx.blocking_send(Ok("{\"end\":true}\n".to_owned()));
+    });
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/x-ndjson")],
+        axum::body::Body::from_stream(ReceiverStream::new(rx)),
+    )
+        .into_response()
 }
 
 /// The query of a page of timeline rows, refused before any run is opened.

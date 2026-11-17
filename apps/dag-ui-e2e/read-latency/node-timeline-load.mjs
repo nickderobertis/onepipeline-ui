@@ -5,7 +5,7 @@
  *
  *   node apps/dag-ui-e2e/read-latency/node-timeline-load.mjs \
  *     --runs-root <path> --run <run> --node <node> \
- *     [--read today|untouched|pages:<n>|concurrent:<k>:<n>|one] \
+ *     [--read today|untouched|pages:<n>|concurrent:<k>:<n>|one|stream] \
  *     [--readings <n>] [--binary <onepipeline-api>] [--output <file>]
  *
  *   node apps/dag-ui-e2e/read-latency/node-timeline-load.mjs \
@@ -17,7 +17,12 @@
  * start until the chart and the event list hold every row of the node and no
  * loading mark remains: "No earlier history remains" shown, and no "Still loading"
  * hatch, Load earlier control, failure, loading state or run-level history
- * banner. A reading's rows are checked off the wire against the node's total.
+ * banner: the reading's `seconds`. `node_complete_s` is the same less the banner.
+ * A reading counts only if, at that mark, both the chart's data and the event list
+ * held every row of the node: the view's probe (`NodeTimelineView.tsx`) reports
+ * after each commit which rows each holds, the observer keeps the report of the
+ * commit it marks on, and the rows expected are read afterwards through the
+ * ordinary paged route. The rows the reads carried are also checked off the wire.
  *
  * `--read`:
  * - `today` drives today's view to its start by its own Load earlier control,
@@ -25,8 +30,11 @@
  * - `untouched` opens today's view and leaves it, reporting where it stops;
  * - `pages:<n>`, `concurrent:<k>:<n>` and `one` are the prototype's read shapes
  *   (`?spike-read=`, `useTimelineHistory`): sequential pages of `n` rows, the
- *   newest page then `k` stretches of time at once in pages of `n`, and every row
- *   in one request.
+ *   newest page then `k` stretches of time at once in pages of `n`, every row in
+ *   one buffered request, and `stream`, the node-scoped stream
+ *   (`GET .../timeline/node-stream`): the run's heads, the node's records fetched
+ *   by handle, its rows sent as newline-delimited lines the view takes as each
+ *   arrives.
  *
  * `--large-world <dir>` builds `dag-ui-read-latency:test-large`'s world there once
  * (the corpus from `large-run-workload.json` and the engine's own checkpoint),
@@ -34,7 +42,8 @@
  * as `test-large` does.
  *
  * The figures go to `--output`, or else to stdout; progress goes to stderr.
- * Exits 2 on a usage error, 1 when a reading did not complete.
+ * Exits 2 on a usage error, 1 when a reading did not complete or its chart or
+ * event list lacked a row at its mark.
  */
 
 import { execFileSync, spawn } from "node:child_process";
@@ -88,7 +97,7 @@ try {
 }
 const READ = values.read;
 if (
-  !/^(today|untouched|one|pages:[1-9]\d*|concurrent:[1-9]\d*:[1-9]\d*)$/u.test(
+  !/^(today|untouched|one|stream|pages:[1-9]\d*|concurrent:[1-9]\d*:[1-9]\d*)$/u.test(
     READ,
   )
 )
@@ -243,7 +252,14 @@ async function stop(server) {
  * Load earlier the moment it is enabled.
  */
 const OBSERVER = (drive) => {
-  const marks = { first_render: null, node_complete: null, complete: null };
+  const marks = {
+    first_render: null,
+    node_complete: null,
+    complete: null,
+    held_at_first_render: null,
+    held_at_node_complete: null,
+    held_at_complete: null,
+  };
   window.__nodeLoad = marks;
   // Each page's answer, teed and kept unread until the measurement is over, so the
   // check of its rows costs the reading nothing.
@@ -253,9 +269,20 @@ const OBSERVER = (drive) => {
   window.fetch = async (...args) => {
     const response = await original(...args);
     const url = String(args[0] instanceof Request ? args[0].url : args[0]);
-    if (url.includes("/timeline/events")) copies.push(response.clone());
+    if (
+      url.includes("/timeline/events") ||
+      url.includes("/timeline/node-stream")
+    )
+      copies.push(response.clone());
     return response;
   };
+  // What the chart's data and the event list hold after each commit, as the view's
+  // probe reports it from a layout effect: the same commit the DOM below is of.
+  let held = { chart: [], list: [] };
+  window.__nodeLoadProbe = (now) => {
+    held = now;
+  };
+  window.__nodeLoadHeldNow = () => held;
   const none = (selector) => document.querySelector(selector) === null;
   const look = () => {
     const now = performance.now();
@@ -264,17 +291,24 @@ const OBSERVER = (drive) => {
       document.querySelector(
         '[aria-label="Node transcript"] article, [data-testid="node-timeline"] [aria-label^="Timeline plot"]',
       ) !== null
-    )
+    ) {
       marks.first_render = now;
+      marks.held_at_first_render = held;
+    }
     const nodeDone =
       document.querySelector(".history-start") !== null &&
       none(".history-hatch") &&
       none("button.load-earlier") &&
       none(".page-failed") &&
       none(".node-timeline-panel .loading-state");
-    if (marks.node_complete === null && nodeDone) marks.node_complete = now;
-    if (marks.complete === null && nodeDone && none(".history-loading"))
+    if (marks.node_complete === null && nodeDone) {
+      marks.node_complete = now;
+      marks.held_at_node_complete = held;
+    }
+    if (marks.complete === null && nodeDone && none(".history-loading")) {
       marks.complete = now;
+      marks.held_at_complete = held;
+    }
     if (drive && marks.complete === null) {
       const button = document.querySelector("button.load-earlier");
       if (button !== null && !button.disabled) button.click();
@@ -294,6 +328,33 @@ const OBSERVER = (drive) => {
     document.addEventListener("DOMContentLoaded", start);
   else start();
 };
+
+const isTimelineRead = (entry) =>
+  entry.route.endsWith("/timeline/events") ||
+  entry.route.endsWith("/timeline/node-stream");
+
+/** The node's every row, by the paged route, keyed `record_id ?? id` as the view keys it. */
+async function expectedRows(origin, world) {
+  const ids = new Set();
+  let total = null;
+  let cursor;
+  for (;;) {
+    const query = new URLSearchParams({
+      scope: "node",
+      node: world.node,
+      limit: "500",
+    });
+    if (cursor !== undefined) query.set("cursor", cursor);
+    const page = await fetch(
+      `${origin}/api/v2/runs/${encodeURIComponent(world.run)}/timeline/events?${query}`,
+    ).then((response) => response.json());
+    total ??= page.total;
+    for (const row of page.rows) ids.add(row.record_id ?? row.id);
+    if (page.next_cursor === null) break;
+    cursor = page.next_cursor;
+  }
+  return { ids: [...ids], total };
+}
 
 const seconds = (ms) => (ms === null ? null : Math.round(ms) / 1000);
 
@@ -342,7 +403,8 @@ async function measure(context, world, origin, index) {
   const spike =
     READ.startsWith("pages:") ||
     READ.startsWith("concurrent:") ||
-    READ === "one"
+    READ === "one" ||
+    READ === "stream"
       ? `&spike-read=${encodeURIComponent(READ)}`
       : "";
   const load_before = hostLoad();
@@ -355,11 +417,19 @@ async function measure(context, world, origin, index) {
   let lastPageAt = Date.now();
   let pagesSeen = 0;
   for (;;) {
-    marks = await page.evaluate("window.__nodeLoad ?? null");
+    // The marks alone: the rows held at each are read once the reading is over.
+    marks = await page.evaluate(() => {
+      const taken = window.__nodeLoad;
+      return taken === undefined
+        ? null
+        : {
+            first_render: taken.first_render,
+            node_complete: taken.node_complete,
+            complete: taken.complete,
+          };
+    });
     if (marks?.complete !== null && marks?.complete !== undefined) break;
-    const pagesNow = requests.filter((entry) =>
-      entry.route.endsWith("/timeline/events"),
-    ).length;
+    const pagesNow = requests.filter(isTimelineRead).length;
     if (pagesNow !== pagesSeen) {
       pagesSeen = pagesNow;
       lastPageAt = Date.now();
@@ -388,25 +458,60 @@ async function measure(context, world, origin, index) {
       '[aria-label="Node transcript"] article',
     ).length,
   }));
-  // The node's rows, as the server counts them, against those the pages carried.
-  const probe = await fetch(
-    `${origin}/api/v2/runs/${encodeURIComponent(world.run)}/timeline/events?scope=node&node=${encodeURIComponent(world.node)}&limit=1`,
-  ).then((response) => response.json());
-  const total = probe.total;
-  const pages = requests.filter((entry) =>
-    entry.route.endsWith("/timeline/events"),
-  );
+  // The node's every row, read after the reading through the ordinary paged route
+  // whatever shape was measured, keyed as the view keys a record's row.
+  const expected = await expectedRows(origin, world);
+  const total = expected.total;
+  const pages = requests.filter(isTimelineRead);
+  // What the pages or the stream carried, off the copies the page kept.
   const read = await page.evaluate(async () => {
     const ids = [];
     let bytes = 0;
+    let split = null;
     for (const copy of window.__nodeLoadCopies) {
       const text = await copy.text();
       bytes += new TextEncoder().encode(text).length;
-      for (const row of JSON.parse(text).rows) ids.push(row.id);
+      const answers = copy.url.includes("/node-stream")
+        ? text
+            .split("\n")
+            .filter((line) => line !== "")
+            .map((line) => JSON.parse(line))
+        : [JSON.parse(text)];
+      for (const answer of answers) {
+        if (answer.server !== undefined) split = answer.server;
+        for (const row of answer.rows ?? []) ids.push(row.record_id ?? row.id);
+      }
     }
-    return { ids, bytes };
+    return { ids, bytes, split };
   });
   const held = new Set(read.ids);
+  // Whether the chart's data and the event list held every expected row at each
+  // mark, as the view's probe reported them in the commit the mark was taken on.
+  const heldAt = await page.evaluate(() => ({
+    first_render: window.__nodeLoad?.held_at_first_render ?? null,
+    end: window.__nodeLoadHeldNow?.() ?? null,
+    node_complete: window.__nodeLoad?.held_at_node_complete ?? null,
+    complete: window.__nodeLoad?.held_at_complete ?? null,
+  }));
+  const missing = (snapshot) => {
+    if (snapshot === null) return null;
+    const chart = new Set(snapshot.chart);
+    const list = new Set(snapshot.list);
+    return {
+      chart: expected.ids.filter((id) => !chart.has(id)).length,
+      list: expected.ids.filter((id) => !list.has(id)).length,
+      chart_rows: chart.size,
+      list_rows: list.size,
+    };
+  };
+  const missingAtComplete = missing(heldAt.complete);
+  // The same check where the view is known not to hold the node yet: that it finds
+  // rows missing there is what shows it can fail.
+  const missingAtFirstRender = missing(heldAt.first_render);
+  const missingAtNodeComplete = missing(heldAt.node_complete);
+  const wholeAt = (counted) =>
+    counted !== null && counted.chart === 0 && counted.list === 0;
+
   await page.close();
   const result = {
     reading: index + 1,
@@ -415,8 +520,17 @@ async function measure(context, world, origin, index) {
     node_complete_s: seconds(marks?.node_complete ?? null),
     first_render_s: seconds(marks?.first_render ?? null),
     rows_total: total,
+    rows_expected: expected.ids.length,
     rows_read: held.size,
-    every_row_read: held.size >= total,
+    every_row_read: expected.ids.every((id) => held.has(id)),
+    // Both the chart's data and the event list held every expected row when each
+    // mark was taken: what makes the mark a complete load rather than a CSS state.
+    held_at_first_render: missingAtFirstRender,
+    held_at_end: missing(heldAt.end),
+    held_at_complete: missingAtComplete,
+    every_row_held_at_complete: wholeAt(missingAtComplete),
+    held_at_node_complete: missingAtNodeComplete,
+    every_row_held_at_node_complete: wholeAt(missingAtNodeComplete),
     timeline_requests: pages.length,
     api_requests: requests.length,
     timeline_bytes: read.bytes,
@@ -429,6 +543,8 @@ async function measure(context, world, origin, index) {
       (sum, entry) => sum + (entry.server_ms ?? 0),
       0,
     ),
+    // The stream's own split of its server time, off its first line.
+    stream_server_split: read.split,
     failed_requests: requests.filter(
       (entry) => entry.status === null || entry.status >= 400,
     ).length,
@@ -492,7 +608,9 @@ const completed = readings.filter((entry) => entry.seconds !== null);
 failed =
   READ !== "untouched" &&
   (completed.length !== readings.length ||
-    readings.some((entry) => !entry.every_row_read));
+    readings.some(
+      (entry) => !entry.every_row_read || !entry.every_row_held_at_complete,
+    ));
 const figures = completed.map((entry) => entry.seconds);
 const summary = {
   run: world.run,

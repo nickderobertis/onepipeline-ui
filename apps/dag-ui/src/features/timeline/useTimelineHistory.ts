@@ -4,6 +4,7 @@ import {
   type RunTimeline,
   type TimelineEventRow,
   type TimelineSpan,
+  timelineEventRowSchema,
   timelineSpanSchema,
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
@@ -19,7 +20,9 @@ type Interval = readonly [number, number];
  * which reads a node's whole timeline as soon as its view opens. `pages:<n>` reads
  * pages of `n` rows one after another; `concurrent:<k>:<n>` reads the newest page,
  * then `k` stretches of time before it at once, each in pages of `n`; `one` reads
- * every row in one request. Absent, the view reads as it does today.
+ * every row in one buffered request; `stream` reads the node-scoped stream
+ * (`GET .../timeline/node-stream`), taking each line of rows as it arrives. Absent,
+ * the view reads as it does today.
  */
 type SpikeRead =
   | { readonly shape: "pages"; readonly limit: number }
@@ -28,7 +31,18 @@ type SpikeRead =
       readonly lanes: number;
       readonly limit: number;
     }
-  | { readonly shape: "one" };
+  | { readonly shape: "one" }
+  | { readonly shape: "stream" };
+
+/** One line of the node stream: rows, or the opening or closing line. */
+const streamLineRows = (line: string): TimelineEventRow[] | undefined => {
+  const parsed: unknown = JSON.parse(line);
+  if (typeof parsed !== "object" || parsed === null || !("rows" in parsed))
+    return undefined;
+  const { rows } = parsed;
+  if (!Array.isArray(rows)) return undefined;
+  return rows.map((row) => timelineEventRowSchema.parse(row));
+};
 
 function spikeRead(): SpikeRead | undefined {
   if (typeof window === "undefined") return undefined;
@@ -36,6 +50,7 @@ function spikeRead(): SpikeRead | undefined {
   if (named === null) return undefined;
   const [shape, first, second] = named.split(":");
   if (shape === "one") return { shape: "one" };
+  if (shape === "stream") return { shape: "stream" };
   if (shape === "pages") return { shape: "pages", limit: Number(first) };
   if (shape === "concurrent")
     return { shape: "concurrent", lanes: Number(first), limit: Number(second) };
@@ -401,7 +416,44 @@ export function useTimelineHistory({
         next = page.next_cursor;
       }
     };
+    /** The node stream, each line of rows taken and drawn as it arrives. */
+    const stream = async () => {
+      const query = new URLSearchParams({ scope: "node", node: nodeId });
+      if (filter !== undefined) query.set("filter", filter);
+      const response = await fetch(
+        `/api/v2/runs/${encodeURIComponent(runId)}/timeline/node-stream?${query}`,
+      );
+      if (!response.ok || response.body === null)
+        throw new Error(`the node stream answered ${response.status}`);
+      const reader = response.body
+        .pipeThrough(new TextDecoderStream())
+        .getReader();
+      let buffered = "";
+      let ended = false;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffered += value;
+        let newline = buffered.indexOf("\n");
+        while (newline >= 0) {
+          const line = buffered.slice(0, newline);
+          buffered = buffered.slice(newline + 1);
+          if (line.includes('"end":true')) ended = true;
+          const rows = line === "" ? undefined : streamLineRows(line);
+          if (rows !== undefined) {
+            take({ rows });
+            bump();
+          }
+          newline = buffered.indexOf("\n");
+        }
+      }
+      if (!ended) throw new Error("the node stream ended early");
+    };
     const whole = async () => {
+      if (read.shape === "stream") {
+        await stream();
+        return;
+      }
       if (read.shape === "one") {
         take(await ask({ limit: ONE_READ_LIMIT }));
         return;

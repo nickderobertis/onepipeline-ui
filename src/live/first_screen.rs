@@ -139,6 +139,71 @@ pub(super) fn read(paths: &RunPaths) -> Result<FirstRead, onepipeline::Error> {
     })
 }
 
+/// Spike `spike-node-timeline-load`, throwaway: `node`'s every record read whole and
+/// nothing else, for the node-scoped streamed read. The run's every record is
+/// headed by [`RunView::heads`], then only the node's records are fetched by their
+/// handles with [`journal::fetch`]: which records are read whole is decided here, by
+/// the node they belong to, and no caller names a kind. Answers the reading and how
+/// long the heads read and the fetch each took, in seconds.
+///
+/// # Errors
+///
+/// The engine's refusal of the run, or of the fetch.
+pub(super) fn read_node(
+    paths: &RunPaths,
+    node: &str,
+) -> Result<(FirstRead, f64, f64), onepipeline::Error> {
+    let started = Instant::now();
+    let RunHeads {
+        mut view,
+        heads,
+        store_len,
+        last_seq,
+    } = RunView::heads(paths)?;
+    let headed_s = started.elapsed().as_secs_f64();
+    let mut wanted = Vec::new();
+    let mut places = Vec::with_capacity(heads.len());
+    let mut handles = Vec::with_capacity(heads.len());
+    view.events.reserve(heads.len());
+    for (index, head) in heads.into_iter().enumerate() {
+        if head.labels.node.as_deref() == Some(node) {
+            wanted.push(index);
+        }
+        places.push(head.place);
+        handles.push(head.handle);
+        view.events.push(Envelope {
+            v: ENVELOPE_VERSION,
+            ts: head.ts,
+            stream: head.stream,
+            seq: head.seq,
+            source: head.source,
+            kind: head.kind,
+            dimensions: head.phase.into(),
+            labels: head.labels,
+            payload: serde_json::Map::new(),
+            artifacts: Vec::new(),
+        });
+    }
+    let mut headed = Headed {
+        whole: vec![false; handles.len()],
+        handles,
+    };
+    let fetching = Instant::now();
+    headed.fetch(&mut view, &wanted)?;
+    let fetch_s = fetching.elapsed().as_secs_f64();
+    let mut indexed = Indexed::headed(&view, places, store_len, last_seq);
+    indexed.holds_whole(Some(node));
+    Ok((
+        FirstRead {
+            view,
+            indexed,
+            headed,
+        },
+        headed_s,
+        fetch_s,
+    ))
+}
+
 impl Headed {
     /// Fetch the records at `indices` the view does not yet hold whole, and put each
     /// in its place.
