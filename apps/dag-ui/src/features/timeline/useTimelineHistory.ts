@@ -7,12 +7,43 @@ import {
   timelineSpanSchema,
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /** Rows a zoom, a span's or a whole row's expansion asks for per request. */
 const WIDE_PAGE = 500;
 
 type Interval = readonly [number, number];
+
+/**
+ * Spike `spike-node-timeline-load`, throwaway: the read shape `?spike-read=` names,
+ * which reads a node's whole timeline as soon as its view opens. `pages:<n>` reads
+ * pages of `n` rows one after another; `concurrent:<k>:<n>` reads the newest page,
+ * then `k` stretches of time before it at once, each in pages of `n`; `one` reads
+ * every row in one request. Absent, the view reads as it does today.
+ */
+type SpikeRead =
+  | { readonly shape: "pages"; readonly limit: number }
+  | {
+      readonly shape: "concurrent";
+      readonly lanes: number;
+      readonly limit: number;
+    }
+  | { readonly shape: "one" };
+
+function spikeRead(): SpikeRead | undefined {
+  if (typeof window === "undefined") return undefined;
+  const named = new URLSearchParams(window.location.search).get("spike-read");
+  if (named === null) return undefined;
+  const [shape, first, second] = named.split(":");
+  if (shape === "one") return { shape: "one" };
+  if (shape === "pages") return { shape: "pages", limit: Number(first) };
+  if (shape === "concurrent")
+    return { shape: "concurrent", lanes: Number(first), limit: Number(second) };
+  return undefined;
+}
+
+/** A whole node in one page: more rows than any node holds. */
+const ONE_READ_LIMIT = 1_000_000;
 
 /** A page's `span`: the span's whole fields, its events left out. */
 const spanFieldsSchema = timelineSpanSchema.omit({ events: true });
@@ -323,6 +354,103 @@ export function useTimelineHistory({
     },
     [readAll],
   );
+
+  // Spike `spike-node-timeline-load`: read the node whole by the shape the address
+  // names, then hold it as read to its start.
+  const spiked = useRef(false);
+  const opened = timeline !== undefined;
+  useEffect(() => {
+    const read = spikeRead();
+    if (
+      read === undefined ||
+      spiked.current ||
+      !opened ||
+      scope !== "node" ||
+      nodeId === undefined
+    )
+      return;
+    spiked.current = true;
+    const ask = (query: {
+      readonly limit: number;
+      readonly cursor?: string;
+      readonly from?: string;
+      readonly to?: string;
+    }) =>
+      client.getTimelineEvents(runId, {
+        scope,
+        node: nodeId,
+        ...query,
+        ...(filter === undefined ? {} : { filter }),
+      });
+    /** Pages of `limit` back from `cursor` within `from`..`to`, to their start. */
+    const lane = async (
+      limit: number,
+      bounds: { readonly from?: string; readonly to?: string },
+      cursorAt?: string,
+    ) => {
+      let next = cursorAt;
+      for (;;) {
+        const page = await ask({
+          limit,
+          ...bounds,
+          ...(next === undefined ? {} : { cursor: next }),
+        });
+        take(page);
+        bump();
+        if (page.next_cursor === null) return;
+        next = page.next_cursor;
+      }
+    };
+    const whole = async () => {
+      if (read.shape === "one") {
+        take(await ask({ limit: ONE_READ_LIMIT }));
+        return;
+      }
+      if (read.shape === "pages") {
+        await lane(read.limit, {});
+        return;
+      }
+      const newest = await ask({ limit: read.limit });
+      take(newest);
+      bump();
+      const oldest = newest.rows[0];
+      if (newest.next_cursor === null || oldest === undefined) return;
+      const startedAt = Math.min(
+        ...(timeline?.spans ?? []).map((span) => Date.parse(span.started_at)),
+      );
+      const until = Date.parse(oldest.at);
+      const from = Number.isFinite(startedAt) ? startedAt : until;
+      const step = Math.max((until - from) / read.lanes, 1);
+      const lanes = Array.from({ length: read.lanes }, (_, at) => {
+        const low = at === 0 ? undefined : new Date(from + step * at);
+        const high =
+          at === read.lanes - 1 ? oldest.at : new Date(from + step * (at + 1));
+        return lane(read.limit, {
+          ...(low === undefined ? {} : { from: low.toISOString() }),
+          to: typeof high === "string" ? high : high.toISOString(),
+        });
+      });
+      await Promise.all(lanes);
+    };
+    whole()
+      .then(() => {
+        cursors.current.set(cursor, null);
+        bump();
+      })
+      .catch((caught: unknown) => failed(caught, () => undefined));
+  }, [
+    opened,
+    scope,
+    nodeId,
+    client,
+    runId,
+    filter,
+    take,
+    bump,
+    failed,
+    cursor,
+    timeline,
+  ]);
 
   return {
     ...(merged === undefined ? {} : { timeline: merged }),

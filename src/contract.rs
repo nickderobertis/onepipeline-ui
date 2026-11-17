@@ -403,7 +403,10 @@ pub const NODE_WINDOW_EVENTS: usize = 40;
 pub const TIMELINE_EVENTS_PAGE: usize = 100;
 
 /// The most rows one page may hold.
-pub const TIMELINE_EVENTS_PAGE_MAX: usize = 500;
+///
+/// Spike `spike-node-timeline-load`: raised from 500 so the prototype's larger
+/// pages and its one whole-node read can be measured through the same route.
+pub const TIMELINE_EVENTS_PAGE_MAX: usize = 1_000_000;
 
 /// The routes `docs/contract.md` defines, as axum path templates.
 pub mod routes {
