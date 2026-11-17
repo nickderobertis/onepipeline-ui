@@ -66,7 +66,16 @@ export function DagGraph({
         state: node.status,
         // The card carries its awaits line inside its border, so it is laid out
         // one line taller.
-        ...(awaits.get(node.id) === undefined ? {} : { lines: 1 }),
+        // SPIKE (spike-visual): a reason line is a line inside the border too.
+        ...((awaits.get(node.id) === undefined ? 0 : 1) +
+          (reasons.get(node.id) === undefined ? 0 : 1) ===
+        0
+          ? {}
+          : {
+              lines:
+                (awaits.get(node.id) === undefined ? 0 : 1) +
+                (reasons.get(node.id) === undefined ? 0 : 1),
+            }),
       })),
       edges: nodeViews.flatMap((node) =>
         (node.task?.deps ?? [])

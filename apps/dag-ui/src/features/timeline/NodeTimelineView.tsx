@@ -39,6 +39,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom"; // SPIKE
 import { LOADING_TEXT } from "../../lib/loading";
 import {
   awaitedReleases,
@@ -143,6 +144,7 @@ export function NodeTimelineView({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onBack, onSelectItem, selectedItemId]);
+  const [tabSlot, setTabSlot] = useState<HTMLDivElement | null>(null); // SPIKE
   const prUrl =
     node.detail?.publication === undefined
       ? (node.result?.pr ?? undefined)
@@ -186,6 +188,8 @@ export function NodeTimelineView({
             </a>
           )}
         </div>
+        {/* SPIKE (spike-visual): the node tabs sit in the node bar. */}
+        <div className="spike-node-tab-slot" ref={setTabSlot} />
       </header>
 
       <NodeProblemBanner node={node} nodes={nodes} />
@@ -199,13 +203,16 @@ export function NodeTimelineView({
         }}
         value={selectedTab}
       >
-        <TabsList aria-label="Node details" variant="line">
-          {Object.entries(NODE_TAB_LABELS).map(([value, label]) => (
-            <TabsTrigger key={value} value={value}>
-              {label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        {tabSlot && createPortal(
+          <TabsList aria-label="Node details" variant="line">
+            {Object.entries(NODE_TAB_LABELS).map(([value, label]) => (
+              <TabsTrigger key={value} value={value}>
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>,
+          tabSlot,
+        )}
         <TabsContent className="node-tab-panel" value="task">
           {/* The task is untrusted markdown: the shared package renders it
               safely, as every other place this app shows a task. */}
@@ -338,7 +345,6 @@ export function NodeTimelineView({
                       <tr>
                         <th>Name</th>
                         <th>Status</th>
-                        <th>Conclusion</th>
                         <th>Runtime</th>
                         <th>Required</th>
                       </tr>
@@ -379,7 +385,6 @@ export function NodeTimelineView({
                               status={check.status}
                             />
                           </td>
-                          <td>{check.conclusion ?? "—"}</td>
                           <td>
                             <CheckRuntime
                               {...(check.started_at === undefined
@@ -1363,6 +1368,13 @@ function SpikeCheckStatus({
   readonly status?: string | null;
   readonly conclusion?: string | null;
 }) {
+  // SPIKE (spike-visual): no Conclusion column; the icon reads progress or outcome.
+  const word =
+    status !== "completed"
+      ? status === "queued"
+        ? "queued"
+        : "running"
+      : (conclusion ?? "completed").replaceAll("_", " ");
   const state =
     status !== "completed"
       ? status === "queued"
@@ -1382,10 +1394,10 @@ function SpikeCheckStatus({
   }[state];
   return (
     <span className={`spike-check spike-check-${state}`}>
-      <svg aria-label={state} height="12" role="img" viewBox="0 0 12 12" width="12">
+      <svg aria-label={word} height="14" role="img" viewBox="0 0 12 12" width="14">
         {glyph}
       </svg>
-      {state}
+      <span aria-hidden="true">{word}</span>
     </span>
   );
 }

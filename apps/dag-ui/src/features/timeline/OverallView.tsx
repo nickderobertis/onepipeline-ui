@@ -66,7 +66,10 @@ export function OverallView({
   onSelectNode,
   selectedItemId,
   onSelectItem,
+  runDetails,
 }: {
+  /** SPIKE (spike-visual): the run details card, beside status. */
+  readonly runDetails?: React.ReactNode;
   readonly client: TelemetryClient;
   readonly detail: LiveRunDetail;
   readonly filter?: string;
@@ -207,6 +210,7 @@ export function OverallView({
                   : LOADING_TEXT
               }
             />
+            {runDetails}
           </section>
           <Card className="gap-0 py-[15px]">
             <CardContent className="px-[15px]">

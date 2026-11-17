@@ -3680,21 +3680,20 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 .node-tab-panel .otg-markdown ol { margin: 0 0 12px; padding-left: 22px; }
 .node-tab-panel .otg-markdown li + li { margin-top: 4px; }
 
-/* Run details, always shown as aligned label and value pairs. */
+/* Run details: a card on Overall, beside Status, as aligned label and value pairs. */
+.metric-grid .spike-run-details-card {
+  grid-column: 3 / span 2;
+  grid-row: 1 / span 2;
+}
 .spike-run-details {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 6px 24px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 5px 16px;
   margin: 0;
-  padding: 10px 28px 12px;
-  border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
 .spike-run-details div {
-  display: grid;
-  grid-template-columns: 9.5em minmax(0, 1fr);
-  gap: 8px;
-  min-width: 0;
+  display: contents;
 }
 .spike-run-details dt {
   color: var(--muted-foreground);
@@ -3704,6 +3703,66 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   margin: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+@media (max-width: 1100px) {
+  .metric-grid .spike-run-details-card {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+}
+
+/* One run bar: title, badge and actions, the view tabs, Updates. */
+.run-topbar {
+  height: auto;
+  min-height: 64px;
+  gap: 8px 16px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.spike-view-slot {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+.spike-view-slot:empty {
+  display: none;
+}
+.run-topbar .last-activity {
+  max-width: 260px;
+}
+.run-topbar .last-activity,
+.run-topbar .topbar-actions > .connection {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One node bar: back link, node id, status, change link, the node tabs. */
+.node-view-head {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 6px 16px;
+  padding: 4px 20px;
+}
+.node-view-head .node-view-facts {
+  flex-wrap: wrap;
+}
+.spike-node-tab-slot {
+  min-width: 0;
+  margin-left: auto;
+}
+.spike-node-tab-slot > [role="tablist"] {
+  overflow-x: auto;
+  max-width: 100%;
+  justify-content: flex-start;
+  scrollbar-width: none;
+}
+
+/* Graph card: the reason line is one of the layout's lines, inside the border. */
+.dag-node .node-reason,
+.dag-node .node-awaits {
+  margin-top: 8px;
+  line-height: 12px;
 }
 
 /* Header: the title truncates and the badge and Updates keep their room. */
@@ -3734,8 +3793,23 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   .run-topbar .run-actions-badge {
     display: inline-flex;
   }
-  .spike-run-details div {
-    grid-template-columns: 8em minmax(0, 1fr);
+  .run-topbar .last-activity {
+    display: none;
+  }
+  .spike-view-slot {
+    order: 10;
+    flex: 1 1 100%;
+    grid-column: 1 / -1;
+  }
+  .run-topbar .main-updates {
+    border-top: 0;
+  }
+  .node-view-head {
+    padding: 6px 14px;
+  }
+  .spike-node-tab-slot {
+    flex: 1 1 100%;
+    margin-left: 0;
   }
 }
 
@@ -3802,4 +3876,15 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   white-space: normal;
   overflow-wrap: anywhere;
   line-height: 1.3;
+}
+
+/* SPIKE (spike-visual): with no Conclusion column, the third cell is Runtime, and the
+   failing row's outcome is the Status icon's, so Runtime keeps its own words. */
+.remote-checks .check-failing td:nth-child(3) {
+  color: inherit;
+  font-weight: inherit;
+}
+.remote-checks .check-failing td:nth-child(3)::before,
+.remote-checks .check-failing td:nth-child(3)::after {
+  content: none;
 }

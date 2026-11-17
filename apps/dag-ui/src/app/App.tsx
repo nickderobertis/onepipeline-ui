@@ -6,7 +6,10 @@
 // journeys to catch what moved. The two hooks it does have — useConversation and
 // useStickyBottom — are the ones that were extracted upstream.
 import { spikeTitle } from "../spike/mock"; // SPIKE
+import { createPortal } from "react-dom"; // SPIKE
+
 import {
+  Card, // SPIKE
   Alert,
   AlertDescription,
   AlertTitle,
@@ -154,6 +157,7 @@ export function App({
   // While a host shutdown is out, it is also what the shutdown's progress is
   // read off, so it is read again whenever a pushed row says a run moved.
   const [hostRefresh, setHostRefresh] = useState(0);
+  const [viewSlot, setViewSlot] = useState<HTMLDivElement | null>(null); // SPIKE
   const shuttingDown = hostShutdowns.host.state.phase === "sending";
   const rowChanges = useChangeCount(rows);
   // The rows as of the last frame, not the navigation's copy: a hold on what the
@@ -335,6 +339,8 @@ export function App({
                 </button>
               )}
             </div>
+            {/* SPIKE (spike-visual): the Graph/Overall tabs sit in the run bar. */}
+            <div className="spike-view-slot" ref={setViewSlot} />
             <div className="main-updates">
               <UpdateSetting
                 caption="Updates"
@@ -356,53 +362,7 @@ export function App({
               </Button>
             </div>
           </section>
-          {/* SPIKE (spike-visual): run details always shown, as label and value pairs. */}
-          {!runless && detail && (
-            <dl aria-label="Run details" className="spike-run-details">
-              <div>
-                <dt>Launching session</dt>
-                <dd>{runLoaded ? launchLabel(detail.launch) : LOADING_TEXT}</dd>
-              </div>
-              <div>
-                <dt>Summary</dt>
-                <dd>{control.status.value?.summary ?? LOADING_TEXT}</dd>
-              </div>
-              <div>
-                <dt>Graph state</dt>
-                <dd>
-                  {control.status.value
-                    ? graphStateWord(control.status.value.node_status)
-                    : LOADING_TEXT}
-                </dd>
-              </div>
-              <div>
-                <dt>Unread surfaces</dt>
-                <dd>
-                  {control.status.value?.unread_surfaces.count ?? LOADING_TEXT}
-                  {control.status.value?.unread_surfaces.oldest_seconds
-                    ? ` · oldest ${control.status.value.unread_surfaces.oldest_seconds}s`
-                    : ""}
-                </dd>
-              </div>
-              <div>
-                <dt>Last progress</dt>
-                <dd>
-                  {!runLoaded ? (
-                    LOADING_TEXT
-                  ) : detail.run.last_progress_at === undefined ? (
-                    "Not recorded"
-                  ) : (
-                    <Timestamp
-                      at={new Date(
-                        detail.run.last_progress_at * 1000,
-                      ).toISOString()}
-                      relative
-                    />
-                  )}
-                </dd>
-              </div>
-            </dl>
-          )}
+          {/* SPIKE (spike-visual): the run details moved to a card on Overall. */}
           {telemetry.error && !readFailed && (
             // `Alert` carries `role="alert"` itself, so the banner keeps announcing
             // itself the moment a read fails.
@@ -496,7 +456,7 @@ export function App({
               }
               value={selection.view}
             >
-              <div className="view-tabs">
+              {viewSlot && createPortal(
                 <TabsList aria-label="DAG views" variant="line">
                   <TabsTrigger value="graph">
                     <Workflow size={15} /> Graph
@@ -504,12 +464,11 @@ export function App({
                   <TabsTrigger value="overall">
                     <Route size={15} /> Overall
                   </TabsTrigger>
-                </TabsList>
+                </TabsList>, viewSlot)}
                 {/* How much of what the run recorded this reading carries. Beside
                   the views rather than in the toolbar: it selects a reading, like
                   they do, and the toolbar is a fixed-height row the timeline
                   region's own share of the window is measured against. */}
-              </div>
               {/* One content region for whichever view is selected: the other tab's
                 panel is unmounted by the primitive, exactly as it is for any tab set. */}
               <TabsContent className="min-h-0" value={selection.view}>
@@ -561,6 +520,57 @@ export function App({
                       onSelectNode={selection.selectNode}
                       onSelectItem={selection.selectItem}
                       selectedItemId={selection.itemId}
+                      runDetails={
+                        !runless && detail && (
+              <Card aria-label="Run details" className="metric spike-run-details-card gap-2 p-4" role="group">
+                <p>Run details</p>
+<dl className="spike-run-details">
+              <div>
+                <dt>Launching session</dt>
+                <dd>{runLoaded ? launchLabel(detail.launch) : LOADING_TEXT}</dd>
+              </div>
+              <div>
+                <dt>Summary</dt>
+                <dd>{control.status.value?.summary ?? LOADING_TEXT}</dd>
+              </div>
+              <div>
+                <dt>Graph state</dt>
+                <dd>
+                  {control.status.value
+                    ? graphStateWord(control.status.value.node_status)
+                    : LOADING_TEXT}
+                </dd>
+              </div>
+              <div>
+                <dt>Unread surfaces</dt>
+                <dd>
+                  {control.status.value?.unread_surfaces.count ?? LOADING_TEXT}
+                  {control.status.value?.unread_surfaces.oldest_seconds
+                    ? ` · oldest ${control.status.value.unread_surfaces.oldest_seconds}s`
+                    : ""}
+                </dd>
+              </div>
+              <div>
+                <dt>Last progress</dt>
+                <dd>
+                  {!runLoaded ? (
+                    LOADING_TEXT
+                  ) : detail.run.last_progress_at === undefined ? (
+                    "Not recorded"
+                  ) : (
+                    <Timestamp
+                      at={new Date(
+                        detail.run.last_progress_at * 1000,
+                      ).toISOString()}
+                      relative
+                    />
+                  )}
+                </dd>
+              </div>
+            </dl>
+              </Card>
+                        )
+                      }
                     />
                   ) : selectedNode ? (
                     // Opening a node hands it the whole working area: the graph stays

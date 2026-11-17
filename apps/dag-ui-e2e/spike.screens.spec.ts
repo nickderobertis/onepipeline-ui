@@ -189,10 +189,11 @@ const SHOTS: readonly Shot[] = [
     },
   },
   {
-    // Change 5: Overall. Before is the baseline's 20-recorded-overall.
+    // Change 5: Overall, with the run details card. Before is the baseline's
+    // 20-recorded-overall, at both sizes.
     name: "s04-overall",
     phases: ["after"],
-    sizes: DESK,
+    sizes: BOTH,
     open: async (page) => {
       await visit(page, `/?run=${recorded.run_id}&view=overall`);
       await page
@@ -200,7 +201,12 @@ const SHOTS: readonly Shot[] = [
         .click();
       const events = page.getByRole("region", { name: "Run events" });
       await expect(events.getByText(/completion-requested/u)).toBeVisible();
-      await events.scrollIntoViewIfNeeded();
+      if ((page.viewportSize()?.width ?? 0) < 700) {
+        await settle(page);
+        await page
+          .getByRole("group", { name: "Run details" })
+          .evaluate((element) => element.scrollIntoView({ block: "center" }));
+      } else await events.scrollIntoViewIfNeeded();
     },
   },
   {
@@ -215,6 +221,17 @@ const SHOTS: readonly Shot[] = [
       await expect(graphNodes(page, "running")).toHaveAccessibleName(
         "dashboard: running",
       );
+      // Revision 3's evidence: each card's padding below its last line, in CSS px.
+      const pads = await page.$$eval("article.dag-node", (cards) =>
+        cards.map((card) => {
+          const last = [...card.children]
+            .filter((child) => child.tagName === "SPAN" || child.tagName === "STRONG")
+            .at(-1);
+          const scale = card.getBoundingClientRect().height / card.offsetHeight;
+          return `${card.getAttribute("aria-label")} reason=${card.querySelector(".node-reason") !== null} pad=${((card.getBoundingClientRect().bottom - (last?.getBoundingClientRect().bottom ?? 0)) / scale - card.clientTop).toFixed(1)}`;
+        }),
+      );
+      console.log(`SPIKE card padding:\n${pads.join("\n")}`);
     },
   },
   {
