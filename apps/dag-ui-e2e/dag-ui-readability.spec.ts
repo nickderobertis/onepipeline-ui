@@ -528,7 +528,7 @@ test("the Task tab reads as a document: real heading sizes and spacing", async (
     .getByRole("heading", { name: "Scope", exact: true });
   await expect(scope).toBeVisible();
   // The rendered task: the block the heading is one of.
-  // llmlint: ignore[e2e_uses_accessible_selectors] the rendered markdown has no role or name of its own; it is reached as the parent of a heading found by name, and its blocks are measured as geometry, which no role exposes.
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] the rendered markdown has no role or name of its own; it is reached as the parent of a heading found by name, and its blocks' type sizes and spacing are measured, which no role exposes.
   const prose = scope.locator("xpath=..");
   const sizes = await prose.evaluate((element) => {
     const size = (selector: string) => {
@@ -552,6 +552,7 @@ test("the Task tab reads as a document: real heading sizes and spacing", async (
     }
     return { h2: size("h2"), h3: size("h3"), p: size("p"), gaps };
   });
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
   expect(sizes.h2).toBeGreaterThan(sizes.h3);
   expect(sizes.h3).toBeGreaterThan(sizes.p);
   expect(sizes.gaps.length).toBeGreaterThan(0);
@@ -662,12 +663,13 @@ test("the Remote tab's checks read as one coloured status icon each, with no Con
     colours.set(word, await colourOf(status.getByRole("img")));
     if (word === "passed") {
       // A successful row never reads as a warning: every colour painted in it.
-      // llmlint: ignore[e2e_uses_accessible_selectors] the colour of every element a row paints is the property under test, which no role or name exposes; the row is found by its row header's name.
+      // llmlint: ignore-block[e2e_uses_accessible_selectors] the colour of every element a row paints is the property under test, which no role or name exposes; the row is found by its row header's name.
       const painted = await row.evaluate((element) =>
         [element, ...element.querySelectorAll("*")].map(
           (each) => getComputedStyle(each).color,
         ),
       );
+      // llmlint: ignore-end[e2e_uses_accessible_selectors]
       for (const colour of painted) {
         const [r = 0, g = 0, b = 0] = (colour.match(/[\d.]+/gu) ?? []).map(
           Number,
