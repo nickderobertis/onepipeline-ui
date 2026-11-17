@@ -27,11 +27,16 @@ const WORDS = [
 ] as const;
 
 const factsSchema = z.object({
-  states: z.object(
-    Object.fromEntries(WORDS.map((word) => [word, z.string().min(1)])) as {
-      [Word in (typeof WORDS)[number]]: z.ZodString;
-    },
-  ),
+  states: z.object({
+    Complete: z.string().min(1),
+    Failed: z.string().min(1),
+    Stopped: z.string().min(1),
+    Unfinished: z.string().min(1),
+    "Waiting on you": z.string().min(1),
+    "Driver dead": z.string().min(1),
+    Idle: z.string().min(1),
+    Running: z.string().min(1),
+  }),
   oneLineTitle: z.string().min(1),
   cards: z.object({
     agent: z.string(),
@@ -393,6 +398,7 @@ test("at 1440 CSS px a 28-character title stays on one line, and the last activi
   }
 });
 
+// llmlint: ignore-block[e2e_uses_accessible_selectors] a card's rows are measured, and the status word, the reason line and the pill's text node have no role or name to reach them by: the card itself is found by its accessible name, and inside it the rows are read as the geometry they are, never clicked or read for meaning.
 /** One card's rows, measured in the card's own CSS pixels, unscaled by the zoom. */
 async function cardRows(card: Locator) {
   return card.evaluate((element: HTMLElement) => {
@@ -423,6 +429,7 @@ async function cardRows(card: Locator) {
     };
   });
 }
+// llmlint: ignore-end[e2e_uses_accessible_selectors]
 
 test("a graph card's status sits under its title, its reason line inside the card, its content centred", async ({
   page,
@@ -497,6 +504,7 @@ test("every card's kind pill names its kind, with an icon of its own", async ({
     const icon = card.getByRole("img", { name: kind.toLowerCase() });
     await expect(icon).toHaveCount(1);
     // The pill is the icon's own badge, its word drawn in capitals.
+    // llmlint: ignore[e2e_uses_accessible_selectors] the pill has no role of its own: it is reached as the parent of its icon, found by the kind it names, so its drawn word can be read beside it.
     const pill = icon.locator("xpath=..");
     await expect(pill).toHaveText(kind, { useInnerText: true });
     // Before the word.
@@ -520,12 +528,14 @@ test("the Task tab reads as a document: real heading sizes and spacing", async (
     .getByRole("heading", { name: "Scope", exact: true });
   await expect(scope).toBeVisible();
   // The rendered task: the block the heading is one of.
+  // llmlint: ignore[e2e_uses_accessible_selectors] the rendered markdown has no role or name of its own; it is reached as the parent of a heading found by name, and its blocks are measured as geometry, which no role exposes.
   const prose = scope.locator("xpath=..");
   const sizes = await prose.evaluate((element) => {
-    const size = (selector: string) =>
-      Number.parseFloat(
-        getComputedStyle(element.querySelector(selector) as Element).fontSize,
-      );
+    const size = (selector: string) => {
+      const found = element.querySelector(selector);
+      if (found === null) throw new Error(`the task renders no ${selector}`);
+      return Number.parseFloat(getComputedStyle(found).fontSize);
+    };
     const gaps: number[] = [];
     const blocks = [...element.children];
     for (const [index, block] of blocks.entries()) {
@@ -616,7 +626,8 @@ test("the Remote tab's checks read as one coloured status icon each, with no Con
     await expect(status.getByRole("img")).toHaveAccessibleName(word);
     colours.set(word, await colourOf(status.getByRole("img")));
     if (word === "passed") {
-      // A successful row never reads as a warning.
+      // A successful row never reads as a warning: every colour painted in it.
+      // llmlint: ignore[e2e_uses_accessible_selectors] the colour of every element a row paints is the property under test, which no role or name exposes; the row is found by its row header's name.
       const painted = await row.evaluate((element) =>
         [element, ...element.querySelectorAll("*")].map(
           (each) => getComputedStyle(each).color,

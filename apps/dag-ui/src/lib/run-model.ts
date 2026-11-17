@@ -276,6 +276,10 @@ export function runState({
           : driver === "ACTIVE"
             ? "Running"
             : undefined;
+  // A word the linked engine does not write reaches no fixture a journey can
+  // serve — the read API serves the engine's own vocabulary, and a run store holds
+  // only what that engine wrote — so this fallback is proved by run-model.test.ts
+  // alone, where a later engine's word is handed to it directly.
   return word === undefined
     ? { word: state, known: false, failed }
     : { word, known: true, failed };

@@ -230,6 +230,8 @@ const WRONG_ANSWERS: {
     name: "the run's state",
     view: "overall",
     feed: (v) => {
+      // The answer is altered as served JSON, past the type that would refuse it:
+      // the cast names the one member this entry breaks.
       (v.detail.run as { state: string }).state = "complete-wrongly";
     },
     refusedAs: /run\.state/u,

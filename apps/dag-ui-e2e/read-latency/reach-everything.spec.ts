@@ -46,13 +46,10 @@ test("Overall reaches its line, tiles, state and run details", async ({
 }) => {
   await open(page, "overall");
   const detail = await settledDetail(world, served, world.facts.openLiveRun);
-  const run = detail.run as { turns: number };
-  await expect(metricText(page, "Turns")).toHaveText(String(run.turns), {
+  await expect(metricText(page, "Turns")).toHaveText(String(detail.run.turns), {
     timeout: NEVER,
   });
-  const statuses = Object.values(
-    (detail.graph as { node_status: Record<string, string> }).node_status,
-  );
+  const statuses = Object.values(detail.graph.node_status);
   await expect(metricText(page, "Nodes")).toHaveText(
     `${statuses.filter((status) => status === "done").length} of ${statuses.length} done`,
   );
