@@ -1,5 +1,4 @@
 import {
-  Badge,
   Button,
   Dialog,
   DialogClose,
@@ -15,6 +14,7 @@ import { useCallback, useState } from "react";
 import { Outcome } from "../../lib/Outcome";
 import type { RunControl } from "./useRunControl";
 import { useVerb } from "./useVerb";
+import { type OneRunState, RunStateBadge } from "../../spike/mock"; // SPIKE
 
 /**
  * The owner a refusal names, as the engine spells it — `[codex:160c290a]` —
@@ -31,7 +31,10 @@ export function RunActions({
   runId,
   control,
   ended,
+  runState,
 }: {
+  /** SPIKE (spike-visual): the one run state the badge shows. */
+  readonly runState?: OneRunState;
   readonly runId: string;
   readonly control: RunControl;
   readonly ended: boolean;
@@ -47,14 +50,11 @@ export function RunActions({
   return (
     <>
       <div className="run-actions">
-        {liveness !== undefined && (
-          <Badge
-            aria-label={`Liveness ${liveness}`}
-            className="run-actions-badge"
-            variant="outline"
-          >
-            {liveness}
-          </Badge>
+        {/* SPIKE (spike-visual): the one run state, not the driver's word. */}
+        {liveness !== undefined && runState !== undefined && (
+          <span className="run-actions-badge">
+            <RunStateBadge runState={runState} />
+          </span>
         )}
         {!ended && (
           <Button

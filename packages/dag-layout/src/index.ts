@@ -96,7 +96,8 @@ const NODE_HEIGHT = 72;
 const COLUMN_GAP = 80;
 const ROW_GAP = 32;
 /** What one extra line of text beneath a card's status word adds to its height. */
-const LINE_HEIGHT = 20;
+// SPIKE (spike-visual): a 3 px gap and a 12 px line, so the reason sits under the status.
+const LINE_HEIGHT = 15;
 const heightOf = (node: DagNode): number =>
   NODE_HEIGHT + Math.max(0, Math.floor(node.lines ?? 0)) * LINE_HEIGHT;
 const NODE_STATES: ReadonlySet<string> = new Set(DAG_NODE_STATES);

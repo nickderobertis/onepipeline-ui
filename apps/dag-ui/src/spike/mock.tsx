@@ -2,7 +2,25 @@
  * SPIKE (spike-visual, never lands): the hard-coded mock of the DAG UI
  * readability plan's visible changes. Throwaway: no tests, no lint.
  */
-import { ChevronDown, Repeat2 } from "lucide-react";
+import {
+  Bot,
+  ChevronDown,
+  CircleCheck,
+  CircleDashed,
+  CirclePause,
+  CircleSlash,
+  CircleX,
+  GitBranch,
+  Hand,
+  LoaderCircle,
+  type LucideIcon,
+  OctagonMinus,
+  Repeat2,
+  Shapes,
+  SquareTerminal,
+  Unplug,
+  UserRound,
+} from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type {
   TimelineRow,
@@ -287,3 +305,99 @@ export const SPIKE_TITLE =
   "Make the DAG UI readable at a glance and complete on drill-in, with compact event lists, a readable chart, answerable approval items and the run details on view";
 export const spikeTitle = (runId: string | undefined) =>
   runId?.startsWith("make-the-dag-ui-readable") ? SPIKE_TITLE : runId;
+
+/**
+ * Revision 2: one run state, derived from the driver's word (`run.state`, the
+ * status route's `liveness`) and the graph's node statuses, shown once.
+ */
+export interface OneRunState {
+  readonly word: string;
+  readonly Icon: LucideIcon;
+  readonly tone: string;
+}
+
+const TONES = {
+  success: "border-success bg-success-surface text-success",
+  destructive: "border-destructive bg-destructive-surface text-destructive",
+  warning: "border-warning bg-warning-surface text-warning",
+  info: "border-info bg-info-surface text-info",
+  muted: "border-border bg-muted text-muted-foreground",
+} as const;
+
+export function oneRunState(
+  state: string | undefined,
+  liveness: string | undefined,
+  nodeStatus: Readonly<Record<string, string>> | undefined,
+): OneRunState | undefined {
+  const s = (state ?? "").toLowerCase().replaceAll(" ", "-");
+  const l = (liveness ?? "").toUpperCase().replaceAll("-", " ");
+  const statuses = Object.values(nodeStatus ?? {});
+  if (s === "settled" || s === "complete")
+    return { word: "Complete", Icon: CircleCheck, tone: TONES.success };
+  if (s === "ended-failed" || s === "failed")
+    return { word: "Failed", Icon: CircleX, tone: TONES.destructive };
+  if (s === "ended-stopped")
+    return { word: "Stopped", Icon: OctagonMinus, tone: TONES.muted };
+  // Not placed among the seven words: nothing failed, nothing left to decide.
+  if (s === "ended-unfinished")
+    return { word: "Unfinished", Icon: CircleSlash, tone: TONES.warning };
+  if (s === "paused")
+    return { word: "Waiting on you", Icon: Hand, tone: TONES.warning };
+  if (l === "DRIVER DEAD" || l === "UNDRIVEN" || s === "driver-dead" || s === "undriven")
+    return { word: "Driver dead", Icon: Unplug, tone: TONES.destructive };
+  if (l === "PARKED" || s === "parked")
+    return { word: "Paused", Icon: CirclePause, tone: TONES.muted };
+  if (l === "ACTIVE" || s === "active" || s === "running") {
+    if (statuses.includes("waiting"))
+      return { word: "Waiting on you", Icon: Hand, tone: TONES.warning };
+    return { word: "Running", Icon: LoaderCircle, tone: TONES.info };
+  }
+  return state === undefined && liveness === undefined
+    ? undefined
+    : { word: state ?? liveness ?? "", Icon: CircleDashed, tone: TONES.muted };
+}
+
+export function RunStateBadge({
+  runState,
+  large = false,
+}: {
+  readonly runState: OneRunState | undefined;
+  readonly large?: boolean;
+}) {
+  if (runState === undefined) return null;
+  const { Icon, word, tone } = runState;
+  return (
+    <span
+      aria-label={`Run state ${word}`}
+      className={`spike-run-state inline-flex items-center gap-1.5 rounded-md border font-semibold whitespace-nowrap ${tone} ${large ? "px-2.5 py-1 text-sm" : "px-2 py-0.5 text-xs"}`}
+      role="status"
+    >
+      <Icon aria-hidden="true" size={large ? 16 : 13} />
+      {word}
+    </span>
+  );
+}
+
+/**
+ * Revision 5 (and ruling c5.0): the pill's word and icon. A node naming a `repo`
+ * or `steps` (today's `lifecycle`) reads CHANGE, `kind: command` COMMAND,
+ * `kind: human` HUMAN, and every other node AGENT.
+ */
+export const kindWord = (kind: string): string =>
+  kind === "lifecycle"
+    ? "change"
+    : kind === "command" || kind === "human"
+      ? kind
+      : "agent";
+
+const KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
+  agent: Bot,
+  human: UserRound,
+  command: SquareTerminal,
+  change: GitBranch,
+};
+
+export function KindIcon({ kind }: { readonly kind: string }) {
+  const Icon = KIND_ICONS[kind] ?? Shapes;
+  return <Icon aria-label={kind} role="img" size={10} strokeWidth={2.4} />;
+}

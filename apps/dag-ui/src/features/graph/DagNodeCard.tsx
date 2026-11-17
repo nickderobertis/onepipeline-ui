@@ -5,6 +5,7 @@ import type {
 } from "@onepipeline-ui/dag-layout";
 import { Handle, type Node, type NodeProps, Position } from "@xyflow/react";
 import { Check, CircleDashed, Clock3, X } from "lucide-react";
+import { KindIcon, kindWord } from "../../spike/mock"; // SPIKE
 
 export interface DagNodeData extends Record<string, unknown> {
   readonly label: string;
@@ -50,10 +51,12 @@ export function DagNodeCard({ data }: NodeProps<DagFlowNode>) {
       <Handle type="target" position={Position.Left} />
       <div className="node-heading">
         <Badge
-          className="px-1.5 py-0 text-[9px] tracking-[.1em] uppercase"
+          className="gap-1 px-1.5 py-0 text-[9px] tracking-[.1em] uppercase"
           variant="outline"
         >
-          {data.kind}
+          {/* SPIKE (spike-visual): the kind's icon before its word. */}
+          <KindIcon kind={kindWord(data.kind)} />
+          {kindWord(data.kind)}
         </Badge>
         <Icon className={cn(data.style === "active" && "spin")} size={17} />
       </div>

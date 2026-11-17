@@ -67,7 +67,10 @@ export function OverallView({
   selectedItemId,
   onSelectItem,
   runDetails,
+  runState,
 }: {
+  /** SPIKE (spike-visual): the one run state, shown once, in the Whole DAG card. */
+  readonly runState?: OneRunState;
   /** SPIKE (spike-visual): the run details card, beside status. */
   readonly runDetails?: React.ReactNode;
   readonly client: TelemetryClient;
@@ -163,8 +166,8 @@ export function OverallView({
             {detail.graph?.plan.goal?.text && (
               <p className="run-goal">{detail.graph.plan.goal.text}</p>
             )}
-            <p>
-              {detail.run.phase} ·{" "}
+            <p className="spike-hero-state">
+              <RunStateBadge large runState={runState} />
               {detail.run.last_event
                 ? `last event ${detail.run.last_event}`
                 : "no events recorded yet"}
@@ -172,15 +175,11 @@ export function OverallView({
           </section>
           {/* SPIKE (spike-visual): the four run-record sections are gone. */}
           <section aria-label="Run metrics" className="metric-grid">
-            <Metric
-              icon={<Activity />}
-              label="Status"
-              value={detail.run.state}
-            />
+            {/* SPIKE (spike-visual): no Status tile; Nodes shows the done count. */}
             <Metric
               icon={<Layers3 />}
               label="Nodes"
-              value={String(detail.run.nodes.length)}
+              value={`${nodes.filter((node) => node.status === "done").length} of ${nodes.length} done`}
             />
             <Metric
               icon={<Clock3 />}
@@ -297,7 +296,7 @@ export function OverallView({
  * "one scale" means: the upstream plot positions everything against the range it is
  * given, so a wheel or a brush anywhere reframes the lot together.
  */
-import { EventTypeFilter } from "../../spike/mock"; // SPIKE
+import { EventTypeFilter, type OneRunState, RunStateBadge } from "../../spike/mock"; // SPIKE
 
 function GraphExecution({
   failureShown,

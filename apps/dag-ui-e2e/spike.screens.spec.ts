@@ -228,7 +228,11 @@ const SHOTS: readonly Shot[] = [
             .filter((child) => child.tagName === "SPAN" || child.tagName === "STRONG")
             .at(-1);
           const scale = card.getBoundingClientRect().height / card.offsetHeight;
-          return `${card.getAttribute("aria-label")} reason=${card.querySelector(".node-reason") !== null} pad=${((card.getBoundingClientRect().bottom - (last?.getBoundingClientRect().bottom ?? 0)) / scale - card.clientTop).toFixed(1)}`;
+          const status = card.querySelector(".node-status")?.getBoundingClientRect();
+          const reason = card.querySelector(".node-reason")?.getBoundingClientRect();
+          const gap =
+            status && reason ? ((reason.top - status.bottom) / scale).toFixed(1) : "-";
+          return `${card.getAttribute("aria-label")} reason=${reason !== undefined} gap=${gap} pad=${((card.getBoundingClientRect().bottom - (last?.getBoundingClientRect().bottom ?? 0)) / scale - card.clientTop).toFixed(1)}`;
         }),
       );
       console.log(`SPIKE card padding:\n${pads.join("\n")}`);
@@ -239,10 +243,14 @@ const SHOTS: readonly Shot[] = [
     name: "s06-header",
     phases: ["before", "after"],
     sizes: BOTH,
-    open: async (page) => {
+    open: async (page, phase) => {
       await delayGraphMeasurements(page);
       await visit(page, `/?run=${SPIKE_LONG_RUN}&view=graph`);
-      await expect(page.getByLabel("Liveness DRIVER DEAD")).toBeVisible();
+      await expect(
+        page.getByLabel(
+          phase === "after" ? "Run state Driver dead" : "Liveness DRIVER DEAD",
+        ),
+      ).toBeVisible();
     },
   },
   {
@@ -304,6 +312,12 @@ for (const shot of SHOTS)
         test(`${shot.name} @${phase} at ${size}`, async ({ page }) => {
           await page.clock.setFixedTime(CAPTURE_INSTANT_MS);
           await shot.open(page, phase);
+          // The run state badge waits on the status read; shoot once it is in.
+          if (phase === "after" && (await page.locator(".run-topbar").count()) > 0)
+            await page
+              .locator(".run-topbar .spike-run-state")
+              .first()
+              .waitFor({ timeout: 15_000 });
           await page.mouse.move(0, 0);
           await settle(page);
           await still(page);

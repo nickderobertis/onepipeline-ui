@@ -3761,7 +3761,7 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 /* Graph card: the reason line is one of the layout's lines, inside the border. */
 .dag-node .node-reason,
 .dag-node .node-awaits {
-  margin-top: 8px;
+  margin-top: 3px;
   line-height: 12px;
 }
 
@@ -3887,4 +3887,12 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 .remote-checks .check-failing td:nth-child(3)::before,
 .remote-checks .check-failing td:nth-child(3)::after {
   content: none;
+}
+
+/* Revision 2: the one run state, as a word with its icon, in the Whole DAG card. */
+.spike-hero-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }

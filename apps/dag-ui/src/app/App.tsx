@@ -5,7 +5,7 @@
 // repository imported precisely so as not to reimplement it, with nothing but the copied
 // journeys to catch what moved. The two hooks it does have — useConversation and
 // useStickyBottom — are the ones that were extracted upstream.
-import { spikeTitle } from "../spike/mock"; // SPIKE
+import { oneRunState, spikeTitle } from "../spike/mock"; // SPIKE
 import { createPortal } from "react-dom"; // SPIKE
 
 import {
@@ -58,7 +58,6 @@ import { RecordDisclosure } from "../lib/RecordDisclosure";
 import {
   currentOverrides,
   graphOf,
-  graphStateWord,
   launchLabel,
   nodeViews,
   openedNode,
@@ -149,6 +148,12 @@ export function App({
   const detail = telemetry.detail;
   const nodes = useMemo(() => (detail ? nodeViews(detail) : []), [detail]);
   const control = useRunControl(client, selectedRunId);
+  // SPIKE (spike-visual): one run state, from the driver's word and the graph's.
+  const spikeRunState = oneRunState(
+    detail?.run.state,
+    control.status.value?.liveness,
+    control.status.value?.node_status ?? detail?.graph?.node_status,
+  );
   // Held here rather than under the run's view: a shutdown is minutes long, and
   // what it is doing stays on screen whichever run or list the reader moves to.
   const hostShutdowns = useHostShutdowns(client);
@@ -305,6 +310,7 @@ export function App({
             <div className="topbar-actions">
               {!runless && selectedRunId !== undefined && (
                 <RunActions
+                  runState={spikeRunState}
                   control={control}
                   runId={selectedRunId}
                   ended={
@@ -508,6 +514,7 @@ export function App({
                     />
                   ) : selection.view === "overall" ? (
                     <OverallView
+                      runState={spikeRunState}
                       client={client}
                       detail={detail}
                       filter={filter}
@@ -530,18 +537,6 @@ export function App({
                 <dd>{runLoaded ? launchLabel(detail.launch) : LOADING_TEXT}</dd>
               </div>
               <div>
-                <dt>Summary</dt>
-                <dd>{control.status.value?.summary ?? LOADING_TEXT}</dd>
-              </div>
-              <div>
-                <dt>Graph state</dt>
-                <dd>
-                  {control.status.value
-                    ? graphStateWord(control.status.value.node_status)
-                    : LOADING_TEXT}
-                </dd>
-              </div>
-              <div>
                 <dt>Unread surfaces</dt>
                 <dd>
                   {control.status.value?.unread_surfaces.count ?? LOADING_TEXT}
@@ -555,14 +550,15 @@ export function App({
                 <dd>
                   {!runLoaded ? (
                     LOADING_TEXT
-                  ) : detail.run.last_progress_at === undefined ? (
-                    "Not recorded"
+                  ) : /* SPIKE: no recorded progress is a dash. */
+                  !detail.run.last_progress_at ? (
+                    "—"
                   ) : (
                     <Timestamp
                       at={new Date(
                         detail.run.last_progress_at * 1000,
                       ).toISOString()}
-                      relative
+                      
                     />
                   )}
                 </dd>

@@ -964,6 +964,14 @@ const LIVE_TASKS = [
     deps: ["publish"],
     task: "## What\nClean up after the publish.\n\n## Acceptance criteria\nCleanup runs",
   },
+  // SPIKE (spike-visual): a command node, so the graph shows the COMMAND pill.
+  {
+    id: "build-site",
+    kind: "command",
+    command: ["bun", "run", "build"],
+    deps: ["dashboard"],
+    task: "Build the site.",
+  },
   {
     id: "followup",
     persona: "worker",
