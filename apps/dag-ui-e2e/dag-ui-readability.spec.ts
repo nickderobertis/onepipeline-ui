@@ -594,6 +594,41 @@ test("every change request link reads as its short id", async ({ page }) => {
   );
 });
 
+test("an opened record covers the node's content and leaves the run bar and the node bar in reach", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { cards } = facts;
+  await page.goto(
+    `${server.origin}/?run=${facts.states.Running}&node=${cards.changeByRepo}`,
+  );
+  await page
+    .getByRole("button", { name: /^Open change-opened/u })
+    .first()
+    .click();
+  const drawer = page.getByRole("complementary", {
+    name: "Item detail panel",
+  });
+  await expect(drawer).toBeVisible();
+  const node = page.getByRole("region", {
+    name: `Timeline for ${cards.changeByRepo}`,
+  });
+  const bar = await boxOf(
+    node.getByRole("region", { name: "Node header", exact: true }),
+  );
+  expect((await boxOf(drawer)).y).toBeGreaterThanOrEqual(
+    bar.y + bar.height - 1,
+  );
+  // Both bars' tabs still take a press while it is open.
+  await node.getByRole("tab", { name: "Remote" }).click();
+  await expect(node.getByRole("tab", { name: "Remote" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await runBar(page).getByRole("tab", { name: "Overall" }).click();
+  await expect(wholeDag(page)).toBeVisible();
+});
+
 test("the Remote tab's checks read as one coloured status icon each, with no Conclusion column", async ({
   page,
 }) => {

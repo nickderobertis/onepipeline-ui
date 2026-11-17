@@ -1,3 +1,4 @@
+import type { NodeDetail } from "@onepipeline-ui/dag-model";
 import {
   CircleCheck,
   CircleDashed,
@@ -16,6 +17,12 @@ import {
  * failure does — and the producer's own words stay in the icon's title. A record
  * that names neither is `not recorded`, never a progress made up for it.
  */
+/** The two fields of a served check this reads, as the model declares them. */
+type CheckState = Pick<
+  NonNullable<NodeDetail["verification"]["checks"]>[number],
+  "status" | "conclusion"
+>;
+
 type CheckWord =
   | "passed"
   | "failed"
@@ -35,10 +42,7 @@ const ICONS: Readonly<Record<CheckWord, LucideIcon>> = {
   "not recorded": CircleHelp,
 };
 
-function checkWord(check: {
-  readonly status?: string;
-  readonly conclusion?: string;
-}): CheckWord {
+function checkWord(check: CheckState): CheckWord {
   if (check.conclusion === undefined) {
     if (check.status === undefined) return "not recorded";
     if (check.status === "in_progress") return "running";
@@ -60,11 +64,7 @@ function checkWord(check: {
  * The Status cell: one coloured icon and its word, the colour `styles.css` gives
  * that word, and the icon named by the word for a reader who cannot see either.
  */
-export function CheckStatus({
-  check,
-}: {
-  readonly check: { readonly status?: string; readonly conclusion?: string };
-}) {
+export function CheckStatus({ check }: { readonly check: CheckState }) {
   const word = checkWord(check);
   const Icon = ICONS[word];
   return (
