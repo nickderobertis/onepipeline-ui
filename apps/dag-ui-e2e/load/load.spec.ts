@@ -16,7 +16,7 @@
  *   with its type and size (the DevTools protocol's Network domain);
  * - for every record appended to the open live run, the lag from its append to
  *   the page rendering it: on a node's timeline the appearance of that record's
- *   row (`article[data-journal-seq]`), and on Graph, Overall and Channel the view
+ *   row (`article[data-journal-seq]`), and on Graph and Overall the view
  *   root's `data-journal-seq` reaching its number, both seen by a DOM observer;
  *   frame arrival is recorded beside it as a breakdown;
  * - the server process tree's CPU seconds (`/proc`), browser and writer apart.
@@ -498,9 +498,7 @@ async function loaded(page: Page, variant: Variant): Promise<number> {
           ? page.getByRole("application", { name: "DAG execution graph" })
           : variant.view === "overall"
             ? page.getByRole("region", { name: "Graph timeline" })
-            : variant.view === "channel"
-              ? page.getByRole("heading", { name: "Channel queue" })
-              : page.getByRole("region", { name: /^Timeline for / });
+            : page.getByRole("region", { name: /^Timeline for / });
   await view.waitFor({ timeout: 300_000 });
   // A run view has loaded once it holds the whole run, as it did when its first
   // answer was the whole run: the window then reads the view kept live, not the
