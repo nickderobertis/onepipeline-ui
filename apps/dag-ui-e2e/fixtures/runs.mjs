@@ -4539,8 +4539,18 @@ export const LARGE_RUN_VIEWS = {
   historyId: "01a00d0f-c094-7660-b26c-8a53baaf9e00",
 };
 
-/** The three kinds a sequence of {@link squareFree} letters is written in. */
-const VARIED_KINDS = ["fetch", "push", "pull"];
+/**
+ * Record one of three ordinary repository kinds for each {@link squareFree}
+ * letter. Each is written as its own literal call, which is how
+ * `packages/timeline-categories` reads the kinds this corpus writes.
+ */
+function emitVaried(journal, letter, labels) {
+  const payload = { remote: "origin" };
+  if (letter === 0) journal.advance(1).emit("vcs", "fetch", labels, payload);
+  else if (letter === 1)
+    journal.advance(1).emit("vcs", "push", labels, payload);
+  else journal.advance(1).emit("vcs", "lock-acquired", labels, payload);
+}
 
 /**
  * `length` letters of three in which no sequence of any length is ever repeated
@@ -4611,13 +4621,8 @@ export function buildLargeRunViews(root) {
   // The records before the run of checks, in an order that never repeats back
   // to back, so none collapse: what a reader paging back reaches.
   const varied = squareFree(LARGE_RUN_VIEWS.earliest + LARGE_RUN_VIEWS.tail);
-  for (let index = 0; index < LARGE_RUN_VIEWS.earliest; index += 1) {
-    journal
-      .advance(1)
-      .emit("vcs", VARIED_KINDS[varied[index] ?? 0], node(history), {
-        remote: "origin",
-      });
-  }
+  for (let index = 0; index < LARGE_RUN_VIEWS.earliest; index += 1)
+    emitVaried(journal, varied[index], node(history));
   for (let index = 0; index < LARGE_RUN_VIEWS.checks; index += 1) {
     journal.advance(1).emit("vcs", "change-check", node(history), {
       name: `check ${index}`,
@@ -4628,16 +4633,12 @@ export function buildLargeRunViews(root) {
     });
   }
   // Never repeating back to back either, so none of the latest rows collapse.
-  for (let index = 0; index < LARGE_RUN_VIEWS.tail; index += 1) {
-    journal
-      .advance(1)
-      .emit(
-        "vcs",
-        VARIED_KINDS[varied[LARGE_RUN_VIEWS.earliest + index] ?? 0],
-        node(history),
-        { remote: "origin" },
-      );
-  }
+  for (let index = 0; index < LARGE_RUN_VIEWS.tail; index += 1)
+    emitVaried(
+      journal,
+      varied[LARGE_RUN_VIEWS.earliest + index],
+      node(history),
+    );
   journal.advance(1).emit("pipeline", "node-settled", node(history), {
     status: "done",
     outcome: "merged",
