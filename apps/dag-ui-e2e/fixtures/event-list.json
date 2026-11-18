@@ -102,6 +102,12 @@
               "kind": "human",
               "task": "Approve the export's columns.",
               "deps": []
+            },
+            {
+              "id": "split",
+              "task": "Check the docs between notes.",
+              "persona": "engineer",
+              "deps": []
             }
           ]
         },
@@ -834,6 +840,76 @@
     },
     {
       "source": "pipeline",
+      "kind": "criterion-checked",
+      "payload": {
+        "criterion": "the docs build",
+        "file": "docs/index.md",
+        "expected": "present",
+        "answer": "match",
+        "holds": "the docs build holds",
+        "reason": "the file is there"
+      },
+      "gap": 1,
+      "node": "split"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "payload": {
+        "surface": 7,
+        "correlation": null,
+        "kind": "check-in",
+        "message": "Docs: the index is done",
+        "source": "split",
+        "blocking": false
+      },
+      "gap": 1,
+      "node": "split"
+    },
+    {
+      "source": "pipeline",
+      "kind": "criterion-checked",
+      "payload": {
+        "criterion": "the docs build",
+        "file": "docs/index.md",
+        "expected": "present",
+        "answer": "match",
+        "holds": "the docs build holds",
+        "reason": "the file is there"
+      },
+      "gap": 1,
+      "node": "split"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "payload": {
+        "surface": 8,
+        "correlation": null,
+        "kind": "check-in",
+        "message": "Docs: the guide is done",
+        "source": "split",
+        "blocking": false
+      },
+      "gap": 1,
+      "node": "split"
+    },
+    {
+      "source": "pipeline",
+      "kind": "criterion-checked",
+      "payload": {
+        "criterion": "the docs build",
+        "file": "docs/index.md",
+        "expected": "present",
+        "answer": "match",
+        "holds": "the docs build holds",
+        "reason": "the file is there"
+      },
+      "gap": 1,
+      "node": "split"
+    },
+    {
+      "source": "pipeline",
       "kind": "planner-surface-queued",
       "payload": {
         "surface": 6,
@@ -1090,6 +1166,15 @@
     },
     {
       "source": "pipeline",
+      "kind": "node-settled",
+      "payload": {
+        "status": "done"
+      },
+      "gap": 1,
+      "node": "split"
+    },
+    {
+      "source": "pipeline",
       "kind": "branches-retired",
       "payload": {
         "retired": [
@@ -1115,6 +1200,54 @@
         "dirs": 2,
         "bytes": 4096,
         "failed": []
+      },
+      "gap": 60
+    },
+    {
+      "source": "pipeline",
+      "kind": "pool-maintenance",
+      "payload": {
+        "started_at": "2026-08-07T12:00:00Z",
+        "identities": [
+          {
+            "identity": "github.com/example/repo",
+            "every": "1h",
+            "outcome": "maintained"
+          }
+        ],
+        "error": null
+      },
+      "gap": 60
+    },
+    {
+      "source": "pipeline",
+      "kind": "pool-maintenance",
+      "payload": {
+        "started_at": "2026-08-07T12:00:00Z",
+        "identities": [
+          {
+            "identity": "github.com/example/repo",
+            "every": "1h",
+            "outcome": "maintained"
+          }
+        ],
+        "error": null
+      },
+      "gap": 60
+    },
+    {
+      "source": "pipeline",
+      "kind": "pool-maintenance",
+      "payload": {
+        "started_at": "2026-08-07T12:00:00Z",
+        "identities": [
+          {
+            "identity": "github.com/example/repo",
+            "every": "1h",
+            "outcome": "maintained"
+          }
+        ],
+        "error": null
       },
       "gap": 60
     }

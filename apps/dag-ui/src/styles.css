@@ -745,19 +745,14 @@ p {
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
-/* The run-kind dropdown's shape, opened over the rows rather than in flow: a list
-   pushed down by its own filter would move the row the reader was on. */
+/* The run-kind dropdown's shape, opening in flow as that one does: laid over the
+   rows, it was clipped by the list's own scroller whenever the list was short,
+   which is exactly when a reader who hid everything needs it. */
 .event-type-filter {
-  position: relative;
   margin-top: 0;
 }
 .event-type-filter fieldset {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
   min-width: 240px;
-  box-shadow: 0 12px 30px rgb(0 0 0 / 30%);
 }
 .event-type-filter label {
   display: grid;

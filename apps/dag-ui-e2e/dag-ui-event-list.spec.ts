@@ -10,7 +10,11 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
 import corpus from "./fixtures/event-list.json" with { type: "json" };
-import { loadAllEarlierRows, loadRunRecords } from "./observatory-locators";
+import {
+  loadAllEarlierRows,
+  loadRunRecords,
+  openRepeatedLoops,
+} from "./observatory-locators";
 
 /**
  * A run's event list, read in the browser over the real read API and a run
@@ -355,8 +359,11 @@ async function openOverall(page: Page, extra = ""): Promise<Locator> {
   await page.goto(`${origin()}/?run=${facts.run}&view=overall${extra}`);
   const events = page.getByRole("region", { name: "Run events" });
   await expect(events.getByRole("heading", { name: "Events" })).toBeVisible();
+  // An address naming a record reads the run's own records by itself, so the
+  // control can leave between being seen and being pressed.
   const load = page.getByRole("button", { name: "Load the run's own records" });
-  if (await load.isVisible()) await loadRunRecords(page);
+  if (await load.isVisible())
+    await load.click({ timeout: 5_000 }).catch(() => undefined);
   await expect(events.getByRole("article").first()).toBeVisible();
   return events;
 }
@@ -443,6 +450,62 @@ test.describe("the run's own records", () => {
       await expect(detail).toContainText(said);
   });
 
+  test("the run's own repeats are one block that opens and closes, and an address inside it opens it", async ({
+    page,
+  }) => {
+    const events = await openOverall(page);
+    const block = events.getByRole("region", {
+      name: "1 event repeated 3 times: pool-maintenance",
+    });
+    await expect(block.getByRole("article")).toHaveCount(1);
+    await block.getByRole("button", { name: "Show all 3" }).click();
+    await expect(block.getByRole("article")).toHaveCount(3);
+    await block.getByRole("button", { name: "Show one pass" }).click();
+    await expect(block.getByRole("article")).toHaveCount(1);
+
+    const response = await page.request.get(
+      `${origin()}/api/v2/runs/${facts.run}/timeline?scope=run`,
+    );
+    const second = parseRunTimeline(await response.json())
+      .spans.flatMap((span) => span.events)
+      .filter((event) => event.kind === "pool-maintenance")[1];
+    if (second?.record_id === undefined) throw new Error("no second sweep");
+    const opened = await openOverall(page, `&event=${second.record_id}`);
+    const holding = opened.getByRole("region", {
+      name: "1 event repeated 3 times: pool-maintenance",
+    });
+    await expect(
+      holding.getByRole("button", { name: "Show one pass" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    await expect(holding.getByRole("article")).toHaveCount(3);
+    await expect(holding.getByRole("article").nth(1)).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect(
+      page.getByRole("complementary", { name: "Item detail panel" }),
+    ).toContainText("github.com/example/repo");
+  });
+
+  test("until the run's own records are read, Overall's list says none is held", async ({
+    page,
+  }) => {
+    await page.goto(`${origin()}/?run=${facts.run}&view=overall`);
+    const events = page.getByRole("region", { name: "Run events" });
+    const load = page.getByRole("button", {
+      name: "Load the run's own records",
+    });
+    await expect(load).toBeVisible();
+    await expect(events).toContainText(
+      "No record of the run's own is held yet.",
+    );
+    await loadRunRecords(page);
+    await expect(events.getByRole("article").first()).toBeVisible();
+    await expect(events).not.toContainText(
+      "No record of the run's own is held yet.",
+    );
+  });
+
   test("no Channel tab or route is there to reach", async ({ page }) => {
     await page.goto(
       `${origin()}/?run=${facts.run}&node=asker&view=graph&tab=channel`,
@@ -490,6 +553,9 @@ for (const where of ["node", "overall"] as const) {
       page,
     }) => {
       const list = await open(page);
+      // A block of repeats draws one pass of the rows it holds, and the filter
+      // counts every row; opened, the list draws them all.
+      await openRepeatedLoops(page);
       await expect(
         page
           .getByRole("banner", { name: "Run header" })
@@ -543,6 +609,9 @@ for (const where of ["node", "overall"] as const) {
         });
         if (await load.isVisible()) await loadRunRecords(page);
       }
+      // Which blocks a reader opened is theirs, not the address's.
+      await expect(reloaded.getByRole("article").first()).toBeVisible();
+      await openRepeatedLoops(page);
       await expect(reloaded.getByRole("article")).toHaveCount(left);
       await expect(await typeBox(reloaded, first)).not.toBeChecked();
     });
@@ -557,12 +626,66 @@ for (const where of ["node", "overall"] as const) {
       await expect(list.getByRole("status")).toContainText(
         "The event-type filter hides every event in this list.",
       );
+      // Closed, so the list's own head holds only its summary again.
+      await list.getByText(/^Event types:/u).click();
       await list.getByRole("button", { name: "Show every event type" }).click();
       await expect(list.getByRole("article").first()).toBeVisible();
       expect(new URL(page.url()).searchParams.getAll("hide-event")).toEqual([]);
     });
   });
 }
+
+test("Select all puts every hidden type back", async ({ page }) => {
+  const list = await openNode(page, "asker");
+  const rows = list.getByRole("article");
+  const total = await rows.count();
+  const filter = await typeFilter(list);
+  await filter.getByRole("button", { name: "Clear" }).click();
+  await expect(rows).toHaveCount(0);
+  await (await typeFilter(list))
+    .getByRole("button", { name: "Select all" })
+    .click();
+  await expect(rows).toHaveCount(total);
+  expect(new URL(page.url()).searchParams.getAll("hide-event")).toEqual([]);
+});
+
+test("a type hidden on one list is offered on a list holding none of it, and shown again from there", async ({
+  page,
+}) => {
+  const build = await openNode(page, "build");
+  await (await typeBox(build, eventTypeLabel("command"))).uncheck();
+  await expect(
+    build.getByRole("article", { name: /^bun run build/u }),
+  ).toHaveCount(0);
+  const asker = await openNode(page, "asker", "&hide-event=command");
+  const box = await typeBox(asker, eventTypeLabel("command"));
+  await expect(box).not.toBeChecked();
+  await expect(box).toHaveAccessibleDescription("0");
+  // Shown again, a type this list holds none of is no longer offered here.
+  await box.click();
+  await expect(box).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.getAll("hide-event")).toEqual([]);
+  const again = await openNode(page, "build");
+  await expect(
+    again.getByRole("article", { name: "bun run build --name 'a b'" }),
+  ).toHaveCount(1);
+});
+
+test("hiding the record that broke a repeat up shows the repeat as one block", async ({
+  page,
+}) => {
+  const list = await openNode(page, "split");
+  await expect(blocks(list)).toHaveCount(0);
+  await expect(
+    list.getByRole("article", { name: "criterion-checked" }),
+  ).toHaveCount(3);
+  await (await typeBox(list, eventTypeLabel("surface"))).uncheck();
+  const block = list.getByRole("region", {
+    name: "1 event repeated 3 times: criterion-checked",
+  });
+  await expect(block.getByText("×3", { exact: true })).toBeVisible();
+  await expect(list.getByRole("article")).toHaveCount(2);
+});
 
 test("no Decisions or Detailed control exists, and nothing the view asks for carries a filter", async ({
   page,
