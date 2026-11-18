@@ -6,7 +6,6 @@ import {
   frameCarriesWholeEvents,
   subscribedSchema,
   subscriptionFrameSchema,
-  timelineEventsPageSchema,
   visibleViolations,
 } from "@onepipeline-ui/dag-model";
 import { READ_DEADLINE_MS } from "@onepipeline-ui/telemetry-client";
@@ -124,49 +123,37 @@ for (const view of ["graph", "overall", "node"] as const)
     }
   });
 
-test("a page request goes out only when the reader scrolls back", async ({
+test("a node reads its rows once, through its stream, and asks for no page", async ({
   page,
 }) => {
   const served = await serve(world);
   try {
     const wire = await record(page);
+    const streams: string[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname.endsWith("/timeline/node-stream"))
+        streams.push(url.search);
+    });
+    const node = world.facts.large.busiestNode;
     await page.goto(
-      `${served.origin}${addressOf(world.facts.openLiveRun, "node", world.facts.large.busiestNode)}`,
+      `${served.origin}${addressOf(world.facts.openLiveRun, "node", node)}`,
     );
-    const load = page.getByRole("button", { name: "Load earlier rows" });
-    await load.waitFor({ timeout: 60_000 });
+    const transcript = page.getByRole("region", { name: "Node transcript" });
+    await expect(transcript).toHaveAttribute("aria-busy", "false", {
+      timeout: 120_000,
+    });
+    // Scrolled back to the top, as a reader looking for earlier rows does.
+    await transcript.hover();
+    await page.mouse.wheel(0, -20_000);
     await page.waitForTimeout(1_000);
+    expect(streams).toStrictEqual([
+      `?scope=node&node=${encodeURIComponent(node)}`,
+    ]);
     expect(wire.pages).toStrictEqual([]);
-    const answered = page.waitForResponse((response) =>
-      new URL(response.url()).pathname.endsWith("/timeline/events"),
-    );
-    // Earlier rows arrive above the rows already shown, and the row they arrive above
-    // keeps its place on screen rather than being pushed down by them.
-    await load.scrollIntoViewIfNeeded();
-    const rows = page
-      .getByRole("region", { name: "Node transcript" })
-      .getByRole("button", { name: /^Open / });
-    const shownBefore = await rows.allInnerTexts();
-    const handles = await rows.elementHandles();
-    const places = await Promise.all(
-      handles.map(async (row) => (await row.boundingBox())?.y),
-    );
-    await load.click();
-    const body = timelineEventsPageSchema.parse(await (await answered).json());
-    expect(body.rows.length).toBeGreaterThan(0);
-    expect(wire.pages).toHaveLength(1);
-    await expect.poll(() => rows.count()).toBeGreaterThan(shownBefore.length);
-    const shownAfter = await rows.allInnerTexts();
-    const above = shownBefore.findIndex((text, at) => shownAfter[at] !== text);
-    expect(
-      above,
-      "the earlier rows arrive among those shown",
-    ).toBeGreaterThanOrEqual(0);
-    const now = (await handles[above]?.boundingBox())?.y;
-    expect(
-      Math.abs((now ?? Number.NaN) - (places[above] ?? Number.NaN)),
-      `"${shownBefore[above]}" moved from ${places[above]} to ${now}`,
-    ).toBeLessThan(2);
+    await expect(
+      transcript.getByRole("button", { name: /^Load(ing)? earlier rows/ }),
+    ).toHaveCount(0);
   } finally {
     await stop(served);
   }
@@ -321,30 +308,29 @@ test("progress.failed shows the error and keeps the held screen", async ({
 
 // llmlint: ignore-end[e2e_not_mocked, tests_mirror_real_usage]
 
-test("a failed page says so at its control, and Try again takes the page", async ({
+test("a node read that keeps failing says so, and Try again reads the node whole", async ({
   page,
 }) => {
   const served = await serve(world);
   try {
     let refusing = true;
-    // llmlint: ignore[e2e_not_mocked] the acceptance criteria require a failed page to recover at its control: the proxy's 524 is doubled at the network boundary, the journey's only doubled party, and Try again then takes the real server's page.
-    await page.route("**/timeline/events**", (route) =>
+    // llmlint: ignore[e2e_not_mocked] the acceptance criteria require a failed read to recover at its control: the proxy's 524 is doubled at the network boundary, the journey's only doubled party, and Try again then takes the real server's stream.
+    await page.route("**/timeline/node-stream**", (route) =>
       refusing ? route.fulfill({ status: 524, body: "" }) : route.continue(),
     );
     await page.goto(
       `${served.origin}${addressOf(world.facts.openLiveRun, "node", world.facts.large.busiestNode)}`,
     );
-    const load = page.getByRole("button", { name: "Load earlier rows" });
-    await load.waitFor({ timeout: 60_000 });
-    await load.click();
     const failed = page
       .getByRole("alert")
-      .filter({ hasText: "Earlier rows did not load" });
-    await expect(failed).toBeVisible();
+      .filter({ hasText: "This node's timeline did not load" });
+    await expect(failed).toBeVisible({ timeout: 60_000 });
     refusing = false;
     await failed.getByRole("button", { name: "Try again" }).click();
     await expect(failed).toHaveCount(0);
-    await expect(load).toBeEnabled();
+    await expect(
+      page.getByRole("region", { name: "Node transcript" }),
+    ).toHaveAttribute("aria-busy", "false", { timeout: 120_000 });
   } finally {
     await stop(served);
   }

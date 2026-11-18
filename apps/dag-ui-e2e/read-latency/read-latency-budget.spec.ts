@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { NODE_TIMELINE_PARTIAL_DELAY_MS } from "@onepipeline-ui/timeline-categories";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
 import { DRIVERS, largeTelemetrySchema, telemetrySchema } from "./telemetry";
@@ -96,6 +97,18 @@ const view = (seconds: number) => ({
   fresh_server: reading(seconds),
   small_run_s: 0.1,
 });
+/** One opening of the busiest node's Timeline, complete after `seconds`. */
+const nodeReading = (seconds: number | null, held = 10_001) => ({
+  seconds,
+  first_render_s: 0.6,
+  partial_s: null,
+  requests: 1,
+  bytes_decoded: 9_000_000,
+  bytes_on_wire: 1_200_000,
+  server: { ttfb_s: 1.3, heads_s: 0.3, fetch_s: 0.04, build_s: 0.8 },
+  held: { expected: 10_001, chart: held, list: held },
+  host_load: load,
+});
 const largeRun = (overrides: object = {}) => ({
   corpus: { ...DRIVERS },
   first_view: {
@@ -119,7 +132,11 @@ const largeRun = (overrides: object = {}) => ({
     node_after_rest_s: 0.2,
     overall_span_page_s: 0.3,
     slowest_s: 0.6,
-    rows_shown_after: 180,
+    rows_read_after: 100,
+  },
+  node_timeline_complete: {
+    readings: [nodeReading(5.1), nodeReading(4.8), nodeReading(6.2)],
+    median_s: 5.1,
   },
   status: {
     small_s: 0.05,
@@ -173,7 +190,7 @@ const telemetry = (overrides: object = {}) => ({
 });
 
 const largeTelemetry = (overrides: object = {}) => ({
-  schema_version: 3,
+  schema_version: 4,
   recorded_at: "2026-11-07T00:00:00.000Z",
   commit: "a".repeat(40),
   dirty: false,
@@ -268,6 +285,7 @@ test("the large-run budgets report their figures and detail through the real che
     ["first-view", 1],
     ["rest-arrived", 60],
     ["history-page", 1],
+    ["node-timeline-complete", 7],
     ["status", 1],
   ]);
   expect(
@@ -278,10 +296,70 @@ test("the large-run budgets report their figures and detail through the real che
     "runner-first-view": [0.7, "within"],
     "runner-rest-arrived": [40, "within"],
     "runner-history-page": [0.6, "within"],
+    "runner-node-timeline-complete": [5.1, "within"],
     "runner-status": [0.4, "within"],
   });
   expect(results[0]?.detail).toContain("corpus");
-  expect(results[3]?.detail).toContain("stand_in_starts");
+  expect(results[4]?.detail).toContain("stand_in_starts");
+  // The node's complete load reports every reading and its breakdown.
+  const node = z
+    .object({
+      median_s: z.number(),
+      readings: z.array(
+        z.object({
+          seconds: z.number(),
+          first_render_s: z.number(),
+          requests: z.number(),
+          bytes_decoded: z.number(),
+          bytes_on_wire: z.number(),
+          server: z.object({ ttfb_s: z.number(), build_s: z.number() }),
+          held: z.object({ chart: z.number(), list: z.number() }),
+        }),
+      ),
+    })
+    .parse(JSON.parse(results[3]?.detail ?? "{}"));
+  expect(node.readings.map((reading) => reading.seconds)).toStrictEqual([
+    5.1, 4.8, 6.2,
+  ]);
+  expect(node.readings[0]?.held).toStrictEqual({ chart: 10_001, list: 10_001 });
+});
+
+test("the node's complete load reports the median of its readings, and over the line fails", () => {
+  const slow = recorded(
+    largeTelemetry({
+      large_run: largeRun({
+        node_timeline_complete: {
+          readings: [nodeReading(7.4), nodeReading(6.9), nodeReading(8.1)],
+          median_s: 7.4,
+        },
+      }),
+    }),
+  );
+  const [result] = check(slow, [["node-timeline-complete", 7]]);
+  expect([result?.actual, result?.verdict]).toStrictEqual([7.4, "over"]);
+});
+
+test("a node load that never completed, or held fewer records than the node's, is refused naming the reading", () => {
+  for (const [reading, says] of [
+    [nodeReading(null), "never held every record"],
+    [nodeReading(5, 9_990), "of the node's 10001 records"],
+  ] as const) {
+    const path = recorded(
+      largeTelemetry({
+        large_run: largeRun({
+          node_timeline_complete: {
+            readings: [reading, nodeReading(5), nodeReading(5)],
+            median_s: 5,
+          },
+        }),
+      }),
+    );
+    const run = measure("node-timeline-complete", path);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(says);
+    const [result] = check(path, [["node-timeline-complete", 7]]);
+    expect(result?.verdict).not.toBe("within");
+  }
 });
 
 // Every driver a budget names, as a corpus that did not hold it: the check fails
@@ -529,7 +607,13 @@ test("each budgets file names this runner's metrics and its own telemetry, with 
       "large-run/budgets.yaml",
       "../read-latency-budget.mjs",
       "read-latency-large.json",
-      ["first-view", "rest-arrived", "history-page", "status"],
+      [
+        "first-view",
+        "rest-arrived",
+        "history-page",
+        "node-timeline-complete",
+        "status",
+      ],
     ],
   ] as const) {
     const text = readFileSync(join(import.meta.dirname, file), "utf8");
@@ -540,6 +624,20 @@ test("each budgets file names this runner's metrics and its own telemetry, with 
     expect(text.match(/command:/gu)).toHaveLength(metrics.length);
     expect(text).not.toMatch(/labels:/u);
   }
+});
+
+test("the view marks a node partial at the node budget's own threshold", () => {
+  // One number: a node that loads within its budget is never marked partial, and
+  // the journeys run their clock past exactly this delay.
+  const text = readFileSync(
+    join(import.meta.dirname, "large-run/budgets.yaml"),
+    "utf8",
+  );
+  const entry = text.slice(
+    text.indexOf("- id: dag-ui-node-timeline-complete-seconds"),
+  );
+  const threshold = /\n {4}threshold: (\d+(?:\.\d+)?)\n/u.exec(entry)?.[1];
+  expect(Number(threshold) * 1_000).toBe(NODE_TIMELINE_PARTIAL_DELAY_MS);
 });
 
 test("the budgets file states the workload workload.json records", () => {

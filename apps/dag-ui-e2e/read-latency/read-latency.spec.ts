@@ -1239,9 +1239,9 @@ async function restArrived(
 }
 
 interface HistoryPages {
-  /** Asks for earlier rows while the rest is still loading. */
+  /** Reads a page while the rest is still loading on `page`. */
   readonly before: (page: Page) => Promise<void>;
-  /** Asks again once the rest has arrived. */
+  /** Reads one once the rest has arrived on `page`. */
   readonly after: (page: Page) => Promise<void>;
   readonly result: () => {
     /** `null` only on a host's run whose rest arrived before a page was asked for. */
@@ -1249,17 +1249,19 @@ interface HistoryPages {
     node_after_rest_s: number;
     overall_span_page_s: number | null;
     slowest_s: number;
-    rows_shown_after: number;
+    rows_read_after: number;
   };
 }
 
 /**
- * The busiest node's history pages, asked for by the page's own control on the
- * node opening the rest-arrived reading holds: one page before the rest is
- * published and one after, then Overall's span page as the client asks for it.
- * The corpus is sized so its rest is still loading when the first page is asked
- * for, and a corpus whose rest was not is refused. A host's run may be small
- * enough that its rest arrives first; that run has no page before the rest.
+ * A page of the busiest node's history from the paged route, as the client
+ * requests it — `GET .../timeline/events?scope=node&node=<busiest>&limit=100` —
+ * from the server the rest-arrived reading holds: one page while the rest is still
+ * loading and one after, then Overall's span page. The view itself now reads the
+ * node whole through its stream, which `dag-ui-node-timeline-complete-seconds`
+ * times; the paged route stays for other readers, and this is its page (manager
+ * ruling `a11`). A corpus whose rest arrived first is refused; a host's run may be
+ * small enough that its rest does, and has no page before it.
  */
 function historyPages(
   world: LargeWorld,
@@ -1267,22 +1269,23 @@ function historyPages(
   complete: Complete,
 ): HistoryPages {
   const generated = world.facts !== undefined;
+  const root = `http://127.0.0.1:${port}/api/v2/runs/${encodeURIComponent(world.run)}`;
   let before: number | null | undefined;
   let after: number | undefined;
   let rowsAfter = 0;
   let overallSpan: number | null = null;
-  const pageRead = async (page: Page) => {
-    const transcript = page.getByRole("region", { name: "Node transcript" });
-    const rows = transcript.getByRole("article");
-    const loadEarlier = page.getByRole("button", { name: "Load earlier rows" });
-    await loadEarlier.waitFor({ timeout: NEVER });
-    const shown = await rows.count();
+  const pageRead = async () => {
     const asked = Date.now();
-    await loadEarlier.click();
-    await expect
-      .poll(() => rows.count(), { timeout: NEVER })
-      .toBeGreaterThan(shown);
-    return { seconds: (Date.now() - asked) / 1000, rows: await rows.count() };
+    const answer = await fetch(
+      `${root}/timeline/events?scope=node&node=${encodeURIComponent(world.busiestNode)}&limit=100`,
+    );
+    const body = await answer.text();
+    const seconds = (Date.now() - asked) / 1000;
+    expect(answer.ok, `the busiest node's page: ${body}`).toBe(true);
+    const rows = z
+      .object({ rows: z.array(z.unknown()) })
+      .parse(JSON.parse(body)).rows.length;
+    return { seconds, rows };
   };
   return {
     async before(page) {
@@ -1295,22 +1298,20 @@ function historyPages(
         before = null;
         return;
       }
-      before = (await pageRead(page)).seconds;
+      before = (await pageRead()).seconds;
     },
     async after(page) {
       await expect(page.getByText(HISTORY_LOADING)).toHaveCount(0, {
         timeout: 600_000,
       });
-      const read = await pageRead(page);
+      const read = await pageRead();
       after = read.seconds;
       rowsAfter = read.rows;
-      // Overall's span page, as the client's own request reads it, from the
-      // server this opening holds the rest on.
+      // Overall's span page, as the client's own request reads it.
       const dispatch = complete.timeline.spans.find(
         (span) => span.kind === "node",
       );
       if (dispatch !== undefined) {
-        const root = `http://127.0.0.1:${port}/api/v2/runs/${encodeURIComponent(world.run)}`;
         const asked = Date.now();
         const answer = await fetch(
           `${root}/timeline/events?scope=run&node=${encodeURIComponent(String(dispatch.node_id))}&span=${encodeURIComponent(String(dispatch.id))}&limit=100`,
@@ -1327,10 +1328,230 @@ function historyPages(
         node_after_rest_s: after,
         overall_span_page_s: overallSpan,
         slowest_s: Math.max(before ?? after, after),
-        rows_shown_after: rowsAfter,
+        rows_read_after: rowsAfter,
       };
     },
   };
+}
+
+/**
+ * What a page installs before it loads to time the busiest node's complete load:
+ * the view's probe (`NodeTimelineView.tsx`'s `useNodeLoadProbe`), told after each
+ * commit which records the chart's data and the event list hold, and a watch on
+ * the node panel. The complete mark is the first moment the panel says nothing is
+ * loading — the chart no longer busy, and no Still loading, Partial — loading or
+ * Load earlier rows in it — and both hold every record `expected` names. The node
+ * read's start line is read off a copy of its body, for the server's split.
+ */
+function nodeLoadObserver(expected: readonly string[]) {
+  const want = new Set(expected);
+  const marks = {
+    first_render: null as number | null,
+    partial: null as number | null,
+    complete: null as number | null,
+    held: { chart: 0, list: 0 },
+    split: null as unknown,
+  };
+  let held: { chart: readonly string[]; list: readonly string[] } = {
+    chart: [],
+    list: [],
+  };
+  const counted = (ids: readonly string[]) => {
+    const has = new Set(ids);
+    let found = 0;
+    for (const id of want) if (has.has(id)) found += 1;
+    return found;
+  };
+  const look = () => {
+    if (marks.complete !== null) return;
+    const now = performance.now();
+    const chart = document.querySelector('section[aria-label="Node timeline"]');
+    const list = document.querySelector(
+      'section[aria-label="Node transcript"]',
+    );
+    if (
+      marks.first_render === null &&
+      (list?.querySelector("article") ?? null) !== null
+    )
+      marks.first_render = now;
+    const said = chart?.textContent ?? "";
+    if (marks.partial === null && said.includes("Partial — loading"))
+      marks.partial = now;
+    if (
+      chart?.getAttribute("aria-busy") !== "false" ||
+      said.includes("Still loading") ||
+      said.includes("Partial — loading") ||
+      (list?.textContent ?? "").includes("Load earlier rows")
+    )
+      return;
+    const inChart = counted(held.chart);
+    const inList = counted(held.list);
+    if (inChart < want.size || inList < want.size) return;
+    marks.complete = now;
+    marks.held = { chart: inChart, list: inList };
+  };
+  Object.assign(window, {
+    __nodeLoad: marks,
+    __nodeLoadProbe: (now: typeof held) => {
+      held = now;
+      look();
+    },
+  });
+  const fetched = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const response = await fetched(input, init);
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    if (url.includes("/timeline/node-stream") && response.body !== null) {
+      const reader = response
+        .clone()
+        .body?.pipeThrough(new TextDecoderStream())
+        .getReader();
+      void (async () => {
+        let text = "";
+        for (;;) {
+          const read = await reader?.read();
+          if (read === undefined || read.done) return;
+          text += read.value;
+          const end = text.indexOf("\n");
+          if (end >= 0) {
+            marks.split = JSON.parse(text.slice(0, end)).split;
+            await reader?.cancel();
+            return;
+          }
+        }
+      })();
+    }
+    return response;
+  };
+  const start = () => {
+    new MutationObserver(look).observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true,
+    });
+    setInterval(look, 50);
+  };
+  if (document.documentElement === null)
+    document.addEventListener("DOMContentLoaded", start);
+  else start();
+}
+
+const nodeLoadSchema = z.object({
+  first_render: z.number().nullable(),
+  partial: z.number().nullable(),
+  complete: z.number().nullable(),
+  held: z.object({ chart: z.number(), list: z.number() }),
+  split: z
+    .object({ heads_s: z.number(), fetch_s: z.number(), build_s: z.number() })
+    .nullable(),
+});
+
+const resourceSchema = z.array(
+  z.object({
+    transfer: z.number(),
+    decoded: z.number(),
+    ttfb_ms: z.number(),
+  }),
+);
+
+/**
+ * The busiest node's Timeline opened three times, each on a fresh server with the
+ * bundle in the HTTP cache, and read until its chart and event list each hold every
+ * record of the node's complete timeline document with no loading, partial or Load
+ * earlier mark in the node panel: `dag-ui-node-timeline-complete-seconds`.
+ */
+async function nodeTimelineComplete(
+  browser: Browser,
+  world: LargeWorld,
+  port: number,
+  complete: Complete,
+): Promise<LargeRun["node_timeline_complete"]> {
+  const expected = [
+    ...new Set(
+      complete.nodeTimeline.spans.flatMap((span) =>
+        z
+          .array(z.object({ id: z.string(), record_id: z.string().optional() }))
+          .parse(span.events)
+          .map((event) => event.record_id ?? event.id),
+      ),
+    ),
+  ];
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+  });
+  try {
+    const open = async () => {
+      const { origin, server } = await serveLarge(world, port);
+      const page = await context.newPage();
+      await page.addInitScript(nodeLoadObserver, expected);
+      await page.goto(
+        `${origin}${urlOf(world.run, "node", world.busiestNode)}`,
+        {
+          waitUntil: "commit",
+        },
+      );
+      return { page, server };
+    };
+    // A primer that leaves the bundle in this context's HTTP cache.
+    const primer = await open();
+    await primer.page.close();
+    await stopServing(primer.server);
+    const readings: LargeRun["node_timeline_complete"]["readings"] = [];
+    for (let index = 0; index < 3; index += 1) {
+      const { page, server } = await open();
+      await expect
+        .poll(() => page.evaluate("window.__nodeLoad?.complete ?? null"), {
+          timeout: NEVER,
+          message: "the busiest node's timeline never held every record",
+        })
+        .not.toBeNull();
+      const marks = nodeLoadSchema.parse(
+        await page.evaluate("window.__nodeLoad"),
+      );
+      const resources = resourceSchema.parse(
+        await page.evaluate(`performance
+          .getEntriesByType("resource")
+          .filter((entry) => entry.name.includes("/timeline/node-stream"))
+          .map((entry) => ({
+            transfer: entry.transferSize,
+            decoded: entry.decodedBodySize,
+            ttfb_ms: entry.responseStart - entry.requestStart,
+          }))`),
+      );
+      const toSeconds = (ms: number | null) =>
+        ms === null ? null : seconds(ms);
+      readings.push({
+        seconds: toSeconds(marks.complete),
+        first_render_s: toSeconds(marks.first_render),
+        partial_s: toSeconds(marks.partial),
+        requests: resources.length,
+        bytes_decoded: resources.reduce((sum, each) => sum + each.decoded, 0),
+        bytes_on_wire: resources.reduce((sum, each) => sum + each.transfer, 0),
+        server: {
+          ttfb_s: toSeconds(resources[0]?.ttfb_ms ?? null),
+          heads_s: marks.split?.heads_s ?? null,
+          fetch_s: marks.split?.fetch_s ?? null,
+          build_s: marks.split?.build_s ?? null,
+        },
+        held: { expected: expected.length, ...marks.held },
+        host_load: hostLoad(),
+      });
+      await page.close();
+      await stopServing(server);
+    }
+    const taken = readings.flatMap((reading) =>
+      reading.seconds === null ? [] : [reading.seconds],
+    );
+    return { readings, median_s: median(taken) };
+  } finally {
+    await context.close();
+  }
 }
 
 async function statusRead(world: LargeWorld, port: number) {
@@ -1485,6 +1706,12 @@ async function measureLargeRun(browser: Browser): Promise<Measured> {
       slowest_view: read[slowestIndex] ?? "graph",
       slowest_s: medians[slowestIndex] ?? 0,
     };
+    const nodeComplete = await nodeTimelineComplete(
+      browser,
+      world,
+      port,
+      complete,
+    );
     const { rest, history } = await restArrived(world, port, browser, complete);
     const status = await statusRead(world, port);
     const unread: Record<string, number> = {};
@@ -1501,6 +1728,7 @@ async function measureLargeRun(browser: Browser): Promise<Measured> {
       first_view: firstView,
       rest_arrived: rest,
       history_page: history,
+      node_timeline_complete: nodeComplete,
       status,
       host_load: { start: hostStart, end: hostLoad() },
     };
@@ -1733,7 +1961,7 @@ test("a large run's first screens, the rest, its history and its status, at real
   const git = (args: string[]) =>
     execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
   const telemetry = largeTelemetrySchema.parse({
-    schema_version: 3,
+    schema_version: 4,
     recorded_at: new Date().toISOString(),
     commit: git(["rev-parse", "HEAD"]),
     dirty: git(["status", "--porcelain"]) !== "",

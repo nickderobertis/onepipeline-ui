@@ -14,7 +14,7 @@
  *     --metric human-items-requests|human-items-lag
  *   node apps/dag-ui-e2e/read-latency/read-latency-budget.mjs \
  *     --telemetry apps/dag-ui-e2e/read-latency/telemetry/read-latency-large.json \
- *     --metric first-view|rest-arrived|history-page|status
+ *     --metric first-view|rest-arrived|history-page|node-timeline-complete|status
  *
  * Exits 0 having reported the figure, 1 when the telemetry is absent or does not
  * state the workload, and 2 on a usage error.
@@ -114,6 +114,13 @@ const MEASURES = {
     return {
       value: page.slowest_s,
       detail: { ...page, ...provenance(telemetry) },
+    };
+  },
+  "node-timeline-complete"(telemetry) {
+    const { readings, median_s } = large(telemetry).node_timeline_complete;
+    return {
+      value: median_s,
+      detail: { median_s, readings, ...provenance(telemetry) },
     };
   },
   status(telemetry) {
