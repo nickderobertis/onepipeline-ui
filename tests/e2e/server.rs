@@ -130,6 +130,41 @@ fn cli_reply(
     Ok(json!({ "receipt": receipt }))
 }
 
+/// [`cli_reply`], run from `dir` — for a reply whose run reads its project, and
+/// so how its repositories are classified, off the working directory the server
+/// runs in.
+fn cli_reply_in(
+    dir: &Path,
+    root: &Path,
+    run: &str,
+    envelope: &str,
+    environment: &[(&str, &str)],
+) -> Result<Value, String> {
+    let files = tempfile::tempdir().expect("the reply's envelope file");
+    let path = files.path().join("reply.json");
+    fs::write(&path, envelope).expect("the envelope");
+    let output = std::process::Command::new(sibling::binary())
+        .args([
+            "reply",
+            run,
+            path.to_str().expect("a UTF-8 path"),
+            "--as",
+            "user",
+        ])
+        .current_dir(dir)
+        .env(onepipeline_ui::store::RUNS_DIR_ENV, root)
+        .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+        .env_remove(onepipeline::cli::WAKE_BUDGET_ENV)
+        .envs(environment.iter().copied())
+        .output()
+        .expect("the provisioned onepipeline runs");
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let receipt: Value = serde_json::from_slice(&output.stdout).expect("the reply's receipt");
+    Ok(json!({ "receipt": receipt }))
+}
+
 /// `onepipeline attest RUN REF`.
 fn engine_attest(root: &Path, run: &str, reference: &str) -> Result<Value, String> {
     onepipeline::verbs::attest(&run_paths(root, run), reference)
@@ -18065,23 +18100,20 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
     );
 
     let state = dir.join("state");
-    let serving = Serving::start_in_as_with_env(
-        workspace,
-        fixture_run::SESSION,
-        &[
-            ("ONEPIPELINE_PROJECT_DIR", &dir.display().to_string()),
-            ("XDG_STATE_HOME", &state.display().to_string()),
-            (
-                scratch_repo::GIT_CONFIG_ENV,
-                &repos.private.gitconfig.display().to_string(),
-            ),
-            (onevcs::branches::PREFIX_ENV, ""),
-            (
-                scratch_repo::GH_ENV,
-                &repos.refusing_gh.display().to_string(),
-            ),
-        ],
-    );
+    let project = dir.display().to_string();
+    let state_home = state.display().to_string();
+    let gitconfig = repos.private.gitconfig.display().to_string();
+    let gh = repos.refusing_gh.display().to_string();
+    // The project the run classifies its repositories by: the server's, and the
+    // reply's, which reads the same plan home off its own process.
+    let environment: [(&str, &str); 5] = [
+        ("ONEPIPELINE_PROJECT_DIR", &project),
+        ("XDG_STATE_HOME", &state_home),
+        (scratch_repo::GIT_CONFIG_ENV, &gitconfig),
+        (onevcs::branches::PREFIX_ENV, ""),
+        (scratch_repo::GH_ENV, &gh),
+    ];
+    let serving = Serving::start_in_as_with_env(workspace, fixture_run::SESSION, &environment);
     let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
     let node_ids = |detail: &Value| -> Vec<String> {
         detail["graph"]["plan"]["tasks"]
@@ -18105,8 +18137,31 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
         "task": "Ship outer.\n\n## Acceptance criteria\n\n- outer is published.\n",
         "deps": [producer],
     }}]});
-    let said = engine_reply(&serving.runs_root(), run, None, &ordinary.to_string())
-        .expect_err("the engine refuses the ordinary dependency");
+    // The reply is the CLI's, from the workspace and in the environment the server
+    // runs under, so the engine classifies the run's repositories as it does there.
+    let onevcs_home = dir
+        .join(crate::serving::ONEVCS_HOME_DIR)
+        .display()
+        .to_string();
+    let cache = dir.join("cache").display().to_string();
+    let config = dir.join("config").display().to_string();
+    let replying: Vec<(&str, &str)> = environment
+        .iter()
+        .copied()
+        .chain([
+            (crate::serving::ONEVCS_HOME_ENV, onevcs_home.as_str()),
+            ("XDG_CACHE_HOME", cache.as_str()),
+            ("XDG_CONFIG_HOME", config.as_str()),
+        ])
+        .collect();
+    let said = cli_reply_in(
+        &dir,
+        &serving.runs_root(),
+        run,
+        &ordinary.to_string(),
+        &replying,
+    )
+    .expect_err("the engine refuses the ordinary dependency");
     assert!(said.contains("ordinary dependency"), "{said}");
     assert!(
         said.contains("generalize -> preserve -> export -> consume"),
