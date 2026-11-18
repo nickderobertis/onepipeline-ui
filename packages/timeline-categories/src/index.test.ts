@@ -24,6 +24,11 @@ const repoFile = (path: string): string =>
  * they do not have, and the second test below fails when the served store writes
  * one.
  *
+ * So a producer's new kind lands here because the crate's gate demands it — the
+ * pattern `apps/dag-ui/AGENTS.md` sets for a vocabulary this app copies — and the
+ * entry is this package's decision, not the producer's concept: the producer owns
+ * the kind, this package the category it reads under.
+ *
  * The *category* is not gated and cannot be — which of the eleven a kind reads
  * under is a decision rather than a fact about the producer — so a kind reaching
  * either gate is one nobody has decided yet, not a defect. An unrecognized kind
@@ -60,6 +65,11 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, and it failed naming exactly these two kinds when the pin moved to 0.106.3.
   "command-started": "session",
   "command-exited": "session",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
+  // A node's guard starting, and the verdict it reached: a gate on the node.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` requires every kind the linked `onepipeline::event::PIPELINE_KINDS` declares to appear in CORPUS, and it failed naming exactly these two when the pin moved to 0.114.0; this file's per-kind suppressions above record the same for each earlier addition.
+  "guard-started": "verification",
+  "guard-evaluated": "verification",
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   "planner-surface-queued": "planning",
   // A surface a bus hook kept off the run's channel: the exchange with the

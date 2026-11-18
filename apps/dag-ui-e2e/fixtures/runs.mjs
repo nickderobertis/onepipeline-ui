@@ -4311,9 +4311,10 @@ export function reviewLoopFacts() {
 }
 
 /**
- * The command-steps corpus: five `kind: command` nodes the engine ran itself —
+ * The command-steps corpus: six `kind: command` nodes the engine ran itself —
  * two `done`, one `failed` with `command-failed`, one `failed` with
- * `command-timed-out` and one never started — and two refused live edits, one of
+ * `command-timed-out`, one never started, and one its guard found not needed,
+ * settled `done` with outcome `not-needed` — and two refused live edits, one of
  * them the run's plan-edit hook's.
  *
  * The records are one document, `command-steps.json`, which `tests/e2e/server.rs`
@@ -4348,8 +4349,9 @@ const COMMAND_STEPS = z
           source: z.literal("pipeline"),
           kind: z.string().min(1),
           node: commandId.optional(),
-          // A log named relative to the run is one of the run's command logs;
-          // an absolute one is another host's, and is never written here.
+          // A log named relative to the run is one of the run's command or
+          // guard logs; an absolute one is another host's, and is never written
+          // here.
           payload: z
             .object({
               log: z
@@ -4357,7 +4359,7 @@ const COMMAND_STEPS = z
                 .refine(
                   (log) =>
                     isAbsolute(log) ||
-                    /^commands\/[A-Za-z0-9._-]+\.log$/u.test(log),
+                    /^(commands|guards)\/[A-Za-z0-9._-]+\.log$/u.test(log),
                 )
                 .optional(),
             })
