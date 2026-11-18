@@ -8,6 +8,7 @@ import {
   API_V2_PATHS,
   agentRoleSchema,
   agentSessionSchema,
+  conversationTurnSchema,
   dagConversationSchema,
   frameCarriesWholeEvents,
   graphPayloadSchema,
@@ -594,6 +595,44 @@ describe("agent roles", () => {
       dagConversationSchema.parse({
         ...attributed,
         attribution: { transportRole: "agent", agentRole: "not a member" },
+      }),
+    ).toThrow();
+  });
+
+  test("a turn's words are read in place, and only as a message or a reasoning", () => {
+    const turn = {
+      assistant: "The gate passed.",
+      failureKind: null,
+      harness: "oneagentgraph",
+      id: "node-scope-1.worker.0",
+      model: null,
+      reasoning: null,
+      status: "turn-completed",
+      timestamp: "2026-07-26T12:00:00Z",
+      tools: [{ index: 2, kind: "tool_call", name: "Bash" }],
+      unknown: {},
+      usage: {},
+      user: "Prove the change.",
+    };
+    const words = [
+      { index: 0, kind: "reasoning", text: "The gate is the quickest proof." },
+      { index: 1, kind: "message", text: "Running the gate first." },
+    ];
+    expect(
+      conversationTurnSchema.parse({ ...turn, agentEvents: words }).agentEvents,
+    ).toEqual(words);
+    // A turn that said nothing carries no words at all, as before schema 30.
+    expect(conversationTurnSchema.parse(turn).agentEvents).toBeUndefined();
+    expect(() =>
+      conversationTurnSchema.parse({
+        ...turn,
+        agentEvents: [{ index: 0, kind: "tool_call", text: "not a word" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      conversationTurnSchema.parse({
+        ...turn,
+        agentEvents: [{ index: -1, kind: "message", text: "no place" }],
       }),
     ).toThrow();
   });
