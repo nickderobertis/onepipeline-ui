@@ -1,4 +1,16 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import {
+  axisTicks,
+  CLOCK,
+  crosshairReading,
+  instantOfClock,
+  intersects,
+  lines,
+  OFFSET,
+  offsetMs,
+  readAxis,
+  readoutPrecisionMs,
+} from "./axis-readings";
 import { runs } from "./fixture-facts";
 import { appPlot } from "./observatory-locators";
 
@@ -13,73 +25,42 @@ import { appPlot } from "./observatory-locators";
  * the elapsed time it names to the elapsed time the markers name.
  */
 
-/** A marker's label, `HH:MM:SS +<elapsed>`, and what it stands for. */
-interface Tick {
-  readonly at: number;
-  readonly x: number;
-  readonly elapsedMs: number;
-  readonly unitMs: number;
-}
-
-/** `+1.5 s`, `+2.3 min`, `+120 ms` — the elapsed reading — in milliseconds. */
-function elapsed(text: string): { ms: number; unitMs: number } {
-  const match = /\+(\d+(?:\.\d+)?) (ms|s|min)$/.exec(text.trim());
-  if (match === null) throw new Error(`'${text}' names no elapsed time`);
-  const [, value = "", unit] = match;
-  const scale = unit === "ms" ? 1 : unit === "s" ? 1_000 : 60_000;
-  // The reading is rounded to a tenth of its unit, or a whole millisecond.
-  return { ms: Number(value) * scale, unitMs: unit === "ms" ? 1 : scale / 10 };
-}
-
-/** The markers drawn on one timeline's axis, left to right. */
-async function ticksOf(timeline: Locator): Promise<Tick[]> {
-  // Found by what a reader reads on each: a wall-clock time and the elapsed
-  // time since the plot's start. The instant each stands for is the marker's own
-  // attribute, read once it is found.
-  const marks = timeline
-    .getByLabel("Timeline plot. Scroll to zoom or drag to select a range.")
-    .getByText(/^\d{2}:\d{2}:\d{2}(?: [AP]M)? \+\d+(?:\.\d+)? (?:ms|s|min)$/);
-  await expect(marks.nth(1)).toBeVisible();
-  const ticks: Tick[] = [];
-  for (const mark of await marks.all()) {
-    const box = await mark.boundingBox();
-    const at = Number(await mark.getAttribute("data-tick-time"));
-    const reading = elapsed((await mark.textContent()) ?? "");
-    // The last marker is drawn right-aligned on its instant; every other one
-    // starts at it.
-    const transform = await mark.evaluate((node) => node.style.transform);
-    if (box === null) throw new Error("a marker drawn nowhere");
-    ticks.push({
-      at,
-      x: transform.includes("-100%") ? box.x + box.width : box.x,
-      elapsedMs: reading.ms,
-      unitMs: reading.unitMs,
-    });
-  }
-  return ticks;
-}
-
-/** Hover a timeline's plot and hold what its crosshair reads to its markers. */
+/**
+ * Hover a timeline's plot and hold what its crosshair reads to its axis: the wall
+ * clock to the instants the centred ticks either side stand for, and the elapsed
+ * time to the elapsed time those ticks name.
+ */
 async function crosshairAgrees(page: Page, timeline: Locator): Promise<void> {
   // The first screen's region is replaced when the app takes over, so scrolling to
   // it before then scrolls a removed element: wait for the app's own plot, as the
   // zoom journeys below do.
   await expect(appPlot(timeline)).toBeVisible();
   await timeline.scrollIntoViewIfNeeded();
-  const ticks = await ticksOf(timeline);
-  expect(ticks.length).toBeGreaterThanOrEqual(2);
-  // Round steps, never crowded: each at least the requested 80 px from the next.
+  const ticks = await readAxis(timeline);
+  for (const tick of ticks) {
+    expect(tick.clock).toMatch(CLOCK);
+    expect(tick.offset).toMatch(OFFSET);
+  }
+  // Round steps, never crowded: each label clear of the next, and every centred
+  // tick at least the requested 80 px from the next.
   for (const [index, tick] of ticks.slice(1).entries()) {
     const before = ticks[index];
     if (before === undefined) continue;
     expect(tick.at).toBeGreaterThan(before.at);
-    expect(tick.x - before.x).toBeGreaterThanOrEqual(79);
+    expect(intersects(before.box, tick.box)).toBe(false);
     expect((tick.at - before.at) % 1_000).toBe(0);
   }
-  const first = ticks[0];
-  const last = ticks.at(-1);
-  if (first === undefined || last === undefined) throw new Error("no markers");
-  // Between the outer markers, where each is a known instant.
+  const centred = ticks.filter((tick) => tick.alignment === "center");
+  for (const [index, tick] of centred.slice(1).entries()) {
+    const before = centred[index];
+    if (before !== undefined)
+      expect(tick.x - before.x).toBeGreaterThanOrEqual(79);
+  }
+  const first = centred[0];
+  const last = centred.at(-1);
+  if (first === undefined || last === undefined || first === last)
+    throw new Error("fewer than two ticks drawn on their instants");
+  // Between the outer centred ticks, where each is a known instant.
   const x = (first.x + last.x) / 2;
   const plot = timeline.getByLabel(
     "Timeline plot. Scroll to zoom or drag to select a range.",
@@ -87,27 +68,33 @@ async function crosshairAgrees(page: Page, timeline: Locator): Promise<void> {
   const box = await plot.boundingBox();
   if (box === null) throw new Error("a plot drawn nowhere");
   await page.mouse.move(x, box.y + box.height / 2);
-  const crosshair = timeline.getByLabel("Timeline crosshair");
-  await expect(crosshair).toBeVisible();
-  const label = ((await crosshair.textContent()) ?? "").trim();
-  const [stamp = "", ...rest] = label.split(" ");
-  const at = Date.parse(stamp);
-  expect(Number.isFinite(at), label).toBe(true);
-  // The time at the point: the markers either side say where it lies, to
-  // within a pixel's worth of time.
+  const reading = await crosshairReading(timeline);
+  const label = `${reading.clock} ${reading.offset}`;
+  // The time at the point: the ticks either side say where it lies, to within a
+  // pixel's worth of time and the step the readout rounds to.
   const perPixel = (last.at - first.at) / (last.x - first.x);
+  const precision = readoutPrecisionMs(perPixel);
   const expected = first.at + (x - first.x) * perPixel;
-  expect(Math.abs(at - expected)).toBeLessThanOrEqual(2 * perPixel + 1);
-  // The elapsed time: the same origin the markers count from.
-  const reading = elapsed(rest.join(" "));
-  const sinceFirst = reading.ms - first.elapsedMs;
+  const at = await instantOfClock(page, reading.clock, expected);
+  expect(Math.abs(at - expected), label).toBeLessThanOrEqual(
+    2 * perPixel + precision + 1,
+  );
+  // The elapsed time: the same origin the ticks count from. A tick's elapsed
+  // reading is rounded to the step its grid needs, a second or a minute.
+  expect(reading.offset).toMatch(OFFSET);
+  const step = Math.min(
+    ...ticks.slice(1).map((tick, index) => tick.at - (ticks[index]?.at ?? 0)),
+  );
+  const tickPrecision = step >= 60_000 ? 60_000 : step >= 1_000 ? 1_000 : step;
   expect(
-    Math.abs(sinceFirst - (at - first.at)),
-    `${label} against ${first.elapsedMs}ms at ${first.at}`,
-  ).toBeLessThanOrEqual(Math.max(reading.unitMs, first.unitMs));
+    Math.abs(
+      offsetMs(reading.offset) - offsetMs(first.offset) - (at - first.at),
+    ),
+    `${label} against ${first.offset} at ${first.at}`,
+  ).toBeLessThanOrEqual(tickPrecision + precision);
   // Leaving the plot takes it away.
   await page.mouse.move(box.x + box.width / 2, box.y - 40);
-  await expect(crosshair).toHaveCount(0);
+  await expect(timeline.getByLabel("Timeline crosshair")).toHaveCount(0);
 }
 
 test("the Overall view marks time on its axis and reads it under the pointer", async ({
@@ -154,9 +141,10 @@ for (const [where, url, region] of [
     ).toBeEnabled();
     // The wheel scrolls the page as well as zooming the plot; look at it again.
     await timeline.scrollIntoViewIfNeeded();
-    const labels = plot.getByText(
-      /^\d{2}:\d{2}:\d{2}(?: [AP]M)? \+\d+(?:\.\d+)? (?:ms|s|min)$/,
-    );
+    const labels = axisTicks(timeline);
     await expect(labels.first()).toBeInViewport();
+    const [clock, offset] = await lines(labels.first());
+    expect(clock).toMatch(CLOCK);
+    expect(offset).toMatch(OFFSET);
   });
 }

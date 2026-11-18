@@ -4,6 +4,11 @@ import {
   subscribedSchema,
 } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import {
+  crosshairReading,
+  instantOfClock,
+  readoutPrecisionMs,
+} from "./axis-readings";
 import corpus from "./fixtures/timeline-recorded.json" with { type: "json" };
 import {
   appPlot,
@@ -19,7 +24,11 @@ const nodeUrl = `/?run=${corpus.run_id}&node=${corpus.node}`;
  * The instant a timeline's plot ends at, read as a reader reads it: the
  * crosshair's time with the pointer at the plot's right edge.
  */
-async function plotEnd(page: Page, timeline: Locator): Promise<number> {
+async function plotEnd(
+  page: Page,
+  timeline: Locator,
+  near: number,
+): Promise<number> {
   await timeline.scrollIntoViewIfNeeded();
   const plot = timeline.getByLabel(
     "Timeline plot. Scroll to zoom or drag to select a range.",
@@ -27,17 +36,17 @@ async function plotEnd(page: Page, timeline: Locator): Promise<number> {
   const box = await plot.boundingBox();
   if (box === null) throw new Error("a plot drawn nowhere");
   await page.mouse.move(box.x + box.width - 0.5, box.y + box.height / 2);
-  const crosshair = timeline.getByLabel("Timeline crosshair");
-  await expect(crosshair).toBeVisible();
-  const [stamp = ""] = ((await crosshair.textContent()) ?? "")
-    .trim()
-    .split(" ");
+  const { clock } = await crosshairReading(timeline);
   await page.mouse.move(box.x + box.width / 2, box.y - 40);
-  return Date.parse(stamp);
+  return instantOfClock(page, clock, near);
 }
 
-/** How far one pixel of a plot `width` wide spans, over `span` milliseconds. */
-const pixelOf = (span: number, width: number) => Math.ceil(span / width) + 1;
+/**
+ * How far one pixel of a plot `width` wide spans, over `span` milliseconds, and the
+ * step the crosshair rounds its reading to there.
+ */
+const pixelOf = (span: number, width: number) =>
+  Math.ceil(span / width) + 1 + readoutPrecisionMs(span / width);
 
 /**
  * What a detail calls a record's field: its wire key read as words, `exit_code`
@@ -225,7 +234,7 @@ test("Overall ends at settlement and keeps the late completion as a marker", asy
     name: "Graph timeline",
     exact: true,
   });
-  const ended = await plotEnd(page, overall);
+  const ended = await plotEnd(page, overall, Date.parse(executionEnd));
   const started = Date.parse(
     served.spans.find((span) => span.kind === "run")?.started_at ?? "",
   );
@@ -314,7 +323,7 @@ for (const terminal of corpus.terminations) {
     if (end === undefined) throw new Error("execution end");
     // The plot ends at the terminal record: the crosshair at its right edge
     // reads it.
-    const ended = await plotEnd(page, graph);
+    const ended = await plotEnd(page, graph, Date.parse(end));
     const started = Date.parse(
       served.spans.find((span) => span.kind === "run")?.started_at ?? "",
     );
