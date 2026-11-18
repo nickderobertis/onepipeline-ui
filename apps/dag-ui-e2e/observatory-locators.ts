@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 /**
  * The two readings these journeys reach for most, by the name a reader has for them
@@ -101,33 +101,23 @@ export async function navigationTakesRowsLive(page: Page): Promise<void> {
 }
 
 /**
- * Read a node's whole transcript back through the page's own control. Its first
- * answer holds each span's latest rows, so what comes before them is asked for;
- * a page that fails on the way fails here, naming what failed.
+ * Wait until a node's whole timeline is held. A node reads every row as it opens,
+ * and its chart and event list say they are being filled until that read lands; a
+ * read that fails on the way fails here, naming what failed.
  */
-export async function loadAllEarlierRows(page: Page): Promise<void> {
-  const more = page.getByRole("button", { name: /^Load(ing)? earlier rows/ });
-  // A short window: a transcript short enough to hold whole offers no control.
-  await more
-    .first()
-    .waitFor({ state: "attached", timeout: 3_000 })
-    .catch(() => undefined);
-  while ((await more.count()) > 0) {
-    await more
-      .first()
-      .click({ timeout: 15_000 })
-      .catch(() => undefined);
-    await page.waitForTimeout(50);
-  }
-  // A failed page replaces the control with its error, which ends the loop above
-  // with rows still missing: that is a failure, not the transcript's start.
-  const failed = page.getByRole("alert").filter({
-    hasText: "Earlier rows did not load",
-  });
-  if ((await failed.count()) > 0)
-    throw new Error(
-      `the transcript stopped short: ${await failed.first().innerText()}`,
-    );
+export async function nodeTimelineHeld(page: Page): Promise<void> {
+  const chart = page.getByRole("region", { name: "Node timeline" });
+  const failed = page
+    .getByRole("alert")
+    .filter({ hasText: "This node's timeline did not load" });
+  await expect(chart.or(failed).first()).toBeVisible();
+  await expect(async () => {
+    if ((await failed.count()) > 0)
+      throw new Error(
+        `the node's timeline did not load: ${await failed.first().innerText()}`,
+      );
+    await expect(chart).toHaveAttribute("aria-busy", "false", { timeout: 0 });
+  }).toPass({ timeout: 60_000 });
 }
 
 /**

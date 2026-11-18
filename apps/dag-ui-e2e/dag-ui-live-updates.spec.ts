@@ -230,10 +230,16 @@ async function shown(page: Page, view: string, node: string): Promise<void> {
     await expect(
       page.getByRole("region", { name: "Graph timeline" }),
     ).toBeVisible();
-  else
+  else {
     await expect(
       page.getByRole("region", { name: `Timeline for ${node}` }),
     ).toBeVisible();
+    // A node reads its whole timeline once as it opens; the view is shown once
+    // that read has landed and the chart says it is no longer being filled.
+    await expect(
+      page.getByRole("region", { name: "Node timeline" }),
+    ).toHaveAttribute("aria-busy", "false", { timeout: FRAME_PATIENCE });
+  }
 }
 
 /** Move to `view` the way a reader does: by its tab, or a node's card. */
@@ -665,11 +671,15 @@ test("a dropped stream resumes from its last frame, and every change made meanwh
     ).toBe(410);
     recordActivity(server, run, node, `on ${view} ${since}`);
     await page.waitForTimeout(1_000);
+    // Opening a node reads its whole timeline once, as it opens; nothing else is
+    // read, and nothing at all for the view left behind.
     expect(
       requestsSince(wire, since).filter((request) =>
         request.startsWith("GET /api/v2/runs/"),
       ),
-    ).toEqual([]);
+    ).toEqual(
+      view === "node" ? [`GET /api/v2/runs/${run}/timeline/node-stream`] : [],
+    );
     // Only the view on screen is patched: a hidden timeline is not.
     const patched = new Set(
       wire.frames

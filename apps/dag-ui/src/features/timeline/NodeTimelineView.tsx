@@ -644,6 +644,9 @@ function NodeExecution({
   );
   const plotArea = useRef<HTMLElement | null>(null);
   const { loadSpan } = history;
+  // Both the chart and the list fill as the node's read arrives, so both say they
+  // are still being filled until it has.
+  const nodeLoading = history.nodeLoad?.state === "loading";
   const openedSpan =
     selected?.rowKind === "span" ? selected.span.id : undefined;
   useEffect(() => {
@@ -662,6 +665,7 @@ function NodeExecution({
   return (
     <div className="node-execution" data-expanded={expanded}>
       <section
+        aria-busy={nodeLoading}
         aria-label="Node timeline"
         className="node-timeline-sticky"
         data-testid="node-timeline"
@@ -705,6 +709,7 @@ function NodeExecution({
         />
       </section>
       <section
+        aria-busy={nodeLoading}
         aria-label="Node transcript"
         className="node-transcript"
         ref={transcriptRef}

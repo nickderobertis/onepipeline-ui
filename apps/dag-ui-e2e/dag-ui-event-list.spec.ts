@@ -11,8 +11,8 @@ import { z } from "zod";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
 import corpus from "./fixtures/event-list.json" with { type: "json" };
 import {
-  loadAllEarlierRows,
   loadRunRecords,
+  nodeTimelineHeld,
   openRepeatedLoops,
 } from "./observatory-locators";
 
@@ -767,7 +767,7 @@ test("no Decisions or Detailed control exists, and nothing the view asks for car
     asked.push({ url: request.url(), body: request.postData() ?? "" }),
   );
   const transcript = await openNode(page, "held");
-  await loadAllEarlierRows(page);
+  await nodeTimelineHeld(page);
   await blocks(transcript)
     .first()
     .getByRole("article")

@@ -23,6 +23,7 @@
  *                      | --event-list-corpus
  *                      | --transcripts-corpus
  *                      | --held-turn-corpus | --large-run-views-corpus
+ *                      | --node-timeline-corpus
  *                      | --readability-corpus | --human-items-world NAME]
  *                                                  build the fixture and serve it,
  *                                                  the browser view beside it with --ui;
@@ -39,7 +40,9 @@
  *                                                  held turn's with
  *                                                  --held-turn-corpus, and the
  *                                                  large-run views' with
- *                                                  --large-run-views-corpus, the
+ *                                                  --large-run-views-corpus, a
+ *                                                  busy node's whole-timeline load
+ *                                                  with --node-timeline-corpus, the
  *                                                  readability journeys' with
  *                                                  --readability-corpus; the
  *                                                  action-items journeys' with
@@ -470,6 +473,32 @@ async function serve(workspace, port, ui, corpus) {
   });
 }
 
+/**
+ * The node-timeline journeys' workload, in `load/corpus.mjs`'s `workload.json` shape:
+ * a live run of 5,000 records whose busiest node holds 3,200 of them.
+ */
+const NODE_TIMELINE_WORKLOAD = {
+  runs: 2,
+  projects: 1,
+  other_live_runs: 0,
+  stopped_runs: 0,
+  open_live_run_records_at_start: 30,
+  settled_big_records: 40,
+  settled_small_records: 40,
+  large: {
+    state: "live",
+    records: 5_000,
+    journal_bytes: 1,
+    streams: 20,
+    ordinary_spans: 20,
+    session_records: 29,
+    harness_spans: 20,
+    checkpoint_bytes: 20_000,
+    busiest_node_records: 3_200,
+    off_graph_node_records: 100,
+  },
+};
+
 function parseArgs(argv) {
   const flags = new Set([
     "--settle-dashboard",
@@ -488,6 +517,7 @@ function parseArgs(argv) {
     "--event-list-corpus",
     "--held-turn-corpus",
     "--large-run-views-corpus",
+    "--node-timeline-corpus",
     "--readability-corpus",
   ]);
   const valued = new Set([
@@ -613,6 +643,21 @@ if (
   die(
     "--large-run-views-corpus serves its own corpus",
     "pass --large-run-views-corpus with --workspace, --port and --ui alone",
+  );
+}
+if (
+  args["node-timeline-corpus"] &&
+  (asked.length > 0 ||
+    args["shutdown-corpus"] ||
+    args["preserved-corpus"] ||
+    args["review-corpus"] ||
+    args["review-loop-corpus"] ||
+    args["held-turn-corpus"] ||
+    args["large-run-views-corpus"])
+) {
+  die(
+    "--node-timeline-corpus serves its own corpus",
+    "pass --node-timeline-corpus with --workspace, --port and --ui alone",
   );
 }
 if (args["shutdown-corpus"] && args["preserved-corpus"]) {
@@ -851,6 +896,22 @@ if (args.stall) {
         corpus = { build: buildEventListRuns, facts: eventListFacts };
       } else if (args["large-run-views-corpus"]) {
         corpus = { build: buildLargeRunViews, facts: largeRunViewsFacts };
+      } else if (args["node-timeline-corpus"]) {
+        // The large run's shape from `load/corpus.mjs`, at a size a journey reads
+        // whole: one live run whose busiest node holds every record family,
+        // turns whose opening and close share a row id among them.
+        let written;
+        corpus = {
+          build: (root) => {
+            const workload = join(workspace, "node-timeline-workload.json");
+            writeFileSync(workload, JSON.stringify(NODE_TIMELINE_WORKLOAD));
+            written = buildLoadCorpus(root, workload);
+          },
+          facts: () => ({
+            run: written.openLiveRun,
+            node: written.large.busiestNode,
+          }),
+        };
       } else if (args["readability-corpus"]) {
         corpus = { build: buildReadabilityRuns, facts: readabilityFacts };
       } else if (args["held-turn-corpus"]) {

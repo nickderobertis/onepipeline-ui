@@ -7,17 +7,14 @@ import {
   timelineSpanSchema,
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
+import { NODE_TIMELINE_PARTIAL_DELAY_MS } from "@onepipeline-ui/timeline-categories";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /** Rows a zoom, a span's or a whole row's expansion asks for per request. */
 const WIDE_PAGE = 500;
 
-/**
- * How long a node's timeline loads before the chart shows what has arrived as
- * partial: the `dag-ui-node-timeline-complete-seconds` budget's threshold, so a
- * node that loads inside its budget never shows the mark.
- */
-export const PARTIAL_RENDER_DELAY_MS = 7_000;
+/** How long a node's timeline loads before the chart is drawn as partial. */
+export const PARTIAL_RENDER_DELAY_MS = NODE_TIMELINE_PARTIAL_DELAY_MS;
 
 /** Reads of a node's stream before a failure is shown, the first included. */
 export const NODE_READ_ATTEMPTS = 3;

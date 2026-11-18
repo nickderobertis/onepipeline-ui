@@ -433,3 +433,15 @@ export function eventType(row: TypedRow): EventType {
   const category = eventCategory(row.kind);
   return category;
 }
+
+/**
+ * How long a node's timeline loads before its chart draws what has arrived and is
+ * marked partial, in milliseconds: the `dag-ui-node-timeline-complete-seconds`
+ * budget's threshold (`apps/dag-ui-e2e/read-latency/large-run/budgets.yaml`), so a
+ * node that loads within its budget is never marked.
+ *
+ * Here rather than in the app because the journeys that hold the mark run a
+ * controlled clock past exactly this delay, and a copy of it would pass while the
+ * app's moved.
+ */
+export const NODE_TIMELINE_PARTIAL_DELAY_MS = 7_000;
