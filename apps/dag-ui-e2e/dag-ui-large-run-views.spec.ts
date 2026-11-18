@@ -91,6 +91,10 @@ interface Asked {
 async function openHistory(page: Page) {
   const pages: Asked[] = [];
   const windowed = new Set<string>();
+  // Only the first subscription's answer is the window. A test that stops and
+  // restarts the server is answered again as the page resubscribes, and reading
+  // that body can still be pending when the test ends, which fails it.
+  let subscribed = false;
   page.on("response", async (response) => {
     const url = new URL(response.url());
     if (url.pathname.endsWith("/timeline/events")) {
@@ -100,9 +104,11 @@ async function openHistory(page: Page) {
         rows: pageSchema.parse(await response.json()).rows,
       });
     } else if (
+      !subscribed &&
       url.pathname === "/api/v2/subscriptions" &&
       response.request().method() === "POST"
     ) {
+      subscribed = true;
       const { timeline } = firstAnswerSchema.parse(await response.json())
         .initial.snapshot.visible;
       for (const span of timeline?.spans ?? [])
