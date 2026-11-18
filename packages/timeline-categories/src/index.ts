@@ -139,9 +139,11 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     // matched whole, so one spelling does not reach the other.
     // `judge` is a judge ruling on the work — one judge of a stacked panel deciding on
     // one turn is a verification of that turn, the same act as a gate's verdict.
+    // `guard` is a node's guard asking whether the node is needed at all, before any
+    // of its work starts: a gate on the node, and its verdict is the gate's.
     [
       "verification",
-      ["verification", "gate", "check", "checks", "coverage", "judge"],
+      ["verification", "gate", "check", "checks", "coverage", "judge", "guard"],
     ],
     // `release` joins this line rather than opening a twelfth category: publishing a
     // crate and merging the change that will be in it are one act to a reader

@@ -1086,6 +1086,27 @@
       "node": "every"
     },
     {
+      "source": "pipeline",
+      "kind": "guard-started",
+      "payload": {
+        "guard": ["guard-started-guard-0-value", "guard-started-guard-1-value"],
+        "log": "/runs/dag-ui-every-kind/guards/every.log",
+        "timeout_seconds": 600
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "guard-evaluated",
+      "payload": {
+        "verdict": "not-needed",
+        "duration_ms": 1234,
+        "ending": "exited",
+        "exit_code": 3
+      },
+      "node": "every"
+    },
+    {
       "source": "vcs",
       "kind": "session-opened",
       "payload": {

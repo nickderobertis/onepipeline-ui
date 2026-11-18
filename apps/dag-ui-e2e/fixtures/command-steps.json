@@ -33,7 +33,7 @@
         "plan": {
           "schema_version": 3,
           "goal": {
-            "text": "Gate the widgets release on its build, lint, integration and docs commands"
+            "text": "Gate the widgets release on its build, lint, integration, docs and changelog commands"
           },
           "name": "dag-ui-command-steps",
           "concurrency": 3,
@@ -67,6 +67,20 @@
               "kind": "command",
               "command": ["cargo", "package"],
               "deps": ["lint", "integration"]
+            },
+            {
+              "id": "changelog",
+              "kind": "command",
+              "command": [
+                "git",
+                "cliff",
+                "--unreleased",
+                "--prepend",
+                "CHANGELOG.md"
+              ],
+              "guard": ["scripts/has-unreleased-changes.sh"],
+              "guard_timeout_seconds": 60,
+              "deps": ["build"]
             }
           ]
         },
@@ -155,6 +169,37 @@
       "node": "docs",
       "payload": {
         "status": "done"
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "guard-started",
+      "node": "changelog",
+      "payload": {
+        "guard": ["scripts/has-unreleased-changes.sh"],
+        "log": "guards/changelog.log",
+        "timeout_seconds": 60
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "guard-evaluated",
+      "node": "changelog",
+      "payload": {
+        "verdict": "not-needed",
+        "ending": "exited",
+        "exit_code": 3,
+        "duration_ms": 140
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "node": "changelog",
+      "payload": {
+        "status": "done",
+        "outcome": "not-needed",
+        "detail": "no commits since v0.4.0 touch a released file"
       }
     },
     {

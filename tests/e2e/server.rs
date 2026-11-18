@@ -14145,6 +14145,10 @@ fn harness_report(
                 cost_usd: None,
             },
             usage_source: Some("json".into()),
+            calls: None,
+            diagnostics: Vec::new(),
+            overlay_env: std::collections::BTreeMap::new(),
+            overlay_timings: None,
             session_id: Some("double-session".into()),
             events,
             events_source: Some("json".into()),
@@ -16962,8 +16966,11 @@ fn a_settlement_leaves_a_stored_term_and_is_read_through_the_status_and_node_rou
 /// stream-json` and writes the task as one `user` message, then holds stdin
 /// open for control frames, so it reads that line and no more. Where oneharness
 /// refuses control — on macOS a long `$TMPDIR` puts the control socket past the
-/// 104-byte `sun_path` — the task rides `-p` as its positional instead and stdin
-/// is empty; either way the task is somewhere on the one line.
+/// 104-byte `sun_path` — the task rides stdin as plain text under `-p
+/// --input-format text`, which closes stdin after it, so this reads all of it and
+/// folds its lines onto the one; a oneharness before 0.34 put it in `-p`'s
+/// positional with stdin empty instead. Either way the task is somewhere on the
+/// one line.
 ///
 /// The harness program is the one process this suite stands in for, and it is
 /// the narrowest place to cut: everything above it — the pinned engine CLI, the
@@ -16992,6 +16999,8 @@ fn write_named_harness_standin(dir: &Path, name: &str, log: &Path) -> PathBuf {
         &standin,
         format!(
             "#!/bin/sh\nIFS= read -r prompt\n\
+             case \" $* \" in *' --input-format text '*) \
+             prompt=\"$prompt $(tr '\\n' ' ')\";; esac\n\
              printf '%s %s %s\\n' \"$0\" \"$*\" \"$prompt\" >> {:?}\n\
              printf '{{\"type\":\"result\",\
              \"subtype\":\"success\",\"is_error\":false,\"result\":\"done\",\
@@ -17978,8 +17987,10 @@ fn a_run_launched_with_validators_is_read_as_its_engine_recorded_it() {
 
 /// A harness stand-in for a dispatch on either side of the publication boundary:
 /// it records the argv it was given in `argv-<pid>.txt` under `records`, and the
-/// first line of its stdin — the stream-json prompt frame, where the turn was
-/// opened with control — beside it in `stdin-<pid>.txt`, and
+/// prompt it was handed on stdin beside it in `stdin-<pid>.txt` — the first line,
+/// which is the stream-json prompt frame, where the turn was opened with control,
+/// and the whole of stdin under `--input-format text`, which closes it after the
+/// prompt — and
 /// commits one file under [`fixture_run::EXPORT_SOURCE_DIRECTORY`] in the
 /// worktree it is run in — the one directory an export producer may change — in
 /// words that name nothing private.
@@ -17998,6 +18009,8 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
         &standin,
         format!(
             "#!/bin/sh\nIFS= read -r prompt\nprintf '%s\\n' \"$*\" > {records:?}/argv-$$.txt\n\
+             case \" $* \" in *' --input-format text '*) rest=$(cat)\n\
+             [ -n \"$rest\" ] && prompt=\"$prompt\n$rest\";; esac\n\
              printf '%s' \"$prompt\" > {records:?}/stdin-$$.txt\n\
              mkdir -p {dir}\nprintf 'a generic example\\n' > {dir}/sample-$$.md\n\
              git add {dir} && git commit -q -m 'feat: add a generic example' >&2 || exit 1\n\
@@ -18017,9 +18030,10 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
 
 /// Every dispatch [`write_exporting_harness_standin`] recorded under `records`:
 /// each one's argv followed by the task it was handed, which the adapter writes
-/// as a stream-json `user` frame on stdin where the turn has control and as
-/// `-p`'s positional where oneharness refused it (see `write_harness_standin`) —
-/// so the text is read from whichever carried it.
+/// as a stream-json `user` frame on stdin where the turn has control and, where
+/// oneharness refused it, as plain text on stdin under `--input-format text` or as
+/// `-p`'s positional (see `write_harness_standin`) — so the text is read from
+/// whichever carried it.
 #[cfg(unix)]
 fn dispatched_tasks(records: &Path) -> Vec<String> {
     fs::read_dir(records)
@@ -18040,16 +18054,20 @@ fn dispatched_tasks(records: &Path) -> Vec<String> {
             );
             let stdin = fs::read_to_string(&stdin_of).expect("a stdin record");
             let streamed = argv.contains("--input-format stream-json");
+            let piped = argv.contains("--input-format text");
             if stdin.is_empty() {
                 assert!(
-                    !streamed,
-                    "a stream-json turn was written no prompt frame: {argv}"
+                    !streamed && !piped,
+                    "a turn that reads its prompt from stdin was written none: {argv}"
                 );
                 return argv;
             }
+            if piped {
+                return format!("{argv}{stdin}");
+            }
             assert!(
                 streamed,
-                "a prompt reached stdin outside a stream-json turn: {argv}"
+                "a prompt reached stdin without a flag that reads it: {argv}"
             );
             let frame: Value = serde_json::from_str(&stdin).unwrap_or_else(|err| {
                 panic!("the prompt is not a stream-json frame: {err}: {stdin}")
@@ -22272,8 +22290,8 @@ fn check_visibility_records_reach_every_event_reading_and_the_node_checks() {
     assert_eq!(refused.status, 422, "{}", refused.body);
 }
 
-/// The command-steps corpus, served: five `kind: command` nodes and two refused
-/// live edits, one of them the run's plan-edit hook's.
+/// The command-steps corpus, served: six `kind: command` nodes, one of them
+/// guarded, and two refused live edits, one of them the run's plan-edit hook's.
 fn command_steps() -> (Serving, String) {
     let corpus = fixture_run::command_steps();
     let run = corpus["run_id"]
@@ -22328,7 +22346,7 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
         .iter()
         .map(|task| (task["id"].as_str().expect("an id").to_owned(), task.clone()))
         .collect();
-    assert_eq!(tasks.len(), 5, "{tasks:?}");
+    assert_eq!(tasks.len(), 6, "{tasks:?}");
     for task in tasks.values() {
         assert_eq!(task["kind"], json!("command"), "{task}");
     }
@@ -22498,6 +22516,61 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
         "?filter=%7B%22exclude%22%3A%5B%7B%22kind%22%3A%22edit-rejected%22%7D%2C%7B%22kind%22%3A%22command-*%22%7D%5D%7D",
     );
     assert_eq!(narrowed["graph"]["rejected_edits"], graph["rejected_edits"]);
+    assert_eq!(narrowed["graph"]["node_results"], graph["node_results"]);
+}
+
+/// A node whose guard answered *not needed* is served as the engine settled it:
+/// `done`, with outcome `not-needed` and the guard's detail, its command never
+/// run — no log and no command records. The guard's own records are on the
+/// node's timeline, and a filter that hides them changes nothing about how the
+/// node stands. A plan's `guard` and `guard_timeout_seconds` are read without
+/// error but not served: the wire's plan-task shape names neither.
+#[test]
+fn a_node_its_guard_found_not_needed_is_served_done_with_that_outcome() {
+    let corpus = fixture_run::command_steps();
+    let (serving, run) = command_steps();
+    let detail = command_steps_detail(&serving, &run, "");
+    let graph = &detail["graph"];
+    let node = "changelog";
+
+    let settled = corpus["records"]
+        .as_array()
+        .expect("the corpus's records")
+        .iter()
+        .find(|record| record["kind"] == "node-settled" && record["node"] == node)
+        .expect("the corpus settles the guarded node");
+    assert_eq!(graph["node_status"][node], json!("done"));
+    let result = &graph["node_results"][node];
+    assert_eq!(result["status"], json!("done"), "{result}");
+    assert_eq!(result["outcome"], json!("not-needed"), "{result}");
+    assert_eq!(result["detail"], settled["payload"]["detail"], "{result}");
+    assert!(result.get("log").is_none(), "{result}");
+    assert!(node_record_fields(&serving, &run, node, "command-started").is_empty());
+    assert!(node_record_fields(&serving, &run, node, "command-exited").is_empty());
+
+    assert_eq!(
+        node_record_fields(&serving, &run, node, "guard-started").len(),
+        1
+    );
+    assert_eq!(
+        node_record_fields(&serving, &run, node, "guard-evaluated").len(),
+        1
+    );
+    let settlement = node_record_fields(&serving, &run, node, "node-settled");
+    assert_eq!(settlement.len(), 1, "{settlement:?}");
+    assert_eq!(settlement[0]["status"], json!("done"), "{settlement:?}");
+    assert_eq!(
+        settlement[0]["outcome"],
+        json!("not-needed"),
+        "{settlement:?}"
+    );
+
+    let narrowed = command_steps_detail(
+        &serving,
+        &run,
+        "?filter=%7B%22exclude%22%3A%5B%7B%22kind%22%3A%22guard-*%22%7D%5D%7D",
+    );
+    assert_eq!(narrowed["graph"]["node_status"], graph["node_status"]);
     assert_eq!(narrowed["graph"]["node_results"], graph["node_results"]);
 }
 

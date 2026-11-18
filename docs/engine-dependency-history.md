@@ -850,3 +850,20 @@ fields, which reach it inside the SDK's records. Its library requirements are
 the ones 0.113.5 resolved; the lock dedupes `windows-sys`, `getrandom` and
 `base64` edges onto versions it already carried. A patch move inside 0.113
 leaves the re-exported engine types where they were.
+
+0.114.0 is the engine whose nodes may carry a guard: a program run when the node
+first becomes actionable, whose exit 3 settles the node `done` with outcome
+`not-needed` and nothing dispatched, journalled `guard-started` and
+`guard-evaluated`. This crate moves to it so that a host can adopt guards together
+with a read API linking the same engine. A guarded node reads as any settled node
+does, with its outcome served as recorded; the two guard kinds are filed under
+`verification` in the browser's timeline categories, and the plan's `guard` and
+`guard_timeout_seconds` are read but not served, because the wire's plan-task shape
+names neither. The engine's exported human-item schemas gain a planned question's
+`choices`, which the checked-in schema and the browser's generated types follow.
+It moves oneagentgraph to 0.13.2, onejudge to 0.23.5 and oneharness-core from
+0.29.1 to 0.34.0, whose report result gains four optional fields the e2e harness
+double now names, and whose report `schema_version`, 0.15, the browser tier's
+checked-in held-turn double now carries. The move is announced as a break: the re-exported
+engine types change. Its onemessagebus, onetaskgraph and onevcs requirements are
+the ones 0.113.5 resolved.

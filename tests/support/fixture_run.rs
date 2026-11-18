@@ -7939,11 +7939,12 @@ pub fn recorded_termination(kind: &str) -> Value {
     corpus
 }
 
-/// The run the command-steps corpus records: five `kind: command` nodes the
+/// The run the command-steps corpus records: six `kind: command` nodes the
 /// engine ran itself — two settled `done` (one first started on another host, one
 /// whose log the run no longer holds), one `failed` with `command-failed`, one
-/// `failed` with `command-timed-out` whose log runs past what a route serves, and
-/// one never started — and two refused live edits journalled `edit-rejected`: a
+/// `failed` with `command-timed-out` whose log runs past what a route serves, one
+/// never started, and one whose guard exited 3 and that settled `done` with outcome
+/// `not-needed`, its command never run — and two refused live edits journalled `edit-rejected`: a
 /// decline refused by kind, and an `add` the run's plan-edit hook refused.
 ///
 /// The corpus is one document, `apps/dag-ui-e2e/fixtures/command-steps.json`,
