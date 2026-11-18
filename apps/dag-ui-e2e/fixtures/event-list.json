@@ -63,13 +63,7 @@
             {
               "id": "build",
               "kind": "command",
-              "command": [
-                "bun",
-                "run",
-                "build",
-                "--name",
-                "a b"
-              ],
+              "command": ["bun", "run", "build", "--name", "a b"],
               "deps": []
             },
             {
@@ -124,9 +118,7 @@
         "reasons": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -140,9 +132,7 @@
         "released": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -156,9 +146,7 @@
         "reasons": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -172,9 +160,7 @@
         "released": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -188,9 +174,7 @@
         "reasons": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -204,9 +188,7 @@
         "released": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -220,9 +202,7 @@
         "reasons": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -236,9 +216,7 @@
         "released": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -252,9 +230,7 @@
         "reasons": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -268,9 +244,7 @@
         "released": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -284,9 +258,7 @@
         "reasons": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -300,9 +272,7 @@
         "released": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -316,9 +286,7 @@
         "reasons": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -332,9 +300,7 @@
         "released": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -348,9 +314,7 @@
         "reasons": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -364,9 +328,7 @@
         "released": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -380,9 +342,7 @@
         "reasons": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -396,9 +356,7 @@
         "released": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -412,9 +370,7 @@
         "reasons": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -428,9 +384,7 @@
         "released": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -444,9 +398,7 @@
         "reasons": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -460,9 +412,7 @@
         "released": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -476,9 +426,7 @@
         "reasons": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -492,9 +440,7 @@
         "released": [
           {
             "kind": "dependencies",
-            "blocking": [
-              "schema"
-            ]
+            "blocking": ["schema"]
           }
         ]
       },
@@ -917,9 +863,7 @@
             "amendment": "Check the criteria twice."
           }
         ],
-        "operation_kinds": [
-          "task-amended"
-        ],
+        "operation_kinds": ["task-amended"],
         "envelope": 3
       },
       "gap": 1
@@ -958,9 +902,7 @@
             "delivery": "deferred"
           }
         ],
-        "operation_kinds": [
-          "context-added"
-        ],
+        "operation_kinds": ["context-added"],
         "envelope": 5
       },
       "gap": 1
@@ -1002,13 +944,7 @@
       "source": "pipeline",
       "kind": "command-started",
       "payload": {
-        "command": [
-          "bun",
-          "run",
-          "build",
-          "--name",
-          "a b"
-        ],
+        "command": ["bun", "run", "build", "--name", "a b"],
         "log": "commands/build.log",
         "timeout_seconds": 600
       },

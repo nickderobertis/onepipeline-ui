@@ -80,9 +80,7 @@
             "run": "concurrent-deferred-holders-0-run-value",
             "node": "concurrent-deferred-holders-0-node-value",
             "dependency": "concurrent-deferred-holders-0-dependency-value",
-            "dependents": [
-              "concurrent-deferred-holders-0-dependents-0-value"
-            ]
+            "dependents": ["concurrent-deferred-holders-0-dependents-0-value"]
           }
         ]
       },
@@ -102,12 +100,8 @@
         "persona": "node-dispatched-persona-value",
         "attempts": 2,
         "reason": "node-dispatched-reason-value",
-        "notes_spent": [
-          {}
-        ],
-        "notes_carried": [
-          {}
-        ]
+        "notes_spent": [{}],
+        "notes_carried": [{}]
       },
       "node": "every"
     },
@@ -123,9 +117,7 @@
         "cause": "node-settled-cause-value",
         "head": "node-settled-head-value",
         "landing": "landed",
-        "completed_steps": [
-          "node-settled-completed_steps-0-value"
-        ],
+        "completed_steps": ["node-settled-completed_steps-0-value"],
         "base": "node-settled-base-value",
         "stack": {
           "parents": [
@@ -169,16 +161,10 @@
       "payload": {
         "node": "landing-closures-node-value",
         "commit": "landing-closures-commit-value",
-        "closes": [
-          "landing-closures-closes-0-value"
-        ],
+        "closes": ["landing-closures-closes-0-value"],
         "outcome": "projected",
-        "items": [
-          {}
-        ],
-        "unsupported": [
-          "landing-closures-unsupported-0-value"
-        ],
+        "items": [{}],
+        "unsupported": ["landing-closures-unsupported-0-value"],
         "class": "refused",
         "reason": "landing-closures-reason-value"
       },
@@ -217,12 +203,8 @@
         "author": "edit-committed-author-value",
         "provenance": "manager",
         "command": {},
-        "operations": [
-          {}
-        ],
-        "operation_kinds": [
-          "edit-committed-operation_kinds-0-value"
-        ],
+        "operations": [{}],
+        "operation_kinds": ["edit-committed-operation_kinds-0-value"],
         "envelope": 1
       },
       "node": "every"
@@ -234,12 +216,8 @@
         "author": "command-accepted-author-value",
         "provenance": "manager",
         "command": {},
-        "operations": [
-          {}
-        ],
-        "operation_kinds": [
-          "command-accepted-operation_kinds-0-value"
-        ],
+        "operations": [{}],
+        "operation_kinds": ["command-accepted-operation_kinds-0-value"],
         "envelope": 1
       },
       "node": "every"
@@ -407,9 +385,7 @@
       "source": "pipeline",
       "kind": "node-held",
       "payload": {
-        "reasons": [
-          {}
-        ]
+        "reasons": [{}]
       },
       "node": "every"
     },
@@ -417,9 +393,7 @@
       "source": "pipeline",
       "kind": "node-unheld",
       "payload": {
-        "released": [
-          {}
-        ]
+        "released": [{}]
       },
       "node": "every"
     },
@@ -429,9 +403,7 @@
       "payload": {
         "reference": "decision-pending-reference-value",
         "kind": "decision-pending-kind-value",
-        "unblocks": [
-          "decision-pending-unblocks-0-value"
-        ]
+        "unblocks": ["decision-pending-unblocks-0-value"]
       },
       "node": "every"
     },
@@ -441,9 +413,7 @@
       "payload": {
         "reference": "decision-cleared-reference-value",
         "kind": "decision-cleared-kind-value",
-        "released": [
-          "decision-cleared-released-0-value"
-        ]
+        "released": ["decision-cleared-released-0-value"]
       },
       "node": "every"
     },
@@ -479,9 +449,7 @@
       "kind": "release-wait",
       "payload": {
         "node": "release-wait-node-value",
-        "awaiting": [
-          {}
-        ]
+        "awaiting": [{}]
       },
       "node": "every"
     },
@@ -692,9 +660,7 @@
         ],
         "cut_short": {
           "reason": "driver-closing",
-          "unreached": [
-            "branches-retired-cut_short-unreached-0-value"
-          ]
+          "unreached": ["branches-retired-cut_short-unreached-0-value"]
         }
       },
       "node": "every"
@@ -815,19 +781,13 @@
         "node": "node-readjusted-node-value",
         "from": {
           "base": "node-readjusted-from-base-value",
-          "stack_parents": [
-            "node-readjusted-from-stack_parents-0-value"
-          ]
+          "stack_parents": ["node-readjusted-from-stack_parents-0-value"]
         },
         "to": {
           "base": "node-readjusted-to-base-value",
-          "stack_parents": [
-            "node-readjusted-to-stack_parents-0-value"
-          ]
+          "stack_parents": ["node-readjusted-to-stack_parents-0-value"]
         },
-        "cause": [
-          "node-readjusted-cause-0-value"
-        ],
+        "cause": ["node-readjusted-cause-0-value"],
         "head": "node-readjusted-head-value",
         "agent_dispatched": true,
         "retarget": "retargeted",
@@ -840,9 +800,7 @@
       "kind": "stack-landed-out-of-order",
       "payload": {
         "node": "stack-landed-out-of-order-node-value",
-        "carried": [
-          "stack-landed-out-of-order-carried-0-value"
-        ]
+        "carried": ["stack-landed-out-of-order-carried-0-value"]
       },
       "node": "every"
     },
@@ -882,9 +840,7 @@
         "comment": "review-reply-posted-comment-value",
         "disposition": "answered",
         "url": "review-reply-posted-url-value",
-        "commits": [
-          "review-reply-posted-commits-0-value"
-        ]
+        "commits": ["review-reply-posted-commits-0-value"]
       },
       "node": "every"
     },
@@ -893,9 +849,7 @@
       "kind": "review-reply-not-drafted",
       "payload": {
         "node": "review-reply-not-drafted-node-value",
-        "comments": [
-          "review-reply-not-drafted-comments-0-value"
-        ],
+        "comments": ["review-reply-not-drafted-comments-0-value"],
         "ending": "unconfigured",
         "detail": "review-reply-not-drafted-detail-value"
       },
@@ -1112,9 +1066,7 @@
       "source": "pipeline",
       "kind": "command-started",
       "payload": {
-        "command": [
-          "command-started-command-0-value"
-        ],
+        "command": ["command-started-command-0-value"],
         "log": "command-started-log-value",
         "timeout_seconds": 1
       },
@@ -1443,9 +1395,7 @@
       "payload": {
         "repo": "github.com/example/repo",
         "count": 6,
-        "landed": [
-          "https://example.invalid/changes/21"
-        ],
+        "landed": ["https://example.invalid/changes/21"],
         "cost": {
           "graphql_points": 1,
           "rest_requests": 0

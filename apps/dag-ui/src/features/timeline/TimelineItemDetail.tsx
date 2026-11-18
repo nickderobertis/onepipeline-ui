@@ -34,17 +34,21 @@ import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ExternalLink, ListTree, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { changeRequestId } from "../../lib/change-request";
+import { argvOf, commandLine } from "../../lib/command-line";
 import { HarnessConversation } from "../../lib/HarnessConversation";
 import type { NodeView } from "../../lib/run-model";
 import { StoredArtifact, servableArtifact } from "../../lib/StoredArtifact";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration } from "../../lib/time";
+import { useRead } from "../../lib/useRead";
 import { ItemHeading } from "./item-reading";
 import { ReleaseRecord } from "./release";
 import {
   dispatchRoleLabel,
   editAuthor,
   holdReasonLabel,
+  holdReasonsOf,
+  surfaceStatus,
   type TimelineRow,
 } from "./timeline-model";
 import { useConversation } from "./useConversation";
@@ -112,6 +116,9 @@ export function TimelineItemDetail({
                 row={row}
                 transcript={transcript}
               />
+              {row.rowKind === "event" && (
+                <RecordContent client={client} event={row.event} />
+              )}
             </>
           )}
         </div>
@@ -758,14 +765,6 @@ function Recorded({
               <Timestamp at={row.startedAt} relative />
             </dd>
           </div>
-          {Object.entries(row.event.fields ?? {}).map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd>
-                {typeof value === "string" ? value : JSON.stringify(value)}
-              </dd>
-            </div>
-          ))}
         </dl>
         {reference !== undefined && (
           <Reference reference={reference} fallback="No recorded artifact." />
@@ -987,4 +986,323 @@ function roleLabel(
   transportRole: Attribution["transportRole"],
 ): string {
   return dispatchRoleLabel(agentRole, transportRole);
+}
+
+/**
+ * Everything one record holds, below whatever its kind is shown as: the readings a
+ * kind needs said in its own words — who resolved a human item, why a node was
+ * held, what an edit did, which command ran, where a surface stands — and then
+ * every field of the record, nested as it was recorded.
+ */
+function RecordContent({
+  client,
+  event,
+}: {
+  readonly client: TelemetryClient;
+  readonly event: TimelineEvent;
+}) {
+  const fields = event.fields ?? {};
+  const argv =
+    event.kind === "command-started" ? argvOf(fields.command) : undefined;
+  return (
+    <section aria-label="Recorded fields" className="record-content">
+      {event.surface_state !== undefined && (
+        <SurfaceSteps state={event.surface_state} />
+      )}
+      {event.kind === "human-attested" && (
+        <AttestedItem client={client} item={fields.item} />
+      )}
+      {(event.kind === "node-held" || event.kind === "node-unheld") && (
+        <HoldReasons event={event} />
+      )}
+      {(event.kind === "edit-committed" ||
+        event.kind === "command-accepted") && (
+        <Operations operations={fields.operations} />
+      )}
+      {argv !== undefined && (
+        <dl className="facts">
+          <div>
+            <dt>Command</dt>
+            <dd>
+              <code className="command-line">{commandLine(argv)}</code>
+            </dd>
+          </div>
+        </dl>
+      )}
+      {Object.keys(fields).length > 0 && (
+        <>
+          <h3 className="detail-heading">Recorded fields</h3>
+          <FieldList
+            value={
+              argv === undefined
+                ? fields
+                : Object.fromEntries(
+                    Object.entries(fields).filter(([key]) => key !== "command"),
+                  )
+            }
+          />
+        </>
+      )}
+    </section>
+  );
+}
+
+/** A wire key as a reader reads it: `timeout_seconds` is "Timeout seconds". */
+export function fieldLabel(key: string): string {
+  const words = key.replaceAll(/[_-]+/gu, " ").trim();
+  return words.length === 0
+    ? key
+    : `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+}
+
+/**
+ * A string a producer wrote holding a JSON object or list, read as that object or
+ * list, so it is shown as the fields it holds rather than as the text encoding them.
+ */
+function decoded(value: string): unknown {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return typeof parsed === "object" && parsed !== null ? parsed : value;
+  } catch {
+    return value;
+  }
+}
+
+/** One object's fields as label and value pairs, each value read the same way. */
+function FieldList({
+  value,
+}: {
+  readonly value: Readonly<Record<string, unknown>>;
+}) {
+  return (
+    <dl className="facts record-fields">
+      {Object.entries(value).map(([key, field]) => (
+        <div key={key}>
+          <dt>{fieldLabel(key)}</dt>
+          <dd>
+            <FieldValue value={field} />
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
+ * One recorded value, readably: text as text, a list as the list it is and an
+ * object as nested label and value pairs, however deep — never the JSON spelling
+ * of either.
+ */
+function FieldValue({ value }: { readonly value: unknown }) {
+  const read = typeof value === "string" ? decoded(value) : value;
+  if (read === null || read === undefined)
+    return <span className="record-none">None</span>;
+  if (typeof read === "string")
+    return <span className="record-text">{read}</span>;
+  if (typeof read === "number" || typeof read === "boolean")
+    return <>{String(read)}</>;
+  if (Array.isArray(read)) {
+    if (read.length === 0) return <span className="record-none">None</span>;
+    return (
+      <ol className="record-list">
+        {read.map((entry, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: a recorded list's identity is its position.
+          <li key={index}>
+            <FieldValue value={entry} />
+          </li>
+        ))}
+      </ol>
+    );
+  }
+  if (typeof read === "object")
+    return <FieldList value={read as Readonly<Record<string, unknown>>} />;
+  return <>{String(read)}</>;
+}
+
+/** What one object field of a record holds, where it is an object. */
+function objectOf(
+  value: unknown,
+): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
+}
+
+/** One string field of an object, where it is a string with something in it. */
+function textOf(
+  value: Readonly<Record<string, unknown>> | undefined,
+  key: string,
+): string | undefined {
+  const field = value?.[key];
+  return typeof field === "string" && field.trim() !== "" ? field : undefined;
+}
+
+/**
+ * Where one surface stands, step by step: when it was raised, when a reader took
+ * it, and when it was answered and with what — folded by the server from every
+ * record of the surface, whichever of them this row is.
+ */
+function SurfaceSteps({
+  state,
+}: {
+  readonly state: NonNullable<TimelineEvent["surface_state"]>;
+}) {
+  const { status } = surfaceStatus(state);
+  const reply = state.reply;
+  const steps: readonly (readonly [string, string | undefined])[] = [
+    ["Queued", state.queued_at],
+    ["Read", state.read_at],
+    ["Answered", state.replied_at],
+  ];
+  return (
+    <>
+      <h3 className="detail-heading">Surface {state.id}</h3>
+      <dl className="facts">
+        <div>
+          <dt>Status</dt>
+          <dd>{status}</dd>
+        </div>
+        {steps.map(([step, at]) => (
+          <div key={step}>
+            <dt>{step}</dt>
+            <dd>{at === undefined ? "Not yet" : <Timestamp at={at} />}</dd>
+          </div>
+        ))}
+        {state.correlation !== undefined && (
+          <div>
+            <dt>Correlation</dt>
+            <dd>
+              <code>{state.correlation}</code>
+            </dd>
+          </div>
+        )}
+      </dl>
+      {reply !== undefined && (
+        <>
+          <h3 className="detail-heading">Reply</h3>
+          <FieldList value={reply} />
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * Who resolved the human item that attested a node, in the words the engine
+ * recorded: the person, whom they acted for, whose words those were, the choice
+ * they picked by its title and what they wrote. The title is read from the item
+ * itself, because the record names the choice by its id.
+ */
+function AttestedItem({
+  client,
+  item,
+}: {
+  readonly client: TelemetryClient;
+  readonly item: unknown;
+}) {
+  const attested = objectOf(item);
+  const id = textOf(attested, "id");
+  const resolution = objectOf(attested?.resolution);
+  const choice = textOf(resolution, "choice");
+  const read = useRead(
+    choice === undefined ? undefined : id,
+    () => client.getHumanItem(id ?? ""),
+    0,
+  );
+  if (attested === undefined)
+    return (
+      <p className="detail-note">
+        Attested with no human item resolved: the planner attested it itself.
+      </p>
+    );
+  const title = read.value?.item.choices?.find(
+    (offered) => offered.id === choice,
+  )?.title;
+  const facts: readonly (readonly [string, string | undefined])[] = [
+    ["Item", id],
+    ["Action", textOf(attested, "action")],
+    ["By", textOf(resolution, "actor")],
+    ["On behalf of", textOf(resolution, "on_behalf_of")],
+    ["Provenance", textOf(resolution, "provenance") ?? "manager"],
+    [
+      "Choice",
+      choice === undefined
+        ? undefined
+        : title === undefined
+          ? choice
+          : `${title} (${choice})`,
+    ],
+    ["Reason", textOf(resolution, "reason")],
+  ];
+  const text = textOf(resolution, "text");
+  return (
+    <>
+      <h3 className="detail-heading">Human item</h3>
+      <dl className="facts">
+        {facts
+          .filter(([, value]) => value !== undefined)
+          .map(([term, value]) => (
+            <div key={term}>
+              <dt>{term}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+      </dl>
+      {text !== undefined && (
+        <>
+          <h3 className="detail-heading">Words</h3>
+          <p className="detail-note record-text">{text}</p>
+        </>
+      )}
+    </>
+  );
+}
+
+/** Why a node was held, or what released it, one reason a line. */
+function HoldReasons({ event }: { readonly event: TimelineEvent }) {
+  const reasons = holdReasonsOf(event);
+  if (reasons.length === 0) return null;
+  return (
+    <>
+      <h3 className="detail-heading">
+        {event.kind === "node-held" ? "Held because" : "Released from"}
+      </h3>
+      <ul className="hold-reasons">
+        {reasons.map((reason, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: a reason's identity is its place in the record.
+          <li key={index}>{holdReasonLabel(reason)}</li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+/** What an edit compiled to, one operation a block, each named by its kind. */
+function Operations({ operations }: { readonly operations: unknown }) {
+  if (!Array.isArray(operations) || operations.length === 0) return null;
+  return (
+    <>
+      <h3 className="detail-heading">Operations</h3>
+      <ol className="record-operations">
+        {operations.map((operation, index) => {
+          const fields = objectOf(operation);
+          return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: an operation's identity is its place in the edit.
+            <li key={index}>
+              <strong>
+                {textOf(fields, "kind") ?? `Operation ${index + 1}`}
+              </strong>
+              {fields === undefined ? (
+                <FieldValue value={operation} />
+              ) : (
+                <FieldList value={fields} />
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </>
+  );
 }

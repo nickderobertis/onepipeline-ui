@@ -54,33 +54,28 @@ export function runPageKind(
   return nodeId === undefined ? "graph" : "node";
 }
 
-/** The server's profile name every view of a run is read under. */
-const FILTER = "detailed";
-
-/** The view a run's page subscribes to, once it knows what it shows. */
+/**
+ * The view a run's page subscribes to, once it knows what it shows.
+ *
+ * Unfiltered: the page reads every record, and narrowing the event list to the
+ * types a reader chose is the list's own work. The read API's `filter` stays for
+ * other readers; nothing this app asks for carries it.
+ */
 export function subscriptionView(
   runId: string | undefined,
   kind: "graph" | "overall" | "node",
   nodeId: string | undefined,
-  filter: string | undefined,
 ): SubscriptionView {
   if (runId === undefined) return { type: "sidebar" };
-  const filtered = filter === undefined ? {} : { filter };
   switch (kind) {
     case "overall":
-      return { type: "timeline", run_id: runId, scope: "run", ...filtered };
+      return { type: "timeline", run_id: runId, scope: "run" };
     case "node":
       return nodeId === undefined
-        ? { type: "detail", run_id: runId, ...filtered }
-        : {
-            type: "timeline",
-            run_id: runId,
-            scope: "node",
-            node: nodeId,
-            ...filtered,
-          };
+        ? { type: "detail", run_id: runId }
+        : { type: "timeline", run_id: runId, scope: "node", node: nodeId };
     case "graph":
-      return { type: "detail", run_id: runId, ...filtered };
+      return { type: "detail", run_id: runId };
   }
 }
 
@@ -104,7 +99,6 @@ export function firstAddress(
   const named = params.get("view");
   const tab = params.get("tab");
   if (tab !== null && tab !== "timeline") return undefined;
-  const filter = FILTER;
   // An address naming no view, or one this app has no page for, opens the graph
   // where it names a node and Overall where it names none, as `useUrlSelection` does.
   const kind = runPageKind(
@@ -119,6 +113,6 @@ export function firstAddress(
     runId,
     ...(kind === "node" && nodeId !== undefined ? { nodeId } : {}),
     kind,
-    view: subscriptionView(runId, kind, nodeId, filter),
+    view: subscriptionView(runId, kind, nodeId),
   };
 }

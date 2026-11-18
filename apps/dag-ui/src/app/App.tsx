@@ -17,7 +17,6 @@ import {
   TabsTrigger,
   TooltipProvider,
 } from "@oneharness/ui";
-import { API_V2_FILTER_PROFILES } from "@onepipeline-ui/dag-model";
 import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import {
   Menu,
@@ -97,16 +96,12 @@ export function App({
   const humanItems = useHumanItemsRoute();
   const runless = selection.host || humanItems.active;
   const humanItemsSelection = useHumanItemsSelection(humanItems.active);
-  // Every payload this app shows is read under the one detailed profile, so the
-  // graph, the timeline and the pushed changes are one slice of the run.
-  const filter = API_V2_FILTER_PROFILES.detailed;
   const updates = useUpdateSettings();
   const drawer = useNavigationDrawer();
   const telemetry = useDagTelemetry(client, {
     runId: selection.runId,
     view: runPageKind(selection.view, selection.nodeId),
     nodeId: selection.nodeId,
-    filter,
     // An address naming no run opens the newest one served, except on the Host
     // page, which picks none itself; a run the address already names stays read.
     selectFirst: !runless,
@@ -494,8 +489,9 @@ export function App({
                     <OverallView
                       client={client}
                       detail={detail}
-                      filter={filter}
-                      key={`${selectedRunId}:${filter ?? ""}`}
+                      hiddenTypes={selection.hiddenEventTypes}
+                      key={selectedRunId}
+                      onHiddenTypesChange={selection.selectEventTypes}
                       journalSeq={graph?.last_seq}
                       nodes={nodes}
                       onRetry={telemetry.refresh}
@@ -512,8 +508,9 @@ export function App({
                     // one breadcrumb away rather than one narrow column beside it.
                     <NodeTimelineView
                       client={client}
-                      filter={filter}
-                      key={`${selectedRunId}:${selectedNode.id}:${filter ?? ""}`}
+                      hiddenTypes={selection.hiddenEventTypes}
+                      key={`${selectedRunId}:${selectedNode.id}`}
+                      onHiddenTypesChange={selection.selectEventTypes}
                       runLoaded={runLoaded}
                       onRetry={telemetry.refresh}
                       node={selectedNode}

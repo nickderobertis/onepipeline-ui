@@ -123,7 +123,9 @@ async function openHistory(page: Page) {
   await expect(rows.first()).toBeVisible();
   // The latest window ends inside the run of checks, which stands collapsed.
   await expect(
-    transcript.getByRole("button", { name: /^Show \d+ more change-check/ }),
+    transcript.getByRole("region", {
+      name: /^1 event repeated \d+ times: change-check/,
+    }),
   ).toBeVisible();
   return { pages, windowed, transcript, rows };
 }
@@ -197,8 +199,8 @@ test("reading back a history of nothing but collapsed checks ends by saying none
   expect(await rows.count()).toBe(shownBefore);
   expect(pages.length).toBeGreaterThan(1);
   await expect(
-    transcript.getByRole("button", {
-      name: `Show ${facts.checks - 2} more change-check events`,
+    transcript.getByRole("region", {
+      name: `1 event repeated ${facts.checks} times: change-check`,
     }),
   ).toBeVisible();
   expect(thrown).toStrictEqual([]);

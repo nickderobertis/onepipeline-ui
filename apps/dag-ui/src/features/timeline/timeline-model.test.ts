@@ -1,22 +1,29 @@
-import { parseRunTimeline, type TimelineSpan } from "@onepipeline-ui/dag-model";
+import {
+  parseRunTimeline,
+  type TimelineEvent,
+} from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
 import { busyTimeline, LIVE_RUN, runTimeline } from "../../test/fixtures";
 import {
-  collapseLabel,
+  collapseCycles,
   compactTimelineItems,
   compactTimelineMarkers,
+  cycleLabel,
   dispatchRoleLabel,
+  eventList,
   findRow,
-  GROUP_THRESHOLD,
   laneLabel,
   laneVocabulary,
   nodeTimeline,
   nodeTimelineV2,
   pathTo,
+  readingRows,
   roleLaneId,
+  runEventRows,
   spanAsRow,
   type TimelineRow,
   transcriptEntries,
+  typeCounts,
 } from "./timeline-model";
 
 const timeline = parseRunTimeline(runTimeline(LIVE_RUN));
@@ -222,120 +229,260 @@ describe("one node's slice of the run timeline", () => {
     expect(nodeTimeline(undefined, "dashboard").rows).toEqual([]);
   });
 
-  test("collapses hundreds of sessions into rows a reader can scan", () => {
+  test("two hundred different sessions are two hundred rows: none is the same thing again", () => {
     const busy = nodeTimeline(parseRunTimeline(busyTimeline(200)), "dashboard");
-    // Two hundred conversations arrive as one row, not two hundred; the run they
-    // stand for remains reachable inside it; sessions in other role lanes stay
-    // separate so filtering cannot replace the worker with a generic dispatch.
-    const group = busy.rows.find(({ rowKind }) => rowKind === "group");
-    expect(group?.label).toBe("200 × dispatch");
-    expect(group?.children).toHaveLength(200);
-    // What the reader is handed where those two hundred stood is three
-    // things: the first, one control naming the rest, and the last.
-    const reading = transcriptEntries(busy.rows, new Set());
-    expect(
-      reading.find(({ entryKind }) => entryKind === "collapse"),
-    ).toMatchObject({ hidden: 198, expanded: false });
-    // The other three role sessions retain their own rows beside the collapsed
-    // worker run; they must not disappear into its lane when activity is filtered.
-    expect(reading).toHaveLength(20);
+    const listed = eventList(busy.rows);
+    expect(listed.filter(({ rowKind }) => rowKind === "group")).toHaveLength(0);
     expect(busy.total).toBeGreaterThan(200);
   });
 
-  /** The two kinds of row this list can hold a consecutive run of. */
-  const SHAPES: readonly ["event", "span"] = ["event", "span"];
-
-  /** A run of `count` identical rows of `kind`, as a node's own span carries them. */
-  const runOf = (
-    kind: string,
-    count: number,
-    shape: (typeof SHAPES)[number],
+  /** A node whose own span holds exactly `events`, a minute apart, in order. */
+  const nodeWith = (
+    events: readonly (Partial<TimelineEvent> & { readonly kind: string })[],
   ): readonly TimelineRow[] => {
     const fixture = parseRunTimeline(runTimeline(LIVE_RUN));
     const node = fixture.spans.find(({ id }) => id === "node-dashboard");
     if (node === undefined) throw new Error("fixture lost the dashboard node");
-    node.events = Array.from({ length: count }, (_, index) => ({
-      id: `${kind}-${index}`,
-      kind,
-      at: `2026-07-26T12:${String(index).padStart(2, "0")}:00.000Z`,
+    const at = (index: number) =>
+      new Date(Date.parse("2026-07-26T12:00:00.000Z") + index * 60_000)
+        .toISOString()
+        .replace(".000Z", ".000Z");
+    node.events = events.map((event, index) => ({
+      id: `${event.kind}-${index}`,
+      at: at(index),
       node_id: "dashboard",
+      journal_order: index,
+      ...event,
     }));
     fixture.spans = fixture.spans.filter(
       (span) => span.node_id !== "dashboard" || span.id === "node-dashboard",
     );
-    const siblings: TimelineSpan[] = Array.from(
-      { length: count },
-      (_, index) => ({
-        id: `verification-${index}`,
-        kind: "verification",
-        label: `check-${index}`,
-        parent_id: "node-dashboard",
-        node_id: "dashboard",
-        started_at: `2026-07-26T13:${String(index).padStart(2, "0")}:00.000Z`,
-        ended_at: `2026-07-26T13:${String(index).padStart(2, "0")}:30.000Z`,
-        events: [],
-      }),
-    );
-    if (shape === "span") fixture.spans.push(...siblings);
     return nodeTimeline(fixture, "dashboard").rows;
   };
 
-  test("collapses a run of journal records on the rule it collapses spans by", () => {
-    // The boundary, from both sides, for the two kinds of row this list holds. One
-    // rule, one count: a reader learns this behaviour once.
-    for (const shape of SHAPES) {
-      const kind = shape === "event" ? "turn-activity" : "verification";
-      const short = runOf(kind, GROUP_THRESHOLD - 1, shape);
-      expect(short.filter(({ rowKind }) => rowKind === "group")).toHaveLength(
-        0,
-      );
-      const long = runOf(kind, GROUP_THRESHOLD, shape);
-      const group = long.find(({ rowKind }) => rowKind === "group");
-      expect(group, `a run of ${GROUP_THRESHOLD} ${kind} did not collapse`);
-      expect(group?.children).toHaveLength(GROUP_THRESHOLD);
-      // And what is then shown is the same shape either way: the first in full,
-      // one control naming how many are behind it and what they are, the last in
-      // full.
-      const reading = transcriptEntries(long, new Set());
-      const shown = reading.filter(
-        (entry) => entry.entryKind === "row" && entry.row.kind === kind,
-      );
-      expect(shown).toHaveLength(2);
-      const control = reading.find(
-        (entry) => entry.entryKind === "collapse" && entry.group.kind === kind,
-      );
-      expect(control).toMatchObject({
-        hidden: GROUP_THRESHOLD - 2,
-        expanded: false,
-      });
-      expect(collapseLabel(GROUP_THRESHOLD - 2, kind)).toBe(
-        `${GROUP_THRESHOLD - 2} more ${kind} events`,
-      );
-    }
+  /** One hold toggling: queued, held behind a node, released. */
+  const HOLD_PASS = [
+    { kind: "node-requeued" },
+    {
+      kind: "node-held",
+      fields: { reasons: [{ kind: "dependencies", blocking: ["schema"] }] },
+    },
+    {
+      kind: "node-unheld",
+      fields: { released: [{ kind: "dependencies", blocking: ["schema"] }] },
+    },
+  ] as const;
+
+  test("a loop gone round twelve times is one block of one pass, its count and its span", () => {
+    const rows = nodeWith(Array.from({ length: 12 }, () => HOLD_PASS).flat());
+    const listed = eventList(rows);
+    expect(listed).toHaveLength(1);
+    const [block] = listed;
+    if (block?.rowKind !== "group")
+      throw new Error("the loop did not collapse");
+    expect(block.count).toBe(12);
+    expect(block.pass.map(({ kind }) => kind)).toEqual([
+      "node-requeued",
+      "node-held",
+      "node-unheld",
+    ]);
+    expect(block.pass[1]?.displayLabel).toBe("Held waiting on schema");
+    expect(block.children).toHaveLength(36);
+    expect(block.startedAt).toBe("2026-07-26T12:00:00.000Z");
+    expect(block.endedAt).toBe(
+      new Date(
+        Date.parse("2026-07-26T12:00:00.000Z") + 35 * 60_000,
+      ).toISOString(),
+    );
+    expect(cycleLabel(block)).toBe("3 events repeated 12 times");
+    // Closed, the block holds one pass; opened, every row in order.
+    const closed = transcriptEntries(listed, new Set());
+    expect(closed).toHaveLength(1);
+    expect(readingRows(closed)).toHaveLength(3);
+    const open = transcriptEntries(listed, new Set([block.id]));
+    expect(readingRows(open).map(({ id }) => id)).toEqual(
+      rows.map(({ id }) => id),
+    );
   });
 
-  test("puts the middle of a collapsed run back when the reader opens it", () => {
-    const rows = runOf("turn-activity", 6, "event");
-    const group = rows.find(({ rowKind }) => rowKind === "group");
-    if (group === undefined) throw new Error("the run did not collapse");
-    const closed = transcriptEntries(rows, new Set());
+  test("two different repeats back to back are two blocks, and the longer saving wins", () => {
+    const pair = [{ kind: "gate-run" }, { kind: "push" }];
+    const rows = nodeWith([
+      ...pair,
+      ...pair,
+      ...Array.from({ length: 5 }, () => ({ kind: "member-heartbeat" })),
+    ]);
+    const listed = eventList(rows);
+    expect(listed.map((row) => row.rowKind)).toEqual(["group", "group"]);
     expect(
-      closed.filter(
-        (entry) =>
-          entry.entryKind === "row" && entry.row.kind === "turn-activity",
+      listed.map((row) =>
+        row.rowKind === "group" ? [row.pass.length, row.count] : [],
       ),
+    ).toEqual([
+      [2, 2],
+      [1, 5],
+    ]);
+    // Four of one row are one loop of one row, not two loops of two.
+    const four = collapseCycles(
+      nodeWith(Array.from({ length: 4 }, () => ({ kind: "push" }))),
+    );
+    expect(four).toHaveLength(1);
+    expect(four[0]?.rowKind === "group" && four[0].pass).toHaveLength(1);
+  });
+
+  test("a sequence that never repeats back to back is not collapsed", () => {
+    const rows = nodeWith([
+      { kind: "gate-run" },
+      { kind: "push" },
+      { kind: "gate-run" },
+      { kind: "session-closed" },
+      { kind: "push" },
+    ]);
+    expect(eventList(rows).map(({ rowKind }) => rowKind)).toEqual(
+      Array.from({ length: 5 }, () => "event"),
+    );
+  });
+
+  test("a row reads the same only with the same label: two different holds are no loop", () => {
+    const rows = nodeWith([
+      HOLD_PASS[1],
+      {
+        kind: "node-held",
+        fields: { reasons: [{ kind: "dependencies", blocking: ["other"] }] },
+      },
+    ]);
+    expect(eventList(rows).map(({ rowKind }) => rowKind)).toEqual([
+      "event",
+      "event",
+    ]);
+  });
+
+  test("a row inside a block is found through it, under the block's own id", () => {
+    const rows = nodeWith(Array.from({ length: 3 }, () => HOLD_PASS).flat());
+    const listed = eventList(rows);
+    const last = rows.at(-1);
+    if (last === undefined) throw new Error("no rows");
+    expect(pathTo(listed, last.id).map(({ rowKind }) => rowKind)).toEqual([
+      "group",
+      "event",
+    ]);
+  });
+
+  test("hiding a type hides exactly its rows, and the repeat it broke up then collapses", () => {
+    const rows = nodeWith([
+      { kind: "push" },
+      { kind: "planner-replied" },
+      { kind: "push" },
+      { kind: "planner-replied" },
+      { kind: "push" },
+    ]);
+    expect(typeCounts(rows)).toEqual(
+      new Map([
+        ["repository", 3],
+        ["reply", 2],
+      ]),
+    );
+    const replies = eventList(rows, new Set(["repository"]));
+    expect(replies.map(({ kind }) => kind)).toEqual(["planner-replied"]);
+    expect(
+      readingRows(transcriptEntries(replies, new Set([replies[0]?.id ?? ""]))),
     ).toHaveLength(2);
-    const open = transcriptEntries(rows, new Set([group.id]));
+    expect(eventList(rows, new Set(["reply"]))).toHaveLength(1);
+    expect(eventList(rows, new Set(["reply", "repository"]))).toEqual([]);
+  });
+
+  test("a surface's records are one row, read as where the surface stands", () => {
+    const state = {
+      id: 7,
+      correlation: "q-7",
+      kind: "planner-question",
+      message: "ship it?",
+      blocking: true,
+      queued_at: "2026-07-26T12:00:00.000Z",
+      read_at: "2026-07-26T12:01:00.000Z",
+      replied_at: "2026-07-26T12:02:00.000Z",
+      reply: { author: "planner", message: "yes" },
+    };
+    const rows = nodeWith([
+      { kind: "planner-surface-queued", surface_id: 7, surface_state: state },
+      { kind: "planner-surfaced", surface_id: 7, surface_state: state },
+      {
+        kind: "quiet-worker",
+        surface_id: 8,
+        surface_state: { id: 8, read_at: "2026-07-26T12:03:00.000Z" },
+      },
+      {
+        kind: "planner-surface-queued",
+        surface_id: 9,
+        surface_state: {
+          id: 9,
+          blocking: true,
+          kind: "finding",
+          message: "red",
+        },
+      },
+    ]);
+    const listed = eventList(rows);
     expect(
-      open.filter(
-        (entry) =>
-          entry.entryKind === "row" && entry.row.kind === "turn-activity",
-      ),
-    ).toHaveLength(6);
-    expect(open.find((entry) => entry.entryKind === "collapse")).toMatchObject({
-      expanded: true,
-      hidden: 4,
-    });
+      listed.map((row) => [row.displayLabel, row.status, row.type]),
+    ).toEqual([
+      ["planner-question: ship it?", "answered", "surface"],
+      ["quiet-worker", "read", "surface"],
+      ["finding: red", "waiting", "surface"],
+    ]);
+    expect(listed[0]?.statusAt).toBe("2026-07-26T12:02:00.000Z");
+    // The second record's id still opens the one row standing for it.
+    expect(findRow(listed, "planner-surfaced-1")?.id).toBe(
+      "planner-surface-queued-0",
+    );
+  });
+
+  test("the run's own list holds the records it made at no node, but none about a node's surface", () => {
+    const run = parseRunTimeline(runTimeline(LIVE_RUN));
+    const runLevel = run.spans.filter((span) => span.node_id === undefined);
+    for (const span of runLevel) span.events = [];
+    const root = runLevel[0];
+    if (root === undefined) throw new Error("the fixture has no run span");
+    root.events = [
+      {
+        id: "late",
+        kind: "completion-requested",
+        at: "2026-07-26T13:00:00.000Z",
+      },
+      { id: "early", kind: "edit-committed", at: "2026-07-26T12:00:00.000Z" },
+      {
+        id: "answer",
+        kind: "planner-replied",
+        at: "2026-07-26T12:30:00.000Z",
+        surface_state: { id: 4, node: "dashboard" },
+      },
+      {
+        id: "stray",
+        kind: "node-ready",
+        at: "2026-07-26T12:10:00.000Z",
+        node_id: "dashboard",
+      },
+    ];
+    expect(runEventRows(run).map(({ id }) => id)).toEqual(["early", "late"]);
+    expect(runEventRows(undefined)).toEqual([]);
+  });
+
+  test("an edit reads as applied or not, and a command step as its command line", () => {
+    const rows = nodeWith([
+      { kind: "edit-committed", author: "planner" },
+      { kind: "edit-rejected", author: "planner", fields: { reason: "no" } },
+      {
+        kind: "command-started",
+        fields: { command: ["bun", "run", "build", "--name", "a b"] },
+      },
+    ]);
+    expect(rows.map((row) => [row.status, row.displayLabel, row.type])).toEqual(
+      [
+        ["applied", "edit-committed · by planner", "edit"],
+        ["not applied", "edit-rejected · by planner", "edit"],
+        [undefined, "bun run build --name 'a b'", "command"],
+      ],
+    );
   });
 
   test("names a queued span for everything that was holding the node", () => {

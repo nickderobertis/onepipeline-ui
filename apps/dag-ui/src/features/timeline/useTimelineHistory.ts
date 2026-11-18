@@ -106,14 +106,12 @@ export function useTimelineHistory({
   runId,
   scope,
   nodeId,
-  filter,
   timeline,
 }: {
   readonly client: TelemetryClient;
   readonly runId: string;
   readonly scope: "run" | "node";
   readonly nodeId?: string;
-  readonly filter?: string;
   readonly timeline?: RunTimeline;
 }): TimelineHistory {
   const rows = useRef(new Map<string, TimelineEventRow>());
@@ -217,7 +215,6 @@ export function useTimelineHistory({
           node: nodeId,
           ...(wide === true ? { limit: WIDE_PAGE } : {}),
           ...(next === undefined ? {} : { cursor: next }),
-          ...(filter === undefined ? {} : { filter }),
         })
         .then((page) => {
           take(page);
@@ -230,7 +227,7 @@ export function useTimelineHistory({
           setLoadingEarlier(false);
         });
     },
-    [bump, client, cursor, failed, filter, nodeId, runId, scope, take],
+    [bump, client, cursor, failed, nodeId, runId, scope, take],
   );
 
   const readAll = useCallback(
@@ -251,7 +248,6 @@ export function useTimelineHistory({
             limit: WIDE_PAGE,
             ...query,
             ...(next === undefined ? {} : { cursor: next }),
-            ...(filter === undefined ? {} : { filter }),
           });
           take(answered);
           const { span } = answered;
@@ -272,7 +268,7 @@ export function useTimelineHistory({
         failed(caught, retry);
       }
     },
-    [bump, client, failed, filter, runId, scope, take],
+    [bump, client, failed, runId, scope, take],
   );
 
   const loadSpan = useCallback(

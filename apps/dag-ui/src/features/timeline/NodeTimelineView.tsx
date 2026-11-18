@@ -21,6 +21,7 @@ import {
 } from "@oneharness/ui";
 import type { PlanTask, RunTimeline } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
+import type { EventType } from "@onepipeline-ui/timeline-categories";
 import { TaskMarkdown } from "@onetaskgraph/ui";
 import {
   ArrowLeft,
@@ -39,6 +40,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { commandLine } from "../../lib/command-line";
 import { LOADING_TEXT } from "../../lib/loading";
 import {
   awaitedReleases,
@@ -66,22 +68,25 @@ import { boundedZoom, TIMELINE_TIME_MARKS } from "./axis";
 import { CheckRuntime } from "./CheckRuntime";
 import { CheckStatus } from "./CheckStatus";
 import { ControlBadge } from "./ControlBadge";
+import { CycleBlock, EventListHeader, FilteredEmpty } from "./EventList";
 import { EventCategoryIcon } from "./event-category";
 import { LoadEarlier, PlotHatches } from "./history-controls";
 import { NodeRelease } from "./release";
 import { TimelineItemDetail } from "./TimelineItemDetail";
 import {
-  collapseLabel,
   compactTimelineItems,
   compactTimelineMarkers,
+  eventList,
   findRow,
   nodeTimeline,
   nodeTimelineV2,
   pathTo,
+  readingRows,
   type TimelineRow,
   type TranscriptEntry,
   transcriptEntries,
   transcriptRuns,
+  typeCounts,
 } from "./timeline-model";
 import { useTimelineHistory } from "./useTimelineHistory";
 
@@ -102,7 +107,8 @@ export function NodeTimelineView({
   nodes,
   timeline,
   timelineError,
-  filter,
+  hiddenTypes = [],
+  onHiddenTypesChange = () => {},
   runLoaded = true,
   onRetry,
   selectedItemId,
@@ -118,7 +124,9 @@ export function NodeTimelineView({
   readonly nodes: readonly NodeView[];
   readonly timeline?: RunTimeline;
   readonly timelineError?: Error;
-  readonly filter?: string;
+  /** The event types the reader hid from the node's event list. */
+  readonly hiddenTypes?: readonly EventType[];
+  readonly onHiddenTypesChange?: (hidden: readonly EventType[]) => void;
   /** Whether the members a first answer leaves out have arrived. */
   readonly runLoaded?: boolean;
   /** Subscribe again, from a failed read. */
@@ -473,8 +481,9 @@ export function NodeTimelineView({
           ) : (
             <NodeExecution
               client={client}
-              {...(filter === undefined ? {} : { filter })}
+              hiddenTypes={hiddenTypes}
               node={node}
+              onHiddenTypesChange={onHiddenTypesChange}
               onSelectItem={onSelectItem}
               runId={runId}
               selectedItemId={selectedItemId}
@@ -489,15 +498,17 @@ export function NodeTimelineView({
 
 function NodeExecution({
   client,
-  filter,
+  hiddenTypes,
   node,
+  onHiddenTypesChange,
   onSelectItem,
   runId,
   selectedItemId,
   timeline: served,
 }: {
   readonly client: TelemetryClient;
-  readonly filter?: string;
+  readonly hiddenTypes: readonly EventType[];
+  readonly onHiddenTypesChange: (hidden: readonly EventType[]) => void;
   readonly node: NodeView;
   readonly onSelectItem: (id?: string) => void;
   readonly runId: string;
@@ -510,13 +521,20 @@ function NodeExecution({
     scope: "node",
     nodeId: node.id,
     timeline: served,
-    ...(filter === undefined ? {} : { filter }),
   });
   const timeline = history.timeline ?? served;
   const projection = useMemo(
     () => nodeTimelineV2(timeline, node.id),
     [timeline, node.id],
   );
+  const hidden = useMemo(() => new Set(hiddenTypes), [hiddenTypes]);
+  // What the event list reads: one row per surface, the types the reader kept,
+  // and every back-to-back repeat as one block. The plot above reads every row.
+  const listed = useMemo(
+    () => eventList(projection.tree, hidden),
+    [projection.tree, hidden],
+  );
+  const counts = useMemo(() => typeCounts(projection.tree), [projection.tree]);
   // Which collapsed runs the reader has opened. Held here rather than in the
   // projection because it is the reader's own state: what the run recorded is the
   // same either way.
@@ -526,30 +544,29 @@ function NodeExecution({
   // A row the address names is a row the reader asked for, so the run holding it
   // opens whether or not they opened it themselves — otherwise a bookmarked
   // moment inside a collapsed run lands on a reading that does not contain it.
-  const selectedRun = useMemo(() => {
-    if (selectedItemId === undefined) return undefined;
-    return pathTo(projection.tree, selectedItemId).find(
-      (row) => row.rowKind === "group",
-    )?.id;
-  }, [projection.tree, selectedItemId]);
+  const selectedRuns = useMemo(() => {
+    if (selectedItemId === undefined) return [];
+    return pathTo(listed, selectedItemId)
+      .filter((row) => row.rowKind === "group")
+      .map(({ id }) => id);
+  }, [listed, selectedItemId]);
   const openNow = useMemo(
     () =>
-      selectedRun === undefined
+      selectedRuns.length === 0
         ? openRuns
-        : new Set<string>([...openRuns, selectedRun]),
-    [openRuns, selectedRun],
+        : new Set<string>([...openRuns, ...selectedRuns]),
+    [openRuns, selectedRuns],
   );
   const reading = useMemo(
-    () => transcriptEntries(projection.tree, openNow),
-    [projection.tree, openNow],
+    () => transcriptEntries(listed, openNow),
+    [listed, openNow],
   );
   const entries = useMemo(
     () =>
-      reading.flatMap((entry) =>
-        entry.entryKind === "row"
-          ? [{ id: entry.row.id, time: Date.parse(entry.row.startedAt) }]
-          : [],
-      ),
+      readingRows(reading).map((row) => ({
+        id: row.id,
+        time: Date.parse(row.startedAt),
+      })),
     [reading],
   );
   const sync = useTimelineScrollSync(entries);
@@ -601,7 +618,8 @@ function NodeExecution({
   const selected =
     selectedItemId === undefined
       ? undefined
-      : findRow(projection.rows, selectedItemId);
+      : (findRow(listed, selectedItemId) ??
+        findRow(projection.rows, selectedItemId));
   // A scroll the page made itself, to a selected row, asks for no page.
   const ownScrollUntil = useRef(0);
   const select = (id: string) => {
@@ -801,30 +819,31 @@ function NodeExecution({
             onLoad={askEarlier}
           />
         )}
+        <EventListHeader
+          counts={counts}
+          hidden={hidden}
+          onHiddenChange={onHiddenTypesChange}
+        />
+        {listed.length === 0 && projection.tree.length > 0 && (
+          <FilteredEmpty onClear={() => onHiddenTypesChange([])} />
+        )}
         {transcriptRuns(reading).map((run) => {
-          const items = run.entries.map((entry) =>
-            entry.entryKind === "row" ? (
-              <TranscriptItem
-                key={entry.row.id}
-                onOpen={openRow}
-                register={sync.register}
-                row={entry.row}
-                selected={entry.row.id === selectedItemId}
-              />
-            ) : (
-              <CollapsedRun
-                entry={entry}
-                key={`collapse-${entry.group.id}`}
-                onToggle={() =>
-                  setOpenRuns((open) => {
-                    const next = new Set(open);
-                    if (next.has(entry.group.id)) next.delete(entry.group.id);
-                    else next.add(entry.group.id);
-                    return next;
-                  })
-                }
-              />
-            ),
+          const items = (
+            <TranscriptEntries
+              entries={run.entries}
+              key={run.id}
+              onOpen={openRow}
+              onToggle={(id) =>
+                setOpenRuns((open) => {
+                  const next = new Set(open);
+                  if (next.has(id)) next.delete(id);
+                  else next.add(id);
+                  return next;
+                })
+              }
+              register={sync.register}
+              selectedItemId={selectedItemId}
+            />
           );
           return run.dispatch === undefined ? (
             <Fragment key={run.id}>{items}</Fragment>
@@ -899,28 +918,52 @@ function transcriptPlaces(transcript: HTMLElement | null): Map<string, number> {
 }
 
 /**
- * The middle of a collapsed run, and the one control that puts it back.
+ * The rows of a reading, each repeated loop drawn as the block that holds it.
  *
- * The count and the kind are the button's own words rather than a shape beside it,
- * so a reader who cannot see the ellipsis is told exactly what is behind it and how
- * much of it there is. `aria-expanded` is what says which way the control goes, and
- * it is the same button both ways: one thing to find, one thing to press.
+ * Exported because the run's own event list on Overall is drawn by the same rows,
+ * so a record reads the same in either list.
  */
-function CollapsedRun({
-  entry,
+export function TranscriptEntries({
+  entries,
+  onOpen,
   onToggle,
+  register,
+  selectedItemId,
 }: {
-  readonly entry: Extract<TranscriptEntry, { entryKind: "collapse" }>;
-  readonly onToggle: () => void;
+  readonly entries: readonly TranscriptEntry[];
+  readonly onOpen: (id: string) => void;
+  readonly onToggle: (id: string) => void;
+  readonly register: (id: string, element: HTMLElement | null) => void;
+  readonly selectedItemId?: string;
 }) {
-  const named = collapseLabel(entry.hidden, entry.group.kind);
-  return (
-    <p className="transcript-collapsed">
-      <button aria-expanded={entry.expanded} onClick={onToggle} type="button">
-        <span aria-hidden="true">…</span>
-        {entry.expanded ? `Collapse ${named}` : `Show ${named}`}
-      </button>
-    </p>
+  return entries.map((entry) =>
+    entry.entryKind === "row" ? (
+      <TranscriptItem
+        key={entry.row.id}
+        onOpen={onOpen}
+        register={register}
+        row={entry.row}
+        selected={
+          entry.row.id === selectedItemId ||
+          (selectedItemId !== undefined &&
+            entry.row.aliases?.includes(selectedItemId) === true)
+        }
+      />
+    ) : (
+      <CycleBlock
+        entry={entry}
+        key={entry.group.id}
+        onToggle={() => onToggle(entry.group.id)}
+      >
+        <TranscriptEntries
+          entries={entry.entries}
+          onOpen={onOpen}
+          onToggle={onToggle}
+          register={register}
+          {...(selectedItemId === undefined ? {} : { selectedItemId })}
+        />
+      </CycleBlock>
+    ),
   );
 }
 
@@ -951,6 +994,7 @@ function drawsTheSame(was: TranscriptItemProps, now: TranscriptItemProps) {
     a.startedAt === b.startedAt &&
     a.durationMs === b.durationMs &&
     a.status === b.status &&
+    a.statusAt === b.statusAt &&
     a.sessionName === b.sessionName &&
     a.dispatch?.label === b.dispatch?.label &&
     (a.rowKind === "event" && b.rowKind === "event"
@@ -959,7 +1003,7 @@ function drawsTheSame(was: TranscriptItemProps, now: TranscriptItemProps) {
   );
 }
 
-const TranscriptItem = memo(function TranscriptItem({
+export const TranscriptItem = memo(function TranscriptItem({
   row,
   selected,
   register,
@@ -994,11 +1038,19 @@ const TranscriptItem = memo(function TranscriptItem({
           )}
           {row.displayKind}
         </span>
-        <strong>{row.displayLabel}</strong>
+        <strong className="transcript-label" title={row.displayLabel}>
+          {row.displayLabel}
+        </strong>
         <span className="transcript-facts">
           <Timestamp at={row.startedAt} />
           {row.durationMs !== null && ` · ${formatDuration(row.durationMs)}`}
           {` · ${row.status ?? "recorded"}`}
+          {row.statusAt !== undefined && (
+            <>
+              {" "}
+              <Timestamp at={row.statusAt} />
+            </>
+          )}
           {row.sessionName !== undefined && ` · ${row.sessionName}`}
         </span>
       </button>
@@ -1166,7 +1218,7 @@ function NodeCommandPanel({ node }: { readonly node: NodeView }) {
           <div>
             <dt>Command</dt>
             <dd>
-              <code>{argv.join(" ")}</code>
+              <code className="command-line">{commandLine(argv)}</code>
             </dd>
           </div>
         )}

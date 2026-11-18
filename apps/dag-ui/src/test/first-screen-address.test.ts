@@ -1,4 +1,3 @@
-import { API_V2_FILTER_PROFILES } from "@onepipeline-ui/dag-model";
 import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -12,8 +11,8 @@ import { useUrlSelection } from "../lib/useUrlSelection";
  * The drift gate for the first-screen chunk's reading of the address.
  *
  * `first-screen/address.ts` reads the address without `useUrlSelection`, whose module
- * the first-screen chunk must not load, and copies the filter profile every view is
- * read under. The app takes the first answer over only when the view it would subscribe
+ * the first-screen chunk must not load, and asks for every view unfiltered, as the
+ * app does. The app takes the first answer over only when the view it would subscribe
  * equals the one the first screen subscribed, so a reading that drifted would draw a
  * first screen for one view and then read the run again for another. Each address
  * here is read both ways, and the first screen's view is held to the app's.
@@ -32,7 +31,6 @@ function appView(search: string) {
       selection.runId,
       runPageKind(selection.view, selection.nodeId),
       selection.nodeId,
-      API_V2_FILTER_PROFILES.detailed,
     ),
   };
 }
@@ -102,12 +100,13 @@ describe("the first screen subscribes the view the app would", () => {
     }
   });
 
-  it("reads every address under the app's one profile, whatever it names", () => {
+  it("asks for every view unfiltered, whatever the address names", () => {
     for (const search of [
       "?run=r&view=overall",
+      "?run=r&node=n&view=graph",
       "?run=r&view=graph&detail=decisions",
-      "?run=r&detail=other",
+      "?run=r&detail=other&hide-event=surface",
     ])
-      expect(filterOf(search)).toBe(API_V2_FILTER_PROFILES.detailed);
+      expect(filterOf(search)).toBeUndefined();
   });
 });
