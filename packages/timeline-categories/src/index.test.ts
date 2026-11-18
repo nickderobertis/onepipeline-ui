@@ -62,8 +62,10 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "command-exited": "session",
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   // A node's guard starting, and the verdict it reached: a gate on the node.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these kinds and this package owns their category; `tests/contract.rs::the_browser_files_every_kind_those_libraries_declare` reconciles CORPUS against the linked `onepipeline::event::PIPELINE_KINDS`, and it failed naming exactly these two kinds when the pin moved to 0.114.0, so the entries are the reconciled copy the gate demands rather than a second source.
   "guard-started": "verification",
   "guard-evaluated": "verification",
+  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
   "planner-surface-queued": "planning",
   // A surface a bus hook kept off the run's channel: the exchange with the
   // planner, like the queueing it stands in for.
