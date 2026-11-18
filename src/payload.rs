@@ -8720,7 +8720,10 @@ pub fn rendered(run: &RunId, rendered: String) -> Value {
 /// It takes the engine's own [`onepipeline::verbs::RunStatus`], so this crate's
 /// public surface follows the linked `onepipeline` release's types here too;
 /// [`ApiError::from_engine`](crate::error::ApiError::from_engine) says why
-/// moving that requirement across a pre-1.0 minor breaks this crate.
+/// moving that requirement across a pre-1.0 minor breaks this crate. Linking
+/// onepipeline 0.114.0 was such a break: a consumer upgrading across it must
+/// align its own engine dependency with onepipeline 0.114 to pass a
+/// `RunStatus` here.
 #[must_use]
 pub fn status(run: &RunId, status: &onepipeline::verbs::RunStatus, rendered: String) -> Value {
     let (count, oldest_seconds) = status.view.unread_surfaces();
