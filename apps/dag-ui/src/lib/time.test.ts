@@ -1,3 +1,4 @@
+import { format, parseISO } from "date-fns";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   formatAbsoluteTimestamp,
@@ -80,6 +81,77 @@ describe("when something happened", () => {
       "42 seconds ago",
     );
     expect(formatRelativeTimestamp("2026-07-19T14:30:00Z")).toBe("7 days ago");
+  });
+
+  test("reads every stamp to the instant parseISO reads it", () => {
+    for (const stamp of [
+      "2026-07-26T11:02:03Z",
+      "2026-07-26T11:02:03.5Z",
+      "2026-07-26T11:02:03.12Z",
+      "2026-07-26T11:02:03.123Z",
+      "2026-07-26T11:02:03.123+05:30",
+      "2026-07-26T11:02:03-07:00",
+      "2028-02-29T00:00:00Z",
+      "2026-07-31T23:59:59.999Z",
+      // Shapes the contract does not serve, still read as parseISO reads them.
+      "2026-07-26T11:02:03.123456Z",
+      "2026-07-26T11:02:03+0530",
+      "2026-07-26",
+    ])
+      expect(parseTimestamp(stamp)?.getTime(), stamp).toBe(
+        parseISO(stamp).getTime(),
+      );
+    // A day no calendar has is no instant, by either reading.
+    expect(parseTimestamp("2026-02-29T00:00:00Z")).toBeUndefined();
+    expect(parseTimestamp("2026-02-30T00:00:00Z")).toBeUndefined();
+    expect(parseTimestamp("2026-04-31T00:00:00Z")).toBeUndefined();
+  });
+
+  test("writes each reading exactly as date-fns' format does, in every zone", () => {
+    const zone = process.env.TZ;
+    try {
+      for (const tz of [
+        "UTC",
+        "America/Chicago",
+        "Asia/Kolkata",
+        "America/St_Johns",
+        "Pacific/Kiritimati",
+      ]) {
+        process.env.TZ = tz;
+        at(NOW);
+        for (const stamp of [
+          "2026-07-26T00:00:00Z",
+          "2026-07-26T11:02:03Z",
+          "2026-07-26T12:00:00Z",
+          "2026-07-26T23:59:59.999Z",
+          "2026-01-01T09:05:07+05:30",
+          "2026-03-08T08:30:00Z",
+          "2026-11-01T06:30:00Z",
+          "2026-12-31T23:00:00-03:30",
+          "2025-02-03T04:05:06Z",
+          "2031-10-09T13:14:15Z",
+        ]) {
+          const parsed = parseISO(stamp);
+          const where = `${stamp} in ${tz}`;
+          expect(formatTimestamp(stamp), where).toBe(
+            format(
+              parsed,
+              format(parsed, "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd")
+                ? "HH:mm:ss"
+                : parsed.getFullYear() === new Date().getFullYear()
+                  ? "MMM d, HH:mm:ss"
+                  : "MMM d yyyy, HH:mm:ss",
+            ),
+          );
+          expect(formatAbsoluteTimestamp(stamp), where).toBe(
+            format(parsed, "PPpp zzzz"),
+          );
+        }
+        vi.useRealTimers();
+      }
+    } finally {
+      process.env.TZ = zone;
+    }
   });
 
   test("hands back a record no clock can read, exactly as recorded", () => {
