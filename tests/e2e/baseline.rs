@@ -329,6 +329,12 @@ fn walk(value: &Value, at: String, found: &mut BTreeSet<String>) {
     }
 }
 
+/// Whether `field` is a key inside a timeline event's `fields`, on a span's
+/// events or on a history page's rows.
+fn is_event_field(field: &str) -> bool {
+    field.contains("events[].fields.") || field.contains("rows[].fields.")
+}
+
 /// The `onepipeline` this clone provisioned, as an older server may need it.
 ///
 /// This build runs no `onepipeline` process; a base commit from before that may
@@ -396,8 +402,21 @@ fn every_field_the_base_commit_served_is_served_by_this_build() {
                 "{path}: the base commit answered it and this build does not: {}",
                 after.body
             );
-            let dropped: Vec<String> = fields(&before.json())
-                .difference(&fields(&after.json()))
+            let (before, after) = (before.json(), after.json());
+            // Schema 16 keys an event's `fields` by wire key rather than label, so
+            // a labelled key the base served is not served under that name now;
+            // that every value it held still is, on the same event, is what
+            // `every_span_and_event_the_base_commits_timeline_served_is_served_unchanged`
+            // holds.
+            let rekeyed = before["timeline_schema_version"]
+                .as_u64()
+                .is_some_and(|schema| schema < WIRE_KEYED_FIELDS)
+                && after["timeline_schema_version"]
+                    .as_u64()
+                    .is_some_and(|schema| schema >= WIRE_KEYED_FIELDS);
+            let dropped: Vec<String> = fields(&before)
+                .difference(&fields(&after))
+                .filter(|field| !(rekeyed && is_event_field(field)))
                 .cloned()
                 .collect();
             assert!(
@@ -642,7 +661,17 @@ fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value,
         before.body
     );
     assert_eq!(after.status, 200, "{path} now: {}", after.body);
-    let (mut before, mut after) = (before.json(), after.json());
+    timelines_of(before.json(), after.json(), newer, path)
+}
+
+/// [`timelines`], over two bodies already read; `newer` is asked again for the
+/// run's own timeline where a node's needs it.
+fn timelines_of(
+    mut before: Value,
+    mut after: Value,
+    newer: SocketAddr,
+    path: &str,
+) -> (Value, Value, u64) {
     telemetry_schemas_are_compatible(&before, &after)
         .unwrap_or_else(|error| panic!("{path}: {error}"));
     let base_schema = before["timeline_schema_version"]
@@ -824,6 +853,30 @@ fn served_differently(older: SocketAddr, newer: SocketAddr, path: &str) -> Optio
     })
 }
 
+/// [`served_differently`], between two servers of this build over two stores
+/// written alike: each store's own location, which a record names where it
+/// keeps a file under it — a report's path — is set aside on both sides, so
+/// what is compared is what the two stores recorded.
+fn served_differently_between(older: &Serving, newer: &Serving, path: &str) -> Option<String> {
+    let read = |serving: &Serving| -> Value {
+        let answer = http::get(serving.address, path);
+        assert_eq!(answer.status, 200, "{path}: {}", answer.body);
+        let root = serving.runs_root();
+        let workspace = root.parent().expect("a store's workspace");
+        let text = answer
+            .body
+            .replace(&workspace.display().to_string(), "{workspace}");
+        serde_json::from_str(&text).expect("a timeline")
+    };
+    let (before, after, base_schema) = timelines_of(read(older), read(newer), newer.address, path);
+    (after != before).then(|| {
+        format!(
+            "{path}: this build serves a span or event the base commit's schema \
+             {base_schema} served differently\n  base: {before}\n  this: {after}"
+        )
+    })
+}
+
 /// Every fixture run whose timeline is compared, with the nodes it is also
 /// asked for one at a time.
 const COMPARED_RUNS: &[(&str, &[&str])] = &[
@@ -965,7 +1018,14 @@ fn every_span_and_event_the_base_commits_timeline_served_is_served_unchanged() {
 #[test]
 fn a_span_or_event_served_differently_from_the_base_fails_the_comparison() {
     let unchanged = Serving::start(compared_store);
-    let same = Serving::start(compared_store);
+    // A second server of this build over the very same store: a record may name
+    // a file the store keeps beside it by its absolute path, which a second store
+    // written alike would name elsewhere.
+    let same = ForeignServing::start(
+        &assert_cmd::cargo::cargo_bin("onepipeline-api"),
+        &unchanged.runs_root(),
+        &[],
+    );
     for (run, nodes) in COMPARED_RUNS {
         for path in timeline_paths(run, nodes) {
             assert_eq!(
@@ -991,13 +1051,13 @@ fn a_span_or_event_served_differently_from_the_base_fails_the_comparison() {
     };
     let review_run = timeline_paths(fixture_run::REVIEW_DRAFT_RUN_ID, &[])[0].clone();
     let verdict = rewritten("passed-with-skipped", "passed");
-    let refused = served_differently(unchanged.address, verdict.address, &review_run)
+    let refused = served_differently_between(&unchanged, &verdict, &review_run)
         .expect("a review event served with another verdict is refused");
     assert!(refused.contains("passed-with-skipped"), "{refused}");
     // One span of it: the kept draft's publication, ending where the run's watch
     // of it ended, which moves with the record that watch ended on.
     let watch = rewritten("2026-08-07T12:00:11.000Z", "2026-08-07T12:00:11.250Z");
-    let refused = served_differently(unchanged.address, watch.address, &review_run)
+    let refused = served_differently_between(&unchanged, &watch, &review_run)
         .expect("a publication served ending elsewhere is refused");
     assert!(refused.contains("2026-08-07T12:00:11.250Z"), "{refused}");
 
@@ -1017,7 +1077,7 @@ fn a_span_or_event_served_differently_from_the_base_fails_the_comparison() {
     for (run, nodes) in COMPARED_RUNS {
         let refused = timeline_paths(run, nodes)
             .iter()
-            .any(|path| served_differently(unchanged.address, truncated.address, path).is_some());
+            .any(|path| served_differently_between(&unchanged, &truncated, path).is_some());
         if refused {
             refused_runs.push(*run);
         }
