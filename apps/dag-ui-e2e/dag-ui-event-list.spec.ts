@@ -415,6 +415,7 @@ test.describe("the run's own records", () => {
       row(events, "Redirection deferred to the next dispatch"),
     ).toContainText(" · held");
     await expect(row(events, "planner-replied")).toHaveCount(1);
+    await expect(row(events, "command-accepted")).toContainText(" · accepted");
     await row(events, "edit-rejected · by planner").getByRole("button").click();
     await expect(
       page.getByRole("complementary", { name: "Item detail panel" }),
