@@ -828,3 +828,13 @@ serves changes. A patch move inside 0.113 leaves the re-exported engine types
 where they were, so it is not announced as a break. Its onejudge,
 onemessagebus, onetaskgraph and onevcs requirements are the ones 0.113.3
 resolved.
+
+0.113.5 is the engine whose `onepipeline start --redo` re-runs exactly the spikes
+whose definitions changed when a revised plan is re-finished, continuing from
+each spike's preserved branch. This crate moves to it so that a host can adopt
+that engine together with a read API linking the same one; nothing it serves
+changes. It moves onejudge to 0.23.2 and onevcs to 0.67.3, and the lock follows
+that engine's own for two transitive crates both resolve, privateterms 0.1.3
+and libz-sys 1.1.33, so every crate the two share resolves at one version. A patch move inside 0.113 leaves the re-exported engine
+types where they were, so it is not announced as a break. Its oneagentgraph,
+onemessagebus and onetaskgraph requirements are the ones 0.113.4 resolved.

@@ -159,7 +159,7 @@ oneharness-core = "0.29.1"
 oneagentgraph = "0.13.1"
 # The document a settled member's report *is*, linked rather than copied — why,
 # and why it is unpinned, is in `src/AGENTS.md`.
-onejudge = "0.23.1"
+onejudge = "0.23.2"
 # The correlation a channel reply is answered under is that library's own
 # token, parsed by its own parser: `POST .../channel/reply?correlation=C` hands
 # the query through `onemessagebus::Correlation` rather than a copy of its
@@ -180,7 +180,7 @@ onemessagebus = "0.11.1"
 # it cannot notice, because both sides' rustdoc still spells the path
 # `onepipeline::Error` while the type behind it changed identity, so
 # `scripts/semver-check.sh` refuses a release that moved this line while the
-# commits release-plz versions from announce no break. At `=0.113.4` this crate's
+# commits release-plz versions from announce no break. At `=0.113.5` this crate's
 # surface follows onepipeline 0.113's: `error::ApiError::from_engine` takes that
 # release's `onepipeline::Error`, which 0.111's is not. 0.110 is the release
 # whose records say whose words a ruling is (`onepipeline::provenance::Provenance`),
@@ -193,7 +193,7 @@ onemessagebus = "0.11.1"
 # The test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.113.4"
+onepipeline = "=0.113.5"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -236,9 +236,9 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right. Exact, at the
-# release the linked engine's lock resolves (0.113.4 requires ^0.67.2); earlier
+# release the linked engine's lock resolves (0.113.5 requires ^0.67.3); earlier
 # moves are in docs/engine-dependency-history.md.
-onevcs = "=0.67.2"
+onevcs = "=0.67.3"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
