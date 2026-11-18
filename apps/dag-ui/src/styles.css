@@ -1914,14 +1914,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     width: 100vw;
   }
 
-  /* One clock over a dozen stacked rows, and at this width its two readings do not fit
-     one line. They stack instead of holding the row wider than the screen — which is
-     what a `justify-between` pair that cannot shrink does. */
-  .graph-row [data-timeline-axis] {
-    flex-wrap: wrap;
-    gap: 2px 10px;
-  }
-
   .metric-grid,
   .facts {
     grid-template-columns: minmax(0, 1fr);
