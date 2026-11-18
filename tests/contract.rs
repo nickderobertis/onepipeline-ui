@@ -4508,3 +4508,29 @@ fn the_every_kind_corpus_is_every_engine_kind_in_its_own_shape() {
         refused.join("\n")
     );
 }
+
+/// **Every engine record of the event-list corpus is in the shape the linked
+/// engine publishes for its kind.** The journeys of
+/// `apps/dag-ui-e2e/dag-ui-event-list.spec.ts` read loops, surfaces, edits and
+/// commands off these records through the real read API, so a record the engine
+/// would never write is a journey proving nothing about a run it would.
+#[test]
+fn every_engine_record_of_the_event_list_corpus_is_in_its_own_shape() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui-e2e/fixtures/event-list.json");
+    let corpus: Value = serde_json::from_str(&fs::read_to_string(&path).expect("the corpus reads"))
+        .expect("the corpus parses");
+    let registry = onepipeline::payload::registry();
+    let mut refused = Vec::new();
+    for (index, record) in corpus["records"].as_array().expect("records").iter().enumerate() {
+        assert_eq!(record["source"], "pipeline", "record {index} is the engine's own");
+        let kind = onepipeline::event::PIPELINE_KINDS
+            .iter()
+            .find(|kind| record["kind"] == kind.as_str())
+            .unwrap_or_else(|| panic!("record {index} is no kind the engine writes: {}", record["kind"]));
+        if let Err(why) = registry.check(&onepipeline::payload::schema_of(*kind), &record["payload"]) {
+            refused.push(format!("record {index} ({}): {why}", kind.as_str()));
+        }
+    }
+    assert!(refused.is_empty(), "{}:\n{}", path.display(), refused.join("\n"));
+}

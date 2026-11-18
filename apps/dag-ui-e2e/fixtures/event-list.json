@@ -1,0 +1,1150 @@
+{
+  "run_id": "dag-ui-event-list",
+  "stream": "a-recording-host-dag-ui-event-list",
+  "launch": {
+    "run_id": "dag-ui-event-list",
+    "plan": "plan.json",
+    "graph": "graphs/dag-scope.yaml",
+    "launcher": "claude-code",
+    "session": "claude-code-top-session",
+    "pid": 4265,
+    "host": "a-recording-host",
+    "started_at": "2026-08-07T12:00:00.000Z",
+    "heartbeat_interval": 1800,
+    "adoptions": 0
+  },
+  "logs": {
+    "build": "bundled app.tar\n",
+    "long": "done\n"
+  },
+  "records": [
+    {
+      "source": "pipeline",
+      "kind": "run-started",
+      "payload": {
+        "plan": {
+          "schema_version": 3,
+          "goal": {
+            "text": "Read a run's history at a glance: loops, surfaces, edits and commands"
+          },
+          "name": "dag-ui-event-list",
+          "concurrency": 4,
+          "tasks": [
+            {
+              "id": "held",
+              "task": "Wait for the schema node.",
+              "persona": "engineer",
+              "deps": []
+            },
+            {
+              "id": "loops",
+              "task": "Poll the upstream run.",
+              "persona": "engineer",
+              "deps": []
+            },
+            {
+              "id": "plain",
+              "task": "Check the criteria once.",
+              "persona": "engineer",
+              "deps": []
+            },
+            {
+              "id": "asker",
+              "task": "Ask what it needs to know.",
+              "persona": "engineer",
+              "deps": []
+            },
+            {
+              "id": "waiting",
+              "task": "Wait on a blocking question.",
+              "persona": "engineer",
+              "deps": []
+            },
+            {
+              "id": "build",
+              "kind": "command",
+              "command": [
+                "bun",
+                "run",
+                "build",
+                "--name",
+                "a b"
+              ],
+              "deps": []
+            },
+            {
+              "id": "long",
+              "kind": "command",
+              "command": [
+                "bun",
+                "run",
+                "build",
+                "--flag-000=value",
+                "--flag-001=value",
+                "--flag-002=value",
+                "--flag-003=value",
+                "--flag-004=value",
+                "--flag-005=value",
+                "--flag-006=value",
+                "--flag-007=value",
+                "--flag-008=value",
+                "--flag-009=value",
+                "--flag-010=value",
+                "--flag-011=value",
+                "--flag-012=value",
+                "--flag-013=value",
+                "--flag-014=value",
+                "--flag-015=value",
+                "--flag-016=value",
+                "--flag-017=value",
+                "--flag-018=value",
+                "--flag-019=value",
+                "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              ],
+              "deps": []
+            }
+          ]
+        },
+        "graph": "graphs/dag-scope.yaml",
+        "dir": "/a-recording-host/workspace/runs/dag-ui-event-list",
+        "heartbeat_interval": 1800
+      },
+      "gap": 0
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": [
+              "schema"
+            ]
+          }
+        ]
+      },
+      "gap": 30,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "cross-dag-satisfied",
+      "payload": {
+        "dependency": "run:upstream#schema",
+        "last_seq": 4
+      },
+      "gap": 1,
+      "node": "loops"
+    },
+    {
+      "source": "pipeline",
+      "kind": "upstream-modified",
+      "payload": {
+        "dependency": "run:upstream#schema",
+        "captured_last_seq": 4,
+        "observed_last_seq": 5
+      },
+      "gap": 1,
+      "node": "loops"
+    },
+    {
+      "source": "pipeline",
+      "kind": "cross-dag-satisfied",
+      "payload": {
+        "dependency": "run:upstream#schema",
+        "last_seq": 4
+      },
+      "gap": 1,
+      "node": "loops"
+    },
+    {
+      "source": "pipeline",
+      "kind": "upstream-modified",
+      "payload": {
+        "dependency": "run:upstream#schema",
+        "captured_last_seq": 4,
+        "observed_last_seq": 5
+      },
+      "gap": 1,
+      "node": "loops"
+    },
+    {
+      "source": "pipeline",
+      "kind": "criterion-checked",
+      "payload": {
+        "criterion": "the docs build",
+        "file": "docs/index.md",
+        "expected": "present",
+        "answer": "match",
+        "holds": "the docs build holds",
+        "reason": "the file is there"
+      },
+      "gap": 1,
+      "node": "loops"
+    },
+    {
+      "source": "pipeline",
+      "kind": "criterion-checked",
+      "payload": {
+        "criterion": "the docs build",
+        "file": "docs/index.md",
+        "expected": "present",
+        "answer": "match",
+        "holds": "the docs build holds",
+        "reason": "the file is there"
+      },
+      "gap": 1,
+      "node": "loops"
+    },
+    {
+      "source": "pipeline",
+      "kind": "criterion-checked",
+      "payload": {
+        "criterion": "the docs build",
+        "file": "docs/index.md",
+        "expected": "present",
+        "answer": "match",
+        "holds": "the docs build holds",
+        "reason": "the file is there"
+      },
+      "gap": 1,
+      "node": "loops"
+    },
+    {
+      "source": "pipeline",
+      "kind": "criterion-checked",
+      "payload": {
+        "criterion": "the docs build",
+        "file": "docs/index.md",
+        "expected": "present",
+        "answer": "match",
+        "holds": "the docs build holds",
+        "reason": "the file is there"
+      },
+      "gap": 1,
+      "node": "loops"
+    },
+    {
+      "source": "pipeline",
+      "kind": "criterion-checked",
+      "payload": {
+        "criterion": "the docs build",
+        "file": "docs/index.md",
+        "expected": "present",
+        "answer": "match",
+        "holds": "the docs build holds",
+        "reason": "the file is there"
+      },
+      "gap": 1,
+      "node": "loops"
+    },
+    {
+      "source": "pipeline",
+      "kind": "criterion-checked",
+      "payload": {
+        "criterion": "the docs build",
+        "file": "docs/index.md",
+        "expected": "present",
+        "answer": "match",
+        "holds": "the docs build holds",
+        "reason": "the file is there"
+      },
+      "gap": 1,
+      "node": "plain"
+    },
+    {
+      "source": "pipeline",
+      "kind": "cross-dag-satisfied",
+      "payload": {
+        "dependency": "run:upstream#schema",
+        "last_seq": 4
+      },
+      "gap": 1,
+      "node": "plain"
+    },
+    {
+      "source": "pipeline",
+      "kind": "upstream-modified",
+      "payload": {
+        "dependency": "run:upstream#schema",
+        "captured_last_seq": 4,
+        "observed_last_seq": 5
+      },
+      "gap": 1,
+      "node": "plain"
+    },
+    {
+      "source": "pipeline",
+      "kind": "criterion-checked",
+      "payload": {
+        "criterion": "the docs build",
+        "file": "docs/index.md",
+        "expected": "present",
+        "answer": "match",
+        "holds": "the docs build holds",
+        "reason": "the file is there"
+      },
+      "gap": 1,
+      "node": "plain"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "payload": {
+        "surface": 1,
+        "correlation": "q-asker-1",
+        "kind": "planner-question",
+        "message": "Should the export keep the v1 columns?",
+        "source": "asker",
+        "blocking": true
+      },
+      "gap": 1,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "payload": {
+        "surface": 2,
+        "correlation": null,
+        "kind": "check-in",
+        "message": "Workstream export: halfway through the writer",
+        "source": "asker",
+        "blocking": false
+      },
+      "gap": 1,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "payload": {
+        "surface": 3,
+        "correlation": null,
+        "kind": "quiet-worker",
+        "message": "asker has been quiet for 30 minutes",
+        "source": "engine",
+        "blocking": false
+      },
+      "gap": 1,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "quiet-worker",
+      "payload": {
+        "surface": 3,
+        "quiet_for_seconds": 1800,
+        "threshold_seconds": 1200,
+        "persona": "engineer"
+      },
+      "gap": 1,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "payload": {
+        "surface": 4,
+        "correlation": null,
+        "kind": "check-failed",
+        "message": "ci/lint failed on asker's change",
+        "source": "engine",
+        "blocking": true
+      },
+      "gap": 1,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "check-failed",
+      "payload": {
+        "surface": 4,
+        "node": "asker",
+        "change": "https://example.invalid/changes/41",
+        "head": "5f3c8a1204e7b96d3fa8c05e17d2b649a08c7e31",
+        "check": "ci/lint",
+        "state": "failed",
+        "conclusion": "failure",
+        "required": true,
+        "requirement": "required",
+        "url": "https://example.invalid/checks/7"
+      },
+      "gap": 1,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "payload": {
+        "surface": 5,
+        "correlation": null,
+        "kind": "checks-unfollowed",
+        "message": "asker's checks are no longer followed",
+        "source": "engine",
+        "blocking": false
+      },
+      "gap": 1,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "checks-unfollowed",
+      "payload": {
+        "surface": 5,
+        "node": "asker",
+        "change": "https://example.invalid/changes/41",
+        "head": "5f3c8a1204e7b96d3fa8c05e17d2b649a08c7e31",
+        "reason": "timeout",
+        "checks": [
+          {
+            "check": "ci/test",
+            "required": true,
+            "requirement": "required"
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "payload": {
+        "surface": 1,
+        "correlation": "q-asker-1",
+        "kind": "planner-question",
+        "message": "Should the export keep the v1 columns?",
+        "source": "asker",
+        "blocking": true,
+        "queued_at": null
+      },
+      "gap": 5,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "payload": {
+        "surface": 2,
+        "correlation": null,
+        "kind": "check-in",
+        "message": "Workstream export: halfway through the writer",
+        "source": "asker",
+        "blocking": false,
+        "queued_at": null
+      },
+      "gap": 5,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "payload": {
+        "surface": 3,
+        "correlation": null,
+        "kind": "quiet-worker",
+        "message": "asker has been quiet for 30 minutes",
+        "source": "engine",
+        "blocking": false,
+        "queued_at": null
+      },
+      "gap": 5,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "payload": {
+        "surface": 4,
+        "correlation": null,
+        "kind": "check-failed",
+        "message": "ci/lint failed on asker's change",
+        "source": "engine",
+        "blocking": true,
+        "queued_at": null
+      },
+      "gap": 5,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "payload": {
+        "surface": 5,
+        "correlation": null,
+        "kind": "checks-unfollowed",
+        "message": "asker's checks are no longer followed",
+        "source": "engine",
+        "blocking": false,
+        "queued_at": null
+      },
+      "gap": 5,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-replied",
+      "payload": {
+        "author": "planner",
+        "completion": null,
+        "reason": null,
+        "correlation": "q-asker-1",
+        "message": "Keep the v1 columns until the next release."
+      },
+      "gap": 5
+    },
+    {
+      "source": "pipeline",
+      "kind": "note-shown",
+      "payload": {
+        "addressee": "worker",
+        "text": "check the export at phone width too",
+        "reached": "worker",
+        "criterion": null,
+        "completion_reason": null,
+        "party": "worker",
+        "turn": 3,
+        "evidence": "delivered-origin",
+        "envelope": 7
+      },
+      "gap": 1,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "payload": {
+        "surface": 6,
+        "correlation": "q-waiting-6",
+        "kind": "planner-question",
+        "message": "Which region should the canary use?",
+        "source": "waiting",
+        "blocking": true
+      },
+      "gap": 1,
+      "node": "waiting"
+    },
+    {
+      "source": "pipeline",
+      "kind": "edit-committed",
+      "payload": {
+        "author": "planner",
+        "command": {
+          "op": "amend",
+          "id": "plain",
+          "amendment": "Check the criteria twice."
+        },
+        "operations": [
+          {
+            "kind": "task-amended",
+            "node": "plain",
+            "amendment": "Check the criteria twice."
+          }
+        ],
+        "operation_kinds": [
+          "task-amended"
+        ],
+        "envelope": 3
+      },
+      "gap": 1
+    },
+    {
+      "source": "pipeline",
+      "kind": "edit-rejected",
+      "payload": {
+        "author": "planner",
+        "command": {
+          "op": "decline",
+          "id": "plain",
+          "reason": ""
+        },
+        "reason": "decline: node 'plain': the reason cannot be blank",
+        "envelope": 4,
+        "index": 0
+      },
+      "gap": 1
+    },
+    {
+      "source": "pipeline",
+      "kind": "edit-committed",
+      "payload": {
+        "author": "planner",
+        "command": {
+          "op": "context",
+          "id": "held",
+          "note": "measure the cold start too"
+        },
+        "operations": [
+          {
+            "kind": "context-added",
+            "node": "held",
+            "note": "measure the cold start too",
+            "delivery": "deferred"
+          }
+        ],
+        "operation_kinds": [
+          "context-added"
+        ],
+        "envelope": 5
+      },
+      "gap": 1
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-replied",
+      "payload": {
+        "author": "planner",
+        "completion": null,
+        "reason": null,
+        "correlation": null,
+        "message": "Carry on with the writer."
+      },
+      "gap": 1
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-started",
+      "payload": {
+        "command": [
+          "bun",
+          "run",
+          "build",
+          "--name",
+          "a b"
+        ],
+        "log": "commands/build.log",
+        "timeout_seconds": 600
+      },
+      "gap": 1,
+      "node": "build"
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-exited",
+      "payload": {
+        "ending": "exited",
+        "exit_code": 0,
+        "duration_ms": 41230,
+        "outputs": {
+          "artifact": "dist/app.tar"
+        }
+      },
+      "gap": 1,
+      "node": "build"
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-started",
+      "payload": {
+        "command": [
+          "bun",
+          "run",
+          "build",
+          "--flag-000=value",
+          "--flag-001=value",
+          "--flag-002=value",
+          "--flag-003=value",
+          "--flag-004=value",
+          "--flag-005=value",
+          "--flag-006=value",
+          "--flag-007=value",
+          "--flag-008=value",
+          "--flag-009=value",
+          "--flag-010=value",
+          "--flag-011=value",
+          "--flag-012=value",
+          "--flag-013=value",
+          "--flag-014=value",
+          "--flag-015=value",
+          "--flag-016=value",
+          "--flag-017=value",
+          "--flag-018=value",
+          "--flag-019=value",
+          "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        ],
+        "log": "commands/long.log"
+      },
+      "gap": 1,
+      "node": "long"
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-exited",
+      "payload": {
+        "ending": "exited",
+        "exit_code": 0,
+        "duration_ms": 1200
+      },
+      "gap": 1,
+      "node": "long"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "payload": {
+        "status": "done",
+        "outcome": "merged"
+      },
+      "gap": 1,
+      "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "payload": {
+        "status": "done",
+        "outcome": "merged"
+      },
+      "gap": 1,
+      "node": "loops"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "payload": {
+        "status": "done",
+        "outcome": "merged"
+      },
+      "gap": 1,
+      "node": "plain"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "payload": {
+        "status": "done",
+        "outcome": "merged"
+      },
+      "gap": 1,
+      "node": "asker"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "payload": {
+        "status": "done",
+        "outcome": "merged"
+      },
+      "gap": 1,
+      "node": "waiting"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "payload": {
+        "status": "done"
+      },
+      "gap": 1,
+      "node": "build"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "payload": {
+        "status": "done"
+      },
+      "gap": 1,
+      "node": "long"
+    },
+    {
+      "source": "pipeline",
+      "kind": "branches-retired",
+      "payload": {
+        "retired": [
+          {
+            "identity": "github.com/example/repo",
+            "branch": "plain",
+            "class": "merged",
+            "proof": {
+              "change": "https://example.invalid/changes/40"
+            },
+            "trigger": "pass"
+          }
+        ],
+        "failed": []
+      },
+      "gap": 60
+    },
+    {
+      "source": "pipeline",
+      "kind": "scratch-removed",
+      "payload": {
+        "trigger": "success",
+        "dirs": 2,
+        "bytes": 4096,
+        "failed": []
+      },
+      "gap": 60
+    }
+  ]
+}
