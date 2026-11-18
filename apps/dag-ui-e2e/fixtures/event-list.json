@@ -102,6 +102,12 @@
                 "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
               ],
               "deps": []
+            },
+            {
+              "id": "approve",
+              "kind": "human",
+              "task": "Approve the export's columns.",
+              "deps": []
             }
           ]
         },
@@ -973,6 +979,27 @@
     },
     {
       "source": "pipeline",
+      "kind": "human-attested",
+      "payload": {
+        "ref": "approve",
+        "item": {
+          "id": "hi-approve-1",
+          "action": "answered",
+          "resolution": {
+            "actor": "operator",
+            "on_behalf_of": "release-manager",
+            "text": "Keep them for one more release.",
+            "choice": "keep",
+            "reason": null,
+            "provenance": "user"
+          }
+        }
+      },
+      "gap": 1,
+      "node": "approve"
+    },
+    {
+      "source": "pipeline",
       "kind": "command-started",
       "payload": {
         "command": [
@@ -1115,6 +1142,15 @@
       },
       "gap": 1,
       "node": "long"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "payload": {
+        "status": "done"
+      },
+      "gap": 1,
+      "node": "approve"
     },
     {
       "source": "pipeline",

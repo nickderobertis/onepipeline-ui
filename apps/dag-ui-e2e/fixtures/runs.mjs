@@ -4413,6 +4413,82 @@ export function buildCommandStepsRuns(root) {
   journal.write();
 }
 
+/**
+ * The engine's records of one recorded corpus — the event-list corpus of loops,
+ * surfaces, edits and commands, or the corpus holding one record of every kind —
+ * as one run under `root`: its launch, its plan, the logs its command steps
+ * name, and its records, each `gap` seconds (one by default) after the last.
+ *
+ * `tests/contract.rs` holds every engine record of both to the payload document
+ * the linked engine registers for its kind.
+ */
+const RECORDED_CORPUS = z.object({
+  run_id: z.string().regex(/^[A-Za-z0-9._-]+$/u),
+  stream: z.string().min(1),
+  node: z.string().min(1).optional(),
+  launch: z.record(z.string(), z.unknown()),
+  logs: z.record(commandId, z.string()).optional(),
+  records: z
+    .array(
+      z.object({
+        source: z.enum(["pipeline", "agentgraph", "vcs"]),
+        kind: z.string().min(1),
+        node: commandId.optional(),
+        gap: z.number().nonnegative().optional(),
+        payload: z.record(z.string(), z.unknown()),
+      }),
+    )
+    .min(1),
+});
+
+/** One recorded corpus, as {@link buildRecordedCorpus} writes it. */
+export function recordedCorpus(name) {
+  return RECORDED_CORPUS.parse(
+    JSON.parse(readFileSync(join(import.meta.dirname, `${name}.json`), "utf8")),
+  );
+}
+
+function buildRecordedCorpus(root, corpus) {
+  const dir = runDir(root, corpus.run_id);
+  const [started] = corpus.records;
+  writeJson(join(dir, "plan.json"), started.payload.plan);
+  writeJson(join(dir, "launch.json"), {
+    ...corpus.launch,
+    started_at: stamp(HISTORIC),
+  });
+  mkdirSync(join(dir, "commands"), { recursive: true });
+  for (const [node, said] of Object.entries(corpus.logs ?? {}))
+    writeFileSync(join(dir, "commands", `${node}.log`), said);
+  const journal = new Journal(dir, corpus.stream, HISTORIC);
+  for (const [index, record] of corpus.records.entries()) {
+    const labels = {
+      run_id: corpus.run_id,
+      ...(record.node === undefined ? {} : { node: record.node }),
+    };
+    const payload =
+      typeof record.payload.log === "string" && !isAbsolute(record.payload.log)
+        ? { ...record.payload, log: join(dir, record.payload.log) }
+        : record.payload;
+    journal
+      .advance(index === 0 ? 0 : (record.gap ?? 1))
+      .emit(record.source, record.kind, labels, payload);
+  }
+  journal.write();
+}
+
+/** The event-list corpus and the every-kind corpus, as two runs under `root`. */
+export function buildEventListRuns(root) {
+  mkdirSync(root, { recursive: true });
+  buildRecordedCorpus(root, recordedCorpus("event-list"));
+  buildRecordedCorpus(root, recordedCorpus("every-kind"));
+}
+
+export function eventListFacts() {
+  const list = recordedCorpus("event-list");
+  const every = recordedCorpus("every-kind");
+  return { run: list.run_id, every: every.run_id, every_node: every.node };
+}
+
 export function commandStepsFacts() {
   return {
     run: COMMAND_STEPS.run_id,
