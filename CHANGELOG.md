@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.83.6](https://github.com/nickderobertis/onepipeline-ui/compare/v0.83.5...v0.83.6) - 2026-11-18
+
+### Fixed
+
+- *(deps)* link the engine that re-runs a settled node with --redo ([#821](https://github.com/nickderobertis/onepipeline-ui/pull/821))
+
 ## [0.83.5](https://github.com/nickderobertis/onepipeline-ui/compare/v0.83.4...v0.83.5) - 2026-11-17
 
 ### Added
