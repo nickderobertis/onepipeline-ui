@@ -194,19 +194,19 @@ test("shows a step its guard found not needed as done, with outcome not-needed",
     "Outcomeno commits since v0.4.0 touch a released file",
   );
 
-  // The guard's two records on the node's timeline, each read as what its glyph
-  // drew it as: a gate on the node, so a verification, as a gate's verdict is.
+  // The guard's two records on the node's timeline, each drawn as a verification
+  // — a gate on the node — read off the glyph the icon set drew its marker with,
+  // as `dag-ui.spec.ts` reads every category's, and named here rather than
+  // derived from the mapping under test.
   await page.getByRole("tab", { name: "Timeline", exact: true }).click();
   const timeline = page.getByRole("region", { name: "Node timeline" });
-  const reading = page.getByTestId("timeline-popover");
   for (const kind of ["guard-started", "guard-evaluated"]) {
-    await timeline
-      .getByRole("button", { name: `${kind}, marker`, exact: true })
-      .hover();
-    await expect(reading).toContainText(kind);
-    await expect(reading).toContainText(" · Verification");
-    await page.mouse.move(0, 0);
-    await expect(reading).toHaveCount(0);
+    const marker = timeline.getByRole("button", {
+      name: `${kind}, marker`,
+      exact: true,
+    });
+    await expect(marker).toBeVisible();
+    await expect(marker.locator("svg")).toHaveClass(/\blucide-shield-check\b/u);
   }
 
   expect(thrown).toEqual([]);

@@ -24,6 +24,11 @@ const repoFile = (path: string): string =>
  * they do not have, and the second test below fails when the served store writes
  * one.
  *
+ * So a producer's new kind lands here because the crate's gate demands it — the
+ * pattern `apps/dag-ui/AGENTS.md` sets for a vocabulary this app copies — and the
+ * entry is this package's decision, not the producer's concept: the producer owns
+ * the kind, this package the category it reads under.
+ *
  * The *category* is not gated and cannot be — which of the eleven a kind reads
  * under is a decision rather than a fact about the producer — so a kind reaching
  * either gate is one nobody has decided yet, not a defect. An unrecognized kind
@@ -61,12 +66,7 @@ const CORPUS: Readonly<Record<string, EventCategory>> = {
   "command-started": "session",
   "command-exited": "session",
   // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
-  // A node's guard starting, and the verdict it reached: a gate on the node, filed
-  // by the rules' `guard` word. The engine owns the kinds and this package their
-  // category; the copy is the one `tests/contract.rs`'s
-  // `the_browser_files_every_kind_those_libraries_declare` demands, reconciled
-  // against the linked `onepipeline::event::PIPELINE_KINDS`, which named exactly
-  // these two when the pin moved to 0.114.0.
+  // A node's guard starting, and the verdict it reached: a gate on the node.
   "guard-started": "verification",
   "guard-evaluated": "verification",
   "planner-surface-queued": "planning",
