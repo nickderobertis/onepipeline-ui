@@ -7008,6 +7008,11 @@ impl SurfaceStates {
     /// Take one record in, and answer the owners whose timeline entries it may
     /// have changed: every owner holding a record of the surface it belongs to.
     pub(crate) fn absorb(&mut self, event: &Envelope) -> BTreeSet<Option<String>> {
+        // Nearly every record of a long run is no surface's, and a first answer
+        // folds every one: those are passed over before anything is copied.
+        if !may_belong_to_surface(event) {
+            return BTreeSet::new();
+        }
         let owner = event.labels.node.clone();
         if is_reply(event) {
             let Some(correlation) = correlation_of(&event.payload) else {
