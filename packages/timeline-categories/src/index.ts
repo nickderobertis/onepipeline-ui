@@ -338,7 +338,6 @@ export const EVENT_TYPES = [
   ...EVENT_CATEGORIES.filter((category) => category !== "human"),
 ] as const;
 
-/** One event type, as a type. */
 export type EventType = (typeof EVENT_TYPES)[number];
 
 /** What each event type is called in the filter, where its word alone is not enough. */

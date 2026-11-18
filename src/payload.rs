@@ -6953,7 +6953,6 @@ fn record_correlation(event: &Envelope) -> Option<&str> {
     carries.then(|| correlation_of(&event.payload)).flatten()
 }
 
-/// A payload's non-empty `correlation`.
 fn correlation_of(payload: &Map<String, Value>) -> Option<&str> {
     non_empty(payload.get("correlation").and_then(Value::as_str))
 }
@@ -6997,7 +6996,6 @@ pub(crate) struct SurfaceStates {
 }
 
 impl SurfaceStates {
-    /// The fold over `events`.
     pub(crate) fn of<'e>(events: impl IntoIterator<Item = &'e Envelope>) -> Self {
         let mut states = Self::default();
         for event in events {

@@ -1057,22 +1057,6 @@ export function fieldLabel(key: string): string {
     : `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }
 
-/**
- * A string a producer wrote holding a JSON object or list, read as that object or
- * list, so it is shown as the fields it holds rather than as the text encoding them.
- */
-function decoded(value: string): unknown {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    return typeof parsed === "object" && parsed !== null ? parsed : value;
-  } catch {
-    return value;
-  }
-}
-
-/** One object's fields as label and value pairs, each value read the same way. */
 function FieldList({
   value,
 }: {
@@ -1098,18 +1082,17 @@ function FieldList({
  * of either.
  */
 function FieldValue({ value }: { readonly value: unknown }) {
-  const read = typeof value === "string" ? decoded(value) : value;
-  if (read === null || read === undefined)
+  if (value === null || value === undefined)
     return <span className="record-none">None</span>;
-  if (typeof read === "string")
-    return <span className="record-text">{read}</span>;
-  if (typeof read === "number" || typeof read === "boolean")
-    return <>{String(read)}</>;
-  if (Array.isArray(read)) {
-    if (read.length === 0) return <span className="record-none">None</span>;
+  if (typeof value === "string")
+    return <span className="record-text">{value}</span>;
+  if (typeof value === "number" || typeof value === "boolean")
+    return <>{String(value)}</>;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="record-none">None</span>;
     return (
       <ol className="record-list">
-        {read.map((entry, index) => (
+        {value.map((entry, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: a recorded list's identity is its position.
           <li key={index}>
             <FieldValue value={entry} />
@@ -1118,12 +1101,11 @@ function FieldValue({ value }: { readonly value: unknown }) {
       </ol>
     );
   }
-  if (typeof read === "object")
-    return <FieldList value={read as Readonly<Record<string, unknown>>} />;
-  return <>{String(read)}</>;
+  const fields = objectOf(value);
+  if (fields !== undefined) return <FieldList value={fields} />;
+  return <>{String(value)}</>;
 }
 
-/** What one object field of a record holds, where it is an object. */
 function objectOf(
   value: unknown,
 ): Readonly<Record<string, unknown>> | undefined {
@@ -1132,7 +1114,6 @@ function objectOf(
     : undefined;
 }
 
-/** One string field of an object, where it is a string with something in it. */
 function textOf(
   value: Readonly<Record<string, unknown>> | undefined,
   key: string,
