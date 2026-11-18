@@ -4025,22 +4025,22 @@ test("shows what a worker said and reasoned as its words, never as tool calls", 
   // The thought, the call and the remark — the last three things the turn did —
   // in the order they happened, each in its place among the turn's activity.
   const activity = turn.getByRole("region", { name: "Agent activity" });
+  // One locator over the three kinds, so they are read in the order drawn.
+  const entries = activity
+    .getByRole("group", { name: "Agent message" })
+    .or(activity.getByRole("button", { name: "Reasoning" }))
+    .or(activity.getByRole("button", { name: / tool details$/ }));
   await expect
-    .poll(async () =>
-      (
-        await activity.evaluate((section) =>
-          [
-            ...section.querySelectorAll('[aria-label="Agent message"], button'),
-          ].map((element) =>
-            element.getAttribute("aria-label") === "Agent message"
-              ? "message"
-              : (element.getAttribute("aria-label") ??
-                element.textContent?.trim()),
-          ),
-        )
-      ).slice(-3),
-    )
-    .toEqual(["Reasoning", "Bash tool details", "message"]);
+    .poll(async () => {
+      const order: string[] = [];
+      for (const entry of await entries.all())
+        order.push(
+          (await entry.getAttribute("aria-label")) ??
+            (await entry.innerText()).trim(),
+        );
+      return order.slice(-3);
+    })
+    .toEqual(["Reasoning", "Bash tool details", "Agent message"]);
 
   // The reasoning is the turn's own, behind the disclosure a reader opens.
   await activity.getByRole("button", { name: "Reasoning" }).click();

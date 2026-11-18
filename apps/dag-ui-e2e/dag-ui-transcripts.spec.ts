@@ -434,17 +434,23 @@ test("what the server serves of a turn is what the client's schemas read", async
 async function activityOrder(page: Page): Promise<string[]> {
   const activity = detail(page).getByRole("region", { name: "Agent activity" });
   await expect(activity).toBeVisible();
-  return activity.evaluate((section) =>
-    [...section.querySelectorAll('[aria-label="Agent message"], button')]
-      .map((element) => {
-        const label = element.getAttribute("aria-label") ?? "";
-        if (label === "Agent message") return "message";
-        if (label.endsWith(" tool details"))
-          return `tool:${label.slice(0, -" tool details".length)}`;
-        return element.textContent?.trim() === "Reasoning" ? "reasoning" : "";
-      })
-      .filter((entry) => entry !== ""),
-  );
+  // One locator over the three, so they are read in the order they are drawn.
+  const entries = activity
+    .getByRole("group", { name: "Agent message" })
+    .or(activity.getByRole("button", { name: "Reasoning" }))
+    .or(activity.getByRole("button", { name: / tool details$/ }));
+  const order: string[] = [];
+  for (const entry of await entries.all()) {
+    const label = (await entry.getAttribute("aria-label")) ?? "";
+    order.push(
+      label === "Agent message"
+        ? "message"
+        : label.endsWith(" tool details")
+          ? `tool:${label.slice(0, -" tool details".length)}`
+          : "reasoning",
+    );
+  }
+  return order;
 }
 
 for (const [reading, node, settled] of [
