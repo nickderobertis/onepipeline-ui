@@ -838,3 +838,15 @@ that engine's own for two transitive crates both resolve, privateterms 0.1.3
 and libz-sys 1.1.33, so every crate the two share resolves at one version. A patch move inside 0.113 leaves the re-exported engine
 types where they were, so it is not announced as a break. Its oneagentgraph,
 onemessagebus and onetaskgraph requirements are the ones 0.113.4 resolved.
+
+0.113.6 is the engine whose records a reader can join without restating them:
+`human-attested` carries the `item` a person answered or completed, with its
+resolution as the human-item store records it; `planner-surface-queued` and
+`planner-surfaced` carry the channel's `surface` id and `correlation`, as do
+the `quiet-worker`, `check-failed` and `checks-unfollowed` records written
+beside a surface; `ask` journals its question; and `planner-replied` names the
+`correlation` it answered. The browser's event list joins and shows those
+fields, which reach it inside the SDK's records. Its library requirements are
+the ones 0.113.5 resolved; the lock dedupes `windows-sys`, `getrandom` and
+`base64` edges onto versions it already carried. A patch move inside 0.113
+leaves the re-exported engine types where they were.

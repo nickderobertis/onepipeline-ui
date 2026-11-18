@@ -180,7 +180,7 @@ onemessagebus = "0.11.1"
 # it cannot notice, because both sides' rustdoc still spells the path
 # `onepipeline::Error` while the type behind it changed identity, so
 # `scripts/semver-check.sh` refuses a release that moved this line while the
-# commits release-plz versions from announce no break. At `=0.113.5` this crate's
+# commits release-plz versions from announce no break. At `=0.113.6` this crate's
 # surface follows onepipeline 0.113's: `error::ApiError::from_engine` takes that
 # release's `onepipeline::Error`, which 0.111's is not. 0.110 is the release
 # whose records say whose words a ruling is (`onepipeline::provenance::Provenance`),
@@ -193,7 +193,7 @@ onemessagebus = "0.11.1"
 # The test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.113.5"
+onepipeline = "=0.113.6"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
