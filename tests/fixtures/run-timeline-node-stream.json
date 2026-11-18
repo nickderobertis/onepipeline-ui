@@ -426,7 +426,7 @@
         "dispatch_id": "run-20260807-a1b2c3.contract-interface",
         "fields": {
           "completed": true,
-          "report_path": "/tmp/.tmpU1QsyA/report.json"
+          "report_path": "/a-scratch/report.json"
         },
         "kind": "member-settled",
         "at": "2026-08-07T12:00:05.500Z",

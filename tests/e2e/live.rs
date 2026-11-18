@@ -4584,6 +4584,22 @@ fn the_node_stream_is_the_golden_the_contract_pins() {
         .map(|line| serde_json::to_value(line).expect("a line serializes"))
         .collect();
     lines[0]["split"] = json!({ "heads_s": 0.0, "fetch_s": 0.0, "build_s": 0.0 });
+    // A settled member names its report in the producing library's scratch, a new
+    // temporary directory on every write of the fixture: pinned by file name under
+    // the `/a-scratch` `tests/contract.rs` pins the run's timeline with.
+    for line in &mut lines {
+        let rows = line.get_mut("rows").and_then(Value::as_array_mut);
+        for row in rows.into_iter().flatten() {
+            if let Some(path) = row["fields"]["report_path"].as_str() {
+                let name = Path::new(path)
+                    .file_name()
+                    .expect("a report file")
+                    .to_string_lossy()
+                    .into_owned();
+                row["fields"]["report_path"] = json!(format!("/a-scratch/{name}"));
+            }
+        }
+    }
     pin_golden("run-timeline-node-stream.json", &Value::Array(lines));
 }
 
