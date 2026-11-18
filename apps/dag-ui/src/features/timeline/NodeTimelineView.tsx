@@ -1016,6 +1016,7 @@ export const TranscriptItem = memo(function TranscriptItem({
   );
   return (
     <article
+      aria-current={selected ? "true" : undefined}
       aria-label={row.displayLabel}
       className="transcript-item"
       data-dispatch-group={row.dispatch?.label}

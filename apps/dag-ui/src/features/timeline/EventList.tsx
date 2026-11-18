@@ -4,7 +4,7 @@ import {
   eventTypeLabel,
 } from "@onepipeline-ui/timeline-categories";
 import { ChevronDown, Repeat2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration } from "../../lib/time";
 import { cycleLabel, type TranscriptEntry } from "./timeline-model";
@@ -33,6 +33,7 @@ export function EventListHeader({
     (type) => (counts.get(type) ?? 0) > 0 || hidden.has(type),
   );
   const shown = offered.filter((type) => !hidden.has(type)).length;
+  const counted = useId();
   return (
     <header className="event-list-head">
       <h3>Events</h3>
@@ -52,6 +53,7 @@ export function EventListHeader({
             {offered.map((type) => (
               <label key={type}>
                 <input
+                  aria-describedby={`${counted}-${type}`}
                   aria-label={eventTypeLabel(type)}
                   checked={!hidden.has(type)}
                   onChange={(event) =>
@@ -64,7 +66,7 @@ export function EventListHeader({
                   type="checkbox"
                 />
                 <span>{eventTypeLabel(type)}</span>
-                <span className="event-type-count">
+                <span className="event-type-count" id={`${counted}-${type}`}>
                   {counts.get(type) ?? 0}
                 </span>
               </label>

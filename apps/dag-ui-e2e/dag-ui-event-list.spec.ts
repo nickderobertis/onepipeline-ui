@@ -108,8 +108,8 @@ test.describe("repeated loops", () => {
       "Released from dependencies",
     );
     // The span the loop covered: the first record's time to the last's.
-    const stamps = block.locator("header time");
-    await expect(stamps).toHaveCount(2);
+    // The block's own two stamps come first, before its rows'.
+    const stamps = block.getByRole("time");
     expect(
       Date.parse((await stamps.nth(0).getAttribute("datetime")) ?? ""),
     ).toBe(Date.parse(held[0]?.at ?? ""));
@@ -173,12 +173,18 @@ test.describe("repeated loops", () => {
       block.getByRole("button", { name: "Show one pass" }),
     ).toHaveAttribute("aria-expanded", "true");
     await expect(block.getByRole("article")).toHaveCount(36);
-    await expect(
-      block.locator(`article[data-row-id="${seventh.record_id}"]`),
-    ).toHaveAttribute("data-selected", "true");
-    await expect(
-      page.getByRole("complementary", { name: "Item detail panel" }),
-    ).toBeVisible();
+    // The detail opened on it is the seventh hold's, by the moment it records.
+    const detail = page.getByRole("complementary", {
+      name: "Item detail panel",
+    });
+    await expect(detail).toBeVisible();
+    expect(
+      await detail
+        .getByRole("time")
+        .evaluateAll((times) =>
+          times.map((time) => time.getAttribute("datetime")),
+        ),
+    ).toContain(new Date(seventh.at).toISOString());
   });
 });
 
@@ -227,17 +233,50 @@ test.describe("surfaces", () => {
           .getByRole("term")
           .filter({ hasText: new RegExp(`^${step}$`, "u") }),
       ).toHaveCount(1);
+    const stamped = await detail
+      .getByRole("time")
+      .evaluateAll((times) =>
+        times.map((time) => time.getAttribute("datetime")),
+      );
     for (const at of [state.queued_at, state.read_at, state.replied_at]) {
       if (at === undefined) throw new Error("a step the server did not fold");
-      await expect(
-        detail
-          .locator(`time[datetime="${new Date(at).toISOString()}"]`)
-          .first(),
-      ).toBeAttached();
+      expect(stamped).toContain(new Date(at).toISOString());
     }
     await expect(detail).toContainText(
       "Keep the v1 columns until the next release.",
     );
+  });
+
+  test("an address naming a surface's later record opens the one row standing for the surface", async ({
+    page,
+  }) => {
+    const events = await nodeEvents(page, "asker");
+    const read = events.find(
+      (event) =>
+        event.kind === "planner-surfaced" && event.surface_state?.id === 1,
+    );
+    if (read?.record_id === undefined) throw new Error("no read question");
+    const transcript = await openNode(
+      page,
+      "asker",
+      `&event=${read.record_id}`,
+    );
+    const detail = page.getByRole("complementary", {
+      name: "Item detail panel",
+    });
+    await expect(
+      detail.getByRole("heading", { name: "Surface 1" }),
+    ).toBeVisible();
+    await expect(detail).toContainText(
+      "Keep the v1 columns until the next release.",
+    );
+    // Still one row for the question, and it is the one the address opened.
+    const question = row(
+      transcript,
+      "planner-question: Should the export keep the v1 columns?",
+    );
+    await expect(question).toHaveCount(1);
+    await expect(question).toHaveAttribute("aria-current", "true");
   });
 
   test("an unanswered blocking surface reads waiting", async ({ page }) => {
@@ -284,7 +323,7 @@ test.describe("commands", () => {
     expect(line).toHaveLength(400);
     const transcript = await openNode(page, "long");
     const started = row(transcript, line);
-    const label = started.locator("strong");
+    const label = started.getByText(line, { exact: true });
     const box = await label.boundingBox();
     const rowBox = await started.boundingBox();
     if (box === null || rowBox === null) throw new Error("a row drawn nowhere");
@@ -423,31 +462,21 @@ test.describe("the run's own records", () => {
   });
 });
 
-/**
- * The filter's checkbox for one type, inside the list's own header.
- * Opens the dropdown first.
- */
-async function typeBox(list: Locator, label: string): Promise<Locator> {
-  const filter = list.locator("details.event-type-filter");
-  if ((await filter.getAttribute("open")) === null)
-    await filter.locator("summary").click();
-  return filter.getByRole("checkbox", { name: label, exact: true });
+/** The event-type filter of `list`, opened from its own summary. */
+async function typeFilter(list: Locator): Promise<Locator> {
+  const group = list.getByRole("group", { name: "Event types" });
+  if (!(await group.isVisible()))
+    await list.getByText(/^Event types:/u).click();
+  await expect(group).toBeVisible();
+  return group;
 }
 
-/** What the filter says it offers, and how many rows each type holds. */
-async function offered(list: Locator): Promise<Map<string, number>> {
-  const filter = list.locator("details.event-type-filter");
-  if ((await filter.getAttribute("open")) === null)
-    await filter.locator("summary").click();
-  const labels = filter.locator("label");
-  const counts = new Map<string, number>();
-  for (const label of await labels.all()) {
-    const [name, count] = await label
-      .locator("span")
-      .evaluateAll((spans) => spans.map((span) => span.textContent ?? ""));
-    counts.set(name ?? "", Number(count));
-  }
-  return counts;
+/** The filter's checkbox for one type, the filter opened first. */
+async function typeBox(list: Locator, label: string): Promise<Locator> {
+  return (await typeFilter(list)).getByRole("checkbox", {
+    name: label,
+    exact: true,
+  });
 }
 
 for (const where of ["node", "overall"] as const) {
@@ -467,27 +496,39 @@ for (const where of ["node", "overall"] as const) {
           .getByText("Event types"),
       ).toHaveCount(0);
       await expect(list.getByText(/^Event types:/u)).toBeVisible();
-      const counts = await offered(list);
-      const labels = new Set(EVENT_TYPES.map(eventTypeLabel));
-      for (const [name, count] of counts) {
-        expect(labels.has(name), name).toBe(true);
-        expect(count, name).toBeGreaterThan(0);
-      }
+      const filter = await typeFilter(list);
+      const offeredTypes: string[] = [];
+      for (const label of EVENT_TYPES.map(eventTypeLabel))
+        if (
+          (await filter
+            .getByRole("checkbox", { name: label, exact: true })
+            .count()) > 0
+        )
+          offeredTypes.push(label);
+      expect(offeredTypes.length).toBeGreaterThan(1);
+      // Each offered type hides rows of its own, says how many, and together
+      // they hide every row exactly once: a row of two types would be counted
+      // twice, and a row of none never.
       const rows = list.getByRole("article");
       const total = await rows.count();
-      expect([...counts.values()].reduce((sum, n) => sum + n, 0)).toBe(total);
-      for (const [name, count] of counts) {
-        const box = await typeBox(list, name);
+      let hiddenInAll = 0;
+      for (const label of offeredTypes) {
+        const box = await typeBox(list, label);
         await box.uncheck();
-        await expect(rows).toHaveCount(total - count);
+        await expect(rows).not.toHaveCount(total);
+        const hidden = total - (await rows.count());
+        expect(hidden, label).toBeGreaterThan(0);
+        await expect(box).toHaveAccessibleDescription(String(hidden));
+        hiddenInAll += hidden;
         await box.check();
         await expect(rows).toHaveCount(total);
       }
-      const [first] = [...counts.keys()];
+      expect(hiddenInAll).toBe(total);
+      const [first] = offeredTypes;
       if (first === undefined) throw new Error("the filter offers nothing");
       await (await typeBox(list, first)).uncheck();
-      const left = total - (counts.get(first) ?? 0);
-      await expect(rows).toHaveCount(left);
+      await expect(rows).not.toHaveCount(total);
+      const left = await rows.count();
       await page.reload();
       const reloaded =
         where === "node"
@@ -510,8 +551,7 @@ for (const where of ["node", "overall"] as const) {
       page,
     }) => {
       const list = await open(page);
-      const filter = list.locator("details.event-type-filter");
-      await filter.locator("summary").click();
+      const filter = await typeFilter(list);
       await filter.getByRole("button", { name: "Clear" }).click();
       await expect(list.getByRole("article")).toHaveCount(0);
       await expect(list.getByRole("status")).toContainText(

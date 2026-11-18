@@ -2263,7 +2263,8 @@ test("keeps a node of hundreds of recorded sessions scannable", async ({
  */
 const outsideRecordedFields = (detail: Locator): Promise<string> =>
   detail.evaluate((element) => {
-    const reading = element.cloneNode(true) as HTMLElement;
+    const reading = element.cloneNode(true);
+    if (!(reading instanceof Element)) return "";
     reading.querySelector('[aria-label="Recorded fields"]')?.remove();
     return reading.textContent ?? "";
   });

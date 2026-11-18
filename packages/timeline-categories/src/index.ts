@@ -355,7 +355,14 @@ const EVENT_TYPE_LABELS: Readonly<Partial<Record<EventType, string>>> = {
 export function eventTypeLabel(type: EventType): string {
   const named = EVENT_TYPE_LABELS[type];
   if (named !== undefined) return named;
-  return eventCategoryLabel(type as EventCategory);
+  return isEventCategory(type)
+    ? eventCategoryLabel(type)
+    : `${type.charAt(0).toUpperCase()}${type.slice(1)}`;
+}
+
+/** Whether an event type is one of the glyph categories, read under its word. */
+function isEventCategory(value: string): value is EventCategory {
+  return (EVENT_CATEGORIES as readonly string[]).includes(value);
 }
 
 /** Whether a word read off an address is one of the types. */

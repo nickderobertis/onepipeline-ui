@@ -3,14 +3,15 @@ import type {
   TimelineLane,
   TimelineMarker,
 } from "@oneharness/ui";
-import type {
-  AgentRole,
-  RunTimeline,
-  TimelineEvent,
-  TimelineHoldReason,
-  TimelineSpan,
-  TimelineSpanKind,
-  TransportRole,
+import {
+  type AgentRole,
+  type RunTimeline,
+  type TimelineEvent,
+  type TimelineHoldReason,
+  type TimelineSpan,
+  type TimelineSpanKind,
+  type TransportRole,
+  timelineHoldReasonSchema,
 } from "@onepipeline-ui/dag-model";
 import { type EventType, eventType } from "@onepipeline-ui/timeline-categories";
 import { createElement } from "react";
@@ -1314,32 +1315,12 @@ export function holdReasonsOf(
         ? event.fields?.released
         : undefined;
   if (!Array.isArray(listed)) return [];
+  // Each entry read by the contract's own reading of a hold reason — the one a
+  // queued span's `reasons` are parsed by — so a record and the span it opened
+  // name the same reasons.
   return listed.flatMap((entry): TimelineHoldReason[] => {
-    if (
-      entry === null ||
-      typeof entry !== "object" ||
-      Array.isArray(entry) ||
-      typeof entry.kind !== "string"
-    )
-      return [];
-    const ids = (value: unknown) =>
-      Array.isArray(value) && value.every((id) => typeof id === "string")
-        ? value
-        : undefined;
-    const ahead = ids(entry.ahead);
-    const blocking = ids(entry.blocking);
-    const awaiting = ids(entry.awaiting);
-    return [
-      {
-        kind: entry.kind,
-        ...(ahead === undefined ? {} : { ahead }),
-        ...(blocking === undefined ? {} : { blocking }),
-        ...(awaiting === undefined ? {} : { awaiting }),
-        ...(typeof entry.reference === "string"
-          ? { reference: entry.reference }
-          : {}),
-      } as TimelineHoldReason,
-    ];
+    const read = timelineHoldReasonSchema.safeParse(entry);
+    return read.success ? [read.data] : [];
   });
 }
 
