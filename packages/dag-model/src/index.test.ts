@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -14,6 +16,8 @@ import {
   hostShutdownScopeSchema,
   isLoadingMark,
   liveRunDetailSchema,
+  NODE_STREAM_ROWS_PER_LINE,
+  nodeStreamLineSchema,
   nodeTelemetrySchema,
   parseRunList,
   parseRunTimeline,
@@ -1519,5 +1523,50 @@ describe("what the subscription contract names", () => {
         "run",
       ),
     ).toBe(false);
+  });
+});
+
+describe("nodeStreamLineSchema", () => {
+  /**
+   * The golden the crate's journey pins from the real node stream, and its
+   * `NodeStreamLine` re-reads: the browser's half of the drift gate between the
+   * two declarations of the stream's lines.
+   */
+  const golden: unknown[] = JSON.parse(
+    readFileSync(
+      join(
+        import.meta.dirname,
+        "../../../tests/fixtures/run-timeline-node-stream.json",
+      ),
+      "utf8",
+    ),
+  );
+
+  test("reads every line the real route served", () => {
+    const lines = golden.map((line) => nodeStreamLineSchema.parse(line));
+    expect(lines[0]?.kind).toBe("start");
+    expect(lines.at(-1)?.kind).toBe("end");
+    const start = lines[0];
+    const rows = lines.flatMap((line) =>
+      line.kind === "rows" ? line.rows : [],
+    );
+    expect(start?.kind === "start" && start.total).toBe(rows.length);
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
+  test("refuses a line the crate's type does not declare", () => {
+    expect(() =>
+      nodeStreamLineSchema.parse({ kind: "end", extra: true }),
+    ).toThrow();
+    expect(() => nodeStreamLineSchema.parse({ kind: "done" })).toThrow();
+    expect(() =>
+      nodeStreamLineSchema.parse({
+        kind: "rows",
+        rows: Array.from({ length: NODE_STREAM_ROWS_PER_LINE + 1 }, () => ({})),
+      }),
+    ).toThrow();
+    expect(
+      nodeStreamLineSchema.parse({ kind: "error", message: "it failed" }),
+    ).toEqual({ kind: "error", message: "it failed" });
   });
 });

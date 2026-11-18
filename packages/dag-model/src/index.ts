@@ -45,6 +45,12 @@ export const API_V2_PATHS = {
    */
   timelineEvents: (runId: string) =>
     `/api/v2/runs/${encodeURIComponent(runId)}/timeline/events`,
+  /**
+   * Every row of one node's own timeline, as newline-delimited JSON: lines of
+   * {@link nodeStreamLineSchema}, read as they arrive.
+   */
+  timelineNodeStream: (runId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/timeline/node-stream`,
   events: "/api/v2/events",
   /**
    * The post-launch verbs, wrapped: every route below `events` is a thin call
@@ -1962,6 +1968,37 @@ export const timelineEventsPageSchema = openObject({
   observed_at: timestamp,
 });
 export type TimelineEventsPage = z.infer<typeof timelineEventsPageSchema>;
+
+/** The most rows one `rows` line of the node stream holds. */
+export const NODE_STREAM_ROWS_PER_LINE = 1_000;
+
+/**
+ * One line of `GET .../timeline/node-stream`'s `application/x-ndjson` body: a
+ * `start` counting every row and the server's time split, `rows` lines newest
+ * first, then `end` — or, once `start` is out, an `error` that ends the body.
+ *
+ * Mirrors the crate's `NodeStreamLine`, closed as it is (`deny_unknown_fields`);
+ * both read the golden `tests/fixtures/run-timeline-node-stream.json`, which the
+ * crate's journey pins from the real route.
+ */
+export const nodeStreamLineSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("start"),
+    total: counter,
+    split: z.strictObject({
+      heads_s: z.number().nonnegative(),
+      fetch_s: z.number().nonnegative(),
+      build_s: z.number().nonnegative(),
+    }),
+  }),
+  z.strictObject({
+    kind: z.literal("rows"),
+    rows: z.array(timelineEventRowSchema).max(NODE_STREAM_ROWS_PER_LINE),
+  }),
+  z.strictObject({ kind: z.literal("end") }),
+  z.strictObject({ kind: z.literal("error"), message: z.string() }),
+]);
+export type NodeStreamLine = z.infer<typeof nodeStreamLineSchema>;
 
 export const apiErrorSchema = openObject({
   error: openObject({ code: z.string(), message: z.string() }),

@@ -1411,6 +1411,30 @@ fn the_browser_clients_node_window_is_the_servers() {
     );
 }
 
+/// The node stream's rows-per-line cap is declared here and in the browser client's
+/// model, whose `nodeStreamLineSchema` refuses a longer line; the two are one number.
+#[test]
+fn the_browser_clients_node_stream_line_cap_is_the_servers() {
+    use onepipeline_ui::contract::NODE_STREAM_ROWS_PER_LINE;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/index.ts");
+    let source = fs::read_to_string(&path).expect("the client's model");
+    let spelled = NODE_STREAM_ROWS_PER_LINE
+        .to_string()
+        .as_bytes()
+        .rchunks(3)
+        .rev()
+        .map(|digits| std::str::from_utf8(digits).expect("ascii digits"))
+        .collect::<Vec<_>>()
+        .join("_");
+    let declaration = format!("export const NODE_STREAM_ROWS_PER_LINE = {spelled};");
+    assert!(
+        source.contains(&declaration),
+        "{} does not declare `{declaration}`; the client's node stream line cap has \
+         drifted from this crate's",
+        path.display()
+    );
+}
+
 /// The reference vocabulary is declared twice — here and in the browser client's
 /// model — because a Rust enum cannot be read from TypeScript.
 ///

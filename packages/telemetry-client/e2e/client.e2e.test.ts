@@ -514,3 +514,75 @@ test("a package consumer reopens and notes a human item and reads the engine's r
     await server.stop();
   }
 });
+
+test("a package consumer reads a node's streamed timeline line by line over a real HTTP boundary", async () => {
+  const row = (seq: number) => ({
+    id: `e${seq}`,
+    record_id: `host.${seq}`,
+    kind: "turn-started",
+    at: `2026-07-26T12:00:${String(seq).padStart(2, "0")}.000Z`,
+    span_id: "node.api",
+  });
+  const bodies: Record<string, string> = {
+    whole: [
+      {
+        kind: "start",
+        total: 3,
+        split: { heads_s: 0.1, fetch_s: 0, build_s: 0.2 },
+      },
+      { kind: "rows", rows: [row(3), row(2)] },
+      { kind: "rows", rows: [row(1)] },
+      { kind: "end" },
+    ]
+      .map((line) => `${JSON.stringify(line)}\n`)
+      .join(""),
+    failed: `${JSON.stringify({ kind: "start", total: 1, split: { heads_s: 0, fetch_s: 0, build_s: 0 } })}\n${JSON.stringify({ kind: "error", message: "the journal went away" })}\n`,
+    cut: `${JSON.stringify({ kind: "start", total: 1, split: { heads_s: 0, fetch_s: 0, build_s: 0 } })}\n`,
+  };
+  const seen: string[] = [];
+  const server = await serveLoopback((request) => {
+    const url = new URL(request.url);
+    seen.push(url.pathname + url.search);
+    const body = bodies[url.pathname.split("/")[4] ?? ""];
+    if (body !== undefined && url.pathname.endsWith("/timeline/node-stream"))
+      return new Response(body, {
+        headers: { "content-type": "application/x-ndjson" },
+      });
+    return Response.json(
+      { error: { code: "node_not_found", message: "No such node" } },
+      { status: 404 },
+    );
+  });
+  const lines = async (run: string, node = "api") => {
+    const read = [];
+    for await (const line of client.streamNodeTimeline(run, node))
+      read.push(line);
+    return read;
+  };
+  const client = new TelemetryClient(`http://127.0.0.1:${server.port}`);
+  try {
+    const read = await lines("whole");
+    expect(seen[0]).toBe(
+      "/api/v2/runs/whole/timeline/node-stream?scope=node&node=api",
+    );
+    expect(read.map((line) => line.kind)).toEqual(["start", "rows", "rows"]);
+    expect(
+      read
+        .flatMap((line) => (line.kind === "rows" ? line.rows : []))
+        .map((each) => each.record_id),
+    ).toEqual(["host.3", "host.2", "host.1"]);
+    await expect(lines("failed")).rejects.toMatchObject({
+      message: "the journal went away",
+      code: "node_stream_failed",
+    });
+    await expect(lines("cut")).rejects.toMatchObject({
+      code: "node_stream_cut_off",
+    });
+    await expect(lines("absent")).rejects.toMatchObject({
+      status: 404,
+      code: "node_not_found",
+    });
+  } finally {
+    await server.stop();
+  }
+});
