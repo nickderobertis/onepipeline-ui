@@ -1,6 +1,7 @@
 import {
   parseRunTimeline,
   type TimelineEvent,
+  timelineHoldReasonSchema,
 } from "@onepipeline-ui/dag-model";
 import { describe, expect, test } from "vitest";
 import { busyTimeline, LIVE_RUN, runTimeline } from "../../test/fixtures";
@@ -12,6 +13,8 @@ import {
   dispatchRoleLabel,
   eventList,
   findRow,
+  holdReasonsOf,
+  isHoldReason,
   laneLabel,
   laneVocabulary,
   nodeTimeline,
@@ -817,5 +820,48 @@ describe("one node's slice of the run timeline", () => {
     expect(
       compactTimelineMarkers(coincident, projected.items, second.id)[0]?.id,
     ).toBe(second.id);
+  });
+});
+
+describe("a hold reason read without the contract's zod", () => {
+  const entries: readonly unknown[] = [
+    { kind: "concurrency", limit: 2, ahead: ["a", "b"] },
+    { kind: "upstream", blocking: ["build"], extra: { kept: true } },
+    { kind: "human", awaiting: ["review"], reference: "item-1" },
+    { kind: "" },
+    { kind: 3 },
+    {},
+    null,
+    "concurrency",
+    ["concurrency"],
+    { kind: "concurrency", limit: -1 },
+    { kind: "concurrency", limit: 1.5 },
+    { kind: "concurrency", limit: "2" },
+    { kind: "upstream", blocking: [] },
+    { kind: "upstream", blocking: [""] },
+    { kind: "upstream", ahead: "a" },
+    { kind: "human", awaiting: [1] },
+    { kind: "human", reference: "" },
+  ];
+
+  test.each(entries.map((entry) => [JSON.stringify(entry), entry] as const))(
+    "reads %s as the schema does",
+    (_, entry) => {
+      expect(isHoldReason(entry)).toBe(
+        timelineHoldReasonSchema.safeParse(entry).success,
+      );
+    },
+  );
+
+  test("a hold lists the reasons it can read and drops the rest", () => {
+    const held = {
+      kind: "node-held",
+      fields: {
+        reasons: [{ kind: "upstream", blocking: ["build"] }, { kind: "" }],
+      },
+    } as unknown as TimelineEvent;
+    expect(holdReasonsOf(held)).toEqual([
+      { kind: "upstream", blocking: ["build"] },
+    ]);
   });
 });

@@ -101,7 +101,9 @@ fn engine_reply(
 /// `onepipeline reply RUN FILE --as user`, run as the pinned CLI in an
 /// environment changed by `environment` — for a reply that waits on a live
 /// driver under a reply timeout the journey names, which the engine reads off
-/// its own process's environment. The receipt the CLI printed, as JSON.
+/// its own process's environment. The receipt the CLI printed, as JSON. Every
+/// caller is a `cfg(unix)` journey, so it is gated with them.
+#[cfg(unix)]
 fn cli_reply(
     root: &Path,
     run: &str,
@@ -133,6 +135,7 @@ fn cli_reply(
 /// [`cli_reply`], run from `dir` — for a reply whose run reads its project, and
 /// so how its repositories are classified, off the working directory the server
 /// runs in.
+#[cfg(unix)]
 fn cli_reply_in(
     dir: &Path,
     root: &Path,

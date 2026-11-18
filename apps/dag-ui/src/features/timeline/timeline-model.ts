@@ -3,15 +3,14 @@ import type {
   TimelineLane,
   TimelineMarker,
 } from "@oneharness/ui";
-import {
-  type AgentRole,
-  type RunTimeline,
-  type TimelineEvent,
-  type TimelineHoldReason,
-  type TimelineSpan,
-  type TimelineSpanKind,
-  type TransportRole,
-  timelineHoldReasonSchema,
+import type {
+  AgentRole,
+  RunTimeline,
+  TimelineEvent,
+  TimelineHoldReason,
+  TimelineSpan,
+  TimelineSpanKind,
+  TransportRole,
 } from "@onepipeline-ui/dag-model";
 import { type EventType, eventType } from "@onepipeline-ui/timeline-categories";
 import { createElement } from "react";
@@ -1368,13 +1367,38 @@ export function holdReasonsOf(
         ? event.fields?.released
         : undefined;
   if (!Array.isArray(listed)) return [];
-  // Each entry read by the contract's own reading of a hold reason — the one a
-  // queued span's `reasons` are parsed by — so a record and the span it opened
-  // name the same reasons.
-  return listed.flatMap((entry): TimelineHoldReason[] => {
-    const read = timelineHoldReasonSchema.safeParse(entry);
-    return read.success ? [read.data] : [];
-  });
+  return listed.filter(isHoldReason);
+}
+
+const isName = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
+
+const isNames = (value: unknown): boolean =>
+  Array.isArray(value) && value.length > 0 && value.every(isName);
+
+/**
+ * Whether an entry reads as the contract's hold reason — the reading a queued
+ * span's `reasons` are parsed by, so a record and the span it opened name the
+ * same reasons. It is written out rather than parsed with the contract's zod
+ * schema because this module draws the first screen, whose script carries no
+ * zod (`tests/e2e/ui.rs`); `timeline-model.test.ts` holds it to that schema.
+ */
+export function isHoldReason(entry: unknown): entry is TimelineHoldReason {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry))
+    return false;
+  const { kind, blocking, ahead, limit, reference, awaiting } = entry as Record<
+    string,
+    unknown
+  >;
+  return (
+    isName(kind) &&
+    (blocking === undefined || isNames(blocking)) &&
+    (ahead === undefined || isNames(ahead)) &&
+    (awaiting === undefined || isNames(awaiting)) &&
+    (reference === undefined || isName(reference)) &&
+    (limit === undefined ||
+      (typeof limit === "number" && Number.isInteger(limit) && limit >= 0))
+  );
 }
 
 /** What a hold or its release reads as in a row, where the record says why. */

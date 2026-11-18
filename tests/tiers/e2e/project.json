@@ -65,6 +65,7 @@
       "{workspaceRoot}/tests/fixtures/human-item*.json",
       "{workspaceRoot}/tests/e2e/live.rs",
       "{workspaceRoot}/tests/e2e/server.rs",
+      "{workspaceRoot}/tests/e2e/surface_records.rs",
       "{workspaceRoot}/tests/e2e/transcripts.rs",
       "{workspaceRoot}/tests/fixtures/history/**",
       "{workspaceRoot}/tests/e2e/ui.rs",
