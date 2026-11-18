@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.84.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.83.6...v0.84.0) - 2026-11-18
+
+### Fixed
+
+- *(deps)* [**breaking**] state that the read API's surface follows onepipeline 0.114 ([#827](https://github.com/nickderobertis/onepipeline-ui/pull/827))
+- *(deps)* link the engine whose node guard can settle a node as not needed ([#825](https://github.com/nickderobertis/onepipeline-ui/pull/825))
+
 ## [0.83.6](https://github.com/nickderobertis/onepipeline-ui/compare/v0.83.5...v0.83.6) - 2026-11-18
 
 ### Fixed
