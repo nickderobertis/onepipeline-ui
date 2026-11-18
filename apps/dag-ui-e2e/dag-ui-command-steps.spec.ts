@@ -206,6 +206,7 @@ test("shows a step its guard found not needed as done, with outcome not-needed",
       exact: true,
     });
     await expect(marker).toBeVisible();
+    // llmlint: ignore[e2e_uses_accessible_selectors] the UI exposes a timeline record's category only as an aria-hidden glyph, so the glyph the icon set drew is the one reading of it there is; `dag-ui.spec.ts` reads every category's the same way under this rule's ignore.
     await expect(marker.locator("svg")).toHaveClass(/\blucide-shield-check\b/u);
   }
 
