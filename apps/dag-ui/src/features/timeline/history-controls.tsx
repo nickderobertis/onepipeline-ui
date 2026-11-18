@@ -1,17 +1,22 @@
 import { type ReactNode, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { STILL_LOADING_TEXT } from "../../lib/loading";
-import type { HistoryFailure } from "./useTimelineHistory";
+import type { HistoryFailure, NodeLoad } from "./useTimelineHistory";
 
-/** Says a page of history failed, naming what failed, with Try again beside it. */
+/** Says a read of history failed, naming what failed, with Try again beside it. */
 export function HistoryFailed({
   failure,
+  what = "Earlier rows",
 }: {
   readonly failure: HistoryFailure;
+  /** What did not load, as the sentence opens. */
+  readonly what?: string;
 }) {
   return (
     <p className="page-failed" role="alert">
-      <span>Earlier rows did not load: {failure.message}</span>
+      <span>
+        {what} did not load: {failure.message}
+      </span>
       <button onClick={failure.retry} type="button">
         Try again
       </button>
@@ -19,25 +24,23 @@ export function HistoryFailed({
   );
 }
 
-export function LoadEarlier({
-  failure,
-  loading,
-  onLoad,
-}: {
-  readonly failure?: HistoryFailure;
-  readonly loading: boolean;
-  readonly onLoad: () => void;
-}) {
-  if (failure !== undefined) return <HistoryFailed failure={failure} />;
+/** The words a chart drawn from part of its node's records is marked with. */
+export const PARTIAL_TEXT = "Partial — loading";
+
+/**
+ * Marks a node's chart as drawn from what has arrived so far, and says how much that
+ * is, while the rest keeps loading.
+ */
+export function PartialMark({ load }: { readonly load: NodeLoad }) {
+  const counted =
+    load.total === undefined
+      ? `${load.loaded.toLocaleString()} records loaded`
+      : `${load.loaded.toLocaleString()} of ${load.total.toLocaleString()} records loaded`;
   return (
-    <button
-      className="load-earlier"
-      disabled={loading}
-      onClick={onLoad}
-      type="button"
-    >
-      {loading ? "Loading earlier rows…" : "Load earlier rows"}
-    </button>
+    <p className="partial-mark" role="status">
+      <span className="partial-mark-label">{PARTIAL_TEXT}</span>
+      <span className="partial-mark-count">{counted}</span>
+    </p>
   );
 }
 
@@ -86,11 +89,14 @@ function usePlotElement(
  */
 export function PlotHatches({
   container,
+  partial = false,
   range,
   stretches,
 }: {
   /** What holds the plot. */
   readonly container: { readonly current: HTMLElement | null };
+  /** The read has run past its delay, and the plot is drawn as partial. */
+  readonly partial?: boolean;
   readonly range: readonly [number, number];
   readonly stretches: readonly (readonly [number, number])[];
 }): ReactNode {
@@ -111,7 +117,9 @@ export function PlotHatches({
           width: `${percent(to) - percent(from)}%`,
         }}
       >
-        <span className="history-hatch-label">{STILL_LOADING_TEXT}</span>
+        <span className="history-hatch-label">
+          {partial ? PARTIAL_TEXT : STILL_LOADING_TEXT}
+        </span>
       </span>
     )),
     plot,

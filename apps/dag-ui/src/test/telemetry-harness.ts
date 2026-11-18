@@ -136,6 +136,51 @@ export const isTimeline = (url: URL): boolean =>
 export const isRunScopeTimeline = (url: URL): boolean =>
   isTimeline(url) && url.searchParams.get(API_V2_QUERY.scope) === "run";
 
+/** True for a node's streamed timeline, whatever run it names. */
+export const isNodeStream = (url: URL): boolean =>
+  url.pathname.endsWith("/timeline/node-stream");
+
+/**
+ * The node stream's body over a node timeline: every row its spans list, once per
+ * record and newest first, between the start and end lines the route writes.
+ */
+export function nodeStreamBody(timeline: {
+  readonly spans: readonly {
+    readonly id: string;
+    readonly events: readonly {
+      readonly id: string;
+      readonly record_id?: string | null;
+      readonly at: string;
+      readonly journal_order?: number | null;
+    }[];
+  }[];
+}): string {
+  const rows = new Map<string, Record<string, unknown>>();
+  for (const span of timeline.spans)
+    for (const event of span.events) {
+      const key = event.record_id ?? event.id;
+      if (!rows.has(key)) rows.set(key, { ...event, span_id: span.id });
+    }
+  const order = (row: Record<string, unknown>) =>
+    [Date.parse(String(row.at)), Number(row.journal_order ?? 0)] as const;
+  const newest = [...rows.values()].sort((left, right) => {
+    const [leftAt, leftOrder] = order(left);
+    const [rightAt, rightOrder] = order(right);
+    return rightAt - leftAt || rightOrder - leftOrder;
+  });
+  return [
+    {
+      kind: "start",
+      total: newest.length,
+      split: { heads_s: 0, fetch_s: 0, build_s: 0 },
+    },
+    ...(newest.length === 0 ? [] : [{ kind: "rows", rows: newest }]),
+    { kind: "end" },
+  ]
+    .map((line) => `${JSON.stringify(line)}\n`)
+    .join("");
+}
+
 /** True for one transcript's path, whatever run and conversation it names. */
 export const isConversation = (url: URL): boolean =>
   url.pathname.includes("/conversations/");
@@ -247,6 +292,10 @@ export function defaultResponder(url: URL): Response {
     );
   }
   const runId = fixtureRunFor(url);
+  if (isNodeStream(url))
+    return new Response(nodeStreamBody(runTimeline(runId)), {
+      headers: { "content-type": "application/x-ndjson" },
+    });
   if (isTimeline(url))
     return Response.json(
       isRunScopeTimeline(url) ? runScopeTimeline(runId) : runTimeline(runId),

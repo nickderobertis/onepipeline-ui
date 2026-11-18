@@ -3146,6 +3146,29 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   white-space: nowrap;
 }
 
+/* A node's chart drawn from what has arrived, while the rest keeps loading: said
+   above the plot, beside how much has loaded, rather than left for the hatch alone. */
+.partial-mark {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+
+.partial-mark-label {
+  padding: 1px 6px;
+  border: 1px dashed var(--muted-foreground);
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.partial-mark-count {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
 /* The frame is the app's plot's own classes; a bar sits where the app's span does. */
 .first-plot-bar {
   position: absolute;

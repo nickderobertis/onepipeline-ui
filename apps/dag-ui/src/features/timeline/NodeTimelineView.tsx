@@ -70,7 +70,7 @@ import { CheckStatus } from "./CheckStatus";
 import { ControlBadge } from "./ControlBadge";
 import { CycleBlock, EventListHeader, FilteredEmpty } from "./EventList";
 import { EventCategoryIcon } from "./event-category";
-import { LoadEarlier, PlotHatches } from "./history-controls";
+import { HistoryFailed, PartialMark, PlotHatches } from "./history-controls";
 import { NodeRelease } from "./release";
 import { TimelineItemDetail } from "./TimelineItemDetail";
 import {
@@ -569,6 +569,7 @@ function NodeExecution({
       })),
     [reading],
   );
+  useNodeLoadProbe(projection, reading);
   const sync = useTimelineScrollSync(entries);
   const [expanded, setExpanded] = useState(false);
   // Held here rather than inside the plot so every zoom is bounded: the plot's
@@ -644,96 +645,12 @@ function NodeExecution({
     [containerRef],
   );
   const plotArea = useRef<HTMLElement | null>(null);
-  // Rows added above the reader keep what they were reading where it was. A page
-  // can add rows at more than one place, so this anchors on the first row already
-  // shown that new rows arrived directly above, not on the total growth.
-  const placesBeforeLoad = useRef<Map<string, number> | undefined>(undefined);
-  const { loadEarlier, loadSpan, loadStretch } = history;
-  // How many rows the reading showed when the reader asked for earlier ones. A
-  // page whose rows all join a collapsed run shows nothing new — the run still
-  // stands as its first row, one control and its last — so the read carries on
-  // until the reading gains a row or nothing earlier is left, rather than
-  // leaving a control that appears to do nothing.
-  const shownBeforeAsk = useRef<number | undefined>(undefined);
-  const askEarlier = () => {
-    placesBeforeLoad.current = transcriptPlaces(transcript.current);
-    shownBeforeAsk.current = entries.length;
-    loadEarlier();
-  };
-  /** Near the transcript's top, a reader's move upward asks for the page before. */
-  const askEarlierIfOpen = () => {
-    if (
-      history.canLoadEarlier &&
-      !history.loadingEarlier &&
-      history.failure === undefined
-    )
-      askEarlier();
-  };
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the rows the merged timeline brought are what moved the row being kept in place.
-  useLayoutEffect(() => {
-    const element = transcript.current;
-    const before = placesBeforeLoad.current;
-    if (element === null || before === undefined || history.loadingEarlier)
-      return;
-    placesBeforeLoad.current = undefined;
-    let arrived = false;
-    for (const [id, top] of transcriptPlaces(element)) {
-      const was = before.get(id);
-      if (was === undefined) arrived = true;
-      else if (arrived) {
-        // The page's own scroll, so it asks for no page: rows that arrive below
-        // the reader can leave them still near the top, and reading that as the
-        // reader moving up read a second page nobody asked for.
-        ownScrollUntil.current = Date.now() + 500;
-        element.scrollTop += top - was;
-        return;
-      }
-    }
-  }, [timeline, history.loadingEarlier]);
-  // An address naming a row before the window is a person asking for it: read back
-  // until it is held or there is nothing earlier.
-  const { canLoadEarlier, loadingEarlier } = history;
-  const shownNow = entries.length;
-  useEffect(() => {
-    const before = shownBeforeAsk.current;
-    if (before === undefined || loadingEarlier) return;
-    if (shownNow > before || !canLoadEarlier || history.failure !== undefined) {
-      shownBeforeAsk.current = undefined;
-      return;
-    }
-    placesBeforeLoad.current = transcriptPlaces(transcript.current);
-    loadEarlier(true);
-  }, [shownNow, canLoadEarlier, loadingEarlier, loadEarlier, history.failure]);
-  useEffect(() => {
-    if (
-      selectedItemId !== undefined &&
-      selected === undefined &&
-      canLoadEarlier &&
-      !loadingEarlier &&
-      history.failure === undefined
-    )
-      loadEarlier();
-  }, [
-    selectedItemId,
-    selected,
-    canLoadEarlier,
-    loadingEarlier,
-    loadEarlier,
-    history.failure,
-  ]);
+  const { loadSpan } = history;
   const openedSpan =
     selected?.rowKind === "span" ? selected.span.id : undefined;
   useEffect(() => {
     if (openedSpan !== undefined) loadSpan(openedSpan);
   }, [openedSpan, loadSpan]);
-  useEffect(() => {
-    if (zoom === undefined) return;
-    const asking = setTimeout(
-      () => loadStretch(zoom[0], zoom[1], node.id),
-      250,
-    );
-    return () => clearTimeout(asking);
-  }, [zoom, loadStretch, node.id]);
   // The hook returns a new object on each render, including a cursor update
   // from scrolling. Only a changed selection should scroll again; depending on
   // that object makes the selected stamp race the scroll-derived reading cursor.
@@ -754,9 +671,13 @@ function NodeExecution({
       >
         <PlotHatches
           container={plotArea}
+          partial={history.nodeLoad?.partial === true}
           range={zoom ?? shown}
           stretches={history.unheld}
         />
+        {history.nodeLoad?.partial === true && (
+          <PartialMark load={history.nodeLoad} />
+        )}
         <Timeline
           {...TIMELINE_TIME_MARKS}
           axis={{ origin: plotted[0] }}
@@ -788,25 +709,6 @@ function NodeExecution({
       <section
         aria-label="Node transcript"
         className="node-transcript"
-        onKeyDown={(event) => {
-          if (UPWARD_KEYS.has(event.key) && nearTop(event.currentTarget))
-            askEarlierIfOpen();
-        }}
-        onScroll={(event) => {
-          if (
-            nearTop(event.currentTarget) &&
-            Date.now() > ownScrollUntil.current
-          )
-            askEarlierIfOpen();
-        }}
-        // A transcript already at its top scrolls no further, so the browser
-        // reports no scroll for a reader who wheels or keys up there again; the
-        // gesture itself asks, and being the reader's own it is never the page's
-        // own scroll.
-        onWheel={(event) => {
-          if (event.deltaY < 0 && nearTop(event.currentTarget))
-            askEarlierIfOpen();
-        }}
         ref={transcriptRef}
       >
         {history.readToStart && history.failure === undefined && (
@@ -814,13 +716,10 @@ function NodeExecution({
             {HISTORY_START_TEXT}
           </p>
         )}
-        {(history.canLoadEarlier || history.failure !== undefined) && (
-          <LoadEarlier
-            {...(history.failure === undefined
-              ? {}
-              : { failure: history.failure })}
-            loading={history.loadingEarlier}
-            onLoad={askEarlier}
+        {history.failure !== undefined && (
+          <HistoryFailed
+            failure={history.failure}
+            what="This node's timeline"
           />
         )}
         <EventListHeader
@@ -901,24 +800,52 @@ function timeRange(
   return [first, last > first ? last : first + 1];
 }
 
-/** Within this many pixels of its top, the transcript reads earlier rows. */
-const NEAR_TOP_PX = 120;
-
-/** Keys that move a focused transcript upward. */
-const UPWARD_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
-
-function nearTop(transcript: HTMLElement): boolean {
-  return transcript.scrollTop < NEAR_TOP_PX;
+/** What the node panel's chart data and event list hold, by record. */
+export interface NodeLoadHeld {
+  readonly chart: readonly string[];
+  readonly list: readonly string[];
 }
 
-/** Where each transcript row stands on screen, by row id, in the order shown. */
-function transcriptPlaces(transcript: HTMLElement | null): Map<string, number> {
-  const places = new Map<string, number>();
-  for (const row of transcript?.querySelectorAll<HTMLElement>(
-    "article.transcript-item[data-row-id]",
-  ) ?? [])
-    places.set(row.dataset.rowId ?? "", row.getBoundingClientRect().top);
-  return places;
+declare global {
+  interface Window {
+    /**
+     * Installed by a measurement (`read-latency.spec.ts`'s complete-load reading)
+     * before the view loads; absent otherwise, when the probe costs nothing.
+     */
+    __nodeLoadProbe?: (held: NodeLoadHeld) => void;
+  }
+}
+
+/**
+ * Tells a measurement's probe, after each commit, which records the chart's data
+ * and the event list hold — every row the list reads, and every row a collapsed
+ * run's control stands for. A layout effect, so what it says is of the same commit
+ * as the DOM a mutation observer sees: a complete load is judged by the records
+ * held, never by a CSS state alone.
+ */
+function useNodeLoadProbe(
+  projection: ReturnType<typeof nodeTimelineV2>,
+  reading: ReturnType<typeof transcriptEntries>,
+): void {
+  useLayoutEffect(() => {
+    const probe = window.__nodeLoadProbe;
+    if (probe === undefined) return;
+    const list: string[] = [];
+    const under = (row: TimelineRow) => {
+      list.push(row.id);
+      for (const child of row.children) under(child);
+    };
+    for (const entry of reading)
+      if (entry.entryKind === "row") list.push(entry.row.id);
+      else for (const member of entry.group.children) under(member);
+    probe({
+      chart: [
+        ...projection.items.map((item) => item.id),
+        ...projection.markers.map((marker) => marker.id),
+      ],
+      list,
+    });
+  }, [projection, reading]);
 }
 
 /**
