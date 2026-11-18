@@ -76,6 +76,7 @@ mod release_probe;
 mod release_status;
 mod semver_check;
 mod server;
+mod surface_records;
 mod transcripts;
 mod ui;
 mod workspace_install;

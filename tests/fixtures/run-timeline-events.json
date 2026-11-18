@@ -10,6 +10,11 @@
       "seq": 29,
       "journal_order": 30,
       "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+      "fields": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "sha": "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1908",
+        "base": "main"
+      },
       "kind": "merge-completed",
       "at": "2026-08-07T12:00:19.000Z",
       "node_id": "contract-interface",
@@ -29,8 +34,10 @@
       "journal_order": 32,
       "dispatch_id": "run-20260807-a1b2c3.contract-interface",
       "fields": {
-        "Status": "done",
-        "Outcome": "shipped"
+        "status": "done",
+        "outcome": "shipped",
+        "branch": "feature/contract-interface",
+        "change_url": "https://example.invalid/changes/1"
       },
       "kind": "node-settled",
       "at": "2026-08-07T12:00:20.000Z",

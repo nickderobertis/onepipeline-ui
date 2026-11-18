@@ -22,6 +22,7 @@ use crate::fixture_run;
 use crate::http;
 use crate::live_journal;
 use crate::serving::{self, Serving};
+use crate::surface_records;
 
 /// How long a journey waits for the server to act on an append before calling
 /// it stuck: the poll is 50 ms, so this is the loaded-runner margin.
@@ -764,7 +765,7 @@ fn a_reconnect_replays_every_frame_it_missed_exactly_once() {
             .expect("spans")
             .iter()
             .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
-            .filter_map(|event| event["fields"]["Detail"].as_str().map(str::to_owned))
+            .filter_map(|event| event["fields"]["detail"].as_str().map(str::to_owned))
             .collect()
     };
     let (held, served) = (
@@ -4291,4 +4292,71 @@ fn a_long_runs_first_answers_fetch_only_what_a_first_screen_reads_and_are_the_wh
         "{:#?}",
         whole.first_answers()
     );
+}
+
+/// A node's question, shown live on the node's own timeline, gains when it was
+/// read and then its answer as the engine writes them — though the answer is
+/// journalled under no node, so nothing the node's own share holds moved. The
+/// question is asked through the real `onepipeline ask`, taken by the engine's
+/// `next` and answered by its reply, and what the tab holds after each is what
+/// a fresh read of the same timeline serves.
+#[test]
+fn a_queued_surface_gains_its_reading_and_its_answer_as_the_engine_writes_them() {
+    let (run, node) = (fixture_run::RUN_ID, fixture_run::NODE_ID);
+    let live = Live::start(|root| growing_run(root, run));
+    let root = live.serving.runs_root();
+    let path = format!("/api/v2/runs/{run}/timeline?scope=node&node={node}");
+    let mut tab = Tab::open(
+        &live,
+        &json!({ "type": "timeline", "run_id": run, "scope": "node", "node": node }),
+    );
+    let question = "is the contract interface ready to ship?";
+    let asked = surface_records::ask(&root, run, node, question);
+    let id = asked.id;
+    let states = |tab: &Tab| -> Vec<Value> {
+        surface_records::of_surface(&tab.state["visible"]["timeline"], id)
+            .into_iter()
+            .map(|event| event["surface_state"].clone())
+            .collect()
+    };
+    let held_as_fresh = |tab: &Tab, what: &str| {
+        let fresh = fresh(live.address(), &path);
+        let fresh: Vec<Value> = surface_records::of_surface(&fresh, id);
+        let shown = surface_records::of_surface(&tab.state["visible"]["timeline"], id);
+        assert_eq!(
+            shown, fresh,
+            "{what}: the tab's question is not a fresh read's"
+        );
+    };
+
+    tab.until_listed("the question", |tab| !states(tab).is_empty());
+    for state in states(&tab) {
+        assert_eq!(state["message"], json!(question), "{state}");
+        assert!(state.get("read_at").is_none(), "{state}");
+    }
+    held_as_fresh(&tab, "queued");
+
+    assert_eq!(surface_records::take_next(&root, run), id);
+    tab.until_listed("its reading", |tab| {
+        let states = states(tab);
+        states.len() == 2 && states.iter().all(|state| state["read_at"].is_string())
+    });
+    held_as_fresh(&tab, "read");
+
+    surface_records::answer(
+        &root,
+        run,
+        &asked.correlation,
+        &json!({"version": 2, "completion": false, "message": "yes, ship it"}),
+    );
+    asked.answered();
+    tab.until_listed("its answer", |tab| {
+        let states = states(tab);
+        !states.is_empty() && states.iter().all(|state| state["replied_at"].is_string())
+    });
+    for state in states(&tab) {
+        assert_eq!(state["reply"]["message"], json!("yes, ship it"), "{state}");
+        assert_eq!(state["reply"]["provenance"], json!("user"), "{state}");
+    }
+    held_as_fresh(&tab, "answered");
 }

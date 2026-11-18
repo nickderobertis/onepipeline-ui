@@ -230,6 +230,11 @@
             "seq": 19,
             "journal_order": 20,
             "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+            "fields": {
+              "branch": "feature/contract-interface",
+              "remote": "origin",
+              "accepted": true
+            },
             "kind": "push",
             "at": "2026-08-07T12:00:10.000Z",
             "node_id": "contract-interface",

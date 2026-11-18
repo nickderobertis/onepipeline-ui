@@ -70,7 +70,7 @@ use crate::fixture_run;
 use crate::http;
 use crate::serving::{ForeignServing, Serving};
 use crate::sibling;
-use crate::timeline_schema::TIMELINE_EVENT_ADDITIONS;
+use crate::timeline_schema::{TIMELINE_EVENT_ADDITIONS, WIRE_KEYED_FIELDS};
 
 /// The environment variable naming the provisioned baseline server.
 ///
@@ -750,6 +750,13 @@ fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value,
             }
         }
     }
+    // Schema 16 keys `fields` by the record's wire key and serves every one of
+    // them where the base served a selection under English labels. Every value
+    // the base served is still served on the same event; the keys are compared
+    // no further.
+    if base_schema < WIRE_KEYED_FIELDS && schema >= WIRE_KEYED_FIELDS {
+        rekeyed_fields_still_carry_the_base(&mut before, &mut after, path);
+    }
     for body in [&mut before, &mut after] {
         let body = body.as_object_mut().expect("a timeline");
         body.remove("observed_at");
@@ -759,6 +766,50 @@ fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value,
         body.remove("telemetry_schema_version");
     }
     (before, as_served_at(after, base_schema), base_schema)
+}
+
+/// Hold every value a base event served under a labelled `fields` key to being
+/// served among the same event's wire-keyed `fields` now, then set both aside.
+fn rekeyed_fields_still_carry_the_base(before: &mut Value, after: &mut Value, path: &str) {
+    let served_now: std::collections::HashMap<String, Value> = after["spans"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|span| span["events"].as_array().into_iter().flatten())
+        .filter_map(|event| Some((event["id"].as_str()?.to_owned(), event["fields"].clone())))
+        .collect();
+    for event in before["spans"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|span| span["events"].as_array().into_iter().flatten())
+    {
+        let Some(labelled) = event["fields"].as_object() else {
+            continue;
+        };
+        let id = event["id"].as_str().unwrap_or_default();
+        let now = served_now
+            .get(id)
+            .and_then(Value::as_object)
+            .unwrap_or_else(|| {
+                panic!("{path}: event {id} lost the fields the base served: {event}")
+            });
+        for (label, value) in labelled {
+            assert!(
+                now.values().any(|served| served == value),
+                "{path}: event {id} no longer serves the base's {label} = {value}: {now:?}"
+            );
+        }
+    }
+    for body in [before, after] {
+        for span in body["spans"].as_array_mut().into_iter().flatten() {
+            for event in span["events"].as_array_mut().into_iter().flatten() {
+                if let Some(event) = event.as_object_mut() {
+                    event.remove("fields");
+                }
+            }
+        }
+    }
 }
 
 /// What `path` serves now that the base commit's schema served differently, as

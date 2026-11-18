@@ -26,4 +26,12 @@ pub const TIMELINE_EVENT_ADDITIONS: &[(u64, &str)] = &[
     (14, "tool"),
     (15, "review.requirement"),
     (15, "review.url"),
+    (16, "surface_id"),
+    (16, "correlation"),
+    (16, "surface_state"),
 ];
+
+/// The timeline schema whose `fields` are every payload key under its wire key,
+/// where the schemas before it served a selection under English labels: the one
+/// event field a bump re-keyed rather than added to.
+pub const WIRE_KEYED_FIELDS: u64 = 16;

@@ -351,8 +351,18 @@ export const TELEMETRY_SCHEMA_VERSION = 29;
  * `description`, the server's (the engine resolver's) one line for the entry it
  * points at, and a `turn-activity` event `tool`, where it sits in its
  * conversation. The browser shows the line and never derives its own.
+ *
+ * `15` names each check's requirement: a `change-check`'s `review` gains
+ * `requirement` and `url`.
+ *
+ * `16` serves every payload field and what a surface came to. An event's
+ * `fields` are every key of its record's payload under the record's own wire
+ * key — a server on `15` served a selection under English labels — and a
+ * surface's records gain `surface_id`, `correlation` and `surface_state`, the
+ * surface folded over the whole reading, so a node's queued question reads as
+ * answered by the reply the run journalled under no node.
  */
-export const TIMELINE_SCHEMA_VERSION = 15;
+export const TIMELINE_SCHEMA_VERSION = 16;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -1598,6 +1608,33 @@ export const timelineSurfaceSchema = openObject({
   }
 });
 /**
+ * What one surface came to (timeline schema 16), on every record of it: folded
+ * by the server over the whole reading, whatever filter the event was listed
+ * under. `queued_at` is when it was sent, `read_at` when it was first taken and
+ * `replied_at` when the reply echoing its correlation was journalled, with that
+ * reply's own words under `reply`. Every member is present only where a record
+ * carried it, and the words are open, as `surface`'s are.
+ */
+export const timelineSurfaceStateSchema = openObject({
+  id: counter,
+  correlation: z.string().min(1).optional(),
+  node: z.string().min(1).optional(),
+  kind: z.string().min(1).optional(),
+  message: z.string().min(1).optional(),
+  source: z.string().min(1).optional(),
+  blocking: z.boolean().optional(),
+  queued_at: timestamp.optional(),
+  read_at: timestamp.optional(),
+  replied_at: timestamp.optional(),
+  reply: openObject({
+    author: z.string().min(1).optional(),
+    message: z.string().min(1).optional(),
+    completion: z.boolean().optional(),
+    reason: z.string().min(1).optional(),
+    provenance: z.string().min(1).optional(),
+  }).optional(),
+});
+/**
  * Where a change request's review stood, on the six `onevcs` records that say so:
  * a check's `name`, `required` and `state`; a draft's `kind` (`awaiting-checks` for
  * the draft a publication opens while its checks run) and `base`; an early lift's
@@ -1705,6 +1742,11 @@ export const timelineEventSchema = openObject({
   persona: z.string().min(1).optional(),
   dispatch_id: z.string().min(1).optional(),
   dispatch_group: timelineDispatchGroupSchema.optional(),
+  /**
+   * Every fact the record's payload carried (timeline schema 16), under its own
+   * wire key and as recorded, less the values that say nothing and a `vcs`
+   * session's `token`. The keys are the producer's; a reader humanizes them.
+   */
   fields: z.record(z.string().min(1), z.json()).optional(),
   kind: z.string().min(1),
   at: timestamp,
@@ -1734,6 +1776,15 @@ export const timelineEventSchema = openObject({
    */
   // llmlint: ignore[boundary_inputs_validated] the pairing of `surface` with a `kind` is the same constraint this parser may not enforce as the `release` pairing above, and for the same reason: the surface kinds are `onepipeline`'s, released on its own schedule, so a conforming server relaying one of them under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `surface` itself carries is validated above, down to refusing one that carries nothing.
   surface: timelineSurfaceSchema.optional(),
+  /**
+   * The surface a record names by id (timeline schema 16): a queued or taken
+   * surface, a quiet worker, a failed check or checks left unfollowed.
+   */
+  surface_id: z.number().int().nonnegative().optional(),
+  /** The correlation a surface was sent or taken under, or a reply echoed. */
+  correlation: z.string().min(1).optional(),
+  /** What the surface this record belongs to came to, over the whole reading. */
+  surface_state: timelineSurfaceStateSchema.optional(),
   /**
    * Where a change request's review stood, on the six `onevcs` kinds that say so
    * and on no other. Not *keyed* on those names, for the reason `surface` is not.
@@ -2912,6 +2963,7 @@ export type ReleaseAwaited = z.infer<typeof releaseAwaitedSchema>;
 export type TimelineRelease = z.infer<typeof timelineReleaseSchema>;
 /** What one surface record said about the surface it raised or consumed. */
 export type TimelineSurface = z.infer<typeof timelineSurfaceSchema>;
+export type TimelineSurfaceState = z.infer<typeof timelineSurfaceStateSchema>;
 export type DagConversation = z.infer<typeof dagConversationSchema>;
 export type NodeConversations = z.infer<typeof nodeConversationsSchema>;
 export type RunConversations = z.infer<typeof runConversationsSchema>;

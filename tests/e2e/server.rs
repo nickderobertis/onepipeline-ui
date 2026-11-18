@@ -35,6 +35,7 @@ use crate::serving::Serving;
 #[cfg(unix)]
 use crate::serving::Stop;
 use crate::sibling;
+use crate::surface_records;
 
 /// A server over one settled run and one more, so the list has rows to page.
 fn two_runs() -> Serving {
@@ -483,9 +484,10 @@ fn a_private_github_home_with_a_public_destination_task_is_readable() {
         .collect();
     assert_eq!(settled.len(), 1, "{timeline}");
     assert_eq!(settled[0]["node_id"], "anchor", "{timeline}");
+    assert_eq!(settled[0]["fields"]["status"], json!("done"), "{timeline}");
     assert_eq!(
-        settled[0]["fields"],
-        json!({"Status": "done", "Outcome": "merged"}),
+        settled[0]["fields"]["outcome"],
+        json!("merged"),
         "{timeline}"
     );
     let missing = http::get(serving.address, "/api/v2/runs/no-such-github-run");
@@ -907,7 +909,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(15));
+    assert_eq!(body["timeline_schema_version"], json!(16));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -5239,7 +5241,7 @@ fn a_notes_turn_is_served_where_the_record_names_one_and_nowhere_else() {
         &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(15));
+    assert_eq!(timeline["timeline_schema_version"], json!(16));
     // Every appended record is stamped at one instant, after everything the
     // live run wrote, so they are its last four edits in the order appended.
     let appended: Vec<Value> = events_on(&timeline)
@@ -6893,7 +6895,7 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
         ),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(15));
+    assert_eq!(timeline["timeline_schema_version"], json!(16));
     let drafted = review_events(&timeline, "change-drafted");
     assert_eq!(drafted.len(), 1, "{timeline}");
     assert_eq!(
@@ -20555,9 +20557,11 @@ fn without_ages_returns_text_with_no_age_unchanged() {
 
 /// A continuation's rework read off the store names the superseded node's
 /// settled head, `replaces_head`, where the store's provenance carried it — a
-/// field no record the engine wrote before carried. No route's contract serves
-/// it, so the run whose journal holds it is served through the run, results,
-/// events and timeline routes exactly as a twin whose record predates it.
+/// field no record the engine wrote before carried. The timeline serves it as
+/// the record carried it, among its settlement's `fields`, and nothing else
+/// reads it: the run whose journal holds it is served through the run, results,
+/// events and timeline routes exactly as a twin whose record predates it, but
+/// for that one recorded field.
 #[test]
 fn a_continued_rework_naming_the_head_it_replaced_is_served_as_one_that_names_none() {
     let corpus = fixture_run::review_loop();
@@ -20610,8 +20614,29 @@ fn a_continued_rework_naming_the_head_it_replaced_is_served_as_one_that_names_no
             assert_eq!(served.status, 200, "{run}{path}: {}", served.body);
             served.json()
         };
+        let mut served_headed = read(&headed);
+        // The timeline serves every field a record carried, so the headed run's
+        // settlement names the head it replaced there, and only there.
+        let mut named = 0;
+        let spans = served_headed.get_mut("spans").and_then(Value::as_array_mut);
+        for span in spans.into_iter().flatten() {
+            let events = span.get_mut("events").and_then(Value::as_array_mut);
+            for event in events.into_iter().flatten() {
+                if let Some(rework) = event
+                    .pointer_mut("/fields/continued/rework")
+                    .and_then(Value::as_object_mut)
+                {
+                    named += usize::from(rework.remove("replaces_head").is_some());
+                }
+            }
+        }
         assert_eq!(
-            as_headed(&read(&headed)),
+            named,
+            usize::from(path.starts_with("/timeline")),
+            "{path} serves the replaced head where the timeline's fields do not"
+        );
+        assert_eq!(
+            as_headed(&served_headed),
             as_headed(&read(&unheaded)),
             "{path} reads the two runs differently"
         );
@@ -20761,6 +20786,17 @@ fn repeated_journal_identities_count_once_on_both_timeline_scopes() {
             body.as_object_mut()
                 .expect("an envelope")
                 .remove("observed_at");
+            // A settled member's report is named by the producer's scratch path,
+            // which each server's fixture wrote under a directory of its own.
+            let spans = body.get_mut("spans").and_then(Value::as_array_mut);
+            for span in spans.into_iter().flatten() {
+                let events = span.get_mut("events").and_then(Value::as_array_mut);
+                for event in events.into_iter().flatten() {
+                    if let Some(fields) = event.get_mut("fields").and_then(Value::as_object_mut) {
+                        fields.remove("report_path");
+                    }
+                }
+            }
             body
         };
         assert_eq!(read(original.address), read(repeated.address), "{query}");
@@ -21106,7 +21142,7 @@ fn a_run_with_journalled_heartbeats_and_one_with_its_liveness_beside_the_journal
 }
 
 #[test]
-fn record_panels_select_each_kinds_facts_and_omit_absent_or_irrelevant_fields() {
+fn record_panels_serve_every_payload_field_but_the_empty_ones_and_the_session_token() {
     let original = fixture_run::recorded_timeline();
     let serving = Serving::start(|root| {
         fixture_run::write_recorded_timeline(root);
@@ -21132,6 +21168,11 @@ fn record_panels_select_each_kinds_facts_and_omit_absent_or_irrelevant_fields() 
     });
     let run = original["run_id"].as_str().expect("run");
     let mut events = Vec::new();
+    // Every event names its record, and serves every key of that record's
+    // payload under the record's own wire key, as the record carried it, but a
+    // value that says nothing and a vcs session's token.
+    let mut withheld = 0;
+    let mut read = 0;
     for id in [
         run.to_owned(),
         fixture_run::LANES_RUN_ID.to_owned(),
@@ -21139,37 +21180,79 @@ fn record_panels_select_each_kinds_facts_and_omit_absent_or_irrelevant_fields() 
         format!("{run}-host-shutdown"),
         format!("{run}-driver-exited"),
     ] {
-        events.extend(events_on(
+        let served = events_on(
             &http::get(
                 serving.address,
                 &format!("/api/v2/runs/{id}/timeline?scope=run"),
             )
             .json(),
-        ));
+        );
+        let view = onepipeline::views::RunView::open(&onepipeline::views::RunPaths::under(
+            &serving.runs_root(),
+            &id,
+        ))
+        .expect("the recorded run reads");
+        let records: std::collections::HashMap<String, &onepipeline::event::Envelope> = view
+            .events
+            .iter()
+            .map(|event| (format!("{}.{}", event.stream, event.seq), event))
+            .collect();
+        for event in &served {
+            let Some(record) = event["record_id"].as_str().and_then(|id| records.get(id)) else {
+                continue;
+            };
+            read += 1;
+            let mut expected = serde_json::Map::new();
+            for (key, value) in &record.payload {
+                if record.source == onepipeline::event::Source::Vcs && key == "token" {
+                    withheld += 1;
+                    continue;
+                }
+                if value.is_null() || value == "" || value == &json!([]) || value == &json!({}) {
+                    continue;
+                }
+                expected.insert(key.clone(), value.clone());
+            }
+            match event.get("fields") {
+                Some(fields) => assert_eq!(fields, &Value::Object(expected), "{id}: {event}"),
+                None => assert!(
+                    expected.is_empty(),
+                    "{id}: {event} served no fields for {expected:?}"
+                ),
+            }
+        }
+        events.extend(served);
     }
+    assert!(read > 0, "no event named a record");
+    assert!(
+        withheld > 0,
+        "the recorded runs carry no session token to withhold"
+    );
+    // The facts each kind's panel used to select are among them, under their
+    // wire keys, wherever the record carried them.
     let cases: &[(&str, &[&str])] = &[
         (
             "edit-committed",
-            &["Author", "Operations", "Operation kinds"],
+            &["author", "operations", "operation_kinds"],
         ),
-        ("planner-replied", &["Author", "Completion", "Reason"]),
-        ("node-dispatched", &["Attempt", "Persona"]),
-        ("session-opened", &["Branch", "Base"]),
-        ("session-closed", &["Branch"]),
-        ("gate-run", &["Gate", "Result", "Duration (seconds)"]),
-        ("graph-started", &["Name", "Graph"]),
-        ("graph-settled", &["Exit code"]),
-        ("member-started", &["Runner", "Engine"]),
-        ("member-settled", &["Verdict", "Reason"]),
-        ("member-died", &["Reason"]),
-        ("turn-started", &["Turn", "Role"]),
-        ("turn-completed", &["Turn", "Role"]),
-        ("turn-message", &["Turn", "Role", "Message"]),
-        ("node-settled", &["Status", "Outcome", "Detail"]),
-        ("completion-requested", &["Reason"]),
-        ("run-stopped", &["Owner", "Forced"]),
-        ("host-shutdown", &["Scope", "Owner", "Teardown"]),
-        ("driver-exited", &["Settlement"]),
+        ("planner-replied", &["author", "completion", "reason"]),
+        ("node-dispatched", &["attempt", "persona"]),
+        ("session-opened", &["branch", "base"]),
+        ("session-closed", &["branch"]),
+        ("gate-run", &["gate", "verdict", "seconds"]),
+        ("graph-started", &["name", "graph"]),
+        ("graph-settled", &["exit_code"]),
+        ("member-started", &["runner", "engine"]),
+        ("member-settled", &["verdict", "completion_reason"]),
+        ("member-died", &["reason"]),
+        ("turn-started", &["turn", "role"]),
+        ("turn-completed", &["turn", "role"]),
+        ("turn-message", &["turn", "role", "text"]),
+        ("node-settled", &["status", "outcome", "detail"]),
+        ("completion-requested", &["reason"]),
+        ("run-stopped", &["owner", "forced"]),
+        ("host-shutdown", &["scope", "owner", "teardown"]),
+        ("driver-exited", &["settlement"]),
     ];
     for &(kind, expected) in cases {
         let event = events
@@ -21182,11 +21265,9 @@ fn record_panels_select_each_kinds_facts_and_omit_absent_or_irrelevant_fields() 
         let fields = event["fields"]
             .as_object()
             .unwrap_or_else(|| panic!("no fields on {kind}: {event}"));
-        let labels: Vec<&str> = fields.keys().map(String::as_str).collect();
-        assert_eq!(labels, expected, "{kind}: {event}");
-        assert!(fields
-            .values()
-            .all(|v| !v.is_null() && v != "" && v != &json!([]) && v != &json!({})));
+        for key in expected {
+            assert!(fields.contains_key(*key), "{kind} serves no {key}: {event}");
+        }
     }
     let current = events
         .iter()
@@ -21194,28 +21275,18 @@ fn record_panels_select_each_kinds_facts_and_omit_absent_or_irrelevant_fields() 
         .expect("current failure");
     assert_eq!(
         current["fields"],
-        json!({"Rule":"process-exited","Cause":"exited","Detail":"process exited 1"})
+        json!({"rule":"process-exited","cause":"exited","detail":"process exited 1","exit_code":1})
     );
-    let heartbeat = events
+    let opened = events
         .iter()
-        .find(|e| e["kind"] == "member-heartbeat")
-        .expect("heartbeat");
-    assert!(
-        heartbeat.get("fields").is_none(),
-        "an empty fact list is omitted"
-    );
+        .find(|e| e["kind"] == "session-opened")
+        .expect("a session opened");
+    assert!(opened["fields"].get("token").is_none(), "{opened}");
     let activity = events
         .iter()
         .find(|e| e["kind"] == "turn-activity")
         .expect("tool call");
-    assert_eq!(activity["fields"]["Tool"], "command_execution");
-    for event in &events {
-        if let Some(fields) = event["fields"].as_object() {
-            for absent in ["Token", "Worktree", "Config"] {
-                assert!(!fields.contains_key(absent), "{event}");
-            }
-        }
-    }
+    assert_eq!(activity["fields"]["name"], "command_execution");
 }
 
 #[test]
@@ -22241,19 +22312,19 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
         // ended.
         let started = node_record_fields(&serving, &run, node, "command-started");
         assert_eq!(
-            started.last().expect("a start")["Command"],
+            started.last().expect("a start")["command"],
             tasks[node]["command"],
             "{node}"
         );
         assert_eq!(
-            started.last().expect("a start")["Log"],
+            started.last().expect("a start")["log"],
             json!(path),
             "{node}"
         );
         let settlement = node_record_fields(&serving, &run, node, "node-settled");
         assert_eq!(settlement.len(), 1, "{node}: {settlement:?}");
         assert_eq!(
-            settlement[0].get("Outcome").cloned(),
+            settlement[0].get("outcome").cloned(),
             outcome.map(|word| json!(word)),
             "{node}"
         );
@@ -22263,7 +22334,7 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
     // the log served is the one its last start named, here.
     let starts = node_record_fields(&serving, &run, "build", "command-started");
     assert_eq!(starts.len(), 2, "{starts:?}");
-    assert_ne!(starts[0]["Log"], results["build"]["log"]["path"]);
+    assert_ne!(starts[0]["log"], results["build"]["log"]["path"]);
     assert_eq!(results["build"]["log"]["content"], corpus["logs"]["build"]);
     assert_eq!(results["build"]["log"]["truncated"], json!(false));
     assert_eq!(results["lint"]["log"]["content"], corpus["logs"]["lint"]);
@@ -22296,15 +22367,15 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
     assert!(node_record_fields(&serving, &run, "package", "command-started").is_empty());
 
     let ended = node_record_fields(&serving, &run, "integration", "command-exited");
-    assert_eq!(ended[0]["Ending"], json!("timed-out"), "{ended:?}");
-    assert_eq!(ended[0]["Duration (ms)"], json!(30004), "{ended:?}");
-    assert!(ended[0].get("Exit code").is_none(), "{ended:?}");
+    assert_eq!(ended[0]["ending"], json!("timed-out"), "{ended:?}");
+    assert_eq!(ended[0]["duration_ms"], json!(30004), "{ended:?}");
+    assert!(ended[0].get("exit_code").is_none(), "{ended:?}");
     let started = node_record_fields(&serving, &run, "integration", "command-started");
-    assert_eq!(started[0]["Timeout (seconds)"], json!(30), "{started:?}");
+    assert_eq!(started[0]["timeout_seconds"], json!(30), "{started:?}");
     let started = node_record_fields(&serving, &run, "lint", "command-started");
-    assert!(started[0].get("Timeout (seconds)").is_none(), "{started:?}");
+    assert!(started[0].get("timeout_seconds").is_none(), "{started:?}");
     let ended = node_record_fields(&serving, &run, "lint", "command-exited");
-    assert_eq!(ended[0]["Exit code"], json!(101), "{ended:?}");
+    assert_eq!(ended[0]["exit_code"], json!(101), "{ended:?}");
 
     // Every refused edit, oldest first, each as its record carried it: the
     // typed refusal where the record carried one and no key where it did not.
@@ -22351,13 +22422,13 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
         .iter()
         .flat_map(|span| span["events"].as_array().cloned().unwrap_or_default())
         .filter(|event| event["kind"] == "edit-rejected")
-        .map(|event| event["fields"].clone())
+        .map(|event| json!({ "author": event["fields"]["author"], "reason": event["fields"]["reason"] }))
         .collect();
     assert_eq!(
         refusals,
         rejected
             .iter()
-            .map(|edit| json!({ "Author": edit["author"], "Reason": edit["reason"] }))
+            .map(|edit| json!({ "author": edit["author"], "reason": edit["reason"] }))
             .collect::<Vec<_>>()
     );
 
@@ -22427,4 +22498,249 @@ fn a_command_log_outside_the_run_or_gone_is_served_as_its_name_alone() {
         .as_str()
         .expect("integration's log");
     assert!(integration.ends_with(corpus["logs"]["integration"].as_str().expect("the log")));
+}
+
+/// Every record of a surface carries what that surface came to over the whole
+/// run: a question a node asked through the real `onepipeline ask`, a finding
+/// raised through the engine's `surface`, and the driver's quiet worker, failed
+/// check and unfollowed checks, each taken — the channel's two by the engine's
+/// own `next` — and the question answered under its correlation by the engine's
+/// own reply. The answer is journalled under no node, and the question's own
+/// record on the node's timeline still reads as answered; a filter that lists
+/// only the answer changes nothing it says about the question.
+#[test]
+fn every_record_of_a_surface_carries_what_it_came_to_over_the_whole_run() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let root = serving.runs_root();
+    let root = root.as_path();
+    let (run, node) = (fixture_run::RUN_ID, fixture_run::NODE_ID);
+    let finding = surface_records::raise_finding(root, run, "the gate went red on main");
+    let question = "is the contract interface ready to ship?";
+    let asked = surface_records::ask(root, run, node, question);
+    let (id, correlation) = (asked.id, asked.correlation.clone());
+    surface_records::driver_surfaces(root, run, node);
+    let mut taken = [
+        surface_records::take_next(root, run),
+        surface_records::take_next(root, run),
+    ];
+    taken.sort_unstable();
+    let mut raised = [finding, id];
+    raised.sort_unstable();
+    assert_eq!(
+        taken, raised,
+        "the engine handed out both surfaces on the channel"
+    );
+    surface_records::answer(
+        root,
+        run,
+        &correlation,
+        &json!({"version": 2, "completion": false, "message": "yes, ship it", "reason": "the gate is green"}),
+    );
+    asked.answered();
+
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    );
+    assert_eq!(timeline.status, 200, "{}", timeline.body);
+    let timeline = timeline.json();
+
+    // The question: queued on its node, taken, and answered by a reply that
+    // names no node, every one of its three records saying all of it.
+    let records = surface_records::of_surface(&timeline, id);
+    let kinds: Vec<&str> = records
+        .iter()
+        .filter_map(|event| event["kind"].as_str())
+        .collect();
+    assert_eq!(
+        kinds.len(),
+        3,
+        "the question's queued, taken and answering records: {records:#?}"
+    );
+    for kind in [
+        "planner-surface-queued",
+        "planner-surfaced",
+        "planner-replied",
+    ] {
+        assert!(
+            kinds.contains(&kind),
+            "{kind} is not the question's: {kinds:?}"
+        );
+    }
+    for event in &records {
+        let state = &event["surface_state"];
+        assert_eq!(state["correlation"], json!(correlation), "{event}");
+        assert_eq!(state["node"], json!(node), "{event}");
+        assert_eq!(state["kind"], json!("planner-question"), "{event}");
+        assert_eq!(state["message"], json!(question), "{event}");
+        assert_eq!(state["blocking"], json!(true), "{event}");
+        for stamp in ["queued_at", "read_at", "replied_at"] {
+            assert!(state[stamp].is_string(), "{stamp} on {event}");
+        }
+        assert_eq!(state["reply"]["message"], json!("yes, ship it"), "{event}");
+        assert_eq!(
+            state["reply"]["reason"],
+            json!("the gate is green"),
+            "{event}"
+        );
+        assert_eq!(state["reply"]["completion"], json!(false), "{event}");
+        assert_eq!(state["reply"]["provenance"], json!("user"), "{event}");
+        assert_eq!(event["correlation"], json!(correlation), "{event}");
+    }
+    let replied = records
+        .iter()
+        .find(|event| event["kind"] == "planner-replied")
+        .expect("the answer");
+    assert!(
+        replied.get("node_id").is_none(),
+        "the answer names no node: {replied}"
+    );
+    assert!(replied.get("surface_id").is_none(), "{replied}");
+    for event in records
+        .iter()
+        .filter(|event| event["kind"] != "planner-replied")
+    {
+        assert_eq!(event["surface_id"], json!(id), "{event}");
+    }
+
+    // The finding: raised to nobody's node and taken, never answered.
+    let raised = surface_records::of_surface(&timeline, finding);
+    assert_eq!(raised.len(), 2, "{raised:#?}");
+    for event in &raised {
+        let state = &event["surface_state"];
+        assert_eq!(state["kind"], json!("finding"), "{event}");
+        assert!(state["read_at"].is_string(), "{event}");
+        assert!(state.get("replied_at").is_none(), "{event}");
+        assert!(state.get("node").is_none(), "{event}");
+        assert!(state.get("correlation").is_none(), "{event}");
+        assert!(event.get("correlation").is_none(), "{event}");
+    }
+
+    // The driver's three: each queued, named by its own record, and taken.
+    for (surface, kind) in [
+        (surface_records::QUIET_WORKER_SURFACE, "quiet-worker"),
+        (surface_records::CHECK_FAILED_SURFACE, "check-failed"),
+        (
+            surface_records::CHECKS_UNFOLLOWED_SURFACE,
+            "checks-unfollowed",
+        ),
+    ] {
+        let records = surface_records::of_surface(&timeline, surface);
+        let kinds: Vec<&str> = records
+            .iter()
+            .filter_map(|event| event["kind"].as_str())
+            .collect();
+        assert_eq!(
+            kinds,
+            ["planner-surface-queued", kind, "planner-surfaced"],
+            "{records:#?}"
+        );
+        for event in &records {
+            assert_eq!(event["surface_id"], json!(surface), "{event}");
+            let state = &event["surface_state"];
+            assert_eq!(state["kind"], json!(kind), "{event}");
+            assert_eq!(state["node"], json!(node), "{event}");
+            assert!(
+                state["queued_at"].is_string() && state["read_at"].is_string(),
+                "{event}"
+            );
+            assert!(state.get("replied_at").is_none(), "{event}");
+        }
+    }
+
+    // A filter shapes the list and never the surface: the answer alone, listed
+    // under a spec admitting nothing else, says what the whole reading says.
+    let only_answers: String =
+        url::form_urlencoded::byte_serialize(br#"{"include":[{"kind":"planner-replied"}]}"#)
+            .collect();
+    let filtered = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run&filter={only_answers}"),
+    );
+    assert_eq!(filtered.status, 200, "{}", filtered.body);
+    let filtered = filtered.json();
+    let listed = surface_records::events(&filtered);
+    assert!(
+        listed
+            .iter()
+            .all(|event| event["kind"] == "planner-replied"),
+        "{listed:#?}"
+    );
+    assert_eq!(
+        surface_records::of_surface(&filtered, id)
+            .first()
+            .map(|event| event["surface_state"].clone()),
+        Some(replied["surface_state"].clone())
+    );
+
+    // And the node's own timeline, which holds the question's records and not
+    // the answer, reads them as answered.
+    let on_node = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=node&node={node}"),
+    )
+    .json();
+    let queued = surface_records::of_surface(&on_node, id);
+    assert!(!queued.is_empty(), "the node's timeline lists its question");
+    assert!(
+        queued
+            .iter()
+            .all(|event| event["surface_state"] == replied["surface_state"]),
+        "{queued:#?}"
+    );
+}
+
+/// A reply naming no correlation, and one echoing a correlation no surface was
+/// raised under, belong to no surface, and are served as the records they are.
+#[test]
+fn a_reply_that_answers_no_surface_the_run_raised_carries_no_surface_state() {
+    let serving = Serving::start(|root| {
+        fixture_run::write(root, fixture_run::RUN_ID);
+    });
+    let (root, run) = (serving.runs_root(), fixture_run::RUN_ID);
+    let journal = root.join(run).join("events.jsonl");
+    let reply = |seq: u64, correlation: Value| {
+        json!({
+            "v": 1, "ts": "2026-08-07T13:00:00.000Z", "stream": format!("run-{run}.replies"),
+            "seq": seq, "source": "pipeline", "kind": "planner-replied",
+            "labels": { "run_id": run },
+            "payload": {
+                "author": "planner", "completion": null, "reason": "carry on",
+                "correlation": correlation, "message": "carry on",
+            },
+            "artifacts": [],
+        })
+        .to_string()
+    };
+    crate::live_journal::append_lines(
+        &journal,
+        &[
+            reply(0, Value::Null),
+            reply(1, json!("c-0123456789abcdef0123456789abcdef")),
+        ],
+    );
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    )
+    .json();
+    let replies: Vec<Value> = surface_records::events(&timeline)
+        .into_iter()
+        .filter(|event| {
+            event["kind"] == "planner-replied" && event["at"] == "2026-08-07T13:00:00.000Z"
+        })
+        .collect();
+    assert_eq!(replies.len(), 2, "{replies:#?}");
+    for event in &replies {
+        assert!(event.get("surface_state").is_none(), "{event}");
+        assert_eq!(event["fields"]["message"], json!("carry on"), "{event}");
+    }
+    assert!(replies
+        .iter()
+        .any(|event| event.get("correlation").is_none()));
+    assert!(replies
+        .iter()
+        .any(|event| event["correlation"] == json!("c-0123456789abcdef0123456789abcdef")));
 }

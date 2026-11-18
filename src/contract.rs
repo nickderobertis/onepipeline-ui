@@ -346,7 +346,19 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 29;
 /// other event is byte-for-byte what 13 served.
 /// **Version 15 carries each check's requirement label and recorded URL.**
 /// The label is the engine vocabulary's own rendering of the required flag.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 15;
+///
+/// **Schema 16 serves every payload field, and what a surface came to.** An
+/// event's `fields` are every key of its record's payload, under the record's
+/// own wire key and with the record's own value — nested objects and lists
+/// included — leaving out only a value that says nothing (`null`, `""`, `[]`,
+/// `{}`) and a `source: vcs` record's session `token`; 15 served a per-kind
+/// selection of them under English labels. An event whose record names a surface
+/// gains `surface_id`, a `planner-surface-queued`, `planner-surfaced` or
+/// `planner-replied` gains the `correlation` it carried, and every record of a
+/// surface — a `planner-replied` reached through the correlation it echoes —
+/// gains `surface_state`, the surface folded over the whole reading, whatever
+/// the filter.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 16;
 
 /// The largest run-list page any request can ask for.
 ///

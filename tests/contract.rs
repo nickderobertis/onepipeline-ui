@@ -22,13 +22,12 @@ use onepipeline::views::{RunPaths, RunSummary, RunView};
 use onepipeline_ui::api::RunApi;
 use onepipeline_ui::cli::{Cli, Command, ServeArgs, SessionId, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
-    routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope,
-    EventFrame, EventsPageLimit, EventsQuery, Health, HealthStatus, NodeId, PageLimit,
-    PageOwner, ProjectId, ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery,
-    ShutdownRequest, ShutdownScope, SseEvent, StopRequest, TimelineEventsQuery,
-    TimelineQuery, TimelineScope, TranscriptQuery, API_VERSION, RUNS_PAGE_LIMIT,
-    TELEMETRY_SCHEMA_VERSION, TIMELINE_EVENTS_PAGE, TIMELINE_EVENTS_PAGE_MAX,
-    TIMELINE_SCHEMA_VERSION,
+    routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope, EventFrame,
+    EventsPageLimit, EventsQuery, Health, HealthStatus, NodeId, PageLimit, PageOwner, ProjectId,
+    ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery, ShutdownRequest, ShutdownScope,
+    SseEvent, StopRequest, TimelineEventsQuery, TimelineQuery, TimelineScope, TranscriptQuery,
+    API_VERSION, RUNS_PAGE_LIMIT, TELEMETRY_SCHEMA_VERSION, TIMELINE_EVENTS_PAGE,
+    TIMELINE_EVENTS_PAGE_MAX, TIMELINE_SCHEMA_VERSION,
 };
 use onepipeline_ui::store::RunStore;
 use onepipeline_ui::ApiError;
@@ -1157,7 +1156,7 @@ fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
     // nothing about.
-    assert_eq!(TIMELINE_SCHEMA_VERSION, 15);
+    assert_eq!(TIMELINE_SCHEMA_VERSION, 16);
     assert!(
         contract_text().contains(&format!("Timeline schema {TIMELINE_SCHEMA_VERSION}")),
         "docs/contract.md names no timeline schema {TIMELINE_SCHEMA_VERSION}"
@@ -1191,6 +1190,14 @@ fn the_fields_and_review_kinds_a_timeline_schema_added_are_the_ones_the_contract
             "docs/contract.md's timeline schema {schema} adds no `{field}`"
         );
     }
+    // The one bump that re-keyed a field rather than adding one says so.
+    assert!(
+        timeline_schema::WIRE_KEYED_FIELDS <= u64::from(TIMELINE_SCHEMA_VERSION)
+            && timeline_schema_paragraph(timeline_schema::WIRE_KEYED_FIELDS)
+                .contains("An event's **`fields`** are every key of its record's payload, keyed by the record's own **wire key**"),
+        "docs/contract.md's timeline schema {} does not say `fields` became wire-keyed",
+        timeline_schema::WIRE_KEYED_FIELDS
+    );
     let review = timeline_schema_paragraph(11);
     let check_labels = timeline_schema_paragraph(15);
     for record in onepipeline_ui::payload::vcs::REVIEW_RECORDS {
@@ -3946,58 +3953,74 @@ fn the_browser_fixture_excludes_the_linked_harness_binaries_from_its_path() {
     assert_eq!(corpus, declared);
 }
 
-/// The per-kind panel selection follows the declarations of the producer that
-/// owns each payload. VCS currently publishes kind names but no payload schema.
+/// Every record a timeline lists serves every key of its payload as `fields`,
+/// under the record's own wire key and with the record's own value — but for a
+/// value that says nothing and a `vcs` session's credential, which no event
+/// serves. Held over every event of the fixture run's run-scope timeline, read
+/// back against the journal records each event names by its `record_id`.
 #[test]
-fn timeline_record_fields_follow_the_producers_published_payloads() {
-    use onepipeline::event::{EventKind, PipelineKind};
-    fn declares(schema: &Value, root: &Value, key: &str) -> bool {
-        schema["properties"].get(key).is_some()
-            || schema["$ref"]
-                .as_str()
-                .and_then(|reference| reference.strip_prefix('#'))
-                .and_then(|pointer| root.pointer(pointer))
-                .is_some_and(|resolved| declares(resolved, root, key))
-            || ["allOf", "anyOf", "oneOf"].iter().any(|combinator| {
-                schema[*combinator]
-                    .as_array()
-                    .is_some_and(|choices| choices.iter().any(|choice| declares(choice, root, key)))
-            })
+fn every_timeline_event_serves_its_records_payload_but_the_session_token() {
+    let (_workspace, root) = fixture_run::workspace();
+    fixture_run::write(&root, fixture_run::RUN_ID);
+    let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
+    let timeline = enveloped(store_over(&root).timeline(
+        &run,
+        &TimelineQuery {
+            scope: TimelineScope::Run,
+            filter: None,
+        },
+    ));
+    let view =
+        RunView::open(&RunPaths::under(&root, fixture_run::RUN_ID)).expect("the fixture run");
+    let records: std::collections::HashMap<String, &onepipeline::event::Envelope> = view
+        .events
+        .iter()
+        .map(|event| (format!("{}.{}", event.stream, event.seq), event))
+        .collect();
+    let mut events = Vec::new();
+    let mut pending = vec![&timeline["spans"]];
+    while let Some(spans) = pending.pop() {
+        for span in spans.as_array().into_iter().flatten() {
+            events.extend(span["events"].as_array().into_iter().flatten());
+            pending.push(&span["children"]);
+        }
     }
-    let pipeline = onepipeline::payload::registry();
-    let graph = oneagentgraph::event::registry();
-    let graph_schemas = oneagentgraph::event::payload_schemas();
-    let mut missing = Vec::new();
-    for &(kind, fields) in onepipeline_ui::payload::TIMELINE_RECORD_FIELDS {
-        let schema = if let Some(kind) = PipelineKind::from_wire(&EventKind(kind.into())) {
-            pipeline.schema(&onepipeline::payload::schema_of(kind))
-        } else if let Some((_, id)) = graph_schemas.iter().find(|(name, _)| name.as_str() == kind) {
-            graph.schema(id)
-        } else {
-            // VCS publishes no payload schemas; graph lifecycle payloads are
-            // likewise not in its public registry. Their kind declarations and
-            // the recorded-run journeys remain the available producer boundary.
-            assert!(
-                oneagentgraph::event::EventKind::ALL
-                    .iter()
-                    .any(|name| name.as_str() == kind)
-                    || serde_json::from_value::<onevcs::EventKind>(json!(kind)).is_ok(),
-                "undeclared kind {kind}"
-            );
+    let mut read = 0;
+    let mut credentials = 0;
+    for event in events {
+        let Some(record) = event["record_id"].as_str().and_then(|id| records.get(id)) else {
             continue;
-        }
-        .expect("the producer publishes its payload schema");
-        for &(key, _) in fields {
-            // Historical member-died records predate the typed cause payload and
-            // carried only reason; the real lanes journey keeps that old shape.
-            if !declares(schema, schema, key) && !(kind == "member-died" && key == "reason") {
-                missing.push(format!("{kind}.{key}"));
-            }
-        }
+        };
+        read += 1;
+        let expected: serde_json::Map<String, Value> = record
+            .payload
+            .iter()
+            .filter(|(key, value)| {
+                let credential =
+                    record.source == onepipeline::event::Source::Vcs && *key == "token";
+                credentials += usize::from(credential);
+                !credential
+                    && !value.is_null()
+                    && **value != json!("")
+                    && **value != json!([])
+                    && **value != json!({})
+            })
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        let served = event
+            .get("fields")
+            .cloned()
+            .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+        assert_eq!(served, Value::Object(expected), "{event}");
+        assert!(
+            !event.to_string().contains("a-vcs-session-token"),
+            "an event served the session's token: {event}"
+        );
     }
+    assert!(read > 0, "the timeline listed no journal record");
     assert!(
-        missing.is_empty(),
-        "panel fields no producer declares: {missing:?}"
+        credentials > 0,
+        "the fixture holds no session token to withhold"
     );
 }
 

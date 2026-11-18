@@ -118,6 +118,15 @@ anything new here is a proposal to make upstream first.
   every session with no role — reported nowhere, because the server cannot tell
   a graph that declared nothing from a record it could not find; the SDK
   publishing the declarations beside the run would close that.
+- **What each surface came to.** A surface's records are written apart — queued
+  on the node it is about, taken by `next`, answered by a `planner-replied` the
+  driver journals under no node — and the engine folds none of them together
+  for a reader, so `payload::SurfaceStates` joins them by surface id and by the
+  correlation the reply echoes, over the whole reading, and every record of a
+  surface serves the result as `surface_state`. The live index keeps the same
+  fold and touches every owner holding a record of a surface that moved. A
+  per-surface fold the SDK published beside the channel's records would
+  replace it.
 - **The last account of each observed check.** `onevcs` reports every transition
   of every check it waits on, and `payload::observed_checks` keeps the last of
   each with the state it moved from. The transitions themselves are still served,

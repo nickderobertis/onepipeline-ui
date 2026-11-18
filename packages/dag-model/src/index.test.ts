@@ -20,7 +20,6 @@ import {
   planTaskSchema,
   projectAgentsSchema,
   projectGroupSchema,
-  provenanceOf,
   runAgentsSchema,
   runDetailSchema,
   runListSchema,
@@ -955,6 +954,63 @@ describe("run timeline", () => {
       expect(() =>
         timelineEventSchema.parse({ ...event, dispatch_group: group }),
       ).toThrow();
+  });
+
+  test("reads a surface record's id, correlation and folded state, and refuses a malformed one", () => {
+    const surface_state = {
+      id: 4,
+      correlation: "c-0123456789abcdef0123456789abcdef",
+      node: "build",
+      kind: "planner-question",
+      message: "is it ready?",
+      source: "proposal",
+      blocking: true,
+      queued_at: "2026-07-26T12:00:00.000Z",
+      read_at: "2026-07-26T12:00:01.000Z",
+      replied_at: "2026-07-26T12:00:02.000Z",
+      reply: {
+        author: "planner",
+        message: "yes",
+        completion: false,
+        provenance: "user",
+      },
+    };
+    const queued = {
+      id: "e1",
+      kind: "planner-surface-queued",
+      at: "2026-07-26T12:00:00Z",
+      surface_id: 4,
+      correlation: surface_state.correlation,
+      surface_state,
+      fields: { surface: 4, kind: "planner-question", blocking: true },
+    };
+    expect(timelineEventSchema.parse(queued)).toEqual(queued);
+    // A reply carries the state of the surface it answers, and no id of its own.
+    const replied = {
+      id: "e2",
+      kind: "planner-replied",
+      at: "2026-07-26T12:00:02Z",
+      correlation: surface_state.correlation,
+      surface_state,
+    };
+    expect(timelineEventSchema.parse(replied).surface_state).toEqual(
+      surface_state,
+    );
+    // Only the id is required of a state: every other member is present only
+    // where a record carried it.
+    expect(
+      timelineEventSchema.parse({ ...queued, surface_state: { id: 4 } })
+        .surface_state,
+    ).toEqual({ id: 4 });
+    for (const malformed of [
+      { ...queued, surface_id: -1 },
+      { ...queued, correlation: "" },
+      { ...queued, surface_state: { ...surface_state, id: undefined } },
+      { ...queued, surface_state: { ...surface_state, read_at: "soon" } },
+      { ...queued, surface_state: { ...surface_state, blocking: "yes" } },
+      { ...queued, surface_state: { ...surface_state, reply: { message: 3 } } },
+    ])
+      expect(timelineEventSchema.safeParse(malformed).success).toBe(false);
   });
 
   test("accepts an open span, a rollup, and reference-only heavy content", () => {

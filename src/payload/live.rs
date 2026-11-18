@@ -33,7 +33,7 @@ use serde_json::{json, Map, Value};
 use super::{
     detail_document, is_end_boundary, is_settlement, measured, moment_of, share_spans,
     timeline_harnesses_over, turns_of, ActivityFold, DeclaredMembers, Ends, ItemsWindow, Rendered,
-    Run, Scope, Share, Transcripts,
+    Run, Scope, Share, SurfaceStates, Transcripts,
 };
 use crate::contract::NodeId;
 use crate::filter::EventFilter;
@@ -121,6 +121,9 @@ pub(crate) struct Indexed {
     whole_store: bool,
     /// The run's own records, whole, for a page read apart from a selective view.
     held_run: Option<(Vec<Envelope>, Vec<usize>)>,
+    /// What each surface came to, over every record indexed: a record that
+    /// moves a surface touches every owner holding a record of it.
+    pub(crate) surfaces: SurfaceStates,
 }
 // llmlint: ignore-end[invalid_states_unrepresentable]
 
@@ -205,6 +208,9 @@ impl Indexed {
         selected: &onepipeline::journal::SelectedRecords,
     ) {
         let (events, positions) = canonical_of(selected, Some(node));
+        for event in &events {
+            self.surfaces.absorb(event);
+        }
         self.held_shares
             .insert(node.to_owned(), (events, positions));
     }
@@ -321,6 +327,16 @@ impl Indexed {
         }
         if is_end_boundary(event) {
             self.last_boundary = Some(index);
+        }
+        // A record that moves a surface rebuilds every share holding a record
+        // of it: the reply that answers a node's question names no node.
+        for owner in self.surfaces.absorb(event) {
+            match owner {
+                None => touched.run = true,
+                Some(node) => {
+                    touched.nodes.insert(node);
+                }
+            }
         }
         match event.labels.node.as_deref() {
             None => {
@@ -641,7 +657,7 @@ impl LiveTimeline {
         let mut held = None;
         for owner in self.owners(view, indexed) {
             let share = indexed.canonical_share(view, &owner);
-            let pre = self.share_of(view, view.events.first(), declared, &owner, &share);
+            let pre = self.share_of(view, indexed, view.events.first(), declared, &owner, &share);
             self.place(owner, pre, &mut spans);
             if matches!(self.scope, TimelineScope::Node(_)) {
                 held = Some(share);
@@ -670,7 +686,14 @@ impl LiveTimeline {
         for owner in self.owners(view, indexed) {
             let lent = indexed.lend_share(view, &owner);
             let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.share_of(view, first.as_ref(), declared, &owner, lent.share())
+                self.share_of(
+                    view,
+                    indexed,
+                    first.as_ref(),
+                    declared,
+                    &owner,
+                    lent.share(),
+                )
             }));
             if built.is_ok() && matches!(self.scope, TimelineScope::Node(_)) {
                 kept = Some(lent);
@@ -794,7 +817,7 @@ impl LiveTimeline {
         owner: &Owner,
     ) -> Vec<Value> {
         let share = indexed.canonical_share(view, owner);
-        self.share_of(view, view.events.first(), declared, owner, &share)
+        self.share_of(view, indexed, view.events.first(), declared, owner, &share)
     }
 
     /// [`Self::share`] over `owner`'s records as [`Indexed::canonical_share`] read
@@ -802,6 +825,7 @@ impl LiveTimeline {
     fn share_of(
         &self,
         view: &RunView,
+        indexed: &Indexed,
         first: Option<&Envelope>,
         declared: &DeclaredMembers,
         owner: &Owner,
@@ -832,6 +856,7 @@ impl LiveTimeline {
             &self.ends,
             &self.rendered,
             self.window,
+            &indexed.surfaces,
         )
     }
 

@@ -5524,6 +5524,9 @@ pub enum Scope<'a> {
 /// route serves under it.
 struct Lens<'a> {
     turns: &'a [Option<Turn>],
+    /// What the run's surfaces came to, over the whole reading rather than the
+    /// records this lens lists.
+    surfaces: &'a SurfaceStates,
     filter: &'a EventFilter,
     /// The run's transcripts, folded once: the judge lane is drawn over the same
     /// stored report the turns beside it were read from.
@@ -5692,8 +5695,13 @@ impl Lens<'_> {
                     .and_then(|positions| positions.get(*index).copied())
                     .unwrap_or(*index);
                 let Some(rendered) = self.rendered else {
-                    return timeline_event(*index, position, event, self.turns);
+                    return timeline_event(*index, position, event, self.turns, self.surfaces);
                 };
+                // A surface's entry changes when a later record of it arrives, so
+                // it is rendered afresh rather than read back.
+                if may_belong_to_surface(event) {
+                    return timeline_event(*index, position, event, self.turns, self.surfaces);
+                }
                 let turn = self
                     .turns
                     .get(*index)
@@ -5705,7 +5713,7 @@ impl Lens<'_> {
                         return entry.clone();
                     }
                 }
-                let entry = timeline_event(*index, position, event, self.turns);
+                let entry = timeline_event(*index, position, event, self.turns, self.surfaces);
                 rendered.fresh += 1;
                 rendered.entries.insert(position, (turn, entry.clone()));
                 entry
@@ -5769,8 +5777,10 @@ fn timeline_spans(
 ) -> Vec<Value> {
     let transcripts = Transcripts::of(view, declared);
     let turns = turn_ids(view, &transcripts);
+    let surfaces = SurfaceStates::of(&view.whole.events);
     let lens = Lens {
         turns: &turns,
+        surfaces: &surfaces,
         filter,
         transcripts: &transcripts,
         positions: view.positions,
@@ -5800,6 +5810,9 @@ pub(crate) enum Share<'a> {
 
 /// The spans one share of a run draws, before the run's end closes any of them:
 /// the same spans [`timeline_over`] draws for those records.
+// Each argument is one input a share's build reads, all borrowed from the one
+// reading; bundling them would be a struct built only to pass.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn share_spans(
     view: &Run<'_>,
     declared: &DeclaredMembers,
@@ -5808,6 +5821,7 @@ pub(crate) fn share_spans(
     ends: &Ends,
     rendered: &std::cell::RefCell<Rendered>,
     window: ItemsWindow,
+    surfaces: &SurfaceStates,
 ) -> Vec<Value> {
     // A span's own fields read no transcript, so a reading that renders no list
     // does not fold one.
@@ -5870,6 +5884,7 @@ pub(crate) fn share_spans(
     };
     let lens = Lens {
         turns: &turns,
+        surfaces,
         filter,
         transcripts: &transcripts,
         positions: view.positions,
@@ -6852,169 +6867,272 @@ fn note_operation(event: &Envelope) -> Option<(&'static str, &Map<String, Value>
         })
 }
 
-/// The fields a reader needs for each record kind. Wire keys are selected here
-/// so neither arbitrary payloads nor session credentials reach a detail panel.
-pub const TIMELINE_RECORD_FIELDS: &[(&str, &[(&str, &str)])] = &[
-    (
-        "edit-committed",
-        &[
-            ("author", "Author"),
-            ("operations", "Operations"),
-            ("operation_kinds", "Operation kinds"),
-        ],
-    ),
-    (
-        "planner-replied",
-        &[
-            ("author", "Author"),
-            ("completion", "Completion"),
-            ("reason", "Reason"),
-        ],
-    ),
-    (
-        "node-dispatched",
-        &[
-            ("attempt", "Attempt"),
-            ("persona", "Persona"),
-            ("reason", "Reason"),
-        ],
-    ),
-    (
-        "gate-run",
-        &[
-            ("gate", "Gate"),
-            ("verdict", "Result"),
-            ("seconds", "Duration (seconds)"),
-            ("log", "Log"),
-        ],
-    ),
-    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 publishes event kinds but no payload schema for session-closed; the recorded-run route/panel journeys hold the historical keys. Follow-up drafts:dag-ui-project-centric/drafts/20261021T211850Z-publish-onevcs-event-payload-schemas-for-timelin publishes that producer boundary and retires this row exception.
-    (
-        "session-closed",
-        &[
-            ("outcome", "Outcome"),
-            ("branch", "Branch"),
-            ("head", "Head"),
-        ],
-    ),
-    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
-    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] onevcs 0.56.3 publishes event kinds but no payload schema for session-opened; the recorded-run route/panel journeys hold the historical keys. Follow-up drafts:dag-ui-project-centric/drafts/20261021T211850Z-publish-onevcs-event-payload-schemas-for-timelin publishes that producer boundary and retires this row exception.
-    ("session-opened", &[("branch", "Branch"), ("base", "Base")]),
-    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
-    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] oneagentgraph 0.7.0 omits graph-started from its payload registry; the recorded-run journeys cover its historical facts (heartbeat carries none). Follow-up drafts:dag-ui-project-centric/drafts/20261021T211851Z-publish-agentgraph-lifecycle-payload-schemas-and publishes these lifecycle declarations and retires this row exception.
-    ("graph-started", &[("name", "Name"), ("graph", "Graph")]),
-    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
-    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] oneagentgraph 0.7.0 omits graph-settled from its payload registry; the recorded-run journeys cover its historical facts (heartbeat carries none). Follow-up drafts:dag-ui-project-centric/drafts/20261021T211851Z-publish-agentgraph-lifecycle-payload-schemas-and publishes these lifecycle declarations and retires this row exception.
-    ("graph-settled", &[("exit_code", "Exit code")]),
-    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
-    (
-        "member-started",
-        &[("runner", "Runner"), ("engine", "Engine")],
-    ),
-    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] oneagentgraph 0.7.0 omits member-heartbeat from its payload registry; the recorded-run journeys cover its historical facts (heartbeat carries none). Follow-up drafts:dag-ui-project-centric/drafts/20261021T211851Z-publish-agentgraph-lifecycle-payload-schemas-and publishes these lifecycle declarations and retires this row exception.
-    ("member-heartbeat", &[]),
-    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
-    // llmlint: ignore-block[contracts_have_one_source_or_a_drift_gate] oneagentgraph 0.7.0 omits member-settled from its payload registry; the recorded-run journeys cover its historical facts (heartbeat carries none). Follow-up drafts:dag-ui-project-centric/drafts/20261021T211851Z-publish-agentgraph-lifecycle-payload-schemas-and publishes these lifecycle declarations and retires this row exception.
-    (
-        "member-settled",
-        &[("verdict", "Verdict"), ("completion_reason", "Reason")],
-    ),
-    // llmlint: ignore-end[contracts_have_one_source_or_a_drift_gate]
-    (
-        "member-died",
-        &[
-            ("rule", "Rule"),
-            ("cause", "Cause"),
-            ("detail", "Detail"),
-            ("reason", "Reason"),
-        ],
-    ),
-    ("turn-started", &[("turn", "Turn"), ("role", "Role")]),
-    (
-        "turn-activity",
-        &[("name", "Tool"), ("detail", "Detail"), ("output", "Output")],
-    ),
-    (
-        "turn-completed",
-        &[("turn", "Turn"), ("role", "Role"), ("usage", "Usage")],
-    ),
-    (
-        "turn-message",
-        &[("turn", "Turn"), ("role", "Role"), ("text", "Message")],
-    ),
-    (
-        "node-settled",
-        &[
-            ("status", "Status"),
-            ("outcome", "Outcome"),
-            ("detail", "Detail"),
-        ],
-    ),
-    // A `kind: command` node's own records: what it ran and where its output is
-    // kept, then how the command ended. Its settlement's outcome is the row
-    // above, so a node's timeline answers what the step was and how it ended.
-    (
-        "command-started",
-        &[
-            ("command", "Command"),
-            ("log", "Log"),
-            ("timeout_seconds", "Timeout (seconds)"),
-        ],
-    ),
-    (
-        "command-exited",
-        &[
-            ("ending", "Ending"),
-            ("exit_code", "Exit code"),
-            ("duration_ms", "Duration (ms)"),
-        ],
-    ),
-    (
-        "edit-rejected",
-        &[("author", "Author"), ("reason", "Reason")],
-    ),
-    ("completion-requested", &[("reason", "Reason")]),
-    (
-        "run-stopped",
-        &[
-            ("owner", "Owner"),
-            ("forced", "Forced"),
-            ("teardown", "Teardown"),
-        ],
-    ),
-    (
-        "host-shutdown",
-        &[
-            ("scope", "Scope"),
-            ("owner", "Owner"),
-            ("teardown", "Teardown"),
-        ],
-    ),
-    (
-        "driver-exited",
-        &[("reason", "Reason"), ("settlement", "Settlement")],
-    ),
-];
+/// The payload key a `source: vcs` record carries its session credential
+/// under: `onevcs`'s `session-opened` hands the session's token back on it.
+/// It is the one key a timeline event never serves.
+const VCS_SESSION_TOKEN: &str = "token";
 
+/// Every fact a record's payload carried, under its own wire key and as the
+/// record carried it, nested objects and lists included — a reader opening the
+/// event is shown what the producer wrote rather than a selection of it, and the
+/// browser humanizes the keys. A value that says nothing (`null`, `""`, `[]`,
+/// `{}`) is left out, and so is a session credential: the `token` of a
+/// `source: vcs` record.
 fn record_fields(event: &Envelope) -> Map<String, Value> {
-    TIMELINE_RECORD_FIELDS
+    event
+        .payload
         .iter()
-        .find(|(kind, _)| *kind == event.kind.0)
-        .map(|(_, fields)| {
-            fields
+        .filter(|(key, _)| !(event.source == Source::Vcs && key.as_str() == VCS_SESSION_TOKEN))
+        .filter(|(_, value)| !says_nothing(value))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+/// Whether a payload value carries nothing a reader could be shown.
+fn says_nothing(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::String(text) => text.is_empty(),
+        Value::Array(items) => items.is_empty(),
+        Value::Object(members) => members.is_empty(),
+        Value::Bool(_) | Value::Number(_) => false,
+    }
+}
+
+/// The kinds of record that belong to a surface by naming its id under
+/// `surface`: the two the channel writes as it is sent and taken, and the three
+/// the engine raises one as.
+fn names_surface(event: &Envelope) -> bool {
+    event.source == Source::Pipeline
+        && matches!(
+            PipelineKind::from_wire(&event.kind),
+            Some(
+                PipelineKind::PlannerSurfaceQueued
+                    | PipelineKind::PlannerSurfaced
+                    | PipelineKind::QuietWorker
+                    | PipelineKind::CheckFailed
+                    | PipelineKind::ChecksUnfollowed
+            )
+        )
+}
+
+/// Whether a record is a `planner-replied`: the verdict half of a reply, which
+/// belongs to the surface whose correlation it echoes.
+fn is_reply(event: &Envelope) -> bool {
+    event.source == Source::Pipeline
+        && PipelineKind::from_wire(&event.kind) == Some(PipelineKind::PlannerReplied)
+}
+
+/// Whether a record may belong to a surface, and so whether its timeline entry
+/// reads the run's [`SurfaceStates`]: such an entry is never served from a live
+/// reading's cache, because a later record — the surface taken, its question
+/// answered — changes it.
+pub(crate) fn may_belong_to_surface(event: &Envelope) -> bool {
+    names_surface(event) || is_reply(event)
+}
+
+/// The surface id a record names, on the kinds that name one.
+fn surface_id(event: &Envelope) -> Option<u64> {
+    names_surface(event)
+        .then(|| event.payload.get("surface").and_then(Value::as_u64))
+        .flatten()
+}
+
+/// The correlation a record was sent, taken or answered under, on the three
+/// kinds that carry one, where it is not null.
+fn record_correlation(event: &Envelope) -> Option<&str> {
+    let carries = event.source == Source::Pipeline
+        && matches!(
+            PipelineKind::from_wire(&event.kind),
+            Some(
+                PipelineKind::PlannerSurfaceQueued
+                    | PipelineKind::PlannerSurfaced
+                    | PipelineKind::PlannerReplied
+            )
+        );
+    carries.then(|| correlation_of(&event.payload)).flatten()
+}
+
+/// A payload's non-empty `correlation`.
+fn correlation_of(payload: &Map<String, Value>) -> Option<&str> {
+    non_empty(payload.get("correlation").and_then(Value::as_str))
+}
+
+/// The record that sent, took or answered a surface, as far as the fold keeps it.
+#[derive(Debug, Clone)]
+struct SurfaceRecord {
+    ts: String,
+    node: Option<String>,
+    payload: Map<String, Value>,
+}
+
+impl SurfaceRecord {
+    fn of(event: &Envelope) -> Self {
+        Self {
+            ts: event.ts.clone(),
+            node: event.labels.node.clone(),
+            payload: event.payload.clone(),
+        }
+    }
+}
+
+/// What each of a run's surfaces came to, folded over every record a reading
+/// holds — never the share or the filtered list being served, so a filter
+/// cannot change it.
+///
+/// A surface is joined across its records by its id (`surface`), and a
+/// `planner-replied` reaches it through the `correlation` it echoes. The first
+/// record of each kind is the one read: a surface is sent once, taken once and
+/// answered once, and a record the journal holds twice is the same record.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct SurfaceStates {
+    queued: HashMap<u64, SurfaceRecord>,
+    surfaced: HashMap<u64, SurfaceRecord>,
+    correlations: HashMap<String, u64>,
+    replies: HashMap<String, SurfaceRecord>,
+    /// Which owners — `None` for the run, else a node label — hold a record of
+    /// each surface, by id, and of each correlation's reply.
+    owners: HashMap<u64, BTreeSet<Option<String>>>,
+    reply_owners: HashMap<String, BTreeSet<Option<String>>>,
+}
+
+impl SurfaceStates {
+    /// The fold over `events`.
+    pub(crate) fn of<'e>(events: impl IntoIterator<Item = &'e Envelope>) -> Self {
+        let mut states = Self::default();
+        for event in events {
+            states.absorb(event);
+        }
+        states
+    }
+
+    /// Take one record in, and answer the owners whose timeline entries it may
+    /// have changed: every owner holding a record of the surface it belongs to.
+    pub(crate) fn absorb(&mut self, event: &Envelope) -> BTreeSet<Option<String>> {
+        let owner = event.labels.node.clone();
+        if is_reply(event) {
+            let Some(correlation) = correlation_of(&event.payload) else {
+                return BTreeSet::new();
+            };
+            self.replies
+                .entry(correlation.to_owned())
+                .or_insert_with(|| SurfaceRecord::of(event));
+            self.reply_owners
+                .entry(correlation.to_owned())
+                .or_default()
+                .insert(owner);
+            return self
+                .correlations
+                .get(correlation)
+                .map_or_else(BTreeSet::new, |id| self.owners_of(*id));
+        }
+        let Some(id) = surface_id(event) else {
+            return BTreeSet::new();
+        };
+        match PipelineKind::from_wire(&event.kind) {
+            Some(PipelineKind::PlannerSurfaceQueued) => {
+                self.queued
+                    .entry(id)
+                    .or_insert_with(|| SurfaceRecord::of(event));
+            }
+            Some(PipelineKind::PlannerSurfaced) => {
+                self.surfaced
+                    .entry(id)
+                    .or_insert_with(|| SurfaceRecord::of(event));
+            }
+            _ => {}
+        }
+        if let Some(correlation) = record_correlation(event) {
+            // A quiet worker or a check names its surface and no correlation,
+            // so only the two channel records reach this.
+            self.correlations
+                .entry(correlation.to_owned())
+                .or_insert(id);
+        }
+        self.owners.entry(id).or_default().insert(owner);
+        self.owners_of(id)
+    }
+
+    /// Every owner holding a record of surface `id`, its reply's included.
+    fn owners_of(&self, id: u64) -> BTreeSet<Option<String>> {
+        let mut owners = self.owners.get(&id).cloned().unwrap_or_default();
+        if let Some(replied) = self
+            .correlation(id)
+            .and_then(|correlation| self.reply_owners.get(correlation))
+        {
+            owners.extend(replied.iter().cloned());
+        }
+        owners
+    }
+
+    /// The correlation surface `id` was sent or taken under.
+    fn correlation(&self, id: u64) -> Option<&str> {
+        [self.queued.get(&id), self.surfaced.get(&id)]
+            .into_iter()
+            .flatten()
+            .find_map(|record| correlation_of(&record.payload))
+    }
+
+    /// The surface a record belongs to, as one object, or `None` for a record
+    /// that belongs to none: a reply with no correlation, or one no surface the
+    /// reading holds was sent or taken under.
+    pub(crate) fn state_of(&self, event: &Envelope) -> Option<Value> {
+        let id = if is_reply(event) {
+            *self.correlations.get(correlation_of(&event.payload)?)?
+        } else {
+            surface_id(event)?
+        };
+        let queued = self.queued.get(&id);
+        let surfaced = self.surfaced.get(&id);
+        let said = [queued, surfaced];
+        let mut state = Map::new();
+        state.insert("id".into(), json!(id));
+        let correlation = self.correlation(id);
+        if let Some(correlation) = correlation {
+            state.insert("correlation".into(), json!(correlation));
+        }
+        if let Some(node) = queued.and_then(|queued| queued.node.as_deref()) {
+            state.insert("node".into(), json!(node));
+        }
+        for key in ["kind", "message", "source"] {
+            if let Some(value) = said
                 .iter()
-                .filter_map(|(key, label)| {
-                    event
-                        .payload
-                        .get(*key)
-                        .filter(|v| {
-                            !v.is_null() && **v != json!("") && **v != json!([]) && **v != json!({})
-                        })
-                        .map(|value| ((*label).to_owned(), value.clone()))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+                .flatten()
+                .find_map(|record| non_empty(record.payload.get(key).and_then(Value::as_str)))
+            {
+                state.insert(key.to_owned(), json!(value));
+            }
+        }
+        if let Some(blocking) = said
+            .iter()
+            .flatten()
+            .find_map(|record| record.payload.get("blocking").and_then(Value::as_bool))
+        {
+            state.insert("blocking".into(), json!(blocking));
+        }
+        if let Some(queued) = queued {
+            state.insert("queued_at".into(), json!(queued.ts));
+        }
+        if let Some(surfaced) = surfaced {
+            state.insert("read_at".into(), json!(surfaced.ts));
+        }
+        if let Some(reply) = correlation.and_then(|correlation| self.replies.get(correlation)) {
+            state.insert("replied_at".into(), json!(reply.ts));
+            let mut said = Map::new();
+            for key in ["author", "message", "reason", "provenance"] {
+                if let Some(value) = non_empty(reply.payload.get(key).and_then(Value::as_str)) {
+                    said.insert(key.to_owned(), json!(value));
+                }
+            }
+            if let Some(completion) = reply.payload.get("completion").and_then(Value::as_bool) {
+                said.insert("completion".into(), json!(completion));
+            }
+            if !said.is_empty() {
+                state.insert("reply".into(), Value::Object(said));
+            }
+        }
+        Some(Value::Object(state))
+    }
 }
 
 /// One journal envelope as a timeline event.
@@ -7023,6 +7141,7 @@ fn timeline_event(
     position: usize,
     event: &Envelope,
     turns: &[Option<Turn>],
+    surfaces: &SurfaceStates,
 ) -> Value {
     let turn = turns.get(index).and_then(Option::as_ref);
     let mut item = Map::new();
@@ -7124,6 +7243,19 @@ fn timeline_event(
     // asked, of whom, and whether anything waited on the answer.
     if let Some(surface) = surface_facts(event) {
         item.insert("surface".into(), surface);
+    }
+    // Which surface the record belongs to, and what that surface came to over
+    // the whole reading: a surface's records are written by different parties
+    // at different times — the reply that answers a question names no node —
+    // so a reader of any one of them is told it was read and answered here.
+    if let Some(id) = surface_id(event) {
+        item.insert("surface_id".into(), json!(id));
+    }
+    if let Some(correlation) = record_correlation(event) {
+        item.insert("correlation".into(), json!(correlation));
+    }
+    if let Some(state) = surfaces.state_of(event) {
+        item.insert("surface_state".into(), state);
     }
     // Where a change request's review stood, on the records that say so: a
     // draft opened for its checks, kept for review or lifted, and the verdict
