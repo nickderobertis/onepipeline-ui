@@ -1367,7 +1367,7 @@ export function holdReasonsOf(
         ? event.fields?.released
         : undefined;
   if (!Array.isArray(listed)) return [];
-  return listed.filter(isHoldReason);
+  return (listed as readonly unknown[]).filter(isHoldReason);
 }
 
 const isName = (value: unknown): value is string =>

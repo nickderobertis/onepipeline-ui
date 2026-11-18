@@ -155,6 +155,12 @@ test("Nx's expanded file inputs retain the base tasks' complete input surface", 
     "apps/dag-ui/src/features/control/useReplyComposer.ts",
     "apps/dag-ui/src/lib/RecordDisclosure.tsx",
     "docs/screens/13-channel-1440x900.png",
+    "tests/fixtures/reply-commands.json",
+    "tests/fixtures/run-attest.json",
+    "tests/fixtures/run-channel-next.json",
+    "tests/fixtures/run-channel-reply.json",
+    "tests/fixtures/run-channel-surface.json",
+    "tests/fixtures/run-channel.json",
   ];
   const retired = execFileSync(
     "git",
