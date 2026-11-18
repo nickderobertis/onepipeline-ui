@@ -278,8 +278,13 @@ export const API_V2_FILTER_PROFILES = {
  * `awaiting`, the releases its settlement still awaits. Every field `26` served is
  * served with the same meaning; the literal moves because a client written against
  * `26` switches on a vocabulary that holds neither word.
+ *
+ * `30` is a turn's words in their place: a turn carries `agentEvents`, its
+ * `message` and `reasoning` events at the index its tools are numbered on, and
+ * `assistant` is the reply alone, `reasoning` `null`. The literal moves because a
+ * client written against `29` shows the reply and loses what was said before it.
  */
-export const TELEMETRY_SCHEMA_VERSION = 29;
+export const TELEMETRY_SCHEMA_VERSION = 30;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -1215,7 +1220,19 @@ export const conversationJudgeDecisionSchema = openObject({
  * when the history record carried them: a harness that measures no wall interval
  * records `startedAt`/`finishedAt` as null and only a `durationMs`.
  */
+/**
+ * One of the agent's own words in a turn (schema 30): a `message` it said or a
+ * `reasoning` it published, at the index its tool events are numbered on, so a
+ * reader places it among them.
+ */
+export const conversationAgentEventSchema = openObject({
+  index: z.number().int().nonnegative(),
+  kind: z.enum(["message", "reasoning"]),
+  text: z.string(),
+});
 export const conversationTurnSchema = openObject({
+  /** The turn's words in index order; absent on a turn that said nothing. */
+  agentEvents: z.array(conversationAgentEventSchema).optional(),
   assistant: z.string().nullable(),
   durationMs: usageValue.optional(),
   failureKind: z.string().nullable(),

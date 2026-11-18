@@ -48,7 +48,7 @@ fn two_runs() -> Serving {
 /// Every successful response carries the schema-version preamble.
 fn assert_enveloped(body: &Value) {
     assert_eq!(body["api_version"], json!(2), "{body}");
-    assert_eq!(body["telemetry_schema_version"], json!(29), "{body}");
+    assert_eq!(body["telemetry_schema_version"], json!(30), "{body}");
     assert!(
         body["observed_at"]
             .as_str()
@@ -11803,7 +11803,8 @@ fn a_live_turn_answers_for_the_records_a_recorded_run_has_none_of() {
 }
 
 /// An agent's own words, relayed from inside a turn under a tool event's kind,
-/// are that turn's text and reasoning — and never one of its tool calls.
+/// are that turn's `agentEvents`, at their place among its calls — and never one
+/// of its tool calls.
 ///
 /// `oneagentgraph` 0.5 publishes what the agent says and reasons as it works as
 /// `turn-activity` of kind `message` and `reasoning`, beside the calls it makes.
@@ -11918,25 +11919,33 @@ fn an_agents_relayed_words_are_its_text_and_reasoning_and_never_its_tool_calls()
     assert_eq!(tools_only[0]["tools"], expected_tools);
     assert_eq!(tools_only[0]["assistant"], json!(null));
     assert_eq!(tools_only[0]["reasoning"], json!(null));
+    assert!(
+        tools_only[0].get("agentEvents").is_none(),
+        "a turn that said nothing carries no words: {:?}",
+        tools_only[0]
+    );
 
     // Beside the words, the same tool payload and nothing more: not one of the
     // four words is a tool event, named or unnamed.
     assert_eq!(words[0]["tools"], expected_tools);
-    // What it said along the way, then the reply it closed with — once, because
-    // the reply is the last thing it said.
+    // What it said and reasoned along the way, each at the index it was
+    // published under, so a reader places it among the calls; then the reply it
+    // closed with, once, because the reply is the last thing it said.
     assert_eq!(
-        words[0]["assistant"],
-        json!("Running the gate first.\n\nThe gate passed.")
+        words[0]["agentEvents"],
+        json!([
+            { "index": 0, "kind": "reasoning", "text": "The gate is the quickest proof." },
+            { "index": 1, "kind": "message", "text": "Running the gate first." },
+            { "index": 4, "kind": "reasoning", "text": "Nothing else needs running." },
+        ])
     );
-    assert_eq!(
-        words[0]["reasoning"],
-        json!("The gate is the quickest proof.\n\nNothing else needs running.")
-    );
+    assert_eq!(words[0]["assistant"], json!("The gate passed."));
+    assert_eq!(words[0]["reasoning"], json!(null));
 }
 
-/// A settled member's stored report is read the same way: words its harness
-/// history recorded among a turn's tool events are the turn's text and
-/// reasoning, and its tool events are served as they were.
+/// A settled member's stored report is read the same way where the run names no
+/// history file for it: words the report recorded among a turn's tool events are
+/// the turn's `agentEvents`, and its tool events are served as they were.
 #[test]
 fn a_reports_recorded_words_are_its_text_and_reasoning_and_never_its_tool_calls() {
     use onejudge::{Message, Report, Role, ToolEvent, Transcript};
@@ -12058,18 +12067,243 @@ fn a_reports_recorded_words_are_its_text_and_reasoning_and_never_its_tool_calls(
     assert_eq!(turns[1]["tools"], expected_tools);
     assert_eq!(turns[1]["assistant"], json!("The docs build."));
     assert_eq!(turns[1]["reasoning"], json!(null));
+    assert!(turns[1].get("agentEvents").is_none(), "{:?}", turns[1]);
 
     // The first holds the same tool events and two words beside them: the words
     // are its text and its reasoning, and none of them is a tool event.
     assert_eq!(turns[0]["tools"], expected_tools);
     assert_eq!(
-        turns[0]["assistant"],
-        json!("Ran the gate.\n\nThe gate passed.")
+        turns[0]["agentEvents"],
+        json!([
+            { "index": 0, "kind": "reasoning", "text": "The gate is the quickest proof." },
+            { "index": 3, "kind": "message", "text": "Ran the gate." },
+        ])
     );
-    assert_eq!(
-        turns[0]["reasoning"],
-        json!("The gate is the quickest proof.")
-    );
+    assert_eq!(turns[0]["assistant"], json!("The gate passed."));
+    assert_eq!(turns[0]["reasoning"], json!(null));
+}
+
+/// What a member's agent said, reasoned and did, in the order its oneharness
+/// history numbers them: the agent's words as `agentEvents` beside its tool
+/// calls on one index, read while the member runs and after it settles.
+///
+/// The settled reading is the one that used to lose the narration: onejudge's
+/// report deliberately keeps only tool activity, so the words are read out of the
+/// history file the journal names for the invocation that ran the turn, through
+/// the reader the harness-session artifact serves that invocation with. Both
+/// readings — the conversation and the artifact — serve one order, which is the
+/// history's own.
+#[test]
+fn a_members_words_are_served_in_the_order_its_history_recorded_them() {
+    use onejudge::{Message, Report, Role, ToolEvent, Transcript};
+
+    const STREAM: &str = "node-scope-1786925518999-3163558";
+    const SESSION: &str = "node-scope-1786925518999-3163558.worker";
+    const PROMPT: &str = "Prove the change.";
+    const REPLY: &str = "The gate passed.";
+
+    let history = [
+        json!({ "kind": "reasoning", "output": "The gate is the quickest proof.", "index": 0 }),
+        json!({ "kind": "message", "output": "Running the gate first.", "index": 1 }),
+        json!({ "kind": "tool_call", "name": "Bash", "input": { "command": "just check" },
+                "index": 2, "tool_call_id": "t1" }),
+        json!({ "kind": "tool_result", "name": "Bash", "output": "check passed",
+                "index": 3, "tool_call_id": "t1" }),
+        json!({ "kind": "reasoning", "output": "Nothing else needs running.", "index": 4 }),
+        json!({ "kind": "message", "output": REPLY, "index": 5 }),
+    ];
+    // Every word before the reply, at the index the history gave it; the reply
+    // is the turn's `assistant`, after them all, and is not repeated here.
+    let expected = json!([
+        { "index": 0, "kind": "reasoning", "text": "The gate is the quickest proof." },
+        { "index": 1, "kind": "message", "text": "Running the gate first." },
+        { "index": 4, "kind": "reasoning", "text": "Nothing else needs running." },
+    ]);
+
+    // The settled member's report, as onejudge writes one: the tool activity of
+    // the turn and its reply, and none of the words.
+    let tool = |kind: &str, index: usize, output: Option<&str>| ToolEvent {
+        kind: kind.into(),
+        name: Some("Bash".into()),
+        input: (kind == "tool_call").then(|| json!({ "command": "just check" })),
+        output: output.map(str::to_owned),
+        index,
+        tool_call_id: Some("t1".into()),
+    };
+    let report = Report {
+        schema_version: onejudge::SCHEMA_VERSION,
+        transcript: Transcript {
+            messages: vec![
+                Message::user(PROMPT),
+                Message {
+                    role: Role::Assistant,
+                    content: REPLY.into(),
+                    events: vec![
+                        tool("tool_call", 2, None),
+                        tool("tool_result", 3, Some("check passed")),
+                    ],
+                },
+            ],
+        },
+        verdicts: Vec::new(),
+        assessment: None,
+        completion_reason: Some("the change is proven".into()),
+        settled_reason: None,
+        judge_decisions: Vec::new(),
+        usage: None,
+        telemetry: None,
+        processes: Vec::new(),
+        control: None,
+        control_unavailable: None,
+        supervisor_control: None,
+        supervisor_control_unavailable: None,
+        stopped_early: false,
+    };
+
+    for settled in [false, true] {
+        let store = tempfile::tempdir().expect("the oneharness history store");
+        let recorded = harness_history::record_with_events(
+            store.path(),
+            "pr author worker",
+            PROMPT,
+            &history,
+            REPLY,
+        );
+        let serving = Serving::start(|root| {
+            let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
+            fixture_run::relay_harness_session(
+                &dir,
+                &fixture_run::HarnessSession {
+                    stream: STREAM,
+                    node: fixture_run::SHIP_NODE_ID,
+                    member: "worker",
+                    history_dir: Some(&recorded.dir),
+                    history_project: &recorded.project,
+                    history_session: &recorded.session,
+                    history_id: &recorded.history_id,
+                    bytes: recorded.bytes(),
+                },
+            );
+            let relay = |kind: &str, payload: Value| {
+                fixture_run::append_relayed(
+                    &dir,
+                    "agentgraph",
+                    kind,
+                    json!({
+                        "run_id": fixture_run::RUN_ID,
+                        "node": fixture_run::SHIP_NODE_ID,
+                        "member": "worker",
+                        "persona": "pr-author",
+                        "session": SESSION,
+                    }),
+                    payload,
+                );
+            };
+            relay(
+                "turn-started",
+                json!({
+                    "turn": 1,
+                    "role": "assistant",
+                    "instruction": PROMPT,
+                    "started_at": "2026-08-07T12:04:00.000Z",
+                }),
+            );
+            // What a running member relays from inside the turn: each event of
+            // the history as `turn-activity`, its words carried as its output.
+            for event in &history {
+                relay(
+                    "turn-activity",
+                    json!({
+                        "kind": event["kind"],
+                        "name": event.get("name").cloned().unwrap_or(Value::Null),
+                        "detail": event.get("input").map_or(String::new(), Value::to_string),
+                        "output": event.get("output").cloned().unwrap_or(Value::Null),
+                        "tool_call_id": event.get("tool_call_id").cloned().unwrap_or(Value::Null),
+                        "index": event["index"],
+                    }),
+                );
+            }
+            relay(
+                "turn-message",
+                json!({ "turn": 1, "role": "assistant", "text": REPLY }),
+            );
+            if settled {
+                fixture_run::settle_member(
+                    &dir,
+                    &fixture_run::SettledMember {
+                        stream: STREAM,
+                        node: fixture_run::SHIP_NODE_ID,
+                        member: "worker",
+                        at: "2026-08-07T12:05:00.000Z",
+                        artifact: "report-node-scope-1786925518999-3163558",
+                        report: &serde_json::to_string(&report).expect("a report serializes"),
+                    },
+                    fixture_run::Produced::Report,
+                );
+            }
+        });
+        let reading = if settled { "settled" } else { "live" };
+
+        let conversation = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/conversations/{SESSION}",
+                fixture_run::RUN_ID
+            ),
+        )
+        .json();
+        let turns = conversation["conversation"]["turns"]
+            .as_array()
+            .expect("the transcript");
+        assert_eq!(turns.len(), 1, "{reading}: {turns:?}");
+        assert_eq!(
+            turns[0]["agentEvents"], expected,
+            "{reading}: {:?}",
+            turns[0]
+        );
+        assert_eq!(turns[0]["assistant"], json!(REPLY), "{reading}");
+        assert_eq!(turns[0]["reasoning"], json!(null), "{reading}");
+        // The words and the calls share one index, so read together they are the
+        // history's own order.
+        let mut indexes: Vec<u64> = turns[0]["agentEvents"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .chain(turns[0]["tools"].as_array().into_iter().flatten())
+            .filter_map(|event| event["index"].as_u64())
+            .collect();
+        indexes.sort_unstable();
+        assert_eq!(indexes.first(), Some(&0), "{reading}: {:?}", turns[0]);
+        assert!(
+            indexes.contains(&2),
+            "{reading}: the call sits between the words: {:?}",
+            turns[0]
+        );
+
+        let artifact = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{}/artifacts/{}",
+                fixture_run::RUN_ID,
+                recorded.history_id
+            ),
+        )
+        .json();
+        let turns = artifact["turns"].as_array().expect("the invocation's turn");
+        assert_eq!(turns.len(), 1, "{reading}: {artifact}");
+        assert_eq!(turns[0]["agentEvents"], expected, "{reading}: {artifact}");
+        assert_eq!(turns[0]["assistant"], json!(REPLY), "{reading}");
+        assert_eq!(
+            turns[0]["tools"]
+                .as_array()
+                .expect("its tools")
+                .iter()
+                .map(|tool| tool["index"].clone())
+                .collect::<Vec<_>>(),
+            vec![json!(2), json!(3)],
+            "{reading}: {artifact}"
+        );
+    }
 }
 
 /// A turn the journal holds only half of is still the turn it was.

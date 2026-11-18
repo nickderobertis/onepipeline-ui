@@ -189,6 +189,28 @@ pub fn record_with_tool(
     )
 }
 
+/// [`record`], for a run that streamed `events` — oneharness's own event shape,
+/// each with its `index` — before it closed on `text`: what a harness records
+/// when its agent talks, reasons and calls tools in turn.
+pub fn record_with_events(
+    dir: &Path,
+    name: &str,
+    prompt: &str,
+    events: &[serde_json::Value],
+    text: &str,
+) -> Recorded {
+    record_session(
+        dir,
+        name,
+        prompt,
+        text,
+        &Shape {
+            events,
+            ..Shape::default()
+        },
+    )
+}
+
 /// The identity the harness minted for the call [`record_with_tool`] records.
 pub const TOOL_CALL_ID: &str = "toolu_01RecordedCall";
 
@@ -245,6 +267,8 @@ struct Shape<'a> {
     in_flight: Option<&'a str>,
     /// One shell call the run made, and what it returned.
     tool: Option<(&'a str, &'a str)>,
+    /// Events the run streamed, in oneharness's own shape.
+    events: &'a [serde_json::Value],
 }
 
 impl Default for Shape<'_> {
@@ -256,6 +280,7 @@ impl Default for Shape<'_> {
             streamed: false,
             in_flight: None,
             tool: None,
+            events: &[],
         }
     }
 }
@@ -268,6 +293,7 @@ fn record_session(dir: &Path, name: &str, prompt: &str, text: &str, shape: &Shap
         streamed,
         in_flight,
         tool,
+        events,
     } = *shape;
     // The directory the harness ran in. oneharness canonicalizes it and slugs
     // the result into the store's project layer, so it has to be a real one.
@@ -305,6 +331,15 @@ fn record_session(dir: &Path, name: &str, prompt: &str, text: &str, shape: &Shap
                 )
                 .expect("append the call the run made");
         }
+    }
+    for event in events {
+        writer
+            .append_event(
+                history_id,
+                "claude-code:alternate",
+                serde_json::from_value(event.clone()).expect("the event oneharness streams"),
+            )
+            .expect("append the event the run streamed");
     }
     let result = result(prompt, text, model);
     writer

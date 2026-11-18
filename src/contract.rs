@@ -205,7 +205,15 @@ pub const API_VERSION: u32 = 2;
 /// with the plan's `command` argv and `timeout_seconds` — whose result carries the
 /// `log` its last `command-started` named; `graph.rejected_edits` lists each
 /// `edit-rejected` record. A client written against 28 refuses the new kind.
-pub const TELEMETRY_SCHEMA_VERSION: u32 = 29;
+///
+/// **Schema 30 is a turn's words in their place.** A conversation turn and a
+/// harness session's turn carry `agentEvents`, `[{index, kind, text}]` with `kind`
+/// `message` or `reasoning`, in index order and absent where the turn said
+/// nothing, numbered on the index its `tools` carry; `assistant` is the reply the
+/// turn closed with alone and `reasoning` is `null`. A settled member's words are
+/// read from the oneharness history file the journal names for the turn. A client
+/// written against 29 shows a turn's reply and loses everything it said before.
+pub const TELEMETRY_SCHEMA_VERSION: u32 = 30;
 
 /// The timeline payload's own schema version, carried beside the API's.
 ///
