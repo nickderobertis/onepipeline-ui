@@ -9,6 +9,7 @@ import {
   appPlot,
   loadAllEarlierRows,
   loadRunRecords,
+  openRepeatedLoops,
 } from "./observatory-locators";
 import { SERVED_UI_URL } from "./playwright.config";
 
@@ -330,12 +331,13 @@ for (const terminal of corpus.terminations) {
     const replyPanel = page.getByRole("region", {
       name: "Timeline item detail",
     });
-    await expect(replyPanel.getByRole("term")).toHaveText([
+    // Every field of the reply, nested beneath when the record nests it.
+    await expect(replyPanel.getByRole("term").first()).toHaveText(
       "Recorded at",
-      "Author",
-      "Completion",
-      "Reason",
-    ]);
+    );
+    expect(await replyPanel.getByRole("term").allTextContents()).toEqual(
+      expect.arrayContaining(["Author", "Completion", "Reason"]),
+    );
     await expect(replyPanel).toContainText("Recorded late closure");
     await expect(replyPanel).not.toContainText(/still running/i);
     await page.keyboard.press("Escape");
@@ -357,10 +359,13 @@ for (const terminal of corpus.terminations) {
     const terminalPanel = page.getByRole("region", {
       name: "Timeline item detail",
     });
-    await expect(terminalPanel.getByRole("term")).toHaveText([
+    // Its own fields among every field it holds.
+    await expect(terminalPanel.getByRole("term").first()).toHaveText(
       "Recorded at",
-      ...(terminalFields[terminal.kind] ?? []),
-    ]);
+    );
+    expect(await terminalPanel.getByRole("term").allTextContents()).toEqual(
+      expect.arrayContaining([...(terminalFields[terminal.kind] ?? [])]),
+    );
     expect(
       await terminalPanel.getByRole("definition").allTextContents(),
     ).not.toContain("");
@@ -628,10 +633,7 @@ test("retries, equal timestamps and repeated relays keep every record under its 
   // A node's first answer holds each span's latest rows, so the ones before them
   // are read through the page's own control before every record is counted.
   await loadAllEarlierRows(page);
-  for (const button of await page
-    .getByRole("button", { name: /^Show all \d+$/ })
-    .all())
-    await button.click();
+  await openRepeatedLoops(page);
   const headings = await page
     .getByRole("heading", { level: 3 })
     .filter({

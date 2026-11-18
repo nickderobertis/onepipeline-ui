@@ -4539,6 +4539,32 @@ export const LARGE_RUN_VIEWS = {
   historyId: "01a00d0f-c094-7660-b26c-8a53baaf9e00",
 };
 
+/** The three kinds a sequence of {@link squareFree} letters is written in. */
+const VARIED_KINDS = ["fetch", "push", "pull"];
+
+/**
+ * `length` letters of three in which no sequence of any length is ever repeated
+ * back to back — the word Thue built from the Thue–Morse sequence, counting the
+ * ones between consecutive zeros — so the event list, which collapses any
+ * back-to-back repeat into one block, collapses none of them.
+ */
+function squareFree(length) {
+  const morse = (n) => {
+    let ones = 0;
+    for (let bits = n; bits > 0; bits >>= 1) ones += bits & 1;
+    return ones % 2;
+  };
+  const letters = [];
+  let run = 0;
+  for (let n = 1; letters.length < length; n += 1) {
+    if (morse(n) === 0) {
+      letters.push(run);
+      run = 0;
+    } else run += 1;
+  }
+  return letters;
+}
+
 /** Write the large-run views corpus under `root`: one settled run. */
 export function buildLargeRunViews(root) {
   mkdirSync(root, { recursive: true });
@@ -4582,12 +4608,13 @@ export function buildLargeRunViews(root) {
     ...node(history),
     persona: "worker",
   });
-  // The records before the run of checks, alternating so none collapse: what a
-  // reader paging back reaches.
+  // The records before the run of checks, in an order that never repeats back
+  // to back, so none collapse: what a reader paging back reaches.
+  const varied = squareFree(LARGE_RUN_VIEWS.earliest + LARGE_RUN_VIEWS.tail);
   for (let index = 0; index < LARGE_RUN_VIEWS.earliest; index += 1) {
     journal
       .advance(1)
-      .emit("vcs", index % 2 === 0 ? "fetch" : "push", node(history), {
+      .emit("vcs", VARIED_KINDS[varied[index] ?? 0], node(history), {
         remote: "origin",
       });
   }
@@ -4600,13 +4627,16 @@ export function buildLargeRunViews(root) {
       state: "success",
     });
   }
-  // Alternating, so none of the latest rows collapse with each other.
+  // Never repeating back to back either, so none of the latest rows collapse.
   for (let index = 0; index < LARGE_RUN_VIEWS.tail; index += 1) {
     journal
       .advance(1)
-      .emit("vcs", index % 2 === 0 ? "push" : "fetch", node(history), {
-        remote: "origin",
-      });
+      .emit(
+        "vcs",
+        VARIED_KINDS[varied[LARGE_RUN_VIEWS.earliest + index] ?? 0],
+        node(history),
+        { remote: "origin" },
+      );
   }
   journal.advance(1).emit("pipeline", "node-settled", node(history), {
     status: "done",

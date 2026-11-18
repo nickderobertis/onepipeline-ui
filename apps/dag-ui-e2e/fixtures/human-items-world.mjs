@@ -1225,7 +1225,6 @@ function buildAttest(workspace, token) {
 }
 
 const WORLDS = {
-  attest: { plans: ATTEST_PLANS, build: buildAttest },
   sessions: { plans: {}, build: buildSessions },
   queue: { plans: QUEUE_PLANS, build: buildQueue },
   hostwide: {
@@ -1244,6 +1243,7 @@ const WORLDS = {
   },
   provenance: { plans: {}, build: buildProvenance },
   "provenance-gallery": { plans: {}, build: buildProvenanceGallery },
+  attest: { plans: ATTEST_PLANS, build: buildAttest },
 };
 
 /**

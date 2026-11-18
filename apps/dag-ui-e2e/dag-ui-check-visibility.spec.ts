@@ -5,6 +5,7 @@ import { runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
 import records from "./fixtures/check-visibility.json" with { type: "json" };
 import { appendRecords } from "./load/journal";
+import { openRepeatedLoops } from "./observatory-locators";
 
 test("the served view marks requirement and failing checks, including a check recorded after settlement", async ({
   page,
@@ -107,6 +108,13 @@ test("the served view marks requirement and failing checks, including a check re
         .getByRole("img"),
     ).toHaveAccessibleName("failed");
     await page.getByRole("tab", { name: "Timeline", exact: true }).click();
+    await expect(
+      page
+        .getByRole("region", { name: "Node transcript" })
+        .getByRole("article")
+        .first(),
+    ).toBeVisible();
+    await openRepeatedLoops(page);
     const eventRows = page.getByRole("button", {
       name: "Open change-check",
       exact: true,

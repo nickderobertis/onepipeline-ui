@@ -801,6 +801,9 @@ p {
    count and its stretch of time on top, standing where the rows it holds stood. */
 .transcript-cycle {
   display: grid;
+  /* One column no wider than the list, however long a row's unbroken word. */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   width: min(100%, 1100px);
   margin: 2px auto;
   gap: 2px;

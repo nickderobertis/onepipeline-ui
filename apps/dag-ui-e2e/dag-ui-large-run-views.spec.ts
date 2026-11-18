@@ -184,7 +184,9 @@ test("reading back a history of nothing but collapsed checks ends by saying none
   const transcript = page.getByRole("region", { name: "Node transcript" });
   const rows = transcript.getByRole("article");
   await expect(
-    transcript.getByRole("button", { name: /^Show \d+ more change-check/ }),
+    transcript.getByRole("region", {
+      name: /^1 event repeated \d+ times: change-check/,
+    }),
   ).toBeVisible();
   const shownBefore = await rows.count();
 

@@ -632,9 +632,12 @@ function NodeTimeline({
               )}
               <Reserved className="event-list-head">
                 <h3>Events</h3>
-                <span className="kind-filter event-type-filter">
-                  <span>Event types</span>
-                </span>
+                <details className="kind-filter event-type-filter">
+                  <summary>
+                    <span>Event types</span>
+                    <IconRoom size={14} />
+                  </summary>
+                </details>
               </Reserved>
               {transcriptRuns(entries).map((run) => {
                 const items = (

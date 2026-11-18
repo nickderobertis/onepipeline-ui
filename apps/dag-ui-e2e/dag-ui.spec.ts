@@ -958,6 +958,14 @@ test("says how a live turn took a note, where the record says", async ({
   const transcript = page.getByRole("region", { name: "Node transcript" });
 
   await openObservatory(page, `/?run=${runs().outcomes}&node=migrate`);
+  // Three of them back to back read alike, so they stand as one block of one
+  // pass; it opens into all three.
+  await transcript
+    .getByRole("region", {
+      name: "1 event repeated 3 times: Redirected into the running turn",
+    })
+    .getByRole("button", { name: "Show all 3" })
+    .click();
   const notes = transcript
     .getByRole("article")
     .filter({ hasText: "Redirected into the running turn" });
@@ -1011,13 +1019,13 @@ test("draws a surface of an unfamiliar kind and an edit by an unfamiliar author"
   await expect(raised).toHaveCount(2);
   await raised.first().getByRole("button").click();
   await expect(itemDetail(page)).toContainText("Surface");
-  await expect(itemDetail(page).locator(".facts")).toContainText(
+  await expect(itemDetail(page).locator(".facts").first()).toContainText(
     `Kind${sentinel.kind}`,
   );
-  await expect(itemDetail(page).locator(".facts")).toContainText(
+  await expect(itemDetail(page).locator(".facts").first()).toContainText(
     `Raised by${sentinel.author}`,
   );
-  await expect(itemDetail(page).locator(".facts")).toContainText(
+  await expect(itemDetail(page).locator(".facts").first()).toContainText(
     "Blockingno — nothing waits on it",
   );
   await expect(itemDetail(page)).toContainText("Message");
@@ -1031,7 +1039,7 @@ test("draws a surface of an unfamiliar kind and an edit by an unfamiliar author"
   await expect(blocking).toHaveCount(2);
   await blocking.first().getByRole("button").click();
   await expect(itemDetail(page)).toContainText("Blocking surface");
-  await expect(itemDetail(page).locator(".facts")).toContainText(
+  await expect(itemDetail(page).locator(".facts").first()).toContainText(
     "Blockingyes — dependents wait on the answer",
   );
   await page.keyboard.press("Escape");
@@ -1043,16 +1051,16 @@ test("draws a surface of an unfamiliar kind and an edit by an unfamiliar author"
     .filter({ hasText: `edit-committed · by ${sentinel.author}` });
   await expect(edited).toHaveCount(1);
   await edited.getByRole("button").click();
-  await expect(itemDetail(page).locator(".facts")).toContainText(
-    `Author${sentinel.author}`,
-  );
+  await expect(
+    itemDetail(page).getByRole("region", { name: "Recorded fields" }),
+  ).toContainText(`Author${sentinel.author}`);
   await page.keyboard.press("Escape");
   const applied = transcript
     .getByRole("article")
     .filter({ hasText: `edit-applied: ${sentinel.edit_applied_message}` });
   await expect(applied).toHaveCount(1);
   await applied.getByRole("button").click();
-  await expect(itemDetail(page).locator(".facts")).toContainText(
+  await expect(itemDetail(page).locator(".facts").first()).toContainText(
     `Raised by${sentinel.author}`,
   );
   // Nothing failed on the way: a record this build had never seen was drawn, not
@@ -1287,8 +1295,12 @@ test("draws every category a record can be as a glyph of its own", async ({
   // came with, rather than as a lifecycle step of the node they are about. Two
   // kinds no word of the scheme reached until the engine declared them, so this
   // is where a browser meets one rather than only a unit corpus.
-  for (const held of ["node-held", "node-unheld"]) {
-    const marker = named(held).first();
+  // Each is named by why the node was held, or what released it.
+  for (const [held, called] of [
+    ["node-held", /^Held .+, marker$/u],
+    ["node-unheld", /^Released.*, marker$/u],
+  ] as const) {
+    const marker = timeline(page).getByRole("button", { name: called }).first();
     await expect(marker).toBeVisible();
     expect(await glyphName(marker)).toBe(expectedGlyph(held));
     // Drawn as the wait beside it, because one category is one drawing — and this
@@ -1601,7 +1613,8 @@ test("shows the release that carried a node's work and the waits before it", asy
   // where the instruction should be.
   const unspoken = itemDetail(page)
     .getByRole("listitem")
-    .filter({ hasText: facts.release.unspoken_target });
+    .filter({ hasText: facts.release.unspoken_target })
+    .first();
   await expect(unspoken).toContainText("Waiting on a person");
   await expect(unspoken).toContainText(
     "The release is a human step and the run recorded no action for it.",
@@ -1728,7 +1741,9 @@ test("reads the report a settled node's member left behind", async ({
   await expect(itemDetail(page)).toContainText(
     "the gate logs onevcs stores are retained by nothing",
   );
-  await expect(itemDetail(page)).not.toContainText(
+  // The record's own fields are listed whole beneath, its `report_path` among
+  // them as written; the reading of the report itself names no such path.
+  expect(await outsideRecordedFields(itemDetail(page))).not.toContain(
     "/a/producing/librarys/scratch",
   );
   // And the whole of it, from its first ruling: a report is served whole and
@@ -1863,7 +1878,9 @@ test("reads a relayed turn and the oneharness conversation behind it", async ({
   // reaches the browser is the *pointer* — the store this server opened to find
   // it — because the panel asks by the history id and renders only the record.
   await expect(itemDetail(page)).toContainText(fixture().harness_session_text);
-  await expect(itemDetail(page)).not.toContainText("oneharness-history");
+  expect(await outsideRecordedFields(itemDetail(page))).not.toContain(
+    "oneharness-history",
+  );
 
   // The record itself stays beside the conversation rather than being replaced
   // by it, and it is reachable from the keyboard like every other control here.
@@ -2205,13 +2222,16 @@ test("keeps a node of hundreds of recorded sessions scannable", async ({
     .click();
 
   // Two hundred different sessions are no loop: each is its own row in the
-  // reading, and none stands in a block of repeats.
+  // reading, and no block of repeats holds any of them.
   const reading = page.getByRole("region", { name: "Node transcript" });
   await expect(
     reading.getByRole("article").filter({ hasText: /engineer-sweep-\d+\b/ }),
   ).not.toHaveCount(0);
   await expect(
-    reading.getByRole("region", { name: /repeated \d+ times/ }),
+    reading
+      .getByRole("region", { name: /repeated \d+ times/ })
+      .getByRole("article")
+      .filter({ hasText: /engineer-sweep-\d+\b/ }),
   ).toHaveCount(0);
 
   // And one long session's own turns are handed out a page at a time in the panel,
@@ -2235,6 +2255,18 @@ test("keeps a node of hundreds of recorded sessions scannable", async ({
     .click();
   await expect(itemDetail(page)).toContainText("Swept batch 7 (29)");
 });
+
+/**
+ * What a detail says outside the record's own field list: its readings of the
+ * record — a report, a conversation — which the list of every field beneath them
+ * does not speak for.
+ */
+const outsideRecordedFields = (detail: Locator): Promise<string> =>
+  detail.evaluate((element) => {
+    const reading = element.cloneNode(true) as HTMLElement;
+    reading.querySelector('[aria-label="Recorded fields"]')?.remove();
+    return reading.textContent ?? "";
+  });
 
 /** The node view's reading: one row per recorded activity, in order. */
 const reading = (page: Page): Locator =>
