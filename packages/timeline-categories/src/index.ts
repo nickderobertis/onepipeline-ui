@@ -143,16 +143,7 @@ const CATEGORY_RULES: readonly (readonly [EventCategory, readonly string[]])[] =
     // of its work starts: a gate on the node, and its verdict is the gate's.
     [
       "verification",
-      [
-        "verification",
-        "gate",
-        "check",
-        "checks",
-        "coverage",
-        "judge",
-        // llmlint: ignore[changed_behavior_has_e2e] the category decision is pinned by the corpus rather than a journey, uniformly for every kind this table files. `apps/dag-ui-e2e/AGENTS.md` records that split: a journey counts the scheme against `EVENT_CATEGORIES` and must not restate the vocabulary, because "a journey holding its own copy of `EVENT_CATEGORIES` passes while the app grows a category nobody draws". A per-kind journey would be exactly that copy. `src/index.test.ts` files `guard-started` and `guard-evaluated` under `verification` through this word, and the browser tier's command-steps journey opens a guarded node whose timeline holds both records and holds the page to throwing nothing over them.
-        "guard",
-      ],
+      ["verification", "gate", "check", "checks", "coverage", "judge", "guard"],
     ],
     // `release` joins this line rather than opening a twelfth category: publishing a
     // crate and merging the change that will be in it are one act to a reader

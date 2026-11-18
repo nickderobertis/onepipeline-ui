@@ -194,6 +194,21 @@ test("shows a step its guard found not needed as done, with outcome not-needed",
     "Outcomeno commits since v0.4.0 touch a released file",
   );
 
+  // The guard's two records on the node's timeline, each read as what its glyph
+  // drew it as: a gate on the node, so a verification, as a gate's verdict is.
+  await page.getByRole("tab", { name: "Timeline", exact: true }).click();
+  const timeline = page.getByRole("region", { name: "Node timeline" });
+  const reading = page.getByTestId("timeline-popover");
+  for (const kind of ["guard-started", "guard-evaluated"]) {
+    await timeline
+      .getByRole("button", { name: `${kind}, marker`, exact: true })
+      .hover();
+    await expect(reading).toContainText(kind);
+    await expect(reading).toContainText(" · Verification");
+    await page.mouse.move(0, 0);
+    await expect(reading).toHaveCount(0);
+  }
+
   expect(thrown).toEqual([]);
   expect(unanswered).toEqual([]);
 });
