@@ -681,6 +681,10 @@ function NodeExecution({
       const was = before.get(id);
       if (was === undefined) arrived = true;
       else if (arrived) {
+        // The page's own scroll, so it asks for no page: rows that arrive below
+        // the reader can leave them still near the top, and reading that as the
+        // reader moving up read a second page nobody asked for.
+        ownScrollUntil.current = Date.now() + 500;
         element.scrollTop += top - was;
         return;
       }
