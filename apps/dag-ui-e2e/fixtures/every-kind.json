@@ -1,0 +1,1649 @@
+{
+  "run_id": "dag-ui-every-kind",
+  "stream": "a-recording-host-dag-ui-every-kind",
+  "node": "every",
+  "launch": {
+    "run_id": "dag-ui-every-kind",
+    "plan": "plan.json",
+    "graph": "graphs/dag-scope.yaml",
+    "launcher": "claude-code",
+    "session": "claude-code-top-session",
+    "pid": 4264,
+    "host": "a-recording-host",
+    "started_at": "2026-08-07T12:00:00.000Z",
+    "heartbeat_interval": 1800,
+    "adoptions": 0
+  },
+  "records": [
+    {
+      "source": "pipeline",
+      "kind": "run-started",
+      "payload": {
+        "plan": {
+          "schema_version": 3,
+          "goal": {
+            "text": "Write one record of every kind the engine writes and the fixtures relay"
+          },
+          "name": "dag-ui-every-kind",
+          "concurrency": 1,
+          "tasks": [
+            {
+              "id": "every",
+              "task": "Record one of everything.",
+              "persona": "engineer",
+              "deps": []
+            }
+          ]
+        },
+        "graph": "run-started-graph-value",
+        "dir": "run-started-dir-value",
+        "heartbeat_interval": 1,
+        "owed_until_closed": true
+      }
+    },
+    {
+      "source": "pipeline",
+      "kind": "concurrent-acknowledged",
+      "payload": {
+        "shared_identities": [
+          "concurrent-acknowledged-shared_identities-0-value"
+        ],
+        "runs": {
+          "launching": "concurrent-acknowledged-runs-launching-value",
+          "holding_sessions": [
+            "concurrent-acknowledged-runs-holding_sessions-0-value"
+          ]
+        },
+        "holders": [
+          {
+            "session": "concurrent-acknowledged-holders-0-session-value",
+            "owner_pid": 1,
+            "identity": "concurrent-acknowledged-holders-0-identity-value",
+            "run": "concurrent-acknowledged-holders-0-run-value",
+            "node": "concurrent-acknowledged-holders-0-node-value",
+            "dependency": "concurrent-acknowledged-holders-0-dependency-value"
+          }
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "concurrent-deferred",
+      "payload": {
+        "launching": "concurrent-deferred-launching-value",
+        "holders": [
+          {
+            "identity": "concurrent-deferred-holders-0-identity-value",
+            "session": "concurrent-deferred-holders-0-session-value",
+            "owner_pid": 1,
+            "run": "concurrent-deferred-holders-0-run-value",
+            "node": "concurrent-deferred-holders-0-node-value",
+            "dependency": "concurrent-deferred-holders-0-dependency-value",
+            "dependents": [
+              "concurrent-deferred-holders-0-dependents-0-value"
+            ]
+          }
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-ready",
+      "payload": {},
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-dispatched",
+      "payload": {
+        "attempt": 1,
+        "persona": "node-dispatched-persona-value",
+        "attempts": 2,
+        "reason": "node-dispatched-reason-value",
+        "notes_spent": [
+          {}
+        ],
+        "notes_carried": [
+          {}
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "payload": {
+        "status": "pending",
+        "outcome": "node-settled-outcome-value",
+        "detail": "node-settled-detail-value",
+        "branch": "node-settled-branch-value",
+        "change_url": "node-settled-change_url-value",
+        "cause": "node-settled-cause-value",
+        "head": "node-settled-head-value",
+        "landing": "landed",
+        "completed_steps": [
+          "node-settled-completed_steps-0-value"
+        ],
+        "base": "node-settled-base-value",
+        "stack": {
+          "parents": [
+            {
+              "node": "node-settled-stack-parents-0-node-value",
+              "branch": "node-settled-stack-parents-0-branch-value",
+              "head": "node-settled-stack-parents-0-head-value"
+            }
+          ],
+          "stack_base": "node-settled-stack-stack_base-value"
+        },
+        "continued": {
+          "rework": {
+            "replacement": "node-settled-continued-rework-replacement-value",
+            "replaces": "node-settled-continued-rework-replaces-value",
+            "comments": [
+              {
+                "id": "node-settled-continued-rework-comments-0-id-value",
+                "url": "node-settled-continued-rework-comments-0-url-value"
+              }
+            ],
+            "reason": "node-settled-continued-rework-reason-value",
+            "instruction": "node-settled-continued-rework-instruction-value",
+            "replaces_head": "node-settled-continued-rework-replaces_head-value"
+          },
+          "source": "store",
+          "run": "node-settled-continued-run-value"
+        },
+        "awaiting": [
+          {
+            "producer": "node-settled-awaiting-0-producer-value",
+            "target": "node-settled-awaiting-0-target-value"
+          }
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "landing-closures",
+      "payload": {
+        "node": "landing-closures-node-value",
+        "commit": "landing-closures-commit-value",
+        "closes": [
+          "landing-closures-closes-0-value"
+        ],
+        "outcome": "projected",
+        "items": [
+          {}
+        ],
+        "unsupported": [
+          "landing-closures-unsupported-0-value"
+        ],
+        "class": "refused",
+        "reason": "landing-closures-reason-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "home-status",
+      "payload": {
+        "project": "home-status-project-value",
+        "outcome": "written",
+        "status": {
+          "category": "draft",
+          "name": "home-status-status-name-value"
+        },
+        "class": "refused",
+        "reason": "home-status-reason-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-requeued",
+      "payload": {
+        "reason": "workspace-exhausted",
+        "detail": "node-requeued-detail-value",
+        "branch": "node-requeued-branch-value",
+        "attempt": 1
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "edit-committed",
+      "payload": {
+        "author": "edit-committed-author-value",
+        "provenance": "manager",
+        "command": {},
+        "operations": [
+          {}
+        ],
+        "operation_kinds": [
+          "edit-committed-operation_kinds-0-value"
+        ],
+        "envelope": 1
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-accepted",
+      "payload": {
+        "author": "command-accepted-author-value",
+        "provenance": "manager",
+        "command": {},
+        "operations": [
+          {}
+        ],
+        "operation_kinds": [
+          "command-accepted-operation_kinds-0-value"
+        ],
+        "envelope": 1
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "edit-rejected",
+      "payload": {
+        "author": "edit-rejected-author-value",
+        "command": {},
+        "reason": "edit-rejected-reason-value",
+        "envelope": 1,
+        "index": 2,
+        "refusal": {
+          "node": "edit-rejected-refusal-node-value",
+          "comment": "edit-rejected-refusal-comment-value",
+          "kind": "comment-not-read"
+        }
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-queued",
+      "payload": {
+        "surface": 1,
+        "correlation": "planner-surface-queued-correlation-value",
+        "kind": "planner-surface-queued-kind-value",
+        "message": "planner-surface-queued-message-value",
+        "source": "planner-surface-queued-source-value",
+        "blocking": true
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surface-dropped",
+      "payload": {
+        "kind": "finding",
+        "message": "the gate went red twice",
+        "source": "sentinel",
+        "blocking": false,
+        "correlation": null,
+        "refused": "the plan-edit hook refused the surface"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-surfaced",
+      "payload": {
+        "surface": 1,
+        "correlation": "planner-surfaced-correlation-value",
+        "kind": "planner-surfaced-kind-value",
+        "message": "planner-surfaced-message-value",
+        "source": "planner-surfaced-source-value",
+        "blocking": true,
+        "queued_at": 2
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "planner-replied",
+      "payload": {
+        "author": "planner-replied-author-value",
+        "provenance": "manager",
+        "completion": true,
+        "reason": "planner-replied-reason-value",
+        "correlation": "planner-replied-correlation-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "human-attested",
+      "payload": {
+        "ref": "human-attested-ref-value",
+        "item": {
+          "id": "human-attested-item-id-value",
+          "action": "answered",
+          "resolution": {
+            "actor": "human-attested-item-resolution-actor-value",
+            "on_behalf_of": "human-attested-item-resolution-on_behalf_of-value",
+            "text": "human-attested-item-resolution-text-value",
+            "choice": "human-attested-item-resolution-choice-value",
+            "reason": "human-attested-item-resolution-reason-value",
+            "provenance": "manager"
+          }
+        }
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "driver-adopted",
+      "payload": {
+        "adoption": 1,
+        "pid": 2,
+        "abandoned": [
+          {
+            "node": "driver-adopted-abandoned-0-node-value",
+            "session": "driver-adopted-abandoned-0-session-value",
+            "branch": "driver-adopted-abandoned-0-branch-value"
+          }
+        ],
+        "owed_until_closed": true,
+        "hook_epoch": true
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "run-stopped",
+      "payload": {
+        "owner": "run-stopped-owner-value",
+        "forced": true,
+        "teardown": "run-stopped-teardown-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "driver-exited",
+      "payload": {
+        "pid": 1,
+        "settlement": "complete",
+        "reason": "driver-exited-reason-value",
+        "last_answered_command": 2,
+        "checks_running": [
+          {
+            "node": "driver-exited-checks_running-0-node-value",
+            "change": "driver-exited-checks_running-0-change-value",
+            "head": "driver-exited-checks_running-0-head-value",
+            "check": "driver-exited-checks_running-0-check-value",
+            "required": true,
+            "requirement": "driver-exited-checks_running-0-requirement-value"
+          }
+        ],
+        "checks_unfollowed": [
+          {
+            "node": "driver-exited-checks_unfollowed-0-node-value",
+            "change": "driver-exited-checks_unfollowed-0-change-value",
+            "head": "driver-exited-checks_unfollowed-0-head-value",
+            "check": "driver-exited-checks_unfollowed-0-check-value",
+            "required": true,
+            "requirement": "driver-exited-checks_unfollowed-0-requirement-value"
+          }
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "quiet-worker",
+      "payload": {
+        "surface": 1,
+        "quiet_for_seconds": 2,
+        "threshold_seconds": 3,
+        "persona": "quiet-worker-persona-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {}
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {}
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "decision-pending",
+      "payload": {
+        "reference": "decision-pending-reference-value",
+        "kind": "decision-pending-kind-value",
+        "unblocks": [
+          "decision-pending-unblocks-0-value"
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "decision-cleared",
+      "payload": {
+        "reference": "decision-cleared-reference-value",
+        "kind": "decision-cleared-kind-value",
+        "released": [
+          "decision-cleared-released-0-value"
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "cross-dag-satisfied",
+      "payload": {
+        "dependency": "cross-dag-satisfied-dependency-value",
+        "last_seq": 1
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "upstream-modified",
+      "payload": {
+        "dependency": "upstream-modified-dependency-value",
+        "captured_last_seq": 1,
+        "observed_last_seq": 2
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "completion-requested",
+      "payload": {
+        "reason": "completion-requested-reason-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "release-wait",
+      "payload": {
+        "node": "release-wait-node-value",
+        "awaiting": [
+          {}
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "release-arrived",
+      "payload": {
+        "node": "release-arrived-node-value",
+        "dep": "release-arrived-dep-value",
+        "identity": "release-arrived-identity-value",
+        "version": "release-arrived-version-value",
+        "target": "release-arrived-target-value",
+        "style": "automated"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "release-adopted",
+      "payload": {
+        "node": "release-adopted-node-value",
+        "delivery": "live",
+        "versions": [
+          {
+            "identity": "release-adopted-versions-0-identity-value",
+            "target": "release-adopted-versions-0-target-value",
+            "version": "release-adopted-versions-0-version-value",
+            "dep": "release-adopted-versions-0-dep-value",
+            "branch": "release-adopted-versions-0-branch-value",
+            "commit": "release-adopted-versions-0-commit-value",
+            "instructions": "release-adopted-versions-0-instructions-value"
+          }
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "criterion-checked",
+      "payload": {
+        "criterion": "criterion-checked-criterion-value",
+        "file": "criterion-checked-file-value",
+        "expected": "criterion-checked-expected-value",
+        "answer": "match",
+        "holds": "criterion-checked-holds-value",
+        "reason": "criterion-checked-reason-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "body-not-drafted",
+      "payload": {
+        "ending": "dispatch-failed",
+        "detail": "body-not-drafted-detail-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "note-shown",
+      "payload": {
+        "addressee": "worker",
+        "text": "note-shown-text-value",
+        "reached": "queued",
+        "criterion": "note-shown-criterion-value",
+        "completion_reason": "note-shown-completion_reason-value",
+        "party": "worker",
+        "turn": 1,
+        "evidence": "delivered-origin",
+        "envelope": 2
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "run-hook-fired",
+      "payload": {
+        "hook": "success",
+        "command": "run-hook-fired-command-value",
+        "reason": {
+          "kind": "nodes",
+          "nodes": [
+            {
+              "id": "run-hook-fired-reason-nodes-0-id-value",
+              "status": "pending",
+              "outcome": "run-hook-fired-reason-nodes-0-outcome-value"
+            }
+          ]
+        }
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "run-hook-finished",
+      "payload": {
+        "hook": "success",
+        "exit": 1,
+        "ending": "succeeded",
+        "log": "run-hook-finished-log-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "run-hook-withheld",
+      "payload": {
+        "settlement": "awaiting-planner"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "pool-maintenance",
+      "payload": {
+        "started_at": "2026-08-07T12:00:00Z",
+        "identities": [
+          {
+            "identity": "github.com/example/repo",
+            "every": "1h",
+            "outcome": "maintained"
+          }
+        ],
+        "error": null
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "dispatch-stopped",
+      "payload": {
+        "pid": 1,
+        "interrupt": "delivered",
+        "detail": "dispatch-stopped-detail-value",
+        "ended": "graceful",
+        "waited_ms": 2
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "host-shutdown",
+      "payload": {
+        "scope": "run",
+        "owner": "host-shutdown-owner-value",
+        "forced": true,
+        "grace_seconds": 1,
+        "dispatches": 2,
+        "graceful": 3,
+        "killed": 4,
+        "teardown": "signalled",
+        "root": "host-shutdown-root-value",
+        "branches": [
+          {
+            "identity": "host-shutdown-branches-0-identity-value",
+            "branch": "host-shutdown-branches-0-branch-value",
+            "result": "pushed",
+            "remote": "host-shutdown-branches-0-remote-value",
+            "commit": "host-shutdown-branches-0-commit-value",
+            "detail": "host-shutdown-branches-0-detail-value"
+          }
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "branches-superseded",
+      "payload": {
+        "node": "branches-superseded-node-value",
+        "landing": "branches-superseded-landing-value",
+        "superseded": [
+          {
+            "node": "branches-superseded-superseded-0-node-value",
+            "branch": "branches-superseded-superseded-0-branch-value"
+          }
+        ],
+        "failed": [
+          {
+            "node": "branches-superseded-failed-0-node-value",
+            "branch": "branches-superseded-failed-0-branch-value",
+            "error": "branches-superseded-failed-0-error-value"
+          }
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "branches-retired",
+      "payload": {
+        "retired": [
+          {
+            "identity": "branches-retired-retired-0-identity-value",
+            "branch": "branches-retired-retired-0-branch-value",
+            "class": "branches-retired-retired-0-class-value",
+            "proof": {},
+            "trigger": "pass"
+          }
+        ],
+        "failed": [
+          {
+            "identity": "branches-retired-failed-0-identity-value",
+            "branch": "branches-retired-failed-0-branch-value",
+            "error": "branches-retired-failed-0-error-value"
+          }
+        ],
+        "cut_short": {
+          "reason": "driver-closing",
+          "unreached": [
+            "branches-retired-cut_short-unreached-0-value"
+          ]
+        }
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "change-retitled",
+      "payload": {
+        "node": "change-retitled-node-value",
+        "from": "change-retitled-from-value",
+        "to": "change-retitled-to-value",
+        "by": "op"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "review-comments-read",
+      "payload": {
+        "node": "review-comments-read-node-value",
+        "change_url": "review-comments-read-change_url-value",
+        "marker": "review-comments-read-marker-value",
+        "unchanged": true,
+        "cost": {
+          "graphql_points": 1,
+          "rest_requests": 2
+        },
+        "comments": [
+          {
+            "id": "review-comments-read-comments-0-id-value",
+            "kind": {},
+            "author": "review-comments-read-comments-0-author-value",
+            "url": "review-comments-read-comments-0-url-value",
+            "updated_at": "review-comments-read-comments-0-updated_at-value",
+            "path": "review-comments-read-comments-0-path-value",
+            "line": 3,
+            "thread": "review-comments-read-comments-0-thread-value",
+            "in_reply_to": "review-comments-read-comments-0-in_reply_to-value"
+          }
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "title-unverified",
+      "payload": {
+        "node": "title-unverified-node-value",
+        "title": "title-unverified-title-value",
+        "reason": "title-unverified-reason-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-restack-started",
+      "payload": {
+        "node": "node-restack-started-node-value",
+        "onto": [
+          {
+            "branch": "node-restack-started-onto-0-branch-value",
+            "head": "node-restack-started-onto-0-head-value"
+          }
+        ],
+        "cause": "rework"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-restacked",
+      "payload": {
+        "node": "node-restacked-node-value",
+        "head": "node-restacked-head-value",
+        "agent_dispatched": true,
+        "outcome": "node-restacked-outcome-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-landed",
+      "payload": {
+        "node": "node-landed-node-value",
+        "change_url": "node-landed-change_url-value",
+        "commit": "node-landed-commit-value",
+        "detected_by": "readjust",
+        "trigger": "review",
+        "via": "node-landed-via-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-absorbed",
+      "payload": {
+        "node": "node-absorbed-node-value",
+        "into": "node-absorbed-into-value",
+        "change_url": "node-absorbed-change_url-value",
+        "commit": "node-absorbed-commit-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "change-reopened",
+      "payload": {
+        "node": "change-reopened-node-value",
+        "change_url": "change-reopened-change_url-value",
+        "restored_base": "change-reopened-restored_base-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-readjusted",
+      "payload": {
+        "node": "node-readjusted-node-value",
+        "from": {
+          "base": "node-readjusted-from-base-value",
+          "stack_parents": [
+            "node-readjusted-from-stack_parents-0-value"
+          ]
+        },
+        "to": {
+          "base": "node-readjusted-to-base-value",
+          "stack_parents": [
+            "node-readjusted-to-stack_parents-0-value"
+          ]
+        },
+        "cause": [
+          "node-readjusted-cause-0-value"
+        ],
+        "head": "node-readjusted-head-value",
+        "agent_dispatched": true,
+        "retarget": "retargeted",
+        "content": "merged"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "stack-landed-out-of-order",
+      "payload": {
+        "node": "stack-landed-out-of-order-node-value",
+        "carried": [
+          "stack-landed-out-of-order-carried-0-value"
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "change-closed",
+      "payload": {
+        "node": "change-closed-node-value",
+        "change_url": "change-closed-change_url-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-checks-read",
+      "payload": {
+        "node": "node-checks-read-node-value",
+        "head": "node-checks-read-head-value",
+        "verdict": "pending"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "readjust-read-failed",
+      "payload": {
+        "repo": "readjust-read-failed-repo-value",
+        "detail": "readjust-read-failed-detail-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "review-reply-posted",
+      "payload": {
+        "node": "review-reply-posted-node-value",
+        "comment": "review-reply-posted-comment-value",
+        "disposition": "answered",
+        "url": "review-reply-posted-url-value",
+        "commits": [
+          "review-reply-posted-commits-0-value"
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "review-reply-not-drafted",
+      "payload": {
+        "node": "review-reply-not-drafted-node-value",
+        "comments": [
+          "review-reply-not-drafted-comments-0-value"
+        ],
+        "ending": "unconfigured",
+        "detail": "review-reply-not-drafted-detail-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "driver-taken-over",
+      "payload": {
+        "previous": {
+          "run": "driver-taken-over-previous-run-value",
+          "host": "driver-taken-over-previous-host-value",
+          "session": "driver-taken-over-previous-session-value",
+          "pid": 1,
+          "claimed_at": "driver-taken-over-previous-claimed_at-value",
+          "lease": {
+            "interval_seconds": 2,
+            "cancel_grace_seconds": 3
+          }
+        }
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "driver-superseded",
+      "payload": {
+        "by": {
+          "run": "driver-superseded-by-run-value",
+          "host": "driver-superseded-by-host-value",
+          "session": "driver-superseded-by-session-value",
+          "pid": 1,
+          "claimed_at": "driver-superseded-by-claimed_at-value",
+          "lease": {
+            "interval_seconds": 2,
+            "cancel_grace_seconds": 3
+          }
+        }
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "landing-registered",
+      "payload": {
+        "landing_id": "landing-registered-landing_id-value",
+        "flow_id": "landing-registered-flow_id-value",
+        "operation": "publish-branch",
+        "subjects": [
+          {
+            "identity": "landing-registered-subjects-0-identity-value",
+            "branch": "landing-registered-subjects-0-branch-value"
+          }
+        ],
+        "message": "landing-registered-message-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "landing-drafting",
+      "payload": {
+        "landing_id": "landing-drafting-landing_id-value",
+        "flow_id": "landing-drafting-flow_id-value",
+        "operation": "publish-branch",
+        "subjects": [
+          {
+            "identity": "landing-drafting-subjects-0-identity-value",
+            "branch": "landing-drafting-subjects-0-branch-value"
+          }
+        ],
+        "message": "landing-drafting-message-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "landing-started",
+      "payload": {
+        "landing_id": "landing-started-landing_id-value",
+        "flow_id": "landing-started-flow_id-value",
+        "operation": "publish-branch",
+        "subjects": [
+          {
+            "identity": "landing-started-subjects-0-identity-value",
+            "branch": "landing-started-subjects-0-branch-value"
+          }
+        ],
+        "message": "landing-started-message-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "landing-finished",
+      "payload": {
+        "landing_id": "landing-finished-landing_id-value",
+        "flow_id": "landing-finished-flow_id-value",
+        "operation": "publish-branch",
+        "subjects": [
+          {
+            "identity": "landing-finished-subjects-0-identity-value",
+            "branch": "landing-finished-subjects-0-branch-value"
+          }
+        ],
+        "message": "landing-finished-message-value",
+        "status": 1
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "landing-refused",
+      "payload": {
+        "landing_id": "landing-refused-landing_id-value",
+        "flow_id": "landing-refused-flow_id-value",
+        "operation": "publish-branch",
+        "subjects": [
+          {
+            "identity": "landing-refused-subjects-0-identity-value",
+            "branch": "landing-refused-subjects-0-branch-value"
+          }
+        ],
+        "message": "landing-refused-message-value",
+        "status": 1
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "landing-died",
+      "payload": {
+        "landing_id": "landing-died-landing_id-value",
+        "flow_id": "landing-died-flow_id-value",
+        "operation": "publish-branch",
+        "subjects": [
+          {
+            "identity": "landing-died-subjects-0-identity-value",
+            "branch": "landing-died-subjects-0-branch-value"
+          }
+        ],
+        "message": "landing-died-message-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "scratch-removed",
+      "payload": {
+        "trigger": "success",
+        "dirs": 2,
+        "bytes": 4096,
+        "failed": [
+          {
+            "path": "/a-recording-host/scratch/every",
+            "error": "directory not empty"
+          }
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "scratch-retained",
+      "payload": {
+        "ending": "failed",
+        "dirs": [
+          {
+            "path": "/a-recording-host/scratch/every",
+            "bytes": 8192
+          }
+        ],
+        "total_bytes": 8192
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "check-failed",
+      "payload": {
+        "surface": 1,
+        "node": "check-failed-node-value",
+        "change": "check-failed-change-value",
+        "head": "check-failed-head-value",
+        "check": "check-failed-check-value",
+        "state": "failed",
+        "conclusion": "check-failed-conclusion-value",
+        "required": true,
+        "requirement": "check-failed-requirement-value",
+        "url": "check-failed-url-value"
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "checks-unfollowed",
+      "payload": {
+        "surface": 1,
+        "node": "checks-unfollowed-node-value",
+        "change": "checks-unfollowed-change-value",
+        "head": "checks-unfollowed-head-value",
+        "reason": "timeout",
+        "checks": [
+          {
+            "check": "checks-unfollowed-checks-0-check-value",
+            "required": true,
+            "requirement": "checks-unfollowed-checks-0-requirement-value"
+          }
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-started",
+      "payload": {
+        "command": [
+          "command-started-command-0-value"
+        ],
+        "log": "command-started-log-value",
+        "timeout_seconds": 1
+      },
+      "node": "every"
+    },
+    {
+      "source": "pipeline",
+      "kind": "command-exited",
+      "payload": {
+        "ending": "exited",
+        "exit_code": 0,
+        "duration_ms": 41230,
+        "outputs": {
+          "artifact": "dist/every.tar"
+        }
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "session-opened",
+      "payload": {
+        "token": "redacted-session",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "base": "main",
+        "worktree": "/recorded/worktree"
+      },
+      "node": "every"
+    },
+    {
+      "source": "agentgraph",
+      "kind": "graph-started",
+      "payload": {
+        "graph": "/recorded/graph",
+        "name": "node-scope",
+        "dir": "/recorded/dir"
+      },
+      "node": "every"
+    },
+    {
+      "source": "agentgraph",
+      "kind": "member-started",
+      "payload": {
+        "runner": "library",
+        "engine": "onejudge",
+        "config": "/recorded/config",
+        "worktree": "/recorded/worktree"
+      },
+      "node": "every"
+    },
+    {
+      "source": "agentgraph",
+      "kind": "turn-started",
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "instruction": "Recorded public repository work (prose trimmed).",
+        "instruction_truncated": true,
+        "started_at": "2026-10-13T16:56:16.760Z",
+        "origin": "task"
+      },
+      "node": "every"
+    },
+    {
+      "source": "agentgraph",
+      "kind": "turn-activity",
+      "payload": {
+        "kind": "tool_call",
+        "name": "command_execution",
+        "detail": "/recorded/detail",
+        "truncated": true,
+        "output": "Recorded public repository work (prose trimmed).",
+        "output_truncated": true,
+        "tool_call_id": "exec-ac86c351-0bfb-43d7-8b6b-58a1a9934eff",
+        "index": 1
+      },
+      "node": "every"
+    },
+    {
+      "source": "agentgraph",
+      "kind": "member-heartbeat",
+      "payload": {},
+      "node": "every"
+    },
+    {
+      "source": "agentgraph",
+      "kind": "turn-message",
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "text": "Recorded public repository work (prose trimmed)."
+      },
+      "node": "every"
+    },
+    {
+      "source": "agentgraph",
+      "kind": "turn-completed",
+      "payload": {
+        "turn": 1,
+        "role": "assistant",
+        "usage": {},
+        "started_at": "2026-10-13T16:56:16.760Z",
+        "finished_at": "2026-10-13T16:56:42.422Z"
+      },
+      "node": "every"
+    },
+    {
+      "source": "agentgraph",
+      "kind": "member-settled",
+      "payload": {
+        "completed": true,
+        "verdict": [
+          {
+            "criterion": "every acceptance criterion stated in the task is met, with every change this dispatch made committed and nothing half-applied left behind",
+            "kind": "boolean",
+            "verdict": {
+              "value": true,
+              "reason": "Recorded public repository work (prose trimmed).",
+              "usage": {
+                "input_tokens": 360275,
+                "output_tokens": 1294,
+                "cache_read_tokens": 312064
+              }
+            }
+          }
+        ],
+        "completion_reason": "Recorded public repository work (prose trimmed).",
+        "report_path": "/recorded/report_path"
+      },
+      "node": "every"
+    },
+    {
+      "source": "agentgraph",
+      "kind": "graph-settled",
+      "payload": {
+        "exit_code": 0,
+        "members": {
+          "worker": "settled"
+        }
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "gate-run",
+      "payload": {
+        "gate": "required-checks",
+        "attempt": 1,
+        "started_at": "2026-10-13T16:58:42.215Z",
+        "ended_at": "2026-10-13T17:23:09.656Z",
+        "seconds": 1467.441,
+        "verdict": "passed",
+        "checks": [
+          {
+            "name": "cross (windows-latest)",
+            "required": true,
+            "started_at": "2026-10-13T16:37:59Z",
+            "completed_at": "2026-10-13T17:02:05Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "deny",
+            "required": true,
+            "started_at": "2026-10-13T16:37:58Z",
+            "completed_at": "2026-10-13T16:38:35Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "gate",
+            "required": true,
+            "started_at": "2026-10-13T17:08:29Z",
+            "completed_at": "2026-10-13T17:08:34Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "install (ubuntu-latest)",
+            "required": true,
+            "started_at": "2026-10-13T17:08:29Z",
+            "completed_at": "2026-10-13T17:16:10Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "install (windows-latest)",
+            "required": true,
+            "started_at": "2026-10-13T17:08:29Z",
+            "completed_at": "2026-10-13T17:22:42Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "llmlint",
+            "required": true,
+            "started_at": "2026-10-13T16:37:44Z",
+            "completed_at": "2026-10-13T16:40:29Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "msrv",
+            "required": true,
+            "started_at": "2026-10-13T16:37:58Z",
+            "completed_at": "2026-10-13T16:38:53Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "pr-title",
+            "required": true,
+            "started_at": "2026-10-13T16:37:44Z",
+            "completed_at": "2026-10-13T16:37:47Z",
+            "conclusion": "success"
+          },
+          {
+            "name": "visual-docs / report (x86_64, shots/current, shots/verify, Visual docs)",
+            "required": true,
+            "started_at": "2026-10-13T16:50:36Z",
+            "completed_at": "2026-10-13T16:50:58Z",
+            "conclusion": "success"
+          }
+        ]
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "session-closed",
+      "payload": {
+        "token": "redacted-session",
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "returned": {
+          "slot": 1
+        }
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "push",
+      "payload": {
+        "branch": "feature/api",
+        "remote": "origin",
+        "accepted": true
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "change-opened",
+      "payload": {
+        "url": "https://example.invalid/changes/21",
+        "host": "github",
+        "id": "21",
+        "base": "main",
+        "author": "a-recording-host"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "change-drafted",
+      "payload": {
+        "url": "https://example.invalid/changes/21",
+        "id": "21",
+        "base": "main",
+        "kind": "awaiting-checks"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "stack-base-assembled",
+      "payload": {
+        "branch": "stack/ui",
+        "root": "main",
+        "parents": [
+          {
+            "branch": "feature/api",
+            "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "head": "1111111111111111111111111111111111111111",
+        "outcome": "created"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "review-comments-read",
+      "payload": {
+        "change_url": "https://example.invalid/changes/22",
+        "count": 1,
+        "unchanged": false,
+        "marker_digest": "sha256:99999999999999999999999999999999",
+        "cost": {
+          "graphql_points": 1,
+          "rest_requests": 2
+        }
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "review-reply-posted",
+      "payload": {
+        "change_url": "https://example.invalid/changes/22",
+        "comment": "c-101",
+        "reply": "r-101",
+        "url": "https://example.invalid/changes/22#discussion_r-101",
+        "threaded": true,
+        "key": "onepipeline:ui-rework-1:c-101",
+        "existing": false
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "publication-resumed",
+      "payload": {
+        "branch": "feature/docs",
+        "head": "3333333333333333333333333333333333333333",
+        "base": "feature/ui",
+        "change_url": "https://example.invalid/changes/23"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "change-standings-read",
+      "payload": {
+        "repo": "github.com/example/repo",
+        "count": 6,
+        "landed": [
+          "https://example.invalid/changes/21"
+        ],
+        "cost": {
+          "graphql_points": 1,
+          "rest_requests": 0
+        }
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "change-retargeted",
+      "payload": {
+        "change_url": "https://example.invalid/changes/22",
+        "from": "stack/ui",
+        "to": "main",
+        "outcome": "retargeted",
+        "body_written": false
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "change-reopened",
+      "payload": {
+        "change_url": "https://example.invalid/changes/30",
+        "restored_base": "main",
+        "at": "7777777777777777777777777777777777777777"
+      },
+      "node": "every"
+    },
+    {
+      "source": "agentgraph",
+      "kind": "fallback-advanced",
+      "payload": {
+        "identity": "claude-code:alternate",
+        "reason": "Recorded public repository work (prose trimmed).",
+        "role": "agent",
+        "turn": 1
+      },
+      "node": "every"
+    },
+    {
+      "source": "agentgraph",
+      "kind": "oneharness-session",
+      "payload": {
+        "role": "judge",
+        "turn": 2,
+        "identity": "codex:primary",
+        "session_id": "01a13632-48f3-74f3-a3c7-6260230f3eb4",
+        "history_id": "01a13632-45bf-7100-95b8-d18518fa9534",
+        "history_dir": "/recorded/history_dir",
+        "history_project": "home-nick-.onevcs-workspaces-github.com-nickderobertis-onepipeline-ui-95f7516c419c-pool-1-worktree",
+        "history_session": "node-scope-1791910576755-4064029-worker-judge-20261013T165706Z-4109409"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "fetch",
+      "payload": {
+        "remote": "origin",
+        "checkout": "/recorded/checkout"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "change-described",
+      "payload": {
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323",
+        "id": "323",
+        "base": "main",
+        "title": "fix(deps): link the engine whose onevcs retires a branch only on its own repository's merged change request",
+        "artifact": "a-cd4805419fd3"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "lock-wait",
+      "payload": {
+        "identity": "git:/home/nick/.ai-orchestrator/repos/nickderobertis__onepipeline-ui/.git",
+        "elapsed": 0.003369521,
+        "queue_position": 1
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "lock-acquired",
+      "payload": {
+        "identity": "git:/home/nick/.ai-orchestrator/repos/nickderobertis__onepipeline-ui/.git"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "merge-queued",
+      "payload": {
+        "identity": "git:/home/nick/.ai-orchestrator/repos/nickderobertis__onepipeline-ui/.git",
+        "queue_position": 1,
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "change-check",
+      "payload": {
+        "name": "changes",
+        "required": false,
+        "status": "completed",
+        "from_status": null,
+        "conclusion": "success",
+        "state": "passed"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "checks-settled",
+      "payload": {
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323",
+        "id": "323",
+        "head": "1a71cafe769cb76607e8b9ae153a4dd2ab843a7b",
+        "verdict": "passed",
+        "skipped": []
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "change-merged",
+      "payload": {
+        "url": "https://github.com/nickderobertis/onepipeline-ui/pull/323",
+        "sha": "0b780676bb80fddf7e68e4ed1ad8c615ef992370",
+        "landed_at": "2026-10-13T17:24:39.000Z",
+        "landing": "0b780676bb80fddf7e68e4ed1ad8c615ef992370"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "merge-completed",
+      "payload": {
+        "identity": "git:/home/nick/.ai-orchestrator/repos/nickderobertis__onepipeline-ui/.git",
+        "sha": "0b780676bb80fddf7e68e4ed1ad8c615ef992370",
+        "landed_at": "2026-10-13T17:24:39.000Z",
+        "landing": "0b780676bb80fddf7e68e4ed1ad8c615ef992370"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "release-probed",
+      "payload": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "target": "crate",
+        "form": "script",
+        "outcome": "released",
+        "elapsed_ms": 270,
+        "version": "0.32.0"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "published",
+      "payload": {
+        "branch": "nick/304/onepipeline-ui-link-retire-scope",
+        "policy": "change-auto",
+        "outcome": "merged",
+        "url": null,
+        "landing": "landed"
+      },
+      "node": "every"
+    },
+    {
+      "source": "vcs",
+      "kind": "release-observed",
+      "payload": {
+        "identity": "github.com/nickderobertis/onepipeline-ui",
+        "target": "pypi-cli",
+        "style": "automated",
+        "version": "0.32.0",
+        "landing_commit": "0b780676bb80fddf7e68e4ed1ad8c615ef992370"
+      },
+      "node": "every"
+    },
+    {
+      "source": "agentgraph",
+      "kind": "member-died",
+      "payload": {
+        "rule": "process-exited",
+        "cause": "exited",
+        "detail": "process exited 1",
+        "exit_code": 1
+      },
+      "node": "every"
+    }
+  ]
+}

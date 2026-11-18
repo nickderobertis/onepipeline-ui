@@ -4473,3 +4473,38 @@ fn check_visibility_records_follow_the_host_check_contract() {
             .collect()
     );
 }
+
+/// **The every-kind corpus is one record of every kind the linked engine writes,
+/// each in the shape that engine publishes for it.** The browser journey that opens
+/// each record's detail and finds every value of its payload there
+/// (`apps/dag-ui-e2e/dag-ui-event-details.spec.ts`) is only as complete as this
+/// corpus, so a kind the engine adds, or a payload it reshapes, fails here: every
+/// `onepipeline::event::PIPELINE_KINDS` kind has a record, and each record's
+/// payload passes the engine's own registry for that kind.
+#[test]
+fn the_every_kind_corpus_is_every_engine_kind_in_its_own_shape() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("apps/dag-ui-e2e/fixtures/every-kind.json");
+    let corpus: Value = serde_json::from_str(&fs::read_to_string(&path).expect("the corpus reads"))
+        .expect("the corpus parses");
+    let records = corpus["records"].as_array().expect("records");
+    let registry = onepipeline::payload::registry();
+    let mut refused = Vec::new();
+    for kind in onepipeline::event::PIPELINE_KINDS {
+        let Some(record) = records
+            .iter()
+            .find(|record| record["source"] == "pipeline" && record["kind"] == kind.as_str())
+        else {
+            refused.push(format!("{}: no record", kind.as_str()));
+            continue;
+        };
+        if let Err(why) = registry.check(&onepipeline::payload::schema_of(*kind), &record["payload"]) {
+            refused.push(format!("{}: {why}", kind.as_str()));
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "{} does not hold the linked engine's kinds in their shapes:\n{}",
+        path.display(),
+        refused.join("\n")
+    );
+}
