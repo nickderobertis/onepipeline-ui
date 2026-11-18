@@ -265,7 +265,11 @@ test.describe("commands", () => {
     const detail = page.getByRole("complementary", {
       name: "Item detail panel",
     });
-    await expect(detail.getByText(line, { exact: true })).toBeVisible();
+    await expect(
+      detail
+        .getByRole("region", { name: "Recorded fields" })
+        .getByText(line, { exact: true }),
+    ).toBeVisible();
     await expect(detail).not.toContainText('["bun"');
   });
 
@@ -301,6 +305,7 @@ test.describe("commands", () => {
     await expect(
       page
         .getByRole("complementary", { name: "Item detail panel" })
+        .getByRole("region", { name: "Recorded fields" })
         .getByText(line, { exact: true }),
     ).toBeAttached();
   });
@@ -374,15 +379,7 @@ test.describe("the run's own records", () => {
       ["edit", "edit-rejected · by planner"],
       ["note", "Redirection deferred to the next dispatch"],
     ] as const) {
-      await page.goto(
-        `${origin()}/?run=${facts.run}&view=overall&hide-event=${type}`,
-      );
-      const hidden = page.getByRole("region", { name: "Run events" });
-      const load = page.getByRole("button", {
-        name: "Load the run's own records",
-      });
-      if (await load.isVisible()) await loadRunRecords(page);
-      await expect(hidden.getByRole("article").first()).toBeVisible();
+      const hidden = await openOverall(page, `&hide-event=${type}`);
       await expect(row(hidden, name)).toHaveCount(0);
     }
     const asker = await openNode(page, "asker");
@@ -496,6 +493,9 @@ for (const where of ["node", "overall"] as const) {
         where === "node"
           ? page.getByRole("region", { name: "Node transcript" })
           : page.getByRole("region", { name: "Run events" });
+      await expect(
+        reloaded.getByRole("heading", { name: "Events" }),
+      ).toBeVisible();
       if (where === "overall") {
         const load = page.getByRole("button", {
           name: "Load the run's own records",

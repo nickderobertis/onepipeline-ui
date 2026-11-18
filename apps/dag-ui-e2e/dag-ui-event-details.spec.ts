@@ -2,7 +2,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
 import every from "./fixtures/every-kind.json" with { type: "json" };
-import { loadRunRecords } from "./observatory-locators";
+import { loadAllEarlierRows, loadRunRecords } from "./observatory-locators";
 
 /**
  * Every record's detail shows the whole of what it recorded.
@@ -79,6 +79,9 @@ async function readDetail(
   for (const leaf of leaves(record.payload))
     expect(text, `${record.kind}'s detail shows ${leaf}`).toContain(leaf);
   expect(text, `${record.kind}'s detail spells JSON`).not.toMatch(JSON_SPELLED);
+  // The detail covers the list it was opened from; Escape closes it.
+  await page.keyboard.press("Escape");
+  await expect(detail).toHaveCount(0);
 }
 
 test("every kind's detail shows each value its record holds, and none as JSON", async ({
@@ -91,13 +94,16 @@ test("every kind's detail shows each value its record holds, and none as JSON", 
   );
   const transcript = page.getByRole("region", { name: "Node transcript" });
   await expect(transcript.getByRole("article").first()).toBeVisible();
+  // The first answer holds each span's latest rows; every record is read back.
+  await loadAllEarlierRows(page);
   for (const record of records.filter((record) => "node" in record))
     await readDetail(page, transcript, record);
 
   await page.goto(`${server.origin}/?run=${facts.every}&view=overall`);
+  const events = page.getByRole("region", { name: "Run events" });
+  await expect(events.getByRole("heading", { name: "Events" })).toBeVisible();
   const load = page.getByRole("button", { name: "Load the run's own records" });
   if (await load.isVisible()) await loadRunRecords(page);
-  const events = page.getByRole("region", { name: "Run events" });
   for (const record of records.filter((record) => !("node" in record)))
     await readDetail(page, events, record);
 });
@@ -109,8 +115,15 @@ test("a human-attested record names who answered, for whom, whose words, the cho
   const attested = records.find(({ kind }) => kind === "human-attested");
   if (attested === undefined) throw new Error("the corpus has no attestation");
   await page.goto(
-    `${server.origin}/?run=${facts.every}&node=${facts.every_node}&view=graph&event=${attested.recordId}`,
+    `${server.origin}/?run=${facts.every}&node=${facts.every_node}&view=graph`,
   );
+  const transcript = page.getByRole("region", { name: "Node transcript" });
+  await expect(transcript.getByRole("article").first()).toBeVisible();
+  await loadAllEarlierRows(page);
+  await transcript
+    .locator(`article[data-row-id="${attested.recordId}"]`)
+    .getByRole("button")
+    .click();
   const item = page
     .getByRole("complementary", { name: "Item detail panel" })
     .getByRole("heading", { name: "Human item" });

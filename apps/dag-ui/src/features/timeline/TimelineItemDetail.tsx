@@ -1029,7 +1029,9 @@ function RecordContent({
           </div>
         </dl>
       )}
-      {Object.keys(fields).length > 0 && (
+      {Object.keys(fields).length === 0 ? (
+        <p className="detail-note">This record holds no fields.</p>
+      ) : (
         <>
           <h3 className="detail-heading">Recorded fields</h3>
           <FieldList

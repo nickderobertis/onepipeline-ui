@@ -52,6 +52,7 @@ export function EventListHeader({
             {offered.map((type) => (
               <label key={type}>
                 <input
+                  aria-label={eventTypeLabel(type)}
                   checked={!hidden.has(type)}
                   onChange={(event) =>
                     onHiddenChange(
